@@ -12792,6 +12792,63 @@ test("G-04 notifPageHtml: admin composes every section; member gets read-only + 
   assert.doesNotMatch(member, /set-matrix-grid/, "member page has no routing matrix");
 });
 
+test("cch-w31-s8 notifPageHtml: a member gets a REAL delivery log, not a notice saying they can't have one", () => {
+  const s = { transport: "instance", channels: [], event_routes: {}, chat_default_on: [] };
+  const member = hooks.notifPageHtml(s, { canManage: false });
+
+  // The mechanism: the log actually mounts for a member.
+  assert.match(member, /Your delivery log/);
+  assert.match(member, /id="notif-deliveries-body"/);
+  assert.match(member, /id="notif-del-load-more"/);
+  // Still no write affordance anywhere on the page.
+  assert.doesNotMatch(member, /set-save-row/);
+
+  // The notice is CORRECTED, not deleted: it no longer claims the delivery log
+  // is admin-managed, because that stopped being true.
+  assert.match(member, /Channels &amp; routing/);
+  assert.doesNotMatch(member, /the delivery log are managed by team admins/);
+
+  // The honest limit is on the surface, in the copy, not left to be inferred.
+  assert.match(member, /covers email only/i);
+  assert.match(member, /never whether the team's chat channel got it/);
+
+  // The admin view is untouched: whole-team heading, both filter axes.
+  const admin = hooks.notifPageHtml(s, { canManage: true });
+  assert.match(admin, /<h3 class="set-h">Delivery log<\/h3>/);
+  assert.doesNotMatch(admin, /Your delivery log/);
+  assert.doesNotMatch(admin, /covers email only/i);
+});
+
+test("cch-w31-s8 notifDeliveryFiltersHtml: the self-scoped view drops the channel axis it can never satisfy", () => {
+  const admin = hooks.notifDeliveryFiltersHtml(false);
+  assert.match(admin, /Channel/);
+  assert.match(admin, /data-notif-del-axis="channel"/);
+  assert.match(admin, /data-notif-del-axis="status"/);
+
+  // A chat channel is recorded against the channel type, never a person, so for
+  // a self-scoped read every chat chip is a guaranteed empty result.
+  const member = hooks.notifDeliveryFiltersHtml(true);
+  assert.doesNotMatch(member, /data-notif-del-axis="channel"/);
+  assert.match(member, /data-notif-del-axis="status"/, "the result axis still works");
+  // Withheld stays reachable — it is the exact thing a member came to check.
+  assert.match(member, /data-notif-del-value="suppressed"/);
+});
+
+test("cch-w31-s8 notifDeliveriesBodyHtml: an empty SELF-scoped log cannot claim the team got nothing", () => {
+  const team = hooks.notifDeliveriesBodyHtml([], false, false);
+  assert.match(team, /No notifications have been delivered yet/);
+
+  const mine = hooks.notifDeliveriesBodyHtml([], false, true);
+  assert.match(mine, /Nothing has been sent to your address yet/);
+  assert.doesNotMatch(mine, /No notifications have been delivered yet/,
+    "a self-scoped view must not speak for the whole team");
+
+  // A filtered empty is still the filter's fault in both views.
+  for (const scoped of [true, false]) {
+    assert.match(hooks.notifDeliveriesBodyHtml([], true, scoped), /No sends match these filters/);
+  }
+});
+
 test("G-04 notifTransportLabel: the platform transport reads friendly", () => {
   assert.equal(hooks.notifTransportLabel("instance"), "Barkpark platform");
   assert.equal(hooks.notifTransportLabel("smtp"), "SMTP");

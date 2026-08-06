@@ -584,6 +584,12 @@ defmodule BarkparkCloud.Notifications do
                    `:before` stamp came from). Supplied together they page on
                    the full `(inserted_at, id)` sort key; supplied alone,
                    `:before` keeps its historical stamp-only meaning.
+    * `:recipient` — the SELF-SCOPE fence: only rows addressed to this address,
+                   compared CASE-INSENSITIVELY. This is what lets a plain team
+                   member read the log for the sends they were actually a
+                   recipient of, without seeing a colleague's. See
+                   `maybe_delivery_recipient/2` for why the comparison cannot be
+                   a plain `==`.
 
   A filter value outside the closed vocabulary is NOT rewritten or ignored: it
   is matched literally and therefore returns nothing. Silently DROPPING an
@@ -605,6 +611,7 @@ defmodule BarkparkCloud.Notifications do
     |> maybe_delivery_eq(:channel, opts[:channel])
     |> maybe_delivery_eq(:status, opts[:status])
     |> maybe_delivery_eq(:event, opts[:event])
+    |> maybe_delivery_recipient(opts[:recipient])
     |> maybe_delivery_before(opts[:before], opts[:before_id])
     |> order_by([d], desc: d.inserted_at, desc: d.id)
     |> limit(^limit)
@@ -615,6 +622,27 @@ defmodule BarkparkCloud.Notifications do
     do: where(query, [d], field(d, ^field) == ^value)
 
   defp maybe_delivery_eq(query, _field, _value), do: query
+
+  # The SELF-SCOPE fence, and it is deliberately NOT `maybe_delivery_eq/3`.
+  #
+  # `notification_deliveries.recipient` is plain `character varying`, NOT citext.
+  # The alert fan-out writes addresses that came back from `team_member_emails/1`
+  # (already lowered by the citext `users.email` column), but `record_delivery/5`
+  # also persists the RAW invite address straight off `invite[:to]` with no
+  # downcase. A plain `d.recipient == ^user.email` therefore matches the fan-out
+  # rows and silently MISSES the invite row for the same human — a short page
+  # that looks exactly like "you were never emailed". Comparing on
+  # `lower(recipient)` is the only version of this filter that cannot lie.
+  #
+  # It is a filter, not a scan risk: the `(team_id, inserted_at)` index still
+  # bounds the read to one team and carries the ORDER BY; `lower(?)` is applied
+  # to the rows that survive the team fence, never to the whole table.
+  defp maybe_delivery_recipient(query, email) when is_binary(email) and email != "" do
+    needle = String.downcase(email)
+    where(query, [d], fragment("lower(?)", d.recipient) == ^needle)
+  end
+
+  defp maybe_delivery_recipient(query, _email), do: query
 
   # The keyset cursor, lexicographic on the SAME compound key the log is ordered
   # by — `(inserted_at DESC, id DESC)`. A stamp-only `<` is not a real page cut:

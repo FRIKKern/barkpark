@@ -77,7 +77,11 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
   end
 
   # A fresh user joined to `team` at `role`, plus a live session token.
-  defp token_for(team, role) do
+  defp token_for(team, role), do: team |> member_of(role) |> elem(1)
+
+  # The same, but keeping the USER too — the self-scoped delivery reads assert on
+  # the caller's own address, so the token alone is not enough.
+  defp member_of(team, role) do
     {:ok, user} =
       Accounts.register_user(%{
         email: "u-#{System.unique_integer([:positive])}@example.com",
@@ -86,7 +90,7 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
 
     {:ok, _} = Accounts.add_member(team, user, role)
     {:ok, token} = Accounts.create_user_session_token(user)
-    token
+    {user, token}
   end
 
   test "GET settings requires auth" do
@@ -186,13 +190,158 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       assert conn.status == 401
     end
 
-    test "is admin-gated — a plain member is 403" do
-      {_owner, team, _owner_token} = user_with_team()
-      member_token = token_for(team, "member")
+    # cch-w31-s8. THE PIN THIS REPLACED asserted "a plain member is 403", and it
+    # was TRUE — this route was the one surface built to answer "was I notified?"
+    # and it 403'd the people it notifies. The pin is REWRITTEN, never deleted:
+    # the member now gets 200, and the guard that can still LOSE is the recipient
+    # fence. Drop `recipient:` from the router's opts and this test goes red by
+    # showing a colleague's row, which is exactly the failure it exists to catch.
+    test "a plain member gets 200 containing ONLY their own rows, and ZERO rows belonging to any other member" do
+      {owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+      {other, _other_token} = member_of(team, "member")
+
+      t0 = DateTime.utc_now()
+
+      for {email, offset} <- [{member.email, -1}, {other.email, -2}, {owner.email, -3}] do
+        insert_delivery(team, %{
+          recipient: email,
+          inserted_at: DateTime.add(t0, offset, :second)
+        })
+      end
 
       conn = call(:get, "/v1/notifications/deliveries", nil, member_token)
+      assert conn.status == 200
+
+      recipients = Enum.map(body(conn)["deliveries"], & &1["recipient"])
+      assert recipients == [member.email]
+      refute other.email in recipients
+      refute owner.email in recipients
+    end
+
+    # The hole `require_user/2` leaves and `gate_role/2` closes: a user holding no
+    # membership ANYWHERE resolves to `current_team = nil`. 403 (they ARE
+    # authenticated, they simply hold no grant) — never a query on a nil team_id.
+    test "a user with no membership anywhere is 403, not a query on a nil team" do
+      {:ok, stray} =
+        Accounts.register_user(%{
+          email: "stray-#{System.unique_integer([:positive])}@example.com",
+          password: @password
+        })
+
+      {:ok, token} = Accounts.create_user_session_token(stray)
+
+      conn = call(:get, "/v1/notifications/deliveries", nil, token)
       assert conn.status == 403
       assert body(conn)["error"] == "forbidden"
+    end
+
+    # `notification_deliveries.recipient` is plain varchar, not citext, and
+    # `record_delivery(Map.get(invite, :team_id), invite[:to], "invite", ...)`
+    # persists the RAW invite address. A lower-cased equality self-filter returns
+    # ZERO here — the silently short page this slice exists to kill.
+    test "the self-filter is case-insensitive — a MiXeD-case recipient still comes back" do
+      {_owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+
+      shouty = member.email |> String.replace("@", "@Example-Host.") |> String.upcase()
+      insert_delivery(team, %{recipient: String.upcase(member.email), event: "invite"})
+      insert_delivery(team, %{recipient: shouty, event: "invite"})
+
+      conn = call(:get, "/v1/notifications/deliveries", nil, member_token)
+      assert conn.status == 200
+
+      recipients = Enum.map(body(conn)["deliveries"], & &1["recipient"])
+      # The row addressed to THIS member in shouting case is theirs; the
+      # different-host shouty address is not.
+      assert recipients == [String.upcase(member.email)]
+    end
+
+    # cch-w32-s2 made a withheld alert a real `suppressed` ROW, fanned out at one
+    # row per member carrying that member's own address — the only grain at which
+    # a self-scoped read can ever show a member their own suppression. Confirmed,
+    # not assumed.
+    test "a member CAN see a suppressed row that was fanned out to them" do
+      {_owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+
+      insert_delivery(team, %{
+        recipient: member.email,
+        status: "suppressed",
+        event: "deployment_failed",
+        attempts: 0
+      })
+
+      conn = call(:get, "/v1/notifications/deliveries", nil, member_token)
+      assert conn.status == 200
+
+      assert [%{"status" => "suppressed", "event" => "deployment_failed"}] =
+               body(conn)["deliveries"]
+    end
+
+    # The structural bonus, pinned so nobody has to take the copy's word for it:
+    # `log_chat_delivery/6` stores the channel TYPE as the recipient, so a
+    # recipient-scoped read excludes every chat row (and every chat last_error)
+    # by construction. This is WHY the member-facing copy must say it can answer
+    # "was I emailed?" and never "did the team's Slack get it?".
+    test "a member's self-scoped log structurally excludes chat rows" do
+      {_owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+
+      insert_delivery(team, %{recipient: member.email, channel: "email"})
+      insert_delivery(team, %{recipient: "slack", channel: "slack", status: "failed"})
+      insert_delivery(team, %{recipient: "discord", channel: "discord", status: "failed"})
+
+      conn = call(:get, "/v1/notifications/deliveries", nil, member_token)
+      assert conn.status == 200
+      assert [%{"channel" => "email"}] = body(conn)["deliveries"]
+    end
+
+    test "an ADMIN still reads the whole team's log, every recipient" do
+      {owner, team, owner_token} = user_with_team()
+      {member, _member_token} = member_of(team, "member")
+
+      t0 = DateTime.utc_now()
+      insert_delivery(team, %{recipient: member.email, inserted_at: DateTime.add(t0, -1, :second)})
+      insert_delivery(team, %{recipient: owner.email, inserted_at: DateTime.add(t0, -2, :second)})
+
+      conn = call(:get, "/v1/notifications/deliveries", nil, owner_token)
+      assert conn.status == 200
+
+      assert Enum.map(body(conn)["deliveries"], & &1["recipient"]) == [
+               member.email,
+               owner.email
+             ]
+    end
+
+    # The self-scope fence is a FENCE, not a filter the caller can widen: a
+    # member cannot page past it, and it composes with every other filter.
+    test "a member cannot escape the fence with filters or a deep keyset page" do
+      {_owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+      {other, _other_token} = member_of(team, "member")
+
+      t0 = DateTime.utc_now()
+
+      for i <- 1..3 do
+        insert_delivery(team, %{
+          recipient: other.email,
+          status: "failed",
+          inserted_at: DateTime.add(t0, -i, :second)
+        })
+      end
+
+      insert_delivery(team, %{
+        recipient: member.email,
+        status: "failed",
+        inserted_at: DateTime.add(t0, -10, :second)
+      })
+
+      assert [%{"recipient" => own}] = filtered(member_token, "status=failed")
+      assert own == member.email
+
+      cursor = DateTime.utc_now() |> DateTime.to_iso8601() |> URI.encode_www_form()
+      assert [%{"recipient" => ^own}] = filtered(member_token, "limit=200&before=" <> cursor)
     end
 
     test "an admin with no deliveries gets an empty list (200)" do
