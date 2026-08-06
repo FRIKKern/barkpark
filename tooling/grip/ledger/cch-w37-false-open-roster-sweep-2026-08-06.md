@@ -132,3 +132,29 @@ before clause (a) is even reached —
 Live 143. Closable now: 3 backlog rows (§3), plus 2 already-`done` rows that were
 still being counted as work (§2). **143 → 140** once Decide closes §3; the
 apparent "12-14 rows of backlog that may not exist" is measured at **3**.
+
+---
+
+## ADDENDUM (wave 37 Decide, 2026-08-06): `bp doc delete task drafts.<id>` DELETES THE PUBLISHED TWIN
+
+Measured the hard way while cleaning up shadow drafts during this wave's task filing.
+
+Two wave-37 rows (`cch-w37-s1-invalid-precedence-details-win`,
+`cch-w37-bl-roster-collapse-three-paid-rows`) each carried a `drafts.<id>` twin whose content was
+byte-identical to the published row — the ordinary residue of a create-then-publish. Running
+
+    bp doc delete task drafts.<id> --yes
+
+returned a normal `rev:` receipt, and afterwards **BOTH** `bp task get drafts.<id>` **and**
+`bp task get <id>` returned `not_found`, and `bp doc get task <id>` returned
+`not found: document not found`. The published document was gone, not just its draft. Both rows had
+to be recreated from scratch.
+
+**RULE:** never `bp doc delete` a `drafts.` id to tidy a shadow twin. The delete is keyed on the
+document, not on the draft perspective. A stranded draft beside a healthy published row is cosmetic;
+deleting it is destructive. If a shadow twin must go, verify with a read-back on the BARE id
+immediately, and be prepared to refile.
+
+**WHY IT MATTERS BEYOND THIS WAVE:** ~40 sessions share this ledger. An agent tidying its own
+`drafts.` residue can silently destroy a published task another session is about to claim — and the
+receipt it gets back looks like success.
