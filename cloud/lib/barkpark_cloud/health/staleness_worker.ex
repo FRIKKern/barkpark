@@ -6,8 +6,11 @@ defmodule BarkparkCloud.Health.StalenessWorker do
   `POST /v1/agent/report` simply stops arriving); this worker does.
 
   Each tick it loads the candidate set (`Registry.stale_online_barkparks/1` —
-  managed/byo, agent online, team subscription active, last heartbeat older than
-  the staleness threshold) and, per instance:
+  managed/byo with an active team subscription, qualifying through EITHER arm:
+  WENT SILENT (`agent_status "online"` with a heartbeat older than the staleness
+  threshold) or NEVER REPORTED (`last_seen_at IS NULL`, created before the
+  threshold, alert latch still clear). That function's docstring is the
+  authority; keep this summary in step with it) and, per instance:
 
     * bumps `unreachable_count`;
     * once the count crosses `health_down_after_count` AND the alert latch is
@@ -22,11 +25,18 @@ defmodule BarkparkCloud.Health.StalenessWorker do
 
     * the `>= health_down_after_count` gate absorbs a single transient miss (a
       slow agent tick, a GC pause) — Coolify `ServerConnectionCheckJob.php:155`;
-    * the `unreachable_notification_sent` latch + the online-only scan filter
-      mean exactly one alert per outage and no re-scan of an already-offline box
-      (the natural backoff — Barkpark has no active-probe channel, so a silent
-      box simply leaves the candidate set until its agent reports again, which
-      re-arms the latch via `Registry.record_agent_report/2`).
+    * exactly one alert per outage, by a DIFFERENT mechanism per arm. WENT
+      SILENT backs off on the status flip: `mark_offline/1` leaves that arm's
+      `agent_status == "online"` requirement, so the box is never re-scanned.
+      NEVER REPORTED has no online status to lose (`last_seen_at` stays NULL
+      forever until an agent reports), so it backs off on the
+      `unreachable_notification_sent` latch instead — which means its
+      `unreachable_count` FREEZES at the down-after threshold rather than
+      climbing. Read that counter as "how many ticks it took to call it", never
+      as a duration; derive a never-reported box's age from `inserted_at`.
+      Either way Barkpark has no active-probe channel, so a silent box simply
+      leaves the candidate set until its agent reports again, which re-arms the
+      latch via `Registry.record_agent_report/2`.
 
   Runs on the EXISTING `:maintenance` Oban queue (the oban-substrate foundation
   already ships Oban + a maintenance queue + the Cron plugin; config.exs merely

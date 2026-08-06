@@ -405,6 +405,32 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert row["team_id"] == team.id
     end
 
+    test "the fleet row carries the reachability counters (cch-w34-s2)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{name: "Prod", slug: "prod"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # A fresh row: BOTH keys present, carrying their honest zero/false — a
+      # client can state "0 missed heartbeat windows", not infer it.
+      conn = call(:get, "/v1/barkparks", nil, token)
+      [row] = json_body(conn)["barkparks"]
+      assert Map.has_key?(row, "unreachable_count")
+      assert Map.has_key?(row, "unreachable_notification_sent")
+      assert row["unreachable_count"] == 0
+      assert row["unreachable_notification_sent"] == false
+
+      # After the staleness sweep has bumped and latched, the counters are the
+      # evidence behind the health axis.
+      {:ok, bumped} = Registry.bump_unreachable(bp)
+      {:ok, _} = Registry.mark_offline(bumped)
+
+      conn2 = call(:get, "/v1/barkparks", nil, token)
+      [row2] = json_body(conn2)["barkparks"]
+      assert row2["unreachable_count"] == 1
+      assert row2["unreachable_notification_sent"] == true
+      assert row2["health_status"] == "unknown"
+    end
+
     test "the fleet row carries the BP-ONB-09 verify verdict fields" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team, %{name: "Prod", slug: "prod"})
