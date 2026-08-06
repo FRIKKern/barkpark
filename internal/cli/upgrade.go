@@ -385,9 +385,16 @@ func performUpgrade(base, latest, exePath string) error {
 	return nil
 }
 
-// upgradeDevBuildRefusal is the dev-build refusal for the MUTATING path. The
-// instruction is the right one and stays verbatim.
-const upgradeDevBuildRefusal = "bp upgrade: this is a dev build (go build); upgrade via git pull + make cli-build"
+// upgradeDevBuildRefusal is the dev-build refusal for the MUTATING path.
+//
+// It names onbCLIDevRemedy — the SAME command the doctor's unreported leg names.
+// It used to say `make cli-build`, which is a different target: cli-build writes
+// dist/bp and nothing else, so a user who followed it re-ran an unchanged `bp`
+// off PATH and saw the identical refusal. `make cli-install` is the target that
+// builds AND installs onto PATH (Makefile:171). Two surfaces answering one fact
+// must not hand out two different remedies, one of which does not work — that is
+// the exact contradiction this slice exists to remove.
+const upgradeDevBuildRefusal = "bp upgrade: this is a dev build (go build); upgrade with `" + onbCLIDevRemedy + "`"
 
 // runUpgrade is the `bp upgrade` builtin: self-update from the cli-v*
 // GitHub Releases. --check reports current vs latest without touching the
