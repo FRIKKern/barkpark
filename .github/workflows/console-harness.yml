@@ -747,6 +747,6 @@ jobs:
           # ONE notice, never one per job — GitHub caps annotations at 10 per
           # level per step and truncates the rest silently.
           if [ "$dispatched" -eq 0 ]; then
-            echo "::notice title=Console gate: green, nothing ran::NOTHING CONSOLE RAN on this head.%0AConsole gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Console job executed', never as 'the Console harness passed'."
+            echo "::notice title=Console gate: green — nothing ran::NOTHING CONSOLE RAN on this head.%0AConsole gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Console job executed', never as 'the Console harness passed'."
           fi
           echo "Console gate: every upstream job either succeeded or was legitimately not dispatched."

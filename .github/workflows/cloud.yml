@@ -404,6 +404,6 @@ jobs:
           # ONE notice, never one per job — GitHub caps annotations at 10 per
           # level per step and truncates the rest silently.
           if [ "$dispatched" -eq 0 ]; then
-            echo "::notice title=Cloud gate: green, nothing ran::NOTHING CLOUD RAN on this head.%0ACloud gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Cloud job executed', never as 'the Cloud suite passed'."
+            echo "::notice title=Cloud gate: green — nothing ran::NOTHING CLOUD RAN on this head.%0ACloud gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Cloud job executed', never as 'the Cloud suite passed'."
           fi
           echo "Cloud gate: every upstream job either succeeded or was legitimately not dispatched."

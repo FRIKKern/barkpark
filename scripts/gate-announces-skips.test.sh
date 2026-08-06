@@ -155,6 +155,30 @@ emit("notice_names_skipped", "${not_dispatched}" in notice)
 # Multi-line, in the only encoding an annotation body accepts.
 emit("notice_multiline", "%0A" in notice)
 
+# ── THE TITLE, PARSED THE WAY GITHUB PARSES IT ─────────────────────────────
+# MEASURED on PR #9677's head (dad4b33bb): all four aggregators delivered
+# `title="<X> gate: green"` — the disclosure clause was GONE, because `,` is
+# the workflow-command PROPERTY SEPARATOR and ` nothing ran` parsed as a
+# valueless property and was dropped. The body survived whole, so the source
+# read fine and only the one field a person skims lied.
+# So this reader SPLITS ON `,` exactly like the runner does, and reports the
+# title as DELIVERED, never as written.
+tm = re.match(r'echo "::notice(?: (?P<props>.*?))?::', notice)
+props = tm.group("props") if (tm and tm.group("props")) else ""
+title = ""
+for prop in props.split(","):
+    k, sep, v = prop.partition("=")
+    if k.strip() == "title" and sep:
+        title = v
+emit("notice_title_present", bool(title.strip()))
+# A comma ANYWHERE in the property section truncates the title at delivery.
+# Scoped to the comma ALONE — an ABSENT title is a different defect with its
+# own assertion above, and one failure reporting two diagnoses sends a reader
+# to the wrong fix.
+emit("notice_title_comma_free", "," not in props)
+# …and what survives must still be the disclosure, not a bare "green".
+emit("notice_title_discloses", "nothing ran" in title.lower())
+
 # The tally the notice is gated on must EXIST and must exclude NEVER-gated jobs
 # (the dispatcher and the unfiltered ratchets run on every head, so counting
 # them would make the notice unreachable — a guard that can never fire).
@@ -216,6 +240,16 @@ for spec in $GATES; do
     no "$file: notice does not interpolate \${not_dispatched}"
   [ "$(fact notice_multiline)" = "True" ] && ok "$file: notice is multi-line (%0A)" ||
     no "$file: notice is single-line — %0A is the only newline an annotation body takes"
+  # ── THE HEADLINE, AS DELIVERED ──────────────────────────────────────────
+  # The body above can be perfect while the title — the one field a person
+  # skims in the Checks list — says the flat opposite. Every assertion here is
+  # on the title GitHub will actually publish, after its own comma-splitting.
+  [ "$(fact notice_title_present)" = "True" ] && ok "$file: notice carries a title= property" ||
+    no "$file: the notice has NO title= property — the Checks list headline is empty"
+  [ "$(fact notice_title_comma_free)" = "True" ] && ok "$file: the notice property section is comma-free, so the title survives delivery" ||
+    no "$file: the notice properties contain a ',' — GitHub reads it as a property separator and TRUNCATES the title"
+  [ "$(fact notice_title_discloses)" = "True" ] && ok "$file: the delivered title still says 'nothing ran'" ||
+    no "$file: the DELIVERED title does not say 'nothing ran' — the headline reads as a plain green pass"
   # ── the guard's own wiring ───────────────────────────────────────────────
   [ "$(fact tally_declared)" = "True" ] && ok "$file: the dispatched tally is declared" ||
     no "$file: no 'dispatched=0' — the notice is gated on an unset variable"
@@ -250,7 +284,20 @@ agg = wf["jobs"][job_key]
 step = next(s for s in agg["steps"] if "run" in s)
 run = step["run"]
 assert mode in ("clean", "drop-notice", "double-notice", "ungate",
-                "count-never", "before-exit", "gut-sentence", "rename"), mode
+                "count-never", "before-exit", "gut-sentence", "rename",
+                "comma-title", "drop-title"), mode
+
+
+def notice_props(body):
+    """The `::notice <props>::` property section, or die loudly.
+
+    Every title mutation below asserts its anchor BEFORE patching: a mutation
+    that silently fails to mutate reports a serene green, which is the exact
+    failure this harness exists to make impossible.
+    """
+    m = re.search(r'echo "::notice (title=[^\n]*?)::', body)
+    assert m, "no `::notice title=` property section to mutate"
+    return m.group(1)
 
 def cut_guard(body):
     """Remove the `if [ "$dispatched" -eq 0 ]` … `fi` block, line-based.
@@ -293,6 +340,22 @@ elif mode == "gut-sentence":
     # The vacuity trap made concrete: an annotation IS published (a count-based
     # guard is satisfied) but it discloses nothing.
     run = re.sub(r'echo "::notice[^\n]*', 'echo "::notice::done"', run)
+elif mode == "comma-title":
+    # THE SHIPPED DEFECT, planted back: `,` is GitHub's property separator, so
+    # `<X> gate: green, nothing ran` DELIVERS as `<X> gate: green` — the four
+    # words carrying the whole disclosure never reach the annotation.
+    props = notice_props(run)
+    assert "," not in props, "the property section already carries a comma"
+    mutated = props.replace(" — ", ", ", 1)
+    assert mutated != props, "expected ' — ' in the title to swap for a comma"
+    run = run.replace(props, mutated, 1)
+elif mode == "drop-title":
+    # The title deleted OUTRIGHT. Before this slice the ratchet still reported
+    # 106 passed / 0 failed on exactly this mutant, because `notice_has_name`
+    # is satisfied by the gate name appearing in the BODY sentence.
+    props = notice_props(run)
+    run = run.replace('echo "::notice %s::' % props, 'echo "::notice::', 1)
+    assert 'echo "::notice::' in run, "the title property was not removed"
 elif mode == "rename":
     # The gate is renamed; the sentinel must follow it, not stay pinned to the
     # old word.
@@ -326,6 +389,31 @@ for spec in $GATES; do
   job="${spec##*:}"
   mutant "$file" "$job" clean       notice_count 1
   mutant "$file" "$job" drop-notice notice_count 0
+  # The round-trip alone must not change the title facts, so the two title
+  # mutants below have exactly one variable: the mutation.
+  mutant "$file" "$job" clean       notice_title_comma_free True
+  mutant "$file" "$job" clean       notice_title_discloses  True
+done
+echo
+
+# ── case 2b: the TITLE mutants — the headline assertions must lose, per file ─
+# Both of these were green before this slice: the ratchet asserted nothing at
+# all about the title, so the field a person actually skims could be truncated,
+# reworded or deleted outright and the guard stayed at 106 passed / 0 failed.
+echo "case 2b: comma-ing or deleting the title in EACH of the four workflows reds this ratchet"
+for spec in $GATES; do
+  file="${spec%%:*}"
+  job="${spec##*:}"
+  # Planting the comma back: the property section is no longer comma-free AND
+  # the DELIVERED title loses the disclosure clause.
+  mutant "$file" "$job" comma-title notice_title_comma_free False
+  mutant "$file" "$job" comma-title notice_title_discloses  False
+  # …while the body is untouched, which is precisely why the old assertions
+  # could not see this: the defect lives only in the title.
+  mutant "$file" "$job" comma-title notice_has_sentinel     True
+  # Deleting the title property outright.
+  mutant "$file" "$job" drop-title  notice_title_present    False
+  mutant "$file" "$job" drop-title  notice_has_name         True
 done
 echo
 
