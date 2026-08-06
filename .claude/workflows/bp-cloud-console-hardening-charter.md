@@ -1752,6 +1752,68 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-06 — wave 37 REVIEWED AND SHIPPED — grade **A−**, six of six green, six PRs open
+
+**All six round-1 slices built, gated, reviewed and PUSHED: #9917 (s1), #9918 (s2), #9919 (s3),
+#9920 (s4), #9921 (s5), #9922 (s6).** No slice stalled; there were no round-2 slices to defer.
+The six merge into `origin/main` in any order with **zero conflicts** — the reviewer merged all six
+into an integration branch and ran every gate on the union: `__app.test.mjs` 919/919, smoke 104/104,
+breakpoint-sweep exit 0 + 51/51, `__css_check` 0 errors, `__binding_census` exit 0, and the **full
+cloud suite 2962 tests / 0 failures**. The file-region ownership D426's plan assigned (s1 at
+`__app.test.mjs:15352`, s6 the EOF and `:2471`, the census standalone) held exactly.
+
+**What landed.** s1 — `friendly()`'s curated `ERRORS` map no longer beats a non-empty `data.details`
+on the two keys that carry no information, and `POST /v1/sites` stops rendering the raw token
+`invalid`; ships its own positive control because the shipped gate was measurably blind (914/914
+before and after). s2 — six bare 403s now name `required:"admin", scope:"team"`, two rank-relative
+arms name a CAUSE (`outranked` / `cannot_grant_higher_role`) and never an authority, three stay bare
+with a D396(5) comment; an 11-test probe drives every claim through the real router. s3 — the wire
+label `scope:"primary_team"` becomes `scope:"team"`, with all three Elixir full-map pins and all six
+JS fixture literals flipped in the same commit. s4 — `__binding_census.mjs` (79 call sites, 40
+elevated, 22 predicated, **18** unpredicated) with its own `console-harness` step, ADD and REMOVE
+arms both mutation-proved. s5 — `registration-deadlock-sweep.sh` refuses `evaluated == 0` with exit
+2 and reports evaluated/skipped/swept **by reason** on every run. s6 — `loadOperator`'s unloaded arm
+becomes three-valued, so a real operator whose `/v1/me` 5xxs reads a report plus a Retry instead of
+a spinner that outlives its request.
+
+**Two review fixes, both real, neither cosmetic.** (i) `877bcb3ed` on s4: `__css_check`'s **E11**
+rule bans committed source-line citations and scans every `cloud/priv/static/*.mjs`, so the census
+prose reddened the required **Console gate** with seven failures — invisible to the slice's own gate,
+which omitted `__css_check`. That class is now filed as
+`cchi-w37-bl-slice-gate-omits-the-surface-s-shipped-gates`: **nothing checks that a hand-authored
+slice gate is a superset of the merge gate for the same paths.** (ii) `bbfddf03c` on s1: an ARRAY
+`details` keys to `"0"`, so the new fence would have rendered `0 has already been taken` — a string
+`main` could not produce for those keys; arrays are now excluded and pinned.
+
+**A ledger defect the wave could not see, fixed here.** `cch-w37-s1-invalid-precedence-details-win`
+is a **DRAFT ONLY** — its publish 409'd `duplicate_of` the already-published wave-36 row
+`cch-w36-s6-invalid-precedence-details-win`, the same work filed in wave 36 and never built. Per
+D105 a draft is a duplicate, never a row, so the published row is now claimed with a now-line
+pointing at the branch and PR, and #9917's canonical `Task:` line names it. **A dispatch whose
+publish 409s must not proceed silently on the draft** — the board showed that work OPEN and
+unclaimed while it sat gate-green in a PR.
+
+**Both HIGH-FLIP-RISK judgments were independently re-derived by the reviewer and both held**, and
+both PR bodies say a genuinely independent second reviewer is still owed: s2's authority labelling
+(re-read `Authz.can_grant?/3`, `update_member_role_as/4`, `remove_member_as/3` and the `POST
+/v1/tokens` guard from source — the PATCH re-derivation maps arm-for-arm onto the two branches
+`update_member_role_as/4` collapses), and s4's classification (the 40-vs-41 count turns entirely on
+`submitToken`, whose route is `Auth.require_user` and nothing else; confirmed at `router.ex:5007`).
+
+**What the next wave should take.** The client half of s2 is the sharpest unfinished edge:
+`FORBIDDEN_REASON_COPY` maps only `no_team`, so the two new `reason` slugs still fall through to the
+billing sentence — **the server is honest now and that one screen is not** (`task-ed706f4e1c616f89`).
+Then the 18 unpredicated elevated writes the census now names by call site
+(`cch-w36-bl-unpredicated-write-affordances-fix`, whose text still says seventeen), and the census's
+own DRIFT arm (`cch-w37-bl-binding-census-drift-arm`) — derived from render reachability in app.js,
+which needs no Elixir oracle at all. Also open: the undriven Operator retry CLICK
+(`cch-w37-bl-operator-retry-click-undriven`) and the function names
+`require_primary_team_admin/owner`, which still assert the scope s3 just proved they do not enforce
+(`cch-w37-bl-require-primary-team-fn-names-still-lie`).
+
+Paper: `cch-wave-37-2026-08-06`.
+
+
 ### 2026-08-06 — wave 37 DECIDED (six round-1 slices, "name the authority, or claim none")
 
 **Wave 36's five PRs ALL MERGED before this wave planned** (14:35–14:41 UTC, including the charter
