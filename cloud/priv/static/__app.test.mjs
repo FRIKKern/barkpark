@@ -1205,14 +1205,23 @@ test("gr-p5-session-provenance: the session row shows origin only when the serve
     "the origin must be escaped");
 });
 
-test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
-  // openAccountModal has exactly three entry points. A recomposition that
-  // renames the function or drops a listener leaves the account unreachable.
+test("gr-p5-account: the account is reachable from #acct-btn and the palette — and #ws-switch is NOT one of its doors", () => {
+  // openAccountModal keeps its entry points; a recomposition that renames the
+  // function or drops a listener leaves the account unreachable.
+  //
+  // THE THIRD DOOR IS DELIBERATELY GONE. #ws-switch used to open this same
+  // modal, so the sidebar's workspace control and its footer account button
+  // were two doors onto one room — and the top one wears a switcher caret, so
+  // it PROMISED a workspace switch and delivered a settings sheet. It now owns
+  // the team picker. This asserts the separation in BOTH directions: re-point
+  // #ws-switch at openAccountModal and the old defect reds here.
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   assert.ok(src.includes('$("#acct-btn").addEventListener("click", openAccountModal)'),
     "the sidebar account button must open the account modal");
-  assert.ok(/wsSwitch\.addEventListener\("click", openAccountModal\)/.test(src),
-    "the workspace switcher must open the account modal");
+  assert.ok(!/wsSwitch\.addEventListener\("click", openAccountModal\)/.test(src),
+    "#ws-switch must NOT open the account modal — it owns the team picker");
+  assert.ok(/wsSwitch\.addEventListener\("click",[\s\S]{0,160}toggleTeamMenu\(\)/.test(src),
+    "#ws-switch must open the team picker");
   // The palette id is LAW (the label is free) — no conditional guard here: a
   // missing hook must red this test, never silently skip it.
   assert.equal(typeof hooks.paletteActionItems, "function",
@@ -1220,6 +1229,56 @@ test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct
   assert.ok(hooks.paletteActionItems().some((i) => i.id === "act-account"),
     "the command palette must keep the act-account action id");
 });
+
+test("team picker: the chip is ONE control — no native <select> may re-appear inside it", () => {
+  // THE DEFECT THIS PINS, reported by the owner with screenshots: the chip's
+  // CENTRE opened a bare OS <select> while its CARET opened the styled picker.
+  // Two different menus on one control, chosen by which pixel you hit. The
+  // <select> came from renderTeamSwitcher, which swapped #account-team's text
+  // for a control whenever /v1/me listed 2+ memberships — so it only appeared
+  // for exactly the users who needed the switcher to be good.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  assert.ok(!/function renderTeamSwitcher\s*\(/.test(src),
+    "renderTeamSwitcher must not come back — the picker is the only switch seam");
+  assert.ok(!/sel\.id = "team-switcher"/.test(src),
+    "no native <select> may be mounted as the team switcher");
+
+  // And nothing may replace the chip's label with a control: #account-team is
+  // plain text so the WHOLE chip is one target for the picker.
+  const chip = appRegion(src, "function setAccountChip(", "\n  }\n");
+  assert.ok(!/createElement\("select"\)/.test(chip),
+    "the account chip must not build a control into its own label");
+});
+
+test("team picker: reads the real /v1/me shape, marks the active team, and says LOADING rather than empty", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  assert.ok(/function renderTeamMenu\(/.test(src) && /function toggleTeamMenu\(/.test(src),
+    "the team picker must exist as its own renderer + toggle");
+
+  // It must read the PRODUCER's envelope — /v1/me returns `teams` for exactly
+  // this purpose — not a second fetch and not a hand-built map.
+  assert.ok(/meCache && meCache\.teams/.test(src),
+    "the picker must read teams from the /v1/me cache");
+  assert.ok(/meCache && meCache\.team && meCache\.team\.id/.test(src),
+    "the active team must come from /v1/me's current team, not from localStorage alone");
+
+  // A LOADING state DISTINCT from an empty one. Rendering an empty list while
+  // /v1/me is in flight tells a member of four teams they belong to none —
+  // absence rendered as a determinate answer.
+  assert.ok(/if \(!meCache\)[\s\S]{0,240}Loading teams/.test(src),
+    "an unloaded /v1/me must render as LOADING, never as an empty team list");
+
+  // Switching pins the team and does a FULL reload — every cache is team-scoped.
+  assert.ok(/localStorage\.setItem\("bp\.active-team", id\)[\s\S]{0,160}location\.reload\(\)/.test(src),
+    "choosing a team must pin bp.active-team and reload");
+
+  // Dismissable by keyboard, not only by mouse.
+  assert.ok(/e\.key !== "Escape"[\s\S]{0,320}toggleTeamMenu\(false\)/.test(src),
+    "Escape must close the team picker");
+});
+
 
 test("gr-p5-account: hostile identity values are ESCAPED, never injected", () => {
   // Every string in the identity band is server-supplied. Drive the real fold,
@@ -10141,9 +10200,17 @@ test("cch-w25-s3: the rail fixture's cut is DERIVED from emit(), and reds when t
 
 test("cch-w25-s3: both producers still exist and still emit an unhumanised stage detail", () => {
   const node = fs.readFileSync(DEPLOY_NODE_SH, "utf8");
+  const common = fs.readFileSync(DEPLOY_COMMON_SH, "utf8");
   // The cruel string's stem is a `build_failure_reason` line: the LAST
-  // npm/Error line out of the build log, forwarded verbatim.
-  assert.ok(/build_failure_reason\(\) \{/.test(node), "build_failure_reason is the fixture's stem producer");
+  // npm/Error line out of the build log, forwarded verbatim. It lives in the
+  // SHARED lib now (one copy, both engines — it used to be duplicated byte for
+  // byte in site-deploy.sh and site-deploy-node.sh), so this assertion reads the
+  // lib and thereby covers BOTH runtime targets, including the DEFAULT (static)
+  // one, which is not itself a path this harness reads.
+  assert.ok(/build_failure_reason\(\) \{/.test(common),
+    "build_failure_reason is the fixture's stem producer, and it lives in deploy/lib/site-deploy-common.sh");
+  assert.ok(!/build_failure_reason\(\) \{/.test(node),
+    "build_failure_reason must exist ONCE — a re-forked copy in an engine is how the two targets drifted before");
   assert.ok(/emit BUILD failed "\$reason"/.test(node),
     "BUILD failed must still forward build_failure_reason's raw line — the moment it is humanised, this box stops " +
     "being a place a machine string can land and the fixture should be re-derived");
@@ -10601,8 +10668,11 @@ test("cch-w12-s1: an identity change WITHOUT a reload drops the cached actor axi
   assert.ok(invite.includes("activityActors = null") && invite.includes("activityActorsTried = false"),
     "an accepted invite changes the roster the Who axis is derived from");
   // NOT at the team switcher: it does location.reload(), which kills every
-  // module variable — a reset there would be a fix for a non-bug.
-  const switcher = appRegion(src, 'sel.id = "team-switcher"', "host.textContent = \"\";");
+  // module variable — a reset there would be a fix for a non-bug. The seam MOVED
+  // (the native <select> is gone; the styled team picker owns the switch now),
+  // so this re-anchors on the picker's own handler rather than deleting an
+  // invariant that still holds.
+  const switcher = appRegion(src, 'var id = el.getAttribute("data-team");', "    });");
   assert.ok(switcher.includes("location.reload()"), "the switcher still reloads");
   assert.ok(!switcher.includes("activityActors"), "no reset belongs at a seam that reloads the document");
 });
@@ -14355,4 +14425,206 @@ test("cch-w31-s4 follow-up: with no recovered body the card gains NOTHING — no
   assert.match(offline, /offline/i);
   // Total over an absent fault (the seam passes fleetFault, which can be null).
   assert.match(hooks.fleetLoadErrorHtml(null), /Couldn't load this instance/);
+});
+
+// ── cch-w34-s1 · A FAILED READ IS NOT AN EMPTY ONE ─────────────────────────
+// The wave-34 law (charter D382), driven rather than read. Both loaders folded
+// `r.ok` into a value-coalescing default — `(r.ok && r.data && r.data.X) || []`
+// — so a 500 and a 403 produced the SAME value as a genuine 200-with-nothing,
+// and the person read a determinate assertion the console never received:
+// "No sites yet" on the instance workspace, "No API tokens yet" beside a
+// Create-token button on the tokens page.
+//
+// Why these are DRIVEN and not asserted from markup: the collapse lives inside
+// the fetch callback, which is exactly why nothing in this harness could see it
+// (loadInstanceSites was mentioned five times, every one of them an assertion
+// that its slot exists in the static HTML). fakeDom() is unusable here — its
+// innerHTML setter regex-extracts class names and THROWS THE MARKUP AWAY, so it
+// cannot assert copy. These use a recording-innerHTML stub, on the
+// driveBootOAuth precedent above (swap the sandbox globals, drive, restore).
+
+// A DOM whose innerHTML assignments are KEPT verbatim, keyed by element id. The
+// whole point is the bytes: a census can prove the fold is gone, only rendered
+// copy can prove what the person actually reads.
+function recordingDom(ids) {
+  const els = {};
+  for (const id of ids) {
+    els[id] = {
+      id,
+      _html: "",
+      writes: [],
+      get innerHTML() { return this._html; },
+      set innerHTML(v) { this._html = String(v); this.writes.push(String(v)); },
+      onclick: null,
+      addEventListener() {},
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      getAttribute() { return null; },
+    };
+  }
+  return {
+    els,
+    document: {
+      querySelector(sel) { return els[String(sel).replace(/^#/, "")] || null; },
+      getElementById(id) { return els[id] || null; },
+      querySelectorAll() { return []; },
+      createElement: () => ({ ...inertEl }),
+    },
+  };
+}
+
+// Swap fetch + document, run one loader to completion, restore. api() resolves
+// on a microtask chain, so draining the queue settles the paint.
+async function driveLoader(run, { status, payload, ids }) {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(ids);
+  const fetch = fetchStub(status, payload);
+  sandbox.fetch = fetch;
+  sandbox.document = dom.document;
+  try {
+    run();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+  return { dom, fetch, html: () => dom.els[ids[0]].innerHTML };
+}
+
+const SITES_IDS = ["instance-sites", "site-new-btn"];
+const driveSites = (status, payload, bp) =>
+  driveLoader(() => hooks.loadInstanceSites(bp), { status, payload, ids: SITES_IDS });
+
+test("cch-w34-s1: both collapsing loaders are hookable (RED on origin/main, where neither is exported)", () => {
+  assert.equal(typeof hooks.loadInstanceSites, "function", "loadInstanceSites must be drivable");
+  assert.equal(typeof hooks.loadTokens, "function", "loadTokens must be drivable");
+  assert.equal(typeof hooks.readFailureCopy, "function", "readFailureCopy must be drivable");
+});
+
+// ── the 3x2 matrix the fix was measured on: {200-empty, 500, 403} x {host, no host}
+
+test("cch-w34-s1: a 500 on /v1/sites SPEAKS — it never renders 'No sites yet'", async () => {
+  for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {
+    const { html } = await driveSites(500, { error: "server_error" }, bp);
+    assert.match(html(), /Couldn't load sites/, "the failure must be stated, host or no host");
+    assert.ok(html().indexOf("No sites yet") === -1,
+      "a failed read must never be painted as an empty one");
+    assert.match(html(), /broke on our side/, "a 5xx names US as the party at fault");
+  }
+});
+
+test("cch-w34-s1: a 403 on /v1/sites does NOT render the billing sentence", async () => {
+  // The shared ERRORS map (grep -n 'forbidden:' app.js, inside the ERRORS
+  // object above friendly()) keys the GENERIC `forbidden` slug to "Only the team owner can
+  // manage billing." — friendly()'s curated copy beats any caller fallback, so
+  // bare friendly(r.data) would answer a sites read with billing copy.
+  for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {
+    const { html } = await driveSites(403, { error: "forbidden" }, bp);
+    assert.match(html(), /Couldn't load sites/);
+    assert.ok(html().indexOf("Only the team owner can manage billing.") === -1,
+      "a sites 403 must not render copy about the billing screen");
+    assert.match(html(), /access to the sites on this instance/);
+    assert.ok(html().indexOf("No sites yet") === -1);
+  }
+});
+
+test("cch-w34-s1: THE PRE-HOST QUIET SURVIVES — a 200 with zero sites and no host paints nothing", async () => {
+  // The high-flip-risk judgment of this slice. The tempting one-liner (turn the
+  // `bp.host` ternary into an `r.ok` ternary) renders correct error copy AND
+  // silently starts asserting "No sites yet" on a pre-host instance — measured,
+  // with every other test in this file still green. This is the assertion that
+  // notices.
+  const quiet = await driveSites(200, { sites: [] }, { id: "bp-1", host: null });
+  assert.equal(quiet.html(), "", "pre-host, a genuine empty stays SILENT — the timeline is the surface");
+
+  const loud = await driveSites(200, { sites: [] }, { id: "bp-1", host: "one.barkpark.cloud" });
+  assert.match(loud.html(), /No sites yet/, "once the box is up, a genuine empty says so");
+  assert.ok(loud.html().indexOf("Couldn't load sites") === -1);
+});
+
+test("cch-w34-s1: a 200 carrying sites still renders rows, and only this instance's", async () => {
+  const { html } = await driveSites(200, {
+    sites: [
+      { id: "s-1", name: "alpha", slug: "alpha", barkpark_id: "bp-1" },
+      { id: "s-2", name: "beta", slug: "beta", barkpark_id: "bp-OTHER" },
+    ],
+  }, { id: "bp-1", host: "one.barkpark.cloud" });
+  assert.match(html(), /alpha/);
+  assert.ok(html().indexOf("beta") === -1, "the barkpark_id filter is untouched by this fix");
+  assert.ok(html().indexOf("empty-state") === -1);
+});
+
+// ── loadTokens: the security-relevant twin
+
+const driveTokens = (status, payload) =>
+  driveLoader(() => hooks.loadTokens(), { status, payload, ids: ["token-list"] });
+
+test("cch-w34-s1: a failed /v1/tokens no longer paints 'No API tokens yet' beside a Create-token CTA", async () => {
+  const { dom } = await driveTokens(500, { error: "server_error" });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /Couldn't load your tokens/);
+  assert.ok(html.indexOf("No API tokens yet") === -1,
+    "a person must never read 'no tokens' about a list we failed to fetch");
+  assert.ok(html.indexOf("token-add-empty") === -1, "and must not be offered the empty-state CTA");
+  assert.match(html, /broke on our side/, "a 5xx names US as the party at fault");
+  assert.match(html, /Nothing was changed/,
+    "the reassurance is UNCONDITIONAL — a failed read cannot have revoked a token");
+  // The loading state was painted first and replaced — the error is the LAST word.
+  assert.match(dom.els["token-list"].writes[0], /Loading tokens/);
+});
+
+test("cch-w34-s1: a tokens 403 is an authority answer, not billing copy", async () => {
+  const { dom } = await driveTokens(403, { error: "forbidden" });
+  const html = dom.els["token-list"].innerHTML;
+  assert.ok(html.indexOf("Only the team owner can manage billing.") === -1);
+  // esc()'d at the seam, so the apostrophe arrives as an entity.
+  assert.match(html, /access to this team&#39;s API tokens/);
+  assert.ok(html.indexOf("No API tokens yet") === -1);
+  assert.match(html, /Nothing was changed/);
+});
+
+test("cch-w34-s1: a genuine 200 with zero tokens still says 'No API tokens yet'", async () => {
+  const { dom } = await driveTokens(200, { tokens: [] });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /No API tokens yet/, "an honest empty must keep speaking");
+  assert.match(html, /token-add-empty/, "and keep its Create-token affordance");
+});
+
+test("cch-w34-s1: a 200 carrying tokens renders the rows", async () => {
+  const { dom } = await driveTokens(200, {
+    tokens: [{ id: "t-1", name: "ci-deploy", abilities: ["deploy"] }],
+  });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /ci-deploy/);
+  assert.ok(html.indexOf("No API tokens yet") === -1);
+});
+
+// ── the copy seam itself
+
+test("cch-w34-s1: readFailureCopy overrides ONLY the generic forbidden slug", () => {
+  const f = hooks.readFailureCopy;
+  assert.equal(f({ ok: false, status: 403, data: { error: "forbidden" } }, "SCOPED", "FB"), "SCOPED");
+  // Everything else keeps faultCopy's honest classification.
+  assert.match(f({ ok: false, status: 500, data: { error: "server_error" } }, "SCOPED", "FB"), /broke on our side/);
+  assert.equal(f({ ok: false, status: 404, data: { error: "not_a_registered_slug" } }, "SCOPED", "FB"), "FB");
+  assert.match(f({ ok: false, status: 0, data: { error: "network_error" }, transport: "offline" }, "SCOPED", "FB"), /offline/i);
+  // A 403 that is genuinely ABOUT billing keeps its own slug's copy — the
+  // override is keyed on the generic slug, not on the status.
+  assert.match(f({ ok: false, status: 403, data: { error: "billing_not_configured" } }, "SCOPED", "FB"), /Billing isn't set up/);
+});
+
+// ── the census is part of the gate, and it must be able to lose ────────────
+
+test("cch-w34-s1: the absence-as-answer census runs clean against the shipped app.js", () => {
+  const censusPath = fileURLToPath(new URL("./__unknown_census.mjs", import.meta.url));
+  const r = spawnSync(process.execPath, [censusPath], { encoding: "utf8" });
+  assert.equal(r.status, 0, "the census must equal its pin:\n" + r.stdout + r.stderr);
+  assert.match(r.stdout, /OK: the absence-as-answer set equals its 5-site pin\./);
+  // The five positive controls are PRESENT and unflagged — that is the proof it
+  // discriminates rather than counting `|| []` idioms.
+  assert.match(r.stdout, /controls present : presenceChip lifecyclePill catalogViewState metricsAgeText freshnessModel/);
+  assert.match(r.stdout, /controls flagged : \(none\)/);
+  assert.match(r.stdout, /controls missing : \(none\)/);
+  // Neither fixed loader may still be in the population.
+  assert.ok(r.stdout.indexOf("loadInstanceSites") === -1);
+  assert.ok(r.stdout.indexOf("loadTokens") === -1);
 });

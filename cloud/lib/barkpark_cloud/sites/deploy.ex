@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   import Ecto.Query, only: [from: 2]
 
+  alias BarkparkCloud.DeployLedger
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site, SiteArtifact}
@@ -637,7 +638,23 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  defp start_on_box(ctx, %Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp, read_token) do
+  defp start_on_box(
+         ctx,
+         %Deployment{} = deployment,
+         %Site{} = site,
+         %Barkpark{} = bp,
+         read_token
+       ),
+       do: start_on_box(ctx, deployment, site, bp, read_token, start_retries())
+
+  defp start_on_box(
+         ctx,
+         %Deployment{} = deployment,
+         %Site{} = site,
+         %Barkpark{} = bp,
+         read_token,
+         retries_left
+       ) do
     case BoxRelay.start_deploy(bp, deploy_payload(deployment, site, bp, read_token)) do
       {:ok, status, body} when status in 200..299 ->
         case prebuilt_echo(deployment, body) do
@@ -652,10 +669,28 @@ defmodule BarkparkCloud.Sites.Deploy do
       # every recovery pass and nothing re-enqueued. It becomes a COUNTED
       # `deferred` row plus a re-fired debounce instead.
       {:ok, 409, body} ->
-        defer(ctx, deployment, box_refusal(409, body))
+        defer(ctx, deployment, box_refusal(409, body, :start))
+
+      # THE POOL BLIP ON THE TRIGGER (deploy-truth W2). An UNTYPED 5xx is not the
+      # box saying no — it is the door's own auth plug dying on a starved
+      # Postgres pool and being rendered by the crash path (see
+      # `transient_refusal?/1`). Retrying is safe BY CONSTRUCTION: if the blip
+      # ate only the RESPONSE and the box did take the job, the retry meets a
+      # slug already in flight and the box answers 409 `already_running` — which
+      # the clause above already turns into a counted deferral plus a re-fired
+      # debounce. So the worst case of a start retry is a DEFERRAL, never a
+      # second build. A TYPED 5xx is the box stating a real fault about itself
+      # and stays terminal on the first answer.
+      {:ok, status, body} when status >= 500 ->
+        if retries_left > 0 and transient_refusal?(body) do
+          Process.sleep(poll_ms())
+          start_on_box(ctx, deployment, site, bp, read_token, retries_left - 1)
+        else
+          fail(ctx, box_refusal(status, body, :start))
+        end
 
       {:ok, status, body} ->
-        fail(ctx, box_refusal(status, body))
+        fail(ctx, box_refusal(status, body, :start))
 
       {:error, reason} ->
         fail(ctx, unreachable(bp, reason))
@@ -844,14 +879,17 @@ defmodule BarkparkCloud.Sites.Deploy do
     do:
       fail(
         ctx,
-        "the build did not finish in time — the box is still working, or it stalled; deploy again to retry"
+        with_graced_note(
+          ctx,
+          "the build did not finish in time — the box is still working, or it stalled; deploy again to retry"
+        )
       )
 
   defp poll(ctx, build_id, left, grace_left) do
     case BoxRelay.poll_deploy(ctx.bp, ctx.site.slug, build_id) do
       {:ok, status, body} when status in 200..299 ->
         report = normalize_report(body)
-        ctx = apply_stages(ctx, report.stages)
+        ctx = ctx |> forget_graced_refusals() |> apply_stages(report.stages)
 
         case report.state do
           :succeeded -> settle_live(ctx, report)
@@ -864,10 +902,40 @@ defmodule BarkparkCloud.Sites.Deploy do
       # picked up) — keep waiting rather than inventing a failure. Reachable, so
       # the grace budget resets here too.
       {:ok, 404, _body} ->
-        sleep_then_poll(ctx, build_id, left - 1, poll_grace())
+        sleep_then_poll(ctx |> forget_graced_refusals(), build_id, left - 1, poll_grace())
+
+      # THE POOL BLIP (deploy-truth W2). 91% of this door's 500s land HERE, and
+      # none of them are the box refusing anything: they are
+      # `DBConnection.ConnectionError` — a starved Postgres pool (SEARCH is the
+      # dominant consumer) crashing the deploy door's OWN auth plug, rendered by
+      # Phoenix's RenderErrors path (`ErrorJSON`, which never reaches
+      # `action_fallback`) into the UNTYPED `internal_error / unknown error`
+      # envelope. Terminating on the first one killed builds on beat 37 of 45 for
+      # a defect the deploy path does not own — the exact grenade the `{:error, _}`
+      # grace below already defuses for a transient SILENCE. A transient ANSWER
+      # now buys the same bounded budget.
+      #
+      # It is DISCRIMINATING, not blanket: only the untyped crash envelope is
+      # graced (`transient_refusal?/1`), so a TYPED 5xx (`runner_start_failed`,
+      # the box stating a real fault about itself) is still terminal on the first
+      # beat. And the swallowed refusals are RECORDED, so if the untyped 5xx
+      # never clears, the failure that lands names the box's own last words and
+      # how many were tolerated first — grace hides nothing, it only waits.
+      {:ok, status, body} when status >= 500 and grace_left > 0 ->
+        refusal = box_refusal(status, body, :poll)
+
+        if transient_refusal?(body) do
+          Process.sleep(poll_ms())
+          poll(record_graced_refusal(ctx, refusal), build_id, left, grace_left - 1)
+        else
+          # A TYPED 5xx is terminal — but if untyped blips were tolerated on the
+          # way here, the row still says so. "Grace never hides" has to hold on
+          # every terminal exit, not only the ones that run out of budget.
+          fail(ctx, with_graced_note(ctx, refusal))
+        end
 
       {:ok, status, body} ->
-        fail(ctx, box_refusal(status, body))
+        fail(ctx, with_graced_note(ctx, box_refusal(status, body, :poll)))
 
       # A restart-shaped blip: the box was unreachable this beat. Spend GRACE (not
       # build budget) and re-poll — `left` is untouched, so a long restart never
@@ -880,7 +948,44 @@ defmodule BarkparkCloud.Sites.Deploy do
       # with the box's own unreachable reason — exactly the pre-grace behaviour,
       # now only after the restart window has closed.
       {:error, reason} ->
-        fail(ctx, unreachable(ctx.bp, reason))
+        fail(ctx, with_graced_note(ctx, unreachable(ctx.bp, reason)))
+    end
+  end
+
+  # `failure_reason` is `:text` and holds the WHOLE story; `detail` is the
+  # varchar(255) latest-wins caption the site page renders under the status pill.
+  # A reason that carries the box's own words plus a request_id plus a graced
+  # count can outgrow 255 — and an over-long `detail` does not truncate, it
+  # RAISES (22001) inside the terminal transition, which would lose the very
+  # failure it was trying to record. Clamped here, once, for both terminal
+  # writers.
+  defp short_detail(reason) when is_binary(reason) do
+    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
+  end
+
+  defp short_detail(reason), do: reason
+
+  # The graced-refusal ledger, carried on `ctx` (a plain map) so the loop's two
+  # budgets keep their arities. It is CLEARED by any poll that reached the box —
+  # the same reset rule `grace_left` follows, so an old blip never colours a
+  # later, unrelated verdict.
+  defp record_graced_refusal(ctx, caption) do
+    ctx
+    |> Map.update(:graced_refusals, 1, &(&1 + 1))
+    |> Map.put(:last_graced_refusal, caption)
+  end
+
+  defp forget_graced_refusals(ctx), do: Map.drop(ctx, [:graced_refusals, :last_graced_refusal])
+
+  # Grace waits; it never hides. Whatever finally fails the row says how many
+  # transient 5xx were tolerated on the way and what the last one said.
+  defp with_graced_note(ctx, reason) do
+    case {Map.get(ctx, :graced_refusals), Map.get(ctx, :last_graced_refusal)} do
+      {n, last} when is_integer(n) and is_binary(last) ->
+        "#{reason} (after tolerating #{n} transient box 5xx; the last was: #{last})"
+
+      _ ->
+        reason
     end
   end
 
@@ -1038,14 +1143,27 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  # How many CONSECUTIVE deferrals a site may collect before the chain is called
-  # what it is. Each deferral costs one re-fired debounce job (~60s apart) and one
-  # box call, and a normal build finishes in 2-4 minutes, so a healthy trailing
-  # rebuild defers once or twice. A box that is still busy after this many rounds
-  # is not "busy" — it is stuck, and a chain that re-fires forever would be a
-  # silent infinite loop wearing a counted status. The last one FAILS, honestly
-  # and terminally, naming the box.
+  # How many CONSECUTIVE deferrals OF THE SAME CAUSE a site may collect before
+  # the chain is called what it is. Each deferral costs one re-fired debounce job
+  # (~60s apart) and one box call, and a normal build finishes in 2-4 minutes, so
+  # a healthy trailing rebuild defers once or twice. A box that is still busy
+  # with THIS SITE after this many rounds is not "busy" — it is stuck, and a
+  # chain that re-fires forever would be a silent infinite loop wearing a counted
+  # status. The last one FAILS, honestly and terminally, naming the box.
   @max_consecutive_deferrals 6
+
+  # …but a CONCURRENT-BUILD CAP is a different animal, and sharing one bound with
+  # the busy box loses publishes for no reason. The cap's whole job is to refuse
+  # slots while the box is under pressure — six refusals in a row is what a busy
+  # fleet LOOKS like, not evidence of a stuck runner — so a capacity chain gets a
+  # longer leash before it is called terminal. It is still bounded: an instance
+  # that has been at its cap for this many rounds has builds that are not
+  # finishing, and that IS worth a human.
+  @max_consecutive_capacity_deferrals 12
+
+  # The head-of-stream scan must reach past the LONGEST bound, or the longest
+  # chain could never be counted to its own limit.
+  @deferral_scan_depth @max_consecutive_capacity_deferrals + 2
 
   # A BOX-BUSY DEFERRAL (charter D9). Not a failure, not a drop — a settled row
   # that says "this build did not happen, and here is the rebuild that will".
@@ -1068,17 +1186,18 @@ defmodule BarkparkCloud.Sites.Deploy do
   # rebuild we will not perform would be a lie. It fails honestly instead.
   defp defer(ctx, %Deployment{} = deployment, reason) do
     site = ctx.site
-    prior = consecutive_deferrals(site)
+    cause = deferral_cause(deployment.stage, reason)
+    prior = consecutive_deferrals(site, cause)
 
     cond do
       Deployment.prebuilt?(deployment) ->
         fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
 
-      prior >= @max_consecutive_deferrals - 1 ->
+      prior >= max_consecutive_deferrals(cause) - 1 ->
         fail(
           ctx,
           reason <>
-            " — and it has now refused #{prior + 1} rebuilds in a row for this site, so the instance is not busy but stuck; check its deploy runner"
+            " — and it has now refused #{prior + 1} rebuilds in a row for this site, #{terminal_verdict(cause)}"
         )
 
       true ->
@@ -1086,62 +1205,114 @@ defmodule BarkparkCloud.Sites.Deploy do
           reason <>
             " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
 
-        _ =
-          Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-            status: "deferred",
-            failure_reason: detail,
-            detail: detail
-          })
+        # THE PROMISE IS MADE FIRST, and the row only says `deferred` once it
+        # holds. `deferred` is a TERMINAL status (`Deployment.@transitions` maps
+        # it to `[]`), so a row settled deferred can never be corrected — writing
+        # it before the re-queue is what made a broken re-queue unfixable and
+        # left a lost publish wearing "re-queued, not lost". Enqueuing early is
+        # safe: the debounced job is unique per site and schedules ~60s out, so a
+        # rebuild that outlives a failed transition is the same coalesced job the
+        # next publish would have fired anyway.
+        case requeue_rebuild(site.id) do
+          {:ok, _job} ->
+            _ =
+              Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
+                status: "deferred",
+                failure_reason: detail,
+                detail: short_detail(detail)
+              })
 
-        outcome =
-          case BarkparkCloud.Sites.AutoDeployWorker.enqueue(site.id) do
-            {:ok, _job} ->
-              Logger.info(
-                "site deploy deferred for site #{site.id} (#{prior + 1} in a row): box busy — rebuild re-queued"
-              )
+            Logger.info(
+              "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
+            )
 
-              {:ok, :deferred}
+            BarkparkCloud.Events.broadcast(site.team_id, "deployments")
+            {:ok, :deferred}
 
-            {:error, enqueue_error} ->
-              # THE PROMISE COULD NOT BE MADE, so this is not a deferral — it is
-              # the lost publish this wave exists to refuse, and it must be
-              # reported as one. Two things happen, and neither is optional:
-              # the row says so in its own words rather than wearing a
-              # `deferred` status that means nothing, and the OUTCOME is an
-              # error so the Oban job retries instead of recording success.
-              # `defer_behind_running_build/2` already ruled it this way; a
-              # deferral that silently succeeded on one path and failed the job
-              # on the other would be two different meanings of one word.
-              Logger.error(
-                "site deploy deferral could not re-queue the rebuild for site #{site.id}: #{inspect(enqueue_error)}"
-              )
+          {:error, enqueue_error} ->
+            # THE PROMISE COULD NOT BE MADE, so this is not a deferral — it is
+            # the lost publish this wave exists to refuse, and it is reported as
+            # one WITH ITS STATUS, not merely in prose. `fail/2` settles it
+            # `failed`, which puts it in the ledger's failure numerator; leaving
+            # it `deferred` kept a terminally lost publish out of the numerator
+            # while wearing the label "the rebuild was re-queued, not lost".
+            #
+            # Nothing retries this row, and the comment that used to sit here
+            # said otherwise: it claimed "the OUTCOME is an error so the Oban job
+            # retries", and cited a `defer_behind_running_build/2` that does not
+            # exist. In production `Deploy.run/1` is called from exactly one
+            # place — the `Task.Supervisor.start_child` body inside
+            # `BarkparkCloud.Sites.Deploy.TaskStarter.start/1`, at the bottom of
+            # THIS file — which returns the SPAWN result and throws the run's
+            # return value away. There is no job outcome to fail and no retry to
+            # wait for. The user's next publish IS the retry, which is what the
+            # row now says.
+            Logger.error(
+              "site deploy deferral could not re-queue the rebuild for site #{site.id}: #{inspect(enqueue_error)}"
+            )
 
-              broken =
+            _ =
+              fail(
+                ctx,
                 reason <> " — and the rebuild could NOT be re-queued; publish again to retry"
+              )
 
-              _ =
-                Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-                  failure_reason: broken,
-                  detail: broken
-                })
-
-              {:error, {:deferral_requeue_failed, enqueue_error}}
-          end
-
-        BarkparkCloud.Events.broadcast(site.team_id, "deployments")
-        outcome
+            {:error, {:deferral_requeue_failed, enqueue_error}}
+        end
     end
   end
 
-  # Deferrals at the HEAD of this site's stream, i.e. how many rounds the current
-  # busy-box chain has already run. Any other terminal status ends the count — a
-  # deferral chain is by construction unbroken (each round mints exactly one row).
-  defp consecutive_deferrals(%Site{} = site) do
+  # The deferral's NAMED cause, from the same classifier the ledger reports with —
+  # one owner for the taxonomy, so a chain and a census can never disagree about
+  # what a row is.
+  defp deferral_cause(stage, reason) do
+    DeployLedger.classify(%{status: "deferred", stage: stage, failure_reason: reason})
+  end
+
+  defp max_consecutive_deferrals("BOX_AT_CAPACITY_DEFERRED"),
+    do: @max_consecutive_capacity_deferrals
+
+  defp max_consecutive_deferrals(_cause), do: @max_consecutive_deferrals
+
+  # What the terminal round actually ACCUSES the box of — derived from the cause,
+  # because a capacity refusal is not a stuck runner and telling an operator to
+  # go look at one sends them to the wrong place.
+  defp terminal_verdict("BOX_AT_CAPACITY_DEFERRED"),
+    do:
+      "so the instance has been at its concurrent-build cap for that entire run; check for builds holding slots without finishing, or raise the cap"
+
+  defp terminal_verdict("BOX_BUSY_DEFERRED"),
+    do: "so the instance is not busy but stuck; check its deploy runner"
+
+  defp terminal_verdict(_cause),
+    do:
+      "so the instance is refusing this site persistently for a cause the ledger cannot name; check its deploy runner"
+
+  # Deferrals of THE SAME CAUSE at the HEAD of this site's stream, i.e. how many
+  # rounds the current chain has already run. Any other status — and any deferral
+  # for a DIFFERENT cause — ends the count: a busy box and a full build queue are
+  # two different stories, and counting them as one chain spends a site's whole
+  # budget on causes that never repeated.
+  defp consecutive_deferrals(%Site{} = site, cause) do
     site
-    |> Registry.list_deployments(@max_consecutive_deferrals + 2, environment: "production")
+    |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
     |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
-    |> Enum.take_while(&(&1.status == "deferred"))
+    |> Enum.take_while(fn d ->
+      d.status == "deferred" and deferral_cause(d.stage, d.failure_reason) == cause
+    end)
     |> length()
+  end
+
+  # The re-queue seam. A PROCESS-LOCAL override wins over the real worker for the
+  # same reason `starter/0` documents its own: under `Oban testing: :manual` an
+  # insert ALWAYS succeeds, so the re-queue-failure arm above — the one that
+  # decides whether a lost publish is counted — was unreachable in a test and had
+  # never been exercised at all. A check that cannot fail proves nothing.
+  defp requeue_rebuild(site_id) do
+    case Process.get(:site_deploy_requeue) do
+      fun when is_function(fun, 1) -> fun.(site_id)
+      _ -> BarkparkCloud.Sites.AutoDeployWorker.enqueue(site_id)
+    end
   end
 
   defp fail(ctx, reason) do
@@ -1149,7 +1320,7 @@ defmodule BarkparkCloud.Sites.Deploy do
       Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
         status: "failed",
         failure_reason: reason,
-        detail: reason
+        detail: short_detail(reason)
       })
 
     # `failed` is terminal too — the row is never re-driven (the reaper only
@@ -1164,12 +1335,71 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   # A box that answered, but said no. Its own words travel — never a generic
   # "deploy failed".
-  defp box_refusal(status, body) when is_map(body) do
-    case refusal_detail(body) do
-      d when is_binary(d) and d != "" -> "the instance refused the deploy (HTTP #{status}): #{d}"
-      _ -> "the instance refused the deploy (HTTP #{status})"
+  #
+  # deploy-truth W2: the caption also names WHICH PHASE refused and carries the
+  # box's `request_id`. Both were missing, and 2,544 rows paid for it: this
+  # helper is called identically from the START arm and from every poll beat, so
+  # "the instance refused the deploy (HTTP 500)" could not be told apart from
+  # "…refused beat 37 of 45", and with no request_id no row could be joined to
+  # the box journal that holds the actual stack trace. `failure_reason` is
+  # `:text`, so both fold in with NO migration and no new column.
+  defp box_refusal(status, body, phase) when is_map(body) do
+    base =
+      case phase do
+        :start -> "the instance refused the deploy (HTTP #{status})"
+        :poll -> "the instance refused the build poll (HTTP #{status})"
+      end
+
+    base =
+      case refusal_detail(body) do
+        d when is_binary(d) and d != "" -> "#{base}: #{d}"
+        _ -> base
+      end
+
+    case request_id(body) do
+      nil -> base
+      rid -> "#{base} [box request_id: #{rid}]"
     end
   end
+
+  # The box's own request id, as `Barkpark.Content.Errors.put_request_id/2`
+  # stamps it from Logger metadata — nested inside the typed envelope, or flat on
+  # the bodies `relay_with/5`'s fallback produces.
+  defp request_id(body) when is_map(body) do
+    nested =
+      case body["error"] do
+        %{} = err -> err["request_id"] || err["requestId"]
+        _ -> nil
+      end
+
+    string_or_nil(nested || body["request_id"])
+  end
+
+  defp request_id(_), do: nil
+
+  # Is this 5xx the box refusing, or the DOOR dying?
+  #
+  # A refusal the box AUTHORED carries a code it chose (`runner_start_failed`,
+  # `feature_not_configured`, …): it is a verdict about this build and repeating
+  # the question cannot change it. The pool-starvation 500 has no author — the
+  # crash path collapses every unhandled fault to the generic `internal_error`
+  # constant with the message "unknown error". That, and only that, is what the
+  # grace budget is for. An untyped body with no code at all counts too: the
+  # bodies `relay_with/5` synthesises for an undecodable 5xx are equally
+  # authorless.
+  defp transient_refusal?(body) when is_map(body) do
+    case refusal_code(body) do
+      nil -> true
+      "internal_error" -> true
+      _ -> false
+    end
+  end
+
+  defp transient_refusal?(_), do: false
+
+  defp refusal_code(%{"error" => %{} = err}), do: string_or_nil(err["code"])
+  defp refusal_code(body) when is_map(body), do: string_or_nil(body["code"])
+  defp refusal_code(_), do: nil
 
   # site-spawner W10: the box renders its typed refusals NESTED —
   # `BarkparkWeb.SiteDeployController.bad_request/3` (and its
@@ -1687,6 +1917,14 @@ defmodule BarkparkCloud.Sites.Deploy do
   # a genuinely dead box still fails inside a couple of minutes. Config-defaulted
   # so tests can shrink it to a handful.
   defp poll_grace, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_grace, 45)
+
+  # How many times an UNTYPED 5xx on the START trigger is retried before the row
+  # fails. Deliberately small: unlike a poll beat (where a finished build is on
+  # the line), nothing has been built yet, and the retry's worst case is a 409
+  # that becomes a counted deferral — so a handful of attempts across a pool blip
+  # is enough, and a box that keeps crash-500ing still gets a verdict in seconds.
+  defp start_retries,
+    do: Application.get_env(:barkpark_cloud, :site_deploy_start_retries, 3)
 
   defp worker_id, do: "site-deploy-#{System.unique_integer([:positive])}@#{node()}"
 end

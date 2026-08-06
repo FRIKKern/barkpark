@@ -650,32 +650,56 @@ defmodule Barkpark.Sites.DeployRunner do
     end
   end
 
-  # The provision reason, rendered for a caller and SCRUBBED. Deliberately a
+  # The provision reason, rendered for an operator and SCRUBBED. Deliberately a
   # local, explicit redactor rather than the display-boundary `scrub/1`: this
-  # string crosses an HTTP boundary as a 500 body, and the measured leak rate of
-  # the shared scrubber against this box's own `bppat_` token shape is 95.1%.
-  # What must SURVIVE is the diagnosis — a File.Error's action and path, an
-  # errno's meaning — because "enoent" alone is what made 25 failures unreadable.
-  defp describe_provision_reason(%File.Error{reason: reason, path: path, action: action}),
+  # string crosses an HTTP boundary as a 500 body, and the measured leak rate
+  # of the shared scrubber against this box's own `bppat_` token shape is
+  # 95.1%. What
+  # must SURVIVE is the diagnosis — a File.Error's action and path, an errno's
+  # meaning — because "enoent" alone is what made 25 failures unreadable.
+  #
+  # PUBLIC (`@doc false`) purely so the operator sentences can be asserted
+  # directly. Neither of the two shapes below can be induced end-to-end from a
+  # test: `:global.trans/2` retries forever rather than returning `:aborted`,
+  # and making `rename(2)` fail with anything but `:enoent` needs a
+  # platform-specific trick (an immutable flag, a mount point) that would red on
+  # someone else's box. An unassertable sentence is one nobody notices breaking.
+  @doc false
+  @spec describe_provision_reason(term()) :: String.t()
+  def describe_provision_reason(%File.Error{reason: reason, path: path, action: action}),
     do: redact("could not #{action} #{path}: #{format_posix(reason)}")
 
-  defp describe_provision_reason(%File.CopyError{reason: reason, source: src, destination: dst}),
+  def describe_provision_reason(%File.CopyError{reason: reason, source: src, destination: dst}),
     do: redact("could not copy #{src} to #{dst}: #{format_posix(reason)}")
 
-  defp describe_provision_reason({:template_not_found, path}),
+  def describe_provision_reason({:template_not_found, path}),
     do: redact("site template not found: #{path}")
 
-  defp describe_provision_reason({:rename_failed, reason}),
+  def describe_provision_reason({:rename_failed, reason}),
     do: redact("could not rename the staged site source: #{format_posix(reason)}")
 
-  defp describe_provision_reason(reason) when is_binary(reason), do: redact(reason)
+  # The two shapes the provisioner's swap produces (provisioner.ex:202/:240).
+  # They live HERE, beside their producers: without their own clauses they fall
+  # to `inspect/1` and reach the operator as Elixir tuple jargon, which is the
+  # exact narrowing this arm exists to end.
+  def describe_provision_reason({:swap_aside_failed, reason}),
+    do:
+      redact(
+        "could not move the live site source aside before swapping in the new one: " <>
+          format_posix(reason)
+      )
 
-  defp describe_provision_reason(%{__exception__: true} = error),
+  def describe_provision_reason({:lock_aborted, slug}),
+    do: redact("another deploy of #{slug} holds the provision lock and it could not be acquired")
+
+  def describe_provision_reason(reason) when is_binary(reason), do: redact(reason)
+
+  def describe_provision_reason(%{__exception__: true} = error),
     do: redact(Exception.message(error))
 
-  defp describe_provision_reason(reason) when is_atom(reason), do: format_posix(reason)
+  def describe_provision_reason(reason) when is_atom(reason), do: format_posix(reason)
 
-  defp describe_provision_reason(reason), do: redact(inspect(reason))
+  def describe_provision_reason(reason), do: redact(inspect(reason))
 
   defp format_posix(reason) when is_atom(reason) do
     described = reason |> :file.format_error() |> to_string()

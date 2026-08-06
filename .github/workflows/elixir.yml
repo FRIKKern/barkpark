@@ -776,6 +776,6 @@ jobs:
           # per level per step, so an N-per-job emitter truncates silently — the
           # same class of quiet lie this line exists to remove.
           if [ "$dispatched" -eq 0 ]; then
-            echo "::notice title=Elixir gate: green, nothing ran::NOTHING ELIXIR RAN on this head.%0AElixir gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Elixir job executed', never as 'the Elixir suite passed'."
+            echo "::notice title=Elixir gate: green — nothing ran::NOTHING ELIXIR RAN on this head.%0AElixir gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Elixir job executed', never as 'the Elixir suite passed'."
           fi
           echo "Elixir gate: every upstream job either succeeded or was legitimately not dispatched."

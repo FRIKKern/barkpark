@@ -249,6 +249,117 @@ defmodule BarkparkCloud.RegistryTest do
     end
   end
 
+  describe "health honesty — a row is never green before anything reported (cch-w34-s2)" do
+    test "adopt_barkpark/3 lands health_status \"unknown\", not \"up\"" do
+      team = team_fixture()
+
+      assert {:ok, bp} =
+               Registry.adopt_barkpark(team, %{
+                 name: "Adopted",
+                 slug: "adopted-#{System.unique_integer([:positive])}",
+                 host: "203.0.113.77"
+               })
+
+      assert bp.host == "203.0.113.77"
+      # Adoption is an operator's intent, not a measurement: no agent report has
+      # arrived, so there is nothing to call healthy.
+      assert bp.health_status == "unknown"
+      assert is_nil(bp.last_seen_at)
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "unknown"
+      assert is_nil(reloaded.last_seen_at)
+    end
+
+    test "succeed_job/2 lands health_status \"unknown\", not \"up\"" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, _job} = Registry.succeed_job(job.id, "203.0.113.51")
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.host == "203.0.113.51"
+      # A successful provision means the machine was CREATED — not that anything
+      # answered. The row goes green on the first agent report.
+      assert reloaded.health_status == "unknown"
+      assert reloaded.agent_status == "offline"
+      assert is_nil(reloaded.last_seen_at)
+    end
+
+    test "the first agent report is what turns the row green" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.52")
+
+      seen = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      assert {:ok, _} =
+               Registry.record_agent_report(Registry.get_barkpark(bp.id), %{
+                 health_status: "up",
+                 agent_status: "online",
+                 last_seen_at: seen
+               })
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "up"
+      refute is_nil(reloaded.last_seen_at)
+    end
+  end
+
+  describe "agent_status \"online\" always co-writes last_seen_at (cch-w34-s2 guard)" do
+    # The never-reported arm of stale_online_barkparks/1 was unreachable for as
+    # long as the query ALSO required agent_status == "online", because no
+    # cloud/lib path can produce `online AND last_seen_at IS NULL`: the sole
+    # producer is the POST /v1/agent/report handler, which stamps last_seen_at in
+    # the same changeset. That invariant is now load-bearing in the OTHER
+    # direction (the arm is keyed on last_seen_at alone), so pin it: a new writer
+    # of "online" that forgets last_seen_at would resurrect a row the sweep can
+    # never see going stale.
+    @lib_root Path.expand("../../lib/barkpark_cloud", __DIR__)
+
+    test "every cloud/lib write of agent_status \"online\" co-writes last_seen_at" do
+      offenders =
+        @lib_root
+        |> Path.join("**/*.ex")
+        |> Path.wildcard()
+        |> Enum.flat_map(fn path ->
+          source = File.read!(path)
+
+          source
+          |> String.split("\n")
+          |> Enum.with_index(1)
+          |> Enum.filter(fn {line, _n} ->
+            String.contains?(line, ~s(agent_status: "online")) or
+              String.contains?(line, ~s("agent_status" => "online"))
+          end)
+          |> Enum.reject(fn {_line, n} -> co_writes_last_seen_at?(source, n) end)
+          |> Enum.map(fn {line, n} ->
+            "#{Path.relative_to(path, @lib_root)}:#{n}: #{String.trim(line)}"
+          end)
+        end)
+
+      assert offenders == [],
+             """
+             A cloud/lib path writes agent_status "online" without co-writing
+             last_seen_at in the same map. That makes `online AND last_seen_at IS
+             NULL` producible again — a row the staleness sweep's went-silent arm
+             will never flip, because it has no heartbeat to age out.
+
+             #{Enum.join(offenders, "\n")}
+             """
+    end
+
+    # `last_seen_at` counts as co-written when it appears within the same map
+    # literal — in practice within a few lines either side of the online write.
+    defp co_writes_last_seen_at?(source, line_no) do
+      lines = String.split(source, "\n")
+      window = Enum.slice(lines, max(line_no - 8, 0), 16)
+      Enum.any?(window, &String.contains?(&1, "last_seen_at"))
+    end
+  end
+
   describe "record_event/3 + recent_events/2" do
     test "appends events and returns them newest-first" do
       team = team_fixture()
