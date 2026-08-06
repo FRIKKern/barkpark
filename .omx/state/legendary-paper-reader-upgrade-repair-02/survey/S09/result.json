@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-09",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-28-2026-08-03::tui_terminal"],
+  "verdict": "partial",
+  "direct_answer": "Pinned source identity and denominators are proven. One-shot paper rendering is deterministic and bounded at widths 20/40/80/120 but width 1 overflows on Related. A real full-screen PTY remains frame-bounded at all five widths, but live Paper discovery returns an empty pane, blocking exact-CCH28 focus/scroll proof. Click/Enter parity fails, Paper history is unreachable, Related is non-navigable, visible identity is absent, and list errors collapse to nil.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "77ab7051-c1de-4741-9797-4371eeb08740",
+    "assignment_snapshot_digest": "b707e37addb1d37799079100cbcbf534340c2abc00295ba6f262afdbb4e36c1d",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471"
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "canonical_blocks_sha256": "a9051f7ad1d7739ccaaca7e80f6d8079c7c78206b0cd723a8e29d0570c9e5d09",
+      "visible_slug_occurrences_per_cell": 0,
+      "visible_revision_occurrences_per_cell": 0
+    },
+    "authored_carriers": {
+      "blocks": "237/237 unique ids",
+      "headings": 43,
+      "paragraphs": 156,
+      "tables": 18,
+      "callouts": 13,
+      "lists": 7,
+      "empty_paragraphs": 103,
+      "table_headers": 57,
+      "table_body_rows": 155,
+      "table_body_cells": 466,
+      "list_items": 35,
+      "marked_nodes": 67
+    },
+    "plain_render_cells": [
+      {"width": 1, "lines": 58661, "max_cells": 7, "overflow_lines": 1, "offender": "Related", "repeat_identical": true},
+      {"width": 20, "lines": 13111, "max_cells": 20, "overflow_lines": 0, "repeat_identical": true},
+      {"width": 40, "lines": 5224, "max_cells": 40, "overflow_lines": 0, "repeat_identical": true},
+      {"width": 80, "lines": 2357, "max_cells": 80, "overflow_lines": 0, "repeat_identical": true},
+      {"width": 120, "lines": 1547, "max_cells": 120, "overflow_lines": 0, "repeat_identical": true}
+    ],
+    "real_pty": {
+      "environment_frames_bounded": "5/5 at widths 1,20,40,80,120",
+      "paper_opened": "0/5",
+      "boundary": "This proves alternate-screen geometry only; CCH28 discovery and Paper-reader interaction remain blocked."
+    },
+    "required_cells": {
+      "terminal_widths": "partial: one-shot passes 4/5; real shell bounded 5/5 but exact Paper frames 0/5",
+      "control_sanitization": "partial: live renders and PTY captures contain no replacement or unexpected decoded controls and pdrender tests pass; C1, bidi, and hostile fixtures remain untested",
+      "focus_scroll_ownership": "blocked: exact Paper sessions 0; reducer statically owns document scroll keys but behavior is unexercised",
+      "click_enter_parity": "not_found: mouse frame hash unchanged while Enter changed state; mouse mode and MouseMsg handling are absent",
+      "history_navigation": "not_found: backend returns 12 revisions, but Paper reducer consumes H before generic history handling",
+      "related_navigation": "not_found: backend returns 10 entries, but one-shot output is plain text and full-screen adapter has no Related model",
+      "typed_recovery": "not_found: Papers pane exposes no rows or typed error because Client.Query maps transport, status, and decode failures to nil"
+    }
+  },
+  "tests": {
+    "internal_pdrender": "PASS: go test ./internal/pdrender",
+    "cmd_barkpark_default": "BLOCKED: runtime/cgo unknown option -E",
+    "cmd_barkpark_cgo_disabled": "PASS: CGO_ENABLED=0 go test ./cmd/barkpark",
+    "claim_boundary": "No test proves exact live CCH28 opening in the full-screen reader."
+  },
+  "inferences": [
+    "The empty Paper pane likely reflects a swallowed Client.Query error, but the exact live HTTP failure is hidden by the nil contract.",
+    "C1 controls remain a credible risk from code inspection, while the immutable Paper provides no hostile carrier.",
+    "Static reducer ownership predicts scroll behavior but cannot replace blocked exact-Paper PTY evidence."
+  ],
+  "recommended_repair_seams": [
+    "Return typed Query results and errors, rendering distinct empty, unauthorized, timeout, malformed, and retryable states.",
+    "Let Paper handling defer unmatched H to generic history and preserve structured blocks in revision projection.",
+    "Add a selectable full-screen Related model with Enter-open behavior.",
+    "Enable and handle mouse events before promising click/Enter parity, or remove click parity from the contract.",
+    "Render immutable Paper slug and current physical revision in Paper chrome.",
+    "Wrap or truncate Related at width 1 and test C1, bidi, malformed UTF-8, CJK, combining, and ZWJ fixtures.",
+    "Add a real PTY regression harness injecting the exact pinned payload across widths, scroll, history, Related, mouse, Enter, and recovery."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "two source-authored task tokens"],
+    "papers": ["cloud-console-hardening-wave-28-2026-08-03@49c1534d9fb76d0d9adc7b97f25ec471", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      "cmd/barkpark/main.go",
+      "cmd/barkpark/paper.go",
+      "cmd/barkpark/tui_update.go",
+      "cmd/barkpark/history.go",
+      "cmd/barkpark/search.go",
+      "cmd/barkpark/structure.go",
+      "internal/apiclient/client.go",
+      "internal/cli/paper_cmd.go",
+      "internal/pdrender/inline.go",
+      "internal/pdrender/render_test.go",
+      "tooling/grip/ledger/legendary-paper-restart-verify-19-2026-08-06.md"
+    ]
+  },
+  "risks": [
+    "No exact CCH28 full-screen Paper session exists at any required width.",
+    "Mouse reporting is disabled and current click/Enter behavior diverges.",
+    "Typed errors are destroyed at the document-list boundary.",
+    "History and Related are visible or documented but unreachable from the Paper reducer."
+  ],
+  "unvisited_scope": [
+    "exact CCH28 full-screen session at widths 1/20/40/80/120",
+    "Paper resize and viewport-offset preservation",
+    "wheel input, hostile controls, bidi, malformed UTF-8, CJK, combining, and ZWJ",
+    "forced Related failure and structured oldest/newest history replay"
+  ],
+  "credential_scan": {"status": "clean", "values_reported": 0, "credential_mutations": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0}
+}
