@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-17",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::studio_authenticated"],
+  "verdict": "blocked",
+  "hard_gate_result": "fail",
+  "direct_answer": "The exact Paper source and revision are pinned, but no real authenticated Studio mount was reached. Fresh reads redirect to login and prior 320/390 browser captures are login pages. None of the authenticated interaction cells can pass. Immutable identity is partial: static adapters carry the exact revision, while Studio data-rev exposes a streaming integer rather than the immutable Paper revision.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "d2e818cd-b643-44c5-9f65-c610d9c84a70",
+    "assignment_snapshot_digest": "fa18529295a50ab6935e7bd31e8425a3cc9202d312aa36edaac425866c294b95",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18"
+  },
+  "observations": {
+    "source": {"blocks": 252, "unique_block_ids": 252, "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21"},
+    "authored_carriers": {"headings": 37, "paragraphs": 187, "empty_spacers": 139, "nonempty": 113, "lists": 13, "list_items": 67, "nested_items": 11, "nested_characters": 2268, "tables": 11, "header_cells": 35, "body_cells": 316, "callouts": 4, "marked_runs": 313, "links": 0, "max_unbroken_token": 65},
+    "fresh_reads": {"attempts": 3, "http_200": "3/3 after redirects", "final_surface": "login", "bytes": 517929, "studio_editor_sentinel": false, "authenticated_session_created": false},
+    "required_cells": {
+      "real_authenticated_mount": "not_found",
+      "actual_320": "not_found; capture is login page",
+      "actual_390": "not_found; capture is login page",
+      "focus_and_scroll_ownership": "not_found",
+      "click_enter_parity": "not_found",
+      "session_expiry_reconnect": "not_found",
+      "immutable_paper_identity": "partial; source/adapters pin revision but Studio data-rev is streaming state"
+    },
+    "implementation_seams": ["authenticated scoped route and MFA hooks exist", "access expiry and revocation handlers exist", "phone width hides navigation when editor is open", "pane row owns horizontal overflow and editor bodies own vertical overflow", "native sidebar buttons expose aria-expanded and click events", "paper_rev is a monotonic streaming revision initialized to zero"]
+  },
+  "inferences": [
+    "The immediate blocker is authenticated proof reachability, not absence of responsive or lifecycle code seams.",
+    "Static adapter success cannot establish deployed authenticated Studio interaction.",
+    "Immutable identity needs a separate DOM carrier because data-rev represents streaming state.",
+    "An adjacent capability-snapshot task is a separate mid-session authorization risk."
+  ],
+  "repair_seams": [
+    "Provide a controlled authenticated non-production Studio session for exact-revision reader proof.",
+    "Expose immutable Paper revision separately from the streaming data-rev sequence.",
+    "Capture actual 320/390 scroll ownership and table containment.",
+    "Exercise click and Enter on identical controls and compare state transitions.",
+    "Execute expiry/reconnect and prove authorization plus immutable revision survive correctly."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "pds-w42-caps-prop-is-a-mount-snapshot", "several adjacent auth/Studio tasks", "first 1000 of 5298 task rows"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03", "paper-cross-reader-reliability-wave-1-2026-07-17"],
+    "files": [".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json", ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/geometry.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/studio-lifecycle.json", "api/lib/barkpark_web/router.ex", "api/lib/barkpark_web/live/studio/studio_live.ex", "api/lib/barkpark_web/live/studio/studio_live/mount.ex", "api/lib/barkpark_web/live/studio/studio_live/components.ex", "api/lib/barkpark_web/studio/pane_builder.ex", "api/lib/barkpark_web/layouts/root.html.heex", "api/assets/paper-surface/paper-surface.css"]
+  },
+  "risks": ["Static adapters may be misread as real-reader proof.", "The immutable revision is absent from the real Studio DOM contract.", "Duplicate-task coverage is incomplete after unbounded list failures.", "Actual responsive interaction, expiry, reconnect, and assistive technology remain unknown."],
+  "unvisited_scope": ["tasks beyond the first 1000-row page", "real authenticated Studio DOM and accessibility tree", "actual 320/390 interaction traces", "real expiry/reconnect", "assistive technology", "byte-normalization proof across archived captures"],
+  "credential_scan": {"status": "clean", "credential_values_inspected": false, "credentials_revealed": false, "login_submitted": false},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "ticket_minted": 0}
+}
