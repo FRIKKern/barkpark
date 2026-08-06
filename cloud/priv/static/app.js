@@ -5008,6 +5008,90 @@
     var launch = $("#scope-launch");
     if (launch) launch.addEventListener("click", function () { toggleScopeMenu(false); openLaunchModal(); });
   }
+  // ---- team picker (sidebar) — the workspace switcher's OWN menu.
+  // Paints from meCache.teams, which /v1/me already returns for exactly this
+  // purpose ("EVERY membership, so the SPA's team switcher can render"). No new
+  // fetch. If /v1/me has not landed yet the menu says LOADING rather than
+  // rendering an empty list — an empty list tells a member of four teams they
+  // belong to none, which is absence reported as a determinate answer.
+  function renderTeamMenu() {
+    var menu = $("#team-menu");
+    if (!menu) return;
+    var teams = (meCache && meCache.teams) || [];
+    var activeId = (meCache && meCache.team && meCache.team.id) || "";
+    var q = ((($("#team-menu-q") || {}).value) || "").toLowerCase();
+
+    var body;
+    if (!meCache) {
+      body = '<div class="team-empty">Loading teams…</div>';
+    } else {
+      var shown = teams.filter(function (t) {
+        return !q || String(t.name || "").toLowerCase().indexOf(q) !== -1;
+      });
+      body = shown.map(function (t) {
+        var on = t.id === activeId;
+        return '<button type="button" class="team-item" role="menuitem" data-team="' + esc(t.id) + '">' +
+          '<span class="team-avatar" aria-hidden="true">' + esc(String(t.name || "?").slice(0, 1).toUpperCase()) + "</span>" +
+          '<span class="team-name">' + esc(t.name || t.slug || t.id) + "</span>" +
+          '<span class="team-role">' + esc(t.role || "") + "</span>" +
+          (on ? '<span class="team-check" aria-label="Current team">\u2713</span>' : "") +
+          "</button>";
+      }).join("");
+      if (!body) {
+        body = '<div class="team-empty">' +
+          (teams.length ? "No team matches \u201c" + esc(q) + "\u201d" : "No teams yet") + "</div>";
+      }
+    }
+
+    menu.innerHTML =
+      '<div class="team-search"><input id="team-menu-q" type="text" placeholder="Find team…" ' +
+      'autocomplete="off" spellcheck="false" value="' + esc(q) + '" aria-label="Find team"></div>' +
+      '<div class="team-list">' + body + "</div>" +
+      '<button type="button" class="team-item team-foot" id="team-create">' +
+      '<span class="team-avatar" aria-hidden="true">+</span>' +
+      '<span class="team-name">Create team<span class="team-sub">Collaborate in a shared workspace</span></span>' +
+      "</button>";
+
+    var q0 = $("#team-menu-q");
+    if (q0) q0.addEventListener("input", function () {
+      renderTeamMenu();
+      var again = $("#team-menu-q");
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    });
+
+    Array.prototype.forEach.call(menu.querySelectorAll("[data-team]"), function (el) {
+      el.addEventListener("click", function () {
+        var id = el.getAttribute("data-team");
+        if (!id || id === activeId) { toggleTeamMenu(false); return; }
+        // The same contract the account modal's <select> used: pin the team,
+        // then a FULL reload, because every cache (fleet, subscription,
+        // members) is team-scoped and must repopulate.
+        localStorage.setItem("bp.active-team", id);
+        location.reload();
+      });
+    });
+
+    var create = $("#team-create");
+    if (create) create.addEventListener("click", function () {
+      toggleTeamMenu(false);
+      openAccountModal(); // team creation lives on the account sheet today
+    });
+  }
+
+  function toggleTeamMenu(force) {
+    var menu = $("#team-menu");
+    var btn = $("#ws-switch");
+    if (!menu) return;
+    var open = force != null ? force : !!menu.hidden;
+    menu.hidden = !open;
+    if (btn) btn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      renderTeamMenu();
+      var q = $("#team-menu-q");
+      if (q) q.focus();
+    }
+  }
+
   function toggleScopeMenu(force) {
     var menu = $("#scope-menu");
     var btn = $("#scope-switch");
@@ -13499,7 +13583,6 @@
     setText($("#acct-name"), who);
     setText($("#acct-email"), email || "");
     setText($("#acct-avatar"), (who[0] || "B").toUpperCase());
-    renderTeamSwitcher(team);
   }
 
   // The workspace switcher's plan chip — the team's current plan, hidden until
@@ -13514,35 +13597,13 @@
     chip.hidden = false;
   }
 
-  // Team switcher (multi-team accounts): a <select> replaces the static team
-  // name when /v1/me lists more than one membership. Choosing a team pins it
-  // in localStorage (api() sends it as x-barkpark-team) and reloads — a full
-  // reload is deliberate: every cache (fleet, subscription, members) is
-  // team-scoped and must repopulate.
-  function renderTeamSwitcher(active) {
-    var host = $("#account-team");
-    var teams = (meCache && meCache.teams) || [];
-    if (!host || teams.length < 2) return;
-    var activeId = (active && active.id) || "";
-    var sel = document.createElement("select");
-    sel.id = "team-switcher";
-    sel.setAttribute("aria-label", "Switch team");
-    sel.style.cssText =
-      "background:transparent;border:none;color:inherit;font:inherit;cursor:pointer;max-width:160px";
-    teams.forEach(function (t) {
-      var o = document.createElement("option");
-      o.value = t.id;
-      o.textContent = t.name + " (" + t.role + ")";
-      if (t.id === activeId) o.selected = true;
-      sel.appendChild(o);
-    });
-    sel.addEventListener("change", function () {
-      localStorage.setItem("bp.active-team", sel.value);
-      location.reload();
-    });
-    host.textContent = "";
-    host.appendChild(sel);
-  }
+  // NO NATIVE <select> HERE, DELIBERATELY. A `renderTeamSwitcher` used to swap
+  // #account-team for a bare <select> whenever /v1/me listed 2+ memberships —
+  // so the chip's CENTRE opened an OS dropdown while its CARET opened the
+  // styled team picker. One control, two different menus, decided by which
+  // pixel you hit. The picker (renderTeamMenu/toggleTeamMenu) is now the only
+  // way to change team, and #account-team stays plain text so the whole chip is
+  // one target. Re-adding a <select> here would restore the split.
 
   function loadMe() {
     setAccountChip(null, null); // immediate placeholder
@@ -18855,11 +18916,17 @@
     var bpPicker = $("#bp-theme-picker");
     if (bpPicker) bpPicker.addEventListener("change", function () { selectBpTheme(bpPicker.value); });
     $("#acct-btn").addEventListener("click", openAccountModal);
-    // v4 sidebar: the workspace switcher opens the same Account modal (team +
-    // sessions live there); Find/⌘K opens the EXISTING command palette (never a
-    // fork — reuses openCommandPalette's #modal-root machinery).
+    // v4 sidebar: the workspace switcher opens the TEAM PICKER. It used to open
+    // the Account modal, which made this control and the footer account button
+    // two doors onto one room — and this one wears a switcher caret, so it
+    // PROMISED a workspace switch and delivered a settings sheet. The account
+    // still lives on #acct-btn; only the promise this control makes is honoured
+    // here. Find/⌘K opens the EXISTING command palette (never a fork).
     var wsSwitch = $("#ws-switch");
-    if (wsSwitch) wsSwitch.addEventListener("click", openAccountModal);
+    if (wsSwitch) wsSwitch.addEventListener("click", function (e) {
+      e.stopPropagation();
+      toggleTeamMenu();
+    });
     var navFind = $("#nav-find");
     if (navFind) navFind.addEventListener("click", openCommandPalette);
     // v4 topbar: the instance-scope dropdown (a fleet jumper over the router).
@@ -18873,6 +18940,23 @@
       var menu = $("#scope-menu");
       if (menu && !menu.hidden && !(e.target.closest && e.target.closest(".topbar-scope"))) {
         toggleScopeMenu(false);
+      }
+      // Same contract for the team picker: any click outside its wrapper.
+      var tm = $("#team-menu");
+      if (tm && !tm.hidden && !(e.target.closest && e.target.closest(".ws-switch-wrap"))) {
+        toggleTeamMenu(false);
+      }
+    });
+    // Escape closes the team picker and returns focus to the control that
+    // opened it — a menu with no keyboard way out is the accessibility half of
+    // the same lie.
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      var tm = $("#team-menu");
+      if (tm && !tm.hidden) {
+        toggleTeamMenu(false);
+        var btn = $("#ws-switch");
+        if (btn) btn.focus();
       }
     });
 

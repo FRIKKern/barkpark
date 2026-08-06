@@ -86,6 +86,42 @@ defmodule Barkpark.Sites.DeployRunner do
   run manifest so a re-attach after a BEAM restart still knows the run was
   prebuilt.
 
+  ## The durable per-BUILD record (deploy-reliability D21/D22)
+
+  The run-state files used to be keyed on the SLUG alone
+  (`<slug>.log`/`.status`/`.env`), and `fresh_run_files/1` truncates them at
+  every launch — so the SECOND deploy of a slug destroyed the FIRST one's build
+  log. Observed live: build `caf056f10a8b6837` wrote 33,227 bytes at 23:36 and
+  the same path was 0 bytes at 23:39. A site that failed 25 times kept zero of
+  its 25 failures. So the log/status/env triple is now keyed on the RUN TAG —
+  `<slug>-<build_id>.log` for a deploy, `<slug>-<mode>-<ms>.log` for a
+  rollback/teardown (which name no build) — and a new build gets a NEW path, so
+  truncating its own fresh path can never reach a sibling's. The MANIFEST stays
+  `<slug>.manifest.json` on purpose: it is the "current run for this slug"
+  pointer the re-attach seam and `status/1` resolve by slug, and it carries the
+  per-build paths.
+
+  A manifest is a POINTER, not a record — it has no exit code, no failure
+  reason, no finished_at — so it cannot answer "what happened to build X" once
+  it is overwritten or pruned. At FINALIZE (`cache_and_cleanup/4`, where the
+  reconstructed render exists) a **terminal record** is written next to the log:
+  `<slug>-<tag>.terminal.json`, carrying exit_code, failure_reason, the stage
+  fold, `unit_name` (so a journald fallback is addressable by EXACT unit name —
+  measured 0.16s, against 121s for a globbed query) and the log's path + byte
+  count. It is ~1 KB and OUTLIVES the log.
+
+  That is what makes eviction honest: `build_record/2` (and `status/1`'s
+  `:log_state`) answers `:available`, `:evicted` or `:never_recorded` as three
+  DIFFERENT answers. Before this, a pruned deployment and a slug that had never
+  deployed returned byte-identical maps. Retention is bounded three ways —
+  total bytes, count, and age, each configurable — whichever bites first, and
+  `retention_sweep/0` REPORTS which cap was effective.
+
+  This slice keeps the record on the BOX. No raw log bytes are exposed over
+  HTTP here: the build env file carries `BARKPARK_TOKEN=` in plaintext and the
+  display scrubber does not yet know that shape, so the read path ships after
+  the scrubber does.
+
   ## Fail-closed
 
   Always supervised (an idle GenServer is free), but every trigger is gated by
@@ -155,7 +191,39 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # Finished runs stay queryable (the orchestrator polls AFTER the exit), but not
   # forever — keep the newest N slugs, evicting finished ones first.
+  #
+  # NOTE this counts SLUGS, not deployments: manifests are `<slug>.manifest.json`
+  # (one per slug, overwritten), so on a 16-site box `length(manifests) > 32` is
+  # unreachable and this cap has never evicted anything in production. The caps
+  # that actually bound the box are the three BUILD-LOG caps below, which count
+  # DEPLOYMENTS.
   @max_tracked_runs 32
+
+  # ── durable per-build log retention (deploy-reliability D21/D23) ───────────
+  #
+  # Three INDEPENDENT caps, whichever bites first, each config-injectable:
+  # bytes, count, age. Sized against this box's real rate (9,495 distinct build
+  # units in 8.74 days ≈ 1,000 builds/day) and a real Next build log (the one
+  # recovered off the box is 30,993 bytes): 1,000/day × ~30 KB ≈ 30 MB/day, so
+  # 256 MiB / 2,000 logs / 7 days all land in the same neighbourhood — no single
+  # cap silently does all the work, and whichever one bites is REPORTED.
+  @default_max_build_log_bytes 268_435_456
+  @default_max_build_logs 2_000
+  @default_max_build_log_age_ms 604_800_000
+
+  # Terminal records are ~1 KB and must OUTLIVE the logs they describe — that is
+  # the whole point of a tombstone — so they are bounded far more loosely, by
+  # count only.
+  @default_max_terminal_records 10_000
+
+  @typedoc """
+  Why a build's raw log can (or cannot) be read — four DIFFERENT answers where
+  there used to be one. `:available` the bytes are on the box; `:evicted`
+  retention removed them and a terminal record survives to say so; `:missing` a
+  record exists but its log never appeared (the unit died before writing);
+  `:never_recorded` nothing was ever written for this deployment at all.
+  """
+  @type log_state :: :available | :evicted | :missing | :never_recorded
   # How many trailing meaningful lines a failure_reason carries. The engine's own
   # "BUILD failed …" line is usually last; the REAL cause (npm's 401, the HEALTH
   # marker miss) is the line or two above it.
@@ -218,7 +286,77 @@ defmodule Barkpark.Sites.DeployRunner do
           {:ok, :started}
           | {:error, :already_running | :disabled | :start_failed}
           | {:error, {:artifact_rejected, String.t(), String.t()}}
+          | {:error, {:provision_failed, String.t()}}
   def trigger(%DeployRequest{} = req), do: safe_call({:trigger, req}, {:error, :disabled})
+
+  @doc """
+  The DURABLE per-deployment record for one build — the answer to "what
+  happened to build X", readable long after the slug has deployed again.
+
+  Reads the box's run-state dir directly (no GenServer call, so a wedged Runner
+  cannot hide a finished build's outcome) and NEVER raises. `build_id` is the
+  deploy's own id; pass `nil` for the newest record of that slug.
+
+  `:log_state` is the honest part (see `t:log_state/0`): a deployment whose log
+  was EVICTED by retention answers `:evicted` and still carries its exit_code,
+  failure_reason, stage fold and `unit_name`; a deployment that was never
+  recorded answers `:never_recorded` and carries nothing. Those used to be the
+  same map.
+
+  `:log_path` is a path ON THE BOX. The bytes are deliberately NOT returned —
+  they carry the build env's plaintext `BARKPARK_TOKEN` and no scrubber on this
+  box is trusted with that shape yet.
+  """
+  @spec build_record(String.t(), String.t() | nil) :: map()
+  def build_record(slug, build_id \\ nil) when is_binary(slug) do
+    case find_terminal_record(slug, build_id) do
+      nil -> absent_record(slug, build_id)
+      record -> render_terminal_record(record)
+    end
+  rescue
+    _ -> absent_record(slug, build_id)
+  end
+
+  @doc """
+  Every durable build record on this box, newest finish first, optionally
+  narrowed to one slug. Never raises.
+  """
+  @spec build_records(String.t() | nil) :: [map()]
+  def build_records(slug \\ nil) do
+    run_state_dir()
+    |> list_terminal_records()
+    |> Enum.filter(&(is_nil(slug) or &1["slug"] == slug))
+    |> Enum.sort_by(& &1["finished_at"], :desc)
+    |> Enum.map(&render_terminal_record/1)
+  rescue
+    _ -> []
+  end
+
+  @doc """
+  Enforce the three retention caps on the durable build logs NOW and report the
+  result — which cap was EFFECTIVE (`:bytes` | `:count` | `:age` | `:none`),
+  how many logs each cap condemned, what survives, and the caps themselves.
+
+  Every evicted log leaves a tombstone behind: an existing terminal record is
+  marked `log_state: :evicted`, and a log with no record at all gets a minimal
+  one, so an evicted deployment can never read back as "never recorded".
+  Called on every launch and on re-attach; public so ops (and the eviction
+  tests, which must drive PAST each cap) can fire it deliberately.
+  """
+  @spec retention_sweep() :: map()
+  def retention_sweep, do: prune_build_logs(run_state_dir())
+
+  @doc "The three configured build-log retention caps."
+  @spec retention_caps() :: map()
+  def retention_caps do
+    %{
+      max_bytes: Keyword.get(config(), :max_build_log_bytes, @default_max_build_log_bytes),
+      max_logs: Keyword.get(config(), :max_build_logs, @default_max_build_logs),
+      max_age_ms: Keyword.get(config(), :max_build_log_age_ms, @default_max_build_log_age_ms),
+      max_terminal_records:
+        Keyword.get(config(), :max_terminal_records, @default_max_terminal_records)
+    }
+  end
 
   @doc """
   The run status for `slug`: `state` (`:idle` | `:running` | `:done`), the parsed
@@ -294,6 +432,14 @@ defmodule Barkpark.Sites.DeployRunner do
       # one this process never launched — e.g. straight after a restart).
       manifest = load_manifest_for(slug) ->
         finalize_from_disk(state, manifest)
+
+      # The manifest is gone (retention pruned it, or a newer slug-keyed one was
+      # overwritten) but a TERMINAL RECORD survives. Answering `:idle` here is
+      # the lie this slice removes: the deployment DID happen and we know how it
+      # ended. Serve the record — `:done`, its exit code, its reason, and a
+      # `log_state` that says whether the bytes still exist.
+      record = load_latest_terminal_record(slug) ->
+        {:reply, status_from_record(record), state}
 
       true ->
         {:reply, idle_status(slug), state}
@@ -475,19 +621,113 @@ defmodule Barkpark.Sites.DeployRunner do
     # site source dir …/src` (exit 10). Deploy only; a rollback is a symlink
     # repoint whose source is already there (Provisioner no-ops it). Fail-closed:
     # a provision failure short-circuits EXACTLY like a spawn failure — no build,
-    # no run recorded, `{:error, :start_failed}`.
+    # no run recorded.
+    #
+    # It is NOT, however, the same ANSWER (deploy-reliability D26). This arm used
+    # to be a bare `Logger.warning` + `{:error, :start_failed}`: no row, no
+    # BPSTAGE, no failure class, so the `%File.Error{}` that explains 63% of this
+    # fleet's failures went to journald and nowhere else, and 25 consecutive
+    # attempts on one site never once said WHY. It is now a NAMED typed refusal
+    # carrying a scrubbed, human-readable reason (the File.Error's action AND
+    # path survive into it — that pair IS the diagnosis) which the controller
+    # renders as its own 500 code.
+    #
+    # site-spawner D34 still holds: PROVISION is a SILENT pre-BUILD step, not a
+    # visible 7th stage. A typed refusal code is not a stage — @stages and
+    # @stage_names are untouched.
     case Provisioner.provision(req) do
       :ok ->
         spawn_run(state, req)
 
       {:error, {:provision_failed, reason}} ->
+        described = describe_provision_reason(reason)
+
         Logger.warning(
-          "[site-deploy] provision failed for #{inspect(req.slug)} — deploy not started: #{inspect(reason)}"
+          "[site-deploy] provision failed for #{inspect(req.slug)} — deploy not started: #{described}"
         )
 
-        {:reply, {:error, :start_failed}, state}
+        {:reply, {:error, {:provision_failed, described}}, state}
     end
   end
+
+  # The provision reason, rendered for an operator and SCRUBBED. Deliberately a
+  # local, explicit redactor rather than the display-boundary `scrub/1`: this
+  # string crosses an HTTP boundary as a 500 body, and the measured leak rate
+  # of the shared scrubber against this box's own `bppat_` token shape is
+  # 95.1%. What
+  # must SURVIVE is the diagnosis — a File.Error's action and path, an errno's
+  # meaning — because "enoent" alone is what made 25 failures unreadable.
+  #
+  # PUBLIC (`@doc false`) purely so the operator sentences can be asserted
+  # directly. Neither of the two shapes below can be induced end-to-end from a
+  # test: `:global.trans/2` retries forever rather than returning `:aborted`,
+  # and making `rename(2)` fail with anything but `:enoent` needs a
+  # platform-specific trick (an immutable flag, a mount point) that would red on
+  # someone else's box. An unassertable sentence is one nobody notices breaking.
+  @doc false
+  @spec describe_provision_reason(term()) :: String.t()
+  def describe_provision_reason(%File.Error{reason: reason, path: path, action: action}),
+    do: redact("could not #{action} #{path}: #{format_posix(reason)}")
+
+  def describe_provision_reason(%File.CopyError{reason: reason, source: src, destination: dst}),
+    do: redact("could not copy #{src} to #{dst}: #{format_posix(reason)}")
+
+  def describe_provision_reason({:template_not_found, path}),
+    do: redact("site template not found: #{path}")
+
+  def describe_provision_reason({:rename_failed, reason}),
+    do: redact("could not rename the staged site source: #{format_posix(reason)}")
+
+  # The two shapes the provisioner's swap produces (provisioner.ex:202/:240).
+  # They live HERE, beside their producers: without their own clauses they fall
+  # to `inspect/1` and reach the operator as Elixir tuple jargon, which is the
+  # exact narrowing this arm exists to end.
+  def describe_provision_reason({:swap_aside_failed, reason}),
+    do:
+      redact(
+        "could not move the live site source aside before swapping in the new one: " <>
+          format_posix(reason)
+      )
+
+  def describe_provision_reason({:lock_aborted, slug}),
+    do: redact("another deploy of #{slug} holds the provision lock and it could not be acquired")
+
+  def describe_provision_reason(reason) when is_binary(reason), do: redact(reason)
+
+  def describe_provision_reason(%{__exception__: true} = error),
+    do: redact(Exception.message(error))
+
+  def describe_provision_reason(reason) when is_atom(reason), do: format_posix(reason)
+
+  def describe_provision_reason(reason), do: redact(inspect(reason))
+
+  defp format_posix(reason) when is_atom(reason) do
+    described = reason |> :file.format_error() |> to_string()
+
+    # `:file.format_error/1` answers "unknown POSIX error: <atom>" for anything
+    # that is not an errno — in that case the atom itself is the better answer.
+    if String.starts_with?(described, "unknown POSIX error"),
+      do: to_string(reason),
+      else: described
+  rescue
+    _ -> inspect(reason)
+  end
+
+  defp format_posix(reason), do: inspect(reason)
+
+  # Redact the two secret shapes that can plausibly ride a provision reason: this
+  # product's own token prefix, and any `KEY=value` whose key names a credential.
+  @token_re ~r/bppat_[A-Za-z0-9_\-]+/
+  @assigned_secret_re ~r/\b([A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|KEK|APIKEY|API_KEY))=\S+/i
+
+  defp redact(text) when is_binary(text) do
+    text
+    |> String.replace(@token_re, "bppat_[REDACTED]")
+    |> String.replace(@assigned_secret_re, "\\1=[REDACTED]")
+    |> String.slice(0, 500)
+  end
+
+  defp redact(other), do: redact(inspect(other))
 
   # The launch fork: a systemd box gets a SURVIVING transient unit; anywhere
   # `systemd-run` is absent falls back to the in-process Port.
@@ -520,12 +760,19 @@ defmodule Barkpark.Sites.DeployRunner do
   defp launch_unit(state, %DeployRequest{} = req) do
     dir = ensure_run_state_dir()
     unit = unit_name(req)
-    status_file = Path.join(dir, "#{req.slug}.status")
-    log_file = Path.join(dir, "#{req.slug}.log")
-    env_file = Path.join(dir, "#{req.slug}.env")
+    # THE KEYING IS THE BUG (deploy-reliability D21). These three used to be
+    # `<slug>.log`/`.status`/`.env`, and fresh_run_files/1 truncates them at
+    # every launch — so deploy #2 of a slug erased deploy #1's build log. Keyed
+    # on the run tag, a new build gets a NEW path and can only ever truncate its
+    # OWN. The manifest deliberately stays slug-keyed (see run_tag/1).
+    tag = run_tag(req)
+    status_file = Path.join(dir, "#{req.slug}-#{tag}.status")
+    log_file = Path.join(dir, "#{req.slug}-#{tag}.log")
+    env_file = Path.join(dir, "#{req.slug}-#{tag}.env")
 
     manifest = %{
       slug: req.slug,
+      run_tag: tag,
       build_id: req.build_id,
       content_rev: req.content_rev,
       mode: req.mode,
@@ -561,6 +808,36 @@ defmodule Barkpark.Sites.DeployRunner do
         {:reply, {:error, :start_failed}, state}
     end
   end
+
+  # The per-DEPLOYMENT key for the run-state files. A deploy is named by its
+  # build_id (charset-validated upstream: `[A-Za-z0-9._-]`, so it is a safe path
+  # component) — that is the id a caller polls with and the id it must be able
+  # to read its log back by. A rollback/teardown names NO build, so it takes
+  # `<mode>-<ms>`, which is still unique per launch and still cannot clobber a
+  # sibling.
+  #
+  # The MANIFEST is not tagged: it stays `<slug>.manifest.json` because it is the
+  # "current run for this slug" pointer that `load_manifest_for/1` and the
+  # re-attach scan resolve BY SLUG, and it carries these tagged paths. The
+  # durable per-deployment record is the terminal record, not the manifest.
+  defp run_tag(%DeployRequest{build_id: id}) when is_binary(id) and id != "", do: id
+
+  defp run_tag(%DeployRequest{mode: mode}),
+    do: "#{mode}-#{System.system_time(:millisecond)}"
+
+  # A manifest written before this change (or by a prior BEAM) carries no
+  # run_tag — derive it from its log file name so its terminal record still
+  # lands beside its log.
+  defp manifest_tag(%{run_tag: tag}) when is_binary(tag) and tag != "", do: tag
+
+  defp manifest_tag(%{slug: slug, log_file: log}) when is_binary(log) do
+    case Path.basename(log, ".log") do
+      ^slug -> "legacy"
+      <<_::binary>> = base -> String.replace_prefix(base, "#{slug}-", "")
+    end
+  end
+
+  defp manifest_tag(_), do: "legacy"
 
   # A unique, valid systemd unit name. The `.service` suffix pins the type so an
   # internal `.` in a build_id can never be read AS the type; the millisecond
@@ -646,6 +923,12 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   defp cache_and_cleanup(state, slug, manifest, render) do
+    # THE terminal record is written HERE and nowhere else: this is the one
+    # place where the reconstructed render (exit_code, failure_reason, the stage
+    # fold, finished_at) exists at the same time as the manifest (unit_name, the
+    # log path). A tombstone written at PRUNE time could not say why anything
+    # failed — the manifest carries none of that.
+    _ = write_terminal_record(manifest, render)
     _ = unlink_env(manifest)
 
     state
@@ -715,6 +998,9 @@ defmodule Barkpark.Sites.DeployRunner do
       runtime_target: manifest.runtime_target,
       stages: stages,
       log: log,
+      log_state: disk_log_state(manifest.log_file),
+      log_path: manifest.log_file,
+      unit_name: manifest.unit_name,
       started_at: manifest.started_at
     }
 
@@ -1368,6 +1654,7 @@ defmodule Barkpark.Sites.DeployRunner do
   defp encode_manifest(m) do
     %{
       "slug" => m.slug,
+      "run_tag" => manifest_tag(m),
       "build_id" => m.build_id,
       "content_rev" => m.content_rev,
       "mode" => Atom.to_string(m.mode),
@@ -1386,6 +1673,7 @@ defmodule Barkpark.Sites.DeployRunner do
        when is_binary(slug) and is_binary(unit) do
     %{
       slug: slug,
+      run_tag: j["run_tag"],
       build_id: j["build_id"],
       content_rev: j["content_rev"],
       mode: safe_atom(j["mode"], [:deploy, :rollback, :teardown], :deploy),
@@ -1460,7 +1748,9 @@ defmodule Barkpark.Sites.DeployRunner do
       for m <- manifests, not MapSet.member?(keep_slugs, m.slug) do
         _ = File.rm(manifest_path(dir, m.slug))
         _ = m.status_file && File.rm(m.status_file)
-        _ = m.log_file && File.rm(m.log_file)
+        # Through evict_build_log/2, never a bare File.rm: a removed log MUST
+        # leave a tombstone, or the deployment reads back as never-recorded.
+        _ = m.log_file && evict_build_log(m.log_file, :count)
         # The staged prebuilt tree is the BIGGEST thing a run leaves behind (up
         # to the 64 MiB extraction cap, against a 3.8 GB box), so it is swept
         # with the rest of the quartet rather than living forever after a
@@ -1470,9 +1760,512 @@ defmodule Barkpark.Sites.DeployRunner do
       end
     end
 
+    # The manifest cap above counts SLUGS and has never fired on this box. The
+    # caps that actually bound a 1,000-builds/day dir count DEPLOYMENTS.
+    _ = prune_build_logs(dir)
     :ok
   rescue
     _ -> :ok
+  end
+
+  # ── durable per-build record (the tombstone) ──────────────────────────────
+
+  defp terminal_record_path(dir, slug, tag),
+    do: Path.join(dir, "#{slug}-#{tag}.terminal.json")
+
+  # Derive a log's record path from the log itself — the two are named from the
+  # SAME `<slug>-<tag>` stem, so an eviction can always find the record to mark
+  # without re-reading a manifest that may already be gone.
+  defp record_path_for_log(log_path),
+    do: String.replace_suffix(log_path, ".log", ".terminal.json")
+
+  # Written ONCE per deployment, at finalize. ~1 KB, and it outlives the log.
+  # Reachability: the path is `run_state_dir()` + a validated slug + a
+  # charset-validated build_id (or a server-generated `<mode>-<ms>` tag).
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_terminal_record(manifest, render) do
+    dir = run_state_dir()
+    tag = manifest_tag(manifest)
+    log_file = manifest.log_file
+
+    payload = %{
+      "slug" => manifest.slug,
+      "run_tag" => tag,
+      "build_id" => Map.get(render, :build_id) || manifest.build_id,
+      "content_rev" => manifest.content_rev,
+      "mode" => to_string(manifest.mode),
+      "runtime_target" => to_string(manifest.runtime_target),
+      # The EXACT unit name, persisted so a journald fallback is addressable by
+      # name (measured 0.16s) instead of by glob (measured 121s). The manifest
+      # carried it but the manifest is a slug-keyed pointer that gets
+      # overwritten; the record is per deployment and durable.
+      "unit_name" => manifest.unit_name,
+      "journal_command" => journal_command(manifest.unit_name),
+      "exit_code" => Map.get(render, :exit_code),
+      "failure_reason" => Map.get(render, :failure_reason),
+      "stages" => Enum.map(Map.get(render, :stages) || [], &encode_record_stage/1),
+      "log_file" => log_file,
+      "log_bytes" => file_size(log_file),
+      "log_state" => Atom.to_string(live_log_state(log_file)),
+      "evicted_at" => nil,
+      "started_at" => iso_or_nil(manifest.started_at),
+      "finished_at" => iso_or_nil(Map.get(render, :finished_at) || DateTime.utc_now())
+    }
+
+    # The record is named from the LOG's own stem whenever a log path exists, so
+    # `record_path_for_log/1` — the only name an eviction has to work from once
+    # the manifest is gone — always resolves to the record this call wrote. For a
+    # tagged run the two names are identical; for a PRE-CHANGE manifest (log
+    # `<slug>.log`, tag "legacy") they diverge, and deriving from the log is what
+    # keeps that run's eviction honest instead of orphan-tombstoning it.
+    record_path =
+      if is_binary(log_file),
+        do: record_path_for_log(log_file),
+        else: terminal_record_path(dir, manifest.slug, tag)
+
+    File.write(record_path, Jason.encode!(payload))
+  rescue
+    error ->
+      Logger.warning("[site-deploy] could not write the terminal record: #{inspect(error)}")
+      :ok
+  end
+
+  defp encode_record_stage(stage) do
+    %{
+      "name" => Map.get(stage, :name),
+      "status" => Map.get(stage, :status),
+      "detail" => Map.get(stage, :detail)
+    }
+  end
+
+  # The EXACT-name journald query. A glob (`bp-site-build-<slug>-*`) has to walk
+  # every journal file on the box; a `_SYSTEMD_UNIT=` match is indexed.
+  defp journal_command(unit) when is_binary(unit),
+    do: "journalctl --no-pager -u #{unit}"
+
+  defp journal_command(_), do: nil
+
+  defp iso_or_nil(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp iso_or_nil(_), do: nil
+
+  # Reachability: only ever a path this module wrote into run_state_dir().
+  # sobelow_skip ["Traversal.FileModule"]
+  defp file_size(path) when is_binary(path) do
+    case File.stat(path) do
+      {:ok, %{size: size}} -> size
+      _ -> nil
+    end
+  end
+
+  defp file_size(_), do: nil
+
+  # Is the log ON THE BOX right now? `:available` / `:missing` only — `:evicted`
+  # is a CLAIM about history that only a tombstone can make.
+  defp live_log_state(path) when is_binary(path) do
+    if File.regular?(path), do: :available, else: :missing
+  end
+
+  defp live_log_state(_), do: :missing
+
+  # The same question, but allowed to consult history: a log that is gone AND
+  # tombstoned was EVICTED; one that is gone with no tombstone never arrived.
+  defp disk_log_state(path) when is_binary(path) do
+    case live_log_state(path) do
+      :available ->
+        :available
+
+      :missing ->
+        case read_terminal_record(record_path_for_log(path)) do
+          %{"log_state" => "evicted"} -> :evicted
+          _ -> :missing
+        end
+    end
+  end
+
+  defp disk_log_state(_), do: :missing
+
+  # Reachability: `run_state_dir()` + a validated slug + a validated tag.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_terminal_record(path) do
+    with {:ok, raw} <- File.read(path),
+         {:ok, %{"slug" => slug} = json} when is_binary(slug) <- Jason.decode(raw) do
+      json
+    else
+      _ -> nil
+    end
+  end
+
+  defp list_terminal_records(dir) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        entries
+        |> Enum.filter(&String.ends_with?(&1, ".terminal.json"))
+        |> Enum.map(&read_terminal_record(Path.join(dir, &1)))
+        |> Enum.reject(&is_nil/1)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  # The record for ONE deployment. A build_id addresses its own build directly
+  # (that is the whole point); `nil` means "the newest record for this slug".
+  defp find_terminal_record(slug, nil), do: newest_record(records_for(slug))
+
+  defp find_terminal_record(slug, build_id) when is_binary(build_id) do
+    dir = run_state_dir()
+
+    case read_terminal_record(terminal_record_path(dir, slug, build_id)) do
+      nil ->
+        slug
+        |> records_for()
+        |> Enum.filter(&(&1["build_id"] == build_id))
+        |> newest_record()
+
+      record ->
+        record
+    end
+  end
+
+  defp records_for(slug) do
+    run_state_dir()
+    |> list_terminal_records()
+    |> Enum.filter(&(&1["slug"] == slug))
+  end
+
+  defp newest_record([]), do: nil
+  defp newest_record(records), do: Enum.max_by(records, &to_string(&1["finished_at"]))
+
+  defp load_latest_terminal_record(slug) do
+    case runner_mode() do
+      :systemd -> find_terminal_record(slug, nil)
+      :port -> nil
+    end
+  end
+
+  # A deployment nobody has any record of. The DIFFERENT answer.
+  defp absent_record(slug, build_id) do
+    %{
+      slug: slug,
+      build_id: build_id,
+      record: :none,
+      log_state: :never_recorded,
+      log_path: nil,
+      log_bytes: nil,
+      exit_code: nil,
+      failure_reason: nil,
+      stages: [],
+      unit_name: nil,
+      journal_command: nil,
+      mode: nil,
+      runtime_target: nil,
+      started_at: nil,
+      finished_at: nil,
+      evicted_at: nil
+    }
+  end
+
+  defp render_terminal_record(record) do
+    log_path = record["log_file"]
+
+    %{
+      slug: record["slug"],
+      build_id: record["build_id"],
+      run_tag: record["run_tag"],
+      record: :terminal,
+      # Re-derived from the FILESYSTEM, not trusted from the record: a log that
+      # is gone but was never tombstoned is `:missing`, not a phantom
+      # `:available`. The tombstone's `:evicted` wins when the bytes are gone.
+      log_state: resolved_log_state(record, log_path),
+      log_path: log_path,
+      log_bytes: record["log_bytes"],
+      exit_code: record["exit_code"],
+      failure_reason: record["failure_reason"],
+      stages: record["stages"] || [],
+      unit_name: record["unit_name"],
+      journal_command: record["journal_command"] || journal_command(record["unit_name"]),
+      mode: record["mode"],
+      runtime_target: record["runtime_target"],
+      started_at: record["started_at"],
+      finished_at: record["finished_at"],
+      evicted_at: record["evicted_at"]
+    }
+  end
+
+  defp resolved_log_state(record, log_path) do
+    case live_log_state(log_path) do
+      :available -> :available
+      :missing -> if record["log_state"] == "evicted", do: :evicted, else: :missing
+    end
+  end
+
+  # A status/1 answer built from the record alone (the manifest is gone). Same
+  # shape as every other status map — plus the honest `log_state`.
+  defp status_from_record(record) do
+    rendered = render_terminal_record(record)
+
+    %{
+      state: :done,
+      slug: rendered.slug,
+      build_id: rendered.build_id,
+      content_rev: record["content_rev"],
+      mode: safe_atom(record["mode"], [:deploy, :rollback, :teardown], :deploy),
+      runtime_target: safe_atom(record["runtime_target"], [:static, :node], :static),
+      stages: Enum.map(rendered.stages, &decode_record_stage/1),
+      exit_code: rendered.exit_code,
+      failure_reason: rendered.failure_reason,
+      # The BYTES are not served here — the record survived, the log may not
+      # have, and either way this slice does not put raw build output on a
+      # response. `log_state` says which it is.
+      log: [],
+      log_state: rendered.log_state,
+      log_path: rendered.log_path,
+      unit_name: rendered.unit_name,
+      started_at: parse_dt_or_nil(record["started_at"]),
+      finished_at: parse_dt_or_nil(record["finished_at"])
+    }
+  end
+
+  defp decode_record_stage(stage) do
+    %{
+      name: stage["name"],
+      status: stage["status"],
+      build_id: nil,
+      detail: stage["detail"],
+      at: nil
+    }
+  end
+
+  defp parse_dt_or_nil(iso) when is_binary(iso), do: parse_dt(iso)
+  defp parse_dt_or_nil(_), do: nil
+
+  # ── build-log retention: bytes AND count AND age ──────────────────────────
+
+  # Enforce all three caps and REPORT which one was effective. Ordered
+  # age → count → bytes, and `bound` names the tightest: a cap that condemned
+  # logs INSIDE the set the previous cap already allowed is the one actually
+  # holding the line.
+  # Reachability: `dir` is `run_state_dir()`; every candidate is a `*.log` entry
+  # inside it, never a caller-supplied path.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp prune_build_logs(dir) do
+    caps = retention_caps()
+    protected = active_log_paths(dir)
+
+    {aged, fresh} =
+      dir
+      |> build_log_entries()
+      |> Enum.reject(&MapSet.member?(protected, &1.path))
+      |> Enum.sort_by(&recency_key/1, :desc)
+      |> Enum.split_with(&older_than?(&1, caps.max_age_ms))
+
+    {within_count, over_count} = Enum.split(fresh, caps.max_logs)
+    {keep, over_bytes} = split_at_byte_cap(within_count, caps.max_bytes)
+
+    for entry <- aged, do: evict_build_log(entry.path, :age)
+    for entry <- over_count, do: evict_build_log(entry.path, :count)
+    for entry <- over_bytes, do: evict_build_log(entry.path, :bytes)
+
+    _ = prune_terminal_records(dir, caps.max_terminal_records)
+
+    report = %{
+      bound: effective_bound(aged, over_count, over_bytes),
+      evicted: length(aged) + length(over_count) + length(over_bytes),
+      evicted_by: %{age: length(aged), count: length(over_count), bytes: length(over_bytes)},
+      kept: length(keep),
+      kept_bytes: Enum.reduce(keep, 0, &(&1.size + &2)),
+      protected: MapSet.size(protected),
+      caps: caps
+    }
+
+    if report.evicted > 0 do
+      Logger.info(
+        "[site-deploy] build-log retention evicted #{report.evicted} log(s) " <>
+          "(age #{report.evicted_by.age}, count #{report.evicted_by.count}, " <>
+          "bytes #{report.evicted_by.bytes}); effective bound=#{report.bound}; " <>
+          "kept #{report.kept} log(s) / #{report.kept_bytes} bytes"
+      )
+    end
+
+    report
+  rescue
+    error ->
+      Logger.warning("[site-deploy] build-log retention skipped: #{inspect(error)}")
+      %{bound: :error, evicted: 0, evicted_by: %{age: 0, count: 0, bytes: 0}, kept: 0}
+  end
+
+  defp effective_bound(aged, over_count, over_bytes) do
+    cond do
+      over_bytes != [] -> :bytes
+      over_count != [] -> :count
+      aged != [] -> :age
+      true -> :none
+    end
+  end
+
+  defp build_log_entries(dir) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        for name <- entries,
+            String.ends_with?(name, ".log"),
+            path = Path.join(dir, name),
+            stat = log_stat(path),
+            stat != nil,
+            do: stat
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp log_stat(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %{type: :regular, size: size, mtime: mtime}} ->
+        %{path: path, size: size, mtime: DateTime.from_unix!(mtime)}
+
+      _ ->
+        nil
+    end
+  end
+
+  # A log whose unit is STILL RUNNING is never a retention candidate — evicting
+  # it would delete the file the engine is actively teeing into.
+  defp active_log_paths(dir) do
+    for m <- list_manifests(dir),
+        is_binary(m.log_file),
+        is_active(m.unit_name) in @active_states,
+        into: MapSet.new(),
+        do: m.log_file
+  end
+
+  defp older_than?(entry, max_age_ms),
+    do: DateTime.diff(DateTime.utc_now(), entry.mtime, :millisecond) > max_age_ms
+
+  # Newest-first ordering, and it must be TOTAL. `File.stat/2` reports mtime at
+  # one-second resolution, so builds of the same slug that finish inside the same
+  # second tie — and a tie left to `Enum.sort_by/3`'s stable sort falls through to
+  # `File.ls/1`'s arbitrary directory order, which would let the OS pick which
+  # build log the byte and count caps delete. Tie-breaking on the path makes that
+  # choice deterministic: the same directory always evicts the same files, so a
+  # sweep is reproducible and "which build lost its log" is answerable.
+  #
+  # The path is a TIE-BREAK, not a recency claim — within one second the
+  # filesystem does not know which build finished last, and neither do we. The
+  # sort key is the mtime as a unix integer rather than the %DateTime{}: a tuple
+  # sorts by Erlang term order, under which structs compare as maps (by size,
+  # then keys, then values) and NOT chronologically.
+  defp recency_key(entry), do: {DateTime.to_unix(entry.mtime), entry.path}
+
+  # Newest-first: keep taking until the running total would exceed the cap; the
+  # remainder is condemned. The newest log is ALWAYS kept even if it alone is
+  # over the cap — a bound that deletes the build you are reading is not a bound,
+  # it is a bug.
+  defp split_at_byte_cap(entries, max_bytes) do
+    {keep, over, _total} =
+      Enum.reduce(entries, {[], [], 0}, fn entry, {keep, over, total} ->
+        cond do
+          keep == [] -> {[entry], over, entry.size}
+          total + entry.size > max_bytes -> {keep, [entry | over], total}
+          true -> {[entry | keep], over, total + entry.size}
+        end
+      end)
+
+    {Enum.reverse(keep), Enum.reverse(over)}
+  end
+
+  # Remove a build log AND leave a tombstone. This is the ONLY way a log may be
+  # deleted: without the tombstone, an evicted deployment reads back identically
+  # to one that never happened, which is precisely the dishonesty D22 forbids.
+  # Reachability: `path` is a `*.log` entry inside run_state_dir(), or a
+  # manifest's own log_file — never caller data.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp evict_build_log(path, cap) when is_binary(path) do
+    if File.regular?(path) do
+      _ = File.rm(path)
+      _ = tombstone(path, cap)
+      :evicted
+    else
+      :noop
+    end
+  rescue
+    _ -> :noop
+  end
+
+  defp evict_build_log(_path, _cap), do: :noop
+
+  # Mark the deployment's record evicted. When there is no record (a run that
+  # never finalized — the BEAM died, the unit vanished) write a MINIMAL one, so
+  # even then "evicted" and "never recorded" stay different answers.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp tombstone(log_path, cap) do
+    record_path = record_path_for_log(log_path)
+    now = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    payload =
+      case read_terminal_record(record_path) do
+        nil -> orphan_tombstone(log_path, cap)
+        record -> record
+      end
+      |> Map.merge(%{
+        "log_state" => "evicted",
+        "evicted_at" => now,
+        "evicted_by" => Atom.to_string(cap)
+      })
+
+    File.write(record_path, Jason.encode!(payload))
+  rescue
+    _ -> :ok
+  end
+
+  # A log with no terminal record: the run never reached finalize, so there is no
+  # exit code to report and saying so IS the honest answer.
+  defp orphan_tombstone(log_path, _cap) do
+    stem = Path.basename(log_path, ".log")
+
+    %{
+      "slug" => stem |> String.split("-") |> List.first(),
+      "run_tag" => stem,
+      "build_id" => nil,
+      "unit_name" => nil,
+      "exit_code" => nil,
+      "failure_reason" =>
+        "the build log was evicted by retention before this run was finalized — " <>
+          "no exit code was ever recorded",
+      "stages" => [],
+      "log_file" => log_path,
+      "log_bytes" => nil,
+      "started_at" => nil,
+      "finished_at" => nil
+    }
+  end
+
+  # Records are the tombstones — they must outlive their logs — so they are
+  # bounded only by COUNT, and generously.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp prune_terminal_records(dir, max_records) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        records =
+          for name <- entries,
+              String.ends_with?(name, ".terminal.json"),
+              path = Path.join(dir, name),
+              stat = log_stat(path),
+              stat != nil,
+              do: stat
+
+        # Same total ordering as the log sweep, and for a sharper reason: these
+        # tombstones are what make an evicted deploy read as `:evicted` instead
+        # of `:never_recorded`. Sorting on mtime alone left ties to `File.ls/1`'s
+        # arbitrary order, so the OS decided which deployment lost its record.
+        records
+        |> Enum.sort_by(&recency_key/1, :desc)
+        |> Enum.drop(max_records)
+        |> Enum.each(&File.rm(&1.path))
+
+      {:error, _} ->
+        :ok
+    end
   end
 
   # ── config knobs ──────────────────────────────────────────────────────────
@@ -1603,6 +2396,11 @@ defmodule Barkpark.Sites.DeployRunner do
       exit_code: nil,
       failure_reason: nil,
       log: [],
+      # NOTHING was ever recorded for this slug — distinct from a deployment
+      # whose log retention evicted, which reports :evicted with its outcome.
+      log_state: :never_recorded,
+      log_path: nil,
+      unit_name: nil,
       started_at: nil,
       finished_at: nil
     }
@@ -1623,10 +2421,26 @@ defmodule Barkpark.Sites.DeployRunner do
       exit_code: run.exit_code,
       failure_reason: run.failure_reason,
       log: Enum.reverse(run.log),
+      # The Port fallback holds its log IN MEMORY for the life of the run — there
+      # is no durable file to evict, so it is available for exactly as long as
+      # the render is.
+      log_state: :available,
+      log_path: nil,
+      unit_name: nil,
       started_at: run.started_at,
       finished_at: run.finished_at
     }
   end
 
-  defp render_run(reconstructed), do: reconstructed
+  # A CACHED systemd render outlives the file it was reconstructed from —
+  # retention can evict the log between the finalize and the next poll — so its
+  # log_state is re-derived from disk on every read. A cached `:available` for
+  # bytes that are gone is exactly the stale-by-one-cache dishonesty this slice
+  # exists to remove.
+  defp render_run(reconstructed), do: refresh_log_state(reconstructed)
+
+  defp refresh_log_state(%{log_path: path} = render) when is_binary(path),
+    do: %{render | log_state: disk_log_state(path)}
+
+  defp refresh_log_state(render), do: render
 end

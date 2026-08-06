@@ -5447,6 +5447,47 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .scope-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scope-foot { color: var(--muted-text); border-top: 1px solid rgba(var(--cc-line-rgb), 0.07); margin-top: 4px; }
 
+/* Team picker — the sidebar workspace switcher's own menu. Built from the SAME
+   tokens as .scope-menu above (one menu language, not two), and anchored to a
+   wrapper so the outside-click test is a single .closest(). */
+.ws-switch-wrap { position: relative; }
+.team-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: var(--z-menu);
+  background: var(--cc-modal); border: 1px solid rgba(var(--cc-line-rgb), 0.12);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.team-search { padding: 2px 2px 6px; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.07); margin-bottom: 4px; }
+.team-search input {
+  width: 100%; box-sizing: border-box; padding: 7px 9px;
+  background: transparent; border: 1px solid rgba(var(--cc-line-rgb), 0.12);
+  border-radius: var(--radius); color: var(--text); font: inherit; font-size: var(--text-sm);
+}
+.team-search input:focus { outline: none; border-color: rgba(var(--cc-line-rgb), 0.28); }
+.team-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
+.team-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 9px; border-radius: var(--radius); cursor: pointer;
+  font: inherit; font-size: var(--text-sm); font-weight: 500; color: var(--text);
+  border: none; background: transparent; width: 100%; text-align: left; transition: background var(--t);
+}
+.team-item:hover { background: rgba(var(--cc-line-rgb), 0.06); }
+.team-avatar {
+  width: 20px; height: 20px; flex: 0 0 auto; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(var(--cc-line-rgb), 0.14); color: var(--text);
+  font-size: 10px; font-weight: 600;
+}
+.team-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-sub { display: block; font-size: 11px; font-weight: 400; color: var(--muted-text); }
+.team-role {
+  flex: 0 0 auto; font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+  color: var(--cc-fg4); text-transform: lowercase;
+}
+.team-check { flex: 0 0 auto; color: var(--text); font-size: 12px; }
+.team-empty { padding: 10px; font-size: var(--text-sm); color: var(--muted-text); }
+.team-foot { color: var(--muted-text); border-top: 1px solid rgba(var(--cc-line-rgb), 0.07); margin-top: 4px; align-items: flex-start; }
+
 /* Narrow viewports: the sidebar folds to a full-width strip above the content so
    nothing is stranded (the nav stays reachable; content flows below).
 

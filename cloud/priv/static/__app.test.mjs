@@ -1205,14 +1205,23 @@ test("gr-p5-session-provenance: the session row shows origin only when the serve
     "the origin must be escaped");
 });
 
-test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
-  // openAccountModal has exactly three entry points. A recomposition that
-  // renames the function or drops a listener leaves the account unreachable.
+test("gr-p5-account: the account is reachable from #acct-btn and the palette — and #ws-switch is NOT one of its doors", () => {
+  // openAccountModal keeps its entry points; a recomposition that renames the
+  // function or drops a listener leaves the account unreachable.
+  //
+  // THE THIRD DOOR IS DELIBERATELY GONE. #ws-switch used to open this same
+  // modal, so the sidebar's workspace control and its footer account button
+  // were two doors onto one room — and the top one wears a switcher caret, so
+  // it PROMISED a workspace switch and delivered a settings sheet. It now owns
+  // the team picker. This asserts the separation in BOTH directions: re-point
+  // #ws-switch at openAccountModal and the old defect reds here.
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   assert.ok(src.includes('$("#acct-btn").addEventListener("click", openAccountModal)'),
     "the sidebar account button must open the account modal");
-  assert.ok(/wsSwitch\.addEventListener\("click", openAccountModal\)/.test(src),
-    "the workspace switcher must open the account modal");
+  assert.ok(!/wsSwitch\.addEventListener\("click", openAccountModal\)/.test(src),
+    "#ws-switch must NOT open the account modal — it owns the team picker");
+  assert.ok(/wsSwitch\.addEventListener\("click",[\s\S]{0,160}toggleTeamMenu\(\)/.test(src),
+    "#ws-switch must open the team picker");
   // The palette id is LAW (the label is free) — no conditional guard here: a
   // missing hook must red this test, never silently skip it.
   assert.equal(typeof hooks.paletteActionItems, "function",
@@ -1220,6 +1229,56 @@ test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct
   assert.ok(hooks.paletteActionItems().some((i) => i.id === "act-account"),
     "the command palette must keep the act-account action id");
 });
+
+test("team picker: the chip is ONE control — no native <select> may re-appear inside it", () => {
+  // THE DEFECT THIS PINS, reported by the owner with screenshots: the chip's
+  // CENTRE opened a bare OS <select> while its CARET opened the styled picker.
+  // Two different menus on one control, chosen by which pixel you hit. The
+  // <select> came from renderTeamSwitcher, which swapped #account-team's text
+  // for a control whenever /v1/me listed 2+ memberships — so it only appeared
+  // for exactly the users who needed the switcher to be good.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  assert.ok(!/function renderTeamSwitcher\s*\(/.test(src),
+    "renderTeamSwitcher must not come back — the picker is the only switch seam");
+  assert.ok(!/sel\.id = "team-switcher"/.test(src),
+    "no native <select> may be mounted as the team switcher");
+
+  // And nothing may replace the chip's label with a control: #account-team is
+  // plain text so the WHOLE chip is one target for the picker.
+  const chip = appRegion(src, "function setAccountChip(", "\n  }\n");
+  assert.ok(!/createElement\("select"\)/.test(chip),
+    "the account chip must not build a control into its own label");
+});
+
+test("team picker: reads the real /v1/me shape, marks the active team, and says LOADING rather than empty", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  assert.ok(/function renderTeamMenu\(/.test(src) && /function toggleTeamMenu\(/.test(src),
+    "the team picker must exist as its own renderer + toggle");
+
+  // It must read the PRODUCER's envelope — /v1/me returns `teams` for exactly
+  // this purpose — not a second fetch and not a hand-built map.
+  assert.ok(/meCache && meCache\.teams/.test(src),
+    "the picker must read teams from the /v1/me cache");
+  assert.ok(/meCache && meCache\.team && meCache\.team\.id/.test(src),
+    "the active team must come from /v1/me's current team, not from localStorage alone");
+
+  // A LOADING state DISTINCT from an empty one. Rendering an empty list while
+  // /v1/me is in flight tells a member of four teams they belong to none —
+  // absence rendered as a determinate answer.
+  assert.ok(/if \(!meCache\)[\s\S]{0,240}Loading teams/.test(src),
+    "an unloaded /v1/me must render as LOADING, never as an empty team list");
+
+  // Switching pins the team and does a FULL reload — every cache is team-scoped.
+  assert.ok(/localStorage\.setItem\("bp\.active-team", id\)[\s\S]{0,160}location\.reload\(\)/.test(src),
+    "choosing a team must pin bp.active-team and reload");
+
+  // Dismissable by keyboard, not only by mouse.
+  assert.ok(/e\.key !== "Escape"[\s\S]{0,320}toggleTeamMenu\(false\)/.test(src),
+    "Escape must close the team picker");
+});
+
 
 test("gr-p5-account: hostile identity values are ESCAPED, never injected", () => {
   // Every string in the identity band is server-supplied. Drive the real fold,
@@ -10825,8 +10884,11 @@ test("cch-w12-s1: an identity change WITHOUT a reload drops the cached actor axi
   assert.ok(invite.includes("activityActors = null") && invite.includes("activityActorsTried = false"),
     "an accepted invite changes the roster the Who axis is derived from");
   // NOT at the team switcher: it does location.reload(), which kills every
-  // module variable — a reset there would be a fix for a non-bug.
-  const switcher = appRegion(src, 'sel.id = "team-switcher"', "host.textContent = \"\";");
+  // module variable — a reset there would be a fix for a non-bug. The seam MOVED
+  // (the native <select> is gone; the styled team picker owns the switch now),
+  // so this re-anchors on the picker's own handler rather than deleting an
+  // invariant that still holds.
+  const switcher = appRegion(src, 'var id = el.getAttribute("data-team");', "    });");
   assert.ok(switcher.includes("location.reload()"), "the switcher still reloads");
   assert.ok(!switcher.includes("activityActors"), "no reset belongs at a seam that reloads the document");
 });

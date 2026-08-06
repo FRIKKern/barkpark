@@ -1136,25 +1136,32 @@ defmodule BarkparkCloud.RegistryTest do
       assert Repo.get(Deployment, d.id).detail == d.detail
     end
 
-    # cch-w33-s3, FOUND WHILE BUILDING, NOT FIXED HERE — filed as
-    # `cch-deployment-detail-column-overflow`.
-    #
-    # This pins a DEFECT, deliberately. The shared validator truncates at 2 KB,
-    # but `deployments.detail` is an Ecto :string — varchar(255)
-    # (priv/repo/migrations/20260703100000_add_detail_to_deployments.exs:14). So
-    # a caption of 256..2_000 chars is neither rejected NOR truncated to fit: it
-    # reaches Repo.update and RAISES, out of a function whose @doc promises
-    # best-effort telemetry that never affects the build's outcome, through a
-    # route that documents only 200/404/422. The fix is a column migration or a
-    # detail-specific cap — both outside this slice's file set.
-    #
-    # WHEN THAT TASK LANDS: delete this test and assert the truncation instead.
-    test "cch-w33-s3: a caption ABOVE the column limit currently RAISES (see cch-deployment-detail-column-overflow)" do
+    # cch-w34-s5: the replacement the pinning test asked for. Its predecessor
+    # ("a caption ABOVE the column limit currently RAISES") certified the defect:
+    # the shared validator truncated at 2 KB while the column was varchar(255),
+    # so 256..2_000 chars raised Postgrex.Error 22001 inside Repo.update — out of
+    # a function whose @doc promises telemetry that never affects the build's
+    # outcome. `modify :detail, :text` (migration 20260806110000) makes the 2 KB
+    # validator the ONLY bound, so the same input now TRUNCATES AND STORES.
+    test "cch-w34-s5: a caption above the shared 2 KB cap truncates and STORES rather than raising" do
       d = detail_deployment_fixture(team_fixture())
 
-      assert_raise Postgrex.Error, ~r/22001|too long/, fn ->
-        Registry.set_deployment_detail(d.id, String.duplicate("y", 5_000))
-      end
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, String.duplicate("y", 5_000))
+      assert String.length(d.detail) == 2_000
+      assert Repo.get(Deployment, d.id).detail == d.detail
+    end
+
+    # cch-w34-s5: the band the old column silently owned — 256..2_000 — is now
+    # stored WHOLE, not truncated at 255 and not raised. This is the assertion a
+    # detail-specific 255 cap would have failed, which is why the remedy was the
+    # column and not a second cap.
+    test "cch-w34-s5: a caption between the old column width and the shared cap round-trips WHOLE" do
+      d = detail_deployment_fixture(team_fixture())
+
+      caption = String.duplicate("z", 300)
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, caption)
+      assert d.detail == caption
+      assert Repo.get(Deployment, d.id).detail == caption
     end
   end
 

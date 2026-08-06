@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   import Ecto.Query, only: [from: 2]
 
+  alias BarkparkCloud.DeployLedger
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site, SiteArtifact}
@@ -1142,14 +1143,27 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  # How many CONSECUTIVE deferrals a site may collect before the chain is called
-  # what it is. Each deferral costs one re-fired debounce job (~60s apart) and one
-  # box call, and a normal build finishes in 2-4 minutes, so a healthy trailing
-  # rebuild defers once or twice. A box that is still busy after this many rounds
-  # is not "busy" — it is stuck, and a chain that re-fires forever would be a
-  # silent infinite loop wearing a counted status. The last one FAILS, honestly
-  # and terminally, naming the box.
+  # How many CONSECUTIVE deferrals OF THE SAME CAUSE a site may collect before
+  # the chain is called what it is. Each deferral costs one re-fired debounce job
+  # (~60s apart) and one box call, and a normal build finishes in 2-4 minutes, so
+  # a healthy trailing rebuild defers once or twice. A box that is still busy
+  # with THIS SITE after this many rounds is not "busy" — it is stuck, and a
+  # chain that re-fires forever would be a silent infinite loop wearing a counted
+  # status. The last one FAILS, honestly and terminally, naming the box.
   @max_consecutive_deferrals 6
+
+  # …but a CONCURRENT-BUILD CAP is a different animal, and sharing one bound with
+  # the busy box loses publishes for no reason. The cap's whole job is to refuse
+  # slots while the box is under pressure — six refusals in a row is what a busy
+  # fleet LOOKS like, not evidence of a stuck runner — so a capacity chain gets a
+  # longer leash before it is called terminal. It is still bounded: an instance
+  # that has been at its cap for this many rounds has builds that are not
+  # finishing, and that IS worth a human.
+  @max_consecutive_capacity_deferrals 12
+
+  # The head-of-stream scan must reach past the LONGEST bound, or the longest
+  # chain could never be counted to its own limit.
+  @deferral_scan_depth @max_consecutive_capacity_deferrals + 2
 
   # A BOX-BUSY DEFERRAL (charter D9). Not a failure, not a drop — a settled row
   # that says "this build did not happen, and here is the rebuild that will".
@@ -1172,17 +1186,18 @@ defmodule BarkparkCloud.Sites.Deploy do
   # rebuild we will not perform would be a lie. It fails honestly instead.
   defp defer(ctx, %Deployment{} = deployment, reason) do
     site = ctx.site
-    prior = consecutive_deferrals(site)
+    cause = deferral_cause(deployment.stage, reason)
+    prior = consecutive_deferrals(site, cause)
 
     cond do
       Deployment.prebuilt?(deployment) ->
         fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
 
-      prior >= @max_consecutive_deferrals - 1 ->
+      prior >= max_consecutive_deferrals(cause) - 1 ->
         fail(
           ctx,
           reason <>
-            " — and it has now refused #{prior + 1} rebuilds in a row for this site, so the instance is not busy but stuck; check its deploy runner"
+            " — and it has now refused #{prior + 1} rebuilds in a row for this site, #{terminal_verdict(cause)}"
         )
 
       true ->
@@ -1190,62 +1205,114 @@ defmodule BarkparkCloud.Sites.Deploy do
           reason <>
             " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
 
-        _ =
-          Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-            status: "deferred",
-            failure_reason: detail,
-            detail: short_detail(detail)
-          })
+        # THE PROMISE IS MADE FIRST, and the row only says `deferred` once it
+        # holds. `deferred` is a TERMINAL status (`Deployment.@transitions` maps
+        # it to `[]`), so a row settled deferred can never be corrected — writing
+        # it before the re-queue is what made a broken re-queue unfixable and
+        # left a lost publish wearing "re-queued, not lost". Enqueuing early is
+        # safe: the debounced job is unique per site and schedules ~60s out, so a
+        # rebuild that outlives a failed transition is the same coalesced job the
+        # next publish would have fired anyway.
+        case requeue_rebuild(site.id) do
+          {:ok, _job} ->
+            _ =
+              Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
+                status: "deferred",
+                failure_reason: detail,
+                detail: short_detail(detail)
+              })
 
-        outcome =
-          case BarkparkCloud.Sites.AutoDeployWorker.enqueue(site.id) do
-            {:ok, _job} ->
-              Logger.info(
-                "site deploy deferred for site #{site.id} (#{prior + 1} in a row): box busy — rebuild re-queued"
-              )
+            Logger.info(
+              "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
+            )
 
-              {:ok, :deferred}
+            BarkparkCloud.Events.broadcast(site.team_id, "deployments")
+            {:ok, :deferred}
 
-            {:error, enqueue_error} ->
-              # THE PROMISE COULD NOT BE MADE, so this is not a deferral — it is
-              # the lost publish this wave exists to refuse, and it must be
-              # reported as one. Two things happen, and neither is optional:
-              # the row says so in its own words rather than wearing a
-              # `deferred` status that means nothing, and the OUTCOME is an
-              # error so the Oban job retries instead of recording success.
-              # `defer_behind_running_build/2` already ruled it this way; a
-              # deferral that silently succeeded on one path and failed the job
-              # on the other would be two different meanings of one word.
-              Logger.error(
-                "site deploy deferral could not re-queue the rebuild for site #{site.id}: #{inspect(enqueue_error)}"
-              )
+          {:error, enqueue_error} ->
+            # THE PROMISE COULD NOT BE MADE, so this is not a deferral — it is
+            # the lost publish this wave exists to refuse, and it is reported as
+            # one WITH ITS STATUS, not merely in prose. `fail/2` settles it
+            # `failed`, which puts it in the ledger's failure numerator; leaving
+            # it `deferred` kept a terminally lost publish out of the numerator
+            # while wearing the label "the rebuild was re-queued, not lost".
+            #
+            # Nothing retries this row, and the comment that used to sit here
+            # said otherwise: it claimed "the OUTCOME is an error so the Oban job
+            # retries", and cited a `defer_behind_running_build/2` that does not
+            # exist. In production `Deploy.run/1` is called from exactly one
+            # place — the `Task.Supervisor.start_child` body inside
+            # `BarkparkCloud.Sites.Deploy.TaskStarter.start/1`, at the bottom of
+            # THIS file — which returns the SPAWN result and throws the run's
+            # return value away. There is no job outcome to fail and no retry to
+            # wait for. The user's next publish IS the retry, which is what the
+            # row now says.
+            Logger.error(
+              "site deploy deferral could not re-queue the rebuild for site #{site.id}: #{inspect(enqueue_error)}"
+            )
 
-              broken =
+            _ =
+              fail(
+                ctx,
                 reason <> " — and the rebuild could NOT be re-queued; publish again to retry"
+              )
 
-              _ =
-                Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-                  failure_reason: broken,
-                  detail: broken
-                })
-
-              {:error, {:deferral_requeue_failed, enqueue_error}}
-          end
-
-        BarkparkCloud.Events.broadcast(site.team_id, "deployments")
-        outcome
+            {:error, {:deferral_requeue_failed, enqueue_error}}
+        end
     end
   end
 
-  # Deferrals at the HEAD of this site's stream, i.e. how many rounds the current
-  # busy-box chain has already run. Any other terminal status ends the count — a
-  # deferral chain is by construction unbroken (each round mints exactly one row).
-  defp consecutive_deferrals(%Site{} = site) do
+  # The deferral's NAMED cause, from the same classifier the ledger reports with —
+  # one owner for the taxonomy, so a chain and a census can never disagree about
+  # what a row is.
+  defp deferral_cause(stage, reason) do
+    DeployLedger.classify(%{status: "deferred", stage: stage, failure_reason: reason})
+  end
+
+  defp max_consecutive_deferrals("BOX_AT_CAPACITY_DEFERRED"),
+    do: @max_consecutive_capacity_deferrals
+
+  defp max_consecutive_deferrals(_cause), do: @max_consecutive_deferrals
+
+  # What the terminal round actually ACCUSES the box of — derived from the cause,
+  # because a capacity refusal is not a stuck runner and telling an operator to
+  # go look at one sends them to the wrong place.
+  defp terminal_verdict("BOX_AT_CAPACITY_DEFERRED"),
+    do:
+      "so the instance has been at its concurrent-build cap for that entire run; check for builds holding slots without finishing, or raise the cap"
+
+  defp terminal_verdict("BOX_BUSY_DEFERRED"),
+    do: "so the instance is not busy but stuck; check its deploy runner"
+
+  defp terminal_verdict(_cause),
+    do:
+      "so the instance is refusing this site persistently for a cause the ledger cannot name; check its deploy runner"
+
+  # Deferrals of THE SAME CAUSE at the HEAD of this site's stream, i.e. how many
+  # rounds the current chain has already run. Any other status — and any deferral
+  # for a DIFFERENT cause — ends the count: a busy box and a full build queue are
+  # two different stories, and counting them as one chain spends a site's whole
+  # budget on causes that never repeated.
+  defp consecutive_deferrals(%Site{} = site, cause) do
     site
-    |> Registry.list_deployments(@max_consecutive_deferrals + 2, environment: "production")
+    |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
     |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
-    |> Enum.take_while(&(&1.status == "deferred"))
+    |> Enum.take_while(fn d ->
+      d.status == "deferred" and deferral_cause(d.stage, d.failure_reason) == cause
+    end)
     |> length()
+  end
+
+  # The re-queue seam. A PROCESS-LOCAL override wins over the real worker for the
+  # same reason `starter/0` documents its own: under `Oban testing: :manual` an
+  # insert ALWAYS succeeds, so the re-queue-failure arm above — the one that
+  # decides whether a lost publish is counted — was unreachable in a test and had
+  # never been exercised at all. A check that cannot fail proves nothing.
+  defp requeue_rebuild(site_id) do
+    case Process.get(:site_deploy_requeue) do
+      fun when is_function(fun, 1) -> fun.(site_id)
+      _ -> BarkparkCloud.Sites.AutoDeployWorker.enqueue(site_id)
+    end
   end
 
   defp fail(ctx, reason) do
