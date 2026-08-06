@@ -1715,6 +1715,30 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       refute File.exists?(Path.join(dir, "captie-t2.log"))
     end
 
+    test "terminal RECORDS that tie on mtime are pruned deterministically too" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      for id <- ~w(r1 r2 r3), do: deploy_and_finalize("recordtie", id)
+
+      # The tombstones carry the SAME one-second mtime hazard as the logs, and
+      # losing one is worse: a deployment whose terminal record is gone reads as
+      # `:never_recorded` rather than `:evicted` — the exact dishonesty this PR
+      # exists to end. Keep exactly one and pin WHICH one, so the assertion is
+      # structurally able to catch directory order deciding it.
+      same_second = System.os_time(:second)
+
+      for id <- ~w(r1 r2 r3),
+          do: File.touch!(Path.join(dir, "recordtie-#{id}.terminal.json"), same_second)
+
+      put_cfg(max_terminal_records: 1)
+      DeployRunner.retention_sweep()
+
+      assert File.exists?(Path.join(dir, "recordtie-r3.terminal.json"))
+      refute File.exists?(Path.join(dir, "recordtie-r1.terminal.json"))
+      refute File.exists?(Path.join(dir, "recordtie-r2.terminal.json"))
+    end
+
     test "a log whose unit is STILL RUNNING is never evicted" do
       dir = run_dir()
       recorder_cfg(dir, is_active_cmd: {echo_script("active"), []}, max_build_logs: 0)

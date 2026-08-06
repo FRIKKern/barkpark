@@ -2230,8 +2230,12 @@ defmodule Barkpark.Sites.DeployRunner do
               stat != nil,
               do: stat
 
+        # Same total ordering as the log sweep, and for a sharper reason: these
+        # tombstones are what make an evicted deploy read as `:evicted` instead
+        # of `:never_recorded`. Sorting on mtime alone left ties to `File.ls/1`'s
+        # arbitrary order, so the OS decided which deployment lost its record.
         records
-        |> Enum.sort_by(& &1.mtime, {:desc, DateTime})
+        |> Enum.sort_by(&recency_key/1, :desc)
         |> Enum.drop(max_records)
         |> Enum.each(&File.rm(&1.path))
 
