@@ -7628,7 +7628,18 @@
         toast({ kind: "success", title: verb === "halt" ? "Rollout halted" : "Rollout resumed" });
         if (typeof onDone === "function") onDone(r.data);
       } else {
-        toast({ kind: "error", title: "Couldn't " + verb + " the rollout", body: friendly(r.data, "Please try again.") });
+        // cch-w36-s4 — THE CALL SITE owns the honest fallback. The curated ERRORS
+        // map beats a caller's default, so `forbidden` used to print "Only the
+        // team owner can manage billing." under a failed halt — a billing remedy
+        // for a platform-allowlist refusal. When the fault classifies into a
+        // class we can name (403/401/no answer at all), that sentence runs and
+        // friendly() is never consulted; everything else keeps its copy.
+        var fault = operatorReadFault(r);
+        toast({
+          kind: "error",
+          title: "Couldn't " + verb + " the rollout",
+          body: fault && fault.text ? fault.text : friendly(r.data, "Please try again."),
+        });
       }
     });
   }
@@ -7742,6 +7753,53 @@
       '<span class="status-pill-dot" aria-hidden="true"></span>' +
       '<span class="status-pill-label">' + esc(label) + "</span>" +
     "</span>";
+  }
+
+  // cch-w36-s4 — THE REFUSAL HAS A VOICE, AND THE FUNNEL STOPS DESTROYING WHY.
+  // Two facts this band used to throw away:
+  //   • A non-operator deep link was bounced in SILENCE (charter D411 carves one
+  //     ADDITIVE emission out of GR49's fail-closed bounce — routing is untouched).
+  //   • operatorPaint handed every card the same `null` whether the control plane
+  //     answered 403 (an AUTHORITY determination), 500, or nothing at all — which
+  //     is how a determined refusal came out as "the roll-up didn't answer".
+  // The authority named here is the PLATFORM principal the server itself emits
+  // (required: "platform_operator", scope: "platform"). It is deliberately NOT
+  // the owner/admin family (GR9 — a different axis), and it must never suggest
+  // asking a team owner: no team action grants it (charter D386's wrong remedy).
+  var OPERATOR_ALLOWLIST_COPY = "The Operator console is gated on the platform_operator principal, " +
+    "which the control plane grants from its own platform allowlist. No team role grants it — not even a " +
+    "team owner — so there is nothing to request from your team.";
+
+  // Pure. Classify ONE operator read's failure into the four classes the console
+  // can actually tell apart, so a card never renders a transport story over an
+  // authority determination. `text` non-null = this fault SPEAKS for itself;
+  // `text` null = defer to the card's own "it didn't answer" degrade, which is
+  // the true sentence for a 5xx and for an older control plane's 404.
+  function operatorReadFault(r) {
+    if (!r || r.ok) return null;
+    var status = Number(r.status) || 0;
+    if (status === 403) {
+      return { kind: "denied", text: "The control plane refused this read (403). " + OPERATOR_ALLOWLIST_COPY +
+        " That says nothing about the fleet itself." };
+    }
+    if (status === 401) {
+      return { kind: "expired", text: "Your session is no longer accepted here (401). Sign in again, then reopen the Operator console." };
+    }
+    if (status === 0) {
+      return { kind: "unreachable", text: "The request never reached the control plane, so there is no reading to show. Check your connection, then retry." };
+    }
+    if (status >= 500) return { kind: "server", text: null };
+    return { kind: "other", text: null };
+  }
+
+  // THE ONE FUNNEL, made pure so all four cards are pinned at a single seam:
+  // given a response and the card's own renderer, decide whose sentence runs.
+  // fault.text is STATIC author copy (never server data), so it is emitted raw
+  // like the gate line above — apostrophes and dashes render verbatim.
+  function operatorCardBody(r, render) {
+    var fault = operatorReadFault(r);
+    if (fault && fault.text) return '<p class="set-empty">' + fault.text + "</p>";
+    return render(r && r.ok ? r.data : null);
   }
 
   // ---- card bodies (pure) ---------------------------------------------------
@@ -7879,6 +7937,18 @@
       // and is idempotent when the browser's own event follows.
       if (location.hash !== "#overview") location.hash = "#overview";
       applyRoute();
+      // charter D411 — THE BOUNCE GETS A VOICE, and nothing above this line moved.
+      // The emission is strictly additive on the ALREADY-DECIDED deny branch and
+      // lands in the toast stack, NOT in #operator-body: the body stays empty,
+      // the hash still flips, the sidebar entry stays hidden. Emitted AFTER
+      // applyRoute so the repaint it triggers cannot wipe the sentence. It names
+      // the platform principal and never sends the person to a team owner, who
+      // has no power to grant it.
+      toast({
+        kind: "info",
+        title: "The Operator console is platform-gated",
+        body: OPERATOR_ALLOWLIST_COPY + " You're back on Overview.",
+      });
       return;
     }
     body.innerHTML = operatorPageHtml();
@@ -7909,7 +7979,7 @@
     var slot = $(sel);
     if (!slot) return;
     api("GET", path, null, { noBounce: true }).then(function (r) {
-      slot.innerHTML = render(r.ok ? r.data : null);
+      slot.innerHTML = operatorCardBody(r, render);
       if (wire) wire(slot);
     });
   }
@@ -20360,6 +20430,10 @@
       operatorDigestCardHtml: operatorDigestCardHtml,
       operatorPageHtml: operatorPageHtml,
       OPERATOR_SETTLE_MIN: OPERATOR_SETTLE_MIN,
+      // cch-w36-s4: the fault classifier + the ONE card funnel it feeds.
+      operatorReadFault: operatorReadFault,
+      operatorCardBody: operatorCardBody,
+      OPERATOR_ALLOWLIST_COPY: OPERATOR_ALLOWLIST_COPY,
       // G-05 API tokens (GR34): the .set-check picker gate + the two DOM mounts
       // smoke drives directly (the modal is click-opened, so smoke's inert click()
       // can't reach it — same seam as renderActivateResult). canMintAnyAbility
