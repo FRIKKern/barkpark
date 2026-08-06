@@ -927,7 +927,10 @@ defmodule BarkparkCloud.Sites.Deploy do
           Process.sleep(poll_ms())
           poll(record_graced_refusal(ctx, refusal), build_id, left, grace_left - 1)
         else
-          fail(ctx, refusal)
+          # A TYPED 5xx is terminal — but if untyped blips were tolerated on the
+          # way here, the row still says so. "Grace never hides" has to hold on
+          # every terminal exit, not only the ones that run out of budget.
+          fail(ctx, with_graced_note(ctx, refusal))
         end
 
       {:ok, status, body} ->
