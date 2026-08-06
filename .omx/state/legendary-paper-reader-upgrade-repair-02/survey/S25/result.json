@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-25",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["pds-wave-44-2026-08-03::public_browser"],
+  "verdict": "blocked",
+  "hard_gate_result": "fail_with_blocked_real_browser_cells",
+  "direct_answer": "The immutable PDS44 source is pinned, but the browser unit fails. Firefox is absent; Chrome's target tab was not inspectable without disrupting the user's tabs; Safari inherited persisted Email view. Real 320, 390, and true 200% cells are blocked. Deployed HTML also fails semantics and caching: 5/5 tables are presentational, 0/12 headers scoped, 0/4 callouts labeled, immutable revision absent, validators absent, and repeated 200 bodies differ.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "bb86d946-c76a-4349-a177-7e943ca236ec",
+    "assignment_snapshot_digest": "1a2560715fad939577d8d2b7342d7885b99730518efaf9bcc7e4bf0ba1d747da",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {"blocks": 99, "unique_block_ids": 99, "raw_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d", "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce"},
+    "authored_carriers": {"nonempty_carriers": 84, "headings": 32, "paragraphs": 48, "lists": 10, "list_items": 85, "tables": 5, "header_cells": 12, "body_cells": 203, "intentional_headerless_tables": 2, "callouts": 4, "marks": 0, "links": 0, "max_unbroken_token": 172},
+    "browser_availability": {
+      "chrome": "installed 150; target background tab; no qualifying capture",
+      "safari": "installed 18.5; route reached but persisted Email view; no qualifying reader capture",
+      "firefox": "not installed",
+      "three_browser_receipts": "0/3"
+    },
+    "real_geometry": {"320_css_px": "0/3 blocked", "390_css_px": "0/3 blocked", "true_200_percent": "0/3 blocked"},
+    "historical_emulation": "nonqualifying: 320 clientWidth 320, scrollWidth 462; 390 and desktop bounded",
+    "deployed_semantics": {"block_ids": "99/99", "presentation_tables": "5/5", "scoped_headers": "0/12", "labeled_callouts": "0/4", "data_rev": "0", "exact_revision_tokens": 0},
+    "safari_ax": "nonqualifying Email view: 33 headings, zero table roles, 10 lists/85 markers, 3 faux-mail links",
+    "cache": {"status": 200, "cache_control": "max-age=0, private, must-revalidate", "etag": "absent", "last_modified": "absent", "stale_validator": "200 full body", "repeated_bodies_equal": false}
+  },
+  "required_cells": {
+    "real_browsers": "0/3 blocked",
+    "widths": "0/6 blocked",
+    "reflow_200": "0/3 blocked",
+    "long_token": "blocked; emulated 320 overflowed and source has 172-character token",
+    "semantics": "fail",
+    "cache_conditionals": "fail: no exact validator; stale returns 200; reconnect unvisited"
+  },
+  "inferences": [
+    "Dynamic public-page content likely causes unequal response hashes, but the changing field is not isolated.",
+    "Safari's extra heading and links come from persisted faux Email view.",
+    "The 172-character token likely contributes to historical 320 overflow, but no qualifying real-width measurement proves it.",
+    "Blocked and failed browser, width, reflow, semantics, and cache cells forbid qualification."
+  ],
+  "repair_seams": [
+    "Run isolated Chrome, Safari, and Firefox profiles against a revision-bound URL.",
+    "Capture exact clientWidth/scrollWidth at 320 and 390 CSS pixels and true 200% zoom.",
+    "Measure every long token against its bounded ancestor.",
+    "Restore table associations and labeled callouts and verify with real assistive technology.",
+    "Expose immutable revision identity and exact/stale conditional behavior on the public route."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "cch-bl-scroll-driven-cue-firefox-fallback"],
+    "papers": ["pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/browser-frame-cases.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/cache-freshness.json",
+      "api/lib/barkpark_web/plugs/paper_revision_headers.ex",
+      "api/lib/barkpark_web/router.ex",
+      "api/lib/barkpark/portable_doc/render/walk.ex",
+      "api/assets/paper-surface/paper-surface.css",
+      "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+    ]
+  },
+  "risks": [
+    "Firefox behavior is unknown and no qualifying exact-width browser cell exists.",
+    "Emulated 320 evidence already shows 142 pixels of overflow.",
+    "Presentational tables erase authored associations and callout tone is unlabeled.",
+    "Flat public captures cannot attest to immutable revision.",
+    "Absent validators and dynamic bodies prevent stable conditional caching.",
+    "Persisted alternate-view state can open a different reader than requested."
+  ],
+  "unvisited_scope": ["qualifying Chrome target", "Firefox", "real 320/390 windows", "true 200% zoom", "real assistive technology", "exact-validator 304", "reconnect after publish", "dynamic-byte isolation"],
+  "credential_scan": {"status": "clean", "credential_values_reported": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "browser_tabs_switched": 0, "browser_view_state_changes": 0}
+}
