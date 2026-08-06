@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-10",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::api"],
+  "verdict": "partial",
+  "hard_gate_result": "fail",
+  "direct_answer": "The immutable Paper source and authored denominators are proven, but the API hard-cell union does not pass. Discovery, schema retrieval, document/query reads, conditional requests, 401, 404, and request-ID correlation work. Unsupported methods return 404 instead of 405; source negotiation returns 406 with internal_error; invalid authenticated perspectives silently become published; source and public Paper responses expose no ETag; history --limit is omitted by bp; 422 and a server timeout were not safely reproduced; and production availability was intermittently 500 despite successful replays.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+    "paper_blocks": 252,
+    "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21",
+    "history_revision_count": 14
+  },
+  "observations": {
+    "source_identity": "paper view, doc get, source blocks, filtered query, and newest history detail share the exact ordered-block hash",
+    "authored_carriers": {
+      "blocks": 252,
+      "unique_block_ids": 252,
+      "headings": 37,
+      "paragraphs": 187,
+      "empty_paragraphs": 139,
+      "tables": 11,
+      "header_cells": 35,
+      "body_cells": 316,
+      "lists": 13,
+      "list_items": 67,
+      "nested_items": 11,
+      "nested_characters": 2268,
+      "callouts": 4,
+      "marks": 313
+    },
+    "required_cells": {
+      "discovery_schema": "partial: mounted /v1/openapi.json works and conditionals pass, while docs also name unmounted /openapi.json",
+      "typed_401": "pass",
+      "typed_404": "pass",
+      "typed_405": "fail: unsupported POST returns 404 with no Allow header",
+      "typed_406": "fail: HTTP 406 carries code internal_error",
+      "typed_422": "not safely reproduced without mutation",
+      "typed_500": "partial: intermittent public Paper and capabilities 500s later succeeded",
+      "typed_timeout": "not found as server envelope; only client-side timeout evidence",
+      "request_ids": "pass: header and body IDs matched on five structured negative responses",
+      "identity_domains": "partial: document, source, history, query, and Cycle identities are distinct; public page revision is absent",
+      "conditionals": "partial: OpenAPI, capabilities, document, and query return 304; source and public Paper lack ETag",
+      "pagination_perspective": "fail: history limit omitted and invalid authenticated perspective silently becomes published"
+    },
+    "availability": {
+      "successful_replay": "30/30 across OpenAPI, capabilities, source, public Paper, document API, and filtered query",
+      "failures_outside_replay": ["one public Paper 500", "two capabilities 500s", "one limit=1001 query client timeout"]
+    }
+  },
+  "inferences": [
+    "Source identity is strong enough for revision-fenced repair because document, source, query, and latest history content join exactly.",
+    "The main contract seam is boundary normalization across routing, content negotiation, perspective parsing, and CLI flag serialization.",
+    "The limit=1001 latency needs profiling before assigning a root cause.",
+    "Successful retries do not erase the observed intermittent failures."
+  ],
+  "recommended_repair_seams": [
+    "Align discovery documentation with /v1/openapi.json and add route/documentation parity proof.",
+    "Return 405 plus Allow for unsupported methods on known resources.",
+    "Replace 406 internal_error with a typed negotiation error while preserving request IDs.",
+    "Validate authenticated perspective values as an enum.",
+    "Add source and public-page ETags plus an immutable Paper revision carrier.",
+    "Serialize doc history --limit into the URL and add pagination receipts.",
+    "Create isolated fixtures for 422, 500, and server-timeout envelopes.",
+    "Profile and bound the limit=1001 Paper query.",
+    "Investigate intermittent capabilities and Paper 500s before Experiment assumes reproducibility."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "cch-w30-bl-api-status-aware-envelope", "cch-w33-bl-recut-api-status-aware-envelope-criterion-3", "task-e05c4e4cea2282e5"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      "docs/api-v1.md",
+      "api/lib/barkpark_web/router.ex",
+      "api/lib/barkpark_web/controllers/query_controller.ex",
+      "api/lib/barkpark_web/controllers/bulldocs_source_controller.ex",
+      "api/lib/barkpark_web/controllers/openapi_controller.ex",
+      "api/lib/barkpark_web/controllers/capabilities_controller.ex",
+      "api/lib/barkpark_web/anon_perspective.ex",
+      "api/lib/barkpark_web/controllers/fallback_controller.ex",
+      "api/lib/barkpark_web/error_response.ex",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json"
+    ]
+  },
+  "risks": [
+    "The API vocabulary and live boundary behavior disagree in several typed-error cells.",
+    "Public and source readers cannot prove an immutable revision from response headers.",
+    "History limits appear accepted but are not transmitted.",
+    "Intermittent 500s and a large-query timeout undermine reproducibility."
+  ],
+  "unvisited_scope": [
+    "safe live 422 reproduction and controlled deterministic 500 fixture",
+    "server-originated timeout envelope",
+    "actor and workspace authorization matrix",
+    "rate limits, Retry-After, CORS, protocol parity, and load profiling"
+  ],
+  "credential_scan": {"status": "clean", "values_revealed": 0, "environment_values_read": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "tests_run": 0}
+}
