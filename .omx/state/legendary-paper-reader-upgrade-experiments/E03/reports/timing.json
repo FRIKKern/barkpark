@@ -1,0 +1,221 @@
+{
+  "build_wall_seconds": 56.524017,
+  "contract_seconds": 3.645173,
+  "excluded_from_stable_hash": true,
+  "probe_seconds": 44.237593,
+  "probes": [
+    {
+      "fixture_id": "CCH29",
+      "probe": "machine_cli_api",
+      "seconds": 1.182602
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "tui-equivalent",
+      "seconds": 1.601853,
+      "width": 20
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "human-cli",
+      "seconds": 1.095214,
+      "width": 20
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "tui-equivalent",
+      "seconds": 1.219409,
+      "width": 40
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "human-cli",
+      "seconds": 1.132058,
+      "width": 40
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "tui-equivalent",
+      "seconds": 1.093241,
+      "width": 80
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "human-cli",
+      "seconds": 0.949214,
+      "width": 80
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "tui-equivalent",
+      "seconds": 0.75871,
+      "width": 120
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "human-cli",
+      "seconds": 1.05842,
+      "width": 120
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "machine_cli_api",
+      "seconds": 0.8873
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "tui-equivalent",
+      "seconds": 1.222258,
+      "width": 20
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "human-cli",
+      "seconds": 1.141028,
+      "width": 20
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "tui-equivalent",
+      "seconds": 1.665367,
+      "width": 40
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "human-cli",
+      "seconds": 0.905461,
+      "width": 40
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "tui-equivalent",
+      "seconds": 1.049516,
+      "width": 80
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "human-cli",
+      "seconds": 0.796674,
+      "width": 80
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "tui-equivalent",
+      "seconds": 0.761874,
+      "width": 120
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "human-cli",
+      "seconds": 1.313513,
+      "width": 120
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "machine_cli_api",
+      "seconds": 1.014427
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "tui-equivalent",
+      "seconds": 1.220768,
+      "width": 20
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "human-cli",
+      "seconds": 2.182205,
+      "width": 20
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "tui-equivalent",
+      "seconds": 2.031009,
+      "width": 40
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "human-cli",
+      "seconds": 2.339725,
+      "width": 40
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "tui-equivalent",
+      "seconds": 2.163907,
+      "width": 80
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "human-cli",
+      "seconds": 1.007385,
+      "width": 80
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "tui-equivalent",
+      "seconds": 1.066238,
+      "width": 120
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "human-cli",
+      "seconds": 1.326379,
+      "width": 120
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "machine_cli_api",
+      "seconds": 1.543718
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "tui-equivalent",
+      "seconds": 1.229264,
+      "width": 20
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "human-cli",
+      "seconds": 1.425246,
+      "width": 20
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "tui-equivalent",
+      "seconds": 0.803237,
+      "width": 40
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "human-cli",
+      "seconds": 0.992532,
+      "width": 40
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "tui-equivalent",
+      "seconds": 1.153151,
+      "width": 80
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "human-cli",
+      "seconds": 0.905075,
+      "width": 80
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "tui-equivalent",
+      "seconds": 0.797519,
+      "width": 120
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "human-cli",
+      "seconds": 1.202096,
+      "width": 120
+    }
+  ],
+  "schema_version": "legendary-paper-e03-timing/v1"
+}

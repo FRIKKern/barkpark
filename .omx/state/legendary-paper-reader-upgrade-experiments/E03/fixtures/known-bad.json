@@ -1,0 +1,55 @@
+{
+  "schema_version": "legendary-paper-e03-known-bad/v1",
+  "targets": [
+    {
+      "dimension": "navigation",
+      "id": "no-outline-or-pager"
+    },
+    {
+      "dimension": "history",
+      "id": "paper-history-not-in-reader"
+    },
+    {
+      "dimension": "limit",
+      "id": "history-limit-not-forwarded"
+    },
+    {
+      "dimension": "identity",
+      "id": "human-reader-no-revision"
+    },
+    {
+      "count": 113,
+      "dimension": "header",
+      "id": "legacy-header-drop"
+    },
+    {
+      "dimension": "list",
+      "id": "nested-list-drop",
+      "words": 406
+    },
+    {
+      "dimension": "semantics",
+      "id": "nocolor-hierarchy-mark-tone-collapse"
+    },
+    {
+      "dimension": "width",
+      "id": "narrow-width-overflow"
+    },
+    {
+      "dimension": "contract",
+      "id": "source-negotiation-drift"
+    },
+    {
+      "dimension": "typed_error",
+      "id": "broad-not-found-mapping"
+    },
+    {
+      "dimension": "provenance",
+      "id": "missing-etag-provenance"
+    },
+    {
+      "dimension": "task_link",
+      "id": "unstructured-task-linkage"
+    }
+  ]
+}

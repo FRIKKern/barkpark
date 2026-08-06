@@ -1,0 +1,472 @@
+{
+  "dimensions": {
+    "flat_list": {
+      "block": {
+        "id": "block-17",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "STALE PRICE. No content hash, no date arithmetic, no re-measurement. pds-record-parity.test.sh will print CPU=4.45s after someone doubles the harness's work, forever, and nothing reds."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "STALE DISPOSITION EVIDENCE. Five rows cite \"by run 2026-08-03: <cmd> rc=N\". The census never re-takes any of them. A disposition survives its own repair."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ORPHANED DISPOSITION. Read the cond at :519-540: legA=yes AND legB=true short-circuits to THROUGH and the ledger is NEVER consulted. A disposition row for a now-THROUGH instrument is silently unread - not an error, not a warning, not printed."
+            }
+          ]
+        ],
+        "style": "bullet",
+        "type": "list"
+      },
+      "fixture": "PDS45"
+    },
+    "hierarchy": {
+      "fixture": "CCH28",
+      "heading_levels": {
+        "1": 1,
+        "2": 24,
+        "3": 18
+      }
+    },
+    "history_uuid": {
+      "expected_shape": "UUID revision id",
+      "fixture": "CCH29"
+    },
+    "identity": {
+      "fixture": "CCH29",
+      "revision": "18768b0a14c2eead927181c4a0e37c18",
+      "slug": "cloud-console-hardening-wave-29-2026-08-03"
+    },
+    "legacy_header": {
+      "block": {
+        "header": [
+          {
+            "content": [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "Claim"
+              }
+            ]
+          },
+          {
+            "content": [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "Command"
+              }
+            ]
+          },
+          {
+            "content": [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "Result"
+              }
+            ]
+          }
+        ],
+        "id": "w29s012",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Four contexts BLOCK merges"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "gh api repos/{owner}/{repo}/branches/main/protection"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "CONFIRMED"
+              },
+              {
+                "type": "text",
+                "value": " — "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Elixir gate"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "PR references an active task"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Cloud gate"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Console gate"
+              },
+              {
+                "type": "text",
+                "value": "; "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "enforce_admins: true"
+              },
+              {
+                "type": "text",
+                "value": "; identical to the committed spec on context AND app_id (15368)."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "The required "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Console gate"
+              },
+              {
+                "type": "text",
+                "value": " depends on a foreign host"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "BP_SERVER=http://127.0.0.1:1 node --test cloud/priv/static/__preview__/seal-predicate.test.mjs"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "CONFIRMED, and located to one line."
+              },
+              {
+                "type": "text",
+                "value": " "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "65 tests / 64 pass / not ok 56"
+              },
+              {
+                "type": "text",
+                "value": " — "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "wave 11: --ladder-only reaches the ladder the live refusals never can"
+              },
+              {
+                "type": "text",
+                "value": ", failing at "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "seal-predicate.test.mjs:1090"
+              },
+              {
+                "type": "text",
+                "value": " with "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "2 !== 1"
+              },
+              {
+                "type": "text",
+                "value": ": the control demands NO_SEAL(1) and a dead server yields INFRA(2). The reaching line is "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": ":1089"
+              },
+              {
+                "type": "text",
+                "value": " — "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "run(['--repo', REPO, '--successor', 'TERMINAL'])"
+              },
+              {
+                "type": "text",
+                "value": ", a LIVE run whose roster fetch precedes the TERMINAL refusal."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "That roster read is anonymous"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "curl -G .../v1/data/query/production/task -H \"Authorization: Bearer undefined\""
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "200 in 340ms."
+              },
+              {
+                "type": "text",
+                "value": " CI has no "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "BP_TEST"
+              },
+              {
+                "type": "text",
+                "value": "-scoped secret and does not need one — the gate is green today purely because guerrilla is up and the roster is world-readable. An ACL change reds it as surely as an outage."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "The "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "unknown"
+              },
+              {
+                "type": "text",
+                "value": " domain rung lies to a screen reader"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "cloud/priv/static/app.js:9598 domainRungChip"
+              },
+              {
+                "type": "text",
+                "value": " vs "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": ":9500 domainStageRows"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "CONFIRMED, and it is the epic’s exact disease."
+              },
+              {
+                "type": "text",
+                "value": " The pure fold computes an honest "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "unknown"
+              },
+              {
+                "type": "text",
+                "value": " role and its 60-line header explains at length why an unmeasured rung must never fall into the waiting bucket. The RENDER has no "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "unknown"
+              },
+              {
+                "type": "text",
+                "value": " arm: it falls through to "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "&middot;"
+              },
+              {
+                "type": "text",
+                "value": " and "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "state = \"waiting\""
+              },
+              {
+                "type": "text",
+                "value": ", so the "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "aria-label"
+              },
+              {
+                "type": "text",
+                "value": " says \"waiting\" for a check nobody made. The model knows; the screen lies."
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      "fixture": "CCH29"
+    },
+    "object_marks": {
+      "count": 8,
+      "fixture": "PDS45"
+    },
+    "source_negotiation": {
+      "accepts": [
+        "application/json",
+        "text/html",
+        "text/plain"
+      ],
+      "fixture": "CCH29"
+    },
+    "string_marks": {
+      "count": 313,
+      "fixture": "CCH29"
+    },
+    "tone": {
+      "fixture": "CCH28",
+      "values": [
+        "warning",
+        "warning",
+        "info",
+        "info",
+        "info",
+        "warning",
+        "warn",
+        "warn",
+        "warn",
+        "info",
+        "warn",
+        "info",
+        null
+      ]
+    },
+    "typed_error": {
+      "expected": "nonzero exit plus structured envelope",
+      "fixture": "missing-paper"
+    }
+  },
+  "schema_version": "legendary-paper-e03-controls/v1"
+}

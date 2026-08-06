@@ -1,0 +1,8490 @@
+CLOUD CONSOLE       
+HARDENING — WAVE 29:
+“I COULD NOT LOOK”  
+GETS A GRAMMAR, AND 
+THE MERGE LANE STOPS
+BEING SOMEONE ELSE’S
+HOST                
+────────────────────
+                    
+Status: SURVEYING.  
+Strategize is       
+closed; 16 Opus     
+surveyors are in    
+flight. Digest      
+appends the survey  
+digest and the      
+verify plan below   
+before any verifier 
+runs; Decide appends
+the decisions and   
+the wave plan before
+any builder flies;  
+Review closes this  
+Paper as the        
+debrief.            
+                    
+Epic cloud-console- 
+hardening-epic ·    
+predecessor wave    
+Paper cloud-console-
+hardening-wave-28-  
+2026-08-03 · charter
+.claude/workflows/bp
+-cloud-console-     
+hardening-charter.md
+(read from          
+origin/main, not the
+primary checkout,   
+which is 401 commits
+behind).            
+                    
+The wish            
+                    
+Seven numbered      
+instructions.       
+Condensed, with the 
+load-bearing        
+corrections         
+preserved:          
+                    
+1. Finish the       
+   discrimination.  
+   cch-w28-s2-      
+   history-         
+   unavailable-     
+   discrimination is
+   round 2 and #9356
+   has landed, so it
+   is unblocked.    
+   Teach the git    
+   legs to tell rc 1
+   ("not an         
+   ancestor" — an   
+   honest answer    
+   about the        
+   PRODUCT) from rc 
+   128 / missing    
+   object / shallow 
+   ("I could not    
+   look" — an honest
+   answer about the 
+   ENVIRONMENT). Its
+   hard constraint  
+   is already armed 
+   as a tripwire by 
+   s1: HISTORY-     
+   UNAVAILABLE must 
+   surface as a     
+   verdict-token    
+   LETTER at exit 1,
+   never a process- 
+   level exit-2     
+   INFRA-FAULT.     
+2. The merge lane   
+   changed and every
+   earlier brief is 
+   stale on this    
+   point. Live      
+   protection       
+   enforces FOUR    
+   contexts as of   
+   today. Console   
+   gate and Cloud   
+   gate are         
+   BLOCKING, not    
+   advisory.        
+   Required-check   
+   spec drift is    
+   GREEN on main for
+   the first time   
+   this session.    
+3. A required gate a
+   third-party host 
+   can red is the   
+   same defect class
+   as a guard no job
+   runs. Wave 28 s3 
+   documented that  
+   the now-REQUIRED 
+   Console gate     
+   depends on       
+   guerrilla.barkpar
+   k.cloud being    
+   reachable, and   
+   nobody fixed it. 
+   Tolerable while  
+   advisory; an     
+   outage on someone
+   else’s host is   
+   now a repo-wide  
+   merge freeze.    
+4. The D307 guard’s 
+   promotion. The   
+   guard is armed at
+   the birth seat   
+   (#9405,          
+   a723ec0dd); the  
+   surface ENUM and 
+   the BACKFILL of  
+   open rows are    
+   what turn the    
+   WARN tier hard.  
+   The contested    
+   scoping criterion
+   was re-measured  
+   by the lead:     
+   deleting only the
+   scoping leg gives
+   46 tests / 1     
+   failure, not the 
+   23 the criterion 
+   predicted — so   
+   the scoping is a 
+   DESIGN BOUNDARY, 
+   not a load-      
+   bearing guard. Do
+   not restate it as
+   load-bearing.    
+5. The s7 residue,  
+   person-facing. A 
+   re-check         
+   affordance for a 
+   TERMINAL unknown 
+   domain rail (the 
+   poll stops with  
+   no way back short
+   of a navigation),
+   plus             
+   domainRungChip’s 
+   missing unknown  
+   arm (task-       
+   1daff7bc1bf46ceb)
+   .                
+6. cch-w22-s7’s     
+   remainder —      
+   finished or      
+   closed against   
+   origin/main’s    
+   bytes rather than
+   rebuilt.         
+7. .preview-url IS  
+   NOT A SLICE and  
+   the wish was     
+   wrong about it.  
+   Wave 28’s smoke  
+   killed it; that  
+   row reads DONE   
+   10/10. Do not    
+   rebuild it.      
+                    
+Ratio floor: at     
+least four slices   
+where a PERSON is   
+misinformed or      
+cannot reach a      
+control.            
+                    
+The standing test,  
+now six clauses. A  
+fix whose only guard
+is a sentence is not
+fixed; a guard no   
+job runs is a       
+sentence with a     
+shebang; a guard    
+that cannot lose is 
+a sentence with an  
+exit code; a guard  
+whose FIXTURE cannot
+produce the defect  
+is green by         
+construction; a     
+guard whose SELECTOR
+cannot reach the    
+defect is green by  
+construction even   
+with a cruel        
+fixture; and an     
+instrument POINTED  
+AT THE WRONG ROOT — 
+or reading an object
+its clone does not  
+have — reports      
+defect-shaped prose 
+for a condition that
+is only "I could not
+look".              
+                    
+REGISTER NOTHING. Do
+not touch           
+.github/required-   
+checks.json — it now
+MATCHES live        
+protection, and any 
+edit re-opens a     
+drift that is       
+finally closed.     
+                    
+Ground truth re-    
+derived at          
+Strategize          
+                    
+Everything the lead 
+handed down was     
+treated as L6 and   
+re-derived. Four    
+measurements, each  
+with its own        
+command, all taken  
+from a detached     
+worktree at         
+origin/main         
+a723ec0dd — never   
+from the primary    
+checkout, which     
+reads ##            
+main...origin/main  
+[ahead 48, behind   
+401].               
+                    
+┌─────┬─────┬──────┐
+│ Fou │ gh  │ CONF │
+│ r   │ api │ IRME │
+│ con │ rep │ D —  │
+│ tex │ os/ │ Elix │
+│ ts  │ {ow │ ir   │
+│ BLO │ ner │ gate │
+│ CK  │ }/{ │ , PR │
+│ mer │ rep │ refe │
+│ ges │ o}/ │ renc │
+│     │ bra │ es   │
+│     │ nch │ an   │
+│     │ es/ │ acti │
+│     │ mai │ ve   │
+│     │ n/p │ task │
+│     │ rot │ ,    │
+│     │ ect │ Clou │
+│     │ ion │ d    │
+│     │     │ gate │
+│     │     │ ,    │
+│     │     │ Cons │
+│     │     │ ole  │
+│     │     │ gate │
+│     │     │ ;    │
+│     │     │ enfo │
+│     │     │ rce_ │
+│     │     │ admi │
+│     │     │ ns:  │
+│     │     │ true │
+│     │     │ ;    │
+│     │     │ iden │
+│     │     │ tica │
+│     │     │ l to │
+│     │     │ the  │
+│     │     │ comm │
+│     │     │ itte │
+│     │     │ d    │
+│     │     │ spec │
+│     │     │ on   │
+│     │     │ cont │
+│     │     │ ext  │
+│     │     │ AND  │
+│     │     │ app_ │
+│     │     │ id   │
+│     │     │ (153 │
+│     │     │ 68). │
+│ The │ BP_ │ CONF │
+│ req │ SER │ IRME │
+│ uir │ VER │ D,   │
+│ ed  │ =ht │ and  │
+│ Con │ tp: │ loca │
+│ sol │ //1 │ ted  │
+│ e   │ 27. │ to   │
+│ gat │ 0.0 │ one  │
+│ e   │ .1: │ line │
+│ dep │ 1   │ . 65 │
+│ end │ nod │ test │
+│ s   │ e - │ s /  │
+│ on  │ -te │ 64   │
+│ a   │ st  │ pass │
+│ for │ clo │ /    │
+│ eig │ ud/ │ not  │
+│ n   │ pri │ ok   │
+│ hos │ v/s │ 56 — │
+│ t   │ tat │ wave │
+│     │ ic/ │ 11:  │
+│     │ __p │ --   │
+│     │ rev │ ladd │
+│     │ iew │ er-  │
+│     │ __/ │ only │
+│     │ sea │ reac │
+│     │ l-  │ hes  │
+│     │ pre │ the  │
+│     │ dic │ ladd │
+│     │ ate │ er   │
+│     │ .te │ the  │
+│     │ st. │ live │
+│     │ mjs │ refu │
+│     │     │ sals │
+│     │     │ neve │
+│     │     │ r    │
+│     │     │ can, │
+│     │     │ fail │
+│     │     │ ing  │
+│     │     │ at   │
+│     │     │ seal │
+│     │     │ -pre │
+│     │     │ dica │
+│     │     │ te.t │
+│     │     │ est. │
+│     │     │ mjs: │
+│     │     │ 1090 │
+│     │     │ with │
+│     │     │ 2    │
+│     │     │ !==  │
+│     │     │ 1:   │
+│     │     │ the  │
+│     │     │ cont │
+│     │     │ rol  │
+│     │     │ dema │
+│     │     │ nds  │
+│     │     │ NO_S │
+│     │     │ EAL( │
+│     │     │ 1)   │
+│     │     │ and  │
+│     │     │ a    │
+│     │     │ dead │
+│     │     │ serv │
+│     │     │ er   │
+│     │     │ yiel │
+│     │     │ ds   │
+│     │     │ INFR │
+│     │     │ A(2) │
+│     │     │ .    │
+│     │     │ The  │
+│     │     │ reac │
+│     │     │ hing │
+│     │     │ line │
+│     │     │ is   │
+│     │     │ :108 │
+│     │     │ 9 —  │
+│     │     │ run( │
+│     │     │ ['-- │
+│     │     │ repo │
+│     │     │ ',   │
+│     │     │ REPO │
+│     │     │ , '- │
+│     │     │ -suc │
+│     │     │ cess │
+│     │     │ or', │
+│     │     │ 'TER │
+│     │     │ MINA │
+│     │     │ L']) │
+│     │     │ , a  │
+│     │     │ LIVE │
+│     │     │ run  │
+│     │     │ whos │
+│     │     │ e    │
+│     │     │ rost │
+│     │     │ er   │
+│     │     │ fetc │
+│     │     │ h    │
+│     │     │ prec │
+│     │     │ edes │
+│     │     │ the  │
+│     │     │ TERM │
+│     │     │ INAL │
+│     │     │ refu │
+│     │     │ sal. │
+│ Tha │ cur │ 200  │
+│ t   │ l - │ in   │
+│ ros │ G   │ 340m │
+│ ter │ ... │ s.   │
+│ rea │ /v1 │ CI   │
+│ d   │ /da │ has  │
+│ is  │ ta/ │ no   │
+│ ano │ que │ BP_T │
+│ nym │ ry/ │ EST- │
+│ ous │ pro │ scop │
+│     │ duc │ ed   │
+│     │ tio │ secr │
+│     │ n/t │ et   │
+│     │ ask │ and  │
+│     │ -H  │ does │
+│     │ "Au │ not  │
+│     │ tho │ need │
+│     │ riz │ one  │
+│     │ ati │ —    │
+│     │ on: │ the  │
+│     │ Bea │ gate │
+│     │ rer │ is   │
+│     │ und │ gree │
+│     │ efi │ n    │
+│     │ ned │ toda │
+│     │ "   │ y    │
+│     │     │ pure │
+│     │     │ ly   │
+│     │     │ beca │
+│     │     │ use  │
+│     │     │ guer │
+│     │     │ rill │
+│     │     │ a is │
+│     │     │ up   │
+│     │     │ and  │
+│     │     │ the  │
+│     │     │ rost │
+│     │     │ er   │
+│     │     │ is   │
+│     │     │ worl │
+│     │     │ d-   │
+│     │     │ read │
+│     │     │ able │
+│     │     │ . An │
+│     │     │ ACL  │
+│     │     │ chan │
+│     │     │ ge   │
+│     │     │ reds │
+│     │     │ it   │
+│     │     │ as   │
+│     │     │ sure │
+│     │     │ ly   │
+│     │     │ as   │
+│     │     │ an   │
+│     │     │ outa │
+│     │     │ ge.  │
+│ The │ clo │ CONF │
+│ unk │ ud/ │ IRME │
+│ now │ pri │ D,   │
+│ n   │ v/s │ and  │
+│ dom │ tat │ it   │
+│ ain │ ic/ │ is   │
+│ run │ app │ the  │
+│ g   │ .js │ epic │
+│ lie │ :95 │ ’s   │
+│ s   │ 98  │ exac │
+│ to  │ dom │ t    │
+│ a   │ ain │ dise │
+│ scr │ Run │ ase. │
+│ een │ gCh │ The  │
+│ rea │ ip  │ pure │
+│ der │ vs  │ fold │
+│     │ :95 │ comp │
+│     │ 00  │ utes │
+│     │ dom │ an   │
+│     │ ain │ hone │
+│     │ Sta │ st   │
+│     │ geR │ unkn │
+│     │ ows │ own  │
+│     │     │ role │
+│     │     │ and  │
+│     │     │ its  │
+│     │     │ 60-  │
+│     │     │ line │
+│     │     │ head │
+│     │     │ er   │
+│     │     │ expl │
+│     │     │ ains │
+│     │     │ at   │
+│     │     │ leng │
+│     │     │ th   │
+│     │     │ why  │
+│     │     │ an   │
+│     │     │ unme │
+│     │     │ asur │
+│     │     │ ed   │
+│     │     │ rung │
+│     │     │ must │
+│     │     │ neve │
+│     │     │ r    │
+│     │     │ fall │
+│     │     │ into │
+│     │     │ the  │
+│     │     │ wait │
+│     │     │ ing  │
+│     │     │ buck │
+│     │     │ et.  │
+│     │     │ The  │
+│     │     │ REND │
+│     │     │ ER   │
+│     │     │ has  │
+│     │     │ no   │
+│     │     │ unkn │
+│     │     │ own  │
+│     │     │ arm: │
+│     │     │ it   │
+│     │     │ fall │
+│     │     │ s    │
+│     │     │ thro │
+│     │     │ ugh  │
+│     │     │ to   │
+│     │     │ &mid │
+│     │     │ dot; │
+│     │     │ and  │
+│     │     │ stat │
+│     │     │ e =  │
+│     │     │ "wai │
+│     │     │ ting │
+│     │     │ ",   │
+│     │     │ so   │
+│     │     │ the  │
+│     │     │ aria │
+│     │     │ -lab │
+│     │     │ el   │
+│     │     │ says │
+│     │     │ "wai │
+│     │     │ ting │
+│     │     │ "    │
+│     │     │ for  │
+│     │     │ a    │
+│     │     │ chec │
+│     │     │ k    │
+│     │     │ nobo │
+│     │     │ dy   │
+│     │     │ made │
+│     │     │ .    │
+│     │     │ The  │
+│     │     │ mode │
+│     │     │ l    │
+│     │     │ know │
+│     │     │ s;   │
+│     │     │ the  │
+│     │     │ scre │
+│     │     │ en   │
+│     │     │ lies │
+│     │     │ .    │
+└─────┴─────┴──────┘
+                    
+Premise smoke. Every
+charter D-number    
+this direction cites
+was git show-n from 
+origin/main and read
+for coverage, not   
+existence: D307 (Law
+0’s filing half),   
+D325 (the cch-w22-s7
+split), D331 (the   
+D307 seat moves to  
+writer.ex, the      
+presence requirement
+stays unarmed), D334
+(Law 0 re-derived;  
+.preview-url cleared
+20/20 by            
+measurement; D325’s 
+kill of C9 REFUTED  
+on both its stated  
+reasons). All four  
+exist and all four  
+authorise what they 
+are cited for. Two  
+code sites confirmed
+present on          
+origin/main: seal-  
+predicate.mjs       
+verifyCommit (the   
+catch that collapses
+rc 1 and rc 128 into
+one sentence) and   
+app.js:9598         
+domainRungChip.     
+                    
+Roster at           
+Strategize: 310     
+children — {done    
+201, open 73,       
+cancelled 35,       
+considering 1}. The 
+seal predicate’s own
+denominator         
+(published-only)    
+will read lower;    
+wave 28 quoted      
+roster 307 at       
+52a80c7be. Both     
+integers get re-    
+derived at Decide.  
+                    
+Direction           
+                    
+"I could not look"  
+gets a grammar — and
+the merge lane stops
+being someone else’s
+host.               
+                    
+Wave 27 found the   
+sentence at the     
+ROOT. Wave 28 found 
+it at the OBJECT and
+shipped it to two   
+audiences — the     
+instrument and the  
+person. Wave 29’s   
+claim is that the   
+sentence now has    
+three audiences, and
+that the third one  
+arrived today,      
+uninvited, when     
+branch protection   
+went hard:          
+                    
+┌─────┬─────┬──────┐
+│ The │ rc  │ Six  │
+│ pre │ 1   │ verb │
+│ dic │ is  │ atim │
+│ ate │ an  │ fals │
+│     │ hon │ e    │
+│     │ est │ "not │
+│     │ ans │ an   │
+│     │ wer │ ance │
+│     │ abo │ stor │
+│     │ ut  │ "    │
+│     │ the │ sent │
+│     │ PRO │ ence │
+│     │ DUC │ s at │
+│     │ T;  │ b=FA │
+│     │ rc  │ IL   │
+│     │ 128 │ in   │
+│     │ /   │ any  │
+│     │ mis │ dept │
+│     │ sin │ h-1  │
+│     │ g   │ clon │
+│     │ obj │ e.   │
+│     │ ect │ Two  │
+│     │ /   │ wave │
+│     │ sha │ s    │
+│     │ llo │ quot │
+│     │ w / │ ed   │
+│     │ no  │ outp │
+│     │ ori │ ut   │
+│     │ gin │ of   │
+│     │ /ma │ that │
+│     │ in  │ shap │
+│     │ ref │ e as │
+│     │ is  │ this │
+│     │ an  │ epic │
+│     │ hon │ ’s   │
+│     │ est │ prim │
+│     │ ans │ ary  │
+│     │ wer │ find │
+│     │ abo │ ing. │
+│     │ ut  │      │
+│     │ the │      │
+│     │ ENV │      │
+│     │ IRO │      │
+│     │ NME │      │
+│     │ NT. │      │
+│     │ HIS │      │
+│     │ TOR │      │
+│     │ Y-  │      │
+│     │ UNA │      │
+│     │ VAI │      │
+│     │ LAB │      │
+│     │ LE  │      │
+│     │ sur │      │
+│     │ fac │      │
+│     │ es  │      │
+│     │ as  │      │
+│     │ a   │      │
+│     │ ver │      │
+│     │ dic │      │
+│     │ t-  │      │
+│     │ tok │      │
+│     │ en  │      │
+│     │ LET │      │
+│     │ TER │      │
+│     │ at  │      │
+│     │ exi │      │
+│     │ t   │      │
+│     │ 1.  │      │
+│ The │ A   │ One  │
+│ mer │ con │ line │
+│ ge  │ tex │ unde │
+│ lan │ t   │ r a  │
+│ e   │ tha │ REQU │
+│     │ t   │ IRED │
+│     │ BLO │ gate │
+│     │ CKS │ reac │
+│     │ a   │ hes  │
+│     │ mer │ guer │
+│     │ ge  │ rill │
+│     │ mus │ a.ba │
+│     │ t   │ rkpa │
+│     │ be  │ rk.c │
+│     │ a   │ loud │
+│     │ fun │ .    │
+│     │ cti │ When │
+│     │ on  │ that │
+│     │ of  │ host │
+│     │ the │ blin │
+│     │ DIF │ ks,  │
+│     │ F.  │ ever │
+│     │ It  │ y PR │
+│     │ may │ in   │
+│     │ red │ the  │
+│     │ for │ repo │
+│     │ thi │ stop │
+│     │ s   │ s    │
+│     │ rep │ merg │
+│     │ o’s │ ing  │
+│     │ byt │ —    │
+│     │ es  │ not  │
+│     │ and │ just │
+│     │ for │ this │
+│     │ not │ epic │
+│     │ hin │ ’s.  │
+│     │ g   │      │
+│     │ els │      │
+│     │ e — │      │
+│     │ not │      │
+│     │ for │      │
+│     │ a   │      │
+│     │ hos │      │
+│     │ t   │      │
+│     │ we  │      │
+│     │ do  │      │
+│     │ not │      │
+│     │ own │      │
+│     │ ,   │      │
+│     │ not │      │
+│     │ for │      │
+│     │ his │      │
+│     │ tor │      │
+│     │ y   │      │
+│     │ the │      │
+│     │ clo │      │
+│     │ ne  │      │
+│     │ was │      │
+│     │ nev │      │
+│     │ er  │      │
+│     │ giv │      │
+│     │ en. │      │
+│ The │ A   │ A    │
+│ per │ scr │ cras │
+│ son │ een │ hed  │
+│     │ may │ usag │
+│     │ say │ e    │
+│     │ "we │ mete │
+│     │ cou │ r    │
+│     │ ld  │ read │
+│     │ not │ s    │
+│     │ che │ unme │
+│     │ ck" │ tere │
+│     │ or  │ d —  │
+│     │ it  │ the  │
+│     │ may │ same │
+│     │ say │ word │
+│     │ wha │ the  │
+│     │ t   │ flow │
+│     │ it  │ mete │
+│     │ mea │ rs   │
+│     │ sur │ use  │
+│     │ ed. │ for  │
+│     │ It  │ "we  │
+│     │ may │ deli │
+│     │ nev │ bera │
+│     │ er  │ tely │
+│     │ spe │ do   │
+│     │ nd  │ not  │
+│     │ the │ meas │
+│     │ pro │ ure  │
+│     │ duc │ this │
+│     │ t’s │ ".   │
+│     │ voc │ An   │
+│     │ abu │ unme │
+│     │ lar │ asur │
+│     │ y   │ able │
+│     │ for │ doma │
+│     │ a   │ in   │
+│     │ del │ rung │
+│     │ ibe │ tell │
+│     │ rat │ s a  │
+│     │ e   │ scre │
+│     │ non │ en   │
+│     │ -me │ read │
+│     │ asu │ er   │
+│     │ rem │ "wai │
+│     │ ent │ ting │
+│     │ on  │ ". A │
+│     │ a   │ reso │
+│     │ mea │ lver │
+│     │ sur │ blip │
+│     │ eme │ leav │
+│     │ nt  │ es   │
+│     │ tha │ the  │
+│     │ t   │ rail │
+│     │ cra │ TERM │
+│     │ she │ INAL │
+│     │ d.  │ with │
+│     │     │ no   │
+│     │     │ way  │
+│     │     │ back │
+│     │     │ shor │
+│     │     │ t of │
+│     │     │ a    │
+│     │     │ navi │
+│     │     │ gati │
+│     │     │ on.  │
+└─────┴─────┴──────┘
+                    
+This is not three   
+themes stapled      
+together. It is one 
+sentence that       
+generates all three,
+which is the shape  
+wave 28 already     
+proved works — "one 
+disease, two        
+audiences", now     
+three. The ratio    
+floor is not a tax  
+on this direction;  
+four of the         
+strongest person    
+rows on the board   
+ARE instances of it.
+                    
+What the finished   
+wave looks like     
+                    
+• The seal predicate
+  can be run        
+  anywhere and never
+  invents a finding.
+  In a full clone it
+  says b=PASS with a
+  byte-identical    
+  token. In a       
+  pristine git clone
+  --depth 1, a      
+  grafted depth-1,  
+  and a simulated   
+  actions/checkout@v
+  4 PR shape it says
+  HISTORY-          
+  UNAVAILABLE with  
+  ZERO "is not an   
+  ancestor"         
+  sentences — at    
+  exit 1, as a      
+  letter, never as  
+  an exit-2 INFRA-  
+  FAULT that would  
+  red s1’s merged   
+  control. And on a 
+  full clone with a 
+  register entry    
+  retargeted to a   
+  present-but-      
+  genuinely-not-an- 
+  ancestor sha it   
+  still prints      
+  exactly ONE honest
+  product sentence  
+  at b=FAIL. The    
+  discrimination is 
+  proved by clones, 
+  not by stubs.     
+• No merge-blocking 
+  job can reach a   
+  host this repo    
+  does not own, and 
+  something reds if 
+  one regains the   
+  ability. The      
+  predicate’s exit-2
+  on an unreachable 
+  server is CORRECT 
+  and stays exactly 
+  as it is — the    
+  wave does not     
+  green a red. What 
+  moves is the      
+  QUESTION: the     
+  live-network      
+  assertion leaves  
+  the required path 
+  for somewhere it  
+  can be honestly   
+  red without       
+  freezing the repo,
+  and a hermetic    
+  control just as   
+  cruel keeps       
+  proving the       
+  contrast that test
+  exists to prove.  
+  Backed by a       
+  ratchet in the    
+  console-path-     
+  escape-check.sh --
+  selftest family   
+  that can lose.    
+• Four screens stop 
+  reporting a failed
+  measurement as a  
+  fact about the    
+  product. A meter  
+  that crashed says 
+  so. An            
+  unmeasurable rung 
+  says so, in its   
+  aria-label as well
+  as its glyph, and 
+  offers a re-check 
+  instead of a dead 
+  end. Copy stops   
+  naming a provider 
+  it never asked. A 
+  publish that      
+  silently refused  
+  to deploy leaves  
+  an event a person 
+  can find.         
+• The board is      
+  shorter and honest
+  about it. cch-w22-
+  s7’s remainder is 
+  rebuilt against   
+  origin/main’s     
+  bytes — including 
+  the C9 leg D334   
+  resurrected, whose
+  substantive defect
+  (collecting ws and
+  te but not        
+  overflow) has its 
+  own model arm 400 
+  lines below it in 
+  the same file.    
+                    
+What this wave      
+deliberately does   
+not take            
+                    
+• .preview-url —    
+  D334 measured it  
+  20/20 clean from a
+  clean detached    
+  worktree, rc 0,   
+  worst urlLost     
+  −6.44px inside the
+  clipper. The row  
+  reads DONE 10/10. 
+  Named here so no  
+  surveyor re-opens 
+  it.               
+• Any edit to       
+  .github/required- 
+  checks.json.      
+  REGISTER NOTHING. 
+  The spec matches  
+  live protection on
+  context and app_id
+  today; Required-  
+  check spec drift  
+  is green on main  
+  for the first     
+  time. An edit re- 
+  opens a drift that
+  took eleven waves 
+  to close.         
+• Arming the D307   
+  ABSENT tier. D331 
+  measured the      
+  backfill: a       
+  description       
+  classifier scores 
+  47%, a structured 
+  classifier 40%,   
+  and a one-line    
+  constant return   
+  "instruments"     
+  scores 73% — both 
+  classifiers below 
+  the majority      
+  baseline, on a    
+  three-day-old     
+  convention absent 
+  from 91% of the   
+  live population. A
+  refusal cannot be 
+  armed over rows   
+  nobody can        
+  classify. At most 
+  a narrow ENUM     
+  question; the     
+  survey decides    
+  whether even that 
+  is a slice. And   
+  the scoping leg is
+  a design boundary,
+  not a load-bearing
+  guard — 46 tests /
+  1 failure, not 23.
+                    
+Direction debate    
+                    
+Two rivals were     
+developed far enough
+to be shippable,    
+then argued against 
+each other. Neither 
+was a straw man;    
+both are what a     
+reasonable          
+strategist would do 
+with this wish.     
+                    
+Rival A — SCREENS   
+ONLY                
+                    
+Spend the whole wave
+on person rows. Take
+s2 because it is    
+mandated and nothing
+else instrumental.  
+The argument is     
+strong: the epic’s  
+vision sentence is  
+the console stops   
+lying, the ratio    
+floor exists because
+instrument work     
+keeps crowding out  
+screens, and the    
+board carries at    
+least a dozen live  
+person rows. The    
+finished wave would 
+be six screens a    
+person can actually 
+reach, which is the 
+most legible good   
+this epic produces. 
+                    
+Why it loses: it was
+true yesterday and  
+stopped being true  
+today. The day four 
+contexts started    
+blocking, a host    
+nobody in this repo 
+controls acquired   
+the power to freeze 
+every merge in the  
+repository — and I  
+measured the        
+coupling live rather
+than inferring it   
+(not ok 56). Rival A
+spends the wave on  
+this epic’s screens 
+while every OTHER   
+concurrent wave pays
+the outage. And it  
+misreads the vision:
+a gate that reds for
+the wrong reason is 
+the same lie,       
+pointed at the fleet
+instead of at a     
+customer.           
+                    
+Rival B — THE LANE, 
+END TO END          
+                    
+An instrument wave. 
+Harden all four     
+required contexts,  
+finish s2, promote  
+D307, run the live  
+half of required-   
+checks.test.sh at   
+four contexts for   
+the first time,     
+adjudicate Security 
+gate’s              
+registrability now  
+that it is green.   
+The argument: the   
+merge lane is the   
+single highest-     
+leverage surface in 
+the repo and it has 
+never been exercised
+in its current      
+shape.              
+                    
+Why it loses: it    
+violates two of this
+epic’s own laws at  
+once. The ratio     
+floor demands four  
+person bodies. And  
+Standing Law 0 sends
+every gate,         
+generator, harness  
+and required-checks 
+row to the SUCCESSOR
+epic cch-           
+instruments-epic —  
+so an all-instrument
+wave filed under    
+this parent would   
+breach the filing   
+law that wave 28    
+just armed a door   
+guard for. Rival B  
+is a real wave; it  
+is the successor’s  
+wave, not this      
+one’s.              
+                    
+Why the winner won  
+                    
+The winner is not a 
+split of A and B. It
+is the observation  
+that the SAME       
+sentence generates  
+both halves, so the 
+wave does not have  
+to choose. "I could 
+not look" ≠ "the    
+thing is broken" is 
+what s2 teaches a   
+predicate, what the 
+lane slice teaches a
+required context,   
+and what four       
+screens on the board
+are already failing 
+at. A wave with one 
+sentence is a wave  
+whose Decide phase  
+can adjudicate      
+slices against a    
+criterion instead of
+a wishlist — and it 
+satisfies the ratio 
+floor with rows     
+chosen on merit     
+rather than on      
+quota.              
+                    
+The sharpest attack 
+on the winner, and  
+how the wave absorbs
+it                  
+                    
+THE GATE SLICE MAY  
+BE A NON-DEFECT, AND
+THE "FIX" MAY BE A  
+WEAKENING. On a dead
+server the predicate
+correctly emitted an
+INFRA FAULT and the 
+test correctly      
+redded. That is an  
+HONEST red. A wave  
+that makes it green 
+has softened a guard
+and called it       
+hardening — the     
+exact failure this  
+epic exists to      
+catch, committed by 
+the wave that cites 
+the standing test.  
+                    
+Absorbed, not       
+hedged. The wave    
+does not green the  
+red. The predicate’s
+exit-2 on an        
+unreachable server  
+is correct behaviour
+and is not touched. 
+The defect is       
+narrower and        
+different: a context
+that BLOCKS a merge 
+is asking a question
+whose answer lives  
+on a host outside   
+this repository. The
+remedy is relocation
+— the live assertion
+moves somewhere it  
+can be honestly red 
+without freezing the
+lane — plus a       
+hermetic control    
+that is just as     
+cruel and still     
+proves the contrast 
+the test exists to  
+prove (a live       
+refusal never       
+reaches the ladder; 
+--ladder-only does).
+Three wrong fixes   
+are banned by name  
+in the slice brief, 
+because each is     
+green by            
+construction under  
+standing clause 4:  
+                    
+1. try/catch around 
+   the spawn — the  
+   control passes on
+   a dead server AND
+   on a broken      
+   predicate.       
+2. assert(status ===
+   NO_SEAL || status
+   === INFRA) — a   
+   disjunction that 
+   admits the       
+   failure it was   
+   written to       
+   detect.          
+3. Deleting the     
+   control — the    
+   contrast at :1089
+   IS the slice that
+   shipped in wave  
+   11; removing it  
+   retires a real   
+   proof to buy a   
+   green.           
+                    
+Three further       
+assumptions that    
+could kill the      
+direction, each now 
+a survey question   
+rather than a hedge:
+(i) Cloud gate may  
+carry its own       
+foreign coupling I  
+have not measured — 
+survey 1; (ii) the  
+fix may require a   
+.github/workflows/**
+edit that collides  
+with the concurrent 
+PDS wave — survey   
+12; (iii) the four  
+person rows I named 
+may be outranked on 
+merit by rows I did 
+not (phone overflow,
+PAT-survives-       
+demotion, the       
+credential Back     
+button) — survey 7  
+ranks all 73 open   
+rows without        
+deference to this   
+direction.          
+                    
+Survey plan         
+                    
+Sixteen broad       
+assignments, one    
+Opus surveyor each  
+at medium effort.   
+Width now buys      
+precision at Verify.
+Every load-bearing  
+assumption in the   
+direction above     
+appears below as    
+something a surveyor
+can refute.         
+                    
+┌───┬────┬────┬────┐
+│ 1 │ ga │ Wa │ De │
+│   │ te │ lk │ ci │
+│   │ -f │ th │ de │
+│   │ or │ e  │ s  │
+│   │ ei │ ne │ wh │
+│   │ gn │ ed │ et │
+│   │ -h │ s  │ he │
+│   │ os │ gr │ r  │
+│   │ t  │ ap │ th │
+│   │    │ h  │ e  │
+│   │    │ of │ la │
+│   │    │ al │ ne │
+│   │    │ l  │ sl │
+│   │    │ fo │ ic │
+│   │    │ ur │ e  │
+│   │    │ re │ is │
+│   │    │ qu │ on │
+│   │    │ ir │ e  │
+│   │    │ ed │ li │
+│   │    │ co │ ne │
+│   │    │ nt │ or │
+│   │    │ ex │ a  │
+│   │    │ ts │ fa │
+│   │    │ an │ mi │
+│   │    │ d  │ ly │
+│   │    │ en │ —  │
+│   │    │ um │ an │
+│   │    │ er │ d  │
+│   │    │ at │ wh │
+│   │    │ e  │ et │
+│   │    │ ev │ he │
+│   │    │ er │ r  │
+│   │    │ y  │ Cl │
+│   │    │ co │ ou │
+│   │    │ mm │ d  │
+│   │    │ an │ ga │
+│   │    │ d  │ te │
+│   │    │ th │ ne │
+│   │    │ at │ ed │
+│   │    │ ca │ s  │
+│   │    │ n  │ it │
+│   │    │ re │ s  │
+│   │    │ ac │ ow │
+│   │    │ h  │ n  │
+│   │    │ a  │ sl │
+│   │    │ ho │ ic │
+│   │    │ st │ e. │
+│   │    │ th │    │
+│   │    │ is │    │
+│   │    │ re │    │
+│   │    │ po │    │
+│   │    │ do │    │
+│   │    │ es │    │
+│   │    │ no │    │
+│   │    │ t  │    │
+│   │    │ co │    │
+│   │    │ nt │    │
+│   │    │ ro │    │
+│   │    │ l. │    │
+│   │    │ I  │    │
+│   │    │ me │    │
+│   │    │ as │    │
+│   │    │ ur │    │
+│   │    │ ed │    │
+│   │    │ ex │    │
+│   │    │ ac │    │
+│   │    │ tl │    │
+│   │    │ y  │    │
+│   │    │ on │    │
+│   │    │ e  │    │
+│   │    │ un │    │
+│   │    │ de │    │
+│   │    │ r  │    │
+│   │    │ Co │    │
+│   │    │ ns │    │
+│   │    │ ol │    │
+│   │    │ e  │    │
+│   │    │ ga │    │
+│   │    │ te │    │
+│   │    │ .  │    │
+│   │    │ Is │    │
+│   │    │ th │    │
+│   │    │ at │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ on │    │
+│   │    │ ly │    │
+│   │    │ on │    │
+│   │    │ e? │    │
+│ 2 │ ga │ Th │ Th │
+│   │ te │ e  │ e  │
+│   │ -h │ fi │ se │
+│   │ is │ ve │ co │
+│   │ to │ la │ nd │
+│   │ ry │ dd │ ha │
+│   │ -c │ er │ lf │
+│   │ ou │ On │ of │
+│   │ pl │ ly │ th │
+│   │ in │ Ru │ e  │
+│   │ g  │ n  │ la │
+│   │    │ si │ ne │
+│   │    │ te │ sl │
+│   │    │ s  │ ic │
+│   │    │ re │ e. │
+│   │    │ ad │ s1 │
+│   │    │ RE │ pr │
+│   │    │ AL │ ov │
+│   │    │ gi │ ed │
+│   │    │ t  │ 65 │
+│   │    │ hi │ /6 │
+│   │    │ st │ 5  │
+│   │    │ or │ in │
+│   │    │ y  │ a  │
+│   │    │ th │ de │
+│   │    │ ro │ pt │
+│   │    │ ug │ h- │
+│   │    │ h  │ 1  │
+│   │    │ -- │ cl │
+│   │    │ re │ on │
+│   │    │ po │ e  │
+│   │    │ RE │ —  │
+│   │    │ PO │ so │
+│   │    │ .  │ ei │
+│   │    │ Do │ th │
+│   │    │ th │ er │
+│   │    │ ey │ th │
+│   │    │ su │ e  │
+│   │    │ rv │ co │
+│   │    │ iv │ up │
+│   │    │ e  │ li │
+│   │    │ a  │ ng │
+│   │    │ re │ is │
+│   │    │ al │ be │
+│   │    │ gi │ ni │
+│   │    │ t  │ gn │
+│   │    │ cl │ or │
+│   │    │ on │ s1 │
+│   │    │ e  │ ’s │
+│   │    │ -- │ cl │
+│   │    │ de │ on │
+│   │    │ pt │ e  │
+│   │    │ h  │ di │
+│   │    │ 1  │ ff │
+│   │    │ -- │ er │
+│   │    │ no │ ed │
+│   │    │ -l │ fr │
+│   │    │ oc │ om │
+│   │    │ al │ CI │
+│   │    │ ?  │ ’s │
+│   │    │ Ro │ .  │
+│   │    │ w  │    │
+│   │    │ cc │    │
+│   │    │ h- │    │
+│   │    │ w2 │    │
+│   │    │ 8- │    │
+│   │    │ fo │    │
+│   │    │ ll │    │
+│   │    │ ow │    │
+│   │    │ up │    │
+│   │    │ -s │    │
+│   │    │ ea │    │
+│   │    │ l- │    │
+│   │    │ su │    │
+│   │    │ it │    │
+│   │    │ e- │    │
+│   │    │ de │    │
+│   │    │ pt │    │
+│   │    │ h1 │    │
+│   │    │ -c │    │
+│   │    │ ou │    │
+│   │    │ pl │    │
+│   │    │ in │    │
+│   │    │ g  │    │
+│   │    │ (0 │    │
+│   │    │ /2 │    │
+│   │    │ )  │    │
+│   │    │ as │    │
+│   │    │ ks │    │
+│   │    │ ex │    │
+│   │    │ ac │    │
+│   │    │ tl │    │
+│   │    │ y  │    │
+│   │    │ th │    │
+│   │    │ is │    │
+│   │    │ .  │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│ 3 │ s2 │ Ma │ s2 │
+│   │ -c │ p  │ is │
+│   │ ri │ s2 │ ma │
+│   │ te │ ’s │ nd │
+│   │ ri │ ni │ at │
+│   │ a- │ ne │ ed │
+│   │ to │ cr │ an │
+│   │ -b │ it │ d  │
+│   │ yt │ er │ it │
+│   │ es │ ia │ s  │
+│   │    │ to │ po │
+│   │    │ th │ rt │
+│   │    │ e  │ ci │
+│   │    │ ex │ ta │
+│   │    │ ac │ ti │
+│   │    │ t  │ on │
+│   │    │ by │ is │
+│   │    │ te │ a  │
+│   │    │ s  │ pr │
+│   │    │ th │ em │
+│   │    │ ey │ is │
+│   │    │ ch │ e  │
+│   │    │ an │ no │
+│   │    │ ge │ bo │
+│   │    │ in │ dy │
+│   │    │ se │ ha │
+│   │    │ al │ s  │
+│   │    │ -p │ sm │
+│   │    │ re │ ok │
+│   │    │ di │ ed │
+│   │    │ ca │ .  │
+│   │    │ te │ Th │
+│   │    │ .m │ at │
+│   │    │ js │ fi │
+│   │    │ .  │ le │
+│   │    │ Co │ is │
+│   │    │ nf │ PD │
+│   │    │ ir │ S- │
+│   │    │ m  │ ow │
+│   │    │ th │ ne │
+│   │    │ e  │ d. │
+│   │    │ po │    │
+│   │    │ rt │    │
+│   │    │ so │    │
+│   │    │ ur │    │
+│   │    │ ce │    │
+│   │    │ sc │    │
+│   │    │ ri │    │
+│   │    │ pt │    │
+│   │    │ s/ │    │
+│   │    │ pd │    │
+│   │    │ s- │    │
+│   │    │ re │    │
+│   │    │ co │    │
+│   │    │ rd │    │
+│   │    │ -p │    │
+│   │    │ ar │    │
+│   │    │ it │    │
+│   │    │ y. │    │
+│   │    │ sh │    │
+│   │    │ :2 │    │
+│   │    │ 61 │    │
+│   │    │ wa │    │
+│   │    │ lk │    │
+│   │    │ _t │    │
+│   │    │ ru │    │
+│   │    │ nc │    │
+│   │    │ at │    │
+│   │    │ io │    │
+│   │    │ n( │    │
+│   │    │ )  │    │
+│   │    │ ex │    │
+│   │    │ is │    │
+│   │    │ ts │    │
+│   │    │ on │    │
+│   │    │ or │    │
+│   │    │ ig │    │
+│   │    │ in │    │
+│   │    │ /m │    │
+│   │    │ ai │    │
+│   │    │ n  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ do │    │
+│   │    │ es │    │
+│   │    │ wh │    │
+│   │    │ at │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ cr │    │
+│   │    │ it │    │
+│   │    │ er │    │
+│   │    │ io │    │
+│   │    │ n  │    │
+│   │    │ cl │    │
+│   │    │ ai │    │
+│   │    │ ms │    │
+│   │    │ .  │    │
+│ 4 │ s2 │ Tr │ Ge │
+│   │ -e │ ac │ tt │
+│   │ xi │ e  │ in │
+│   │ t- │ ho │ g  │
+│   │ co │ w  │ th │
+│   │ nt │ In │ is │
+│   │ ra │ fr │ wr │
+│   │ ct │ a  │ on │
+│   │    │ pr │ g  │
+│   │    │ op │ re │
+│   │    │ ag │ ds │
+│   │    │ at │ a  │
+│   │    │ es │ co │
+│   │    │ to │ nt │
+│   │    │ th │ ro │
+│   │    │ e  │ l  │
+│   │    │ ex │ th │
+│   │    │ it │ at │
+│   │    │ co │ is │
+│   │    │ de │ al │
+│   │    │ ,  │ re │
+│   │    │ an │ ad │
+│   │    │ d  │ y  │
+│   │    │ fi │ me │
+│   │    │ nd │ rg │
+│   │    │ wh │ ed │
+│   │    │ er │ .  │
+│   │    │ e  │ Th │
+│   │    │ a  │ e  │
+│   │    │ HI │ tr │
+│   │    │ ST │ ip │
+│   │    │ OR │ wi │
+│   │    │ Y- │ re │
+│   │    │ UN │ is │
+│   │    │ AV │ ar │
+│   │    │ AI │ me │
+│   │    │ LA │ d  │
+│   │    │ BL │ on │
+│   │    │ E  │ pu │
+│   │    │ LE │ rp │
+│   │    │ TT │ os │
+│   │    │ ER │ e. │
+│   │    │ ca │    │
+│   │    │ n  │    │
+│   │    │ be │    │
+│   │    │ em │    │
+│   │    │ it │    │
+│   │    │ te │    │
+│   │    │ d  │    │
+│   │    │ at │    │
+│   │    │ ex │    │
+│   │    │ it │    │
+│   │    │ 1  │    │
+│   │    │ wi │    │
+│   │    │ th │    │
+│   │    │ ou │    │
+│   │    │ t  │    │
+│   │    │ to │    │
+│   │    │ uc │    │
+│   │    │ hi │    │
+│   │    │ ng │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ ex │    │
+│   │    │ it │    │
+│   │    │ -2 │    │
+│   │    │ pa │    │
+│   │    │ th │    │
+│   │    │ .  │    │
+│   │    │ Ru │    │
+│   │    │ n  │    │
+│   │    │ s1 │    │
+│   │    │ ’s │    │
+│   │    │ cl │    │
+│   │    │ au │    │
+│   │    │ se │    │
+│   │    │ -( │    │
+│   │    │ a) │    │
+│   │    │ as │    │
+│   │    │ se │    │
+│   │    │ rt │    │
+│   │    │ io │    │
+│   │    │ ns │    │
+│   │    │ ag │    │
+│   │    │ ai │    │
+│   │    │ ns │    │
+│   │    │ t  │    │
+│   │    │ a  │    │
+│   │    │ ca │    │
+│   │    │ nd │    │
+│   │    │ id │    │
+│   │    │ at │    │
+│   │    │ e  │    │
+│   │    │ sh │    │
+│   │    │ ap │    │
+│   │    │ e. │    │
+│ 5 │ pe │ Fi │ Th │
+│   │ rs │ nd │ e  │
+│   │ on │ th │ pu │
+│   │ -u │ e  │ re │
+│   │ nm │ SE │ st │
+│   │ et │ RV │ pe │
+│   │ er │ ER │ rs │
+│   │ ed │ pr │ on │
+│   │    │ od │ -f │
+│   │    │ uc │ ac │
+│   │    │ er │ in │
+│   │    │ of │ g  │
+│   │    │ us │ in │
+│   │    │ ag │ st │
+│   │    │ e  │ an │
+│   │    │ me │ ce │
+│   │    │ te │ of │
+│   │    │ rs │ th │
+│   │    │ an │ e  │
+│   │    │ d  │ wa │
+│   │    │ th │ ve │
+│   │    │ e  │ ’s │
+│   │    │ cl │ se │
+│   │    │ ie │ nt │
+│   │    │ nt │ en │
+│   │    │ re │ ce │
+│   │    │ nd │ .  │
+│   │    │ er │ If │
+│   │    │ .  │ it │
+│   │    │ Pr │ re │
+│   │    │ ov │ fu │
+│   │    │ e  │ te │
+│   │    │ or │ s, │
+│   │    │ re │ th │
+│   │    │ fu │ e  │
+│   │    │ te │ ra │
+│   │    │ :  │ ti │
+│   │    │ a  │ o  │
+│   │    │ me │ ne │
+│   │    │ te │ ed │
+│   │    │ r  │ s  │
+│   │    │ wh │ an │
+│   │    │ os │ ot │
+│   │    │ e  │ he │
+│   │    │ me │ r  │
+│   │    │ as │ bo │
+│   │    │ ur │ dy │
+│   │    │ em │ .  │
+│   │    │ en │    │
+│   │    │ t  │    │
+│   │    │ CR │    │
+│   │    │ AS │    │
+│   │    │ HE │    │
+│   │    │ D  │    │
+│   │    │ re │    │
+│   │    │ ac │    │
+│   │    │ he │    │
+│   │    │ s  │    │
+│   │    │ a  │    │
+│   │    │ pe │    │
+│   │    │ rs │    │
+│   │    │ on │    │
+│   │    │ as │    │
+│   │    │ un │    │
+│   │    │ me │    │
+│   │    │ te │    │
+│   │    │ re │    │
+│   │    │ d  │    │
+│   │    │ —  │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ pr │    │
+│   │    │ od │    │
+│   │    │ uc │    │
+│   │    │ t’ │    │
+│   │    │ s  │    │
+│   │    │ ow │    │
+│   │    │ n  │    │
+│   │    │ wo │    │
+│   │    │ rd │    │
+│   │    │ fo │    │
+│   │    │ r  │    │
+│   │    │ a  │    │
+│   │    │ de │    │
+│   │    │ li │    │
+│   │    │ be │    │
+│   │    │ ra │    │
+│   │    │ te │    │
+│   │    │ no │    │
+│   │    │ n- │    │
+│   │    │ me │    │
+│   │    │ as │    │
+│   │    │ ur │    │
+│   │    │ em │    │
+│   │    │ en │    │
+│   │    │ t. │    │
+│   │    │ Na │    │
+│   │    │ me │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ no │    │
+│   │    │ n- │    │
+│   │    │ ad │    │
+│   │    │ mi │    │
+│   │    │ n  │    │
+│   │    │ ro │    │
+│   │    │ ut │    │
+│   │    │ e. │    │
+│ 6 │ pe │ Co │ Wi │
+│   │ rs │ nf │ sh │
+│   │ on │ ir │ it │
+│   │ -d │ m  │ em │
+│   │ om │ th │ 5, │
+│   │ ai │ e  │ tw │
+│   │ n- │ ar │ o  │
+│   │ ru │ ia │ ha │
+│   │ ng │ -l │ lv │
+│   │    │ ab │ es │
+│   │    │ el │ in │
+│   │    │ an │ on │
+│   │    │ un │ e  │
+│   │    │ kn │ sl │
+│   │    │ ow │ ic │
+│   │    │ n  │ e. │
+│   │    │ ru │ Th │
+│   │    │ ng │ e  │
+│   │    │ pr │ pu │
+│   │    │ od │ re │
+│   │    │ uc │ fo │
+│   │    │ es │ ld │
+│   │    │ ,  │ is │
+│   │    │ wh │ al │
+│   │    │ et │ re │
+│   │    │ he │ ad │
+│   │    │ r  │ y  │
+│   │    │ .d │ ho │
+│   │    │ om │ ne │
+│   │    │ -r │ st │
+│   │    │ un │ —  │
+│   │    │ g- │ th │
+│   │    │ -u │ is │
+│   │    │ nk │ is │
+│   │    │ no │ a  │
+│   │    │ wn │ re │
+│   │    │ CS │ nd │
+│   │    │ S  │ er │
+│   │    │ ex │ de │
+│   │    │ is │ fe │
+│   │    │ ts │ ct │
+│   │    │ at │ ,  │
+│   │    │ al │ wh │
+│   │    │ l, │ ic │
+│   │    │ an │ h  │
+│   │    │ d  │ ma │
+│   │    │ ma │ ke │
+│   │    │ p  │ s  │
+│   │    │ th │ it │
+│   │    │ e  │ sm │
+│   │    │ TE │ al │
+│   │    │ RM │ l  │
+│   │    │ IN │ an │
+│   │    │ AL │ d  │
+│   │    │ ha │ pr │
+│   │    │ lf │ ov │
+│   │    │ :  │ ab │
+│   │    │ wh │ le │
+│   │    │ er │ .  │
+│   │    │ e  │    │
+│   │    │ te │    │
+│   │    │ rm │    │
+│   │    │ in │    │
+│   │    │ al │    │
+│   │    │ st │    │
+│   │    │ op │    │
+│   │    │ s  │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ 4s │    │
+│   │    │ po │    │
+│   │    │ ll │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ wh │    │
+│   │    │ at │    │
+│   │    │ mo │    │
+│   │    │ un │    │
+│   │    │ t  │    │
+│   │    │ co │    │
+│   │    │ ul │    │
+│   │    │ d  │    │
+│   │    │ ho │    │
+│   │    │ st │    │
+│   │    │ a  │    │
+│   │    │ re │    │
+│   │    │ -c │    │
+│   │    │ he │    │
+│   │    │ ck │    │
+│   │    │ co │    │
+│   │    │ nt │    │
+│   │    │ ro │    │
+│   │    │ l. │    │
+│ 7 │ pe │ Re │ Am │
+│   │ rs │ ad │ mu │
+│   │ on │ al │ ni │
+│   │ -r │ l  │ ti │
+│   │ ow │ 73 │ on │
+│   │ -r │ op │ ag │
+│   │ an │ en │ ai │
+│   │ ki │ ch │ ns │
+│   │ ng │ il │ t  │
+│   │    │ dr │ my │
+│   │    │ en │ ow │
+│   │    │ (b │ n  │
+│   │    │ p  │ di │
+│   │    │ ta │ re │
+│   │    │ sk │ ct │
+│   │    │ ge │ io │
+│   │    │ t  │ n. │
+│   │    │ cl │ Th │
+│   │    │ ou │ e  │
+│   │    │ d- │ ra │
+│   │    │ co │ ti │
+│   │    │ ns │ o  │
+│   │    │ ol │ pi │
+│   │    │ e- │ ck │
+│   │    │ ha │ s  │
+│   │    │ rd │ mu │
+│   │    │ en │ st │
+│   │    │ in │ be │
+│   │    │ g- │ at │
+│   │    │ ep │ th │
+│   │    │ ic │ e  │
+│   │    │ -o │ al │
+│   │    │ js │ te │
+│   │    │ on │ rn │
+│   │    │ →  │ at │
+│   │    │ .c │ iv │
+│   │    │ hi │ es │
+│   │    │ ld │ on │
+│   │    │ re │ me │
+│   │    │ n, │ ri │
+│   │    │ ke │ t, │
+│   │    │ y  │ no │
+│   │    │ do │ t  │
+│   │    │ c_ │ on │
+│   │    │ id │ fi │
+│   │    │ )  │ tt │
+│   │    │ an │ in │
+│   │    │ d  │ g  │
+│   │    │ ra │ my │
+│   │    │ nk │ se │
+│   │    │ ev │ nt │
+│   │    │ er │ en │
+│   │    │ y  │ ce │
+│   │    │ pe │ .  │
+│   │    │ rs │    │
+│   │    │ on │    │
+│   │    │ -f │    │
+│   │    │ ac │    │
+│   │    │ in │    │
+│   │    │ g  │    │
+│   │    │ ro │    │
+│   │    │ w  │    │
+│   │    │ by │    │
+│   │    │ ho │    │
+│   │    │ w  │    │
+│   │    │ ba │    │
+│   │    │ dl │    │
+│   │    │ y  │    │
+│   │    │ a  │    │
+│   │    │ re │    │
+│   │    │ al │    │
+│   │    │ pe │    │
+│   │    │ rs │    │
+│   │    │ on │    │
+│   │    │ is │    │
+│   │    │ mi │    │
+│   │    │ si │    │
+│   │    │ nf │    │
+│   │    │ or │    │
+│   │    │ me │    │
+│   │    │ d, │    │
+│   │    │ no │    │
+│   │    │ n- │    │
+│   │    │ ad │    │
+│   │    │ mi │    │
+│   │    │ n  │    │
+│   │    │ re │    │
+│   │    │ ac │    │
+│   │    │ ha │    │
+│   │    │ bi │    │
+│   │    │ li │    │
+│   │    │ ty │    │
+│   │    │ ,  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ sl │    │
+│   │    │ ic │    │
+│   │    │ e  │    │
+│   │    │ si │    │
+│   │    │ ze │    │
+│   │    │ .  │    │
+│   │    │ In │    │
+│   │    │ cl │    │
+│   │    │ ud │    │
+│   │    │ e  │    │
+│   │    │ ro │    │
+│   │    │ ws │    │
+│   │    │ th │    │
+│   │    │ is │    │
+│   │    │ di │    │
+│   │    │ re │    │
+│   │    │ ct │    │
+│   │    │ io │    │
+│   │    │ n  │    │
+│   │    │ di │    │
+│   │    │ d  │    │
+│   │    │ NO │    │
+│   │    │ T  │    │
+│   │    │ na │    │
+│   │    │ me │    │
+│ 8 │ w2 │ Re │ Wi │
+│   │ 2s │ -d │ sh │
+│   │ 7- │ er │ it │
+│   │ re │ iv │ em │
+│   │ ma │ e  │ 6. │
+│   │ in │ cc │ D3 │
+│   │ de │ h- │ 25 │
+│   │ r  │ w2 │ sa │
+│   │    │ 2- │ id │
+│   │    │ s7 │ st │
+│   │    │ ag │ am │
+│   │    │ ai │ p  │
+│   │    │ ns │ fi │
+│   │    │ t  │ ve │
+│   │    │ or │ an │
+│   │    │ ig │ d  │
+│   │    │ in │ ki │
+│   │    │ /m │ ll │
+│   │    │ ai │ C9 │
+│   │    │ n: │ ;  │
+│   │    │ wh │ D3 │
+│   │    │ ic │ 34 │
+│   │    │ h  │ re │
+│   │    │ of │ fu │
+│   │    │ it │ te │
+│   │    │ s  │ d  │
+│   │    │ 16 │ th │
+│   │    │ cr │ e  │
+│   │    │ it │ ki │
+│   │    │ er │ ll │
+│   │    │ ia │ on │
+│   │    │ ar │ BO │
+│   │    │ e  │ TH │
+│   │    │ st │ st │
+│   │    │ am │ at │
+│   │    │ pa │ ed │
+│   │    │ bl │ re │
+│   │    │ e  │ as │
+│   │    │ TO │ on │
+│   │    │ DA │ s. │
+│   │    │ Y, │ So │
+│   │    │ an │ me │
+│   │    │ d  │ bo │
+│   │    │ is │ dy │
+│   │    │ D3 │ ha │
+│   │    │ 34 │ s  │
+│   │    │ ’s │ to │
+│   │    │ C9 │ se │
+│   │    │ re │ tt │
+│   │    │ -s │ le │
+│   │    │ co │ it │
+│   │    │ pe │ ag │
+│   │    │ a  │ ai │
+│   │    │ re │ ns │
+│   │    │ al │ t  │
+│   │    │ bu │ re │
+│   │    │ il │ al │
+│   │    │ da │ by │
+│   │    │ bl │ te │
+│   │    │ e  │ s. │
+│   │    │ le │    │
+│   │    │ g? │    │
+│   │    │ Th │    │
+│   │    │ e  │    │
+│   │    │ su │    │
+│   │    │ bs │    │
+│   │    │ ta │    │
+│   │    │ nt │    │
+│   │    │ iv │    │
+│   │    │ e  │    │
+│   │    │ de │    │
+│   │    │ fe │    │
+│   │    │ ct │    │
+│   │    │ is │    │
+│   │    │ th │    │
+│   │    │ at │    │
+│   │    │ ov │    │
+│   │    │ er │    │
+│   │    │ fl │    │
+│   │    │ ow │    │
+│   │    │ -g │    │
+│   │    │ ua │    │
+│   │    │ rd │    │
+│   │    │ .m │    │
+│   │    │ js │    │
+│   │    │ :4 │    │
+│   │    │ 08 │    │
+│   │    │ 3  │    │
+│   │    │ co │    │
+│   │    │ ll │    │
+│   │    │ ec │    │
+│   │    │ ts │    │
+│   │    │ ws │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ te │    │
+│   │    │ bu │    │
+│   │    │ t  │    │
+│   │    │ no │    │
+│   │    │ t  │    │
+│   │    │ ov │    │
+│   │    │ er │    │
+│   │    │ fl │    │
+│   │    │ ow │    │
+│   │    │ ,  │    │
+│   │    │ wh │    │
+│   │    │ il │    │
+│   │    │ e  │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ mo │    │
+│   │    │ de │    │
+│   │    │ l  │    │
+│   │    │ ar │    │
+│   │    │ m  │    │
+│   │    │ at │    │
+│   │    │ :4 │    │
+│   │    │ 53 │    │
+│   │    │ 4  │    │
+│   │    │ co │    │
+│   │    │ ll │    │
+│   │    │ ec │    │
+│   │    │ ts │    │
+│   │    │ ov │    │
+│   │    │ :  │    │
+│   │    │ cs │    │
+│   │    │ .o │    │
+│   │    │ ve │    │
+│   │    │ rf │    │
+│   │    │ lo │    │
+│   │    │ w. │    │
+│ 9 │ d3 │ Wh │ De │
+│   │ 07 │ at │ ci │
+│   │ -p │ wo │ de │
+│   │ ro │ ul │ s  │
+│   │ mo │ d  │ sl │
+│   │ ti │ ac │ ic │
+│   │ on │ tu │ e  │
+│   │ -c │ al │ vs │
+│   │ os │ ly │ .  │
+│   │ t  │ tu │ de │
+│   │    │ rn │ fe │
+│   │    │ th │ r- │
+│   │    │ e  │ wi │
+│   │    │ AB │ th │
+│   │    │ SE │ -a │
+│   │    │ NT │ -s │
+│   │    │ ti │ en │
+│   │    │ er │ te │
+│   │    │ ha │ nc │
+│   │    │ rd │ e. │
+│   │    │ ?  │ Do │
+│   │    │ Re │ no │
+│   │    │ ad │ t  │
+│   │    │ wr │ re │
+│   │    │ it │ st │
+│   │    │ er │ at │
+│   │    │ .e │ e  │
+│   │    │ x: │ th │
+│   │    │ 74 │ e  │
+│   │    │ 9- │ sc │
+│   │    │ 88 │ op │
+│   │    │ 0  │ in │
+│   │    │ in │ g  │
+│   │    │ cl │ le │
+│   │    │ ud │ g  │
+│   │    │ in │ as │
+│   │    │ g  │ lo │
+│   │    │ th │ ad │
+│   │    │ e  │ -b │
+│   │    │ co │ ea │
+│   │    │ rr │ ri │
+│   │    │ ec │ ng │
+│   │    │ te │ —  │
+│   │    │ d  │ th │
+│   │    │ co │ e  │
+│   │    │ mm │ me │
+│   │    │ en │ as │
+│   │    │ t  │ ur │
+│   │    │ at │ ed │
+│   │    │ :8 │ mu │
+│   │    │ 24 │ ta │
+│   │    │ -8 │ ti │
+│   │    │ 34 │ on │
+│   │    │ ,  │ is │
+│   │    │ fi │ 46 │
+│   │    │ nd │ te │
+│   │    │ wh │ st │
+│   │    │ et │ s  │
+│   │    │ he │ /  │
+│   │    │ r  │ 1  │
+│   │    │ a  │ fa │
+│   │    │ su │ il │
+│   │    │ rf │ ur │
+│   │    │ ac │ e. │
+│   │    │ e  │    │
+│   │    │ EN │    │
+│   │    │ UM │    │
+│   │    │ ex │    │
+│   │    │ is │    │
+│   │    │ ts │    │
+│   │    │ as │    │
+│   │    │ sc │    │
+│   │    │ he │    │
+│   │    │ ma │    │
+│   │    │ an │    │
+│   │    │ yw │    │
+│   │    │ he │    │
+│   │    │ re │    │
+│   │    │ ,  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ re │    │
+│   │    │ -d │    │
+│   │    │ er │    │
+│   │    │ iv │    │
+│   │    │ e  │    │
+│   │    │ D3 │    │
+│   │    │ 31 │    │
+│   │    │ ’s │    │
+│   │    │ ba │    │
+│   │    │ ck │    │
+│   │    │ fi │    │
+│   │    │ ll │    │
+│   │    │ nu │    │
+│   │    │ mb │    │
+│   │    │ er │    │
+│   │    │ s  │    │
+│   │    │ ag │    │
+│   │    │ ai │    │
+│   │    │ ns │    │
+│   │    │ t  │    │
+│   │    │ TO │    │
+│   │    │ DA │    │
+│   │    │ Y’ │    │
+│   │    │ s  │    │
+│   │    │ ro │    │
+│   │    │ st │    │
+│   │    │ er │    │
+│   │    │ .  │    │
+│ 1 │ re │ Co │ RE │
+│ 0 │ qu │ nf │ GI │
+│   │ ir │ ir │ ST │
+│   │ ed │ m  │ ER │
+│   │ -c │ li │ NO │
+│   │ he │ ve │ TH │
+│   │ ck │ pr │ IN │
+│   │ s- │ ot │ G  │
+│   │ fr │ ec │ is │
+│   │ oz │ ti │ th │
+│   │ en │ on │ e  │
+│   │    │ ma │ st │
+│   │    │ tc │ an │
+│   │    │ he │ di │
+│   │    │ s  │ ng │
+│   │    │ th │ in │
+│   │    │ e  │ st │
+│   │    │ co │ ru │
+│   │    │ mm │ ct │
+│   │    │ it │ io │
+│   │    │ te │ n. │
+│   │    │ d  │ I  │
+│   │    │ sp │ ne │
+│   │    │ ec │ ed │
+│   │    │ on │ to │
+│   │    │ co │ kn │
+│   │    │ nt │ ow │
+│   │    │ ex │ pr │
+│   │    │ t  │ ec │
+│   │    │ AN │ is │
+│   │    │ D  │ el │
+│   │    │ ap │ y  │
+│   │    │ p_ │ wh │
+│   │    │ id │ at │
+│   │    │ .  │ "n │
+│   │    │ Re │ ot │
+│   │    │ ad │ hi │
+│   │    │ re │ ng │
+│   │    │ qu │ "  │
+│   │    │ ir │ ex │
+│   │    │ ed │ cl │
+│   │    │ -c │ ud │
+│   │    │ he │ es │
+│   │    │ ck │ —  │
+│   │    │ s- │ in │
+│   │    │ ve │ cl │
+│   │    │ ri │ ud │
+│   │    │ fy │ in │
+│   │    │ .s │ g  │
+│   │    │ h, │ wh │
+│   │    │ -f │ et │
+│   │    │ lo │ he │
+│   │    │ or │ r  │
+│   │    │ .s │ a  │
+│   │    │ h, │ wo │
+│   │    │ -g │ rk │
+│   │    │ en │ fl │
+│   │    │ er │ ow │
+│   │    │ at │ re │
+│   │    │ e. │ na │
+│   │    │ sh │ me │
+│   │    │ .  │ co │
+│   │    │ Wh │ un │
+│   │    │ at │ ts │
+│   │    │ co │ .  │
+│   │    │ ul │    │
+│   │    │ d  │    │
+│   │    │ a  │    │
+│   │    │ wa │    │
+│   │    │ ve │    │
+│   │    │ do │    │
+│   │    │ th │    │
+│   │    │ at │    │
+│   │    │ si │    │
+│   │    │ le │    │
+│   │    │ nt │    │
+│   │    │ ly │    │
+│   │    │ re │    │
+│   │    │ -o │    │
+│   │    │ pe │    │
+│   │    │ ns │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ dr │    │
+│ 1 │ gu │ Ho │ Si │
+│ 1 │ er │ w  │ ze │
+│   │ ri │ re │ s  │
+│   │ ll │ li │ th │
+│   │ a- │ ab │ e  │
+│   │ as │ le │ ri │
+│   │ -c │ is │ sk │
+│   │ i- │ gu │ th │
+│   │ de │ er │ e  │
+│   │ pe │ ri │ la │
+│   │ nd │ ll │ ne │
+│   │ en │ a. │ sl │
+│   │ cy │ ba │ ic │
+│   │    │ rk │ e  │
+│   │    │ pa │ re │
+│   │    │ rk │ mo │
+│   │    │ .c │ ve │
+│   │    │ lo │ s. │
+│   │    │ ud │ If │
+│   │    │ as │ gu │
+│   │    │ a  │ er │
+│   │    │ CI │ ri │
+│   │    │ de │ ll │
+│   │    │ pe │ a  │
+│   │    │ nd │ ha │
+│   │    │ en │ s  │
+│   │    │ cy │ ne │
+│   │    │ ?  │ ve │
+│   │    │ I  │ r  │
+│   │    │ me │ bl │
+│   │    │ as │ in │
+│   │    │ ur │ ke │
+│   │    │ ed │ d, │
+│   │    │ th │ th │
+│   │    │ e  │ e  │
+│   │    │ ro │ sl │
+│   │    │ st │ ic │
+│   │    │ er │ e  │
+│   │    │ qu │ is │
+│   │    │ er │ pr │
+│   │    │ y  │ ud │
+│   │    │ an │ en │
+│   │    │ on │ ce │
+│   │    │ ym │ ;  │
+│   │    │ ou │ if │
+│   │    │ s, │ it │
+│   │    │ 20 │ 50 │
+│   │    │ 0, │ 3s │
+│   │    │ 34 │ on │
+│   │    │ 0m │ th │
+│   │    │ s. │ is │
+│   │    │ Se │ re │
+│   │    │ ar │ po │
+│   │    │ ch │ ’s │
+│   │    │ bp │ ow │
+│   │    │ pa │ n  │
+│   │    │ pe │ me │
+│   │    │ rs │ rg │
+│   │    │ /t │ es │
+│   │    │ as │ ,  │
+│   │    │ ks │ it │
+│   │    │ an │ is │
+│   │    │ d  │ ur │
+│   │    │ th │ ge │
+│   │    │ e  │ nt │
+│   │    │ re │ .  │
+│   │    │ po │    │
+│   │    │ fo │    │
+│   │    │ r  │    │
+│   │    │ re │    │
+│   │    │ co │    │
+│   │    │ rd │    │
+│   │    │ ed │    │
+│   │    │ ou │    │
+│   │    │ ta │    │
+│   │    │ ge │    │
+│   │    │ s, │    │
+│   │    │ 50 │    │
+│   │    │ 3s │    │
+│   │    │ on │    │
+│   │    │ cl │    │
+│   │    │ ou │    │
+│   │    │ d/ │    │
+│   │    │ ** │    │
+│   │    │ me │    │
+│   │    │ rg │    │
+│   │    │ es │    │
+│   │    │ ,  │    │
+│   │    │ ra │    │
+│   │    │ te │    │
+│   │    │ li │    │
+│   │    │ mi │    │
+│   │    │ ts │    │
+│   │    │ ,  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ an │    │
+│   │    │ y  │    │
+│   │    │ pl │    │
+│   │    │ an │    │
+│   │    │ ne │    │
+│   │    │ d  │    │
+│   │    │ AC │    │
+│   │    │ L  │    │
+│   │    │ ch │    │
+│   │    │ an │    │
+│   │    │ ge │    │
+│   │    │ .  │    │
+│ 1 │ pd │ Th │ A  │
+│ 2 │ s- │ e  │ co │
+│   │ co │ PD │ ll │
+│   │ ll │ S  │ is │
+│   │ is │ wa │ io │
+│   │ io │ ve │ n  │
+│   │ n- │ ru │ is │
+│   │ ma │ ns │ fa │
+│   │ p  │ co │ r  │
+│   │    │ nc │ ch │
+│   │    │ ur │ ea │
+│   │    │ re │ pe │
+│   │    │ nt │ r  │
+│   │    │ ly │ to │
+│   │    │ on │ ro │
+│   │    │ ap │ ut │
+│   │    │ i/ │ e  │
+│   │    │ ** │ ar │
+│   │    │ ,  │ ou │
+│   │    │ sc │ nd │
+│   │    │ ri │ at │
+│   │    │ pt │ De │
+│   │    │ s/ │ ci │
+│   │    │ pd │ de │
+│   │    │ s- │ th │
+│   │    │ *. │ an │
+│   │    │ En │ to │
+│   │    │ um │ me │
+│   │    │ er │ rg │
+│   │    │ at │ e  │
+│   │    │ e  │ ou │
+│   │    │ op │ t  │
+│   │    │ en │ of │
+│   │    │ PR │ at │
+│   │    │ s, │ Bu │
+│   │    │ li │ il │
+│   │    │ ve │ d. │
+│   │    │ wo │    │
+│   │    │ rk │    │
+│   │    │ tr │    │
+│   │    │ ee │    │
+│   │    │ s  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ re │    │
+│   │    │ ce │    │
+│   │    │ nt │    │
+│   │    │ co │    │
+│   │    │ mm │    │
+│   │    │ it │    │
+│   │    │ s  │    │
+│   │    │ ho │    │
+│   │    │ ld │    │
+│   │    │ in │    │
+│   │    │ g  │    │
+│   │    │ an │    │
+│   │    │ yt │    │
+│   │    │ hi │    │
+│   │    │ ng │    │
+│   │    │ my │    │
+│   │    │ ca │    │
+│   │    │ nd │    │
+│   │    │ id │    │
+│   │    │ at │    │
+│   │    │ e  │    │
+│   │    │ sl │    │
+│   │    │ ic │    │
+│   │    │ es │    │
+│   │    │ to │    │
+│   │    │ uc │    │
+│   │    │ h  │    │
+│   │    │ —  │    │
+│   │    │ es │    │
+│   │    │ pe │    │
+│   │    │ ci │    │
+│   │    │ al │    │
+│   │    │ ly │    │
+│   │    │ sc │    │
+│   │    │ ri │    │
+│   │    │ pt │    │
+│   │    │ s/ │    │
+│   │    │ pd │    │
+│   │    │ s- │    │
+│   │    │ re │    │
+│   │    │ co │    │
+│   │    │ rd │    │
+│   │    │ -p │    │
+│   │    │ ar │    │
+│   │    │ it │    │
+│   │    │ y. │    │
+│   │    │ sh │    │
+│   │    │ (s │    │
+│   │    │ 2’ │    │
+│   │    │ s  │    │
+│   │    │ po │    │
+│   │    │ rt │    │
+│   │    │ so │    │
+│   │    │ ur │    │
+│   │    │ ce │    │
+│   │    │ )  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ sc │    │
+│   │    │ ri │    │
+│   │    │ pt │    │
+│   │    │ s/ │    │
+│   │    │ el │    │
+│   │    │ ix │    │
+│   │    │ ir │    │
+│   │    │ -p │    │
+│   │    │ at │    │
+│   │    │ h- │    │
+│   │    │ es │    │
+│   │    │ ca │    │
+│   │    │ pe │    │
+│   │    │ -c │    │
+│   │    │ he │    │
+│   │    │ ck │    │
+│   │    │ .s │    │
+│   │    │ h. │    │
+│ 1 │ pe │ Wa │ Th │
+│ 3 │ rs │ ve │ e  │
+│   │ on │ 28 │ sh │
+│   │ -a │ (# │ ar │
+│   │ le │ 94 │ pe │
+│   │ rt │ 07 │ st │
+│   │ -e │ )  │ se │
+│   │ ma │ wi │ qu │
+│   │ il │ re │ en │
+│   │ -b │ d  │ ci │
+│   │ yt │ :d │ ng │
+│   │ es │ ep │ av │
+│   │    │ lo │ ai │
+│   │    │ ym │ la │
+│   │    │ en │ bl │
+│   │    │ t_ │ e: │
+│   │    │ fa │ wa │
+│   │    │ il │ ve │
+│   │    │ ed │ 28 │
+│   │    │ so │ st │
+│   │    │ th │ op │
+│   │    │ e  │ pe │
+│   │    │ de │ d  │
+│   │    │ fa │ th │
+│   │    │ ul │ e  │
+│   │    │ t- │ to │
+│   │    │ on │ gg │
+│   │    │ al │ le │
+│   │    │ er │ ly │
+│   │    │ t  │ in │
+│   │    │ ca │ g, │
+│   │    │ n  │ wa │
+│   │    │ ac │ ve │
+│   │    │ tu │ 29 │
+│   │    │ al │ st │
+│   │    │ ly │ op │
+│   │    │ se │ s  │
+│   │    │ nd │ th │
+│   │    │ .  │ e  │
+│   │    │ Qu │ le │
+│   │    │ ot │ tt │
+│   │    │ e  │ er │
+│   │    │ th │ .  │
+│   │    │ e  │ Th │
+│   │    │ BY │ e  │
+│   │    │ TE │ ca │
+│   │    │ S  │ p  │
+│   │    │ a  │ is │
+│   │    │ pe │ a  │
+│   │    │ rs │ pe │
+│   │    │ on │ rs │
+│   │    │ no │ on │
+│   │    │ w  │ -f │
+│   │    │ re │ ac │
+│   │    │ ce │ in │
+│   │    │ iv │ g  │
+│   │    │ es │ SU │
+│   │    │ fo │ PP │
+│   │    │ r  │ RE │
+│   │    │ a  │ SS │
+│   │    │ de │ IO │
+│   │    │ pl │ N. │
+│   │    │ oy │    │
+│   │    │ me │    │
+│   │    │ nt │    │
+│   │    │ _f │    │
+│   │    │ ai │    │
+│   │    │ le │    │
+│   │    │ d  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ an │    │
+│   │    │ ag │    │
+│   │    │ en │    │
+│   │    │ t_ │    │
+│   │    │ un │    │
+│   │    │ re │    │
+│   │    │ ac │    │
+│   │    │ ha │    │
+│   │    │ bl │    │
+│   │    │ e  │    │
+│   │    │ al │    │
+│   │    │ er │    │
+│   │    │ t. │    │
+│   │    │ Do │    │
+│   │    │ es │    │
+│   │    │ Fa │    │
+│   │    │ il │    │
+│   │    │ ur │    │
+│   │    │ eC │    │
+│   │    │ op │    │
+│   │    │ y  │    │
+│   │    │ re │    │
+│   │    │ ac │    │
+│   │    │ h  │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ ma │    │
+│   │    │ il │    │
+│   │    │ pa │    │
+│   │    │ th │    │
+│   │    │ at │    │
+│   │    │ al │    │
+│   │    │ l? │    │
+│   │    │ An │    │
+│   │    │ d  │    │
+│   │    │ wh │    │
+│   │    │ at │    │
+│   │    │ do │    │
+│   │    │ es │    │
+│   │    │ a  │    │
+│   │    │ pe │    │
+│   │    │ rs │    │
+│   │    │ on │    │
+│   │    │ NO │    │
+│   │    │ T  │    │
+│   │    │ ge │    │
+│   │    │ t  │    │
+│   │    │ to │    │
+│   │    │ ld │    │
+│   │    │ wh │    │
+│   │    │ en │    │
+│   │    │ @r │    │
+│   │    │ ea │    │
+│   │    │ p_ │    │
+│   │    │ al │    │
+│   │    │ er │    │
+│   │    │ t_ │    │
+│   │    │ ca │    │
+│   │    │ p  │    │
+│   │    │ (2 │    │
+│   │    │ 5/ │    │
+│   │    │ sw │    │
+│   │    │ ee │    │
+│   │    │ p) │    │
+│   │    │ bi │    │
+│   │    │ te │    │
+│   │    │ s? │    │
+│ 1 │ pe │ A  │ Sa │
+│ 4 │ rs │ co │ me │
+│   │ on │ nt │ cl │
+│   │ -s │ en │ as │
+│   │ il │ t  │ s  │
+│   │ en │ pu │ as │
+│   │ t- │ bl │ wa │
+│   │ de │ is │ ve │
+│   │ pl │ h  │ 28 │
+│   │ oy │ th │ ’s │
+│   │ -r │ at │ s6 │
+│   │ ef │ si │ —  │
+│   │ us │ le │ a  │
+│   │ al │ nt │ st │
+│   │    │ ly │ at │
+│   │    │ re │ e  │
+│   │    │ fu │ wi │
+│   │    │ se │ th │
+│   │    │ s  │ no │
+│   │    │ to │ di │
+│   │    │ de │ sp │
+│   │    │ pl │ at │
+│   │    │ oy │ ch │
+│   │    │ mi │ si │
+│   │    │ nt │ te │
+│   │    │ s  │ —  │
+│   │    │ a  │ po │
+│   │    │ ca │ in │
+│   │    │ nc │ te │
+│   │    │ el │ d  │
+│   │    │ le │ at │
+│   │    │ d  │ th │
+│   │    │ ro │ e  │
+│   │    │ w  │ de │
+│   │    │ an │ pl │
+│   │    │ d  │ oy │
+│   │    │ no │ ti │
+│   │    │ ev │ me │
+│   │    │ en │ li │
+│   │    │ t  │ ne │
+│   │    │ ex │ in │
+│   │    │ is │ st │
+│   │    │ ts │ ea │
+│   │    │ fo │ d  │
+│   │    │ r  │ of │
+│   │    │ it │ at │
+│   │    │ an │ al │
+│   │    │ yw │ er │
+│   │    │ he │ ts │
+│   │    │ re │ .  │
+│   │    │ .  │    │
+│   │    │ Fi │    │
+│   │    │ nd │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ re │    │
+│   │    │ fu │    │
+│   │    │ sa │    │
+│   │    │ l  │    │
+│   │    │ si │    │
+│   │    │ te │    │
+│   │    │ ,  │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ ro │    │
+│   │    │ w  │    │
+│   │    │ it │    │
+│   │    │ mi │    │
+│   │    │ nt │    │
+│   │    │ s, │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ ev │    │
+│   │    │ en │    │
+│   │    │ t  │    │
+│   │    │ vo │    │
+│   │    │ ca │    │
+│   │    │ bu │    │
+│   │    │ la │    │
+│   │    │ ry │    │
+│   │    │ ,  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ wh │    │
+│   │    │ at │    │
+│   │    │ a  │    │
+│   │    │ pe │    │
+│   │    │ rs │    │
+│   │    │ on │    │
+│   │    │ se │    │
+│   │    │ es │    │
+│   │    │ to │    │
+│   │    │ da │    │
+│   │    │ y. │    │
+│   │    │ Co │    │
+│   │    │ nf │    │
+│   │    │ ir │    │
+│   │    │ m  │    │
+│   │    │ a  │    │
+│   │    │ no │    │
+│   │    │ n- │    │
+│   │    │ ad │    │
+│   │    │ mi │    │
+│   │    │ n  │    │
+│   │    │ pu │    │
+│   │    │ bl │    │
+│   │    │ is │    │
+│   │    │ h  │    │
+│   │    │ re │    │
+│   │    │ ac │    │
+│   │    │ he │    │
+│   │    │ s  │    │
+│   │    │ it │    │
+│   │    │ .  │    │
+│ 1 │ fa │ Re │ A  │
+│ 5 │ il │ ad │ sm │
+│   │ ur │ fa │ al │
+│   │ e- │ il │ l, │
+│   │ co │ ur │ sh │
+│   │ py │ e_ │ ar │
+│   │ -q │ co │ p  │
+│   │ uo │ py │ pe │
+│   │ ta │ .e │ rs │
+│   │ -a │ x  │ on │
+│   │ rm │ as │ sl │
+│   │    │ it │ ic │
+│   │    │ st │ e  │
+│   │    │ an │ ad │
+│   │    │ ds │ ja │
+│   │    │ af │ ce │
+│   │    │ te │ nt │
+│   │    │ r  │ to │
+│   │    │ #9 │ co │
+│   │    │ 40 │ de │
+│   │    │ 6  │ tw │
+│   │    │ an │ o  │
+│   │    │ d  │ bu │
+│   │    │ #9 │ il │
+│   │    │ 40 │ de │
+│   │    │ 8. │ rs │
+│   │    │ Fi │ ju │
+│   │    │ nd │ st │
+│   │    │ th │ to │
+│   │    │ e  │ uc │
+│   │    │ ba │ he │
+│   │    │ re │ d, │
+│   │    │ qu │ so │
+│   │    │ ot │ th │
+│   │    │ a  │ e  │
+│   │    │ to │ se │
+│   │    │ ke │ am │
+│   │    │ n’ │ is │
+│   │    │ s  │ wa │
+│   │    │ ar │ rm │
+│   │    │ m  │ .  │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ pr │    │
+│   │    │ ov │    │
+│   │    │ e  │    │
+│   │    │ wh │    │
+│   │    │ ic │    │
+│   │    │ h  │    │
+│   │    │ pr │    │
+│   │    │ ov │    │
+│   │    │ id │    │
+│   │    │ er │    │
+│   │    │ st │    │
+│   │    │ ri │    │
+│   │    │ ng │    │
+│   │    │ s  │    │
+│   │    │ ca │    │
+│   │    │ n  │    │
+│   │    │ re │    │
+│   │    │ ac │    │
+│   │    │ h  │    │
+│   │    │ it │    │
+│   │    │ —  │    │
+│   │    │ th │    │
+│   │    │ e  │    │
+│   │    │ ro │    │
+│   │    │ w  │    │
+│   │    │ cl │    │
+│   │    │ ai │    │
+│   │    │ ms │    │
+│   │    │ an │    │
+│   │    │ Az │    │
+│   │    │ ur │    │
+│   │    │ e- │    │
+│   │    │ fa │    │
+│   │    │ il │    │
+│   │    │ ed │    │
+│   │    │ pe │    │
+│   │    │ rs │    │
+│   │    │ on │    │
+│   │    │ is │    │
+│   │    │ to │    │
+│   │    │ ld │    │
+│   │    │ He │    │
+│   │    │ tz │    │
+│   │    │ ne │    │
+│   │    │ r  │    │
+│   │    │ ra │    │
+│   │    │ n  │    │
+│   │    │ ou │    │
+│   │    │ t  │    │
+│   │    │ of │    │
+│   │    │ se │    │
+│   │    │ rv │    │
+│   │    │ er │    │
+│   │    │ s. │    │
+│ 1 │ he │ Wh │ St │
+│ 6 │ rm │ at │ an │
+│   │ et │ in │ di │
+│   │ ic │ -t │ ng │
+│   │ -g │ re │ cl │
+│   │ at │ e  │ au │
+│   │ e- │ pr │ se │
+│   │ pr │ ec │ s  │
+│   │ ec │ ed │ 2, │
+│   │ ed │ en │ 3, │
+│   │ en │ t  │ 4, │
+│   │ t  │ ex │ 5  │
+│   │    │ is │ an │
+│   │    │ ts │ d  │
+│   │    │ fo │ 6  │
+│   │    │ r  │ al │
+│   │    │ pr │ l  │
+│   │    │ ov │ ap │
+│   │    │ in │ pl │
+│   │    │ g  │ y  │
+│   │    │ a  │ to │
+│   │    │ CI │ th │
+│   │    │ jo │ e  │
+│   │    │ b  │ la │
+│   │    │ he │ ne │
+│   │    │ rm │ sl │
+│   │    │ et │ ic │
+│   │    │ ic │ e  │
+│   │    │ ?  │ at │
+│   │    │ Re │ on │
+│   │    │ ad │ ce │
+│   │    │ th │ .  │
+│   │    │ e  │ Wi │
+│   │    │ pa │ th │
+│   │    │ th │ ou │
+│   │    │ -e │ t  │
+│   │    │ sc │ th │
+│   │    │ ap │ is │
+│   │    │ e  │ ,  │
+│   │    │ ra │ th │
+│   │    │ tc │ e  │
+│   │    │ he │ la │
+│   │    │ t  │ ne │
+│   │    │ fa │ fi │
+│   │    │ mi │ x  │
+│   │    │ ly │ is │
+│   │    │ an │ a  │
+│   │    │ d  │ se │
+│   │    │ it │ nt │
+│   │    │ s  │ en │
+│   │    │ -- │ ce │
+│   │    │ se │ wi │
+│   │    │ lf │ th │
+│   │    │ te │ a  │
+│   │    │ st │ sh │
+│   │    │ .  │ eb │
+│   │    │ Co │ an │
+│   │    │ ul │ g. │
+│   │    │ d  │    │
+│   │    │ a  │    │
+│   │    │ si │    │
+│   │    │ mi │    │
+│   │    │ la │    │
+│   │    │ r  │    │
+│   │    │ ra │    │
+│   │    │ tc │    │
+│   │    │ he │    │
+│   │    │ t  │    │
+│   │    │ en │    │
+│   │    │ um │    │
+│   │    │ er │    │
+│   │    │ at │    │
+│   │    │ e  │    │
+│   │    │ me │    │
+│   │    │ rg │    │
+│   │    │ e- │    │
+│   │    │ bl │    │
+│   │    │ oc │    │
+│   │    │ ki │    │
+│   │    │ ng │    │
+│   │    │ jo │    │
+│   │    │ bs │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ re │    │
+│   │    │ fu │    │
+│   │    │ se │    │
+│   │    │ a  │    │
+│   │    │ fo │    │
+│   │    │ re │    │
+│   │    │ ig │    │
+│   │    │ n  │    │
+│   │    │ ho │    │
+│   │    │ st │    │
+│   │    │ or │    │
+│   │    │ a  │    │
+│   │    │ re │    │
+│   │    │ al │    │
+│   │    │ -h │    │
+│   │    │ is │    │
+│   │    │ to │    │
+│   │    │ ry │    │
+│   │    │ re │    │
+│   │    │ ad │    │
+│   │    │ —  │    │
+│   │    │ an │    │
+│   │    │ d  │    │
+│   │    │ co │    │
+│   │    │ ul │    │
+│   │    │ d  │    │
+│   │    │ it │    │
+│   │    │ LO │    │
+│   │    │ SE │    │
+│   │    │ ?  │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+└───┴────┴────┴────┘
+                    
+Tasks this Paper    
+drives              
+                    
+Named at Strategize 
+as CANDIDATES, not  
+as the wave plan.   
+Decide files and    
+perfects the actual 
+slice rows and links
+this Paper onto     
+each.               
+                    
+┌─────┬─────┬──────┐
+│ cch │ ope │ Mand │
+│ -w2 │ n   │ ated │
+│ 8-  │ 0/9 │ roun │
+│ s2- │ ,   │ d-2  │
+│ his │ unc │ slic │
+│ tor │ lai │ e.   │
+│ y-  │ med │ Audi │
+│ una │     │ ence │
+│ vai │     │ 1:   │
+│ lab │     │ the  │
+│ le- │     │ pred │
+│ dis │     │ icat │
+│ cri │     │ e.   │
+│ min │     │      │
+│ ati │     │      │
+│ on  │     │      │
+│ cch │ ope │ Audi │
+│ -w2 │ n   │ ence │
+│ 8-  │ 0/2 │ 2,   │
+│ fol │     │ half │
+│ low │     │ one: │
+│ up- │     │ the  │
+│ sea │     │ requ │
+│ l-  │     │ ired │
+│ sui │     │ gate │
+│ te- │     │ ’s   │
+│ dep │     │ hist │
+│ th1 │     │ ory  │
+│ -co │     │ coup │
+│ upl │     │ ling │
+│ ing │     │ .    │
+│ unf │ NOT │ Audi │
+│ ile │ FIL │ ence │
+│ d — │ ED  │ 2,   │
+│ the │     │ half │
+│ for │     │ two. │
+│ eig │     │ Wave │
+│ n-  │     │ 28   │
+│ hos │     │ s3   │
+│ t   │     │ docu │
+│ cou │     │ ment │
+│ pli │     │ ed   │
+│ ng  │     │ it;  │
+│     │     │ no   │
+│     │     │ row  │
+│     │     │ exis │
+│     │     │ ts.  │
+│     │     │ Deci │
+│     │     │ de   │
+│     │     │ file │
+│     │     │ s    │
+│     │     │ it,  │
+│     │     │ and  │
+│     │     │ Law  │
+│     │     │ 0    │
+│     │     │ send │
+│     │     │ s it │
+│     │     │ to   │
+│     │     │ cch- │
+│     │     │ inst │
+│     │     │ rume │
+│     │     │ nts- │
+│     │     │ epic │
+│     │     │ AT   │
+│     │     │ CREA │
+│     │     │ TE   │
+│     │     │ TIME │
+│     │     │ .    │
+│ tas │ ope │ PERS │
+│ k-  │ n   │ ON.  │
+│ 1da │ 0/3 │ The  │
+│ ff7 │     │ unkn │
+│ bc1 │     │ own  │
+│ bf4 │     │ rung │
+│ 6ce │     │ ’s   │
+│ b   │     │ aria │
+│     │     │ -lab │
+│     │     │ el + │
+│     │     │ the  │
+│     │     │ TERM │
+│     │     │ INAL │
+│     │     │ re-  │
+│     │     │ chec │
+│     │     │ k    │
+│     │     │ affo │
+│     │     │ rdan │
+│     │     │ ce.  │
+│ cch │ ope │ PERS │
+│ -w2 │ n   │ ON.  │
+│ 8-  │ 0/3 │ The  │
+│ bl- │     │ pure │
+│ usa │     │ st   │
+│ ge- │     │ inst │
+│ met │     │ ance │
+│ ers │     │ of   │
+│ -sa │     │ the  │
+│ y-  │     │ wave │
+│ unm │     │ ’s   │
+│ ete │     │ sent │
+│ red │     │ ence │
+│ -wh │     │ on a │
+│ en- │     │ scre │
+│ the │     │ en.  │
+│ y-  │     │      │
+│ cou │     │      │
+│ ld- │     │      │
+│ not │     │      │
+│ -me │     │      │
+│ asu │     │      │
+│ re  │     │      │
+│ cch │ ope │ PERS │
+│ -w2 │ n   │ ON.  │
+│ 6-  │ 0/3 │ Wave │
+│ bl- │     │ 28   │
+│ dep │     │ made │
+│ loy │     │ it   │
+│ men │     │ send │
+│ t-  │     │ ;    │
+│ fai │     │ wave │
+│ led │     │ 29   │
+│ -em │     │ make │
+│ ail │     │ s it │
+│ -st │     │ read │
+│ ill │     │ able │
+│ -un │     │ .    │
+│ hum │     │      │
+│ ani │     │      │
+│ zed │     │      │
+│ cch │ ope │ PERS │
+│ -w2 │ n   │ ON.  │
+│ 8-  │ 0/3 │ A    │
+│ bl- │     │ refu │
+│ aut │     │ sal  │
+│ o-  │     │ with │
+│ dep │     │ no   │
+│ loy │     │ even │
+│ -re │     │ t    │
+│ fus │     │ anyw │
+│ al- │     │ here │
+│ has │     │ .    │
+│ -no │     │      │
+│ -ev │     │      │
+│ ent │     │      │
+│ -at │     │      │
+│ -al │     │      │
+│ l   │     │      │
+│ cch │ ope │ PERS │
+│ -w2 │ n   │ ON.  │
+│ 8-  │ 0/3 │ Rese │
+│ bl- │     │ rve  │
+│ cap │     │ body │
+│ aci │     │ —    │
+│ ty- │     │ smal │
+│ arm │     │ l,   │
+│ -bl │     │ shar │
+│ ame │     │ p,   │
+│ s-  │     │ warm │
+│ het │     │ seam │
+│ zne │     │ .    │
+│ r-  │     │      │
+│ for │     │      │
+│ -az │     │      │
+│ ure │     │      │
+│ cch │ ope │ Wish │
+│ -w2 │ n   │ item │
+│ 8-  │ 0/3 │ 6.   │
+│ bl- │     │ Rebu │
+│ w22 │     │ ilt  │
+│ s7- │     │ agai │
+│ spl │     │ nst  │
+│ it- │     │ orig │
+│ sta │     │ in/m │
+│ mps │     │ ain’ │
+│ -ne │     │ s    │
+│ ver │     │ byte │
+│ -la │     │ s,   │
+│ nde │     │ not  │
+│ d-  │     │ clos │
+│ and │     │ ed   │
+│ -c9 │     │ agai │
+│ -ki │     │ nst  │
+│ ll- │     │ them │
+│ is- │     │ .    │
+│ ref │     │      │
+│ ute │     │      │
+│ d   │     │      │
+│ cch │ ope │ Wish │
+│ -w2 │ n   │ item │
+│ 8-  │ 0/3 │ 4.   │
+│ s4- │     │ Prob │
+│ fol │     │ ably │
+│ low │     │ a    │
+│ up- │     │ defe │
+│ pro │     │ r-   │
+│ mot │     │ with │
+│ e-  │     │ -a-  │
+│ abs │     │ sent │
+│ ent │     │ ence │
+│ -su │     │ ;    │
+│ rfa │     │ surv │
+│ ce- │     │ ey 9 │
+│ to- │     │ deci │
+│ har │     │ des. │
+│ d   │     │      │
+└─────┴─────┴──────┘
+                    
+Next append: DIGEST.
+The sixteen surveyor
+reports fold into a 
+coverage-accounted  
+digest and a verify 
+plan, written here  
+BEFORE any verifier 
+flies. Nothing below
+the Direction       
+heading is a        
+decision yet —      
+Decide is what turns
+a candidate into a  
+slice.              
+                    
+Survey digest — 16  
+reports, one        
+sentence, three     
+audiences           
+                    
+Sixteen surveyors   
+reported; coverage  
+deficit none. The   
+direction survives, 
+but it survives     
+CORRECTED on its    
+most urgent half,   
+and the survey found
+one hazard the      
+direction did not   
+anticipate that must
+be settled BEFORE   
+Decide files a      
+single row.         
+                    
+Established, and re-
+derived by this     
+phase rather than   
+inherited           
+                    
+• FOUR required     
+  contexts, live:   
+  Elixir gate, PR   
+  references an     
+  active task, Cloud
+  gate, Console gate
+  — all app_id      
+  15368,            
+  enforce_admins    
+  true. Re-derived  
+  by me and         
+  independently by  
+  three surveyors.  
+  The committed     
+  .github/required- 
+  checks.json byte- 
+  matches on context
+  AND app_id.       
+  REGISTER NOTHING  
+  holds: no open PR 
+  touches that file.
+• All eight wave-28 
+  commits are       
+  ancestors of      
+  origin/main       
+  (0a1b4d2ea,       
+  dcba89411,        
+  a723ec0dd,        
+  9b4e76d5c,        
+  96a120b71,        
+  156f7669d,        
+  b348779d6,        
+  0d1936832).       
+  Verified, not     
+  inherited.        
+• Every code site   
+  the wish points a 
+  builder at still  
+  exists on         
+  origin/main: seal-
+  predicate.mjs:489-
+  490 (the          
+  swallowing bare   
+  catch), :1096 (the
+  b= ternary seam), 
+  walk_truncation() 
+  at pds-record-    
+  parity.sh:261     
+  exactly,          
+  failure_copy.ex:47
+  5-478, app.js:9598
+  domainRungChip,   
+  overflow-         
+  guard.mjs:4083/:41
+  29, usage.ex:210, 
+  auto_deploy_worker
+  .ex:176.          
+• Charter           
+  D307/D325/D328/D33
+  0/D331/D334 all   
+  present on        
+  origin/main and   
+  D334 READ FOR     
+  COVERAGE — it does
+  authorize the C9  
+  refutation, the   
+  cuePaints-is-alive
+  claim, and taking 
+  .preview-url off  
+  the board on      
+  measurement (rc 0,
+  20/20 cells       
+  clean). The wish  
+  item 7 is correct:
+  do not rebuild it.
+                    
+PREMISE SMOKE       
+FAILURE — one       
+phantom citation,   
+caught before a     
+builder chased it   
+                    
+The charter at :536 
+names cssom-        
+parity.mjs:608 as   
+one of "two working 
+in-tree             
+implementations to  
+cite" of the I-     
+could-not-look      
+doctrine. git show  
+origin/main gives   
+line 608 as a Chrome
+DevTools build-     
+banner template     
+literal. The whole  
+790-line file       
+contains zero merge-
+base, zero shallow  
+probe, zero git     
+dependency — its    
+only relevant text  
+is the :195-200     
+comment REFUSING to 
+take a git          
+dependency. Wrong   
+line AND "working   
+implementation"     
+overstates a        
+documented refusal. 
+The companion anchor
+at :538 (:189-193)  
+is also off by ~6.  
+s2 needs only the   
+pds-record-         
+parity.sh:261       
+citation, which is  
+real and exact; the 
+second citation must
+be struck or        
+corrected in the    
+slice brief, or a   
+builder burns time  
+on dead bytes and   
+cites them back into
+the ledger.         
+                    
+CORRECTION 1 — the  
+lane slice’s        
+finished state as   
+written is          
+unachievable, and   
+three surveyors     
+found it            
+independently       
+                    
+"No merge-blocking  
+job reaches a host  
+this repository does
+not own" cannot be  
+built. PR references
+an active task      
+reaches             
+guerrilla.barkpark.c
+loud BY DESIGN and  
+BY POLICY: pr-task- 
+gate.yml:257 GETs   
+the ledger, :202    
+POSTs a mutation    
+with a repo secret, 
+and the step body   
+converts the        
+script’s exit 2 into
+exit 1 under the    
+annotation "Ledger  
+unreachable — task  
+backing UNVERIFIED",
+arguing in its own  
+comment that "the   
+only alternative to 
+red is a green check
+that verified       
+nothing".           
+docs/ops/merge-     
+gates.md:75 codifies
+it: ledger outage = 
+a red that says so. 
+                    
+So the repo has     
+ALREADY adjudicated 
+this wave’s question
+in committed bytes  
+on a blocking gate. 
+The honest defect   
+class is narrower   
+and sharper:        
+                    
+┌─────┬─────┬──────┐
+│ dep │ SEM │ ACCI │
+│ end │ ANT │ DENT │
+│ enc │ IC  │ AL — │
+│ y   │ —   │ a    │
+│     │ the │ unit │
+│     │ gat │ test │
+│     │ e’s │ of a │
+│     │ que │ pred │
+│     │ sti │ icat │
+│     │ on  │ e    │
+│     │ IS  │ make │
+│     │ abo │ s a  │
+│     │ ut  │ live │
+│     │ tha │ rost │
+│     │ t   │ er   │
+│     │ hos │ call │
+│     │ t   │      │
+│ ret │ 3   │ none │
+│ rie │ att │      │
+│ s   │ emp │      │
+│     │ ts, │      │
+│     │ 2s  │      │
+│     │ apa │      │
+│     │ rt, │      │
+│     │ cur │      │
+│     │ l - │      │
+│     │ m   │      │
+│     │ 20  │      │
+│     │ eac │      │
+│     │ h   │      │
+│ fai │ nam │ not  │
+│ lur │ ed  │ ok   │
+│ e   │ ann │ 56 … │
+│ leg │ ota │ 2    │
+│ ibi │ tio │ !==  │
+│ lit │ n + │ 1    │
+│ y   │ ste │      │
+│     │ p   │      │
+│     │ sum │      │
+│     │ mar │      │
+│     │ y   │      │
+│ ope │ doc │ none │
+│ rat │ ume │      │
+│ or  │ nte │      │
+│ ove │ d   │      │
+│ rri │ hot │      │
+│ de  │ fix │      │
+│     │ !   │      │
+│     │ lan │      │
+│     │ e   │      │
+│ the │ com │ A    │
+│ dis │ put │ YAML │
+│ cri │ ed  │ COMM │
+│ min │ and │ ENT  │
+│ ato │ pri │ tell │
+│ r   │ nte │ ing  │
+│     │ d   │ a    │
+│     │     │ huma │
+│     │     │ n to │
+│     │     │ read │
+│     │     │ a    │
+│     │     │ soli │
+│     │     │ tary │
+│     │     │ red  │
+│     │     │ at   │
+│     │     │ test │
+│     │     │ 56   │
+│     │     │ as   │
+│     │     │ "the │
+│     │     │ ledg │
+│     │     │ er   │
+│     │     │ was  │
+│     │     │ unre │
+│     │     │ acha │
+│     │     │ ble" │
+└─────┴─────┴──────┘
+                    
+Exactly one of four 
+required contexts   
+fails the test "a   
+required gate may be
+red by a third-party
+host only if it     
+names the condition 
+and has a tested    
+override", and it is
+Console gate. A     
+ratchet phrased as a
+prohibition reds pr-
+task-gate.yml the   
+day it lands and its
+first act is to be  
+waived — a guard    
+that cannot lose,   
+wearing an          
+exemption. It must  
+be a DECLARE-AND-   
+JUSTIFY census (the 
+CONSOLE_ESCAPE_EXEMP
+T "<path>TAB<why>"  
+shape already in-   
+tree) from the first
+commit. Also: a     
+ratchet homed only  
+in the console-path-
+escape-check.sh     
+family is           
+structurally blind  
+to pr-task-gate.yml 
+— that script is    
+path-scoped to      
+cloud/priv/static.  
+Cloud gate and      
+Elixir gate are     
+clean at the YAML   
+layer (zero curl/URL
+tokens); their      
+RUNTIME reach is    
+UNMEASURED and is a 
+verify assignment.  
+                    
+CORRECTION 2 — the  
+wave’s own mandated 
+fix can freeze every
+merge in the repo   
+                    
+This is the largest 
+build hazard the    
+survey found and it 
+was measured in a   
+real pristine --    
+depth 1 clone of    
+origin/main,        
+shallowness asserted
+INSIDE the clone    
+(git log --oneline -
+-all | wc -l == 1). 
+                    
+• The suite passes  
+  65/65 at CI’s     
+  checkout depth —  
+  and passes green- 
+  by-construction. A
+  direct --ladder-  
+  only read in that 
+  same clone exits 0
+  while printing SIX
+  verbatim "is not  
+  an ancestor of    
+  origin/main"      
+  sentences and b-  
+  clean=0/6 (a full 
+  clone reads 6/6). 
+  Not one of the    
+  five ladderOnlyRun
+  assertions reads  
+  b-clean or counts 
+  the sentences.    
+  Standing clause 5 
+  verbatim: the     
+  fixture is a real 
+  shallow clone,    
+  cruel enough, and 
+  the SELECTOR still
+  cannot reach the  
+  defect.           
+• seal-             
+  predicate.test.mjs
+  :1055 hard-asserts
+  a live --ladder-  
+  only read exits 0 
+  (SEAL), and :1108 
+  asserts the same. 
+  console-unit      
+  checks out at     
+  actions/checkout@v
+  4’s depth-1       
+  default (console- 
+  harness.yml:214,  
+  bare uses, no     
+  with:). If s2     
+  emits HISTORY-    
+  UNAVAILABLE at    
+  exit 1 on the READ
+  path, those sites 
+  red on a now-     
+  merge-BLOCKING    
+  Console gate. s2  
+  and the five sites
+  must land in ONE  
+  PR.               
+• A candidate ~20-  
+  line              
+  discrimination was
+  BUILT AND RUN in a
+  detached worktree 
+  at origin/main:   
+  full suite 65     
+  tests / 64 pass / 
+  1 fail. On a real 
+  depth-1 clone it  
+  emits 6 HISTORY-  
+  UNAVAILABLE       
+  sentences and ZERO
+  "is not an        
+  ancestor"         
+  sentences. All six
+  of s1’s clause-(a)
+  assertions SURVIVE
+  (test 63 ok).     
+• The single failure
+  is a TRUE fail-   
+  before-control    
+  collision, not a  
+  regression: :1211 
+  demands exactly 6 
+  "is not an        
+  ancestor" lines   
+  from wave 27’s    
+  root-guard        
+  mutation control  
+  and gets 0.       
+  Baseline confirmed
+  green pristine in 
+  the same worktree.
+  THIS IS THE       
+  "mutate the       
+  discrimination out
+  of #9356’s        
+  controls" work the
+  wish mandates — it
+  must be named in  
+  the criteria or a 
+  builder will      
+  weaken the        
+  discrimination    
+  instead of        
+  rewriting the     
+  control.          
+• A SECOND exit-2   
+  trap survives an  
+  ancestry-only fix:
+  the git show catch
+  at :493-494 throws
+  Infra, which      
+  routes to :1123   
+  and prints        
+  a=UNKNOWN         
+  b=UNKNOWN         
+  c=UNKNOWN at code 
+  2 — precisely the 
+  shape s1’s clause-
+  (a) control is    
+  armed to red.     
+  Fixing only :489- 
+  490 moves the     
+  exit-2 one call   
+  deeper. Both must 
+  be re-classified  
+  in the same diff. 
+• The token tail is 
+  pinned: :1359     
+  asserts /roster=0 
+  repo=\S+ head=[0- 
+  9a-f]{7,}/. The   
+  letter goes in the
+  b= slot, never    
+  appended.         
+                    
+THE ONE DECISION    
+DECIDE CANNOT LIVE  
+WITHOUT: does --    
+ladder-only keep    
+exit 0 and carry the
+condition as a      
+letter in its own   
+LADDER-ONLY token   
+(which has no b=    
+slot today and      
+prints a=NOT-READ   
+c=NOT-READ), or does
+it exit 1 and force 
+all five sites      
+rewritten? Two      
+surveyors read this 
+opposite ways. Today
+--ladder-only exits 
+0 with six          
+unanswerable rows   
+and says nothing    
+about it — which is 
+this epic’s own     
+defect class, inside
+the instrument that 
+polices it. Verify  
+V1 settles it by    
+running both shapes.
+                    
+CORRECTION 3 — the  
+D307 guard is a live
+filing hazard for   
+THIS wave, before   
+any builder flies   
+                    
+The assignment asked
+what promoting      
+ABSENT to hard      
+costs. The answer is
+that the ENUM tier —
+already HARD,       
+shipped in #9405 —  
+points at a         
+vocabulary the epic 
+does not use. Live  
+roster: 143         
+published tasks     
+carry a surface;    
+exactly ONE holds a 
+value in            
+@cch_surfaces       
+(console|instrument|
+ledger), and it is  
+the promotion task  
+itself. Of 307 epic 
+children, 43 carry  
+surface and 42 are  
+off-vocabulary      
+descriptive prose — 
+the epic’s practiced
+filing convention.  
+Every off-vocab row 
+PREDATES the guard  
+(latest 14:10:26Z vs
+the guard’s         
+15:08:46Z), so the  
+guard has refused   
+nothing yet and wave
+29’s filings are the
+FIRST that will meet
+it. Under           
+presence+enum, 70 of
+71 open rows would  
+be refused. There is
+no surface field in 
+tasks/schema.ex at  
+all (grep count 0) —
+one enforcement     
+layer, versus three 
+for                 
+lifecycle_status.   
+The ABSENT promotion
+is a DEFER with a   
+measurement behind  
+it; the             
+reconciliation is   
+not.                
+                    
+The person rows, re-
+ranked on merit —   
+and two of them are 
+already built       
+                    
+• STALE-OPEN, do not
+  rebuild: cch-w27- 
+  bl-connection-    
+  refused-          
+  classified-as-    
+  timeout (0/4) and 
+  cch-w27-bl-       
+  deployment-failed-
+  toggle-fires-     
+  nothing (0/6) are 
+  substantively     
+  LANDED on         
+  origin/main — the 
+  refused arm       
+  carries its own   
+  "Split out of the 
+  network class in  
+  wave 28 (D321(3))"
+  comment, and      
+  registry.ex now   
+  has               
+  dispatch_deploymen
+  t_failed/2, the   
+  edge guard, and   
+  the reaper fan-   
+  out. These are    
+  ledger closes.    
+  cch-w14-bl-site-  
+  open-phone-       
+  overflow (3/5) is 
+  likewise largely  
+  PAID by W15-S5,   
+  whose committed   
+  CSS comment names 
+  the row id and    
+  quotes its exact  
+  numbers.          
+• cch-w26-bl-       
+  deployment-failed-
+  email-still-      
+  unhumanized:      
+  HEADLINE REFUTED. 
+  #9407 already     
+  routes the email  
+  through           
+  cause_then_capture
+  /1. The live      
+  defect MOVED      
+  CHANNEL —         
+  notifications/rend
+  er.ex imports     
+  nothing,          
+  classifies        
+  nothing, and never
+  reads :detail, so 
+  the SAME dispatch 
+  gives an email    
+  reader a cause and
+  a capture while a 
+  Slack/Discord     
+  reader gets       
+  neither. Same     
+  person, same      
+  minute, two       
+  stories. Rewrite  
+  the row at chat,  
+  not email.        
+• A row nobody      
+  filed:            
+  registry.ex:6672- 
+  6687 splits alerts
+  at @reap_alert_cap
+  25 and the dropped
+  tail’s ONLY trace 
+  is a              
+  Logger.warning. A 
+  repo-wide grep    
+  finds no event,   
+  banner, email or  
+  API field. The    
+  26th owner in a   
+  cluster-wide      
+  incident is told  
+  nothing, and their
+  experience is     
+  byte-identical to 
+  "alerts are off"  
+  or "the relay is  
+  down". Honest in  
+  the code,         
+  dishonest in the  
+  product.          
+• task-             
+  1daff7bc1bf46ceb  
+  (domainRungChip): 
+  CONFIRMED         
+  verbatim, with a  
+  refinement — the  
+  CLASS dom-rung--  
+  unknown IS emitted
+  correctly         
+  (interpolated from
+  row.role); only   
+  the glyph and the 
+  aria-label state  
+  fall through to   
+  "waiting". And the
+  one existing test 
+  (__app.test.mjs:79
+  38) pins that     
+  class, so it is   
+  GREEN WITH THE    
+  DEFECT FULLY      
+  PRESENT. No .dom- 
+  rung--unknown CSS 
+  exists, so unknown
+  also renders      
+  pixel-identical to
+  waiting. Both     
+  mounts            
+  (loadInstanceDomai
+  ns :9673,         
+  loadSiteDomains   
+  :9702) already    
+  bump domainSeq and
+  clear the timer on
+  entry — safe re-  
+  entry points for a
+  re-check.         
+• cch-w28-bl-auto-  
+  deploy-refusal-   
+  has-no-event-at-  
+  all is BIGGER than
+  filed and the     
+  cheapest honest   
+  fix is a CONSOLE  
+  fix, not an alert 
+  event: refuse/1   
+  mints an          
+  actionable remedy 
+  sentence naming   
+  the exact command,
+  router.ex:10206   
+  SERIALIZES it, and
+  app.js discards it
+  at TWO byte-      
+  identical gates   
+  (:10333 and       
+  :11203, st ===    
+  "failed") plus    
+  deployDetailHtml’s
+  deployIsActive    
+  guard. Reachable  
+  by any content    
+  editor via an     
+  HMAC-authed       
+  webhook — no cloud
+  account required. 
+• cch-w28-bl-       
+  capacity-arm-     
+  blames-hetzner-   
+  for-azure: the arm
+  is at :475-478,   
+  NOT the :470-473  
+  the row cites     
+  (that lands on the
+  DNS clause). The  
+  AZURE half is not 
+  derivable — zero  
+  quota/exceed      
+  strings anywhere  
+  under             
+  internal/cli/cloud
+  /azure/ including 
+  all 18 fixtures,  
+  and the Elixir    
+  Azure client      
+  returns atoms     
+  only. The         
+  DERIVABLE cruelty 
+  is a verb-less    
+  Hetzner DNS zone  
+  quota, which      
+  misses @dns_step  
+  and is answered   
+  "ran out of SERVER
+  capacity" — wrong 
+  resource, provider
+  correct. Reframe  
+  as a provider-AND-
+  resource-blind    
+  literal.          
+• cch-w28-bl-usage- 
+  meters-say-       
+  unmetered: shape  
+  confirmed and     
+  STRONGER than     
+  filed (source does
+  not discriminate  
+  either — both     
+  paths carry the   
+  same string, and  
+  app.js reads      
+  meter.source zero 
+  times). But       
+  reachability is   
+  source-read, not  
+  driven; the       
+  fixture cannot    
+  express a crashed 
+  meter; and        
+  usage_test.exs:231
+  /:237 PIN the     
+  conflation and are
+  the fail-before   
+  control. Ranked   
+  below the rows    
+  above until a     
+  crash reaches a   
+  pixel.            
+                    
+Coverage map —      
+checked and FOUND   
+                    
+┌────────┬─────────┐
+│ branch │ four    │
+│ protec │ context │
+│ tion   │ s,      │
+│ (live  │ app_id  │
+│ API)   │ 15368,  │
+│        │ enforce │
+│        │ _admins │
+│        │ true —  │
+│        │ spec    │
+│        │ byte-   │
+│        │ matches │
+│ pr-    │ TWO     │
+│ task-  │ guerril │
+│ gate.y │ la      │
+│ ml +   │ reaches │
+│ script │ ; exit  │
+│ s/pr-  │ 2 to    │
+│ task-  │ exit 1  │
+│ gate.s │ by      │
+│ h      │ design; │
+│        │ bounded │
+│        │ retries │
+│        │ ;       │
+│        │ hotfix! │
+│        │ overrid │
+│        │ e       │
+│ consol │ Console │
+│ e-     │ gate    │
+│ harnes │ needs   │
+│ s.yml  │ SIX     │
+│        │ leaves  │
+│        │ incl.   │
+│        │ overflo │
+│        │ w-guard │
+│        │ (not    │
+│        │ five);  │
+│        │ zero    │
+│        │ direct  │
+│        │ network │
+│        │ in the  │
+│        │ YAML;   │
+│        │ couplin │
+│        │ g       │
+│        │ transit │
+│        │ ive via │
+│        │ node -- │
+│        │ test    │
+│        │ only    │
+│ cloud. │ NO      │
+│ yml /  │ foreign │
+│ elixir │ -host   │
+│ .yml   │ reach   │
+│        │ at the  │
+│        │ YAML    │
+│        │ layer;  │
+│        │ cloud/t │
+│        │ est and │
+│        │ api/tes │
+│        │ t grep  │
+│        │ clean   │
+│        │ (api    │
+│        │ hits    │
+│        │ are     │
+│        │ PHX_HOS │
+│        │ T       │
+│        │ fixture │
+│        │ s)      │
+│ seal-  │ every   │
+│ predic │ seam    │
+│ ate.mj │ located │
+│ s +    │ : :489- │
+│ .test. │ 490,    │
+│ mjs    │ :493-   │
+│        │ 494,    │
+│        │ :1096,  │
+│        │ :1104-  │
+│        │ 1130,   │
+│        │ five    │
+│        │ ladderO │
+│        │ nlyRun  │
+│        │ sites,  │
+│        │ the     │
+│        │ :1313-  │
+│        │ 1318    │
+│        │ after-  │
+│        │ note    │
+│        │ that    │
+│        │ already │
+│        │ COMMITS │
+│        │ the s2  │
+│        │ contrac │
+│        │ t       │
+│ real - │ 65/65   │
+│ -depth │ pass; 6 │
+│ 1      │ false   │
+│ clone  │ sentenc │
+│ of     │ es at   │
+│ origin │ exit 0; │
+│ /main  │ dead    │
+│        │ BP_SERV │
+│        │ ER reds │
+│        │ exactly │
+│        │ not ok  │
+│        │ 56      │
+│ overfl │ cuePain │
+│ ow-    │ ts      │
+│ guard. │ ALIVE   │
+│ mjs /  │ at      │
+│ app.cs │ :4129;  │
+│ s      │ :4083   │
+│        │ omits   │
+│        │ overflo │
+│        │ w;      │
+│        │ model   │
+│        │ arm     │
+│        │ :4534   │
+│        │ collect │
+│        │ s ov;   │
+│        │ .set-   │
+│        │ row-    │
+│        │ name    │
+│        │ sets    │
+│        │ overflo │
+│        │ w:      │
+│        │ hidden  │
+│ usage. │ :210    │
+│ ex /   │ catch-  │
+│ app.js │ all     │
+│ meters │ collaps │
+│        │ es four │
+│        │ causes; │
+│        │ "Not    │
+│        │ yet     │
+│        │ metered │
+│        │ " at    │
+│        │ :16213; │
+│        │ em dash │
+│        │ at      │
+│        │ :5219;  │
+│        │ meter.s │
+│        │ ource   │
+│        │ read    │
+│        │ ZERO    │
+│        │ times   │
+│ failur │ bare    │
+│ e_copy │ quota   │
+│ .ex +  │ arm at  │
+│ azure  │ :475-   │
+│ fixtur │ 478;    │
+│ es     │ humaniz │
+│        │ e/1 is  │
+│        │ provide │
+│        │ r-BLIND │
+│        │ (arity  │
+│        │ 1, 4    │
+│        │ call    │
+│        │ sites)  │
+│ notifi │ Failure │
+│ cation │ Copy    │
+│ s/{eve │ reaches │
+│ nt_ema │ the     │
+│ il,ren │ mail    │
+│ der}.e │ path    │
+│ x      │ ONLY;   │
+│        │ chat    │
+│        │ never   │
+│        │ reads   │
+│        │ :detail │
+│ live   │ 143     │
+│ guerri │ surface │
+│ lla    │ rows, 1 │
+│ roster │ in-     │
+│ (4652  │ vocabul │
+│ docs)  │ ary; 42 │
+│        │ of 43   │
+│        │ epic    │
+│        │ rows    │
+│        │ off-    │
+│        │ vocabul │
+│        │ ary     │
+│        │ prose   │
+│ open   │ only    │
+│ PRs    │ #8465   │
+│ (all   │ (writer │
+│ 7)     │ .ex)    │
+│        │ and     │
+│        │ #6028   │
+│        │ (app.js │
+│        │ ) touch │
+│        │ candida │
+│        │ te      │
+│        │ files;  │
+│        │ both    │
+│        │ stale,  │
+│        │ mergeab │
+│        │ le      │
+│        │ UNKNOWN │
+│        │ ;       │
+│        │ nothing │
+│        │ open    │
+│        │ touches │
+│        │ require │
+│        │ d-      │
+│        │ checks. │
+│        │ json    │
+└────────┴─────────┘
+                    
+Coverage map —      
+checked and NOT     
+FOUND (absences are 
+decisions in        
+waiting)            
+                    
+• NO script anywhere
+  enforces the "MUST
+  NEVER REGAIN a    
+  workflow-level on:
+  paths: key"       
+  prohibition that  
+  protects two now- 
+  blocking contexts.
+  grep over         
+  scripts/*.sh      
+  returns nothing.  
+  cloud.yml does not
+  even carry the    
+  sentence. A paths 
+  filter on either  
+  file makes a      
+  required context  
+  ABSENT on every   
+  non-matching PR — 
+  a permanent "is   
+  expected." and a  
+  repo-wide merge   
+  freeze.           
+• required-         
+  checks.test.sh §3c
+  computes          
+  REAL_UNMAPPED     
+  against the real  
+  workflow tree and 
+  NEVER READS IT    
+  (grep returns one 
+  line, the         
+  assignment). Its  
+  actual assertion  
+  is on the static  
+  committed JSON,   
+  which cannot      
+  change when a     
+  workflow is       
+  renamed. The      
+  blocking half runs
+  --hermetic and    
+  makes no          
+  protection read at
+  all — the ENTIRE  
+  drift surface is  
+  guarded only by a 
+  continue-on-error 
+  job.              
+• NO surface field  
+  exists in         
+  api/lib/barkpark/t
+  asks/schema.ex. NO
+  .dom-rung--unknown
+  CSS in app.css. NO
+  re-check/check-   
+  again affordance  
+  anywhere in       
+  app.js. NO        
+  deployment_cancell
+  ed event in the 9-
+  atom @events      
+  vocabulary. NO    
+  Plug.ErrorHandler 
+  anywhere in       
+  cloud/lib. NO     
+  Azure quota       
+  producer string   
+  anywhere under    
+  internal/cli/cloud
+  /azure/. NO bp    
+  task row exists   
+  for Security gate 
+  registrability,   
+  nor for "the live 
+  half never ran at 
+  four contexts" —  
+  and the latter’s  
+  premise is now    
+  FALSE (both drift 
+  steps concluded   
+  success           
+  individually on   
+  a723ec0dd at four 
+  contexts).        
+• NO script         
+  enumerates merge- 
+  blocking jobs or  
+  audits workflows  
+  for host reach.   
+  The ratchet the   
+  direction         
+  describes has no  
+  in-tree           
+  implementation to 
+  extend — only     
+  shapes to copy    
+  (console-path-    
+  escape-           
+  check.test.sh case
+  9 already         
+  yaml.safe_loads   
+  the aggregator and
+  EXECUTES its step 
+  body verbatim).   
+• cch-w22-s7 reads  
+  0/16 with claim   
+  null. D325’s five 
+  stamps NEVER      
+  LANDED and could  
+  not have — stamps 
+  are holder-only.  
+  Every line number 
+  D325 quotes is    
+  stale by ~+570    
+  lines, and C7’s   
+  own criterion text
+  cites a straddle  
+  assertion at      
+  :2004-2006 that is
+  not there.        
+                    
+Corners NO surveyor 
+reached:            
+docs/ops/merge-     
+gates.md’s hotfix!  
+lane end-to-end (is 
+BARKPARK_TASK_TOKEN 
+actually            
+provisioned? if     
+unset the documented
+override ITSELF     
+exits 1 and the lane
+has no escape at    
+all); the RUNTIME   
+host reach of Cloud 
+gate and Elixir gate
+(only the YAML layer
+is proven clean, and
+the Console coupling
+is proof that reach 
+hides one level     
+down); the other    
+five console-unit   
+steps at depth 1;   
+cloud/priv/static/__
+fixtures__/usage_met
+ers.json;           
+breakpoint-sweep.tes
+t.mjs; the successor
+row cchi-w27-bl-    
+w22s7-residue-      
+derived-caps-and-   
+refusals; and       
+whether #9405 is    
+actually DEPLOYED to
+the server that     
+accepts bp filings. 
+                    
+Verify plan — 14    
+assignments, in     
+flight now          
+                    
+This is the LAST    
+look. Every row     
+names what will be  
+RUN; reading is     
+proof for none of   
+the load-bearing    
+claims.             
+                    
+┌───┬────┬────┬────┐
+│ V │ Th │ fa │ th │
+│ 1 │ e  │ bl │ e  │
+│   │ s2 │ e  │ ca │
+│   │ ex │    │ nd │
+│   │ it │    │ id │
+│   │ co │    │ at │
+│   │ nt │    │ e  │
+│   │ ra │    │ di │
+│   │ ct │    │ sc │
+│   │ :  │    │ ri │
+│   │ do │    │ mi │
+│   │ es │    │ na │
+│   │ -- │    │ ti │
+│   │ la │    │ on │
+│   │ dd │    │ in │
+│   │ er │    │ a  │
+│   │ -o │    │ re │
+│   │ nl │    │ al │
+│   │ y  │    │ -- │
+│   │ st │    │ de │
+│   │ ay │    │ pt │
+│   │ ex │    │ h  │
+│   │ it │    │ 1  │
+│   │ 0  │    │ cl │
+│   │ wi │    │ on │
+│   │ th │    │ e  │
+│   │ a  │    │ AN │
+│   │ hi │    │ D  │
+│   │ st │    │ a  │
+│   │ or │    │ si │
+│   │ y  │    │ mu │
+│   │ le │    │ la │
+│   │ tt │    │ te │
+│   │ er │    │ d  │
+│   │ ,  │    │ re │
+│   │ or │    │ fs │
+│   │ ex │    │ /p │
+│   │ it │    │ ul │
+│   │ 1  │    │ l/ │
+│   │ wi │    │ N/ │
+│   │ th │    │ me │
+│   │ fi │    │ rg │
+│   │ ve │    │ e  │
+│   │ si │    │ PR │
+│   │ te │    │ sh │
+│   │ s  │    │ ap │
+│   │ re │    │ e, │
+│   │ wr │    │ bo │
+│   │ it │    │ th │
+│   │ te │    │ va │
+│   │ n? │    │ ri │
+│   │ Tw │    │ an │
+│   │ o  │    │ ts │
+│   │ su │    │ ,  │
+│   │ rv │    │ fu │
+│   │ ey │    │ ll │
+│   │ or │    │ su │
+│   │ s  │    │ it │
+│   │ re │    │ e  │
+│   │ ad │    │ ea │
+│   │ it │    │ ch │
+│   │ op │    │    │
+│   │ po │    │    │
+│   │ si │    │    │
+│   │ te │    │    │
+│   │ wa │    │    │
+│   │ ys │    │    │
+│   │ .  │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│ V │ Do │ op │ fu │
+│ 2 │ es │ us │ ll │
+│   │ th │    │ se │
+│   │ e  │    │ al │
+│   │ na │    │ su │
+│   │ iv │    │ it │
+│   │ e  │    │ e  │
+│   │ s2 │    │ at │
+│   │ fi │    │ de │
+│   │ x  │    │ pt │
+│   │ ac │    │ h  │
+│   │ tu │    │ 1, │
+│   │ al │    │ th │
+│   │ ly │    │ en │
+│   │ re │    │ th │
+│   │ d  │    │ e  │
+│   │ Co │    │ ex │
+│   │ ns │    │ it │
+│   │ ol │    │ -1 │
+│   │ e  │    │ -o │
+│   │ ga │    │ n- │
+│   │ te │    │ re │
+│   │ re │    │ ad │
+│   │ po │    │ va │
+│   │ -w │    │ ri │
+│   │ id │    │ an │
+│   │ e? │    │ t; │
+│   │    │    │ qu │
+│   │    │    │ ot │
+│   │    │    │ e  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fa │
+│   │    │    │ il │
+│   │    │    │ in │
+│   │    │    │ g  │
+│   │    │    │ te │
+│   │    │    │ st │
+│   │    │    │ na │
+│   │    │    │ me │
+│   │    │    │ s  │
+│ V │ Is │ op │ a  │
+│ 3 │ th │ us │ se │
+│   │ e  │    │ nt │
+│   │ fo │    │ in │
+│   │ re │    │ el │
+│   │ ig │    │ cu │
+│   │ n- │    │ rl │
+│   │ ho │    │ fi │
+│   │ st │    │ rs │
+│   │ ce │    │ t  │
+│   │ ns │    │ on │
+│   │ us │    │ PA │
+│   │ 1, │    │ TH │
+│   │ 2  │    │ ac │
+│   │ or │    │ ro │
+│   │ 3  │    │ ss │
+│   │ of │    │ Co │
+│   │ th │    │ ns │
+│   │ e  │    │ ol │
+│   │ fo │    │ e  │
+│   │ ur │    │ ga │
+│   │ co │    │ te │
+│   │ nt │    │ ’s │
+│   │ ex │    │ si │
+│   │ ts │    │ x  │
+│   │ —  │    │ le │
+│   │ at │    │ av │
+│   │ RU │    │ es │
+│   │ NT │    │ ,  │
+│   │ IM │    │ th │
+│   │ E, │    │ e  │
+│   │ no │    │ Cl │
+│   │ t  │    │ ou │
+│   │ at │    │ d  │
+│   │ th │    │ ga │
+│   │ e  │    │ te │
+│   │ YA │    │ su │
+│   │ ML │    │ it │
+│   │ la │    │ e  │
+│   │ ye │    │ an │
+│   │ r? │    │ d  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ El │
+│   │    │    │ ix │
+│   │    │    │ ir │
+│   │    │    │ ga │
+│   │    │    │ te │
+│   │    │    │ su │
+│   │    │    │ it │
+│   │    │    │ e; │
+│   │    │    │ co │
+│   │    │    │ un │
+│   │    │    │ t  │
+│   │    │    │ fi │
+│   │    │    │ re │
+│   │    │    │ s  │
+│   │    │    │ pe │
+│   │    │    │ r  │
+│   │    │    │ ga │
+│   │    │    │ te │
+│ V │ Is │ fa │ gh │
+│ 4 │ th │ bl │ ap │
+│   │ e  │ e  │ i  │
+│   │ ho │    │ ac │
+│   │ tf │    │ ti │
+│   │ ix │    │ on │
+│   │ !  │    │ s/ │
+│   │ ov │    │ se │
+│   │ er │    │ cr │
+│   │ ri │    │ et │
+│   │ de │    │ s  │
+│   │ RE │    │ +  │
+│   │ AL │    │ ac │
+│   │ ?  │    │ ti │
+│   │ If │    │ on │
+│   │ BA │    │ s/ │
+│   │ RK │    │ va │
+│   │ PA │    │ ri │
+│   │ RK │    │ ab │
+│   │ _T │    │ le │
+│   │ AS │    │ s; │
+│   │ K_ │    │ re │
+│   │ TO │    │ ad │
+│   │ KE │    │ me │
+│   │ N  │    │ rg │
+│   │ is │    │ e- │
+│   │ un │    │ ga │
+│   │ se │    │ te │
+│   │ t  │    │ s. │
+│   │ th │    │ md │
+│   │ e  │    │ en │
+│   │ do │    │ d  │
+│   │ cu │    │ to │
+│   │ me │    │ en │
+│   │ nt │    │ d; │
+│   │ ed │    │ ru │
+│   │ es │    │ n  │
+│   │ ca │    │ pr │
+│   │ pe │    │ -t │
+│   │ ha │    │ as │
+│   │ tc │    │ k- │
+│   │ h  │    │ ga │
+│   │ it │    │ te │
+│   │ se │    │ .s │
+│   │ lf │    │ h  │
+│   │ ex │    │ ag │
+│   │ it │    │ ai │
+│   │ s  │    │ ns │
+│   │ 1  │    │ t  │
+│   │ —  │    │ an │
+│   │ an │    │ un │
+│   │ d  │    │ re │
+│   │ th │    │ ac │
+│   │ e  │    │ ha │
+│   │ ra │    │ bl │
+│   │ tc │    │ e  │
+│   │ he │    │ le │
+│   │ t’ │    │ dg │
+│   │ s  │    │ er │
+│   │ cr │    │ an │
+│   │ it │    │ d  │
+│   │ er │    │ ca │
+│   │ io │    │ pt │
+│   │ n  │    │ ur │
+│   │ be │    │ e  │
+│   │ co │    │ th │
+│   │ me │    │ e  │
+│   │ s  │    │ ex │
+│   │ un │    │ it │
+│   │ sa │    │ co │
+│   │ ti │    │ de │
+│   │ sf │    │ un │
+│   │ ia │    │ pi │
+│   │ bl │    │ pe │
+│   │ e. │    │ d  │
+│ V │ Is │ op │ a  │
+│ 5 │ #9 │ us │ re │
+│   │ 40 │    │ al │
+│   │ 5  │    │ cr │
+│   │ LI │    │ ea │
+│   │ VE │    │ te │
+│   │ on │    │ of │
+│   │ gu │    │ a  │
+│   │ er │    │ th │
+│   │ ri │    │ ro │
+│   │ ll │    │ wa │
+│   │ a  │    │ wa │
+│   │ —  │    │ y  │
+│   │ i. │    │ ep │
+│   │ e. │    │ ic │
+│   │ wi │    │ ch │
+│   │ ll │    │ il │
+│   │ wa │    │ d  │
+│   │ ve │    │ wi │
+│   │ 29 │    │ th │
+│   │ ’s │    │ an │
+│   │ ow │    │ of │
+│   │ n  │    │ f- │
+│   │ fi │    │ vo │
+│   │ li │    │ ca │
+│   │ ng │    │ bu │
+│   │ s  │    │ la │
+│   │ 42 │    │ ry │
+│   │ 2? │    │ su │
+│   │    │    │ rf │
+│   │    │    │ ac │
+│   │    │    │ e, │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ on │
+│   │    │    │ e  │
+│   │    │    │ wi │
+│   │    │    │ th │
+│   │    │    │ no │
+│   │    │    │ ne │
+│   │    │    │ ;  │
+│   │    │    │ re │
+│   │    │    │ ad │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ st │
+│   │    │    │ at │
+│   │    │    │ us │
+│   │    │    │ ba │
+│   │    │    │ ck │
+│ V │ Ar │ op │ mi │
+│ 6 │ e  │ us │ x  │
+│   │ th │    │ te │
+│   │ e  │    │ st │
+│   │ tw │    │ fa │
+│   │ o  │    │ il │
+│   │ st │    │ ur │
+│   │ al │    │ e_ │
+│   │ e- │    │ co │
+│   │ op │    │ py │
+│   │ en │    │ _t │
+│   │ w2 │    │ es │
+│   │ 7  │    │ t. │
+│   │ ro │    │ ex │
+│   │ ws │    │ s  │
+│   │ re │    │ an │
+│   │ al │    │ d  │
+│   │ ly │    │ th │
+│   │ la │    │ e  │
+│   │ nd │    │ de │
+│   │ ed │    │ pl │
+│   │ ,  │    │ oy │
+│   │ an │    │ me │
+│   │ d  │    │ nt │
+│   │ is │    │ _f │
+│   │ cc │    │ ai │
+│   │ h- │    │ le │
+│   │ w1 │    │ d  │
+│   │ 4  │    │ di │
+│   │ re │    │ sp │
+│   │ al │    │ at │
+│   │ ly │    │ ch │
+│   │ pa │    │ te │
+│   │ id │    │ st │
+│   │ ?  │    │ ;  │
+│   │    │    │ id │
+│   │    │    │ en │
+│   │    │    │ ti │
+│   │    │    │ fy │
+│   │    │    │ ap │
+│   │    │    │ p. │
+│   │    │    │ js │
+│   │    │    │ :1 │
+│   │    │    │ 09 │
+│   │    │    │ 69 │
+│   │    │    │ ’s │
+│   │    │    │ co │
+│   │    │    │ nt │
+│   │    │    │ ai │
+│   │    │    │ ne │
+│   │    │    │ r  │
+│ V │ Do │ op │ fo │
+│ 7 │ es │ us │ rc │
+│   │ a  │    │ e  │
+│   │ re │    │ {: │
+│   │ al │    │ er │
+│   │ us │    │ ro │
+│   │ ag │    │ r, │
+│   │ e- │    │ :e │
+│   │ me │    │ xc │
+│   │ te │    │ ep │
+│   │ r  │    │ ti │
+│   │ cr │    │ on │
+│   │ as │    │ }, │
+│   │ h  │    │ ru │
+│   │ re │    │ n  │
+│   │ ac │    │ us │
+│   │ h  │    │ ag │
+│   │ a  │    │ e_ │
+│   │ re │    │ te │
+│   │ nd │    │ st │
+│   │ er │    │ .e │
+│   │ ed │    │ xs │
+│   │ pi │    │ ,  │
+│   │ xe │    │ dr │
+│   │ l  │    │ iv │
+│   │ —  │    │ e  │
+│   │ fi │    │ us │
+│   │ x  │    │ ag │
+│   │ sl │    │ eM │
+│   │ ic │    │ et │
+│   │ e  │    │ er │
+│   │ or │    │ Di │
+│   │ me │    │ sp │
+│   │ as │    │ la │
+│   │ ur │    │ y  │
+│   │ em │    │ th │
+│   │ en │    │ ro │
+│   │ t  │    │ ug │
+│   │ sl │    │ h  │
+│   │ ic │    │ th │
+│   │ e? │    │ e  │
+│   │    │    │ __ │
+│   │    │    │ ap │
+│   │    │    │ p. │
+│   │    │    │ te │
+│   │    │    │ st │
+│   │    │    │ .m │
+│   │    │    │ js │
+│   │    │    │ ho │
+│   │    │    │ ok │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ ca │
+│   │    │    │ pt │
+│   │    │    │ ur │
+│   │    │    │ e  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ li │
+│   │    │    │ te │
+│   │    │    │ ra │
+│   │    │    │ l  │
+│   │    │    │ st │
+│   │    │    │ ri │
+│   │    │    │ ng │
+│   │    │    │ ;  │
+│   │    │    │ op │
+│   │    │    │ en │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ us │
+│   │    │    │ ag │
+│   │    │    │ e_ │
+│   │    │    │ me │
+│   │    │    │ te │
+│   │    │    │ rs │
+│   │    │    │ fi │
+│   │    │    │ xt │
+│   │    │    │ ur │
+│   │    │    │ e  │
+│ V │ Pr │ op │ mu │
+│ 8 │ ov │ us │ ta │
+│   │ e  │    │ te │
+│   │ __ │    │ th │
+│   │ ap │    │ e  │
+│   │ p. │    │ st │
+│   │ te │    │ at │
+│   │ st │    │ e  │
+│   │ .m │    │ fa │
+│   │ js │    │ ll │
+│   │ :7 │    │ th │
+│   │ 93 │    │ ro │
+│   │ 8  │    │ ug │
+│   │ is │    │ h, │
+│   │ gr │    │ ru │
+│   │ ee │    │ n  │
+│   │ n- │    │ __ │
+│   │ by │    │ ap │
+│   │ -c │    │ p. │
+│   │ on │    │ te │
+│   │ st │    │ st │
+│   │ ru │    │ .m │
+│   │ ct │    │ js │
+│   │ io │    │ ,  │
+│   │ n, │    │ sh │
+│   │ an │    │ ow │
+│   │ d  │    │ it │
+│   │ th │    │ st │
+│   │ at │    │ ay │
+│   │ th │    │ s  │
+│   │ e  │    │ gr │
+│   │ ar │    │ ee │
+│   │ ia │    │ n  │
+│   │ -l │    │    │
+│   │ ab │    │    │
+│   │ el │    │    │
+│   │ de │    │    │
+│   │ fe │    │    │
+│   │ ct │    │    │
+│   │ is │    │    │
+│   │ in │    │    │
+│   │ vi │    │    │
+│   │ si │    │    │
+│   │ bl │    │    │
+│   │ e  │    │    │
+│   │ to │    │    │
+│   │ th │    │    │
+│   │ e  │    │    │
+│   │ su │    │    │
+│   │ it │    │    │
+│   │ e. │    │    │
+│ V │ Is │ op │ me │
+│ 9 │ C9 │ us │ mb │
+│   │ ’s │    │ er │
+│   │ su │    │ s  │
+│   │ bs │    │ le │
+│   │ ta │    │ g  │
+│   │ nt │    │ at │
+│   │ iv │    │ ba │
+│   │ e  │    │ se │
+│   │ le │    │ li │
+│   │ g  │    │ ne │
+│   │ pr │    │ ,  │
+│   │ ov │    │ th │
+│   │ ab │    │ en │
+│   │ le │    │ .s │
+│   │ HE │    │ et │
+│   │ RE │    │ -r │
+│   │ ,  │    │ ow │
+│   │ or │    │ -n │
+│   │ on │    │ am │
+│   │ ly │    │ e  │
+│   │ on │    │ ov │
+│   │ th │    │ er │
+│   │ e  │    │ fl │
+│   │ ga │    │ ow │
+│   │ ti │    │ :  │
+│   │ ng │    │ hi │
+│   │ ma │    │ dd │
+│   │ ch │    │ en │
+│   │ in │    │ to │
+│   │ e? │    │ vi │
+│   │    │    │ si │
+│   │    │    │ bl │
+│   │    │    │ e, │
+│   │    │    │ re │
+│   │    │    │ -r │
+│   │    │    │ un │
+│   │    │    │ ;  │
+│   │    │    │ re │
+│   │    │    │ po │
+│   │    │    │ rt │
+│   │    │    │ ho │
+│   │    │    │ ne │
+│   │    │    │ st │
+│   │    │    │ ly │
+│   │    │    │ wh │
+│   │    │    │ et │
+│   │    │    │ he │
+│   │    │    │ r  │
+│   │    │    │ ma │
+│   │    │    │ cO │
+│   │    │    │ S  │
+│   │    │    │ Ch │
+│   │    │    │ ro │
+│   │    │    │ me │
+│   │    │    │ ca │
+│   │    │    │ n  │
+│   │    │    │ pa │
+│   │    │    │ y  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ cr │
+│   │    │    │ it │
+│   │    │    │ er │
+│   │    │    │ io │
+│   │    │    │ n  │
+│ V │ Do │ op │ a  │
+│ 1 │ es │ us │ ta │
+│ 0 │ th │    │ rg │
+│   │ e  │    │ et │
+│   │ ch │    │ ed │
+│   │ at │    │ te │
+│   │ ch │    │ st │
+│   │ an │    │ th │
+│   │ ne │    │ at │
+│   │ l  │    │ di │
+│   │ re │    │ sp │
+│   │ al │    │ at │
+│   │ ly │    │ ch │
+│   │ sh │    │ es │
+│   │ ip │    │ de │
+│   │ a  │    │ pl │
+│   │ ca │    │ oy │
+│   │ us │    │ me │
+│   │ e- │    │ nt │
+│   │ fr │    │ _f │
+│   │ ee │    │ ai │
+│   │ li │    │ le │
+│   │ ne │    │ d  │
+│   │ fo │    │ an │
+│   │ r  │    │ d  │
+│   │ th │    │ ca │
+│   │ e  │    │ pt │
+│   │ sa │    │ ur │
+│   │ me │    │ es │
+│   │ di │    │ BO │
+│   │ sp │    │ TH │
+│   │ at │    │ th │
+│   │ ch │    │ e  │
+│   │ th │    │ em │
+│   │ at │    │ ai │
+│   │ gi │    │ l  │
+│   │ ve │    │ by │
+│   │ s  │    │ te │
+│   │ em │    │ s  │
+│   │ ai │    │ an │
+│   │ l  │    │ d  │
+│   │ a  │    │ th │
+│   │ ca │    │ e  │
+│   │ us │    │ ch │
+│   │ e? │    │ at │
+│   │    │    │ pa │
+│   │    │    │ yl │
+│   │    │    │ oa │
+│   │    │    │ d  │
+│ V │ Do │ op │ dr │
+│ 1 │ es │ us │ iv │
+│ 1 │ th │    │ e  │
+│   │ e  │    │ de │
+│   │ co │    │ pl │
+│   │ ns │    │ oy │
+│   │ ol │    │ Ro │
+│   │ e  │    │ w/ │
+│   │ re │    │ de │
+│   │ al │    │ pl │
+│   │ ly │    │ oy │
+│   │ dr │    │ De │
+│   │ op │    │ ta │
+│   │ th │    │ il │
+│   │ e  │    │ Ht │
+│   │ de │    │ ml │
+│   │ pl │    │ wi │
+│   │ oy │    │ th │
+│   │ -r │    │ a  │
+│   │ ef │    │ ca │
+│   │ us │    │ nc │
+│   │ al │    │ el │
+│   │ re │    │ le │
+│   │ me │    │ d  │
+│   │ dy │    │ ro │
+│   │ ,  │    │ w  │
+│   │ an │    │ ca │
+│   │ d  │    │ rr │
+│   │ do │    │ yi │
+│   │ es │    │ ng │
+│   │ hu │    │ fa │
+│   │ ma │    │ il │
+│   │ ni │    │ ur │
+│   │ ze │    │ e_ │
+│   │ /1 │    │ re │
+│   │ ma │    │ as │
+│   │ ng │    │ on │
+│   │ le │    │ ;  │
+│   │ it │    │ ru │
+│   │ ?  │    │ n  │
+│   │    │    │ Fa │
+│   │    │    │ il │
+│   │    │    │ ur │
+│   │    │    │ eC │
+│   │    │    │ op │
+│   │    │    │ y. │
+│   │    │    │ hu │
+│   │    │    │ ma │
+│   │    │    │ ni │
+│   │    │    │ ze │
+│   │    │    │ on │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ re │
+│   │    │    │ fu │
+│   │    │    │ sa │
+│   │    │    │ l  │
+│   │    │    │ de │
+│   │    │    │ ta │
+│   │    │    │ il │
+│ V │ Is │ op │ re │
+│ 1 │ §3 │ us │ qu │
+│ 2 │ c’ │    │ ir │
+│   │ s  │    │ ed │
+│   │ RE │    │ -c │
+│   │ AL │    │ he │
+│   │ _U │    │ ck │
+│   │ NM │    │ s. │
+│   │ AP │    │ te │
+│   │ PE │    │ st │
+│   │ D  │    │ .s │
+│   │ ho │    │ h  │
+│   │ le │    │ -- │
+│   │ re │    │ he │
+│   │ al │    │ rm │
+│   │ ,  │    │ et │
+│   │ an │    │ ic │
+│   │ d  │    │ ,  │
+│   │ ca │    │ qu │
+│   │ n  │    │ ot │
+│   │ th │    │ ed │
+│   │ e  │    │ ;  │
+│   │ he │    │ th │
+│   │ rm │    │ en │
+│   │ et │    │ pl │
+│   │ ic │    │ an │
+│   │ su │    │ t  │
+│   │ it │    │ a  │
+│   │ e  │    │ ca │
+│   │ se │    │ tc │
+│   │ e  │    │ h- │
+│   │ a  │    │ al │
+│   │ pl │    │ l  │
+│   │ an │    │ in │
+│   │ te │    │ a  │
+│   │ d  │    │ fi │
+│   │ ca │    │ xt │
+│   │ tc │    │ ur │
+│   │ h- │    │ e  │
+│   │ al │    │ tr │
+│   │ l? │    │ ee │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ wa │
+│   │    │    │ tc │
+│   │    │    │ h  │
+│   │    │    │ it │
+│   │    │    │ st │
+│   │    │    │ ay │
+│   │    │    │ gr │
+│   │    │    │ ee │
+│   │    │    │ n  │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│   │    │    │    │
+│ V │ Wh │ op │ re │
+│ 1 │ ic │ us │ -d │
+│ 3 │ h  │    │ er │
+│   │ w2 │    │ iv │
+│   │ 2- │    │ e  │
+│   │ s7 │    │ al │
+│   │ cr │    │ l  │
+│   │ it │    │ fi │
+│   │ er │    │ ve │
+│   │ ia │    │ an │
+│   │ ar │    │ ch │
+│   │ e  │    │ or │
+│   │ st │    │ s  │
+│   │ am │    │ at │
+│   │ pa │    │ or │
+│   │ bl │    │ ig │
+│   │ e  │    │ in │
+│   │ wi │    │ /m │
+│   │ th │    │ ai │
+│   │ CO │    │ n; │
+│   │ RR │    │ fe │
+│   │ EC │    │ tc │
+│   │ T  │    │ h  │
+│   │ an │    │ cc │
+│   │ ch │    │ hi │
+│   │ or │    │ -w │
+│   │ s, │    │ 27 │
+│   │ an │    │ -b │
+│   │ d  │    │ l- │
+│   │ do │    │ w2 │
+│   │ es │    │ 2s │
+│   │ th │    │ 7- │
+│   │ e  │    │ re │
+│   │ su │    │ si │
+│   │ cc │    │ du │
+│   │ es │    │ e- │
+│   │ so │    │ de │
+│   │ r  │    │ ri │
+│   │ ro │    │ ve │
+│   │ w  │    │ d- │
+│   │ al │    │ ca │
+│   │ re │    │ ps │
+│   │ ad │    │ -a │
+│   │ y  │    │ nd │
+│   │ ca │    │ -r │
+│   │ rr │    │ ef │
+│   │ y  │    │ us │
+│   │ a  │    │ al │
+│   │ C9 │    │ s; │
+│   │ -s │    │ te │
+│   │ ha │    │ st │
+│   │ pe │    │ C1 │
+│   │ d  │    │ 2’ │
+│   │ cr │    │ s  │
+│   │ it │    │ fi │
+│   │ er │    │ ve │
+│   │ io │    │ nu │
+│   │ n? │    │ mb │
+│   │    │    │ er │
+│   │    │    │ se │
+│   │    │    │ ts │
+│ V │ Ha │ op │ op │
+│ 1 │ s  │ us │ en │
+│ 4 │ th │    │ -P │
+│   │ e  │    │ R  │
+│   │ PD │    │ re │
+│   │ S  │    │ -s │
+│   │ w4 │    │ ca │
+│   │ 5  │    │ n, │
+│   │ co │    │ PD │
+│   │ ll │    │ S  │
+│   │ is │    │ bu │
+│   │ io │    │ il │
+│   │ n  │    │ de │
+│   │ su │    │ r  │
+│   │ rf │    │ br │
+│   │ ac │    │ an │
+│   │ e  │    │ ch │
+│   │ mo │    │ es │
+│   │ ve │    │ ,  │
+│   │ d? │    │ di │
+│   │ Th │    │ rt │
+│   │ e  │    │ y  │
+│   │ ma │    │ wo │
+│   │ p  │    │ rk │
+│   │ ha │    │ tr │
+│   │ s  │    │ ee │
+│   │ a  │    │ s  │
+│   │ kn │    │ on │
+│   │ ow │    │ ca │
+│   │ n  │    │ nd │
+│   │ on │    │ id │
+│   │ e- │    │ at │
+│   │ ho │    │ e  │
+│   │ ur │    │ fi │
+│   │ fr │    │ le │
+│   │ es │    │ s  │
+│   │ hn │    │    │
+│   │ es │    │    │
+│   │ s  │    │    │
+│   │ wi │    │    │
+│   │ nd │    │    │
+│   │ ow │    │    │
+│   │ .  │    │    │
+└───┴────┴────┴────┘
+                    
+Wave status:        
+VERIFYING. The      
+direction holds —   
+one sentence, three 
+audiences — but the 
+lane slice must be  
+re-scoped from a    
+prohibition to a    
+declare-and-justify 
+census, s2 must land
+with the five       
+ladderOnlyRun sites 
+in ONE PR, and the  
+D307 vocabulary must
+be reconciled before
+Decide files a      
+single row.         
+                    
+DECIDE —            
+verification        
+results, decisions, 
+and the wave in     
+flight              
+                    
+Ten verifiers ran.  
+Coverage was        
+complete: every     
+dispatched agent    
+reported, in both   
+the survey and the  
+verify rounds.      
+Nothing below is    
+inherited — every   
+load-bearing number 
+was re-derived from 
+origin/main bytes or
+from a real run,    
+because the primary 
+checkout reads      
+[ahead 48, behind   
+402] and three      
+separate verifiers  
+measured a DIFFERENT
+PROGRAM there before
+re-running in a     
+worktree.           
+                    
+What was PROVEN     
+                    
+┌────────┬─────────┐
+│ Four   │ context │
+│ contex │ s       │
+│ ts     │ [Elixir │
+│ BLOCK  │ gate,   │
+│ merges │ PR      │
+│ , spec │ referen │
+│ matche │ ces an  │
+│ s live │ active  │
+│ exactl │ task,   │
+│ y      │ Cloud   │
+│        │ gate,   │
+│        │ Console │
+│        │ gate]   │
+│        │ all     │
+│        │ app_id  │
+│        │ 15368,  │
+│        │ enforce │
+│        │ _admins │
+│        │ true,   │
+│        │ strict  │
+│        │ FALSE   │
+│ The    │ variant │
+│ exit   │ A 64/65 │
+│ contra │ on      │
+│ ct:    │ EVERY   │
+│ varian │ shape;  │
+│ t A    │ variant │
+│ wins   │ B 64/65 │
+│        │ full    │
+│        │ clone   │
+│        │ but     │
+│        │ 61/65   │
+│        │ on      │
+│        │ every   │
+│        │ SHALLOW │
+│        │ one —   │
+│        │ not ok  │
+│        │ 54, 56, │
+│        │ 62, all │
+│        │ "1 !==  │
+│        │ 0"      │
+│ origin │ depth-1 │
+│ /main  │ clone:  │
+│ today  │ 6 x "is │
+│ prints │ not an  │
+│ six    │ ancesto │
+│ FALSE  │ r", b-  │
+│ senten │ clean=0 │
+│ ces at │ /6, rc  │
+│ depth  │ 0 — and │
+│ 1, and │ node -- │
+│ the    │ test    │
+│ suite  │ gives   │
+│ is     │ 65 pass │
+│ GREEN  │ / 0     │
+│ anyway │ fail    │
+│ Consol │ refusin │
+│ e gate │ g curl  │
+│ is     │ sentine │
+│ green  │ l: 1    │
+│ only   │ fire,   │
+│ becaus │ not ok  │
+│ e a    │ 56.     │
+│ foreig │ Passthr │
+│ n host │ ough    │
+│ is up  │ sentine │
+│ AND    │ l: rc   │
+│ anonym │ 0,      │
+│ ous    │ 65/65,  │
+│        │ same    │
+│        │ single  │
+│        │ curl to │
+│        │ guerril │
+│        │ la with │
+│        │ Bearer  │
+│        │ undefin │
+│        │ ed      │
+│ Cloud  │ ERL_INE │
+│ gate   │ TRC     │
+│ resolv │ {lookup │
+│ es     │ ,[file] │
+│ discor │ }:      │
+│ d.com  │ exactly │
+│ live   │ ONE new │
+│        │ failure │
+│        │ —       │
+│        │ safe_ur │
+│        │ l_test. │
+│        │ exs:47, │
+│        │ left:   │
+│        │ {:error │
+│        │ ,       │
+│        │ :unreso │
+│        │ lvable} │
+│ Elixir │ full    │
+│ gate   │ api     │
+│ is     │ suite   │
+│ runtim │ under   │
+│ e-     │ both    │
+│ CLEAN  │ instrum │
+│        │ ents:   │
+│        │ 13416   │
+│        │ tests + │
+│        │ 27      │
+│        │ doctest │
+│        │ s, 5    │
+│        │ failure │
+│        │ s, 0    │
+│        │ curl/wg │
+│        │ et      │
+│        │ fires,  │
+│        │ guerril │
+│        │ la      │
+│        │ nxdomai │
+│        │ n for   │
+│        │ 605.7s  │
+│ domain │ baselin │
+│ RungCh │ e       │
+│ ip     │ 797/797 │
+│ guard  │ /0;     │
+│ cannot │ telling │
+│ lose   │ a       │
+│        │ screen  │
+│        │ reader  │
+│        │ an      │
+│        │ unmeasu │
+│        │ rable   │
+│        │ rung is │
+│        │ "done"  │
+│        │ ->      │
+│        │ STILL   │
+│        │ 797/797 │
+│        │ /0;     │
+│        │ glyph   │
+│        │ mutatio │
+│        │ n ->    │
+│        │ STILL   │
+│        │ 797/797 │
+│        │ /0      │
+│ previe │ deletin │
+│ wRow   │ g       │
+│ test   │ preview │
+│ runs   │ Row     │
+│ ZERO   │ failure │
+│ assert │ panel:  │
+│ ions   │ 797/797 │
+│        │ green.  │
+│        │ Deletin │
+│        │ g       │
+│        │ deployR │
+│        │ ow      │
+│        │ twin:   │
+│        │ 796/1   │
+│ The    │ M4      │
+│ overfl │ probe   │
+│ ow     │ on      │
+│ guard  │ unpatch │
+│ certif │ ed      │
+│ ies a  │ bytes:  │
+│ 392px  │ rc 0,   │
+│ spill  │ "22 /   │
+│ as     │ 22      │
+│ clean  │ cells   │
+│        │ clean   │
+│        │ ... 0   │
+│        │ identit │
+│        │ ies     │
+│        │ hidden  │
+│        │ with no │
+│        │ cue     │
+│        │ that    │
+│        │ can     │
+│        │ paint", │
+│        │ beside  │
+│        │ id[..., │
+│        │ 246/638 │
+│        │ ,...]   │
+│ The    │ off-    │
+│ D307   │ vocabul │
+│ guard  │ ary     │
+│ is     │ create  │
+│ LIVE   │ -> HTTP │
+│ on the │ 422     │
+│ filing │ validat │
+│ server │ ion_fai │
+│        │ led;    │
+│        │ omitted │
+│        │ ->      │
+│        │ lands;  │
+│        │ surface │
+│        │ =consol │
+│        │ e ->    │
+│        │ lands   │
+│ The    │ create  │
+│ D307   │ bare -> │
+│ guard  │ patch   │
+│ is     │ the     │
+│ bypass │ refused │
+│ ed in  │ prose   │
+│ two    │ (200) - │
+│ calls  │ >       │
+│        │ publish │
+│        │ (200);  │
+│        │ read    │
+│        │ back    │
+│        │ _draft: │
+│        │ false   │
+│        │ under   │
+│        │ the     │
+│        │ epic    │
+│        │ carryin │
+│        │ g the   │
+│        │ off-    │
+│        │ vocabul │
+│        │ ary     │
+│        │ term    │
+│ The    │ step    │
+│ hotfix │ body    │
+│ ! lane │ with    │
+│ is an  │ the     │
+│ ANTI-  │ repo    │
+│ escape │ real    │
+│        │ (unset) │
+│        │ token:  │
+│        │ rc=1;   │
+│        │ the     │
+│        │ label   │
+│        │ does    │
+│        │ not     │
+│        │ exist;  │
+│        │ scripts │
+│        │ /pr-    │
+│        │ task-   │
+│        │ gate.te │
+│        │ st.sh   │
+│        │ PINS    │
+│        │ that    │
+│        │ red at  │
+│        │ 84      │
+│        │ passed  │
+│        │ / 0     │
+│        │ failed  │
+└────────┴─────────┘
+                    
+What was REFUTED —  
+five premises the   
+wave was handed     
+                    
+•                   
+•                   
+•                   
+•                   
+•                   
+                    
+One charter premise 
+failed smoke and is 
+struck in the same  
+PR: the charter     
+cited cssom-        
+parity.mjs:608 as a 
+"working in-tree    
+implementation" of  
+the doctrine. Line  
+608 is a Chrome     
+build-banner        
+template literal;   
+the 790-line file   
+execs no git at all,
+and the passage it  
+means (:195-200) is 
+a documented REFUSAL
+to take a git       
+dependency. Wrong   
+line and wrong      
+claim. A builder    
+chasing it would    
+have cited dead     
+bytes back into the 
+ledger.             
+                    
+Not-founds worth as 
+much as the finds   
+                    
+•                   
+•                   
+•                   
+•                   
+•                   
+•                   
+                    
+Decisions           
+                    
+┌─────┬─────┬──────┐
+│ D33 │ --  │ Exit │
+│ 5   │ lad │ -1-  │
+│     │ der │ on-  │
+│     │ -on │ read │
+│     │ ly  │ is   │
+│     │ KEE │ invi │
+│     │ PS  │ sibl │
+│     │ exi │ e on │
+│     │ t   │ a    │
+│     │ 0;  │ full │
+│     │ the │ clon │
+│     │ con │ e    │
+│     │ dit │ and  │
+│     │ ion │ reds │
+│     │ rid │ thre │
+│     │ es  │ e    │
+│     │ as  │ test │
+│     │ b-  │ s on │
+│     │ una │ ever │
+│     │ vai │ y    │
+│     │ lab │ shal │
+│     │ le  │ low  │
+│     │ let │ one  │
+│     │ ter │ —    │
+│     │ s.  │ and  │
+│     │ Ver │ cons │
+│     │ dic │ ole- │
+│     │ t   │ unit │
+│     │ pat │ runs │
+│     │ h   │ at   │
+│     │ emi │ dept │
+│     │ ts  │ h 1  │
+│     │ b=H │ on   │
+│     │ IST │ ever │
+│     │ ORY │ y    │
+│     │ -UN │ push │
+│     │ AVA │ to   │
+│     │ ILA │ main │
+│     │ BLE │ , so │
+│     │ at  │ it   │
+│     │ exi │ woul │
+│     │ t   │ d    │
+│     │ 1.  │ leav │
+│     │     │ e    │
+│     │     │ the  │
+│     │     │ now- │
+│     │     │ bloc │
+│     │     │ king │
+│     │     │ Cons │
+│     │     │ ole  │
+│     │     │ gate │
+│     │     │ perm │
+│     │     │ anen │
+│     │     │ tly  │
+│     │     │ red. │
+│ D33 │ Key │ It   │
+│ 6   │ the │ reso │
+│     │ dis │ lves │
+│     │ cri │ in a │
+│     │ min │ dept │
+│     │ ati │ h-1  │
+│     │ on  │ clon │
+│     │ on  │ e    │
+│     │ the │ and  │
+│     │ mer │ does │
+│     │ ge- │ NOT  │
+│     │ bas │ in a │
+│     │ e   │ real │
+│     │ rc, │ PR   │
+│     │ nev │ chec │
+│     │ er  │ kout │
+│     │ on  │ ;    │
+│     │ whe │ only │
+│     │ the │ the  │
+│     │ r   │ merg │
+│     │ ori │ e-   │
+│     │ gin │ base │
+│     │ /ma │ rc   │
+│     │ in  │ is   │
+│     │ res │ shap │
+│     │ olv │ e-   │
+│     │ es. │ inde │
+│     │     │ pend │
+│     │     │ ent. │
+│ D33 │ Ret │ Thre │
+│ 7   │ ire │ e of │
+│     │ the │ four │
+│     │ wav │ cont │
+│     │ e's │ exts │
+│     │ ori │ are  │
+│     │ gin │ coup │
+│     │ al  │ led, │
+│     │ fin │ two  │
+│     │ ish │ of   │
+│     │ ed  │ them │
+│     │ sta │ legi │
+│     │ te. │ tima │
+│     │ The │ tely │
+│     │ def │ ; a  │
+│     │ ect │ proh │
+│     │ cla │ ibit │
+│     │ ss  │ ion  │
+│     │ is  │ reds │
+│     │ nar │ pr-  │
+│     │ row │ task │
+│     │ er: │ -gat │
+│     │ a   │ e.ym │
+│     │ req │ l on │
+│     │ uir │ day  │
+│     │ ed  │ one. │
+│     │ gat │      │
+│     │ e   │      │
+│     │ may │      │
+│     │ be  │      │
+│     │ red │      │
+│     │ by  │      │
+│     │ a   │      │
+│     │ for │      │
+│     │ eig │      │
+│     │ n   │      │
+│     │ hos │      │
+│     │ t   │      │
+│     │ onl │      │
+│     │ y   │      │
+│     │ if  │      │
+│     │ its │      │
+│     │ OWN │      │
+│     │ out │      │
+│     │ put │      │
+│     │ nam │      │
+│     │ es  │      │
+│     │ the │      │
+│     │ con │      │
+│     │ dit │      │
+│     │ ion │      │
+│     │ and │      │
+│     │ its │      │
+│     │ esc │      │
+│     │ ape │      │
+│     │ is  │      │
+│     │ arm │      │
+│     │ ed. │      │
+│     │ Bui │      │
+│     │ ld  │      │
+│     │ the │      │
+│     │ one │      │
+│     │ che │      │
+│     │ ap  │      │
+│     │ rea │      │
+│     │ l   │      │
+│     │ def │      │
+│     │ ect │      │
+│     │ ;   │      │
+│     │ fil │      │
+│     │ e   │      │
+│     │ the │      │
+│     │ cen │      │
+│     │ sus │      │
+│     │ as  │      │
+│     │ a   │      │
+│     │ dec │      │
+│     │ lar │      │
+│     │ e-  │      │
+│     │ and │      │
+│     │ -ju │      │
+│     │ sti │      │
+│     │ fy  │      │
+│     │ row │      │
+│     │ .   │      │
+│ D33 │ Do  │ Pres │
+│ 8   │ NOT │ umin │
+│     │ bui │ g    │
+│     │ ld  │ the  │
+│     │ the │ answ │
+│     │ hot │ er   │
+│     │ fix │ woul │
+│     │ lan │ d    │
+│     │ e   │ put  │
+│     │ thi │ a    │
+│     │ s   │ secu │
+│     │ wav │ rity │
+│     │ e.  │ deci │
+│     │ Fil │ sion │
+│     │ e   │ in a │
+│     │ it, │ buil │
+│     │ and │ der  │
+│     │ let │ brie │
+│     │ a   │ f.   │
+│     │ LEA │      │
+│     │ D   │      │
+│     │ cho │      │
+│     │ ose │      │
+│     │ bet │      │
+│     │ wee │      │
+│     │ n   │      │
+│     │ pro │      │
+│     │ vis │      │
+│     │ ion │      │
+│     │ ing │      │
+│     │ a   │      │
+│     │ gue │      │
+│     │ rri │      │
+│     │ lla │      │
+│     │ WRI │      │
+│     │ TE  │      │
+│     │ tok │      │
+│     │ en  │      │
+│     │ in  │      │
+│     │ CI  │      │
+│     │ and │      │
+│     │ dec │      │
+│     │ oup │      │
+│     │ lin │      │
+│     │ g   │      │
+│     │ the │      │
+│     │ rec │      │
+│     │ ord │      │
+│     │ to  │      │
+│     │ the │      │
+│     │ Git │      │
+│     │ Hub │      │
+│     │ sid │      │
+│     │ e.  │      │
+│ D33 │ Eve │ The  │
+│ 9   │ ry  │ door │
+│     │ wav │ is   │
+│     │ e-  │ live │
+│     │ 29  │ and  │
+│     │ row │ woul │
+│     │ dec │ d    │
+│     │ lar │ 422  │
+│     │ es  │ the  │
+│     │ an  │ epic │
+│     │ in- │ 's   │
+│     │ voc │ prac │
+│     │ abu │ tise │
+│     │ lar │ d    │
+│     │ y   │ pros │
+│     │ sur │ e;   │
+│     │ fac │ unde │
+│     │ e.  │ r    │
+│     │ The │ pres │
+│     │ ABS │ ence │
+│     │ ENT │ +enu │
+│     │ pro │ m 70 │
+│     │ mot │ of   │
+│     │ ion │ 71   │
+│     │ sta │ open │
+│     │ ys  │ rows │
+│     │ a   │ woul │
+│     │ mea │ d be │
+│     │ sur │ refu │
+│     │ ed  │ sed. │
+│     │ DEF │      │
+│     │ ER. │      │
+│     │ The │      │
+│     │ sco │      │
+│     │ pin │      │
+│     │ g   │      │
+│     │ leg │      │
+│     │ is  │      │
+│     │ a   │      │
+│     │ DES │      │
+│     │ IGN │      │
+│     │ BOU │      │
+│     │ NDA │      │
+│     │ RY  │      │
+│     │ at  │      │
+│     │ 46  │      │
+│     │ tes │      │
+│     │ ts  │      │
+│     │ / 1 │      │
+│     │ fai │      │
+│     │ lur │      │
+│     │ e — │      │
+│     │ nev │      │
+│     │ er  │      │
+│     │ aga │      │
+│     │ in  │      │
+│     │ 23. │      │
+│ D34 │ Re- │ Thei │
+│ 0   │ aim │ r    │
+│     │ fou │ head │
+│     │ r   │ line │
+│     │ sta │ fixe │
+│     │ le- │ s    │
+│     │ ope │ are  │
+│     │ n   │ alre │
+│     │ per │ ady  │
+│     │ son │ on   │
+│     │ row │ main │
+│     │ s   │ ;    │
+│     │ rat │ rebu │
+│     │ her │ ildi │
+│     │ tha │ ng   │
+│     │ n   │ them │
+│     │ reb │ woul │
+│     │ uil │ d    │
+│     │ d   │ burn │
+│     │ the │ four │
+│     │ m,  │ buil │
+│     │ and │ ders │
+│     │ re- │ on   │
+│     │ poi │ ship │
+│     │ nt  │ ped  │
+│     │ cch │ code │
+│     │ -w2 │ .    │
+│     │ 6   │      │
+│     │ at  │      │
+│     │ the │      │
+│     │ cha │      │
+│     │ t   │      │
+│     │ cha │      │
+│     │ nne │      │
+│     │ l.  │      │
+└─────┴─────┴──────┘
+                    
+Deliberately not    
+taken, named so no  
+surveyor re-opens   
+them: .preview-url  
+(measured 20/20     
+clean, rc 0 — the   
+row reads DONE      
+10/10); any edit to 
+.github/required-   
+checks.json         
+(REGISTER NOTHING — 
+the drift is green  
+for the first time  
+this session);      
+arming the D307     
+ABSENT tier; a repo-
+wide foreign-host   
+ratchet; and the    
+Console gate live-  
+roster relocation,  
+which collides with 
+s1's file fence and 
+is filed for        
+dispatch AFTER s1   
+merges.             
+                    
+The wave in flight —
+8 slices, all round 
+1                   
+                    
+Five person-facing  
+slices and three    
+instrument slices.  
+The ratio floor (>=4
+person) is met on   
+merit, not quota.   
+All eight run on    
+opus: fable is      
+unavailable this    
+session, so a fable 
+selection would be  
+remapped anyway and 
+claiming otherwise  
+would misreport what
+actually runs.      
+                    
+┌───┬────┬────┬────┐
+│ s │ cc │ in │ no │
+│ 1 │ h- │ st │ de │
+│ T │ w2 │ ru │ -- │
+│ h │ 8- │ me │ te │
+│ e │ s2 │ nt │ st │
+│ s │ -h │    │ se │
+│ e │ is │    │ al │
+│ a │ to │    │ -p │
+│ l │ ry │    │ re │
+│ p │ -u │    │ di │
+│ r │ na │    │ ca │
+│ e │ va │    │ te │
+│ d │ il │    │ .t │
+│ i │ ab │    │ es │
+│ c │ le │    │ t. │
+│ a │ -d │    │ mj │
+│ t │ is │    │ s, │
+│ e │ cr │    │ in │
+│ t │ im │    │ a  │
+│ e │ in │    │ fu │
+│ l │ at │    │ ll │
+│ l │ io │    │ cl │
+│ s │ n  │    │ on │
+│ " │    │    │ e  │
+│ I │    │    │ AN │
+│ c │    │    │ D  │
+│ o │    │    │ a  │
+│ u │    │    │ re │
+│ l │    │    │ al │
+│ d │    │    │ -- │
+│ n │    │    │ de │
+│ o │    │    │ pt │
+│ t │    │    │ h  │
+│ l │    │    │ 1  │
+│ o │    │    │ cl │
+│ o │    │    │ on │
+│ k │    │    │ e  │
+│ " │    │    │    │
+│ f │    │    │    │
+│ r │    │    │    │
+│ o │    │    │    │
+│ m │    │    │    │
+│ " │    │    │    │
+│ t │    │    │    │
+│ h │    │    │    │
+│ e │    │    │    │
+│ t │    │    │    │
+│ h │    │    │    │
+│ i │    │    │    │
+│ n │    │    │    │
+│ g │    │    │    │
+│ i │    │    │    │
+│ s │    │    │    │
+│ b │    │    │    │
+│ r │    │    │    │
+│ o │    │    │    │
+│ k │    │    │    │
+│ e │    │    │    │
+│ n │    │    │    │
+│ " │    │    │    │
+│ s │ cc │ in │ mi │
+│ 2 │ h- │ st │ x  │
+│ A │ w2 │ ru │ te │
+│ m │ 9- │ me │ st │
+│ e │ s2 │ nt │ sa │
+│ r │ -c │    │ fe │
+│ g │ lo │    │ _u │
+│ e │ ud │    │ rl │
+│ - │ -g │    │ _t │
+│ b │ at │    │ es │
+│ l │ e- │    │ t. │
+│ o │ st │    │ ex │
+│ c │ op │    │ s, │
+│ k │ s- │    │ an │
+│ i │ re │    │ d  │
+│ n │ so │    │ ag │
+│ g │ lv │    │ ai │
+│ g │ in │    │ n  │
+│ a │ g- │    │ un │
+│ t │ di │    │ de │
+│ e │ sc │    │ r  │
+│ s │ or │    │ ER │
+│ t │ d- │    │ L_ │
+│ o │ co │    │ IN │
+│ p │ m  │    │ ET │
+│ s │    │    │ RC │
+│ a │    │    │ wi │
+│ s │    │    │ th │
+│ k │    │    │ fo │
+│ i │    │    │ re │
+│ n │    │    │ ig │
+│ g │    │    │ n  │
+│ D │    │    │ DN │
+│ i │    │    │ S  │
+│ s │    │    │ de │
+│ c │    │    │ ad │
+│ o │    │    │    │
+│ r │    │    │    │
+│ d │    │    │    │
+│ ' │    │    │    │
+│ s │    │    │    │
+│ D │    │    │    │
+│ N │    │    │    │
+│ S │    │    │    │
+│ f │    │    │    │
+│ o │    │    │    │
+│ r │    │    │    │
+│ p │    │    │    │
+│ e │    │    │    │
+│ r │    │    │    │
+│ m │    │    │    │
+│ i │    │    │    │
+│ s │    │    │    │
+│ s │    │    │    │
+│ i │    │    │    │
+│ o │    │    │    │
+│ n │    │    │    │
+│ t │    │    │    │
+│ o │    │    │    │
+│ m │    │    │    │
+│ e │    │    │    │
+│ r │    │    │    │
+│ g │    │    │    │
+│ s │ cc │ in │ OV │
+│ 3 │ h- │ st │ ER │
+│ T │ w2 │ ru │ FL │
+│ h │ 9- │ me │ OW │
+│ e │ s3 │ nt │ _G │
+│ o │ -o │    │ UA │
+│ v │ ve │    │ RD │
+│ e │ rf │    │ _P │
+│ r │ lo │    │ OR │
+│ f │ w- │    │ T= │
+│ l │ gu │    │ 42 │
+│ o │ ar │    │ 87 │
+│ w │ d- │    │ ov │
+│ g │ cu │    │ er │
+│ u │ e- │    │ fl │
+│ a │ pr │    │ ow │
+│ r │ ed │    │ -g │
+│ d │ ic │    │ ua │
+│ c │ at │    │ rd │
+│ e │ e- │    │ .m │
+│ r │ is │    │ js │
+│ t │ -b │    │ -- │
+│ i │ li │    │ de │
+│ f │ nd │    │ fe │
+│ i │ -t │    │ ct │
+│ e │ o- │    │ W2 │
+│ s │ ov │    │ 1- │
+│ " │ er │    │ me │
+│ 0 │ fl │    │ mb │
+│ i │ ow │    │ er │
+│ d │    │    │ s- │
+│ e │    │    │ ro │
+│ n │    │    │ st │
+│ t │    │    │ er │
+│ i │    │    │ -i │
+│ t │    │    │ de │
+│ i │    │    │ nt │
+│ e │    │    │ it │
+│ s │    │    │ y- │
+│ h │    │    │ an │
+│ i │    │    │ d- │
+│ d │    │    │ re │
+│ d │    │    │ mo │
+│ e │    │    │ ve │
+│ n │    │    │ ,  │
+│ " │    │    │ th │
+│ w │    │    │ en │
+│ h │    │    │ th │
+│ i │    │    │ e  │
+│ l │    │    │ fu │
+│ e │    │    │ ll │
+│ 3 │    │    │ 25 │
+│ 9 │    │    │ -l │
+│ 2 │    │    │ eg │
+│ p │    │    │ ru │
+│ x │    │    │ n  │
+│ i │    │    │    │
+│ s │    │    │    │
+│ c │    │    │    │
+│ u │    │    │    │
+│ t │    │    │    │
+│ s │ ta │ co │ no │
+│ 4 │ sk │ ns │ de │
+│ A │ -1 │ ol │ -- │
+│ n │ da │ e  │ ch │
+│ u │ ff │    │ ec │
+│ n │ 7b │    │ k  │
+│ m │ c1 │    │ ap │
+│ e │ bf │    │ p. │
+│ a │ 46 │    │ js │
+│ s │ ce │    │ && │
+│ u │ b  │    │ no │
+│ r │    │    │ de │
+│ a │    │    │ __ │
+│ b │    │    │ ap │
+│ l │    │    │ p. │
+│ e │    │    │ te │
+│ d │    │    │ st │
+│ o │    │    │ .m │
+│ m │    │    │ js │
+│ a │    │    │    │
+│ i │    │    │    │
+│ n │    │    │    │
+│ r │    │    │    │
+│ u │    │    │    │
+│ n │    │    │    │
+│ g │    │    │    │
+│ s │    │    │    │
+│ t │    │    │    │
+│ o │    │    │    │
+│ p │    │    │    │
+│ s │    │    │    │
+│ t │    │    │    │
+│ e │    │    │    │
+│ l │    │    │    │
+│ l │    │    │    │
+│ i │    │    │    │
+│ n │    │    │    │
+│ g │    │    │    │
+│ a │    │    │    │
+│ s │    │    │    │
+│ c │    │    │    │
+│ r │    │    │    │
+│ e │    │    │    │
+│ e │    │    │    │
+│ n │    │    │    │
+│ r │    │    │    │
+│ e │    │    │    │
+│ a │    │    │    │
+│ d │    │    │    │
+│ e │    │    │    │
+│ r │    │    │    │
+│ i │    │    │    │
+│ t │    │    │    │
+│ i │    │    │    │
+│ s │    │    │    │
+│ " │    │    │    │
+│ w │    │    │    │
+│ a │    │    │    │
+│ i │    │    │    │
+│ t │    │    │    │
+│ i │    │    │    │
+│ n │    │    │    │
+│ g │    │    │    │
+│ " │    │    │    │
+│ s │ cc │ co │ mi │
+│ 5 │ h- │ ns │ x  │
+│ A │ w2 │ ol │ te │
+│ u │ 8- │ e  │ st │
+│ s │ bl │    │ th │
+│ a │ -u │    │ e  │
+│ g │ sa │    │ fo │
+│ e │ ge │    │ ur │
+│ m │ -m │    │ us │
+│ e │ et │    │ ag │
+│ t │ er │    │ e  │
+│ e │ s- │    │ su │
+│ r │ sa │    │ it │
+│ t │ y- │    │ es │
+│ h │ un │    │ ;  │
+│ a │ me │    │ no │
+│ t │ te │    │ de │
+│ C │ re │    │ __ │
+│ R │ d- │    │ ap │
+│ A │ wh │    │ p. │
+│ S │ en │    │ te │
+│ H │ -t │    │ st │
+│ E │ he │    │ .m │
+│ D │ y- │    │ js │
+│ s │ co │    │ ;  │
+│ t │ ul │    │ sm │
+│ o │ d- │    │ ok │
+│ p │ no │    │ e. │
+│ s │ t- │    │ mj │
+│ r │ me │    │ s  │
+│ e │ as │    │    │
+│ a │ ur │    │    │
+│ d │ e  │    │    │
+│ i │    │    │    │
+│ n │    │    │    │
+│ g │    │    │    │
+│ a │    │    │    │
+│ s │    │    │    │
+│ " │    │    │    │
+│ N │    │    │    │
+│ o │    │    │    │
+│ t │    │    │    │
+│ y │    │    │    │
+│ e │    │    │    │
+│ t │    │    │    │
+│ m │    │    │    │
+│ e │    │    │    │
+│ t │    │    │    │
+│ e │    │    │    │
+│ r │    │    │    │
+│ e │    │    │    │
+│ d │    │    │    │
+│ " │    │    │    │
+│ s │ cc │ co │ no │
+│ 6 │ h- │ ns │ de │
+│ A │ w2 │ ol │ -- │
+│ p │ 8- │ e  │ ch │
+│ u │ bl │    │ ec │
+│ b │ -a │    │ k  │
+│ l │ ut │    │ ap │
+│ i │ o- │    │ p. │
+│ s │ de │    │ js │
+│ h │ pl │    │ && │
+│ t │ oy │    │ no │
+│ h │ -r │    │ de │
+│ a │ ef │    │ __ │
+│ t │ us │    │ ap │
+│ w │ al │    │ p. │
+│ a │ -h │    │ te │
+│ s │ as │    │ st │
+│ R │ -n │    │ .m │
+│ E │ o- │    │ js │
+│ F │ ev │    │ ;  │
+│ U │ en │    │ sm │
+│ S │ t- │    │ ok │
+│ E │ at │    │ e. │
+│ D │ -a │    │ mj │
+│ s │ ll │    │ s  │
+│ t │    │    │    │
+│ o │    │    │    │
+│ p │    │    │    │
+│ s │    │    │    │
+│ r │    │    │    │
+│ e │    │    │    │
+│ n │    │    │    │
+│ d │    │    │    │
+│ e │    │    │    │
+│ r │    │    │    │
+│ i │    │    │    │
+│ n │    │    │    │
+│ g │    │    │    │
+│ a │    │    │    │
+│ s │    │    │    │
+│ a │    │    │    │
+│ b │    │    │    │
+│ a │    │    │    │
+│ r │    │    │    │
+│ e │    │    │    │
+│ " │    │    │    │
+│ C │    │    │    │
+│ a │    │    │    │
+│ n │    │    │    │
+│ c │    │    │    │
+│ e │    │    │    │
+│ l │    │    │    │
+│ l │    │    │    │
+│ e │    │    │    │
+│ d │    │    │    │
+│ " │    │    │    │
+│ p │    │    │    │
+│ i │    │    │    │
+│ l │    │    │    │
+│ l │    │    │    │
+│ s │ cc │ co │ mi │
+│ 7 │ h- │ ns │ x  │
+│ O │ w2 │ ol │ te │
+│ n │ 6- │ e  │ st │
+│ e │ bl │    │ te │
+│ f │ -d │    │ st │
+│ a │ ep │    │ /b │
+│ i │ lo │    │ ar │
+│ l │ ym │    │ kp │
+│ u │ en │    │ ar │
+│ r │ t- │    │ k_ │
+│ e │ fa │    │ cl │
+│ , │ il │    │ ou │
+│ t │ ed │    │ d/ │
+│ w │ -e │    │ no │
+│ o │ ma │    │ ti │
+│ s │ il │    │ fi │
+│ t │ -s │    │ ca │
+│ o │ ti │    │ ti │
+│ r │ ll │    │ on │
+│ i │ -u │    │ s/ │
+│ e │ nh │    │ (o │
+│ s │ um │    │ ri │
+│ : │ an │    │ gi │
+│ t │ iz │    │ n/ │
+│ h │ ed │    │ ma │
+│ e │    │    │ in │
+│ c │    │    │ ba │
+│ h │    │    │ se │
+│ a │    │    │ li │
+│ t │    │    │ ne │
+│ r │    │    │ :  │
+│ e │    │    │ 30 │
+│ a │    │    │ te │
+│ d │    │    │ st │
+│ e │    │    │ s, │
+│ r │    │    │ 0  │
+│ g │    │    │ fa │
+│ e │    │    │ il │
+│ t │    │    │ ur │
+│ s │    │    │ es │
+│ n │    │    │ )  │
+│ o │    │    │    │
+│ c │    │    │    │
+│ a │    │    │    │
+│ u │    │    │    │
+│ s │    │    │    │
+│ e │    │    │    │
+│ s │ cc │ co │ mi │
+│ 8 │ h- │ ns │ x  │
+│ T │ w2 │ ol │ te │
+│ h │ 8- │ e  │ st │
+│ e │ bl │    │ fa │
+│ c │ -c │    │ il │
+│ a │ ap │    │ ur │
+│ p │ ac │    │ e_ │
+│ a │ it │    │ co │
+│ c │ y- │    │ py │
+│ i │ ar │    │ _t │
+│ t │ m- │    │ es │
+│ y │ bl │    │ t. │
+│ a │ am │    │ ex │
+│ r │ es │    │ s  │
+│ m │ -h │    │ (o │
+│ n │ et │    │ ri │
+│ a │ zn │    │ gi │
+│ m │ er │    │ n/ │
+│ e │ -f │    │ ma │
+│ s │ or │    │ in │
+│ o │ -a │    │ ba │
+│ n │ zu │    │ se │
+│ e │ re │    │ li │
+│ p │    │    │ ne │
+│ r │    │    │ :  │
+│ o │    │    │ 83 │
+│ v │    │    │ te │
+│ i │    │    │ st │
+│ d │    │    │ s, │
+│ e │    │    │ 0  │
+│ r │    │    │ fa │
+│ a │    │    │ il │
+│ n │    │    │ ur │
+│ d │    │    │ es │
+│ o │    │    │ )  │
+│ n │    │    │    │
+│ e │    │    │    │
+│ r │    │    │    │
+│ e │    │    │    │
+│ s │    │    │    │
+│ o │    │    │    │
+│ u │    │    │    │
+│ r │    │    │    │
+│ c │    │    │    │
+│ e │    │    │    │
+│ f │    │    │    │
+│ o │    │    │    │
+│ r │    │    │    │
+│ a │    │    │    │
+│ b │    │    │    │
+│ l │    │    │    │
+│ i │    │    │    │
+│ n │    │    │    │
+│ d │    │    │    │
+│ p │    │    │    │
+│ r │    │    │    │
+│ e │    │    │    │
+│ d │    │    │    │
+│ i │    │    │    │
+│ c │    │    │    │
+│ a │    │    │    │
+│ t │    │    │    │
+│ e │    │    │    │
+└───┴────┴────┴────┘
+                    
+HIGH-FLIP-RISK: s1's
+exit contract on the
+read path. Two      
+surveyors read it   
+opposite ways and it
+was settled by      
+running both        
+variants in four    
+clone shapes. A     
+genuinely           
+independent second  
+re-derivation is    
+owed before that    
+judgment is allowed 
+to flip — the wave- 
+reviewer must name  
+it, and the lead    
+dispatches it by    
+hand.               
+                    
+Standing Law 0 is   
+honoured by         
+splitting the       
+parent, and the     
+deviation is stated 
+rather than         
+smuggled: s2 and s3 
+are instrument rows 
+filed under cch-    
+instruments-epic; s1
+was already a child 
+of this epic when   
+wave 28 filed it and
+stays there; the    
+five person rows    
+stay under this     
+epic.               
+                    
+File collisions,    
+declared: three     
+slices touch app.js 
+in three disjoint   
+regions (s4 ~9550-  
+9730; s6 ~10090-    
+10390 and ~11203; s5
+~5219 and ~16200-   
+16320); s5 and s6   
+share scenarios.mjs;
+s4/s5/s6 append to  
+__app.test.mjs in   
+different places.   
+Every brief names   
+its region and      
+orders a rebase on  
+origin/main before  
+pushing. Suggested  
+merge order: s4,    
+then s6, then s5.   
+                    
+Backlog filed —     
+twelve rows         
+                    
+Everything          
+exploration surfaced
+that is real but not
+this wave, filed now
+as published        
+children with honest
+descriptions: the   
+Console gate live-  
+roster relocation   
+(after s1 merges),  
+the D307 patch-then-
+publish bypass, the 
+500-on-missing-brief
+filing door,        
+token_expiring (0   
+producers, default  
+TRUE), the .deploy- 
+rail-live overflow, 
+the hotfix anti-    
+escape, merge-      
+gates.md's three    
+stale claims,       
+required-checks 3c's
+dead read, the reap-
+cap's untold 26th   
+owner,              
+agent_unreachable's 
+next-step-less      
+letter, console-    
+harness.yml's three 
+falsified ADVISORY  
+sentences, and the  
+owed cch-w22-s7     
+stamp set with its  
+four honesty        
+caveats.            
+                    
+Wave status:        
+BUILDING. Charter PR
+#9450 is open and   
+reporting (docs-    
+only, 7 markdown    
+files, REGISTER     
+NOTHING held).      
+Because it may not  
+be on origin/main   
+while the builders  
+fly, every decision 
+above is stated here
+IN FULL — this Paper
+is what a builder   
+can read today.     
+                    
+DEBRIEF — the wave  
+as it will merge    
+                    
+Wave status:        
+COMPLETE. Eight     
+round-1 slices      
+built, reviewed     
+adversarially, fixed
+in place, re-gated  
+on the final branch,
+pushed and PR'd.    
+Grade A. Nothing was
+registered;         
+.github/required-   
+checks.json is byte-
+unchanged and the   
+drift that closed   
+for the first time  
+this session stays  
+closed. This section
+supersedes the Wave 
+status: BUILDING    
+line that closed the
+DECIDE section      
+above; every        
+decision and proof  
+recorded before it  
+still stands, with  
+the corrections     
+named explicitly    
+below.              
+                    
+The wish's item 2   
+was re-derived, not 
+trusted: gh api     
+repos/FRIKKern/barkp
+ark/branches/main/pr
+otection returns    
+exactly ["Elixir    
+gate","PR references
+an active           
+task","Cloud        
+gate","Console      
+gate"] with         
+enforce_admins.enabl
+ed true and strict  
+false. Console gate 
+and Cloud gate      
+BLOCK. No slice     
+touched anything    
+under .github/.     
+                    
+What shipped — final
+branch is the -r    
+branch in every row 
+                    
+The lead merges     
+these. Each row's   
+last acceptance     
+criterion is MERGE- 
+GATED and stays open
+until the lead      
+closes it on merge —
+that is the only    
+open criterion on   
+any of the eight.   
+                    
+┌───┬────┬────┬────┐
+│ c │ lo │ #9 │ Th │
+│ c │ op │ 45 │ e  │
+│ h │ -e │ 5  │ wa │
+│ - │ pi │    │ ve │
+│ w │ c/ │    │ 's │
+│ 2 │ th │    │ ce │
+│ 8 │ e- │    │ nt │
+│ - │ se │    │ re │
+│ s │ al │    │ pi │
+│ 2 │ -p │    │ ec │
+│ - │ re │    │ e. │
+│ h │ di │    │ Fi │
+│ i │ ca │    │ ve │
+│ s │ te │    │ pr │
+│ t │ -t │    │ ob │
+│ o │ el │    │ es │
+│ r │ ls │    │ ,  │
+│ y │ -i │    │ ne │
+│ - │ -c │    │ ve │
+│ u │ ou │    │ r  │
+│ n │ ld │    │ fo │
+│ a │ -n │    │ ld │
+│ v │ ot │    │ in │
+│ a │ -l │    │ g  │
+│ i │ oo │    │ on │
+│ l │ -0 │    │ e  │
+│ a │ -r │    │ rc │
+│ b │    │    │ in │
+│ l │    │    │ to │
+│ e │    │    │ an │
+│ - │    │    │ ot │
+│ d │    │    │ he │
+│ i │    │    │ r; │
+│ s │    │    │ th │
+│ c │    │    │ e  │
+│ r │    │    │ fi │
+│ i │    │    │ ft │
+│ m │    │    │ h  │
+│ i │    │    │ (D │
+│ n │    │    │ IF │
+│ a │    │    │ F  │
+│ t │    │    │ IN │
+│ i │    │    │ TE │
+│ o │    │    │ GR │
+│ n │    │    │ IT │
+│   │    │    │ Y) │
+│   │    │    │ is │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ on │
+│   │    │    │ e  │
+│   │    │    │ no │
+│   │    │    │ bo │
+│   │    │    │ dy │
+│   │    │    │ na │
+│   │    │    │ me │
+│   │    │    │ d  │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ it │
+│   │    │    │ is │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fa │
+│   │    │    │ ls │
+│   │    │    │ e  │
+│   │    │    │ PA │
+│   │    │    │ SS │
+│   │    │    │ be │
+│   │    │    │ hi │
+│   │    │    │ nd │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fa │
+│   │    │    │ ls │
+│   │    │    │ e  │
+│   │    │    │ FA │
+│   │    │    │ IL │
+│   │    │    │ .  │
+│   │    │    │ Re │
+│   │    │    │ -p │
+│   │    │    │ ro │
+│   │    │    │ ve │
+│   │    │    │ d  │
+│   │    │    │ by │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ re │
+│   │    │    │ vi │
+│   │    │    │ ew │
+│   │    │    │ er │
+│   │    │    │ in │
+│   │    │    │ a  │
+│   │    │    │ pr │
+│   │    │    │ is │
+│   │    │    │ ti │
+│   │    │    │ ne │
+│   │    │    │ de │
+│   │    │    │ pt │
+│   │    │    │ h- │
+│   │    │    │ 1  │
+│   │    │    │ cl │
+│   │    │    │ on │
+│   │    │    │ e: │
+│   │    │    │ b- │
+│   │    │    │ cl │
+│   │    │    │ ea │
+│   │    │    │ n= │
+│   │    │    │ 0/ │
+│   │    │    │ 6  │
+│   │    │    │ b- │
+│   │    │    │ un │
+│   │    │    │ av │
+│   │    │    │ ai │
+│   │    │    │ la │
+│   │    │    │ bl │
+│   │    │    │ e= │
+│   │    │    │ 6/ │
+│   │    │    │ 6, │
+│   │    │    │ rc │
+│   │    │    │ 0, │
+│   │    │    │ ZE │
+│   │    │    │ RO │
+│   │    │    │ 'i │
+│   │    │    │ s  │
+│   │    │    │ no │
+│   │    │    │ t  │
+│   │    │    │ an │
+│   │    │    │ an │
+│   │    │    │ ce │
+│   │    │    │ st │
+│   │    │    │ or │
+│   │    │    │ '  │
+│   │    │    │ se │
+│   │    │    │ nt │
+│   │    │    │ en │
+│   │    │    │ ce │
+│   │    │    │ s; │
+│   │    │    │ su │
+│   │    │    │ it │
+│   │    │    │ e  │
+│   │    │    │ 74 │
+│   │    │    │ /7 │
+│   │    │    │ 4  │
+│   │    │    │ th │
+│   │    │    │ er │
+│   │    │    │ e  │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ in │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ wo │
+│   │    │    │ rk │
+│   │    │    │ tr │
+│   │    │    │ ee │
+│   │    │    │ .  │
+│   │    │    │ FL │
+│   │    │    │ IP │
+│   │    │    │ -R │
+│   │    │    │ IS │
+│   │    │    │ K: │
+│   │    │    │ an │
+│   │    │    │ in │
+│   │    │    │ de │
+│   │    │    │ pe │
+│   │    │    │ nd │
+│   │    │    │ en │
+│   │    │    │ t  │
+│   │    │    │ se │
+│   │    │    │ co │
+│   │    │    │ nd │
+│   │    │    │ re │
+│   │    │    │ vi │
+│   │    │    │ ew │
+│   │    │    │ er │
+│   │    │    │ is │
+│   │    │    │ ow │
+│   │    │    │ ed │
+│   │    │    │ on │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ NO │
+│   │    │    │ -M │
+│   │    │    │ ER │
+│   │    │    │ GE │
+│   │    │    │ -B │
+│   │    │    │ AS │
+│   │    │    │ E  │
+│   │    │    │ co │
+│   │    │    │ rr │
+│   │    │    │ ob │
+│   │    │    │ or │
+│   │    │    │ at │
+│   │    │    │ or │
+│   │    │    │ .  │
+│ c │ lo │ #9 │ A  │
+│ c │ op │ 45 │ bl │
+│ h │ -e │ 8  │ oc │
+│ - │ pi │    │ ki │
+│ w │ c/ │    │ ng │
+│ 2 │ a- │    │ ga │
+│ 9 │ me │    │ te │
+│ - │ rg │    │ st │
+│ s │ e- │    │ op │
+│ 2 │ bl │    │ pe │
+│ - │ oc │    │ d  │
+│ c │ ki │    │ as │
+│ l │ ng │    │ ki │
+│ o │ -g │    │ ng │
+│ u │ at │    │ a  │
+│ d │ e- │    │ th │
+│ - │ st │    │ ir │
+│ g │ op │    │ d  │
+│ a │ s- │    │ pa │
+│ t │ as │    │ rt │
+│ e │ ki │    │ y' │
+│ - │ ng │    │ s  │
+│ s │ -d │    │ na │
+│ t │ is │    │ me │
+│ o │ co │    │ se │
+│ p │ -1 │    │ rv │
+│ s │ -r │    │ er │
+│ - │    │    │ s  │
+│ r │    │    │ fo │
+│ e │    │    │ r  │
+│ s │    │    │ pe │
+│ o │    │    │ rm │
+│ l │    │    │ is │
+│ v │    │    │ si │
+│ i │    │    │ on │
+│ n │    │    │ to │
+│ g │    │    │ me │
+│ - │    │    │ rg │
+│ d │    │    │ e. │
+│ i │    │    │ ch │
+│ s │    │    │ ec │
+│ c │    │    │ k/ │
+│ o │    │    │ 2  │
+│ r │    │    │ ga │
+│ d │    │    │ in │
+│ - │    │    │ s  │
+│ c │    │    │ an │
+│ o │    │    │ op │
+│ m │    │    │ ti │
+│   │    │    │ on │
+│   │    │    │ al │
+│   │    │    │ :r │
+│   │    │    │ es │
+│   │    │    │ ol │
+│   │    │    │ ve │
+│   │    │    │ r, │
+│   │    │    │ de │
+│   │    │    │ fa │
+│   │    │    │ ul │
+│   │    │    │ t  │
+│   │    │    │ &: │
+│   │    │    │ in │
+│   │    │    │ et │
+│   │    │    │ .g │
+│   │    │    │ et │
+│   │    │    │ ad │
+│   │    │    │ dr │
+│   │    │    │ s/ │
+│   │    │    │ 2, │
+│   │    │    │ so │
+│   │    │    │ ev │
+│   │    │    │ er │
+│   │    │    │ y  │
+│   │    │    │ pr │
+│   │    │    │ od │
+│   │    │    │ uc │
+│   │    │    │ ti │
+│   │    │    │ on │
+│   │    │    │ ca │
+│   │    │    │ ll │
+│   │    │    │ er │
+│   │    │    │ is │
+│   │    │    │ by │
+│   │    │    │ te │
+│   │    │    │ -i │
+│   │    │    │ de │
+│   │    │    │ nt │
+│   │    │    │ ic │
+│   │    │    │ al │
+│   │    │    │ .  │
+│   │    │    │ 10 │
+│   │    │    │ /0 │
+│   │    │    │ ,  │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ 10 │
+│   │    │    │ /0 │
+│   │    │    │ un │
+│   │    │    │ de │
+│   │    │    │ r  │
+│   │    │    │ ER │
+│   │    │    │ L_ │
+│   │    │    │ IN │
+│   │    │    │ ET │
+│   │    │    │ RC │
+│   │    │    │ {l │
+│   │    │    │ oo │
+│   │    │    │ ku │
+│   │    │    │ p, │
+│   │    │    │ [f │
+│   │    │    │ il │
+│   │    │    │ e] │
+│   │    │    │ }. │
+│   │    │    │ Th │
+│   │    │    │ e  │
+│   │    │    │ se │
+│   │    │    │ am │
+│   │    │    │ is │
+│   │    │    │ an │
+│   │    │    │ af │
+│   │    │    │ fo │
+│   │    │    │ rd │
+│   │    │    │ an │
+│   │    │    │ ce │
+│   │    │    │ no │
+│   │    │    │ th │
+│   │    │    │ in │
+│   │    │    │ g  │
+│   │    │    │ gu │
+│   │    │    │ ar │
+│   │    │    │ ds │
+│   │    │    │ in │
+│   │    │    │ pr │
+│   │    │    │ od │
+│   │    │    │ uc │
+│   │    │    │ ti │
+│   │    │    │ on │
+│   │    │    │ —  │
+│   │    │    │ fi │
+│   │    │    │ le │
+│   │    │    │ d, │
+│   │    │    │ no │
+│   │    │    │ t  │
+│   │    │    │ le │
+│   │    │    │ ft │
+│   │    │    │ as │
+│   │    │    │ a  │
+│   │    │    │ se │
+│   │    │    │ nt │
+│   │    │    │ en │
+│   │    │    │ ce │
+│   │    │    │ .  │
+│ c │ lo │ #9 │ Th │
+│ c │ op │ 45 │ e  │
+│ h │ -e │ 9  │ fo │
+│ - │ pi │    │ ur │
+│ w │ c/ │    │ -p │
+│ 2 │ th │    │ ar │
+│ 9 │ e- │    │ t  │
+│ - │ ov │    │ fa │
+│ s │ er │    │ il │
+│ 3 │ fl │    │ -b │
+│ - │ ow │    │ ef │
+│ o │ -g │    │ or │
+│ v │ ua │    │ e  │
+│ e │ rd │    │ he │
+│ r │ -c │    │ ld │
+│ f │ er │    │ :  │
+│ l │ ti │    │ on │
+│ o │ fi │    │ un │
+│ w │ es │    │ pa │
+│ - │ -0 │    │ tc │
+│ g │ -i │    │ he │
+│ u │ de │    │ d  │
+│ a │ nt │    │ by │
+│ r │ it │    │ te │
+│ d │ ie │    │ s  │
+│ - │ -2 │    │ th │
+│ c │ -r │    │ e  │
+│ u │    │    │ gu │
+│ e │    │    │ ar │
+│ - │    │    │ d  │
+│ p │    │    │ pr │
+│ r │    │    │ in │
+│ e │    │    │ te │
+│ d │    │    │ d  │
+│ i │    │    │ OV │
+│ c │    │    │ ER │
+│ a │    │    │ FL │
+│ t │    │    │ OW │
+│ e │    │    │ GU │
+│ - │    │    │ AR │
+│ i │    │    │ D  │
+│ s │    │    │ PA │
+│ - │    │    │ SS │
+│ b │    │    │ an │
+│ l │    │    │ d  │
+│ i │    │    │ '0 │
+│ n │    │    │ id │
+│ d │    │    │ en │
+│ - │    │    │ ti │
+│ t │    │    │ ti │
+│ o │    │    │ es │
+│ - │    │    │ hi │
+│ o │    │    │ dd │
+│ v │    │    │ en │
+│ e │    │    │ '  │
+│ r │    │    │ be │
+│ f │    │    │ si │
+│ l │    │    │ de │
+│ o │    │    │ 43 │
+│ w │    │    │ 0p │
+│   │    │    │ x  │
+│   │    │    │ of │
+│   │    │    │ a  │
+│   │    │    │ cu │
+│   │    │    │ t  │
+│   │    │    │ id │
+│   │    │    │ en │
+│   │    │    │ ti │
+│   │    │    │ ty │
+│   │    │    │ .  │
+│   │    │    │ Re │
+│   │    │    │ vi │
+│   │    │    │ ew │
+│   │    │    │ er │
+│   │    │    │ st │
+│   │    │    │ re │
+│   │    │    │ ng │
+│   │    │    │ th │
+│   │    │    │ en │
+│   │    │    │ ed │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ te │
+│   │    │    │ rm │
+│   │    │    │ fr │
+│   │    │    │ om │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ sh │
+│   │    │    │ or │
+│   │    │    │ th │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ to │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ X  │
+│   │    │    │ AX │
+│   │    │    │ IS │
+│   │    │    │ —  │
+│   │    │    │ se │
+│   │    │    │ e  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fi │
+│   │    │    │ xe │
+│   │    │    │ s  │
+│   │    │    │ se │
+│   │    │    │ ct │
+│   │    │    │ io │
+│   │    │    │ n. │
+│ t │ lo │ #9 │ Fo │
+│ a │ op │ 46 │ ur │
+│ s │ -e │ 0  │ ru │
+│ k │ pi │    │ ng │
+│ - │ c/ │    │ s  │
+│ 1 │ an │    │ ma │
+│ d │ -u │    │ de │
+│ a │ nm │    │ ho │
+│ f │ ea │    │ ne │
+│ f │ su │    │ st │
+│ 7 │ ra │    │ ,  │
+│ b │ bl │    │ no │
+│ c │ e- │    │ t  │
+│ 1 │ do │    │ on │
+│ b │ ma │    │ e: │
+│ f │ in │    │ un │
+│ 4 │ -r │    │ kn │
+│ 6 │ un │    │ ow │
+│ c │ g- │    │ n  │
+│ e │ st │    │ ge │
+│ b │ op │    │ ts │
+│   │ s- │    │ it │
+│   │ te │    │ s  │
+│   │ ll │    │ ow │
+│   │ in │    │ n  │
+│   │ -3 │    │ gl │
+│   │ -r │    │ yp │
+│   │    │    │ h  │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ wo │
+│   │    │    │ rd │
+│   │    │    │ s, │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ th │
+│   │    │    │ re │
+│   │    │    │ e  │
+│   │    │    │ be │
+│   │    │    │ hi │
+│   │    │    │ nd │
+│   │    │    │ it │
+│   │    │    │ st │
+│   │    │    │ op │
+│   │    │    │ sa │
+│   │    │    │ yi │
+│   │    │    │ ng │
+│   │    │    │ 'w │
+│   │    │    │ ai │
+│   │    │    │ ti │
+│   │    │    │ ng │
+│   │    │    │ '. │
+│   │    │    │ .d │
+│   │    │    │ om │
+│   │    │    │ -r │
+│   │    │    │ un │
+│   │    │    │ g- │
+│   │    │    │ -u │
+│   │    │    │ nk │
+│   │    │    │ no │
+│   │    │    │ wn │
+│   │    │    │ pa │
+│   │    │    │ in │
+│   │    │    │ te │
+│   │    │    │ d  │
+│   │    │    │ fo │
+│   │    │    │ r  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fi │
+│   │    │    │ rs │
+│   │    │    │ t  │
+│   │    │    │ ti │
+│   │    │    │ me │
+│   │    │    │ (g │
+│   │    │    │ re │
+│   │    │    │ p  │
+│   │    │    │ wa │
+│   │    │    │ s  │
+│   │    │    │ 0) │
+│   │    │    │ .  │
+│   │    │    │ cs │
+│   │    │    │ so │
+│   │    │    │ m  │
+│   │    │    │ ba │
+│   │    │    │ se │
+│   │    │    │ li │
+│   │    │    │ ne │
+│   │    │    │ 12 │
+│   │    │    │ 86 │
+│   │    │    │ -> │
+│   │    │    │ 12 │
+│   │    │    │ 89 │
+│   │    │    │ ,  │
+│   │    │    │ me │
+│   │    │    │ as │
+│   │    │    │ ur │
+│   │    │    │ ed │
+│   │    │    │ .  │
+│   │    │    │ Cr │
+│   │    │    │ it │
+│   │    │    │ er │
+│   │    │    │ io │
+│   │    │    │ n  │
+│   │    │    │ 5  │
+│   │    │    │ (t │
+│   │    │    │ he │
+│   │    │    │ cl │
+│   │    │    │ ic │
+│   │    │    │ k) │
+│   │    │    │ is │
+│   │    │    │ a  │
+│   │    │    │ SO │
+│   │    │    │ UR │
+│   │    │    │ CE │
+│   │    │    │ -O │
+│   │    │    │ RD │
+│   │    │    │ ER │
+│   │    │    │ gu │
+│   │    │    │ ar │
+│   │    │    │ d, │
+│   │    │    │ no │
+│   │    │    │ t  │
+│   │    │    │ a  │
+│   │    │    │ br │
+│   │    │    │ ow │
+│   │    │    │ se │
+│   │    │    │ r  │
+│   │    │    │ cl │
+│   │    │    │ ic │
+│   │    │    │ k  │
+│   │    │    │ —  │
+│   │    │    │ so │
+│   │    │    │ me │
+│   │    │    │ on │
+│   │    │    │ e  │
+│   │    │    │ sh │
+│   │    │    │ ou │
+│   │    │    │ ld │
+│   │    │    │ cl │
+│   │    │    │ ic │
+│   │    │    │ k  │
+│   │    │    │ it │
+│   │    │    │ on │
+│   │    │    │ ce │
+│   │    │    │ on │
+│   │    │    │ a  │
+│   │    │    │ li │
+│   │    │    │ ve │
+│   │    │    │ co │
+│   │    │    │ ns │
+│   │    │    │ ol │
+│ c │ lo │ #9 │ On │
+│ c │ op │ 46 │ e  │
+│ h │ -e │ 1  │ ca │
+│ - │ pi │    │ tc │
+│ w │ c/ │    │ h- │
+│ 2 │ a- │    │ al │
+│ 8 │ us │    │ l  │
+│ - │ ag │    │ at │
+│ b │ e- │    │ us │
+│ l │ me │    │ ag │
+│ - │ te │    │ e. │
+│ u │ r- │    │ ex │
+│ s │ th │    │ :2 │
+│ a │ at │    │ 10 │
+│ g │ -c │    │ fl │
+│ e │ ra │    │ at │
+│ - │ sh │    │ te │
+│ m │ ed │    │ ne │
+│ e │ -s │    │ d  │
+│ t │ to │    │ se │
+│ e │ ps │    │ ve │
+│ r │ -r │    │ n  │
+│ s │ ea │    │ in │
+│ - │ di │    │ pu │
+│ s │ ng │    │ ts │
+│ a │ -4 │    │ in │
+│ y │ -r │    │ to │
+│ - │    │    │ on │
+│ u │    │    │ e  │
+│ n │    │    │ by │
+│ m │    │    │ te │
+│ e │    │    │ -i │
+│ t │    │    │ de │
+│ e │    │    │ nt │
+│ r │    │    │ ic │
+│ e │    │    │ al │
+│ d │    │    │ ma │
+│ - │    │    │ p. │
+│ w │    │    │ Sp │
+│ h │    │    │ li │
+│ e │    │    │ t  │
+│ n │    │    │ fo │
+│ - │    │    │ ur │
+│ t │    │    │ wa │
+│ h │    │    │ ys │
+│ e │    │    │ wi │
+│ y │    │    │ th │
+│ - │    │    │ a  │
+│ c │    │    │ no │
+│ o │    │    │ rm │
+│ u │    │    │ al │
+│ l │    │    │ is │
+│ d │    │    │ ed │
+│ - │    │    │ ty │
+│ n │    │    │ pe │
+│ o │    │    │ d  │
+│ t │    │    │ re │
+│ - │    │    │ as │
+│ m │    │    │ on │
+│ e │    │    │ ;  │
+│ a │    │    │ bo │
+│ s │    │    │ th │
+│ u │    │    │ re │
+│ r │    │    │ nd │
+│ e │    │    │ er │
+│   │    │    │ si │
+│   │    │    │ te │
+│   │    │    │ s  │
+│   │    │    │ fi │
+│   │    │    │ xe │
+│   │    │    │ d  │
+│   │    │    │ at │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ re │
+│   │    │    │ so │
+│   │    │    │ lu │
+│   │    │    │ ti │
+│   │    │    │ on │
+│   │    │    │ ea │
+│   │    │    │ ch │
+│   │    │    │ ha │
+│   │    │    │ s. │
+│   │    │    │ Ca │
+│   │    │    │ ch │
+│   │    │    │ ed │
+│   │    │    │ us │
+│   │    │    │ ag │
+│   │    │    │ e_ │
+│   │    │    │ sa │
+│   │    │    │ mp │
+│   │    │    │ le │
+│   │    │    │ s  │
+│   │    │    │ ro │
+│   │    │    │ ws │
+│   │    │    │ wr │
+│   │    │    │ it │
+│   │    │    │ te │
+│   │    │    │ n  │
+│   │    │    │ be │
+│   │    │    │ fo │
+│   │    │    │ re │
+│   │    │    │ th │
+│   │    │    │ is │
+│   │    │    │ co │
+│   │    │    │ mm │
+│   │    │    │ it │
+│   │    │    │ st │
+│   │    │    │ il │
+│   │    │    │ l  │
+│   │    │    │ re │
+│   │    │    │ ad │
+│   │    │    │ 'N │
+│   │    │    │ ot │
+│   │    │    │ ye │
+│   │    │    │ t  │
+│   │    │    │ me │
+│   │    │    │ te │
+│   │    │    │ re │
+│   │    │    │ d' │
+│   │    │    │ un │
+│   │    │    │ ti │
+│   │    │    │ l  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ ne │
+│   │    │    │ xt │
+│   │    │    │ sa │
+│   │    │    │ mp │
+│   │    │    │ le │
+│   │    │    │ r  │
+│   │    │    │ ti │
+│   │    │    │ ck │
+│   │    │    │ —  │
+│   │    │    │ co │
+│   │    │    │ rr │
+│   │    │    │ ec │
+│   │    │    │ t  │
+│   │    │    │ by │
+│   │    │    │ co │
+│   │    │    │ ns │
+│   │    │    │ tr │
+│   │    │    │ uc │
+│   │    │    │ ti │
+│   │    │    │ on │
+│   │    │    │ ,  │
+│   │    │    │ wo │
+│   │    │    │ rt │
+│   │    │    │ h  │
+│   │    │    │ kn │
+│   │    │    │ ow │
+│   │    │    │ in │
+│   │    │    │ g. │
+│ c │ lo │ #9 │ Th │
+│ c │ op │ 46 │ re │
+│ h │ -e │ 2  │ e  │
+│ - │ pi │    │ dr │
+│ w │ c/ │    │ op │
+│ 2 │ a- │    │ si │
+│ 8 │ pu │    │ te │
+│ - │ bl │    │ s, │
+│ b │ is │    │ an │
+│ l │ h- │    │ d  │
+│ - │ th │    │ a  │
+│ a │ at │    │ gr │
+│ u │ -w │    │ ep │
+│ t │ as │    │ fo │
+│ o │ -r │    │ r  │
+│ - │ ef │    │ th │
+│ d │ us │    │ e  │
+│ e │ ed │    │ ob │
+│ p │ -s │    │ vi │
+│ l │ to │    │ ou │
+│ o │ ps │    │ s  │
+│ y │ -r │    │ st │
+│ - │ en │    │ ri │
+│ r │ de │    │ ng │
+│ e │ ri │    │ fi │
+│ f │ -5 │    │ nd │
+│ u │ -r │    │ s  │
+│ s │    │    │ on │
+│ a │    │    │ ly │
+│ l │    │    │ tw │
+│ - │    │    │ o. │
+│ h │    │    │ Bo │
+│ a │    │    │ th │
+│ s │    │    │ tr │
+│ - │    │    │ ap │
+│ n │    │    │ s  │
+│ o │    │    │ di │
+│ - │    │    │ sa │
+│ e │    │    │ rm │
+│ v │    │    │ ed │
+│ e │    │    │ :  │
+│ n │    │    │ pr │
+│ t │    │    │ ev │
+│ - │    │    │ ie │
+│ a │    │    │ wR │
+│ t │    │    │ ow │
+│ - │    │    │ ex │
+│ a │    │    │ po │
+│ l │    │    │ rt │
+│ l │    │    │ ed │
+│   │    │    │ (i │
+│   │    │    │ ts │
+│   │    │    │ te │
+│   │    │    │ st │
+│   │    │    │ ra │
+│   │    │    │ n  │
+│   │    │    │ ZE │
+│   │    │    │ RO │
+│   │    │    │ as │
+│   │    │    │ se │
+│   │    │    │ rt │
+│   │    │    │ io │
+│   │    │    │ ns │
+│   │    │    │ be │
+│   │    │    │ fo │
+│   │    │    │ re │
+│   │    │    │ ), │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ gr │
+│   │    │    │ -p │
+│   │    │    │ 3  │
+│   │    │    │ ca │
+│   │    │    │ nc │
+│   │    │    │ el │
+│   │    │    │ le │
+│   │    │    │ d  │
+│   │    │    │ co │
+│   │    │    │ nt │
+│   │    │    │ ro │
+│   │    │    │ l  │
+│   │    │    │ ad │
+│   │    │    │ ju │
+│   │    │    │ di │
+│   │    │    │ ca │
+│   │    │    │ te │
+│   │    │    │ d  │
+│   │    │    │ ra │
+│   │    │    │ th │
+│   │    │    │ er │
+│   │    │    │ th │
+│   │    │    │ an │
+│   │    │    │ de │
+│   │    │    │ le │
+│   │    │    │ te │
+│   │    │    │ d. │
+│   │    │    │ Re │
+│   │    │    │ vi │
+│   │    │    │ ew │
+│   │    │    │ er │
+│   │    │    │ na │
+│   │    │    │ rr │
+│   │    │    │ ow │
+│   │    │    │ ed │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ re │
+│   │    │    │ fu │
+│   │    │    │ sa │
+│   │    │    │ l  │
+│   │    │    │ pr │
+│   │    │    │ ed │
+│   │    │    │ ic │
+│   │    │    │ at │
+│   │    │    │ e  │
+│   │    │    │ —  │
+│   │    │    │ se │
+│   │    │    │ e  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fi │
+│   │    │    │ xe │
+│   │    │    │ s  │
+│   │    │    │ se │
+│   │    │    │ ct │
+│   │    │    │ io │
+│   │    │    │ n. │
+│   │    │    │ EV │
+│   │    │    │ EN │
+│   │    │    │ T  │
+│   │    │    │ ha │
+│   │    │    │ lf │
+│   │    │    │ ex │
+│   │    │    │ pl │
+│   │    │    │ ic │
+│   │    │    │ it │
+│   │    │    │ ly │
+│   │    │    │ de │
+│   │    │    │ fe │
+│   │    │    │ rr │
+│   │    │    │ ed │
+│   │    │    │ an │
+│   │    │    │ d  │
+│   │    │    │ fi │
+│   │    │    │ le │
+│   │    │    │ d. │
+│ c │ lo │ #9 │ Th │
+│ c │ op │ 46 │ e  │
+│ h │ -e │ 3  │ ro │
+│ - │ pi │    │ w' │
+│ w │ c/ │    │ s  │
+│ 2 │ on │    │ he │
+│ 6 │ e- │    │ ad │
+│ - │ fa │    │ li │
+│ b │ il │    │ ne │
+│ l │ ur │    │ wa │
+│ - │ e- │    │ s  │
+│ d │ tw │    │ re │
+│ e │ o- │    │ fu │
+│ p │ st │    │ te │
+│ l │ or │    │ d  │
+│ o │ ie │    │ an │
+│ y │ s- │    │ d  │
+│ m │ th │    │ th │
+│ e │ e- │    │ e  │
+│ n │ em │    │ de │
+│ t │ ai │    │ fe │
+│ - │ l- │    │ ct │
+│ f │ re │    │ ha │
+│ a │ ad │    │ d  │
+│ i │ er │    │ MO │
+│ l │ -6 │    │ VE │
+│ e │ -r │    │ D  │
+│ d │    │    │ CH │
+│ - │    │    │ AN │
+│ e │    │    │ NE │
+│ m │    │    │ L: │
+│ a │    │    │ th │
+│ i │    │    │ e  │
+│ l │    │    │ ch │
+│ - │    │    │ at │
+│ s │    │    │ ar │
+│ t │    │    │ m  │
+│ i │    │    │ ha │
+│ l │    │    │ d  │
+│ l │    │    │ ze │
+│ - │    │    │ ro │
+│ u │    │    │ bo │
+│ n │    │    │ dy │
+│ h │    │    │ co │
+│ u │    │    │ ve │
+│ m │    │    │ ra │
+│ a │    │    │ ge │
+│ n │    │    │ of │
+│ i │    │    │ an │
+│ z │    │    │ y  │
+│ e │    │    │ ki │
+│ d │    │    │ nd │
+│   │    │    │ .  │
+│   │    │    │ Ne │
+│   │    │    │ w  │
+│   │    │    │ re │
+│   │    │    │ nd │
+│   │    │    │ er │
+│   │    │    │ _t │
+│   │    │    │ es │
+│   │    │    │ t. │
+│   │    │    │ ex │
+│   │    │    │ s, │
+│   │    │    │ 14 │
+│   │    │    │ te │
+│   │    │    │ st │
+│   │    │    │ s, │
+│   │    │    │ pi │
+│   │    │    │ nn │
+│   │    │    │ in │
+│   │    │    │ g  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ sc │
+│   │    │    │ ru │
+│   │    │    │ b  │
+│   │    │    │ bo │
+│   │    │    │ un │
+│   │    │    │ da │
+│   │    │    │ ry │
+│   │    │    │ in │
+│   │    │    │ bo │
+│   │    │    │ th │
+│   │    │    │ di │
+│   │    │    │ re │
+│   │    │    │ ct │
+│   │    │    │ io │
+│   │    │    │ ns │
+│   │    │    │ ac │
+│   │    │    │ ro │
+│   │    │    │ ss │
+│   │    │    │ fi │
+│   │    │    │ ve │
+│   │    │    │ sh │
+│   │    │    │ ap │
+│   │    │    │ er │
+│   │    │    │ s. │
+│   │    │    │ An │
+│   │    │    │ un │
+│   │    │    │ cl │
+│   │    │    │ as │
+│   │    │    │ si │
+│   │    │    │ fi │
+│   │    │    │ ed │
+│   │    │    │ re │
+│   │    │    │ as │
+│   │    │    │ on │
+│   │    │    │ no │
+│   │    │    │ w  │
+│   │    │    │ eg │
+│   │    │    │ re │
+│   │    │    │ ss │
+│   │    │    │ es │
+│   │    │    │ SC │
+│   │    │    │ RU │
+│   │    │    │ BB │
+│   │    │    │ ED │
+│   │    │    │ to │
+│   │    │    │ fi │
+│   │    │    │ ve │
+│   │    │    │ th │
+│   │    │    │ ir │
+│   │    │    │ d- │
+│   │    │    │ pa │
+│   │    │    │ rt │
+│   │    │    │ y  │
+│   │    │    │ ho │
+│   │    │    │ st │
+│   │    │    │ s  │
+│   │    │    │ —  │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ em │
+│   │    │    │ ai │
+│   │    │    │ l' │
+│   │    │    │ s  │
+│   │    │    │ ow │
+│   │    │    │ n  │
+│   │    │    │ bo │
+│   │    │    │ un │
+│   │    │    │ da │
+│   │    │    │ ry │
+│   │    │    │ si │
+│   │    │    │ nc │
+│   │    │    │ e  │
+│   │    │    │ wa │
+│   │    │    │ ve │
+│   │    │    │ 13 │
+│   │    │    │ S2 │
+│   │    │    │ ,  │
+│   │    │    │ bu │
+│   │    │    │ t  │
+│   │    │    │ mo │
+│   │    │    │ re │
+│   │    │    │ by │
+│   │    │    │ te │
+│   │    │    │ s  │
+│   │    │    │ th │
+│   │    │    │ an │
+│   │    │    │ ye │
+│   │    │    │ st │
+│   │    │    │ er │
+│   │    │    │ da │
+│   │    │    │ y. │
+│ c │ lo │ #9 │ Re │
+│ c │ op │ 46 │ -s │
+│ h │ -e │ 4  │ co │
+│ - │ pi │    │ pe │
+│ w │ c/ │    │ d  │
+│ 2 │ th │    │ co │
+│ 8 │ e- │    │ rr │
+│ - │ ca │    │ ec │
+│ b │ pa │    │ tl │
+│ l │ ci │    │ y: │
+│ - │ ty │    │ th │
+│ c │ -a │    │ e  │
+│ a │ rm │    │ Az │
+│ p │ -n │    │ ur │
+│ a │ am │    │ e  │
+│ c │ es │    │ ha │
+│ i │ -o │    │ lf │
+│ t │ ne │    │ is │
+│ y │ -p │    │ NO │
+│ - │ ro │    │ T  │
+│ a │ vi │    │ de │
+│ r │ de │    │ ri │
+│ m │ r- │    │ va │
+│ - │ an │    │ bl │
+│ b │ d- │    │ e  │
+│ l │ -7 │    │ (z │
+│ a │ -r │    │ er │
+│ m │    │    │ o  │
+│ e │    │    │ hi │
+│ s │    │    │ ts │
+│ - │    │    │ ac │
+│ h │    │    │ ro │
+│ e │    │    │ ss │
+│ t │    │    │ so │
+│ z │    │    │ ur │
+│ n │    │    │ ce │
+│ e │    │    │ ,  │
+│ r │    │    │ te │
+│ - │    │    │ st │
+│ f │    │    │ s  │
+│ o │    │    │ an │
+│ r │    │    │ d  │
+│ - │    │    │ 18 │
+│ a │    │    │ fi │
+│ z │    │    │ xt │
+│ u │    │    │ ur │
+│ r │    │    │ es │
+│ e │    │    │ ), │
+│   │    │    │ so │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fi │
+│   │    │    │ x  │
+│   │    │    │ re │
+│   │    │    │ st │
+│   │    │    │ s  │
+│   │    │    │ en │
+│   │    │    │ ti │
+│   │    │    │ re │
+│   │    │    │ ly │
+│   │    │    │ on │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ re │
+│   │    │    │ so │
+│   │    │    │ ur │
+│   │    │    │ ce │
+│   │    │    │ -b │
+│   │    │    │ li │
+│   │    │    │ nd │
+│   │    │    │ ne │
+│   │    │    │ ss │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ tr │
+│   │    │    │ ee │
+│   │    │    │ CA │
+│   │    │    │ N  │
+│   │    │    │ pr │
+│   │    │    │ od │
+│   │    │    │ uc │
+│   │    │    │ e  │
+│   │    │    │ —  │
+│   │    │    │ a  │
+│   │    │    │ ve │
+│   │    │    │ rb │
+│   │    │    │ -l │
+│   │    │    │ es │
+│   │    │    │ s  │
+│   │    │    │ zo │
+│   │    │    │ ne │
+│   │    │    │ -q │
+│   │    │    │ uo │
+│   │    │    │ ta │
+│   │    │    │ ca │
+│   │    │    │ pt │
+│   │    │    │ ur │
+│   │    │    │ e  │
+│   │    │    │ to │
+│   │    │    │ ld │
+│   │    │    │ it │
+│   │    │    │ ra │
+│   │    │    │ n  │
+│   │    │    │ ou │
+│   │    │    │ t  │
+│   │    │    │ of │
+│   │    │    │ SE │
+│   │    │    │ RV │
+│   │    │    │ ER │
+│   │    │    │ ca │
+│   │    │    │ pa │
+│   │    │    │ ci │
+│   │    │    │ ty │
+│   │    │    │ .  │
+│   │    │    │ Bl │
+│   │    │    │ as │
+│   │    │    │ t  │
+│   │    │    │ ra │
+│   │    │    │ di │
+│   │    │    │ us │
+│   │    │    │ be │
+│   │    │    │ yo │
+│   │    │    │ nd │
+│   │    │    │ th │
+│   │    │    │ e  │
+│   │    │    │ fe │
+│   │    │    │ nc │
+│   │    │    │ e  │
+│   │    │    │ ha │
+│   │    │    │ nd │
+│   │    │    │ le │
+│   │    │    │ d; │
+│   │    │    │ th │
+│   │    │    │ re │
+│   │    │    │ e  │
+│   │    │    │ co │
+│   │    │    │ -e │
+│   │    │    │ di │
+│   │    │    │ te │
+│   │    │    │ d  │
+│   │    │    │ te │
+│   │    │    │ st │
+│   │    │    │ fi │
+│   │    │    │ le │
+│   │    │    │ s, │
+│   │    │    │ 12 │
+│   │    │    │ 3/ │
+│   │    │    │ 0. │
+└───┴────┴────┴────┘
+                    
+Reviewer fixes — in 
+place, gate-proven, 
+none a redesign     
+                    
+• graftList read    
+  prose. It detected
+  'store is not     
+  shallow' by       
+  comparing         
+  walkTruncation().r
+  eason to a literal
+  sentence — a      
+  control path      
+  coupled to a      
+  string anyone may 
+  reword. It reads  
+  an explicit       
+  shallowStore      
+  boolean now. The  
+  builder named this
+  risk himself; it  
+  cost three lines. 
+• The overflow      
+  guard's cue       
+  predicate reads   
+  the X AXIS, not   
+  the shorthand.    
+  overflow-x:       
+  visible; overflow-
+  y: clip is a legal
+  pair the spec does
+  not blockify, so  
+  Chrome serialises 
+  it as "visible    
+  clip". Probed both
+  ways with a 101-  
+  char email and an 
+  ancestor clip: the
+  shipped shorthand 
+  test printed      
+  OVERFLOW GUARD    
+  PASS with ZERO    
+  name findings over
+  469px of a spilled
+  identity (rc 0);  
+  the axis test reds
+  at 22 findings,   
+  each naming       
+  overflow-x        
+  "visible". That is
+  clause 5 of the   
+  standing test     
+  firing inside the 
+  fix for clause 5. 
+• A domain re-check 
+  that FAILED       
+  restored nothing. 
+  Both mounts bail  
+  on 404/error      
+  WITHOUT           
+  repainting, and   
+  the click handler 
+  disables the      
+  button and        
+  relabels it       
+  'Checking…' — so  
+  the only way back 
+  from a terminal   
+  unmeasurable rail 
+  sat permanently   
+  disabled          
+  announcing work   
+  nobody was doing. 
+  Mutation-proven   
+  803/1 -> 804/0.   
+• A stale stage     
+  caption is not a  
+  refusal.          
+  Registry.cancel_pr
+  eview/2 changes   
+  only status +     
+  console, so a     
+  superseded preview
+  keeps whatever    
+  caption           
+  Sites.Deploy last 
+  wrote — 'Uploading
+  bundle', or on a  
+  cancelled LIVE row
+  'live at          
+  https://…'. The   
+  shipped detail-   
+  keyed predicate   
+  would have painted
+  those inside the  
+  amber FAILURE     
+  panel: a progress 
+  line re-cast as an
+  explained         
+  decision, the     
+  slice's own defect
+  class one row     
+  over. Keyed on    
+  failure_reason    
+  now; the detail-  
+  only test legs    
+  adjudicated, not  
+  deleted.          
+• The Overview      
+  strip's "?"       
+  carries a         
+  sentence. A bare  
+  glyph is what this
+  epic refuses; a   
+  screen reader said
+  'DOCS, question   
+  mark'. The reason 
+  the Usage tab     
+  prints in full now
+  rides along as    
+  title + aria-     
+  label.            
+• Two now-false     
+  sentences         
+  corrected at the  
+  source.           
+  event_email.ex    
+  claimed           
+  'Render.render/2  
+  never reads it' — 
+  false as of this  
+  very wave (closes 
+  cch-w29-bl-event- 
+  email-scrub-      
+  comment-stale);   
+  and               
+  cloud/DESIGN.md   
+  quoted the retired
+  capacity literal  
+  as the shipped    
+  sentence. Budgets 
+  PASS.             
+• One cross-slice   
+  landmine defused. 
+  render_test.exs   
+  quoted "Hetzner   
+  ran out of server 
+  capacity for this 
+  size." while the  
+  capacity-arm slice
+  retires that      
+  literal IN THE    
+  SAME WAVE — green 
+  apart, RED        
+  TOGETHER. The leg 
+  now pins the class
+  by derivation and 
+  asserts what it   
+  actually owes.    
+  Proved by an      
+  actual merge of   
+  both -r branches: 
+  158/0. The three  
+  app.js slices were
+  merged the same   
+  way: 814/0, smoke 
+  102, cssom-parity 
+  PARITY PASS at    
+  1289, __css_check 
+  0 errors.         
+                    
+What stalled, and   
+what nobody proved  
+                    
+• Nothing stalled.  
+  All eight round-1 
+  slices are green; 
+  there were no     
+  deferred rounds   
+  this wave, so     
+  there is no       
+  sequenced-rounds  
+  dispatch to chase.
+• The seal          
+  predicate's NO-   
+  MERGE-BASE        
+  corroborator rests
+  on ONE measured   
+  corroboration. A  
+  register entry on 
+  a genuinely       
+  disjoint history  
+  would degrade to  
+  HISTORY-          
+  UNAVAILABLE rather
+  than the honest   
+  'not an ancestor'.
+  Fail-closed — it  
+  can never become a
+  false PASS — but  
+  it is a           
+  behavioural claim,
+  and it is this    
+  wave's flip-risk  
+  row.              
+• The byte-identity 
+  test skips itself 
+  on a checkout with
+  unreadable        
+  history, so in a  
+  depth-1 CI clone  
+  it contributes    
+  nothing. The      
+  alternative pinned
+  CI to a shape it  
+  does not have,    
+  which is what     
+  redded the roster 
+  control.          
+• No browser was    
+  driven anywhere.  
+  The domain re-    
+  check's guard     
+  reads source      
+  order, not        
+  behaviour; the    
+  refusal panel's   
+  ~230-character    
+  sentence has never
+  been seen wrapping
+  in a .deploy-row; 
+  the usage strip's 
+  new glyph was     
+  rendered only     
+  through the       
+  preview smoke.    
+• The overflow      
+  guard's new term  
+  has no COMMITTED  
+  fixture that      
+  exercises it,     
+  because its fail- 
+  before requires   
+  shipping the      
+  defect in CSS. It 
+  is protected in CI
+  only in the       
+  negative sense —  
+  inherent to the   
+  leg, not a        
+  deferred task.    
+                    
+Ledger audit        
+                    
+All eight slice     
+tasks: published,   
+claimed, criteria   
+stamped AS THE      
+BUILDERS WORKED     
+(evidence carries   
+run output, not     
+assertions),        
+lifecycle honest,   
+and only the merge- 
+gated criterion open
+on each — 12/13,    
+6/7, 9/10, 7/8, 7/8,
+7/8, 6/7, 6/7.      
+Several criteria    
+carry the builder's 
+own limitation      
+written INTO the    
+evidence rather than
+hidden: the seal    
+predicate's full-   
+clone byte-identity 
+substitution, the   
+usage raise not     
+being driven through
+the gatherer, the   
+domain re-check's   
+source-order guard. 
+That is the         
+behaviour the epic  
+wants.              
+                    
+Reviewer ledger     
+fixes: every now-   
+line named the PRE- 
+REVIEW branch (and  
+one said 'not       
+pushed'), so all    
+eight were re-pulsed
+with the final -r   
+branch, its PR      
+number and the      
+reviewer's fix. One 
+new backlog row     
+filed — cch-w29-bl- 
+safe-url-resolver-  
+seam-unguarded — for
+the production      
+affordance the new  
+:resolver seam      
+opens. The four rows
+builders filed were 
+verified published  
+under the epic. No  
+task outside this   
+wave was touched.   
+                    
+Grade — A           
+                    
+Earned, not given.  
+What is genuinely   
+strong: the         
+discrimination slice
+is the best         
+instrument work this
+epic has produced — 
+five probes, a fifth
+leg nobody asked for
+that turns out to be
+the false PASS      
+hiding behind the   
+false FAIL, an exit 
+contract honoured   
+rather than re-     
+litigated, and four 
+REAL clones instead 
+of stubs. The       
+overflow slice's    
+four-part probe is a
+model of refusing a 
+comfortable non-    
+mutation. Every     
+builder report named
+its own weakest     
+claim before anyone 
+asked, and two of   
+them argued with    
+their brief and said
+so. The wish's ratio
+was not just met but
+exceeded — five     
+person-facing rows, 
+including two of the
+epic's purest       
+examples.           
+                    
+What falls short:   
+three of the eight  
+shipped a defect of 
+exactly the class   
+the epic exists to  
+close, and a        
+reviewer had to     
+catch them — a cue  
+predicate that could
+not reach a defect  
+one CSS axis over, a
+refusal predicate   
+that would have re- 
+cast a progress line
+as an explained     
+decision, and a     
+recovery control    
+that ate itself on  
+failure. A cross-   
+slice literal       
+collision made two  
+slices green apart  
+and red together,   
+which no builder    
+could see and the   
+wave's own file-    
+fence discipline did
+not prevent. And    
+nothing in this wave
+was seen by a human 
+eye in a browser:   
+five person-facing  
+rows shipped on     
+source-order guards 
+and static renders. 
+That is the gap     
+between A and A+.   
+                    
+What the next wave  
+should take         
+                    
+• The D307 guard's  
+  promotion. The    
+  surface ENUM and  
+  the BACKFILL of   
+  open rows are what
+  turn the WARN tier
+  hard. The scoping 
+  leg is a DESIGN   
+  BOUNDARY (46 tests
+  / 1 failure on    
+  deletion, not the 
+  23 the criterion  
+  predicted) — do   
+  not restate it as 
+  load-bearing.     
+• cch-w22-s7's      
+  remainder, still  
+  adjudicated       
+  against           
+  origin/main's     
+  bytes rather than 
+  rebuilt. D325     
+  stamped the five  
+  criteria the tree 
+  had already       
+  settled.          
+• A BROWSER PASS    
+  over what this    
+  wave shipped.     
+  Click the domain  
+  re-check; look at 
+  the refusal       
+  panel's 230-      
+  character sentence
+  in a .deploy-row  
+  at 320px; look at 
+  the amber '?' in  
+  the fleet strip.  
+  Three of the five 
+  person rows have  
+  never been seen by
+  an eye.           
+• The instrument    
+  rows this wave    
+  opened: cch-w29-  
+  bl-safe-url-      
+  resolver-seam-    
+  unguarded (a seam 
+  nothing stops     
+  production from   
+  using), the       
+  refused-auto-     
+  deploy event      
+  dispatcher (the   
+  toggle must not   
+  land ahead of it),
+  the Go CLI usage  
+  twin, and task-   
+  79aa75e4be7a0067's
+  two remaining     
+  stale capacity    
+  quotes in         
+  router.ex and a Go
+  test comment.     
+• Dispatch order:   
+  merge round 1 in  
+  any order — the   
+  eight -r branches 
+  are file-disjoint 
+  except for app.js 
+  (three slices,    
+  disjoint regions, 
+  merged and proven 
+  together at 814/0)
+  and the           
+  notifications pair
+  (proven together  
+  at 158/0). If     
+  anything else adds
+  a CSS rule head   
+  before #9460      
+  lands, RE-MEASURE 
+  the cssom baseline
+  by running cssom- 
+  parity.mjs on the 
+  merge; never add  
+  up two deltas.    
+                    
+An independent      
+second reviewer is  
+owed on #9455 before
+merge. This workflow
+spawns exactly one  
+reviewer, so the    
+dispatch is a manual
+lead step. The      
+judgment to re-     
+derive independently
+is the NO-MERGE-BASE
+corroborator:       
+whether 'merge-base 
+found no common     
+ancestor' is        
+genuinely           
+inseparable from    
+'this store cannot  
+place the commit'.  
+It was measured     
+once, and it decides
+whether an honest   
+product FAIL can be 
+silently downgraded 
+to an environment   
+excuse.             
+
+Related
+  3.06  Cloud
+        Console
+        Hardening —
+        wave 9
+        strategy:
+        MEASURED
+        must mean
+        ABLE TO STOP
+        A MERGE
+        (paper)
+        tags: cloud-
+              consol
+              e-
+              harden
+              ing
+              (96·95
+              ),
+              epic-
+              cycle
+              (88·80
+              ),
+              honest
+              -gates
+              (81·88
+              )
+  2.86  The 
+        required-che
+        cks
+        toolchain
+        becomes
+        blocking
+        where it is
+        offline, and
+        survives its
+        own
+        registration
+        (task)
+        tags: cloud-
+              consol
+              e-
+              harden
+              ing
+              (96·95
+              ),
+              honest
+              -gates
+              (81·85
+              ),
+              ratche
+              t-
+              honest
+              y
+              (74·60
+              )
+  2.85  Wave 4:
+        install the
+        teeth, and
+        make the
+        merge verb
+        an artifact
+        (paper)
+        tags: epic-
+              cycle
+              (88·80
+              ),
+              honest
+              -gates
+              (81·98
+              ),
+              ratche
+              t-
+              honest
+              y
+              (74·92
+              )
+  2.83  Wave 5: the
+        flip, and
+        the lane
+        that keeps
+        the fleet
+        merging
+        under it
+        (paper)
+        tags: epic-
+              cycle
+              (88·78
+              ),
+              honest
+              -gates
+              (81·98
+              ),
+              ratche
+              t-
+              honest
+              y
+              (74·90
+              )
+  2.75  Close five
+        false-green
+        classes and
+        the empty-
+        diff brick
+        in all three
+        path
+        dispatchers
+        (task)
+        tags: cloud-
+              consol
+              e-
+              harden
+              ing
+              (96·95
+              ),
+              honest
+              -gates
+              (81·80
+              ),
+              ratche
+              t-
+              honest
+              y
+              (74·50
+              )

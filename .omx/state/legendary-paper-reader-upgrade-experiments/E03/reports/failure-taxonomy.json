@@ -1,0 +1,70 @@
+{
+  "boundary": "Observed probe facts are separate from inferences; no candidate or format preference is selected.",
+  "observed": [
+    {
+      "code": "T01_WIDTH_OVERFLOW",
+      "hard": true
+    },
+    {
+      "code": "T02_LINE_EXPLOSION",
+      "hard": true
+    },
+    {
+      "code": "T03_HIERARCHY_COLOR_ONLY",
+      "hard": true
+    },
+    {
+      "code": "T04_HEADER_ROLE_LOSS",
+      "hard": true
+    },
+    {
+      "code": "T05_LIST_TEXT_LOSS",
+      "hard": true
+    },
+    {
+      "code": "T06_MARK_SEMANTIC_LOSS",
+      "hard": true
+    },
+    {
+      "code": "T07_TONE_SEMANTIC_LOSS",
+      "hard": true
+    },
+    {
+      "code": "T08_NAVIGATION_ABSENT",
+      "hard": true
+    },
+    {
+      "code": "T09_HISTORY_LIMIT_IGNORED",
+      "hard": true
+    },
+    {
+      "code": "T10_IDENTITY_CONFLATION_OR_ABSENCE",
+      "hard": true
+    },
+    {
+      "code": "T11_TASK_LINK_NOT_STRUCTURED",
+      "hard": true
+    },
+    {
+      "code": "T12_TYPED_ERROR_COLLAPSE",
+      "hard": true
+    },
+    {
+      "code": "T13_ETAG_PROVENANCE_ABSENT",
+      "hard": true
+    },
+    {
+      "code": "T14_NEGOTIATION_OR_DISCOVERY_DRIFT",
+      "hard": true
+    },
+    {
+      "code": "T15_REQUEST_ID_ABSENT",
+      "hard": true
+    },
+    {
+      "code": "T16_TRANSIENT_DEPLOYED_5XX",
+      "hard": false
+    }
+  ],
+  "schema_version": "legendary-paper-e03-failure-taxonomy/v1"
+}

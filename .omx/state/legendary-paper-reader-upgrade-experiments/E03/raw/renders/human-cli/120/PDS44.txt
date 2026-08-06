@@ -1,0 +1,909 @@
+PDS WAVE 44 - RECOVER WAVE 43'S UNLANDED WORK, RE-DERIVE ITS ONE SECURITY CLAIM, AND MAKE THE PRICE COLUMN RUN
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+▌ STRATEGIZE COMPLETE - the survey fleet is flying. PREMISE SMOKE RUN IN-PROCESS against `git show origin/main:<path>`
+▌ at origin/main head c2affd445, never the primary checkout (300+ commits behind, 220 foreign modified files).
+▌ VERIFIED: the charter on origin/main tops out at PDS-D632 - D633-D642 are NOT on main, they live only on PR #9312,
+▌ so NO builder may carry a D633+ citation until that PR lands. VERIFIED: PDS-D578 exists at charter:11830 and says
+▌ verbatim 'PROVEN-BACKED is 23/252 = 9.1%' - D640's citation of it COVERS what it is cited for. VERIFIED:
+▌ api/lib/barkpark_web/studio/caps.ex on origin/main has write_capable?/2 at :283 with `Map.get(caps, :write) == true
+▌ -> true` as the FIRST cond arm and `restricted?(assigns) -> false` as the SECOND, and restricted?/1 at :295 already
+▌ contains `share_access == :read` - the ORDER defect #9332 claims is REAL AT SOURCE. Reachability is not yet proven
+▌ and is survey question 1. VERIFIED: scripts/elixir-path-escape-check.sh is the SINGLE source of truth for
+▌ ELIXIR_TEST_ONLY_PATHS - the name appears in NO workflow yml; elixir.yml consumes it through --print-set / --match.
+▌ #9333 edits the right file. VERIFIED on origin/main: scripts/pds-ledger-census_test.sh, scripts/pds-live-hetzner-
+▌ placement-group.sh, scripts/pds-scratch-target_test.sh, scripts/pds-charter-ledger-sweep.sh and
+▌ api/test/barkpark/pds_residue_lens_test.exs all exist. VERIFIED: LiveScope.authorize_read/4 is a PRIVATE function at
+▌ api/lib/barkpark_web/live_scope.ex:114, called from :88 - the non-admin reachability story runs through
+▌ LiveScope.assign_scope, so the CALLER is what a verifier must pin.
+
+The wish, and the four things it asks for
+
+Wave 43 died mid-flight on a weekly account limit, not on a defect. It completed 36 of 41 agents, produced ten charter
+decisions (PDS-D633-D642), and pushed NOTHING. The lead recovered four branches out of their worktrees by hand and
+opened #9332, #9333, #9334, #9335 at 12:15 today. Wave 43's reviewer never ran; its debrief was never written. Those
+four PRs are UNREVIEWED BY ANYONE, and their commit messages are an author's own account of their own work.
+
+The wish asks for four things: (1) re-derive #9332's live write bypass from source before trusting a word of it; (2)
+verify the other three the same way; (3) confirm PDS-D633's measurement law - the in-BEAM meter is blind to port
+children and errs in the one direction a price column must not - and ship its blind-spot sentence in the meter's own
+moduledoc AND printed output; (4) finish the price column: N of 19 instruments under a required gate, every remaining
+refusal carrying a measured price, a named environment, or NOT-YET-BUILT.
+
+REFUTATION - the first one, and it is in the wish's own item 4
+
+The wish states the price column's reason vocabulary is 'exactly three reasons: PRICE, ENVIRONMENT, NOT-YET-BUILT' and
+that 'the fence' is not an available answer. Wave 43's own PDS-D637 - which the wish is paraphrasing - found by RUN that
+three is not enough. It names FIVE classes: PRICE, ENVIRONMENT, NOT-YET-BUILT, plus CONTENT-RED (pds-charter-ledger-
+sweep.sh --selftest is rc=1 on main today at 2.36s user, refusing because an UNRESOLVED-CLAIM ARRIVAL is unadjudicated -
+neither a price nor an environment) and RED-BY-DESIGN / REPORTER (pds-record-parity.sh's live axis B exits 1 on 59 leaf
+rows, 48 of them belonging to twelve OTHER epics that never consented to the instrument; the arm is a reporter and must
+never carry a required check name). A related sixth, HUMAN-GATE, governs the sheet-grid harness, whose own workflow
+header says it only gates once a human registers it as a required check.
+
+The wish also says pds-record-parity.sh --selftest exits rc=3 with 'unknown argument' and calls that an ENVIRONMENT
+blocker. Wave 43 did not accept that framing - it walked a DIFFERENT door. #9333 gates scripts/pds-record-
+parity.test.sh, the instrument's own hermetic two-sided mutation harness (76 checks, zero of which read a live ledger
+row), at 1.30-1.47s user - the cheapest door in the inventory. So record-parity is not an ENVIRONMENT refusal; its
+HARNESS is a THROUGH and its LIVE arm is RED-BY-DESIGN. The wish's item 4 is the tenth consecutive dispatch this epic
+has refuted from the artifact, and it is refuted in the direction of GOOD NEWS.
+
+Direction - three movements, and the third is what makes this a wave and not a cleanup
+
+The finished experience: at the end of wave 44 a cold reader runs ONE command and gets the epic's honesty column back
+COMPUTED rather than quoted - every scripts/pds-* instrument, its gate status derived from the two things that actually
+make a door (a test file that shells it, and a matching ELIXIR_TEST_ONLY_PATHS line), its refusal class, and its price
+in the unit PDS-D633 says is legal. A new pds-* script arrives as an UNDISPOSED row and the thing goes red. A door that
+quietly stops running goes red. And the number that appears in the charter next wave is a number nobody typed.
+
+Movement 1 - LAND THE RECOVERED WORK, WITH INDEPENDENCE THAT IS REAL
+
+Charter #9312 merges FIRST and alone, because until it does every D633+ citation a builder would carry points at nothing
+on origin/main. Then the four slice PRs, each with an independent re-derivation that does NOT read the branch's own test
+as its oracle. #9332 gets the full treatment: the source-level order defect is already confirmed (cond arm 1 =
+caps.write, arm 2 = restricted?, and restricted? already contains share_access == :read), so the open question is
+REACHABILITY - can a real signed-in NON-MEMBER, through a real non-admin route, hold share_access: :read and caps.write
+== true simultaneously? That is the whole claim, and it must be re-derived through LiveScope.assign_scope ->
+authorize_read/4, not asserted from a fixture the branch authored.
+
+One suspected defect the wave carries in already, found while reading the diff and NOT yet proven: #9332's membership
+collapse routes through loadable_principal?/1, which accepts only %ApiToken{} and %User{}. Tenancy.Auth.authorize/3 on
+origin/main has a THIRD clause at :200 for %Barkpark.Content.CallerContext{}. If a socket's principals list can ever
+carry a CallerContext, the collapse silently drops a principal that authorize/3 would have decided - a behaviour change
+dressed as a round-trip saving, in the same slice as a security fix. Survey question 3 exists to settle it before a
+builder inherits it.
+
+Movement 2 - FINISH WHAT WAVE 43 PRICED
+
+Two of wave 43's six slices never got a builder at all. The LiveView residual 32-fold (PDS-D639: one missing lvs_walk/3
+clause takes RESIDUAL 32 -> 0 and makes the headline deny fraction WORSE, 70.6% -> 60.9%, which is the strongest
+available evidence it is real) is unbuilt - no branch exists for it. The judgment-coverage ladder (PDS-D640: PROVEN-
+BACKED is 23 routed-write MEMBERS as an Enum.count over a MapSet.union/2, never an addition, with OVERLAP printed beside
+it) is its round-2 dependent and has had its numbers die three times. Both ship this wave, the fold first, with D639's
+three named obligations non-negotiable - especially (a), the plugin fixture, because without it the new clause is
+STRUCTURALLY unexercised and the class does not descend from its substitution.
+
+And the door walks D637 explicitly deferred to wave 44: pds-ledger-census_test.sh (PRICE ~20-23s, viable, python3
+confirmed present on the Elixir runner by wave 43's own three-leg ledger note) and the best unexamined candidate, pds-
+live-hetzner-placement-group.sh --selftest-offline, NOT-YET-MEASURED. Each measured by the ONLY legal method: an OS
+meter around a SHELL, never from inside a BEAM parent.
+
+Movement 3 - THE DOOR CENSUS: the price column stops being prose
+
+This is the bold one. PDS-D637's column is, today, forty lines of charter prose sitting on an unmerged PR - and PDS-
+D633's own closing sentence is that a number from a meter must live in the instrument's moduledoc and printed output,
+NEVER in prose a copy-paste can drop. The column violates the law that produced it. Wave 44 turns it into an instrument:
+enumerate scripts/pds-*.{sh,exs} for the denominator; for each row DERIVE the gate status from two independent legs -
+leg A, a '../../../scripts/...' string literal in an api/test/** file that actually shells it; leg B, that same path
+present in elixir-path-escape-check.sh's declared set - and report THROUGH only when BOTH hold. One leg without the
+other is exactly the wave-42 #9290/#9292 defect (Test skipped while Elixir gate passed in 3s on the skip shim), and this
+makes that defect impossible to reintroduce quietly rather than merely remembered.
+
+Every non-THROUGH row carries a class from D637's FIVE (not three) and, for PRICE rows, a figure with the meter named.
+An instrument with no disposition is UNDISPOSED and the census exits non-zero - the same fail-closed shape the receipt
+census already uses. It prints D633's blind-spot sentence in its own output. And it rides its own door: it is an
+instrument, so it gets a test file and a path-set line like every other, which is the self-referential proof that the
+derivation works.
+
+The wave plan, provisionally
+
+┌───┬──────────────────────────────────────────────┬──────────────────────────────────────────────┬────────────────────┐
+│ 0 │ merge charter #9312 alone, first             │ D633-D642 are not on origin/main; every      │ PR open, BLOCKED   │
+│   │                                              │ downstream citation is a phantom until it    │                    │
+│   │                                              │ lands                                        │                    │
+│ 1 │ independently re-derive + land #9332 (caps   │ a live authorization bypass reviewed by      │ PR open,           │
+│   │ read-only share write bypass + derive        │ nobody; source-level order defect already    │ unreviewed         │
+│   │ collapse)                                    │ confirmed                                    │                    │
+│ 2 │ independently re-derive + land #9333 (census │ carries the ELIXIR_TEST_ONLY_PATHS lesson    │ PR open,           │
+│   │ + record-parity doors, 1 -> 3 of 19)         │ wave 42 lost                                 │ unreviewed         │
+│ 3 │ independently re-derive + land #9334         │ ledger lapse is endemic; the lesson has been │ PR open,           │
+│   │ (ledger-lapse expiry arm, three shapes)      │ a paragraph in three debriefs                │ unreviewed         │
+│ 4 │ independently re-derive + land #9335 (sheet- │ the one standing user-facing harm: a         │ PR open,           │
+│   │ grid read mode)                              │ selection frozen at A1 that nothing can move │ unreviewed         │
+│ 5 │ BUILD the LiveView residual 32-fold (D639)   │ never got a builder; blocks the ladder       │ unbuilt, no branch │
+│   │ with its three obligations                   │                                              │                    │
+│ 6 │ BUILD the judgment-coverage ladder (D640)    │ numbers dead three times; union not addition │ deferred round 2   │
+│   │ after the fold merges                        │                                              │                    │
+│ 7 │ BUILD the DOOR CENSUS - the price column as  │ the honesty column violates the law that     │ new this wave      │
+│   │ a running instrument                         │ produced it                                  │                    │
+│ 8 │ walk two more doors: pds-ledger-             │ D637 named both for wave 44 by number and by │ new this wave      │
+│   │ census_test.sh, pds-live-hetzner-placement-  │ name                                         │                    │
+│   │ group.sh                                     │                                              │                    │
+└───┴──────────────────────────────────────────────┴──────────────────────────────────────────────┴────────────────────┘
+
+Direction debate - the rivals, and why this one won
+
+Rival A - RECOVERY ONLY
+
+Spend the whole wave making wave 43's four branches independently bulletproof and merged, plus the charter, and ship
+nothing new. The case for it is strong and honest: an unreviewed authorization change is the single riskiest object in
+the repo right now, and a wave that merges it carelessly while chasing new capability has failed at the only thing that
+mattered. It was rejected because it under-uses the wave, not because it is wrong: four PRs of independent re-derivation
+is roughly one round, and the fold plus the ladder are DESIGNED work with their obligations already derived by run -
+leaving them unbuilt for a second consecutive wave is how wave 43's best output rots. Rival A's real contribution
+survives: movement 1 goes first, alone, and no slice PR merges on its own author's oracle.
+
+Rival B - ADVANCE ONLY
+
+Treat the four branches as inherited fact, merge them on their green, and spend the wave taking the door from 3 of 19 to
+6 or 7. Rejected outright: it is precisely the move the wish forbids, and the epic's own law forbids it too. A commit
+message is an exit code with better prose. Merging #9332 on its own test's word is 'a gate lies when its green costs
+nothing to produce', committed by the wave that coined the sentence.
+
+Rival C - THE DOOR CENSUS (winner, as movement 3 of three)
+
+The winning insight is that the epic has spent four waves arguing about a column it has never computed. Every wave
+restates the roster, re-prices some rows, and writes the total into the charter by hand - and PDS-D636 records that the
+census itself carries a FALSE SENTENCE about its own gating on main today. That is the exact failure mode this epic
+exists to end, committed by the epic, about the epic. Making the column an instrument is the epic's own law turned
+inward one more notch, and it is cheap: the derivation is two greps over files that already exist, and the prior art is
+already on main (api/test/barkpark/pds_residue_lens_test.exs).
+
+The sharpest attack on the winner, and how the wave absorbs it
+
+THE ATTACK: the door census is a THIRD census. This epic already has a receipt census, a residue lens, a ledger census,
+a record-parity arm and a charter-ledger sweep - nineteen instruments, three of which run anywhere. Building a twentieth
+instrument to count the nineteen is the purest possible instance of an epic measuring itself instead of shipping. And it
+will be WRONG on day one: leg A ('a test file shells it') has at least three encodings in the repo already (System.cmd
+with a module attribute, Code.require_file, a bare relative path), so a naive derivation will under-count and print a
+number LOWER than the truth - a different lie, in a friendlier direction.
+
+HOW THE WAVE ABSORBS IT. First, the door census is movement THREE of three - it ships only if movements 1 and 2 are
+honest, and the wave is graded on the security fix and the merges regardless. Second, the under-count objection becomes
+the instrument's design: the census is FAIL-CLOSED on ambiguity - a pds-* script it cannot dispose is UNDISPOSED and
+reds, and a test-side reference it cannot classify is an ERROR, never a silent 'not gated'. That makes the day-one
+wrongness LOUD instead of quiet, and the surveyors are tasked (question 4) with enumerating every encoding of leg A that
+exists on main before a builder writes a regex. Third, if the survey shows the derivation cannot be made honest cheaply,
+the fallback is smaller and still real: a self-check that the two legs AGREE for every already-gated instrument - which
+alone would have caught #9290 and #9292.
+
+The survey plan - 20 assignments, and what each one changes
+
+Width is the point. Each surveyor is one Opus at medium effort; the digest distils. Every load-bearing assumption in the
+direction above appears below as a question, including the ones that would kill it.
+
+┌─────────────────────────────┬───────────────────────────────────────────┬────────────────────────────────────────────┐
+│ caps-reachability           │ Can a signed-in NON-MEMBER with an ACTIVE │ this IS #9332's claim; if the posture and  │
+│                             │ WRITE GRANT actually reach a socket       │ the write source cannot co-occur the fix   │
+│                             │ carrying share_access: :read AND          │ is a no-op dressed as a security patch     │
+│                             │ caps.write == true, through a real non-   │                                            │
+│                             │ admin route? Trace LiveScope.assign_scope │                                            │
+│                             │ -> authorize_read/4 arm order, and        │                                            │
+│                             │ Caps.derive/1's grant load.               │                                            │
+│ caps-blast-radius           │ Who calls Caps.write_capable?/2 and       │ the fix's whole safety argument is that it │
+│                             │ Caps.derive/1, and are there FORKED       │ is narrower than restricted?/1; a fork     │
+│                             │ copies of the predicate anywhere? Does    │ elsewhere means the bypass survives the    │
+│                             │ denying on readonly_posture? break any    │ merge                                      │
+│                             │ legitimate write path (grant-graded       │                                            │
+│                             │ sockets, anonymous public-demo, api_token │                                            │
+│                             │ flows)?                                   │                                            │
+│ caps-callercontext          │ Does Tenancy.Auth.authorize/3's           │ a suspected live behaviour change hiding   │
+│                             │ CallerContext clause (auth.ex:200) matter │ inside a performance collapse, shipped in  │
+│                             │ to Caps.derive/1? Can socket principals   │ a security PR                              │
+│                             │ ever carry a CallerContext, and does      │                                            │
+│                             │ #9332's loadable_principal?/1 silently    │                                            │
+│                             │ drop it? Is permits?/2 + role_permits?/3  │                                            │
+│                             │ truly byte-identical to authorize/3 for   │                                            │
+│                             │ every shape?                              │                                            │
+│ door-leg-encodings          │ Enumerate EVERY way an api/test file      │ the door census's derivation is only as    │
+│                             │ currently invokes a scripts/* instrument  │ honest as its enumeration; this is the     │
+│                             │ on origin/main (System.cmd with a @rel    │ attack on the winner, answered before a    │
+│                             │ attribute, Code.require_file, bare paths, │ builder writes a regex                     │
+│                             │ bash -c), and every entry in elixir-path- │                                            │
+│                             │ escape-check.sh's two declared sets.      │                                            │
+│                             │ Which pds-* scripts satisfy BOTH legs     │                                            │
+│                             │ today?                                    │                                            │
+│ price-column-19             │ Re-derive the denominator: is             │ the wave prints a fraction; a denominator  │
+│                             │ scripts/pds-*.{sh,exs} really 19 on       │ nobody recomputed is the thing this epic   │
+│                             │ origin/main, and does each of D637's 19   │ exists to stop                             │
+│                             │ rows still hold its class? Which rows     │                                            │
+│                             │ changed since 2026-08-02?                 │                                            │
+│ ledger-census-door-price    │ Price scripts/pds-ledger-census_test.sh   │ D637 named this as THE wave-44 door; if    │
+│                             │ by the D633-legal method (/usr/bin/time - │ the price or the environment claim fails,  │
+│                             │ l bash -c, or bash's times builtin) on a  │ movement 2's door walk changes target      │
+│                             │ QUIET host, and confirm it needs no live  │                                            │
+│                             │ ledger creds. Does python3 exist on the   │                                            │
+│                             │ Elixir runner (re-derive wave 43's three- │                                            │
+│                             │ leg claim)?                               │                                            │
+│ hetzner-selftest-offline    │ Does scripts/pds-live-hetzner-placement-  │ D637's best UNEXAMINED candidate; a second │
+│                             │ group.sh --selftest-offline exist, what   │ cheap door would move the count 3 -> 6     │
+│                             │ does it actually do, what does it cost by │                                            │
+│                             │ an OS meter around a shell, and can it    │                                            │
+│                             │ red?                                      │                                            │
+│ charter-sweep-content-red   │ Why is pds-charter-ledger-sweep.sh --     │ CONTENT-RED is the class the wish's three- │
+│                             │ selftest rc=1 on main today, exactly what │ reason vocabulary cannot express; clearing │
+│                             │ unadjudicated claim is it naming, and     │ it would be a fourth door for near-zero    │
+│                             │ what would scripts/pds-charter-ledger-    │ cost                                       │
+│                             │ adjudication.md need to say to clear it?  │                                            │
+│ meter-blindspot-sites       │ Find every place this epic prints a       │ D633's obligation is mechanical placement, │
+│                             │ number derived from a meter               │ not prose; this is the list a builder      │
+│                             │ (:erlang.statistics,                      │ needs                                      │
+│                             │ System.monotonic_time, wall clocks,       │                                            │
+│                             │ reductions) across scripts/pds-* and      │                                            │
+│                             │ api/test/**. Which carry a blind-spot     │                                            │
+│                             │ sentence today? Which quote wall clock in │                                            │
+│                             │ violation of D605?                        │                                            │
+│ residual-fold-clause        │ In scripts/pds-elixir-receipt-census.exs, │ D639's obligation (a) is that without a    │
+│                             │ locate lvs_walk/3 and the                 │ plugin fixture the new clause is           │
+│                             │ plugin_routes(scope:) macro node          │ structurally unexercised; confirm before   │
+│                             │ handling. Confirm the missing clause, the │ building                                   │
+│                             │ RESIDUAL 32 -> 0 fold, and whether the    │                                            │
+│                             │ selftest corpus really writes zero        │                                            │
+│                             │ fixtures under api/lib/barkpark/plugins/. │                                            │
+│ ladder-union-sites          │ Find every addition idiom in the census's │ D640 says PROVEN-BACKED must be an         │
+│                             │ ladder reporting flow (census.exs ~4033   │ Enum.count over a MapSet.union with        │
+│                             │ area), the roster_functions/1 verdict-    │ OVERLAP printed; the task's own criteria   │
+│                             │ filter question, and the current selftest │ are wrong and must be rewritten            │
+│                             │ case/mutant baseline (30/20 vs the task's │                                            │
+│                             │ stale 25/16).                             │                                            │
+│ sheetgrid-readmode          │ In #9335: is READ_MODE_EVENTS truly the   │ the branch's own tests are its author's    │
+│                             │ complement of the six mutating events     │ oracle; the allowlist/denylist complement  │
+│                             │ (edit-start, cell-toggle, clear-          │ claim is the security-shaped half of a UX  │
+│                             │ selection, undo, redo, toggle-style)? Is  │ slice                                      │
+│                             │ presence-meta's editing flag denied? Does │                                            │
+│                             │ Ops.send_ops/2's write_capable:false      │                                            │
+│                             │ clause really terminate all six? What is  │                                            │
+│                             │ the reader-half state                     │                                            │
+│                             │ (grid_sel(_,_,:reader) -> {0,0,0,0})?     │                                            │
+│ ledger-lapse-truth          │ Re-derive #9334's three shapes against    │ the arm's keys are the whole finding; a    │
+│                             │ the SERVER's actual claim schema and TTL  │ wrong key means an arm that passes         │
+│                             │ sweeper: does a lapse really null worker  │ vacuously forever, which is the defect it  │
+│                             │ while preserving previous_worker and      │ was built to fix                           │
+│                             │ writing expired_at? Is                    │                                            │
+│                             │ BARKPARK_TASK_LEASE_TTL_SECONDS / 2700    │                                            │
+│                             │ the real default? Does /v1/data/query     │                                            │
+│                             │ really carry claim as a top-level key?    │                                            │
+│ gate-health-four-prs        │ For each of #9332-#9335 on their CURRENT  │ a green that came from a skip shim is the  │
+│                             │ head SHAs: which check-runs ran, which    │ wave's own law failing on its own PRs      │
+│                             │ were SKIPPED, and did 'Test (Elixir ...)' │                                            │
+│                             │ actually execute? Check started_at on     │                                            │
+│                             │ every red. Is 'PR references an active    │                                            │
+│                             │ task' red for the known lease reason?     │                                            │
+│ merge-order-conflicts       │ Do #9312, #9332, #9333, #9334, #9335      │ wave 43 resolved intra-wave collisions by  │
+│                             │ conflict with each other or with          │ cutting differently; wave 44 inherits the  │
+│                             │ origin/main? Compute merge-base and file  │ cuts and must re-verify them against a     │
+│                             │ overlap. Does any of them touch           │ moved main                                 │
+│                             │ scripts/pds-elixir-receipt-census.exs,    │                                            │
+│                             │ which the fold slice also wants?          │                                            │
+│ w43-task-ledger             │ Read every wave-43 slice task row (pds-   │ the wave must re-claim and close these     │
+│                             │ w43-*): lifecycle_status,                 │ rows honestly; and the lapse count is live │
+│                             │ criteria_progress, claim state. How many  │ data for #9334's own arm                   │
+│                             │ lapsed to open with work done? Which      │                                            │
+│                             │ criteria are stamped with real evidence   │                                            │
+│                             │ vs empty?                                 │                                            │
+│ w43-backlog-security        │ Read pds-w43-bl-grant-grade-doc-          │ if the grant-graded escalation is live,    │
+│                             │ escalation-unproven in full. Is the doc-  │ wave 44 has a SECOND security slice and    │
+│                             │ scoped write escalation still open on the │ the wave plan changes shape                │
+│                             │ paper COMPONENT route for GRANT-graded    │                                            │
+│                             │ sockets - the population #9332            │                                            │
+│                             │ deliberately did NOT deny?                │                                            │
+│ prior-papers                │ Read the bp Papers pds-wave-41/42/43-     │ wave 43 never wrote a debrief; its Paper   │
+│                             │ 2026-08-0x and any wave-43 debrief        │ is the only record of its own unfinished   │
+│                             │ fragments. What did wave 43's direction   │ intent                                     │
+│                             │ promise that its four branches do NOT     │                                            │
+│                             │ deliver? What did its surveyors find that │                                            │
+│                             │ never reached a decision?                 │                                            │
+│ sobelow-and-required-checks │ Re-derive main's Sobelow baseline from    │ an unchanged breakdown is the only proof a │
+│                             │ the DECIDING scan block only (between its │ PR added nothing; the required-check spec  │
+│                             │ own banner and SCAN COMPLETE), and the    │ drift is a HELD human decision the wave    │
+│                             │ live vs committed required-check          │ must not touch                             │
+│                             │ contexts. Do any of the four PRs move the │                                            │
+│                             │ breakdown?                                │                                            │
+│ census-selfclaim-falsehood  │ Confirm PDS-D636's claim that             │ an instrument lying about itself is the    │
+│                             │ scripts/pds-elixir-receipt-census.exs:10- │ epic's law failing at the source, and it   │
+│                             │ 11 states something FALSE about its own   │ is a free high-signal fix for the door-    │
+│                             │ gating on origin/main today, and find any │ census slice                               │
+│                             │ OTHER instrument carrying a false self-   │                                            │
+│                             │ description.                              │                                            │
+└─────────────────────────────┴───────────────────────────────────────────┴────────────────────────────────────────────┘
+
+What this wave will NOT do
+
+• Touch .github/required-checks.json - the four-vs-two context gap is a HELD human decision.
+• Touch .claude/workflows/bp-epic-cycle.workflow.js - #6086 edits it, is conflicting and 587 commits behind.
+• Fence-cross into cloud/**, .github/workflows/** or gr-*/cch-* - Cloud Console wave 27 is resuming alongside. This
+  wave's fence is api/**, internal/**, deploy/**, scripts/pds-* and pds-*.
+• Waive Sobelow. Count it from the deciding scan only; main's baseline is 24, of which 21 are the never-baselined
+  tenancy/workspace_bundle* subsystem (task-75e526fcc79978b3).
+• Attempt the READER half of the sheet-grid selection fix - PDS-D641 split it off deliberately as a separate chrome-
+  policy decision.
+• Merge any slice PR on its own branch's test as the oracle. Independent re-derivation, or it does not land.
+
+▌ PUSH EARLY. Wave 43 lost four branches to a mid-flight failure because nothing reached origin until review, and
+▌ review never ran. Every slice pushes its branch and opens its PR the moment it has one green commit - not at the
+▌ end. If a push fails, the wave says so out loud.
+
+DIGEST - survey complete, 20 of 20 reported, verify fleet in flight
+
+PREMISE SMOKE RE-RUN IN-PROCESS at Digest against origin/main c2affd445 (the primary checkout is a31faa52d, 300+ commits
+behind, and EVERY surveyor independently hit this - a plain grep of the worktree MISSES caps.ex, the census, the ledger
+census, the charter sweep and the hetzner harness entirely). CONFIRMED: caps.ex:283 cond arm 1 is `Map.get(caps, :write)
+== true -> true`, arm 2 is `restricted?(assigns) -> false`, and restricted?/1:295 already lists share_access == :read
+AND readonly_gate?. CONFIRMED: the charter on origin/main tops out at PDS-D632 - D633-D642 exist ONLY on PR #9312.
+CONFIRMED: exactly ONE pds-* path sits in ELIXIR_TEST_ONLY_PATHS on main - scripts/pds-status-only-residue.exs at
+elixir-path-escape-check.sh:99.
+
+What the survey ESTABLISHED
+
+• #9332's premise is REAL AND REACHABLE, derived independently by three surveyors from source.
+  LiveScope.authorize_read/4 offers the :docs share arm (live_scope.ex:147) BEFORE the grant arm (:157), so a signed-in
+  NON-MEMBER holding an active write grant on a :docs-shared desk is graded :share_read - share_access: :read +
+  readonly_gate?: true, with NEITHER scope_to_grants read-narrowing NOR Access.validate write-narrowing armed. Meanwhile
+  Caps.derive/1 loads active grants UNCONDITIONALLY (caps.ex:148-168, no grade reference) and Access.admits_desk?/3
+  (access.ex:329-336) OVERWRITES the desk scope's :type and :doc_id with the grant's own before validating, so a one-doc
+  grant auto-satisfies its own narrowest rungs. caps.write == true and share_access == :read co-occur. Order defect
+  confirmed.
+• BUT THE BYPASS IS NARROWER THAN THE SOCKET GATE, and this decides how it must be verified. For PLAIN socket events the
+  :live_scope_readonly hook halts the event anyway, so a verifier reproducing through a plain event sees green FOR THE
+  WRONG REASON. The live doors are the two that structurally skip socket hooks: the phx-target'ed SheetGrid component
+  prop (components.ex:1786-1787 -> nine mutating cid-targeted heads -> ops.ex:421) and the handle_info paper-op door
+  (shared/paper.ex:99).
+• #9332's SUSPECTED OWN DEFECT IS REFUTED, twice, independently. Caps.derive/1's principals list is a CLOSED two-element
+  set - caps.ex:148-149 `Enum.reject([socket.assigns[:api_token], socket.assigns[:current_user]], &is_nil/1)` - and the
+  PR does not touch that line. A %CallerContext{} lands on the SEPARATE :caller_context assign and can never enter it,
+  so loadable_principal?/1 rejecting it drops nothing. The strategic direction's Q3 closes NEGATIVE. Nothing needs
+  splitting out on that axis.
+• A DIFFERENT byte-identity gap survives: membership_authorizes?/4 reads permits?/2 and role_permits?/3 off the row
+  instead of through authorize/3. Identical for every reachable shape, but a nil-id principal went from
+  FunctionClauseError to false, and a CUSTOM (non-builtin) membership role adds a db_actions Repo.all per authorize -
+  read-derived, never run. The @moduledoc's 'byte-identical' sentence is 99% true, not 100%.
+• THE DOOR COUNT ON LANDED MAIN IS 1, NOT 3. Both legs hold for exactly one instrument: pds_residue_lens_test.exs:44/:76
+  shells scripts/pds-status-only-residue.exs, and that same path is the only pds entry in ELIXIR_TEST_ONLY_PATHS. #9333
+  adds the census and record-parity.test.sh to the set and adds two api/test files - it takes 1 to 3, and it is
+  UNMERGED.
+• #9334 IS THE WAVE-42 DEFECT LIVE, TODAY, ON A WAVE-43 PR. Its Test check-run is the dispatcher shim verbatim: name
+  carries unexpanded ${{ matrix.elixir }}, conclusion skipped, started_at == completed_at (0 s) - while Elixir gate
+  reports SUCCESS in 2 s. It touches only scripts/pds-ledger-census{,_test}.sh, which are in NEITHER path set and are
+  shelled by NO api/test file. Zero legs, not one. Its green cost nothing to produce.
+• #9335 IS RED ON ITS OWN MERITS, not on lease or drift. Test executed (567.3 s) and failed with exactly one failure:
+  sheets_grid_proof_test.exs:324 `refute view_html =~ ~s(phx-hook="SheetGrid")` now MATCHES, because the branch's own
+  thesis moves the hook from @editable to @hookable. A one-line stale assertion the builder missed in a third test file.
+  Its Sheet-grid hook harness red is INHERITED - __hook.test.mjs passes 13/13 and __palette.test.mjs:133 fails on
+  origin/main content too (dark --sheet-ref-0 contrast 2.72:1 < 4.5:1).
+• SOBELOW IS AN UNCHANGED-ORACLE, proven by run on four SHAs. Main's deciding block is 24 findings - 13
+  workspace_bundle.ex + 6 janitor.ex + 2 archive.ex = 21, plus 3 router.ex Config.CSRF High-Confidence. #9332, #9333 and
+  #9335 each reproduce 24 / 21 / 3 byte-for-byte; #9334 does not run it at all. The whole-log count is 127, not ~107,
+  across THREE Running Sobelow banners (24 deciding / 78 unskipped reconcile / 25 mutation selftest).
+• MERGE MECHANICS ARE CLEAN. All five PRs share merge-base == origin/main tip, 0 behind, 1 ahead, 18 distinct files each
+  touched exactly once, and 15/15 trial merges (5 vs main + 10 pairwise) succeeded. There are NO textual conflicts.
+  Every blocker is gate-health or citation-order.
+• CITATION ORDER IS LOAD-BEARING AND MEASURED: #9332 cites PDS-D633 x3 / D634 x2 / D635 x3, #9333 cites D633, #9334
+  cites D638 x4, #9335 cites none. Merging any of the first three before #9312 ships comments pointing at decisions that
+  exist nowhere on main.
+• THE LEDGER-CENSUS DOOR IS VIABLE AND ITS PRICE IS CONFIRMED: 18.15-20.57 s USER CPU over three trials plus one
+  hermetic env -i run, rc=0, 'SELFTEST PASS: 107 checks', zero network / zero credentials / runs outside a git repo.
+  Wave 43's 20.1-23.1 s ceiling holds and is slightly conservative.
+• THE HETZNER OFFLINE DOOR IS THE CHEAPEST UNEXAMINED CANDIDATE AND IT CAN RED: --selftest-offline is real, ~1.34-1.47 s
+  user / ~5.1-5.8 s wall, strips and COUNTS every HCLOUD/HETZNER var (asserts 0 survivors), drives a localhost python3
+  stub, leaves zero repo residue - and a one-token mutation at :430 reds it rc=1 with four FAIL rows and its own verdict
+  prose. NEITHER gate leg exists for it today.
+• THE RESIDUAL-32 FOLD'S PREMISE IS CONFIRMED BY RUN at origin/main: 87 / 9 / 194 / 0 with RESIDUAL 32, sum 322 ==
+  population 322, DENIES 137/194 = 70.6%. lvs_walk/3 (census.exs:4939-4958) has six clauses and NONE matches
+  plugin_routes, so every plugin-mounted LiveView gets sess == [] and falls to the residual. Router corroborates: 17
+  plugin_routes callsites, 6 inside a live_session, 11 outside.
+• THE LADDER'S THREE LIVE RUNGS RE-MEASURED BY RUN: DISPOSED 252/252 UNDISPOSED 0, JUDGED 67, ROSTERED 7, EXCLUDED 178,
+  register VERDICTS PROVEN 15 / REFUTED 0 / UNJUDGED 76. Selftest is 30 cases / 20 mutants (the task's 25/16 warning is
+  correct and the task ALREADY carries the corrected criteria - it does not need rewriting).
+• #9334's THREE LAPSE SHAPES SURVIVE RE-DERIVATION against server source AND the live ledger. ttl_sweeper.ex:371-392
+  merges (worker=>nil, previous_worker preserved, expired_at written); release.ex:120-141 writes released_at and NOT
+  previous_worker; close.ex:539-545 writes closed_at and does NOT clear worker (schema.ex:559 states this as contract).
+  Only claim.ex:297-306 resets the map. Live cross-tab of 300 rows: 26 shape A, 9 done rows carrying closed_at AND
+  expired_at AND previous_worker, 2 released-only, 1 open-with-live-worker.
+
+Where the reports REFUTE the dispatch or each other
+
+• REFUTATION 1 (the biggest, and it changes Movement 2): 'the fold never got a builder' is FALSE. pds-w43-liveview-
+  residual-32-fold sits at 6/11 with run-quoted evidence, previous_worker epic-builder-the-32-get-judged-fold-residual-
+  no-deriv, claim epoch 6 LAPSED 2026-08-02T20:34:00Z. Its four UNMET criteria are exactly the hard ones: the plugin
+  fixture (D639 obligation a), the '?' decline, GATE GREEN both invocations, and a PR-body record invalidating PDS-
+  D620's 'only multi-session module of the 15' - an obligation the brief never mentions. One surveyor found its
+  uncommitted diff on disk at .claude/worktrees/wf_50c6d61a-402-36 (+273/-34, base c2affd445); another grepped every
+  worktree for the same prose and found ZERO. THAT CONTRADICTION IS THE SINGLE MOST DECISION-CHANGING UNKNOWN IN THIS
+  WAVE.
+• REFUTATION 2: the four PR-backed rows have NOT lapsed - all four are in_progress, claimed by loop-lead at 10:30Z
+  today, epochs 7 / 7 / 7 / EIGHT. A copy-pasted epoch 7 will be REFUSED on #9335.
+• REFUTATION 3: 'pds-w43-two-more-doors' does not resolve; the row is pds-w43-two-more-doors-census-record-parity. And
+  the four branches are on loop-epic/* heads - `git ls-remote origin refs/heads/pds-w43-*` returns nothing, which reads
+  exactly like 'the branches are gone'.
+• REFUTATION 4: the ladder task ALREADY carries the D640 ruling. Criterion 3 verbatim demands 'a single Enum.count over
+  a MapSet.union/2, never as leg_a + leg_b, and BOTH legs filtered to verdict PROVEN'; criterion 9 forbids pinning the
+  selftest counts; the prose already names the live 30/20 baseline. It needs VERIFICATION, not rewriting.
+• REFUTATION 5: there is no ladder in the census. PROVEN-BACKED appears ZERO times in the 7,106-line script and zero
+  times in its 1,100-line output - only 8 times in charter prose. The slice is greenfield, and census.exs:4033's four-
+  term `+` is the ONLY bare multi-term addition inside a print call in the whole file - the one copy-paste hazard shaped
+  like the thing D640 forbids.
+• REFUTATION 6: 'ELIXIR_TEST_ONLY_PATHS appears in no workflow yml' is wrong in letter - studio-journey-smoke.yml:16
+  mentions it in a comment. The load-bearing claim (escape-check is the single source of truth, consumed by
+  elixir.yml:196-197 via --match) is intact; the absolute phrasing is not, and a builder who greps will find that hit
+  and doubt the leg-B design.
+• REFUTATION 7: the door-census's TWO-LEG AGREEMENT check is VACUOUSLY GREEN today. Legs agree perfectly on the pds
+  inventory (1 THROUGH, 0 disagreements), so an instrument built around agreement ships a check that cannot fail - 'a
+  gate lies when its green costs nothing to produce', committed by the slice that coins the sentence. The instrument's
+  honest value is the UNDISPOSED DENOMINATOR, not leg disagreement.
+• REFUTATION 8: the denominator itself is contested. Two surveyors derive 19 (.sh + .exs) from git ls-tree; a third
+  derives 17 and notes a bare `scripts/pds-*` glob is 43 files (24 .md/.txt runbooks and transcripts). Four of the 19
+  are *_test.sh harnesses of other instruments. A census that does not DECLARE its enumeration rule in its own output
+  has a false self-description on day one.
+• REFUTATION 9: wave 43's own D638 evidence for the ledger-census door is FABRICATED relative to the tree. The task says
+  'the green Elixir path-escape ratchet job calls python3 five times; stripping it from PATH makes that job rc=127'.
+  scripts/elixir-path-escape-check.sh contains ZERO python3 (its only interpreter hop is awk at :335) and elixir.yml
+  contains zero python3 anywhere. The requirement is right; the receipt is not. Strike that sentence before dispatch.
+• REFUTATION 10: the census PRINTS `wall clock N ms` (pds-elixir-receipt-census.exs:1193/1225/6605) - the exact unit
+  PDS-D605 ('QUOTE USER CPU, NEVER WALL CLOCK') forbids, whose own evidence is this census. And #9333's new gate rider
+  quotes '~23 s wall each' in the SAME @moduledoc that cites D633. Neither of #9333's two ExUnit files can satisfy the
+  'printed output' half of D633's obligation at all - a green ExUnit case prints nothing. The obligation can only land
+  on the INSTRUMENT.
+• REFUTATION 11 (the mirror, and the sharpest): pds-status-only-residue.exs - the ONE instrument that IS through a
+  required gate - says NOTHING in its own header about being gated, while two ungated instruments editorialize about
+  gating falsely (census.exs:10-11 'scripts/pds-* is in NEITHER Elixir path set'; pds-scratch-target_test.sh:26 'nothing
+  under .github/workflows runs scripts/pds-*', which teaches the WRONG derivation leg). D636 is confirmed but imprecise:
+  the census's claim about ITSELF is true, its claim about the FAMILY is false.
+• REFUTATION 12: the wish's price figures are all load-contaminated. Wave 43 self-declares no quiet host existed at any
+  point (load 13.66-57.73 on 10 cores), and nobody has ever measured any door on the actual ubuntu-latest runner. Two
+  Digest-round surveyors independently reproduced D633's blindness by accident - /usr/bin/time around the BEAM reported
+  user 4.81 s against a wall of 386.70 s for the census selftest, an 80x understatement.
+
+Coverage map - checked and FOUND
+
+• caps.ex / live_scope.ex / live_auth.ex / router.ex / access.ex / components.ex / sheet_grid.ex / shared/paper.ex /
+  tenancy/auth.ex on origin/main - the whole #9332 chain, three independent walks, all agreeing.
+• scripts/elixir-path-escape-check.sh (both declared sets, verbatim, plus glob grammar and the escape resolution
+  algorithm) and .github/workflows/elixir.yml's consumption of it.
+• All 19 scripts/pds-*.{sh,exs} enumerated with exec bits; selftest-surface swept (only 6 of 19 declare any --selftest*;
+  hetzner declares THREE variants).
+• RUN: pds-ledger-census_test.sh x4 (incl. hermetic env -i), pds-charter-ledger-sweep.sh --selftest (rc=1, 41 arrivals),
+  pds-record-parity.sh --selftest (rc=3, flag does not exist), pds-live-hetzner-placement-group.sh --selftest-offline x3
+  + one MUTANT (rc=1), the census plain + --selftest, __hook/__palette/__pointing/__formula .test.mjs.
+• CI feeds for all five PRs by CHECK-RUN (not workflow-run) - which caught the runs feed reporting SUCCESS where check-
+  runs report FAILURE on three occasions.
+• The live guerrilla ledger: 300 task docs cross-tabbed by lifecycle x claim keys; /v1/data/query confirmed to serve
+  `claim` top-level and result.perspective in one request.
+• The bp ledger rows for all six wave-43 slices plus six wave-42 N-1 rows, four backlog rows and two lapsed rows.
+
+Coverage map - checked and NOT FOUND (absences are decisions-in-waiting)
+
+• docs/decisions/success-claim-census.md - THE OWNING DOC for the 19-instrument inventory. No surveyor in wave 43 OR
+  wave 44 has opened it. Movement 3's denominator has an unread owner.
+• Ops.commit/3 in sheet_grid/ops.ex - cell-toggle is the ONLY one of the six read-mode events with neither its own
+  write_capable head nor a direct send_ops call. If Ops.commit/3 does not funnel into send_ops, that is a live write
+  bypass on MAIN, in a different place from #9332.
+• api/lib/barkpark/sharing.ex - who can create a :docs share, and whether prod holds any. The reachability chain assumes
+  a normal product action nobody verified.
+• LiveScope.write_target/3 - so whether a grant-graded socket writes ANYTHING today is unverified, which means #9332's
+  'grant sockets keep writing' safety argument is unproven in the affirmative direction too.
+• The branch copy of scripts/pds-ledger-census.sh - #9334's actual predicates were never read; the surveyor verified the
+  WORLD the arm must match, not the arm.
+• PR #9332's diff read only as a diff, never as a differential property test over the principal x membership x
+  permissions matrix.
+• api/lib/barkpark/plugins/** for :api_token / :current_user assigns - the closed-principal-set proof is exhaustive over
+  api/lib/barkpark_web/ only.
+• Whether __palette.test.mjs's contrast red is pre-existing could not be baselined from main (the check-run is path-
+  gated and absent there) - one surveyor reproduced it on main CONTENT locally, which is strong but not a CI baseline.
+• bp search: one surveyor could not resolve `bp` at all (masked as rc=0 by a `timeout` prefix - the bespoke-check lie
+  class), another found multi-word queries returning unparseable output. Do NOT read any 'no prior art' in this survey
+  as absence.
+• AND AN INSTRUMENT DEFECT IN OUR OWN READER: `bp paper view` renders paragraph-wrapped list items as EMPTY bullets.
+  Wave 43's Refusals, Coverage, High-flip-risk and all nine Backlog rows print as bare dots. Anyone reading wave 43
+  through the CLI reader silently misses every refusal it recorded. This is the epic's own class, in the epic's own
+  tooling.
+
+VERIFY PLAN - 12 assignments, all Opus (fable unavailable this wave), in flight now
+
+• V1 STRANDED FOLD - does .claude/worktrees/wf_50c6d61a-402-36 hold a working residual fold? RUN the census from it and
+  quote RESIDUAL / sum / DENIES. Two surveyors contradict each other on whether the code exists. Decides whether
+  Movement 2 recovers or rebuilds.
+• V2 CELL-TOGGLE TERMINUS - does Ops.commit/3 funnel into send_ops/2? RUN a targeted mix test driving cell-toggle on a
+  write_capable:false socket and quote stored() before/after. A no is a live write bypass on main.
+• V3 #9332 REACHABILITY BY RUN - reproduce the bypass through the COMPONENT door and the handle_info door, not a plain
+  socket event, and prove the fix denies both while a grant-graded write socket still writes. RUN both new test files
+  plus a mutation.
+• V4 #9335 ONE-LINE RED - fix sheets_grid_proof_test.exs:324, RUN the file, and confirm the failure count goes 1 -> 0
+  without touching the branch's thesis.
+• V5 GATE HEALTH RE-DERIVED - re-claim all four rows, push, and prove `PR references an active task` clears; quote every
+  check-run's started_at so no two-day-old failure is read as today's.
+• V6 DOOR CENSUS FEASIBILITY - enumerate every leg-A encoding on main and prove a fail-closed classifier can be written
+  that does NOT count the comment at pds_residue_lens_test.exs:38 and does NOT treat Code.require_file as a priceable
+  shelled door.
+• V7 DENOMINATOR RULE - settle 17 vs 19 vs 43 by run, and decide whether the four *_test.sh harnesses are peers or
+  harnesses. The instrument must PRINT its rule.
+• V8 QUIET-HOST PRICES - re-take ledger-census_test.sh and hetzner --selftest-offline at load < 2 with an OS meter
+  around a SHELL, and quote the load average with every figure.
+• V9 PYTHON3-ON-RUNNER - the D638 receipt is fabricated. Establish honestly whether python3 exists on the elixir.yml
+  runner, by an unguarded command -v in a real CI run, and strike the false sentence.
+• V10 LADDER UNION BY RUN - print |A|, |B|, |A union B| and |A intersect B| with BOTH legs verdict-filtered to PROVEN.
+  Nobody has ever computed these; 23 / 20 / 3 / OVERLAP 0 are charter prose.
+• V11 CHARTER SWEEP SIZE - re-run pds-charter-ledger-sweep.sh --selftest against #9312's charter blob, not main's, and
+  report the POST-MERGE arrival count. Adjudicating 41 rows pre-merge is guaranteed rework.
+• V12 MERGE ORDER PROOF - drive #9312 to green and merge it alone, then re-run the pairwise merge-tree matrix against
+  the new main and re-check that all four slice PRs still apply.
+
+MERGE ORDER THE VERIFIERS ARE TESTING: #9312 alone first (citation integrity for three of four slices). Then #9333 - it
+is the escape-check SEED and the wave's single serialization point; the fold, the ledger-census door and the door census
+all want that file, so exactly one PR may touch it at a time. Then #9332 on its independent re-derivation. #9334 does
+NOT merge on its current zero-leg green. #9335 last, after its own red is fixed.
+
+DECIDE COMPLETE - the builders are flying
+
+Wave 44 was dispatched to independently re-derive four recovered branches BEFORE they merged. It did not get the chance,
+and that is the wave's first finding. #9332 merged 53add1f24 at 10:49:48Z, #9333 626f71f86 at 10:49:56Z, #9334 3f18ab048
+at 10:50:04Z - and the charter #9312 merged at 11:29:57Z, FORTY MINUTES AFTER the code that cites it. For that window
+git grep over origin/main returned 13 hits in shipped api/ and scripts/ code pointing at PDS-D633+ decisions main did
+not define. Movement 1's stated law was inverted in practice. It is now repaired: main carries D633-D642, and only #9335
+remains open.
+
+Verification results - what was PROVEN, what was REFUTED
+
+Nine verifiers reported; the coverage deficit was empty in both rounds. Trust order was proofs over facts over prose,
+and four dispatch premises were refuted at the artifact.
+
+┌────────────────────────────────────────┬────────────────────────────────────┬────────────────────────────────────────┐
+│ Assignment                             │ Verdict                            │ The decisive line                      │
+│ #9332 order defect                     │ PROVEN, and non-vacuous            │ Deleting `readonly_posture?(assigns) - │
+│                                        │                                    │ > false` takes the suite 14 tests / 0  │
+│                                        │                                    │ failures to 14 tests / 4 failures, and │
+│                                        │                                    │ the failures name persisted bytes:     │
+│                                        │                                    │ `left: %{"amount" => "ESCALATED"}`     │
+│ #9332's suspected OWN defect (dropped  │ REFUTED, twice independently       │ `derive/1`'s principals is the closed  │
+│ CallerContext)                         │                                    │ two-element list `[api_token,          │
+│                                        │                                    │ current_user]` and the PR does not     │
+│                                        │                                    │ touch it - a %CallerContext{} can      │
+│                                        │                                    │ never reach `loadable_principal?/1`    │
+│ Grant grade safe?                      │ REFUTED - a LIVE bypass on main    │ A doc-scoped write grant wrote a       │
+│                                        │                                    │ DIFFERENT doc: `left: {true,           │
+│                                        │                                    │ %{"amount" => "ESCALATED", "currency"  │
+│                                        │                                    │ => "NOK"}}`                            │
+│ Ops.commit/3 a second bypass?          │ REFUTED - it funnels               │ `ops.ex:391-403` ends in               │
+│                                        │                                    │ `send_ops(socket,[op])`; probe green   │
+│                                        │                                    │ rc=0, RED under guard mutation with    │
+│                                        │                                    │ `%{"fmt" => "checkbox", "v" => false}` │
+│ Stranded fold never had a builder      │ REFUTED at the code level          │ Row is 6/11 with run-quoted evidence;  │
+│                                        │                                    │ the diff is +273/-34, RESIDUAL 32 to   │
+│                                        │                                    │ 0, `sum 322 == population 322`,        │
+│                                        │                                    │ `CENSUS OK`                            │
+│ D633's 210 s a gate budget?            │ REFUTED                            │ `--selftest` exceeds 600 s WALL; one   │
+│                                        │                                    │ meter read `real 1662,98 / user 7,05`  │
+│                                        │                                    │ - a 236x understatement                │
+│ Ledger-census door 20-23 s / 107       │ REFUTED by run                     │ 42.6-45.0 s CPU (49.3 s hermetic), and │
+│ checks                                 │                                    │ 144 checks in all four runs            │
+│ Two-leg AGREEMENT check                │ REFUTED as a design                │ MUT-1 is ALREADY RED on main via `--   │
+│                                        │                                    │ check`; a one-line COMMENT plus the    │
+│                                        │                                    │ forced declaration buys a fraudulent   │
+│                                        │                                    │ THROUGH                                │
+│ python3 receipt (D638 row)             │ STRUCK                             │ Ratchet exits rc=0 with python3        │
+│                                        │                                    │ absent, not 127; the first repro was   │
+│                                        │                                    │ confounded by a PATH strip that also   │
+│                                        │                                    │ lost `dirname` and `cut`               │
+│ Sheet-grid palette 2.72:1              │ REFUTED as a defect                │ #5b9dff vs WHITE = 2.72 (the           │
+│                                        │                                    │ assertion's own number); vs the real   │
+│                                        │                                    │ dark bg = 7.27. The harness reads --bg │
+│                                        │                                    │ ordinally                              │
+│ Door count on landed main              │ 1 of 19 was stale; it is 3         │ #9333 merged mid-round; denominator is │
+│                                        │                                    │ 19 (17 .sh + 2 .exs), and 43 is a glob │
+│                                        │                                    │ error                                  │
+│ Owning doc for the inventory           │ NOT-FOUND, and that is the finding │ `success-claim-census.md` read in      │
+│                                        │                                    │ full: 286 lines, ZERO instrument       │
+│                                        │                                    │ inventory. No doc owns this fact-topic │
+└────────────────────────────────────────┴────────────────────────────────────┴────────────────────────────────────────┘
+
+COVERAGE, INCLUDING NOT-FOUNDS. Reached for the first time: docs/decisions/success-claim-census.md, Ops.commit/3, the
+sheet-grid palette harness, and every leg-A encoding on main. STILL NOT REACHED:
+api/lib/barkpark/plugins/sheets/web/ops_controller.ex:69, a SECOND Session.apply_ops surface over HTTP that the LiveView
+wall does not cover - nobody examined it, and it is filed rather than assumed safe. The SheetGrid write-LANDING half is
+UNPROVEN, not proven-safe: Session.peek returned {:error, :no_session} in BOTH arms, so an assertion there today would
+be vacuous in both directions. Both are backlog rows, not silent gaps.
+
+Decisions - PDS-D643 through D652, each with its one-line why
+
+These mirror the charter (PR #9353); the charter is the epic's memory, this Paper is the wave's story. Because that PR
+may not be on main while the builders fly, the decisions are here in full.
+
+• D643 - Movement 1 landed WHILE wave 44 verified it, charter last. Why: 13 dangling citations shipped, and #9334's
+  green was a zero-second skip shim with ZERO gate legs - this epic's own law broken on this epic's own PR.
+• D644 - #9332 is sound, its suspected own defect is void, and the bypass is NOT closed for the pure grant grade. Why:
+  the narrowing hook is :handle_event and the component route is handle_info, so Access.validate/3 is never consulted.
+  Denying readonly_posture? would be the WRONG fix - the narrowing must travel into the door.
+• D645 - The fold is recoverable, not rebuildable, and git-grep cannot see stranded work. Why: uncommitted work is the
+  only kind that CAN be stranded, so any git-based sweep systematically misses exactly what it is looking for.
+• D646 - 210 s is leaf CPU, not a gate budget. Why: a required gate enforces WALL, the driver is serial and prints
+  nothing until the last case returns, and an in-flight run is indistinguishable from a hang by stdout alone.
+• D647 - The ledger-census door is re-priced and 'viable' is dead. Why: 42.6-49.3 s CPU and 144 checks, and the count is
+  load-independent so this is staleness, not mismeasurement.
+• D648 - Wall is not a measurable property of a door; the unit is CPU = user + sys, labelled LOCAL. Why: a FIXED
+  workload swung 5.8x at constant load while its user CPU held to 27%, and on the hetzner door sys EXCEEDS user,
+  understating it 2.1x as a pure CPU fact.
+• D649 - The agreement check cannot fail; leg A must be attribute-bound AND executed. Why: leg A implies leg B by an
+  existing required ratchet, and a comment-blind extractor lets one comment line plus the declaration the ratchet forces
+  manufacture a THROUGH.
+• D650 - The denominator is 19 and the inventory's owner is the INSTRUMENT'S OWN PRINTED OUTPUT. Why: no doc owns the
+  fact-topic, the repo caps cards at 7, and an appendix would push success-claim-census.md past its budget.
+• D651 - The palette red is a harness attribution bug, not a contrast defect. Why: a generated :root block was inserted
+  ABOVE the dark block, so an ordinal read compares dark hues against WHITE - and the standing task about it would send
+  a builder to change a hue that passes at 7.27:1.
+• D652 - What wave 44 cut, with reasons: the ledger-census door (price), the charter sweep (45 hand rulings, gated on
+  this charter merging, and its second read FAILS OPEN), and the sheet-grid reader half (D641, deliberate).
+
+The wave plan - 7 slices, 4 in round 1
+
+Round 1 is dependency-free and builds this run. Round 2 does NOT build now: each names the merge it waits on, stated as
+the first line of its own brief so a manually-dispatched builder sees it first. Round-1 file sets are disjoint - the
+census, the escape-check, shared/paper.ex and the palette harness are each owned by exactly one slice.
+
+┌───┬──────────────────────────────────┬────────────────────────────────┬───┬──────┬───────────────────────────────────┐
+│ # │ Slice                            │ Task id                        │ R │ Mode │ Gate                              │
+│   │                                  │                                │ o │ l    │                                   │
+│   │                                  │                                │ u │      │                                   │
+│   │                                  │                                │ n │      │                                   │
+│   │                                  │                                │ d │      │                                   │
+│ 1 │ The grant-graded doc escalation  │ pds-w44-grant-door-narrowing   │ 1 │ fabl │ CC=clang mix test on the new      │
+│   │ is closed at the door it rides   │                                │   │ e    │ LiveView test + the studio        │
+│   │                                  │                                │   │ (rem │ directory, rc captured to a       │
+│   │                                  │                                │   │ appe │ variable                          │
+│   │                                  │                                │   │ d to │                                   │
+│   │                                  │                                │   │ opus │                                   │
+│   │                                  │                                │   │ -    │                                   │
+│   │                                  │                                │   │ fabl │                                   │
+│   │                                  │                                │   │ e    │                                   │
+│   │                                  │                                │   │ unav │                                   │
+│   │                                  │                                │   │ aila │                                   │
+│ 2 │ Residual-32 fold recovered +     │ pds-w44-census-fold-and-       │ 1 │ fabl │ elixir scripts/pds-elixir-        │
+│   │ D605's unit + D633's blind spot  │ blindspot                      │   │ e    │ receipt-census.exs and its --     │
+│   │ IN the instrument                │                                │   │ (rem │ selftest, both rc=0               │
+│   │                                  │                                │   │ appe │                                   │
+│   │                                  │                                │   │ d)   │                                   │
+│ 3 │ The door census: the price       │ pds-w44-door-census-instrument │ 1 │ fabl │ bash scripts/pds-door-census.sh + │
+│   │ column becomes an instrument     │                                │   │ e    │ bash scripts/elixir-path-escape-  │
+│   │                                  │                                │   │ (rem │ check.sh --check + CC=clang mix   │
+│   │                                  │                                │   │ appe │ test the new rider                │
+│   │                                  │                                │   │ d)   │                                   │
+│ 4 │ The palette harness repaired     │ pds-w44-palette-harness-repair │ 1 │ opus │ node each __*.test.mjs in         │
+│   │ against generated tokens         │                                │   │      │ api/assets/sheet-grid, every rc   │
+│   │                                  │                                │   │      │ captured and zero                 │
+│ 5 │ The judgment-coverage ladder:    │ pds-w44-judgment-coverage-     │ 2 │ opus │ elixir census + --selftest + the  │
+│   │ PROVEN-BACKED 23 as a union      │ ladder                         │ ( │      │ doc byte-budget check             │
+│   │                                  │                                │ a │      │                                   │
+│   │                                  │                                │ f │      │                                   │
+│   │                                  │                                │ t │      │                                   │
+│   │                                  │                                │ e │      │                                   │
+│   │                                  │                                │ r │      │                                   │
+│   │                                  │                                │ 2 │      │                                   │
+│   │                                  │                                │ ) │      │                                   │
+│ 6 │ The hetzner offline arm becomes  │ pds-w44-hetzner-offline-door   │ 2 │ opus │ CC=clang mix test the new rider + │
+│   │ the next door                    │                                │ ( │      │ escape-check --check at rc=0      │
+│   │                                  │                                │ a │      │                                   │
+│   │                                  │                                │ f │      │                                   │
+│   │                                  │                                │ t │      │                                   │
+│   │                                  │                                │ e │      │                                   │
+│   │                                  │                                │ r │      │                                   │
+│   │                                  │                                │ 3 │      │                                   │
+│   │                                  │                                │ ) │      │                                   │
+│ 7 │ The charter sweep adjudicated    │ pds-w44-charter-sweep-         │ 2 │ opus │ bash scripts/pds-charter-ledger-  │
+│   │ and its fail-open closed         │ adjudication                   │ ( │      │ sweep.sh and --selftest, both     │
+│   │                                  │                                │ a │      │ rc=0                              │
+│   │                                  │                                │ f │      │                                   │
+│   │                                  │                                │ t │      │                                   │
+│   │                                  │                                │ e │      │                                   │
+│   │                                  │                                │ r │      │                                   │
+│   │                                  │                                │ T │      │                                   │
+│   │                                  │                                │ H │      │                                   │
+│   │                                  │                                │ I │      │                                   │
+│   │                                  │                                │ S │      │                                   │
+│   │                                  │                                │ c │      │                                   │
+│   │                                  │                                │ h │      │                                   │
+│   │                                  │                                │ a │      │                                   │
+│   │                                  │                                │ r │      │                                   │
+│   │                                  │                                │ t │      │                                   │
+│   │                                  │                                │ e │      │                                   │
+│   │                                  │                                │ r │      │                                   │
+│   │                                  │                                │ m │      │                                   │
+│   │                                  │                                │ e │      │                                   │
+│   │                                  │                                │ r │      │                                   │
+│   │                                  │                                │ g │      │                                   │
+│   │                                  │                                │ e │      │                                   │
+│   │                                  │                                │ s │      │                                   │
+│   │                                  │                                │ ) │      │                                   │
+└───┴──────────────────────────────────┴────────────────────────────────┴───┴──────┴───────────────────────────────────┘
+
+HIGH-FLIP-RISK, declared, and the line is in each task's own brief so the reviewer reads it there: SLICE 1 - whether the
+grant grade's narrowing belongs in the door or the gate, and whether narrowing it denies a legitimate grantee. This is
+an authorization judgment on a bypass that is LIVE ON MAIN, and it is the species that flipped twice in wave 43. SLICE 3
+-
+whether leg A's three predicates admit a fraudulent THROUGH; the comment mutation is the oracle, and wave 44's own
+prototype PASSED IT. Both warrant a genuinely independent second reviewer before merge. This workflow spawns one
+reviewer, so that dispatch is a manual lead step - review's job is to NAME when independence is owed.
+
+BACKLOG FILED NOW, six published child rows, so the ledger shows the future: pds-w44-bl-ledger-census-door-repriced,
+pds-w44-bl-ops-controller-apply-ops-ungated, pds-w44-bl-vacuous-reader-toggle-oracle, pds-w44-bl-sheetgrid-write-
+landing-unproven, pds-w44-bl-stranded-work-is-invisible-to-git-grep, pds-w44-bl-citation-precedes-merge-check.
+
+▌ THE WAVE'S OWN LAW, TURNED ON ITSELF. A gate lies when its green costs nothing to produce - and this wave found that
+▌ sentence violated three times by the epic that coined it: #9334's zero-second Test shim, the two-leg agreement check
+▌ that cannot red, and the charter sweep's second read that prints CONFIRMED while its read failed. Wave 44's grade
+▌ rests on slices 1 and 2, not on the door count.
+
+DEBRIEF - wave 44 reviewed, 4 PRs pushed, grade A-
+
+Every branch this wave produced is on origin with a PR open. Nothing is merged - the lead merges. Three slices were
+handed to review as built and green; a FOURTH was found stranded, fully built and fully gated, with zero commits on its
+branch, and was recovered here.
+
+What shipped, per slice
+
+┌──────────────────────────┬───────────────────────────┬───────┬───────────────────────────┬───────────────────────────┐
+│ pds-w44-grant-door-      │ loop-epic/a-doc-scoped-   │ #9377 │ slice test rc=0, 5 tests  │ STRONG. The bypass is     │
+│ narrowing                │ write-grant-stops-        │       │ 0 failures; studio suite  │ real and the fix is what  │
+│                          │ writing-a-0-r             │       │ rc=0, 1547 tests 0        │ closes it - proven by the │
+│                          │                           │       │ failures                  │ reviewer's OWN mutation,  │
+│                          │                           │       │                           │ not the builder's:        │
+│                          │                           │       │                           │ neutering                 │
+│                          │                           │       │                           │ grant_target_denied?/3    │
+│                          │                           │       │                           │ gives rc=2 with two       │
+│                          │                           │       │                           │ failures printing left:   │
+│                          │                           │       │                           │ %{"amount" =>             │
+│                          │                           │       │                           │ "ESCALATED"} read back    │
+│                          │                           │       │                           │ from the store.           │
+│ pds-w44-census-fold-and- │ loop-epic/the-residual-   │ #9378 │ census rc=0, RESIDUAL     │ STRONG. A/B re-derived    │
+│ blindspot                │ 32-gets-judged-and-the-   │       │ 0/322, sum 322 ==         │ independently: 32 -> 0,   │
+│                          │ mete-1                    │       │ population 322, CENSUS OK │ reachable_unconditional   │
+│                          │                           │       │                           │ 194 -> 225, DENIES        │
+│                          │                           │       │                           │ numerator HELD at 137, so │
+│                          │                           │       │                           │ the headline fraction     │
+│                          │                           │       │                           │ gets WORSE (70.6% ->      │
+│                          │                           │       │                           │ 60.9%). That is a fold,   │
+│                          │                           │       │                           │ not a rubber stamp.       │
+│ pds-w44-palette-harness- │ loop-epic/the-sheet-grid- │ #9379 │ all four __*.test.mjs     │ STRONG, plus two reviewer │
+│ repair                   │ palette-harness-stops-    │       │ rc=0; palette reports 18  │ fixes. The 4-week red was │
+│                          │ com-3-r                   │       │ contrast checks           │ a harness attribution     │
+│                          │                           │       │                           │ bug, never a WCAG defect  │
+│                          │                           │       │                           │ - and the bug lied in     │
+│                          │                           │       │                           │ BOTH directions (#14532d  │
+│                          │                           │       │                           │ is invisible in dark mode │
+│                          │                           │       │                           │ at 2.18:1 and the old     │
+│                          │                           │       │                           │ harness would have PASSED │
+│                          │                           │       │                           │ it at 9.11:1 vs white).   │
+│ pds-w44-door-census-     │ loop-epic/the-price-      │ #9380 │ door-census rc=0          │ RECOVERED BY REVIEW, not  │
+│ instrument               │ column-stops-being-       │       │ (UNDISPOSED 0 of 20,      │ builder-delivered.        │
+│                          │ charter-pro-2-r           │       │ ERRORS 0); --selftest     │ Complete and green - it   │
+│                          │                           │       │ rc=0 (8 PASS / 0 FAIL);   │ simply never got          │
+│                          │                           │       │ escape-check rc=0; rider  │ committed. One pair of    │
+│                          │                           │       │ rc=0 (8 tests)            │ eyes on a 37 KB shell     │
+│                          │                           │       │                           │ instrument; an            │
+│                          │                           │       │                           │ independent second        │
+│                          │                           │       │                           │ reviewer is owed.         │
+└──────────────────────────┴───────────────────────────┴───────┴───────────────────────────┴───────────────────────────┘
+
+What the review FOUND that the wave did not report
+
+• PDS-D653 - A TASK CAN BE 11/12 STAMPED AND ITS BRANCH EMPTY. pds-w44-door-census-instrument stamped eleven criteria
+  with real run evidence, its now-line read 'committing: ... branching loop-epic/the-price-column-stops-being-charter-
+  pro-2', and git diff origin/main...that-branch is EMPTY. It was in NEITHER the built handoff nor the not-green list.
+  The rule this buys: the LEDGER is the sweep index, not the handoff - diff every wave task's stated branch against
+  origin/main and treat an empty diff as STRANDED, because a report cannot describe the builder that stopped before
+  writing it.
+• PDS-D654 - A GATE THAT DOES NOT TRIGGER ON ITS OWN SUBJECT IS GREEN FOR FREE. sheet-grid-js.yml runs a harness that
+  parses root.html.heex, presence_state.ex and tokens_gen.ex, and triggered on NONE of them - so the contrast gate never
+  ran on a PR that changed a hue, a background token, or the presence palette. D633's law in its cheapest form yet: no
+  skip shim, no vacuous assertion, just a paths: list that omits the subject. Repaired in #9379.
+• PDS-D655 - TWO INSTRUMENTS SHIPPED CONTRADICTORY PROSE ABOUT THE SAME FINDING, IN THE SAME WAVE. pds-door-census.sh
+  printed the meter blindness as a 236x real/user RATIO; pds-elixir-receipt-census.exs refuted exactly that on its own
+  runs (113x, then 123x, for the SAME fan-out, because real counts WAITING). Reconciled in review onto the load-
+  independent leaf-metered FLOOR. The rule: when a finding ships inside more than one instrument, ONE owns the sentence
+  and the others cite it - the same argument the census's own @blind_spot attribute makes, one level up.
+• A FLAKE, FILED RATHER THAN SWALLOWED. The first full studio-suite run scored 1 failure in ChatRenderGoldenTest's
+  sidebar byte-lock (golden 6554 bytes, region 6554 bytes, first diff at 723 - a same-length CONTENT SWAP). It passes in
+  isolation and passed on re-run of the identical tree. Filed as task-441f5a5669e0ab6b. A golden that reds only
+  sometimes trains reviewers to re-run until green, which is this epic's own defect class.
+• THE HOST WAS NOT QUIET, AND THAT PROVED D605 BY ACCIDENT. The reviewer's census read user cpu 17330 ms against wall
+  clock 95801 ms on a box carrying 24 stray busy-loop processes four days old. The wall figure is the LOAD; the CPU
+  figure is the CODE.
+
+Dated corrections to earlier sections of this Paper
+
+• 2026-08-03, correcting the Direction section's 'Charter #9312 merges FIRST and alone': INVERTED IN PRACTICE.
+  #9332/#9333/#9334 merged at 10:49-10:50Z and the charter at 11:29:57Z - forty minutes after the code citing it.
+  Already recorded as PDS-D643; noted here so a reader of the Direction section does not carry the plan as the outcome.
+• 2026-08-03, correcting 'The wave plan - 7 slices, 4 in round 1': FOUR round-1 slices were dispatched and only THREE
+  reached review as built. The fourth (pds-w44-door-census-instrument) completed its work and its gate and died before
+  committing; it is delivered by this review as #9380. The plan's round-1 count is right; its delivery path is not what
+  the plan describes.
+• 2026-08-03, on the wish's item 3 ('measured at 236x'): REFUTED BY THE ARTIFACT, and the refutation is now the shipped
+  sentence in BOTH instruments. real/user is load-dependent; the load-independent statement is the DIRECTION plus a
+  leaf-metered floor.
+
+Ledger audit
+
+• All four slice tasks are lifecycle in_progress with merge-gated criteria left OPEN for the lead - correct, none closed
+  early.
+• Evidence was stamped AS THE BUILDERS WORKED, not batched: each carries per-criterion evidence quoting run output, and
+  two carry honest --miss records rather than fabricated flips (pds-w44-census-fold-and-blindspot criterion 8, the
+  lv_verdict/5 cond reorder; pds-w44-palette-harness-repair criterion 7, the PR body a builder cannot write because
+  builders do not push).
+• ONE LEDGER LIE CORRECTED: pds-w44-door-census-instrument's claim now-line implied a committed branch that does not
+  exist. A review_status field now records the correction, the recovery, and the re-run gate; re-published and read
+  back.
+• Each of the other three tasks gained a review_status naming its final branch, its PR, and which gate legs the REVIEWER
+  re-ran (as distinct from which the builder claimed).
+• No task outside this wave was mutated. One NEW task was filed and published: task-441f5a5669e0ab6b (the golden byte-
+  lock flake), parented to the epic.
+
+Grade - A-
+
+EARNED, not awarded. What is genuinely strong: three of four slices closed a defect that was REAL and proved it by
+substitution rather than by reading, and every one of them refuted part of its own brief from the artifact - the palette
+slice found a THIRD stale coupling nobody had priced (--fg-muted was matched for an hsl() both themes author as var(--
+muted-text), so that check had found zero declarations and could never have run), and the census slice refused the ratio
+its dispatch demanded. The security slice is the wave's best work: it declined the obvious fix (widening
+Caps.write_capable?/2, which is shared with the SheetGrid prop and has no target), declined the obvious predicate
+(Access.admits_desk?/3, whose type/doc_id overwrite IS the bug), and carries a positive control proving a legitimate
+grantee still writes.
+
+What falls short. (1) A whole slice died between its last stamp and its first commit and NOTHING in the wave's own
+reporting said so - it took a branch-vs-ledger diff to find a finished instrument one cycle away from deletion. That is
+the sixth consecutive wave to strand built work, and it is the single reason this is not an A. (2) Two instruments
+shipped contradictory prose about the same finding in the same wave - a coherence failure the wave had every opportunity
+to catch, since one slice explicitly refuted the other's figure in its own commit message. (3) The security slice's
+shipped non-vacuity test is a local constant-false STUB, not the reverted arm; the real revert was run and recorded in
+the stamp, but the artifact that MERGES cannot reproduce it - the reviewer had to re-run the mutation by hand to
+confirm. (4) Coverage is honestly partial and says so: paper_ops/2 and document_op/2 carry the new arm but are proven by
+READING, and the census's ExUnit rider was never run locally.
+
+No bloat: 489 lines for the security slice including a 361-line test, 333 for the census fold, 86 for the palette
+repair. Nothing was redesigned; the reviewer's edits are two latent-hazard closures and one prose reconciliation. Tree-
+tidiness was not pursued and has no value here.
+
+What the next wave should take
+
+MERGE ROUND 1 FIRST, IN THIS ORDER: #9377 (the security fix - it is the only thing in this wave that closes a live
+escalation), then #9379 (it turns the red Sheet-grid hook unit harness green, which is currently the only non-advisory
+red on the still-open #9335), then #9378 and #9380. Two of the four are owed a genuinely independent second reviewer
+before merge, and this workflow spawns exactly one reviewer, so that dispatch is a MANUAL LEAD STEP: #9377 (security /
+tenancy) and #9380 (whether leg A admits a fraudulent THROUGH - and it never got its builder's own review dispatch, so
+it has had ONE pair of eyes on 37 KB of shell).
+
+THEN THE DEFERRED ROUND-2 SLICES, EACH AS ITS DEPENDENCY MERGES: pds-w44-judgment-coverage-ladder after #9378 (both
+rewrite the census and every line number shifts - re-derive anchors at the new base, and PROVEN-BACKED must be one
+Enum.count over one MapSet.union, never an addition); pds-w44-hetzner-offline-door after #9380 (it edits the same
+declared set, so dispatching beside it produces a conflict, not a build - and BOTH legs or neither: the instrument AND
+its ELIXIR_TEST_ONLY_PATHS entry); pds-w44-charter-sweep-adjudication after the charter PR #9353 merges (the candidate
+vocabulary is MINED FROM THE CHARTER, so adjudicating before it lands produces a fresh red the moment it does - and this
+wave's own wave-log entry moved that vocabulary again).
+
+AND ONE NEW STANDING CHORE, from D653: every review must diff each wave task's stated branch against origin/main before
+it grades anything. An empty diff on a stamped task is a stranded slice, and the built-slice handoff structurally cannot
+report one.
+
+▌ Wave 44 sealed 2026-08-03. 4 PRs open: #9377, #9378, #9379, #9380. Nothing merged - the lead merges, and closes the
+▌ merge-gated criterion on each task as it does.
+
+Related
+  3.48  PDS wave 43 - the door has a price, and every number is in user CPU  (paper)
+        tags: honest-gates (88·90), pds (95·95), security (80·55), studio (65·60)
+  3.40  PDS wave 42 - a class must descend from its substitution, and the fence is not the only door  (paper)
+        tags: honest-gates (88·85), pds (95·95), security (80·50), studio (65·60)
+  2.80  The census runs `python3 -`, so a stray module in the working directory shadows stdlib and EXECUTES during a
+        certifying run  (task)
+        tags: honest-gates (88·65), pds (95·85), security (80·80)
+  2.78  The census stops executing code it finds in the working directory, and a fixture proves it  (task)
+        tags: honest-gates (88·90), pds (95·80), security (80·60)
+  2.67  LiveComponent-targeted events bypass EVERY socket-level gate — a read-only principal writes persisted sheet
+        state; pass the capability into the component, not a fourth hook  (task)
+        tags: pds (95·88), security (80·64), studio (65·72)

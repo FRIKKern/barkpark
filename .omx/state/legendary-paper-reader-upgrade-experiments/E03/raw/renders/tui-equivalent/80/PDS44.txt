@@ -1,0 +1,1305 @@
+[1;38;5;188mPDS WAVE 44 - RECOVER WAVE 43'S UNLANDED WORK, RE-DERIVE ITS ONE SECURITY CLAIM,
+AND MAKE THE PRICE COLUMN RUN[0m                                                   
+[38;5;232m────────────────────────────────────────────────────────────────────────────────[0m
+                                                                                
+[38;5;69m▌[0m STRATEGIZE COMPLETE - the survey fleet is flying. PREMISE SMOKE RUN IN-       
+[38;5;69m▌[0m PROCESS against `git show origin/main:<path>` at origin/main head c2affd445,  
+[38;5;69m▌[0m never the primary checkout (300+ commits behind, 220 foreign modified         
+[38;5;69m▌[0m files). VERIFIED: the charter on origin/main tops out at PDS-D632 - D633-     
+[38;5;69m▌[0m D642 are NOT on main, they live only on PR #9312, so NO builder may carry a   
+[38;5;69m▌[0m D633+ citation until that PR lands. VERIFIED: PDS-D578 exists at              
+[38;5;69m▌[0m charter:11830 and says verbatim 'PROVEN-BACKED is 23/252 = 9.1%' - D640's     
+[38;5;69m▌[0m citation of it COVERS what it is cited for. VERIFIED:                         
+[38;5;69m▌[0m api/lib/barkpark_web/studio/caps.ex on origin/main has write_capable?/2 at    
+[38;5;69m▌[0m :283 with `Map.get(caps, :write) == true -> true` as the FIRST cond arm and   
+[38;5;69m▌[0m `restricted?(assigns) -> false` as the SECOND, and restricted?/1 at :295      
+[38;5;69m▌[0m already contains `share_access == :read` - the ORDER defect #9332 claims is   
+[38;5;69m▌[0m REAL AT SOURCE. Reachability is not yet proven and is survey question 1.      
+[38;5;69m▌[0m VERIFIED: scripts/elixir-path-escape-check.sh is the SINGLE source of truth   
+[38;5;69m▌[0m for ELIXIR_TEST_ONLY_PATHS - the name appears in NO workflow yml; elixir.yml  
+[38;5;69m▌[0m consumes it through --print-set / --match. #9333 edits the right file.        
+[38;5;69m▌[0m VERIFIED on origin/main: scripts/pds-ledger-census_test.sh, scripts/pds-      
+[38;5;69m▌[0m live-hetzner-placement-group.sh, scripts/pds-scratch-target_test.sh,          
+[38;5;69m▌[0m scripts/pds-charter-ledger-sweep.sh and                                       
+[38;5;69m▌[0m api/test/barkpark/pds_residue_lens_test.exs all exist. VERIFIED:              
+[38;5;69m▌[0m LiveScope.authorize_read/4 is a PRIVATE function at                           
+[38;5;69m▌[0m api/lib/barkpark_web/live_scope.ex:114, called from :88 - the non-admin       
+[38;5;69m▌[0m reachability story runs through LiveScope.assign_scope, so the CALLER is      
+[38;5;69m▌[0m what a verifier must pin.                                                     
+                                                                                
+[1;38;5;78mThe wish, and the four things it asks for[0m                                       
+                                                                                
+Wave 43 died mid-flight on a weekly account limit, not on a defect. It completed
+36 of 41 agents, produced ten charter decisions (PDS-D633-D642), and pushed     
+NOTHING. The lead recovered four branches out of their worktrees by hand and    
+opened #9332, #9333, #9334, #9335 at 12:15 today. Wave 43's reviewer never ran; 
+its debrief was never written. Those four PRs are UNREVIEWED BY ANYONE, and     
+their commit messages are an author's own account of their own work.            
+                                                                                
+The wish asks for four things: (1) re-derive #9332's live write bypass from     
+source before trusting a word of it; (2) verify the other three the same way;   
+(3) confirm PDS-D633's measurement law - the in-BEAM meter is blind to port     
+children and errs in the one direction a price column must not - and ship its   
+blind-spot sentence in the meter's own moduledoc AND printed output; (4) finish 
+the price column: N of 19 instruments under a required gate, every remaining    
+refusal carrying a measured price, a named environment, or NOT-YET-BUILT.       
+                                                                                
+[1;38;5;78mREFUTATION - the first one, and it is in the wish's own item 4[0m                  
+                                                                                
+The wish states the price column's reason vocabulary is 'exactly three reasons: 
+PRICE, ENVIRONMENT, NOT-YET-BUILT' and that 'the fence' is not an available     
+answer. Wave 43's own PDS-D637 - which the wish is paraphrasing - found by RUN  
+that three is not enough. It names FIVE classes: PRICE, ENVIRONMENT, NOT-YET-   
+BUILT, plus CONTENT-RED (pds-charter-ledger-sweep.sh --selftest is rc=1 on main 
+today at 2.36s user, refusing because an UNRESOLVED-CLAIM ARRIVAL is            
+unadjudicated - neither a price nor an environment) and RED-BY-DESIGN / REPORTER
+(pds-record-parity.sh's live axis B exits 1 on 59 leaf rows, 48 of them         
+belonging to twelve OTHER epics that never consented to the instrument; the arm 
+is a reporter and must never carry a required check name). A related sixth,     
+HUMAN-GATE, governs the sheet-grid harness, whose own workflow header says it   
+only gates once a human registers it as a required check.                       
+                                                                                
+The wish also says pds-record-parity.sh --selftest exits rc=3 with 'unknown     
+argument' and calls that an ENVIRONMENT blocker. Wave 43 did not accept that    
+framing - it walked a DIFFERENT door. #9333 gates scripts/pds-record-           
+parity.test.sh, the instrument's own hermetic two-sided mutation harness (76    
+checks, zero of which read a live ledger row), at 1.30-1.47s user - the cheapest
+door in the inventory. So record-parity is not an ENVIRONMENT refusal; its      
+HARNESS is a THROUGH and its LIVE arm is RED-BY-DESIGN. The wish's item 4 is the
+tenth consecutive dispatch this epic has refuted from the artifact, and it is   
+refuted in the direction of GOOD NEWS.                                          
+                                                                                
+[1;38;5;78mDirection - three movements, and the third is what makes this a wave and not a  
+cleanup[0m                                                                         
+                                                                                
+The finished experience: at the end of wave 44 a cold reader runs ONE command   
+and gets the epic's honesty column back COMPUTED rather than quoted - every     
+scripts/pds-* instrument, its gate status derived from the two things that      
+actually make a door (a test file that shells it, and a matching                
+ELIXIR_TEST_ONLY_PATHS line), its refusal class, and its price in the unit PDS- 
+D633 says is legal. A new pds-* script arrives as an UNDISPOSED row and the     
+thing goes red. A door that quietly stops running goes red. And the number that 
+appears in the charter next wave is a number nobody typed.                      
+                                                                                
+[1;38;5;59mMovement 1 - LAND THE RECOVERED WORK, WITH INDEPENDENCE THAT IS REAL[0m            
+                                                                                
+Charter #9312 merges FIRST and alone, because until it does every D633+ citation
+a builder would carry points at nothing on origin/main. Then the four slice PRs,
+each with an independent re-derivation that does NOT read the branch's own test 
+as its oracle. #9332 gets the full treatment: the source-level order defect is  
+already confirmed (cond arm 1 = caps.write, arm 2 = restricted?, and restricted?
+already contains share_access == :read), so the open question is REACHABILITY - 
+can a real signed-in NON-MEMBER, through a real non-admin route, hold           
+share_access: :read and caps.write == true simultaneously? That is the whole    
+claim, and it must be re-derived through LiveScope.assign_scope ->              
+authorize_read/4, not asserted from a fixture the branch authored.              
+                                                                                
+One suspected defect the wave carries in already, found while reading the diff  
+and NOT yet proven: #9332's membership collapse routes through                  
+loadable_principal?/1, which accepts only %ApiToken{} and %User{}.              
+Tenancy.Auth.authorize/3 on origin/main has a THIRD clause at :200 for          
+%Barkpark.Content.CallerContext{}. If a socket's principals list can ever carry 
+a CallerContext, the collapse silently drops a principal that authorize/3 would 
+have decided - a behaviour change dressed as a round-trip saving, in the same   
+slice as a security fix. Survey question 3 exists to settle it before a builder 
+inherits it.                                                                    
+                                                                                
+[1;38;5;59mMovement 2 - FINISH WHAT WAVE 43 PRICED[0m                                         
+                                                                                
+Two of wave 43's six slices never got a builder at all. The LiveView residual   
+32-fold (PDS-D639: one missing lvs_walk/3 clause takes RESIDUAL 32 -> 0 and     
+makes the headline deny fraction WORSE, 70.6% -> 60.9%, which is the strongest  
+available evidence it is real) is unbuilt - no branch exists for it. The        
+judgment-coverage ladder (PDS-D640: PROVEN-BACKED is 23 routed-write MEMBERS as 
+an Enum.count over a MapSet.union/2, never an addition, with OVERLAP printed    
+beside it) is its round-2 dependent and has had its numbers die three times.    
+Both ship this wave, the fold first, with D639's three named obligations non-   
+negotiable - especially (a), the plugin fixture, because without it the new     
+clause is STRUCTURALLY unexercised and the class does not descend from its      
+substitution.                                                                   
+                                                                                
+And the door walks D637 explicitly deferred to wave 44: pds-ledger-             
+census_test.sh (PRICE ~20-23s, viable, python3 confirmed present on the Elixir  
+runner by wave 43's own three-leg ledger note) and the best unexamined          
+candidate, pds-live-hetzner-placement-group.sh --selftest-offline, NOT-YET-     
+MEASURED. Each measured by the ONLY legal method: an OS meter around a SHELL,   
+never from inside a BEAM parent.                                                
+                                                                                
+[1;38;5;59mMovement 3 - THE DOOR CENSUS: the price column stops being prose[0m                
+                                                                                
+This is the bold one. PDS-D637's column is, today, forty lines of charter prose 
+sitting on an unmerged PR - and PDS-D633's own closing sentence is that a number
+from a meter must live in the instrument's moduledoc and printed output, NEVER  
+in prose a copy-paste can drop. The column violates the law that produced it.   
+Wave 44 turns it into an instrument: enumerate scripts/pds-*.{sh,exs} for the   
+denominator; for each row DERIVE the gate status from two independent legs - leg
+A, a '../../../scripts/...' string literal in an api/test/** file that actually 
+shells it; leg B, that same path present in elixir-path-escape-check.sh's       
+declared set - and report THROUGH only when BOTH hold. One leg without the other
+is exactly the wave-42 #9290/#9292 defect (Test skipped while Elixir gate passed
+in 3s on the skip shim), and this makes that defect impossible to reintroduce   
+quietly rather than merely remembered.                                          
+                                                                                
+Every non-THROUGH row carries a class from D637's FIVE (not three) and, for     
+PRICE rows, a figure with the meter named. An instrument with no disposition is 
+UNDISPOSED and the census exits non-zero - the same fail-closed shape the       
+receipt census already uses. It prints D633's blind-spot sentence in its own    
+output. And it rides its own door: it is an instrument, so it gets a test file  
+and a path-set line like every other, which is the self-referential proof that  
+the derivation works.                                                           
+                                                                                
+[1;38;5;78mThe wave plan, provisionally[0m                                                    
+                                                                                
+[38;5;232m┌[0m[38;5;232m───[0m[38;5;232m┬[0m[38;5;232m──────────────────────────[0m[38;5;232m┬[0m[38;5;232m──────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m0[0m [38;5;232m│[0m [38;5;145mmerge charter #9312[0m      [38;5;232m│[0m [38;5;145mD633-D642 are not on[0m     [38;5;232m│[0m [38;5;145mPR open, BLOCKED[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145malone, first[0m             [38;5;232m│[0m [38;5;145morigin/main; every[0m       [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mdownstream citation is a[0m [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mphantom until it lands[0m   [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mindependently re-derive[0m  [38;5;232m│[0m [38;5;145ma live authorization[0m     [38;5;232m│[0m [38;5;145mPR open,[0m           [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145m+ land #9332 (caps read-[0m [38;5;232m│[0m [38;5;145mbypass reviewed by[0m       [38;5;232m│[0m [38;5;145munreviewed[0m         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145monly share write bypass[0m  [38;5;232m│[0m [38;5;145mnobody; source-level[0m     [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145m+ derive collapse)[0m       [38;5;232m│[0m [38;5;145morder defect already[0m     [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mconfirmed[0m                [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mindependently re-derive[0m  [38;5;232m│[0m [38;5;145mcarries the[0m              [38;5;232m│[0m [38;5;145mPR open,[0m           [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145m+ land #9333 (census +[0m   [38;5;232m│[0m [38;5;145mELIXIR_TEST_ONLY_PATHS[0m   [38;5;232m│[0m [38;5;145munreviewed[0m         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mrecord-parity doors, 1 -[0m [38;5;232m│[0m [38;5;145mlesson wave 42 lost[0m      [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145m> 3 of 19)[0m               [38;5;232m│[0m                          [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3[0m [38;5;232m│[0m [38;5;145mindependently re-derive[0m  [38;5;232m│[0m [38;5;145mledger lapse is endemic;[0m [38;5;232m│[0m [38;5;145mPR open,[0m           [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145m+ land #9334 (ledger-[0m    [38;5;232m│[0m [38;5;145mthe lesson has been a[0m    [38;5;232m│[0m [38;5;145munreviewed[0m         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mlapse expiry arm, three[0m  [38;5;232m│[0m [38;5;145mparagraph in three[0m       [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mshapes)[0m                  [38;5;232m│[0m [38;5;145mdebriefs[0m                 [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m4[0m [38;5;232m│[0m [38;5;145mindependently re-derive[0m  [38;5;232m│[0m [38;5;145mthe one standing user-[0m   [38;5;232m│[0m [38;5;145mPR open,[0m           [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145m+ land #9335 (sheet-grid[0m [38;5;232m│[0m [38;5;145mfacing harm: a selection[0m [38;5;232m│[0m [38;5;145munreviewed[0m         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mread mode)[0m               [38;5;232m│[0m [38;5;145mfrozen at A1 that[0m        [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mnothing can move[0m         [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m5[0m [38;5;232m│[0m [38;5;145mBUILD the LiveView[0m       [38;5;232m│[0m [38;5;145mnever got a builder;[0m     [38;5;232m│[0m [38;5;145munbuilt, no branch[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mresidual 32-fold (D639)[0m  [38;5;232m│[0m [38;5;145mblocks the ladder[0m        [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mwith its three[0m           [38;5;232m│[0m                          [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mobligations[0m              [38;5;232m│[0m                          [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m6[0m [38;5;232m│[0m [38;5;145mBUILD the judgment-[0m      [38;5;232m│[0m [38;5;145mnumbers dead three[0m       [38;5;232m│[0m [38;5;145mdeferred round 2[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mcoverage ladder (D640)[0m   [38;5;232m│[0m [38;5;145mtimes; union not[0m         [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mafter the fold merges[0m    [38;5;232m│[0m [38;5;145maddition[0m                 [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m7[0m [38;5;232m│[0m [38;5;145mBUILD the DOOR CENSUS -[0m  [38;5;232m│[0m [38;5;145mthe honesty column[0m       [38;5;232m│[0m [38;5;145mnew this wave[0m      [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mthe price column as a[0m    [38;5;232m│[0m [38;5;145mviolates the law that[0m    [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mrunning instrument[0m       [38;5;232m│[0m [38;5;145mproduced it[0m              [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m8[0m [38;5;232m│[0m [38;5;145mwalk two more doors: [0m    [38;5;232m│[0m [38;5;145mD637 named both for wave[0m [38;5;232m│[0m [38;5;145mnew this wave[0m      [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mpds-ledger-[0m              [38;5;232m│[0m [38;5;145m44 by number and by name[0m [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mcensus_test.sh, pds-[0m     [38;5;232m│[0m                          [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mlive-hetzner-placement-[0m  [38;5;232m│[0m                          [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mgroup.sh[0m                 [38;5;232m│[0m                          [38;5;232m│[0m                    [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m───[0m[38;5;232m┴[0m[38;5;232m──────────────────────────[0m[38;5;232m┴[0m[38;5;232m──────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────[0m[38;5;232m┘[0m
+                                                                                
+[1;38;5;78mDirection debate - the rivals, and why this one won[0m                             
+                                                                                
+[1;38;5;59mRival A - RECOVERY ONLY[0m                                                         
+                                                                                
+Spend the whole wave making wave 43's four branches independently bulletproof   
+and merged, plus the charter, and ship nothing new. The case for it is strong   
+and honest: an unreviewed authorization change is the single riskiest object in 
+the repo right now, and a wave that merges it carelessly while chasing new      
+capability has failed at the only thing that mattered. It was rejected because  
+it under-uses the wave, not because it is wrong: four PRs of independent re-    
+derivation is roughly one round, and the fold plus the ladder are DESIGNED work 
+with their obligations already derived by run - leaving them unbuilt for a      
+second consecutive wave is how wave 43's best output rots. Rival A's real       
+contribution survives: movement 1 goes first, alone, and no slice PR merges on  
+its own author's oracle.                                                        
+                                                                                
+[1;38;5;59mRival B - ADVANCE ONLY[0m                                                          
+                                                                                
+Treat the four branches as inherited fact, merge them on their green, and spend 
+the wave taking the door from 3 of 19 to 6 or 7. Rejected outright: it is       
+precisely the move the wish forbids, and the epic's own law forbids it too. A   
+commit message is an exit code with better prose. Merging #9332 on its own      
+test's word is 'a gate lies when its green costs nothing to produce', committed 
+by the wave that coined the sentence.                                           
+                                                                                
+[1;38;5;59mRival C - THE DOOR CENSUS (winner, as movement 3 of three)[0m                      
+                                                                                
+The winning insight is that the epic has spent four waves arguing about a column
+it has never computed. Every wave restates the roster, re-prices some rows, and 
+writes the total into the charter by hand - and PDS-D636 records that the census
+itself carries a FALSE SENTENCE about its own gating on main today. That is the 
+exact failure mode this epic exists to end, committed by the epic, about the    
+epic. Making the column an instrument is the epic's own law turned inward one   
+more notch, and it is cheap: the derivation is two greps over files that already
+exist, and the prior art is already on main                                     
+(api/test/barkpark/pds_residue_lens_test.exs).                                  
+                                                                                
+[1;38;5;59mThe sharpest attack on the winner, and how the wave absorbs it[0m                  
+                                                                                
+THE ATTACK: the door census is a THIRD census. This epic already has a receipt  
+census, a residue lens, a ledger census, a record-parity arm and a charter-     
+ledger sweep - nineteen instruments, three of which run anywhere. Building a    
+twentieth instrument to count the nineteen is the purest possible instance of an
+epic measuring itself instead of shipping. And it will be WRONG on day one: leg 
+A ('a test file shells it') has at least three encodings in the repo already    
+(System.cmd with a module attribute, Code.require_file, a bare relative path),  
+so a naive derivation will under-count and print a number LOWER than the truth -
+a different lie, in a friendlier direction.                                     
+                                                                                
+HOW THE WAVE ABSORBS IT. First, the door census is movement THREE of three - it 
+ships only if movements 1 and 2 are honest, and the wave is graded on the       
+security fix and the merges regardless. Second, the under-count objection       
+becomes the instrument's design: the census is FAIL-CLOSED on ambiguity - a pds-
+* script it cannot dispose is UNDISPOSED and reds, and a test-side reference it 
+cannot classify is an ERROR, never a silent 'not gated'. That makes the day-one 
+wrongness LOUD instead of quiet, and the surveyors are tasked (question 4) with 
+enumerating every encoding of leg A that exists on main before a builder writes 
+a regex. Third, if the survey shows the derivation cannot be made honest        
+cheaply, the fallback is smaller and still real: a self-check that the two legs 
+AGREE for every already-gated instrument - which alone would have caught #9290  
+and #9292.                                                                      
+                                                                                
+[1;38;5;78mThe survey plan - 20 assignments, and what each one changes[0m                     
+                                                                                
+Width is the point. Each surveyor is one Opus at medium effort; the digest      
+distils. Every load-bearing assumption in the direction above appears below as a
+question, including the ones that would kill it.                                
+                                                                                
+[38;5;232m┌[0m[38;5;232m─────────────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────[0m[38;5;232m┬[0m[38;5;232m──────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mcaps-reachability[0m       [38;5;232m│[0m [38;5;145mCan a signed-in NON-[0m    [38;5;232m│[0m [38;5;145mthis IS #9332's claim;[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mMEMBER with an ACTIVE[0m   [38;5;232m│[0m [38;5;145mif the posture and the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mWRITE GRANT actually[0m    [38;5;232m│[0m [38;5;145mwrite source cannot co-[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mreach a socket carrying[0m [38;5;232m│[0m [38;5;145moccur the fix is a no-op[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mshare_access: :read AND[0m [38;5;232m│[0m [38;5;145mdressed as a security[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcaps.write == true,[0m     [38;5;232m│[0m [38;5;145mpatch[0m                    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthrough a real non-[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145madmin route? Trace[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mLiveScope.assign_scope [0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m-> authorize_read/4 arm[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145morder, and[0m              [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mCaps.derive/1's grant[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mload.[0m                   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcaps-blast-radius[0m       [38;5;232m│[0m [38;5;145mWho calls[0m               [38;5;232m│[0m [38;5;145mthe fix's whole safety[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mCaps.write_capable?/2[0m   [38;5;232m│[0m [38;5;145margument is that it is[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mand Caps.derive/1, and[0m  [38;5;232m│[0m [38;5;145mnarrower than[0m            [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mare there FORKED copies[0m [38;5;232m│[0m [38;5;145mrestricted?/1; a fork[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mof the predicate[0m        [38;5;232m│[0m [38;5;145melsewhere means the[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145manywhere? Does denying[0m  [38;5;232m│[0m [38;5;145mbypass survives the[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mon readonly_posture?[0m    [38;5;232m│[0m [38;5;145mmerge[0m                    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mbreak any legitimate[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwrite path (grant-[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mgraded sockets,[0m         [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145manonymous public-demo,[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mapi_token flows)?[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcaps-callercontext[0m      [38;5;232m│[0m [38;5;145mDoes[0m                    [38;5;232m│[0m [38;5;145ma suspected live[0m         [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mTenancy.Auth.authorize/[0m [38;5;232m│[0m [38;5;145mbehaviour change hiding[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m3's CallerContext[0m       [38;5;232m│[0m [38;5;145minside a performance[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mclause (auth.ex:200)[0m    [38;5;232m│[0m [38;5;145mcollapse, shipped in a[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mmatter to[0m               [38;5;232m│[0m [38;5;145msecurity PR[0m              [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mCaps.derive/1? Can[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msocket principals ever[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcarry a CallerContext,[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mand does #9332's[0m        [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mloadable_principal?/1[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msilently drop it? Is[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpermits?/2 +[0m            [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mrole_permits?/3 truly[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mbyte-identical to[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mauthorize/3 for every[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mshape?[0m                  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mdoor-leg-encodings[0m      [38;5;232m│[0m [38;5;145mEnumerate EVERY way an[0m  [38;5;232m│[0m [38;5;145mthe door census's[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mapi/test file currently[0m [38;5;232m│[0m [38;5;145mderivation is only as[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145minvokes a scripts/*[0m     [38;5;232m│[0m [38;5;145mhonest as its[0m            [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145minstrument on[0m           [38;5;232m│[0m [38;5;145menumeration; this is the[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145morigin/main (System.cmd[0m [38;5;232m│[0m [38;5;145mattack on the winner,[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwith a @rel attribute,[0m  [38;5;232m│[0m [38;5;145manswered before a[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mCode.require_file, bare[0m [38;5;232m│[0m [38;5;145mbuilder writes a regex[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpaths, bash -c), and[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mevery entry in elixir-[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpath-escape-check.sh's[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mtwo declared sets.[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mWhich pds-* scripts[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msatisfy BOTH legs[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mtoday?[0m                  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mprice-column-19[0m         [38;5;232m│[0m [38;5;145mRe-derive the[0m           [38;5;232m│[0m [38;5;145mthe wave prints a[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdenominator: is[0m         [38;5;232m│[0m [38;5;145mfraction; a denominator[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mscripts/pds-*.{sh,exs}[0m  [38;5;232m│[0m [38;5;145mnobody recomputed is the[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mreally 19 on[0m            [38;5;232m│[0m [38;5;145mthing this epic exists[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145morigin/main, and does[0m   [38;5;232m│[0m [38;5;145mto stop[0m                  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145meach of D637's 19 rows[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mstill hold its class?[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mWhich rows changed[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msince 2026-08-02?[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mledger-census-door-[0m     [38;5;232m│[0m [38;5;145mPrice scripts/pds-[0m      [38;5;232m│[0m [38;5;145mD637 named this as THE[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mprice[0m                   [38;5;232m│[0m [38;5;145mledger-census_test.sh[0m   [38;5;232m│[0m [38;5;145mwave-44 door; if the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mby the D633-legal[0m       [38;5;232m│[0m [38;5;145mprice or the environment[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mmethod (/usr/bin/time -[0m [38;5;232m│[0m [38;5;145mclaim fails, movement[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145ml bash -c, or bash's[0m    [38;5;232m│[0m [38;5;145m2's door walk changes[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mtimes builtin) on a[0m     [38;5;232m│[0m [38;5;145mtarget[0m                   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mQUIET host, and confirm[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mit needs no live ledger[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcreds. Does python3[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mexist on the Elixir[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mrunner (re-derive wave[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m43's three-leg claim)?[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mhetzner-selftest-[0m       [38;5;232m│[0m [38;5;145mDoes scripts/pds-live-[0m  [38;5;232m│[0m [38;5;145mD637's best UNEXAMINED[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145moffline[0m                 [38;5;232m│[0m [38;5;145mhetzner-placement-[0m      [38;5;232m│[0m [38;5;145mcandidate; a second[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mgroup.sh --selftest-[0m    [38;5;232m│[0m [38;5;145mcheap door would move[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145moffline exist, what[0m     [38;5;232m│[0m [38;5;145mthe count 3 -> 6[0m         [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdoes it actually do,[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwhat does it cost by an[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mOS meter around a[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mshell, and can it red?[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcharter-sweep-content-[0m  [38;5;232m│[0m [38;5;145mWhy is pds-charter-[0m     [38;5;232m│[0m [38;5;145mCONTENT-RED is the class[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mred[0m                     [38;5;232m│[0m [38;5;145mledger-sweep.sh --[0m      [38;5;232m│[0m [38;5;145mthe wish's three-reason[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mselftest rc=1 on main[0m   [38;5;232m│[0m [38;5;145mvocabulary cannot[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mtoday, exactly what[0m     [38;5;232m│[0m [38;5;145mexpress; clearing it[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145munadjudicated claim is[0m  [38;5;232m│[0m [38;5;145mwould be a fourth door[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mit naming, and what[0m     [38;5;232m│[0m [38;5;145mfor near-zero cost[0m       [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwould scripts/pds-[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcharter-ledger-[0m         [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145madjudication.md need to[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msay to clear it?[0m        [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mmeter-blindspot-sites[0m   [38;5;232m│[0m [38;5;145mFind every place this[0m   [38;5;232m│[0m [38;5;145mD633's obligation is[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mepic prints a number[0m    [38;5;232m│[0m [38;5;145mmechanical placement,[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mderived from a meter[0m    [38;5;232m│[0m [38;5;145mnot prose; this is the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m(:erlang.statistics,[0m    [38;5;232m│[0m [38;5;145mlist a builder needs[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mSystem.monotonic_time,[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwall clocks,[0m            [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mreductions) across[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mscripts/pds-* and[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mapi/test/**. Which[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcarry a blind-spot[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msentence today? Which[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mquote wall clock in[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mviolation of D605?[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mresidual-fold-clause[0m    [38;5;232m│[0m [38;5;145mIn scripts/pds-elixir-[0m  [38;5;232m│[0m [38;5;145mD639's obligation (a) is[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mreceipt-census.exs,[0m     [38;5;232m│[0m [38;5;145mthat without a plugin[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mlocate lvs_walk/3 and[0m   [38;5;232m│[0m [38;5;145mfixture the new clause[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe[0m                     [38;5;232m│[0m [38;5;145mis structurally[0m          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mplugin_routes(scope:)[0m   [38;5;232m│[0m [38;5;145munexercised; confirm[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mmacro node handling.[0m    [38;5;232m│[0m [38;5;145mbefore building[0m          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mConfirm the missing[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mclause, the RESIDUAL 32 [0m[38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m-> 0 fold, and whether[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe selftest corpus[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mreally writes zero[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfixtures under[0m          [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mapi/lib/barkpark/plugin[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145ms/.[0m                     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mladder-union-sites[0m      [38;5;232m│[0m [38;5;145mFind every addition[0m     [38;5;232m│[0m [38;5;145mD640 says PROVEN-BACKED[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145midiom in the census's[0m   [38;5;232m│[0m [38;5;145mmust be an Enum.count[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mladder reporting flow[0m   [38;5;232m│[0m [38;5;145mover a MapSet.union with[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m(census.exs ~4033[0m       [38;5;232m│[0m [38;5;145mOVERLAP printed; the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145marea), the[0m              [38;5;232m│[0m [38;5;145mtask's own criteria are[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mroster_functions/1[0m      [38;5;232m│[0m [38;5;145mwrong and must be[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mverdict-filter[0m          [38;5;232m│[0m [38;5;145mrewritten[0m                [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mquestion, and the[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcurrent selftest[0m        [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcase/mutant baseline[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m(30/20 vs the task's[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mstale 25/16).[0m           [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145msheetgrid-readmode[0m      [38;5;232m│[0m [38;5;145mIn #9335: is[0m            [38;5;232m│[0m [38;5;145mthe branch's own tests[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mREAD_MODE_EVENTS truly[0m  [38;5;232m│[0m [38;5;145mare its author's oracle;[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe complement of the[0m   [38;5;232m│[0m [38;5;145mthe allowlist/denylist[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msix mutating events[0m     [38;5;232m│[0m [38;5;145mcomplement claim is the[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m(edit-start, cell-[0m      [38;5;232m│[0m [38;5;145msecurity-shaped half of[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mtoggle, clear-[0m          [38;5;232m│[0m [38;5;145ma UX slice[0m               [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mselection, undo, redo,[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mtoggle-style)? Is[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpresence-meta's editing[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mflag denied? Does[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mOps.send_ops/2's[0m        [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwrite_capable:false[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mclause really terminate[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mall six? What is the[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mreader-half state[0m       [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m(grid_sel(_,_,:reader) [0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m-> {0,0,0,0})?[0m          [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mledger-lapse-truth[0m      [38;5;232m│[0m [38;5;145mRe-derive #9334's three[0m [38;5;232m│[0m [38;5;145mthe arm's keys are the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mshapes against the[0m      [38;5;232m│[0m [38;5;145mwhole finding; a wrong[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mSERVER's actual claim[0m   [38;5;232m│[0m [38;5;145mkey means an arm that[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mschema and TTL sweeper:[0m [38;5;232m│[0m [38;5;145mpasses vacuously[0m         [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdoes a lapse really[0m     [38;5;232m│[0m [38;5;145mforever, which is the[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mnull worker while[0m       [38;5;232m│[0m [38;5;145mdefect it was built to[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpreserving[0m              [38;5;232m│[0m [38;5;145mfix[0m                      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mprevious_worker and[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwriting expired_at? Is[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mBARKPARK_TASK_LEASE_TTL[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m_SECONDS / 2700 the[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mreal default? Does[0m      [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m/v1/data/query really[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcarry claim as a top-[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mlevel key?[0m              [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mgate-health-four-prs[0m    [38;5;232m│[0m [38;5;145mFor each of #9332-#9335[0m [38;5;232m│[0m [38;5;145ma green that came from a[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mon their CURRENT head[0m   [38;5;232m│[0m [38;5;145mskip shim is the wave's[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mSHAs: which check-runs[0m  [38;5;232m│[0m [38;5;145mown law failing on its[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mran, which were[0m         [38;5;232m│[0m [38;5;145mown PRs[0m                  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mSKIPPED, and did 'Test[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m(Elixir ...)' actually[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mexecute? Check[0m          [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mstarted_at on every[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mred. Is 'PR references[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145man active task' red for[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe known lease reason?[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mmerge-order-conflicts[0m   [38;5;232m│[0m [38;5;145mDo #9312, #9332, #9333,[0m [38;5;232m│[0m [38;5;145mwave 43 resolved intra-[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m#9334, #9335 conflict[0m   [38;5;232m│[0m [38;5;145mwave collisions by[0m       [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwith each other or with[0m [38;5;232m│[0m [38;5;145mcutting differently;[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145morigin/main? Compute[0m    [38;5;232m│[0m [38;5;145mwave 44 inherits the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mmerge-base and file[0m     [38;5;232m│[0m [38;5;145mcuts and must re-verify[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145moverlap. Does any of[0m    [38;5;232m│[0m [38;5;145mthem against a moved[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthem touch scripts/pds-[0m [38;5;232m│[0m [38;5;145mmain[0m                     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145melixir-receipt-[0m         [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcensus.exs, which the[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfold slice also wants?[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mw43-task-ledger[0m         [38;5;232m│[0m [38;5;145mRead every wave-43[0m      [38;5;232m│[0m [38;5;145mthe wave must re-claim[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mslice task row (pds-[0m    [38;5;232m│[0m [38;5;145mand close these rows[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mw43-*):[0m                 [38;5;232m│[0m [38;5;145mhonestly; and the lapse[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mlifecycle_status,[0m       [38;5;232m│[0m [38;5;145mcount is live data for[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcriteria_progress,[0m      [38;5;232m│[0m [38;5;145m#9334's own arm[0m          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mclaim state. How many[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mlapsed to open with[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwork done? Which[0m        [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcriteria are stamped[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwith real evidence vs[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mempty?[0m                  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mw43-backlog-security[0m    [38;5;232m│[0m [38;5;145mRead pds-w43-bl-grant-[0m  [38;5;232m│[0m [38;5;145mif the grant-graded[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mgrade-doc-escalation-[0m   [38;5;232m│[0m [38;5;145mescalation is live, wave[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145munproven in full. Is[0m    [38;5;232m│[0m [38;5;145m44 has a SECOND security[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe doc-scoped write[0m    [38;5;232m│[0m [38;5;145mslice and the wave plan[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mescalation still open[0m   [38;5;232m│[0m [38;5;145mchanges shape[0m            [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mon the paper COMPONENT[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mroute for GRANT-graded[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msockets - the[0m           [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpopulation #9332[0m        [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdeliberately did NOT[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdeny?[0m                   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mprior-papers[0m            [38;5;232m│[0m [38;5;145mRead the bp Papers pds-[0m [38;5;232m│[0m [38;5;145mwave 43 never wrote a[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwave-41/42/43-2026-08-[0m  [38;5;232m│[0m [38;5;145mdebrief; its Paper is[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m0x and any wave-43[0m      [38;5;232m│[0m [38;5;145mthe only record of its[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdebrief fragments. What[0m [38;5;232m│[0m [38;5;145mown unfinished intent[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdid wave 43's direction[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpromise that its four[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mbranches do NOT[0m         [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdeliver? What did its[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msurveyors find that[0m     [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mnever reached a[0m         [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdecision?[0m               [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145msobelow-and-required-[0m   [38;5;232m│[0m [38;5;145mRe-derive main's[0m        [38;5;232m│[0m [38;5;145man unchanged breakdown[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mchecks[0m                  [38;5;232m│[0m [38;5;145mSobelow baseline from[0m   [38;5;232m│[0m [38;5;145mis the only proof a PR[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe DECIDING scan block[0m [38;5;232m│[0m [38;5;145madded nothing; the[0m       [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145monly (between its own[0m   [38;5;232m│[0m [38;5;145mrequired-check spec[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mbanner and SCAN[0m         [38;5;232m│[0m [38;5;145mdrift is a HELD human[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mCOMPLETE), and the live[0m [38;5;232m│[0m [38;5;145mdecision the wave must[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mvs committed required-[0m  [38;5;232m│[0m [38;5;145mnot touch[0m                [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcheck contexts. Do any[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mof the four PRs move[0m    [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe breakdown?[0m          [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcensus-selfclaim-[0m       [38;5;232m│[0m [38;5;145mConfirm PDS-D636's[0m      [38;5;232m│[0m [38;5;145man instrument lying[0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mfalsehood[0m               [38;5;232m│[0m [38;5;145mclaim that scripts/pds-[0m [38;5;232m│[0m [38;5;145mabout itself is the[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145melixir-receipt-[0m         [38;5;232m│[0m [38;5;145mepic's law failing at[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcensus.exs:10-11 states[0m [38;5;232m│[0m [38;5;145mthe source, and it is a[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msomething FALSE about[0m   [38;5;232m│[0m [38;5;145mfree high-signal fix for[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mits own gating on[0m       [38;5;232m│[0m [38;5;145mthe door-census slice[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145morigin/main today, and[0m  [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfind any OTHER[0m          [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145minstrument carrying a[0m   [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfalse self-description.[0m [38;5;232m│[0m                          [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m─────────────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────[0m[38;5;232m┴[0m[38;5;232m──────────────────────────[0m[38;5;232m┘[0m
+                                                                                
+[1;38;5;78mWhat this wave will NOT do[0m                                                      
+                                                                                
+[38;5;59m• [0mTouch .github/required-checks.json - the four-vs-two context gap is a HELD    
+  human decision.                                                               
+[38;5;59m• [0mTouch .claude/workflows/bp-epic-cycle.workflow.js - #6086 edits it, is        
+  conflicting and 587 commits behind.                                           
+[38;5;59m• [0mFence-cross into cloud/**, .github/workflows/** or gr-*/cch-* - Cloud Console 
+  wave 27 is resuming alongside. This wave's fence is api/**, internal/**,      
+  deploy/**, scripts/pds-* and pds-*.                                           
+[38;5;59m• [0mWaive Sobelow. Count it from the deciding scan only; main's baseline is 24, of
+  which 21 are the never-baselined tenancy/workspace_bundle* subsystem (task-   
+  75e526fcc79978b3).                                                            
+[38;5;59m• [0mAttempt the READER half of the sheet-grid selection fix - PDS-D641 split it   
+  off deliberately as a separate chrome-policy decision.                        
+[38;5;59m• [0mMerge any slice PR on its own branch's test as the oracle. Independent re-    
+  derivation, or it does not land.                                              
+                                                                                
+[38;5;69m▌[0m PUSH EARLY. Wave 43 lost four branches to a mid-flight failure because        
+[38;5;69m▌[0m nothing reached origin until review, and review never ran. Every slice        
+[38;5;69m▌[0m pushes its branch and opens its PR the moment it has one green commit - not   
+[38;5;69m▌[0m at the end. If a push fails, the wave says so out loud.                       
+                                                                                
+[1;38;5;78mDIGEST - survey complete, 20 of 20 reported, verify fleet in flight[0m             
+                                                                                
+PREMISE SMOKE RE-RUN IN-PROCESS at Digest against origin/main c2affd445 (the    
+primary checkout is a31faa52d, 300+ commits behind, and EVERY surveyor          
+independently hit this - a plain grep of the worktree MISSES caps.ex, the       
+census, the ledger census, the charter sweep and the hetzner harness entirely). 
+CONFIRMED: caps.ex:283 cond arm 1 is `Map.get(caps, :write) == true -> true`,   
+arm 2 is `restricted?(assigns) -> false`, and restricted?/1:295 already lists   
+share_access == :read AND readonly_gate?. CONFIRMED: the charter on origin/main 
+tops out at PDS-D632 - D633-D642 exist ONLY on PR #9312. CONFIRMED: exactly ONE 
+pds-* path sits in ELIXIR_TEST_ONLY_PATHS on main - scripts/pds-status-only-    
+residue.exs at elixir-path-escape-check.sh:99.                                  
+                                                                                
+[1;38;5;78mWhat the survey ESTABLISHED[0m                                                     
+                                                                                
+[38;5;59m• [0m#9332's premise is REAL AND REACHABLE, derived independently by three         
+  surveyors from source. LiveScope.authorize_read/4 offers the :docs share arm  
+  (live_scope.ex:147) BEFORE the grant arm (:157), so a signed-in NON-MEMBER    
+  holding an active write grant on a :docs-shared desk is graded :share_read -  
+  share_access: :read + readonly_gate?: true, with NEITHER scope_to_grants read-
+  narrowing NOR Access.validate write-narrowing armed. Meanwhile Caps.derive/1  
+  loads active grants UNCONDITIONALLY (caps.ex:148-168, no grade reference) and 
+  Access.admits_desk?/3 (access.ex:329-336) OVERWRITES the desk scope's :type   
+  and :doc_id with the grant's own before validating, so a one-doc grant auto-  
+  satisfies its own narrowest rungs. caps.write == true and share_access ==     
+  :read co-occur. Order defect confirmed.                                       
+[38;5;59m• [0mBUT THE BYPASS IS NARROWER THAN THE SOCKET GATE, and this decides how it must 
+  be verified. For PLAIN socket events the :live_scope_readonly hook halts the  
+  event anyway, so a verifier reproducing through a plain event sees green FOR  
+  THE WRONG REASON. The live doors are the two that structurally skip socket    
+  hooks: the phx-target'ed SheetGrid component prop (components.ex:1786-1787 -> 
+  nine mutating cid-targeted heads -> ops.ex:421) and the handle_info paper-op  
+  door (shared/paper.ex:99).                                                    
+[38;5;59m• [0m#9332's SUSPECTED OWN DEFECT IS REFUTED, twice, independently. Caps.derive/1's
+  principals list is a CLOSED two-element set - caps.ex:148-149                 
+  `Enum.reject([socket.assigns[:api_token], socket.assigns[:current_user]],     
+  &is_nil/1)` - and the PR does not touch that line. A %CallerContext{} lands on
+  the SEPARATE :caller_context assign and can never enter it, so                
+  loadable_principal?/1 rejecting it drops nothing. The strategic direction's Q3
+  closes NEGATIVE. Nothing needs splitting out on that axis.                    
+[38;5;59m• [0mA DIFFERENT byte-identity gap survives: membership_authorizes?/4 reads        
+  permits?/2 and role_permits?/3 off the row instead of through authorize/3.    
+  Identical for every reachable shape, but a nil-id principal went from         
+  FunctionClauseError to false, and a CUSTOM (non-builtin) membership role adds 
+  a db_actions Repo.all per authorize - read-derived, never run. The            
+  @moduledoc's 'byte-identical' sentence is 99% true, not 100%.                 
+[38;5;59m• [0mTHE DOOR COUNT ON LANDED MAIN IS 1, NOT 3. Both legs hold for exactly one     
+  instrument: pds_residue_lens_test.exs:44/:76 shells scripts/pds-status-only-  
+  residue.exs, and that same path is the only pds entry in                      
+  ELIXIR_TEST_ONLY_PATHS. #9333 adds the census and record-parity.test.sh to the
+  set and adds two api/test files - it takes 1 to 3, and it is UNMERGED.        
+[38;5;59m• [0m#9334 IS THE WAVE-42 DEFECT LIVE, TODAY, ON A WAVE-43 PR. Its Test check-run  
+  is the dispatcher shim verbatim: name carries unexpanded ${{ matrix.elixir }},
+  conclusion skipped, started_at == completed_at (0 s) - while Elixir gate      
+  reports SUCCESS in 2 s. It touches only scripts/pds-ledger-census{,_test}.sh, 
+  which are in NEITHER path set and are shelled by NO api/test file. Zero legs, 
+  not one. Its green cost nothing to produce.                                   
+[38;5;59m• [0m#9335 IS RED ON ITS OWN MERITS, not on lease or drift. Test executed (567.3 s)
+  and failed with exactly one failure: sheets_grid_proof_test.exs:324 `refute   
+  view_html =~ ~s(phx-hook="SheetGrid")` now MATCHES, because the branch's own  
+  thesis moves the hook from @editable to @hookable. A one-line stale assertion 
+  the builder missed in a third test file. Its Sheet-grid hook harness red is   
+  INHERITED - __hook.test.mjs passes 13/13 and __palette.test.mjs:133 fails on  
+  origin/main content too (dark --sheet-ref-0 contrast 2.72:1 < 4.5:1).         
+[38;5;59m• [0mSOBELOW IS AN UNCHANGED-ORACLE, proven by run on four SHAs. Main's deciding   
+  block is 24 findings - 13 workspace_bundle.ex + 6 janitor.ex + 2 archive.ex = 
+  21, plus 3 router.ex Config.CSRF High-Confidence. #9332, #9333 and #9335 each 
+  reproduce 24 / 21 / 3 byte-for-byte; #9334 does not run it at all. The whole- 
+  log count is 127, not ~107, across THREE Running Sobelow banners (24 deciding 
+  / 78 unskipped reconcile / 25 mutation selftest).                             
+[38;5;59m• [0mMERGE MECHANICS ARE CLEAN. All five PRs share merge-base == origin/main tip, 0
+  behind, 1 ahead, 18 distinct files each touched exactly once, and 15/15 trial 
+  merges (5 vs main + 10 pairwise) succeeded. There are NO textual conflicts.   
+  Every blocker is gate-health or citation-order.                               
+[38;5;59m• [0mCITATION ORDER IS LOAD-BEARING AND MEASURED: #9332 cites PDS-D633 x3 / D634 x2
+  / D635 x3, #9333 cites D633, #9334 cites D638 x4, #9335 cites none. Merging   
+  any of the first three before #9312 ships comments pointing at decisions that 
+  exist nowhere on main.                                                        
+[38;5;59m• [0mTHE LEDGER-CENSUS DOOR IS VIABLE AND ITS PRICE IS CONFIRMED: 18.15-20.57 s    
+  USER CPU over three trials plus one hermetic env -i run, rc=0, 'SELFTEST PASS:
+  107 checks', zero network / zero credentials / runs outside a git repo. Wave  
+  43's 20.1-23.1 s ceiling holds and is slightly conservative.                  
+[38;5;59m• [0mTHE HETZNER OFFLINE DOOR IS THE CHEAPEST UNEXAMINED CANDIDATE AND IT CAN RED: 
+  --selftest-offline is real, ~1.34-1.47 s user / ~5.1-5.8 s wall, strips and   
+  COUNTS every HCLOUD/HETZNER var (asserts 0 survivors), drives a localhost     
+  python3 stub, leaves zero repo residue - and a one-token mutation at :430 reds
+  it rc=1 with four FAIL rows and its own verdict prose. NEITHER gate leg exists
+  for it today.                                                                 
+[38;5;59m• [0mTHE RESIDUAL-32 FOLD'S PREMISE IS CONFIRMED BY RUN at origin/main: 87 / 9 /   
+  194 / 0 with RESIDUAL 32, sum 322 == population 322, DENIES 137/194 = 70.6%.  
+  lvs_walk/3 (census.exs:4939-4958) has six clauses and NONE matches            
+  plugin_routes, so every plugin-mounted LiveView gets sess == [] and falls to  
+  the residual. Router corroborates: 17 plugin_routes callsites, 6 inside a     
+  live_session, 11 outside.                                                     
+[38;5;59m• [0mTHE LADDER'S THREE LIVE RUNGS RE-MEASURED BY RUN: DISPOSED 252/252 UNDISPOSED 
+  0, JUDGED 67, ROSTERED 7, EXCLUDED 178, register VERDICTS PROVEN 15 / REFUTED 
+  0 / UNJUDGED 76. Selftest is 30 cases / 20 mutants (the task's 25/16 warning  
+  is correct and the task ALREADY carries the corrected criteria - it does not  
+  need rewriting).                                                              
+[38;5;59m• [0m#9334's THREE LAPSE SHAPES SURVIVE RE-DERIVATION against server source AND the
+  live ledger. ttl_sweeper.ex:371-392 merges (worker=>nil, previous_worker      
+  preserved, expired_at written); release.ex:120-141 writes released_at and NOT 
+  previous_worker; close.ex:539-545 writes closed_at and does NOT clear worker  
+  (schema.ex:559 states this as contract). Only claim.ex:297-306 resets the map.
+  Live cross-tab of 300 rows: 26 shape A, 9 done rows carrying closed_at AND    
+  expired_at AND previous_worker, 2 released-only, 1 open-with-live-worker.     
+                                                                                
+[1;38;5;78mWhere the reports REFUTE the dispatch or each other[0m                             
+                                                                                
+[38;5;59m• [0mREFUTATION 1 (the biggest, and it changes Movement 2): 'the fold never got a  
+  builder' is FALSE. pds-w43-liveview-residual-32-fold sits at 6/11 with run-   
+  quoted evidence, previous_worker epic-builder-the-32-get-judged-fold-residual-
+  no-deriv, claim epoch 6 LAPSED 2026-08-02T20:34:00Z. Its four UNMET criteria  
+  are exactly the hard ones: the plugin fixture (D639 obligation a), the '?'    
+  decline, GATE GREEN both invocations, and a PR-body record invalidating PDS-  
+  D620's 'only multi-session module of the 15' - an obligation the brief never  
+  mentions. One surveyor found its uncommitted diff on disk at                  
+  .claude/worktrees/wf_50c6d61a-402-36 (+273/-34, base c2affd445); another      
+  grepped every worktree for the same prose and found ZERO. THAT CONTRADICTION  
+  IS THE SINGLE MOST DECISION-CHANGING UNKNOWN IN THIS WAVE.                    
+[38;5;59m• [0mREFUTATION 2: the four PR-backed rows have NOT lapsed - all four are          
+  in_progress, claimed by loop-lead at 10:30Z today, epochs 7 / 7 / 7 / EIGHT. A
+  copy-pasted epoch 7 will be REFUSED on #9335.                                 
+[38;5;59m• [0mREFUTATION 3: 'pds-w43-two-more-doors' does not resolve; the row is pds-w43-  
+  two-more-doors-census-record-parity. And the four branches are on loop-epic/* 
+  heads - `git ls-remote origin refs/heads/pds-w43-*` returns nothing, which    
+  reads exactly like 'the branches are gone'.                                   
+[38;5;59m• [0mREFUTATION 4: the ladder task ALREADY carries the D640 ruling. Criterion 3    
+  verbatim demands 'a single Enum.count over a MapSet.union/2, never as leg_a + 
+  leg_b, and BOTH legs filtered to verdict PROVEN'; criterion 9 forbids pinning 
+  the selftest counts; the prose already names the live 30/20 baseline. It needs
+  VERIFICATION, not rewriting.                                                  
+[38;5;59m• [0mREFUTATION 5: there is no ladder in the census. PROVEN-BACKED appears ZERO    
+  times in the 7,106-line script and zero times in its 1,100-line output - only 
+  8 times in charter prose. The slice is greenfield, and census.exs:4033's four-
+  term `+` is the ONLY bare multi-term addition inside a print call in the whole
+  file - the one copy-paste hazard shaped like the thing D640 forbids.          
+[38;5;59m• [0mREFUTATION 6: 'ELIXIR_TEST_ONLY_PATHS appears in no workflow yml' is wrong in 
+  letter - studio-journey-smoke.yml:16 mentions it in a comment. The load-      
+  bearing claim (escape-check is the single source of truth, consumed by        
+  elixir.yml:196-197 via --match) is intact; the absolute phrasing is not, and a
+  builder who greps will find that hit and doubt the leg-B design.              
+[38;5;59m• [0mREFUTATION 7: the door-census's TWO-LEG AGREEMENT check is VACUOUSLY GREEN    
+  today. Legs agree perfectly on the pds inventory (1 THROUGH, 0 disagreements),
+  so an instrument built around agreement ships a check that cannot fail - 'a   
+  gate lies when its green costs nothing to produce', committed by the slice    
+  that coins the sentence. The instrument's honest value is the UNDISPOSED      
+  DENOMINATOR, not leg disagreement.                                            
+[38;5;59m• [0mREFUTATION 8: the denominator itself is contested. Two surveyors derive 19    
+  (.sh + .exs) from git ls-tree; a third derives 17 and notes a bare            
+  `scripts/pds-*` glob is 43 files (24 .md/.txt runbooks and transcripts). Four 
+  of the 19 are *_test.sh harnesses of other instruments. A census that does not
+  DECLARE its enumeration rule in its own output has a false self-description on
+  day one.                                                                      
+[38;5;59m• [0mREFUTATION 9: wave 43's own D638 evidence for the ledger-census door is       
+  FABRICATED relative to the tree. The task says 'the green Elixir path-escape  
+  ratchet job calls python3 five times; stripping it from PATH makes that job   
+  rc=127'. scripts/elixir-path-escape-check.sh contains ZERO python3 (its only  
+  interpreter hop is awk at :335) and elixir.yml contains zero python3 anywhere.
+  The requirement is right; the receipt is not. Strike that sentence before     
+  dispatch.                                                                     
+[38;5;59m• [0mREFUTATION 10: the census PRINTS `wall clock N ms` (pds-elixir-receipt-       
+  census.exs:1193/1225/6605) - the exact unit PDS-D605 ('QUOTE USER CPU, NEVER  
+  WALL CLOCK') forbids, whose own evidence is this census. And #9333's new gate 
+  rider quotes '~23 s wall each' in the SAME @moduledoc that cites D633. Neither
+  of #9333's two ExUnit files can satisfy the 'printed output' half of D633's   
+  obligation at all - a green ExUnit case prints nothing. The obligation can    
+  only land on the INSTRUMENT.                                                  
+[38;5;59m• [0mREFUTATION 11 (the mirror, and the sharpest): pds-status-only-residue.exs -   
+  the ONE instrument that IS through a required gate - says NOTHING in its own  
+  header about being gated, while two ungated instruments editorialize about    
+  gating falsely (census.exs:10-11 'scripts/pds-* is in NEITHER Elixir path     
+  set'; pds-scratch-target_test.sh:26 'nothing under .github/workflows runs     
+  scripts/pds-*', which teaches the WRONG derivation leg). D636 is confirmed but
+  imprecise: the census's claim about ITSELF is true, its claim about the FAMILY
+  is false.                                                                     
+[38;5;59m• [0mREFUTATION 12: the wish's price figures are all load-contaminated. Wave 43    
+  self-declares no quiet host existed at any point (load 13.66-57.73 on 10      
+  cores), and nobody has ever measured any door on the actual ubuntu-latest     
+  runner. Two Digest-round surveyors independently reproduced D633's blindness  
+  by accident - /usr/bin/time around the BEAM reported user 4.81 s against a    
+  wall of 386.70 s for the census selftest, an 80x understatement.              
+                                                                                
+[1;38;5;78mCoverage map - checked and FOUND[0m                                                
+                                                                                
+[38;5;59m• [0mcaps.ex / live_scope.ex / live_auth.ex / router.ex / access.ex / components.ex
+  / sheet_grid.ex / shared/paper.ex / tenancy/auth.ex on origin/main - the whole
+  #9332 chain, three independent walks, all agreeing.                           
+[38;5;59m• [0mscripts/elixir-path-escape-check.sh (both declared sets, verbatim, plus glob  
+  grammar and the escape resolution algorithm) and                              
+  .github/workflows/elixir.yml's consumption of it.                             
+[38;5;59m• [0mAll 19 scripts/pds-*.{sh,exs} enumerated with exec bits; selftest-surface     
+  swept (only 6 of 19 declare any --selftest*; hetzner declares THREE variants).
+[38;5;59m• [0mRUN: pds-ledger-census_test.sh x4 (incl. hermetic env -i), pds-charter-ledger-
+  sweep.sh --selftest (rc=1, 41 arrivals), pds-record-parity.sh --selftest      
+  (rc=3, flag does not exist), pds-live-hetzner-placement-group.sh --selftest-  
+  offline x3 + one MUTANT (rc=1), the census plain + --selftest,                
+  __hook/__palette/__pointing/__formula .test.mjs.                              
+[38;5;59m• [0mCI feeds for all five PRs by CHECK-RUN (not workflow-run) - which caught the  
+  runs feed reporting SUCCESS where check-runs report FAILURE on three          
+  occasions.                                                                    
+[38;5;59m• [0mThe live guerrilla ledger: 300 task docs cross-tabbed by lifecycle x claim    
+  keys; /v1/data/query confirmed to serve `claim` top-level and                 
+  result.perspective in one request.                                            
+[38;5;59m• [0mThe bp ledger rows for all six wave-43 slices plus six wave-42 N-1 rows, four 
+  backlog rows and two lapsed rows.                                             
+                                                                                
+[1;38;5;78mCoverage map - checked and NOT FOUND (absences are decisions-in-waiting)[0m        
+                                                                                
+[38;5;59m• [0mdocs/decisions/success-claim-census.md - THE OWNING DOC for the 19-instrument 
+  inventory. No surveyor in wave 43 OR wave 44 has opened it. Movement 3's      
+  denominator has an unread owner.                                              
+[38;5;59m• [0mOps.commit/3 in sheet_grid/ops.ex - cell-toggle is the ONLY one of the six    
+  read-mode events with neither its own write_capable head nor a direct send_ops
+  call. If Ops.commit/3 does not funnel into send_ops, that is a live write     
+  bypass on MAIN, in a different place from #9332.                              
+[38;5;59m• [0mapi/lib/barkpark/sharing.ex - who can create a :docs share, and whether prod  
+  holds any. The reachability chain assumes a normal product action nobody      
+  verified.                                                                     
+[38;5;59m• [0mLiveScope.write_target/3 - so whether a grant-graded socket writes ANYTHING   
+  today is unverified, which means #9332's 'grant sockets keep writing' safety  
+  argument is unproven in the affirmative direction too.                        
+[38;5;59m• [0mThe branch copy of scripts/pds-ledger-census.sh - #9334's actual predicates   
+  were never read; the surveyor verified the WORLD the arm must match, not the  
+  arm.                                                                          
+[38;5;59m• [0mPR #9332's diff read only as a diff, never as a differential property test    
+  over the principal x membership x permissions matrix.                         
+[38;5;59m• [0mapi/lib/barkpark/plugins/** for :api_token / :current_user assigns - the      
+  closed-principal-set proof is exhaustive over api/lib/barkpark_web/ only.     
+[38;5;59m• [0mWhether __palette.test.mjs's contrast red is pre-existing could not be        
+  baselined from main (the check-run is path-gated and absent there) - one      
+  surveyor reproduced it on main CONTENT locally, which is strong but not a CI  
+  baseline.                                                                     
+[38;5;59m• [0mbp search: one surveyor could not resolve `bp` at all (masked as rc=0 by a    
+  `timeout` prefix - the bespoke-check lie class), another found multi-word     
+  queries returning unparseable output. Do NOT read any 'no prior art' in this  
+  survey as absence.                                                            
+[38;5;59m• [0mAND AN INSTRUMENT DEFECT IN OUR OWN READER: `bp paper view` renders paragraph-
+  wrapped list items as EMPTY bullets. Wave 43's Refusals, Coverage, High-flip- 
+  risk and all nine Backlog rows print as bare dots. Anyone reading wave 43     
+  through the CLI reader silently misses every refusal it recorded. This is the 
+  epic's own class, in the epic's own tooling.                                  
+                                                                                
+[1;38;5;78mVERIFY PLAN - 12 assignments, all Opus (fable unavailable this wave), in flight 
+now[0m                                                                             
+                                                                                
+[38;5;59m• [0mV1 STRANDED FOLD - does .claude/worktrees/wf_50c6d61a-402-36 hold a working   
+  residual fold? RUN the census from it and quote RESIDUAL / sum / DENIES. Two  
+  surveyors contradict each other on whether the code exists. Decides whether   
+  Movement 2 recovers or rebuilds.                                              
+[38;5;59m• [0mV2 CELL-TOGGLE TERMINUS - does Ops.commit/3 funnel into send_ops/2? RUN a     
+  targeted mix test driving cell-toggle on a write_capable:false socket and     
+  quote stored() before/after. A no is a live write bypass on main.             
+[38;5;59m• [0mV3 #9332 REACHABILITY BY RUN - reproduce the bypass through the COMPONENT door
+  and the handle_info door, not a plain socket event, and prove the fix denies  
+  both while a grant-graded write socket still writes. RUN both new test files  
+  plus a mutation.                                                              
+[38;5;59m• [0mV4 #9335 ONE-LINE RED - fix sheets_grid_proof_test.exs:324, RUN the file, and 
+  confirm the failure count goes 1 -> 0 without touching the branch's thesis.   
+[38;5;59m• [0mV5 GATE HEALTH RE-DERIVED - re-claim all four rows, push, and prove `PR       
+  references an active task` clears; quote every check-run's started_at so no   
+  two-day-old failure is read as today's.                                       
+[38;5;59m• [0mV6 DOOR CENSUS FEASIBILITY - enumerate every leg-A encoding on main and prove 
+  a fail-closed classifier can be written that does NOT count the comment at    
+  pds_residue_lens_test.exs:38 and does NOT treat Code.require_file as a        
+  priceable shelled door.                                                       
+[38;5;59m• [0mV7 DENOMINATOR RULE - settle 17 vs 19 vs 43 by run, and decide whether the    
+  four *_test.sh harnesses are peers or harnesses. The instrument must PRINT its
+  rule.                                                                         
+[38;5;59m• [0mV8 QUIET-HOST PRICES - re-take ledger-census_test.sh and hetzner --selftest-  
+  offline at load < 2 with an OS meter around a SHELL, and quote the load       
+  average with every figure.                                                    
+[38;5;59m• [0mV9 PYTHON3-ON-RUNNER - the D638 receipt is fabricated. Establish honestly     
+  whether python3 exists on the elixir.yml runner, by an unguarded command -v in
+  a real CI run, and strike the false sentence.                                 
+[38;5;59m• [0mV10 LADDER UNION BY RUN - print |A|, |B|, |A union B| and |A intersect B| with
+  BOTH legs verdict-filtered to PROVEN. Nobody has ever computed these; 23 / 20 
+  / 3 / OVERLAP 0 are charter prose.                                            
+[38;5;59m• [0mV11 CHARTER SWEEP SIZE - re-run pds-charter-ledger-sweep.sh --selftest against
+  #9312's charter blob, not main's, and report the POST-MERGE arrival count.    
+  Adjudicating 41 rows pre-merge is guaranteed rework.                          
+[38;5;59m• [0mV12 MERGE ORDER PROOF - drive #9312 to green and merge it alone, then re-run  
+  the pairwise merge-tree matrix against the new main and re-check that all four
+  slice PRs still apply.                                                        
+                                                                                
+MERGE ORDER THE VERIFIERS ARE TESTING: #9312 alone first (citation integrity for
+three of four slices). Then #9333 - it is the escape-check SEED and the wave's  
+single serialization point; the fold, the ledger-census door and the door census
+all want that file, so exactly one PR may touch it at a time. Then #9332 on its 
+independent re-derivation. #9334 does NOT merge on its current zero-leg green.  
+#9335 last, after its own red is fixed.                                         
+                                                                                
+[1;38;5;78mDECIDE COMPLETE - the builders are flying[0m                                       
+                                                                                
+Wave 44 was dispatched to independently re-derive four recovered branches BEFORE
+they merged. It did not get the chance, and that is the wave's first finding.   
+#9332 merged 53add1f24 at 10:49:48Z, #9333 626f71f86 at 10:49:56Z, #9334        
+3f18ab048 at 10:50:04Z - and the charter #9312 merged at 11:29:57Z, FORTY       
+MINUTES AFTER the code that cites it. For that window git grep over origin/main 
+returned 13 hits in shipped api/ and scripts/ code pointing at PDS-D633+        
+decisions main did not define. Movement 1's stated law was inverted in practice.
+It is now repaired: main carries D633-D642, and only #9335 remains open.        
+                                                                                
+[1;38;5;78mVerification results - what was PROVEN, what was REFUTED[0m                        
+                                                                                
+Nine verifiers reported; the coverage deficit was empty in both rounds. Trust   
+order was proofs over facts over prose, and four dispatch premises were refuted 
+at the artifact.                                                                
+                                                                                
+[38;5;232m┌[0m[38;5;232m─────────────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────[0m[38;5;232m┬[0m[38;5;232m──────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mAssignment[0m              [38;5;232m│[0m [38;5;145mVerdict[0m                 [38;5;232m│[0m [38;5;145mThe decisive line[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m#9332 order defect[0m      [38;5;232m│[0m [38;5;145mPROVEN, and non-vacuous[0m [38;5;232m│[0m [38;5;145mDeleting[0m                 [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`readonly_posture?(assig[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mns) -> false` takes the[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145msuite 14 tests / 0[0m       [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfailures to 14 tests / 4[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfailures, and the[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfailures name persisted[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mbytes: `left: %{"amount"[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m=> "ESCALATED"}`[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m#9332's suspected OWN[0m   [38;5;232m│[0m [38;5;145mREFUTED, twice[0m          [38;5;232m│[0m [38;5;145m`derive/1`'s principals[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mdefect (dropped[0m         [38;5;232m│[0m [38;5;145mindependently[0m           [38;5;232m│[0m [38;5;145mis the closed two-[0m       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mCallerContext)[0m          [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145melement list[0m             [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`[api_token,[0m             [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcurrent_user]` and the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mPR does not touch it - a[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m%CallerContext{} can[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mnever reach[0m              [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`loadable_principal?/1`[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mGrant grade safe?[0m       [38;5;232m│[0m [38;5;145mREFUTED - a LIVE bypass[0m [38;5;232m│[0m [38;5;145mA doc-scoped write grant[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mon main[0m                 [38;5;232m│[0m [38;5;145mwrote a DIFFERENT doc:[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`left: {true, %{"amount"[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m=> "ESCALATED",[0m          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m"currency" => "NOK"}}`[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mOps.commit/3 a second[0m   [38;5;232m│[0m [38;5;145mREFUTED - it funnels[0m    [38;5;232m│[0m [38;5;145m`ops.ex:391-403` ends in[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mbypass?[0m                 [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`send_ops(socket,[op])`;[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mprobe green rc=0, RED[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145munder guard mutation[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mwith `%{"fmt" =>[0m         [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m"checkbox", "v" =>[0m       [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mfalse}`[0m                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mStranded fold never had[0m [38;5;232m│[0m [38;5;145mREFUTED at the code[0m     [38;5;232m│[0m [38;5;145mRow is 6/11 with run-[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ma builder[0m               [38;5;232m│[0m [38;5;145mlevel[0m                   [38;5;232m│[0m [38;5;145mquoted evidence; the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdiff is +273/-34,[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mRESIDUAL 32 to 0, `sum[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m322 == population 322`,[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`CENSUS OK`[0m              [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD633's 210 s a gate[0m     [38;5;232m│[0m [38;5;145mREFUTED[0m                 [38;5;232m│[0m [38;5;145m`--selftest` exceeds 600[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mbudget?[0m                 [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145ms WALL; one meter read[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`real 1662,98 / user[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m7,05` - a 236x[0m           [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145munderstatement[0m           [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mLedger-census door 20-[0m  [38;5;232m│[0m [38;5;145mREFUTED by run[0m          [38;5;232m│[0m [38;5;145m42.6-45.0 s CPU (49.3 s[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m23 s / 107 checks[0m       [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mhermetic), and 144[0m       [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mchecks in all four runs[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mTwo-leg AGREEMENT check[0m [38;5;232m│[0m [38;5;145mREFUTED as a design[0m     [38;5;232m│[0m [38;5;145mMUT-1 is ALREADY RED on[0m  [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mmain via `--check`; a[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mone-line COMMENT plus[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe forced declaration[0m   [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mbuys a fraudulent[0m        [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mTHROUGH[0m                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpython3 receipt (D638[0m   [38;5;232m│[0m [38;5;145mSTRUCK[0m                  [38;5;232m│[0m [38;5;145mRatchet exits rc=0 with[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mrow)[0m                    [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mpython3 absent, not 127;[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mthe first repro was[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mconfounded by a PATH[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mstrip that also lost[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m`dirname` and `cut`[0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mSheet-grid palette[0m      [38;5;232m│[0m [38;5;145mREFUTED as a defect[0m     [38;5;232m│[0m [38;5;145m#5b9dff vs WHITE = 2.72[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2.72:1[0m                  [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m(the assertion's own[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mnumber); vs the real[0m     [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdark bg = 7.27. The[0m      [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mharness reads --bg[0m       [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mordinally[0m                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mDoor count on landed[0m    [38;5;232m│[0m [38;5;145m1 of 19 was stale; it[0m   [38;5;232m│[0m [38;5;145m#9333 merged mid-round;[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mmain[0m                    [38;5;232m│[0m [38;5;145mis 3[0m                    [38;5;232m│[0m [38;5;145mdenominator is 19 (17[0m    [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m.sh + 2 .exs), and 43 is[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145ma glob error[0m             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mOwning doc for the[0m      [38;5;232m│[0m [38;5;145mNOT-FOUND, and that is[0m  [38;5;232m│[0m [38;5;145m`success-claim-[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145minventory[0m               [38;5;232m│[0m [38;5;145mthe finding[0m             [38;5;232m│[0m [38;5;145mcensus.md` read in full:[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m286 lines, ZERO[0m          [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145minstrument inventory. No[0m [38;5;232m│[0m
+[38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdoc owns this fact-topic[0m [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m─────────────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────[0m[38;5;232m┴[0m[38;5;232m──────────────────────────[0m[38;5;232m┘[0m
+                                                                                
+COVERAGE, INCLUDING NOT-FOUNDS. Reached for the first time:                     
+docs/decisions/success-claim-census.md, Ops.commit/3, the sheet-grid palette    
+harness, and every leg-A encoding on main. STILL NOT REACHED:                   
+api/lib/barkpark/plugins/sheets/web/ops_controller.ex:69, a SECOND              
+Session.apply_ops surface over HTTP that the LiveView wall does not cover -     
+nobody examined it, and it is filed rather than assumed safe. The SheetGrid     
+write-LANDING half is UNPROVEN, not proven-safe: Session.peek returned {:error, 
+:no_session} in BOTH arms, so an assertion there today would be vacuous in both 
+directions. Both are backlog rows, not silent gaps.                             
+                                                                                
+[1;38;5;78mDecisions - PDS-D643 through D652, each with its one-line why[0m                   
+                                                                                
+These mirror the charter (PR #9353); the charter is the epic's memory, this     
+Paper is the wave's story. Because that PR may not be on main while the builders
+fly, the decisions are here in full.                                            
+                                                                                
+[38;5;59m• [0mD643 - Movement 1 landed WHILE wave 44 verified it, charter last. Why: 13     
+  dangling citations shipped, and #9334's green was a zero-second skip shim with
+  ZERO gate legs - this epic's own law broken on this epic's own PR.            
+[38;5;59m• [0mD644 - #9332 is sound, its suspected own defect is void, and the bypass is NOT
+  closed for the pure grant grade. Why: the narrowing hook is :handle_event and 
+  the component route is handle_info, so Access.validate/3 is never consulted.  
+  Denying readonly_posture? would be the WRONG fix - the narrowing must travel  
+  into the door.                                                                
+[38;5;59m• [0mD645 - The fold is recoverable, not rebuildable, and git-grep cannot see      
+  stranded work. Why: uncommitted work is the only kind that CAN be stranded, so
+  any git-based sweep systematically misses exactly what it is looking for.     
+[38;5;59m• [0mD646 - 210 s is leaf CPU, not a gate budget. Why: a required gate enforces    
+  WALL, the driver is serial and prints nothing until the last case returns, and
+  an in-flight run is indistinguishable from a hang by stdout alone.            
+[38;5;59m• [0mD647 - The ledger-census door is re-priced and 'viable' is dead. Why: 42.6-   
+  49.3 s CPU and 144 checks, and the count is load-independent so this is       
+  staleness, not mismeasurement.                                                
+[38;5;59m• [0mD648 - Wall is not a measurable property of a door; the unit is CPU = user +  
+  sys, labelled LOCAL. Why: a FIXED workload swung 5.8x at constant load while  
+  its user CPU held to 27%, and on the hetzner door sys EXCEEDS user,           
+  understating it 2.1x as a pure CPU fact.                                      
+[38;5;59m• [0mD649 - The agreement check cannot fail; leg A must be attribute-bound AND     
+  executed. Why: leg A implies leg B by an existing required ratchet, and a     
+  comment-blind extractor lets one comment line plus the declaration the ratchet
+  forces manufacture a THROUGH.                                                 
+[38;5;59m• [0mD650 - The denominator is 19 and the inventory's owner is the INSTRUMENT'S OWN
+  PRINTED OUTPUT. Why: no doc owns the fact-topic, the repo caps cards at 7, and
+  an appendix would push success-claim-census.md past its budget.               
+[38;5;59m• [0mD651 - The palette red is a harness attribution bug, not a contrast defect.   
+  Why: a generated :root block was inserted ABOVE the dark block, so an ordinal 
+  read compares dark hues against WHITE - and the standing task about it would  
+  send a builder to change a hue that passes at 7.27:1.                         
+[38;5;59m• [0mD652 - What wave 44 cut, with reasons: the ledger-census door (price), the    
+  charter sweep (45 hand rulings, gated on this charter merging, and its second 
+  read FAILS OPEN), and the sheet-grid reader half (D641, deliberate).          
+                                                                                
+[1;38;5;78mThe wave plan - 7 slices, 4 in round 1[0m                                          
+                                                                                
+Round 1 is dependency-free and builds this run. Round 2 does NOT build now: each
+names the merge it waits on, stated as the first line of its own brief so a     
+manually-dispatched builder sees it first. Round-1 file sets are disjoint - the 
+census, the escape-check, shared/paper.ex and the palette harness are each owned
+by exactly one slice.                                                           
+                                                                                
+[38;5;232m┌[0m[38;5;232m───[0m[38;5;232m┬[0m[38;5;232m────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────[0m[38;5;232m┬[0m[38;5;232m───[0m[38;5;232m┬[0m[38;5;232m──────[0m[38;5;232m┬[0m[38;5;232m─────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m#[0m [38;5;232m│[0m [38;5;145mSlice[0m              [38;5;232m│[0m [38;5;145mTask id[0m            [38;5;232m│[0m [38;5;145mR[0m [38;5;232m│[0m [38;5;145mMode[0m [38;5;232m│[0m [38;5;145mGate[0m                [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mo[0m [38;5;232m│[0m [38;5;145ml[0m    [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mu[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mn[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145md[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mThe grant-graded[0m   [38;5;232m│[0m [38;5;145mpds-w44-grant-[0m     [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mfabl[0m [38;5;232m│[0m [38;5;145mCC=clang mix test[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mdoc escalation is[0m  [38;5;232m│[0m [38;5;145mdoor-narrowing[0m     [38;5;232m│[0m   [38;5;232m│[0m [38;5;145me[0m    [38;5;232m│[0m [38;5;145mon the new LiveView[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mclosed at the door[0m [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145m(rem[0m [38;5;232m│[0m [38;5;145mtest + the studio[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mit rides[0m           [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mappe[0m [38;5;232m│[0m [38;5;145mdirectory, rc[0m       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145md to[0m [38;5;232m│[0m [38;5;145mcaptured to a[0m       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mopus [0m[38;5;232m│[0m [38;5;145mvariable[0m            [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145m-[0m    [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mfabl[0m [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145me[0m    [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145munav[0m [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145maila[0m [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mResidual-32 fold[0m   [38;5;232m│[0m [38;5;145mpds-w44-census-[0m    [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mfabl[0m [38;5;232m│[0m [38;5;145melixir scripts/pds-[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mrecovered + D605's[0m [38;5;232m│[0m [38;5;145mfold-and-blindspot[0m [38;5;232m│[0m   [38;5;232m│[0m [38;5;145me[0m    [38;5;232m│[0m [38;5;145melixir-receipt-[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145munit + D633's[0m      [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145m(rem[0m [38;5;232m│[0m [38;5;145mcensus.exs and its [0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mblind spot IN the[0m  [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mappe[0m [38;5;232m│[0m [38;5;145m--selftest, both[0m    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145minstrument[0m         [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145md)[0m   [38;5;232m│[0m [38;5;145mrc=0[0m                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3[0m [38;5;232m│[0m [38;5;145mThe door census:[0m   [38;5;232m│[0m [38;5;145mpds-w44-door-[0m      [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mfabl[0m [38;5;232m│[0m [38;5;145mbash scripts/pds-[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mthe price column[0m   [38;5;232m│[0m [38;5;145mcensus-instrument[0m  [38;5;232m│[0m   [38;5;232m│[0m [38;5;145me[0m    [38;5;232m│[0m [38;5;145mdoor-census.sh +[0m    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mbecomes an[0m         [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145m(rem[0m [38;5;232m│[0m [38;5;145mbash [0m               [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145minstrument[0m         [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mappe[0m [38;5;232m│[0m [38;5;145mscripts/elixir-path[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m [38;5;145md)[0m   [38;5;232m│[0m [38;5;145m-escape-check.sh --[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcheck + CC=clang[0m    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mmix test the new[0m    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mrider[0m               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m4[0m [38;5;232m│[0m [38;5;145mThe palette[0m        [38;5;232m│[0m [38;5;145mpds-w44-palette-[0m   [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mnode each[0m           [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mharness repaired[0m   [38;5;232m│[0m [38;5;145mharness-repair[0m     [38;5;232m│[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145m__*.test.mjs in[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145magainst generated[0m  [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mapi/assets/sheet-[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mtokens[0m             [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mgrid, every rc[0m      [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcaptured and zero[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m5[0m [38;5;232m│[0m [38;5;145mThe judgment-[0m      [38;5;232m│[0m [38;5;145mpds-w44-judgment-[0m  [38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145melixir census + --[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mcoverage ladder:[0m   [38;5;232m│[0m [38;5;145mcoverage-ladder[0m    [38;5;232m│[0m [38;5;145m([0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mselftest + the doc[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mPROVEN-BACKED 23[0m   [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145ma[0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mbyte-budget check[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mas a union[0m         [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mf[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mt[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145m)[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m6[0m [38;5;232m│[0m [38;5;145mThe hetzner[0m        [38;5;232m│[0m [38;5;145mpds-w44-hetzner-[0m   [38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mCC=clang mix test[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145moffline arm[0m        [38;5;232m│[0m [38;5;145moffline-door[0m       [38;5;232m│[0m [38;5;145m([0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mthe new rider +[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mbecomes the next[0m   [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145ma[0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mescape-check --[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mdoor[0m               [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mf[0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcheck at rc=0[0m       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mt[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145m3[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145m)[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m7[0m [38;5;232m│[0m [38;5;145mThe charter sweep[0m  [38;5;232m│[0m [38;5;145mpds-w44-charter-[0m   [38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mbash scripts/pds-[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145madjudicated and[0m    [38;5;232m│[0m [38;5;145msweep-adjudication[0m [38;5;232m│[0m [38;5;145m([0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcharter-ledger-[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mits fail-open[0m      [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145ma[0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145msweep.sh and --[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mclosed[0m             [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mf[0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mselftest, both rc=0[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mt[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mT[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mH[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mI[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mS[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mc[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mh[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145ma[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mt[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mm[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mg[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145ms[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                    [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145m)[0m [38;5;232m│[0m      [38;5;232m│[0m                     [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m───[0m[38;5;232m┴[0m[38;5;232m────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────[0m[38;5;232m┴[0m[38;5;232m───[0m[38;5;232m┴[0m[38;5;232m──────[0m[38;5;232m┴[0m[38;5;232m─────────────────────[0m[38;5;232m┘[0m
+                                                                                
+HIGH-FLIP-RISK, declared, and the line is in each task's own brief so the       
+reviewer reads it there: SLICE 1 - whether the grant grade's narrowing belongs  
+in the door or the gate, and whether narrowing it denies a legitimate grantee.  
+This is an authorization judgment on a bypass that is LIVE ON MAIN, and it is   
+the species that flipped twice in wave 43. SLICE 3 - whether leg A's three      
+predicates admit a fraudulent THROUGH; the comment mutation is the oracle, and  
+wave 44's own prototype PASSED IT. Both warrant a genuinely independent second  
+reviewer before merge. This workflow spawns one reviewer, so that dispatch is a 
+manual lead step - review's job is to NAME when independence is owed.           
+                                                                                
+BACKLOG FILED NOW, six published child rows, so the ledger shows the future:    
+pds-w44-bl-ledger-census-door-repriced, pds-w44-bl-ops-controller-apply-ops-    
+ungated, pds-w44-bl-vacuous-reader-toggle-oracle, pds-w44-bl-sheetgrid-write-   
+landing-unproven, pds-w44-bl-stranded-work-is-invisible-to-git-grep, pds-w44-bl-
+citation-precedes-merge-check.                                                  
+                                                                                
+[38;5;69m▌[0m THE WAVE'S OWN LAW, TURNED ON ITSELF. A gate lies when its green costs        
+[38;5;69m▌[0m nothing to produce - and this wave found that sentence violated three times   
+[38;5;69m▌[0m by the epic that coined it: #9334's zero-second Test shim, the two-leg        
+[38;5;69m▌[0m agreement check that cannot red, and the charter sweep's second read that     
+[38;5;69m▌[0m prints CONFIRMED while its read failed. Wave 44's grade rests on slices 1     
+[38;5;69m▌[0m and 2, not on the door count.                                                 
+                                                                                
+[1;38;5;78mDEBRIEF - wave 44 reviewed, 4 PRs pushed, grade A-[0m                              
+                                                                                
+Every branch this wave produced is on origin with a PR open. Nothing is merged -
+the lead merges. Three slices were handed to review as built and green; a FOURTH
+was found stranded, fully built and fully gated, with zero commits on its       
+branch, and was recovered here.                                                 
+                                                                                
+[1;38;5;78mWhat shipped, per slice[0m                                                         
+                                                                                
+[38;5;232m┌[0m[38;5;232m────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────[0m[38;5;232m┬[0m[38;5;232m───────[0m[38;5;232m┬[0m[38;5;232m─────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mpds-w44-grant-[0m [38;5;232m│[0m [38;5;145mloop-epic/a-[0m    [38;5;232m│[0m [38;5;145m#9377[0m [38;5;232m│[0m [38;5;145mslice test[0m      [38;5;232m│[0m [38;5;145mSTRONG. The[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mdoor-narrowing[0m [38;5;232m│[0m [38;5;145mdoc-scoped-[0m     [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0, 5 tests 0[0m [38;5;232m│[0m [38;5;145mbypass is real[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mwrite-grant-[0m    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mfailures;[0m       [38;5;232m│[0m [38;5;145mand the fix is[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mstops-writing-[0m  [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mstudio suite[0m    [38;5;232m│[0m [38;5;145mwhat closes it [0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145ma-0-r[0m           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0, 1547[0m      [38;5;232m│[0m [38;5;145m- proven by the[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mtests 0[0m         [38;5;232m│[0m [38;5;145mreviewer's OWN[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mfailures[0m        [38;5;232m│[0m [38;5;145mmutation, not[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mthe builder's:[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mneutering[0m       [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mgrant_target_de[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mnied?/3 gives[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mrc=2 with two[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mfailures[0m        [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mprinting left:[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145m%{"amount" =>[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145m"ESCALATED"}[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mread back from[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mthe store.[0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w44-[0m       [38;5;232m│[0m [38;5;145mloop-epic/the-[0m  [38;5;232m│[0m [38;5;145m#9378[0m [38;5;232m│[0m [38;5;145mcensus rc=0,[0m    [38;5;232m│[0m [38;5;145mSTRONG. A/B re-[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcensus-fold-[0m   [38;5;232m│[0m [38;5;145mresidual-32-[0m    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mRESIDUAL 0/322,[0m [38;5;232m│[0m [38;5;145mderived[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mand-blindspot[0m  [38;5;232m│[0m [38;5;145mgets-judged-[0m    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145msum 322 ==[0m      [38;5;232m│[0m [38;5;145mindependently:[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mand-the-mete-1[0m  [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mpopulation 322,[0m [38;5;232m│[0m [38;5;145m32 -> 0,[0m        [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mCENSUS OK[0m       [38;5;232m│[0m [38;5;145mreachable_uncon[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mditional 194 ->[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145m225, DENIES[0m     [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mnumerator HELD[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mat 137, so the[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mheadline[0m        [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mfraction gets[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mWORSE (70.6% ->[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145m60.9%). That is[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145ma fold, not a[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mrubber stamp.[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w44-[0m       [38;5;232m│[0m [38;5;145mloop-epic/the-[0m  [38;5;232m│[0m [38;5;145m#9379[0m [38;5;232m│[0m [38;5;145mall four[0m        [38;5;232m│[0m [38;5;145mSTRONG, plus[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpalette-[0m       [38;5;232m│[0m [38;5;145msheet-grid-[0m     [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m__*.test.mjs[0m    [38;5;232m│[0m [38;5;145mtwo reviewer[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mharness-repair[0m [38;5;232m│[0m [38;5;145mpalette-[0m        [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0; palette[0m   [38;5;232m│[0m [38;5;145mfixes. The 4-[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mharness-stops-[0m  [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mreports 18[0m      [38;5;232m│[0m [38;5;145mweek red was a[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mcom-3-r[0m         [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mcontrast checks[0m [38;5;232m│[0m [38;5;145mharness[0m         [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mattribution[0m     [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mbug, never a[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mWCAG defect -[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mand the bug[0m     [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mlied in BOTH[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mdirections[0m      [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145m(#14532d is[0m     [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145minvisible in[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mdark mode at[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145m2.18:1 and the[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mold harness[0m     [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mwould have[0m      [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mPASSED it at[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145m9.11:1 vs[0m       [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mwhite).[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w44-door-[0m  [38;5;232m│[0m [38;5;145mloop-epic/the-[0m  [38;5;232m│[0m [38;5;145m#9380[0m [38;5;232m│[0m [38;5;145mdoor-census[0m     [38;5;232m│[0m [38;5;145mRECOVERED BY[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcensus-[0m        [38;5;232m│[0m [38;5;145mprice-column-[0m   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0[0m            [38;5;232m│[0m [38;5;145mREVIEW, not[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145minstrument[0m     [38;5;232m│[0m [38;5;145mstops-being-[0m    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m(UNDISPOSED 0[0m   [38;5;232m│[0m [38;5;145mbuilder-[0m        [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mcharter-pro-2-r[0m [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mof 20, ERRORS[0m   [38;5;232m│[0m [38;5;145mdelivered.[0m      [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m0); --selftest[0m  [38;5;232m│[0m [38;5;145mComplete and[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0 (8 PASS /[0m  [38;5;232m│[0m [38;5;145mgreen - it[0m      [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m0 FAIL); [0m       [38;5;232m│[0m [38;5;145msimply never[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mescape-check[0m    [38;5;232m│[0m [38;5;145mgot committed.[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0; rider[0m     [38;5;232m│[0m [38;5;145mOne pair of[0m     [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0 (8 tests)[0m  [38;5;232m│[0m [38;5;145meyes on a 37 KB[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mshell[0m           [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145minstrument; an[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mindependent[0m     [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145msecond reviewer[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                 [38;5;232m│[0m       [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mis owed.[0m        [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────[0m[38;5;232m┴[0m[38;5;232m───────[0m[38;5;232m┴[0m[38;5;232m─────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────[0m[38;5;232m┘[0m
+                                                                                
+[1;38;5;78mWhat the review FOUND that the wave did not report[0m                              
+                                                                                
+[38;5;59m• [0mPDS-D653 - A TASK CAN BE 11/12 STAMPED AND ITS BRANCH EMPTY. pds-w44-door-    
+  census-instrument stamped eleven criteria with real run evidence, its now-line
+  read 'committing: ... branching loop-epic/the-price-column-stops-being-       
+  charter-pro-2', and git diff origin/main...that-branch is EMPTY. It was in    
+  NEITHER the built handoff nor the not-green list. The rule this buys: the     
+  LEDGER is the sweep index, not the handoff - diff every wave task's stated    
+  branch against origin/main and treat an empty diff as STRANDED, because a     
+  report cannot describe the builder that stopped before writing it.            
+[38;5;59m• [0mPDS-D654 - A GATE THAT DOES NOT TRIGGER ON ITS OWN SUBJECT IS GREEN FOR FREE. 
+  sheet-grid-js.yml runs a harness that parses root.html.heex, presence_state.ex
+  and tokens_gen.ex, and triggered on NONE of them - so the contrast gate never 
+  ran on a PR that changed a hue, a background token, or the presence palette.  
+  D633's law in its cheapest form yet: no skip shim, no vacuous assertion, just 
+  a paths: list that omits the subject. Repaired in #9379.                      
+[38;5;59m• [0mPDS-D655 - TWO INSTRUMENTS SHIPPED CONTRADICTORY PROSE ABOUT THE SAME FINDING,
+  IN THE SAME WAVE. pds-door-census.sh printed the meter blindness as a 236x    
+  real/user RATIO; pds-elixir-receipt-census.exs refuted exactly that on its own
+  runs (113x, then 123x, for the SAME fan-out, because real counts WAITING).    
+  Reconciled in review onto the load-independent leaf-metered FLOOR. The rule:  
+  when a finding ships inside more than one instrument, ONE owns the sentence   
+  and the others cite it - the same argument the census's own @blind_spot       
+  attribute makes, one level up.                                                
+[38;5;59m• [0mA FLAKE, FILED RATHER THAN SWALLOWED. The first full studio-suite run scored 1
+  failure in ChatRenderGoldenTest's sidebar byte-lock (golden 6554 bytes, region
+  6554 bytes, first diff at 723 - a same-length CONTENT SWAP). It passes in     
+  isolation and passed on re-run of the identical tree. Filed as task-          
+  441f5a5669e0ab6b. A golden that reds only sometimes trains reviewers to re-run
+  until green, which is this epic's own defect class.                           
+[38;5;59m• [0mTHE HOST WAS NOT QUIET, AND THAT PROVED D605 BY ACCIDENT. The reviewer's      
+  census read user cpu 17330 ms against wall clock 95801 ms on a box carrying 24
+  stray busy-loop processes four days old. The wall figure is the LOAD; the CPU 
+  figure is the CODE.                                                           
+                                                                                
+[1;38;5;78mDated corrections to earlier sections of this Paper[0m                             
+                                                                                
+[38;5;59m• [0m2026-08-03, correcting the Direction section's 'Charter #9312 merges FIRST and
+  alone': INVERTED IN PRACTICE. #9332/#9333/#9334 merged at 10:49-10:50Z and the
+  charter at 11:29:57Z - forty minutes after the code citing it. Already        
+  recorded as PDS-D643; noted here so a reader of the Direction section does not
+  carry the plan as the outcome.                                                
+[38;5;59m• [0m2026-08-03, correcting 'The wave plan - 7 slices, 4 in round 1': FOUR round-1 
+  slices were dispatched and only THREE reached review as built. The fourth     
+  (pds-w44-door-census-instrument) completed its work and its gate and died     
+  before committing; it is delivered by this review as #9380. The plan's round-1
+  count is right; its delivery path is not what the plan describes.             
+[38;5;59m• [0m2026-08-03, on the wish's item 3 ('measured at 236x'): REFUTED BY THE         
+  ARTIFACT, and the refutation is now the shipped sentence in BOTH instruments. 
+  real/user is load-dependent; the load-independent statement is the DIRECTION  
+  plus a leaf-metered floor.                                                    
+                                                                                
+[1;38;5;78mLedger audit[0m                                                                    
+                                                                                
+[38;5;59m• [0mAll four slice tasks are lifecycle in_progress with merge-gated criteria left 
+  OPEN for the lead - correct, none closed early.                               
+[38;5;59m• [0mEvidence was stamped AS THE BUILDERS WORKED, not batched: each carries per-   
+  criterion evidence quoting run output, and two carry honest --miss records    
+  rather than fabricated flips (pds-w44-census-fold-and-blindspot criterion 8,  
+  the lv_verdict/5 cond reorder; pds-w44-palette-harness-repair criterion 7, the
+  PR body a builder cannot write because builders do not push).                 
+[38;5;59m• [0mONE LEDGER LIE CORRECTED: pds-w44-door-census-instrument's claim now-line     
+  implied a committed branch that does not exist. A review_status field now     
+  records the correction, the recovery, and the re-run gate; re-published and   
+  read back.                                                                    
+[38;5;59m• [0mEach of the other three tasks gained a review_status naming its final branch, 
+  its PR, and which gate legs the REVIEWER re-ran (as distinct from which the   
+  builder claimed).                                                             
+[38;5;59m• [0mNo task outside this wave was mutated. One NEW task was filed and published:  
+  task-441f5a5669e0ab6b (the golden byte-lock flake), parented to the epic.     
+                                                                                
+[1;38;5;78mGrade - A-[0m                                                                      
+                                                                                
+EARNED, not awarded. What is genuinely strong: three of four slices closed a    
+defect that was REAL and proved it by substitution rather than by reading, and  
+every one of them refuted part of its own brief from the artifact - the palette 
+slice found a THIRD stale coupling nobody had priced (--fg-muted was matched for
+an hsl() both themes author as var(--muted-text), so that check had found zero  
+declarations and could never have run), and the census slice refused the ratio  
+its dispatch demanded. The security slice is the wave's best work: it declined  
+the obvious fix (widening Caps.write_capable?/2, which is shared with the       
+SheetGrid prop and has no target), declined the obvious predicate               
+(Access.admits_desk?/3, whose type/doc_id overwrite IS the bug), and carries a  
+positive control proving a legitimate grantee still writes.                     
+                                                                                
+What falls short. (1) A whole slice died between its last stamp and its first   
+commit and NOTHING in the wave's own reporting said so - it took a branch-vs-   
+ledger diff to find a finished instrument one cycle away from deletion. That is 
+the sixth consecutive wave to strand built work, and it is the single reason    
+this is not an A. (2) Two instruments shipped contradictory prose about the same
+finding in the same wave - a coherence failure the wave had every opportunity to
+catch, since one slice explicitly refuted the other's figure in its own commit  
+message. (3) The security slice's shipped non-vacuity test is a local constant- 
+false STUB, not the reverted arm; the real revert was run and recorded in the   
+stamp, but the artifact that MERGES cannot reproduce it - the reviewer had to   
+re-run the mutation by hand to confirm. (4) Coverage is honestly partial and    
+says so: paper_ops/2 and document_op/2 carry the new arm but are proven by      
+READING, and the census's ExUnit rider was never run locally.                   
+                                                                                
+No bloat: 489 lines for the security slice including a 361-line test, 333 for   
+the census fold, 86 for the palette repair. Nothing was redesigned; the         
+reviewer's edits are two latent-hazard closures and one prose reconciliation.   
+Tree-tidiness was not pursued and has no value here.                            
+                                                                                
+[1;38;5;78mWhat the next wave should take[0m                                                  
+                                                                                
+MERGE ROUND 1 FIRST, IN THIS ORDER: #9377 (the security fix - it is the only    
+thing in this wave that closes a live escalation), then #9379 (it turns the red 
+Sheet-grid hook unit harness green, which is currently the only non-advisory red
+on the still-open #9335), then #9378 and #9380. Two of the four are owed a      
+genuinely independent second reviewer before merge, and this workflow spawns    
+exactly one reviewer, so that dispatch is a MANUAL LEAD STEP: #9377 (security / 
+tenancy) and #9380 (whether leg A admits a fraudulent THROUGH - and it never got
+its builder's own review dispatch, so it has had ONE pair of eyes on 37 KB of   
+shell).                                                                         
+                                                                                
+THEN THE DEFERRED ROUND-2 SLICES, EACH AS ITS DEPENDENCY MERGES: pds-w44-       
+judgment-coverage-ladder after #9378 (both rewrite the census and every line    
+number shifts - re-derive anchors at the new base, and PROVEN-BACKED must be one
+Enum.count over one MapSet.union, never an addition); pds-w44-hetzner-offline-  
+door after #9380 (it edits the same declared set, so dispatching beside it      
+produces a conflict, not a build - and BOTH legs or neither: the instrument AND 
+its ELIXIR_TEST_ONLY_PATHS entry); pds-w44-charter-sweep-adjudication after the 
+charter PR #9353 merges (the candidate vocabulary is MINED FROM THE CHARTER, so 
+adjudicating before it lands produces a fresh red the moment it does - and this 
+wave's own wave-log entry moved that vocabulary again).                         
+                                                                                
+AND ONE NEW STANDING CHORE, from D653: every review must diff each wave task's  
+stated branch against origin/main before it grades anything. An empty diff on a 
+stamped task is a stranded slice, and the built-slice handoff structurally      
+cannot report one.                                                              
+                                                                                
+[38;5;69m▌[0m Wave 44 sealed 2026-08-03. 4 PRs open: #9377, #9378, #9379, #9380. Nothing    
+[38;5;69m▌[0m merged - the lead merges, and closes the merge-gated criterion on each task   
+[38;5;69m▌[0m as it does.                                                                   
+
+Related
+  3.48  PDS wave 43 - the door has a price, and every number is in user CPU
+        (paper)
+        tags: honest-gates (88·90), pds (95·95), security (80·55), studio
+              (65·60)
+  3.40  PDS wave 42 - a class must descend from its substitution, and the fence
+        is not the only door  (paper)
+        tags: honest-gates (88·85), pds (95·95), security (80·50), studio
+              (65·60)
+  2.80  The census runs `python3 -`, so a stray module in the working directory
+        shadows stdlib and EXECUTES during a certifying run  (task)
+        tags: honest-gates (88·65), pds (95·85), security (80·80)
+  2.78  The census stops executing code it finds in the working directory, and a
+        fixture proves it  (task)
+        tags: honest-gates (88·90), pds (95·80), security (80·60)
+  2.67  LiveComponent-targeted events bypass EVERY socket-level gate — a read-
+        only principal writes persisted sheet state; pass the capability into
+        the component, not a fourth hook  (task)
+        tags: pds (95·88), security (80·64), studio (65·72)

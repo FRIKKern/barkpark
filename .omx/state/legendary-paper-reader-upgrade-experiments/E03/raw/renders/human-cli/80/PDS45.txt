@@ -1,0 +1,1537 @@
+PDS WAVE 45 - THE PRICE COLUMN LEARNS TO EXPIRE                                 
+───────────────────────────────────────────────                                 
+                                                                                
+▌ STRATEGIZE COMPLETE - the survey fleet is flying. GROUND TRUTH, DERIVED IN-   
+▌ PROCESS at origin/main ab8c86b05 in a detached worktree, never the primary    
+▌ checkout (which is stale at a31faa52d and dirty across eight charters). I     
+▌ ran scripts/pds-door-census.sh myself: rc=0, ERRORS 0, every program          
+▌ disposed. THE HEADLINE THE WISH DID NOT ASK FOR: the census runs in 4.13 s    
+▌ wall / 2.80 s CPU - so it CANNOT have taken the 40.33 s CPU / 68.24 s wall    
+▌ figure it prints. Every price and every disposition-evidence string is a      
+▌ hardcoded literal in PDS_DOOR_PRICES (:146-149) and PDS_DOOR_DISPOSITIONS     
+▌ (:123-137). The CLASS column became an instrument in wave 44. The PRICE       
+▌ column became a shell variable with a date stamp. And the denominator is 20   
+▌ with 4 doors, not the 19 with 3 that both the wish and the lead notes carry - 
+▌ the census counts itself, and says so at :12-14.                              
+                                                                                
+What I ran, and what it refuted                                                 
+                                                                                
+Eleven consecutive waves have refuted their own dispatch from the artifact. This
+is the twelfth, and the refutations are load-bearing rather than cosmetic -     
+three of the five figures the brief and the lead notes hand down are            
+contradicted by the instrument on merged main.                                  
+                                                                                
+┌─────────────────────────┬─────────────────────────┬──────────────────────────┐
+│ "the door count is 3 of │ THE COLUMN prints       │ The census entered its   │
+│ 19, not an unmeasured   │ population 20 (18 .sh + │ own denominator by       │
+│ N" (lead notes,         │ 2 .exs), THROUGH 4 of   │ design (:12-14: "a       │
+│ emphatic)               │ 20 - pds-door-          │ census that hid itself   │
+│                         │ census.sh, pds-elixir-  │ would be the first thing │
+│                         │ receipt-census.exs,     │ it exists to catch"). 3- │
+│                         │ pds-record-             │ of-19 was true before    │
+│                         │ parity.test.sh, pds-    │ #9380 merged. Do not     │
+│                         │ status-only-residue.exs │ quote it.                │
+│ "prints a class + a     │ HALF TRUE. Class is     │ THE WAVE'S SPINE. A 4-   │
+│ MEASURED PRICE or a     │ computed: leg A is      │ second program cannot    │
+│ named blocker with      │ three mechanical        │ have measured a 68-      │
+│ file:line" (wish item,  │ predicates over the     │ second row.              │
+│ the wave's whole claim) │ tree, leg B is          │                          │
+│                         │ evaluated by EXECUTING  │                          │
+│                         │ elixir-path-escape-     │                          │
+│                         │ check.sh. Price is a    │                          │
+│                         │ string literal. Timed:  │                          │
+│                         │ real 4,13 / user 0,81 / │                          │
+│                         │ sys 1,99 for the entire │                          │
+│                         │ run.                    │                          │
+│ "my 'exactly three      │ The VOCABULARY is six   │ The correction is right  │
+│ refusal reasons' is     │ (:105-115). The classes │ in direction and still   │
+│ FIVE by run plus a      │ actually USED by a row  │ not the run's number. A  │
+│ sixth (HUMAN-GATE)"     │ on main are five:       │ vocabulary entry no row  │
+│                         │ ENVIRONMENT (11), PRICE │ exercises is itself an   │
+│                         │ (2), CONTENT-RED (1),   │ untested arm.            │
+│                         │ RED-BY-DESIGN-REPORTER  │                          │
+│                         │ (1), NOT-YET-BUILT (1). │                          │
+│                         │ HUMAN-GATE is used by   │                          │
+│                         │ ZERO rows.              │                          │
+│ "pds-live-hetzner-      │ The CLASS is            │ A LIVE FALSEHOOD-BY-     │
+│ placement-group.sh -    │ defensible; the         │ OMISSION in the shipped  │
+│ ENVIRONMENT, needs      │ EVIDENCE is about the   │ instrument, and the      │
+│ HCLOUD_TOKEN" (shipped  │ wrong arm. It cites `-- │ second-cheapest arm in   │
+│ disposition, :128)      │ selftest` rc=3. The     │ the whole inventory      │
+│                         │ script's own header at  │ sitting behind it.       │
+│                         │ :12-13 and :964         │                          │
+│                         │ declares `--selftest-   │                          │
+│                         │ offline` "the           │                          │
+│                         │ CREDENTIAL-FREE arm and │                          │
+│                         │ the CI-able gate". I    │                          │
+│                         │ ran it: rc=0, CPU       │                          │
+│                         │ 1.06+1.09 = 2.15 s at   │                          │
+│                         │ load1 15.44.            │                          │
+│ "pds-charter-ledger-    │ Confirmed as printed -  │ The wish's own slice 3   │
+│ sweep.sh is CONTENT-    │ but the census does not │ takes this row to rc=0.  │
+│ RED, rc=1 today" (wish  │ RUN it. The string "by  │ The census will keep     │
+│ item 3)                 │ run 2026-08-03 ...      │ printing CONTENT-RED.    │
+│                         │ rc=1" is a literal at   │                          │
+│                         │ :123.                   │                          │
+└─────────────────────────┴─────────────────────────┴──────────────────────────┘
+                                                                                
+The three blind spots, and why two of them are this wave's own doing            
+                                                                                
+The census has exactly one rot check, at :585-602, and it tests EXISTENCE: a    
+ledger row naming a file that is no longer on disk is an error. That catches    
+deletion. It cannot catch the three shapes that actually rot a price column.    
+                                                                                
+• STALE PRICE. No content hash, no date arithmetic, no re-measurement. pds-     
+  record-parity.test.sh will print CPU=4.45s after someone doubles the harness's
+  work, forever, and nothing reds.                                              
+• STALE DISPOSITION EVIDENCE. Five rows cite "by run 2026-08-03: <cmd> rc=N".   
+  The census never re-takes any of them. A disposition survives its own repair. 
+• ORPHANED DISPOSITION. Read the cond at :519-540: legA=yes AND legB=true short-
+  circuits to THROUGH and the ledger is NEVER consulted. A disposition row for a
+  now-THROUGH instrument is silently unread - not an error, not a warning, not  
+  printed.                                                                      
+                                                                                
+▌ THE COUPLING THAT MAKES THIS THE SPINE RATHER THAN A TANGENT: two of the      
+▌ three deferred slices the wish orders will make the census lie the day they   
+▌ land. pds-w44-hetzner-offline-door puts --selftest-offline through a rider    
+▌ plus ELIXIR_TEST_ONLY_PATHS - legA/legB then compute THROUGH and the          
+▌ ENVIRONMENT row at :128 becomes an unflagged orphan asserting a refusal that  
+▌ is no longer the disposition. pds-w44-charter-sweep-adjudication takes the    
+▌ sweep from rc=1 to rc=0 - and CONTENT-RED, evidenced by a run nobody re-      
+▌ takes, outlives the red it names. Price provenance is a PREREQUISITE for the  
+▌ wish's own item 2, not an addition to it.                                     
+                                                                                
+The direction                                                                   
+                                                                                
+The epic's law has walked one rung per wave. A receipt lies when the value it   
+emits does not descend from the write return. A class lies when it does not     
+descend from its substitution (wave 42). A gate lies when its green costs       
+nothing to produce (wave 43). Wave 45's sentence is the one the new instrument  
+earns:                                                                          
+                                                                                
+▌ A PRICE LIES WHEN IT DOES NOT DESCEND FROM A METER THE INSTRUMENT ITSELF      
+▌ DROVE - AND A DISPOSITION LIES WHEN ITS EVIDENCE NAMES A RUN THE INSTRUMENT   
+▌ NEVER RE-TAKES.                                                               
+                                                                                
+What the finished wave looks like: ./scripts/pds-door-census.sh still exits 0 on
+main and still costs seconds - it is a door, and its own 3.32 s row is its own  
+gate cost, so any design that prices it out of its own door is disqualified     
+before it is written. But every number it prints is now either taken by a meter 
+it drove in THIS run, or a cached measurement carrying the content hash of the  
+instrument it prices, so that a changed instrument turns the row PRICE-STALE and
+reds. A --measure verb takes the measurement and emits the exact ledger row, so 
+re-pricing is one command rather than a hand ritual - the number descends from a
+meter the instrument drove, and anyone can re-take it. Dispositions whose       
+evidence is a RUN get re-run under an opt-in, threshold-printed tier, so        
+CONTENT-RED cannot survive its own repair. And an orphaned ledger row is an     
+ERROR, because that is the exact shape both of this wave's own slices create.   
+                                                                                
+Around that spine, the debts get paid at the new base. Priority order, and the  
+reasoning behind it:                                                            
+                                                                                
+┌───┬────────────────────────────────────┬─────────────────────────────────────┐
+│ 1 │ #9377's SHIPPED non-vacuity test   │ The only item on this list that is  │
+│   │ is a stub - make it real, then     │ a LIVE GAP ON MERGED CODE. Wave     │
+│   │ review                             │ 44's reviewer re-proved the         │
+│   │                                    │ narrowing by hand-mutation; the     │
+│   │                                    │ merging artifact cannot reproduce   │
+│   │                                    │ that proof. A security fix whose    │
+│   │                                    │ non-vacuity cannot be re-run is a   │
+│   │                                    │ stamped receipt that overstates.    │
+│   │                                    │ This outranks the spine on urgency, │
+│   │                                    │ not on scope.                       │
+│ 2 │ Price provenance, expiry, and      │ The spine. Unblocks slices 4 and 5  │
+│   │ orphan detection in pds-door-      │ from corrupting the instrument.     │
+│   │ census.sh                          │                                     │
+│ 3 │ #9380's genuinely independent      │ D649 declared leg A's three         │
+│   │ second review - 37 KB of shell,    │ predicates HIGH-FLIP-RISK and named │
+│   │ one pair of eyes                   │ the comment mutation as the oracle. │
+│   │                                    │ It never got its builder's own      │
+│   │                                    │ review dispatch.                    │
+│ 4 │ pds-w44-hetzner-offline-door -     │ I measured the arm today: rc=0,     │
+│   │ BOTH LEGS OR NEITHER, plus its     │ 2.15 s CPU. The cheapest unclaimed  │
+│   │ census row                         │ door in the inventory. It also      │
+│   │                                    │ carries the wave's sharpest overlap │
+│   │                                    │ risk.                               │
+│ 5 │ pds-w44-charter-sweep-adjudication │ Vocabulary is mined from the        │
+│   │ - 45 rulings, and the fail-open at │ charter, which has now landed - and │
+│   │ :203                               │ wave 44's own wave-log entry moved  │
+│   │                                    │ it again. Its                       │
+│   │                                    │ bp_json(allow_error=True) fail-open │
+│   │                                    │ is this epic's law broken inside    │
+│   │                                    │ the instrument that enforces it.    │
+│ 6 │ pds-w44-judgment-coverage-ladder   │ #9378 shifted every line number.    │
+│   │ at the new base                    │ PROVEN-BACKED must be ONE           │
+│   │                                    │ Enum.count over ONE MapSet.union,   │
+│   │                                    │ taken once, never leg_a + leg_b.    │
+│   │                                    │ Its numbers have been dead three    │
+│   │                                    │ times.                              │
+│ 7 │ lv_verdict/5's '?' variable-bound  │ Wave 44 recorded a non-build rather │
+│   │ decline - finish properly or rule  │ than shipping a cond reorder it     │
+│   │ out with a reason                  │ could not justify. That was         │
+│   │                                    │ correct. It is still owed a         │
+│   │                                    │ disposition.                        │
+│ 8 │ The criterion-venue rubric fix     │ Cheap, and it prevents a whole      │
+│   │                                    │ class of unmeetable criteria: name  │
+│   │                                    │ the CLAIM, accept any durable       │
+│   │                                    │ venue.                              │
+└───┴────────────────────────────────────┴─────────────────────────────────────┘
+                                                                                
+The direction debate                                                            
+                                                                                
+Three directions were developed far enough to cost something, then argued       
+against each other.                                                             
+                                                                                
+Rival A - pay the debts, period                                                 
+                                                                                
+Do exactly the wish's items 1 through 5: three deferred slices, two owed        
+reviews, the lv_verdict half, the criterion lesson. Do not touch the census - it
+exits 0, wave 44 declared it done, and reopening it is a fifth wave of arguing  
+about a column. This is the disciplined reading of the brief and it has a real  
+claim on the wave.                                                              
+                                                                                
+WHY IT LOSES: it hands the wave a false floor. Two of its own three slices      
+silently corrupt the instrument, so "pay the debts" manufactures the next wave's
+finding. And it violates the mandate the user restates every single wave -      
+DERIVE, NEVER TRANSCRIBE, INCLUDING FROM THIS BRIEF - by inheriting "the price  
+column is an instrument now" as a premise instead of running it. I ran it. It is
+half an instrument, and the half that is prose is the half the column is named  
+after.                                                                          
+                                                                                
+Rival B - measure every price, every run                                        
+                                                                                
+The pure fix: no cache, no ledger, no staleness possible. The census drives the 
+meter for every row on every invocation and the price column is a measurement by
+construction.                                                                   
+                                                                                
+WHY IT LOSES, on the epic's own evidence: D648 proved wall is not a property of 
+a door on a shared host - a fixed workload's wall spanned 5.8x at constant load 
+while its user CPU spanned 27 percent. A re-measuring census becomes the most   
+expensive program in its own denominator: 40.33 s for pds-ledger-census_test.sh 
+alone, plus the receipt census whose expensive arm D646 showed conceals ~140 s  
+minimum from any outer meter. It would also have to price ITSELF - a fixpoint.  
+Worst of all it converts a 4 s door into an ungateable one, killing the census's
+own THROUGH row, which is the single most self-defeating outcome available to   
+this wave. The honest design is not "always measure" but "never assert a        
+measurement you cannot re-take, and know when it expired."                      
+                                                                                
+Rival C - spend the column, gate the cheap doors                                
+                                                                                
+Take the census output at face value and do the obvious thing the wish's title  
+demands - SPEND IT. Put every affordable row through the required gate: hetzner 
+offline at 2.15 s, pds-record-parity.test.sh at 4.45 s, pds-scratch-            
+target_test.sh at 8.91 s. Maximum visible progress, and it is exactly what four 
+waves of arguing were FOR.                                                      
+                                                                                
+WHY IT LOSES AS A WHOLE DIRECTION, and why it is absorbed as a part: gating on  
+unverified prices is D633's sin at one remove. pds-scratch-target_test.sh's own 
+shipped row says "Hermeticity on a runner WITHOUT local Postgres is unproven    
+here" - gating it is a day-one red on a foreign runner, the identical trap wave 
+44 documented for sheet-grid-js.yml. Rival C survives as exactly ONE new door:  
+the one whose price and green I measured myself today.                          
+                                                                                
+Why the winner won                                                              
+                                                                                
+The spine plus the debts, with hetzner-offline as the one new door, is the only 
+direction in which the wish's own item 2 does not manufacture the next wave's   
+finding. It applies the epic's law to the epic's newest artifact, which is what 
+every wave of this epic has actually been about. And it converts "spend the     
+column" from a slogan into something that is safe to do more than once.         
+                                                                                
+The sharpest attack on the winner, and how the wave absorbs it                  
+                                                                                
+▌ THE ATTACK: "You are reopening a slice that shipped 11/12 with run evidence   
+▌ and rc=0 on main, on a distinction - 'measured' versus 'cached with           
+▌ provenance' - that is philosophy, not a defect. Nobody is harmed by a three-  
+▌ day-old CPU figure. This is the fifth consecutive wave arguing about a        
+▌ column, which is precisely what wave 44 ended."                               
+                                                                                
+That attack has real force, and the wave absorbs it by refusing to argue and    
+making it a RUN. The spine ships only if the verify round can demonstrate, by   
+mutation against a real tree, a case where the shipped census prints a number or
+a class the tree contradicts. I already hold one candidate - the hetzner row's  
+wrong-arm evidence - and this wave's own slices manufacture two more. IF THE    
+VERIFIERS CANNOT MAKE THE SHIPPED CENSUS PRINT A FALSEHOOD AGAINST A REAL TREE, 
+THE SPINE IS CUT AND THIS WAVE BECOMES RIVAL A. That is the fail-before         
+condition, declared before the fleet flies, and it is the honest version of     
+"derive, never transcribe" turned on my own direction.                          
+                                                                                
+Second-order absorption, as a criterion rather than a hope: the design must not 
+balloon the census's own price. A content hash per row is one shasum across 20  
+files - milliseconds. Re-running cheap dispositions is opt-in and threshold-    
+printed, never on --check's default path.                                       
+                                                                                
+Standing hazards this wave carries                                              
+                                                                                
+• THE FORMATTER VERSION TRAP, newly measured in wave 44: CI pins Elixir 1.18.1; 
+  this host runs 1.19.5. #9380 reddened Format while mix format --check-        
+  formatted exited 0 locally on the SAME commit. Apply CI's own suggested output
+  verbatim and verify BOTH formatters accept it, or the red only moves.         
+• OVERLAP RISK, declared: #9380 now owns scripts/elixir-path-escape-check.sh and
+  the hetzner slice edits the same declared set. Cloud Console wave 28 runs     
+  concurrently and owns .github/workflows/**. Coordinate before touching either.
+• BOTH LEGS OR NEITHER on the hetzner slice - the instrument AND its            
+  ELIXIR_TEST_ONLY_PATHS entry, or it is wave 42's #9290/#9292 a third time.    
+• The primary checkout is stale at a31faa52d and dirty across eight charter     
+  files. Read the charter via git show origin/main:<path>; build in worktrees   
+  only.                                                                         
+• A slice PR citing a D-number must not merge before the charter PR that defines
+  it - the D643 rule, bought at the cost of 13 shipped citations pointing at    
+  decisions main did not define.                                                
+• PUSH EARLY AND OPEN THE PR ON THE FIRST GREEN COMMIT. Wave 43 lost four       
+  branches because nothing was pushed until review, and review never ran.       
+                                                                                
+The survey plan                                                                 
+                                                                                
+Fifteen Opus surveyors at medium effort. Width now buys precision later: every  
+load-bearing assumption in the direction above is a question below, and the     
+first three are aimed squarely at the spine's own fail-before condition.        
+                                                                                
+┌─────────────────────────┬─────────────────────────┬──────────────────────────┐
+│ price-provenance-audit  │ Re-derive independently │ This is the wave's       │
+│                         │ whether pds-door-       │ spine. If any price is   │
+│                         │ census.sh MEASURES or   │ genuinely re-measured    │
+│                         │ QUOTES its prices. Time │ the direction narrows    │
+│                         │ the full run; trace     │ sharply.                 │
+│                         │ every value in THE      │                          │
+│                         │ COLUMN back to either a │                          │
+│                         │ computation or a        │                          │
+│                         │ literal at scripts/pds- │                          │
+│                         │ door-census.sh:123-149. │                          │
+│                         │ Which columns are       │                          │
+│                         │ computed, which are     │                          │
+│                         │ quoted?                 │                          │
+│ census-rot-mutation     │ Mutation-prove the      │ THE FAIL-BEFORE. If none │
+│                         │ three claimed blind     │ of the three can be made │
+│                         │ spots against a real    │ to print a falsehood,    │
+│                         │ tree: (a) change a      │ the spine is CUT.        │
+│                         │ priced instrument's     │                          │
+│                         │ bytes and show the      │                          │
+│                         │ price still prints; (b) │                          │
+│                         │ repair a CONTENT-RED    │                          │
+│                         │ row's cause and show    │                          │
+│                         │ CONTENT-RED still       │                          │
+│                         │ prints; (c) make a      │                          │
+│                         │ disposed instrument     │                          │
+│                         │ satisfy legA+legB and   │                          │
+│                         │ show its disposition    │                          │
+│                         │ row goes silently       │                          │
+│                         │ unread. Which actually  │                          │
+│                         │ fire?                   │                          │
+│ hetzner-offline-door    │ Verify --selftest-      │ Door number five and the │
+│                         │ offline is genuinely    │ live orphan              │
+│                         │ credential-free and     │ demonstration in one     │
+│                         │ hermetic (env -i, no    │ slice.                   │
+│                         │ network, no HCLOUD_*),  │                          │
+│                         │ re-measure its CPU, and │                          │
+│                         │ map EXACTLY what the    │                          │
+│                         │ rider plus              │                          │
+│                         │ ELIXIR_TEST_ONLY_PATHS  │                          │
+│                         │ entry must contain.     │                          │
+│                         │ What does the census    │                          │
+│                         │ then print for that     │                          │
+│                         │ row, and does the       │                          │
+│                         │ ENVIRONMENT disposition │                          │
+│                         │ become an orphan?       │                          │
+│ 9377-stub-nonvacuity    │ Read                    │ A live gap on merged     │
+│                         │ api/test/barkpark_web/l │ security code - the      │
+│                         │ ive/studio/pds_w44_gran │ highest-urgency item in  │
+│                         │ t_door_test.exs in      │ the wave.                │
+│                         │ full. Which case is the │                          │
+│                         │ non-vacuity or mutation │                          │
+│                         │ proof, and is it a      │                          │
+│                         │ stub? What would a REAL │                          │
+│                         │ one assert, and does    │                          │
+│                         │ shared/paper.ex's       │                          │
+│                         │ narrowing survive an    │                          │
+│                         │ independent re-         │                          │
+│                         │ derivation from source? │                          │
+│ 9380-independent-review │ Genuinely independent   │ The second owed review;  │
+│                         │ review of pds-door-     │ D649 declared it HIGH-   │
+│                         │ census.sh's leg A: do   │ FLIP-RISK.               │
+│                         │ the three predicates    │                          │
+│                         │ admit a fraudulent      │                          │
+│                         │ THROUGH? Run D649's     │                          │
+│                         │ comment mutation as the │                          │
+│                         │ oracle. Also audit the  │                          │
+│                         │ --selftest fixture tree │                          │
+│                         │ and whether the E1-E4   │                          │
+│                         │ execution encodings are │                          │
+│                         │ all covered.            │                          │
+│ charter-sweep-          │ Map scripts/pds-        │ Slice five's scope and   │
+│ adjudication            │ charter-ledger-sweep.sh │ its own law-breach; the  │
+│                         │ and pds-charter-ledger- │ count moved once         │
+│                         │ adjudication.md: how    │ already.                 │
+│                         │ many unresolved-claim   │                          │
+│                         │ arrivals against the    │                          │
+│                         │ CURRENT charter blob    │                          │
+│                         │ (D652 said 45), what    │                          │
+│                         │ the adjudication row    │                          │
+│                         │ format is, and the      │                          │
+│                         │ exact shape of the      │                          │
+│                         │ fail-open at :203 with  │                          │
+│                         │ bp_json                 │                          │
+│                         │ allow_error=True.       │                          │
+│ judgment-coverage-      │ Re-derive the ladder's  │ Slice six. Its numbers   │
+│ ladder                  │ anchors in scripts/pds- │ have been dead three     │
+│                         │ elixir-receipt-         │ times; every line number │
+│                         │ census.exs at the post- │ shifted.                 │
+│                         │ #9378 base. Where does  │                          │
+│                         │ PROVEN-BACKED belong,   │                          │
+│                         │ what are leg A and leg  │                          │
+│                         │ B, and why is the       │                          │
+│                         │ disposition sum near    │                          │
+│                         │ :4033 NOT a safe model  │                          │
+│                         │ for it?                 │                          │
+│ lv-verdict-unresolved-  │ Read lv_verdict/5 at    │ Item four. Finish        │
+│ arm                     │ census.exs:4766 and     │ properly or rule out     │
+│                         │ lv_chain_verdict. Is    │ with a reason - both are │
+│                         │ the '?' variable-bound  │ acceptable outcomes.     │
+│                         │ decline reachable       │                          │
+│                         │ through the residual?   │                          │
+│                         │ Wave 44 confirmed from  │                          │
+│                         │ source that the arm     │                          │
+│                         │ ordering does not admit │                          │
+│                         │ the specified reorder - │                          │
+│                         │ is there a              │                          │
+│                         │ semantically-honest     │                          │
+│                         │ route, or is the right  │                          │
+│                         │ answer a recorded rule- │                          │
+│                         │ out?                    │                          │
+│ receipt-census-         │ pds-elixir-receipt-     │ Wish item three's first  │
+│ unmeasured              │ census.exs is THROUGH   │ honest gap; determines   │
+│                         │ but UNMEASURED-LOCAL.   │ whether a price is even  │
+│                         │ What IS the gated arm's │ obtainable.              │
+│                         │ real price (the rider,  │                          │
+│                         │ not --selftest), and    │                          │
+│                         │ can it be measured      │                          │
+│                         │ without hitting D646's  │                          │
+│                         │ fan-out blindness?      │                          │
+│ ledger-census-tiering   │ Justify or refuse pds-  │ Wish item three's second │
+│                         │ ledger-census_test.sh   │ gap; a shrug is          │
+│                         │ at 40.33 s CPU and      │ explicitly not           │
+│                         │ 68.24 s wall on a 2-4   │ acceptable.              │
+│                         │ vCPU runner. Re-        │                          │
+│                         │ measure. What are its   │                          │
+│                         │ 144 checks, is it       │                          │
+│                         │ decomposable into a     │                          │
+│                         │ cheap arm and an        │                          │
+│                         │ expensive one, and is   │                          │
+│                         │ the D647 figure         │                          │
+│                         │ reproducible?           │                          │
+│ scratch-target-         │ pds-scratch-            │ The third PRICE row,     │
+│ hermeticity             │ target_test.sh is PRICE │ unexamined by the brief  │
+│                         │ at 8.91 s with          │ - either a cheap win or  │
+│                         │ hermeticity unproven    │ a documented refusal.    │
+│                         │ without local Postgres. │                          │
+│                         │ Prove or refute         │                          │
+│                         │ hermeticity on a        │                          │
+│                         │ Postgres-free           │                          │
+│                         │ environment. Is it a    │                          │
+│                         │ further candidate door  │                          │
+│                         │ or a genuine PRICE      │                          │
+│                         │ refusal?                │                          │
+│ gate-plumbing-and-      │ Map elixir.yml's        │ Every slice touching a   │
+│ formatter               │ required legs,          │ rider crosses this; wave │
+│                         │ ELIXIR_TEST_ONLY_PATHS  │ 44 lost time to it       │
+│                         │ and                     │ twice.                   │
+│                         │ ELIXIR_COMPILE_PATHS    │                          │
+│                         │ semantics, and          │                          │
+│                         │ reproduce the 1.18.1-   │                          │
+│                         │ vs-1.19.5 formatter     │                          │
+│                         │ divergence. What is the │                          │
+│                         │ exact procedure that    │                          │
+│                         │ satisfies BOTH          │                          │
+│                         │ formatters?             │                          │
+│ prior-art-sweep         │ Search bp papers and    │ D645's lesson: git-based │
+│                         │ tasks, and the epic     │ greps structurally       │
+│                         │ tree under task-        │ cannot see stranded      │
+│                         │ 2ac1f95237c4a8e5, for   │ work. Check the ledger   │
+│                         │ prior art on price      │ too.                     │
+│                         │ staleness, ledger       │                          │
+│                         │ expiry, content-hash    │                          │
+│                         │ freshness, and orphaned │                          │
+│                         │ allowlist rows -        │                          │
+│                         │ anywhere in this repo,  │                          │
+│                         │ not only PDS. Has any   │                          │
+│                         │ of this been built and  │                          │
+│                         │ stranded?               │                          │
+│ criterion-venue-rubric  │ Find where slice        │ Item five - and it is    │
+│                         │ criteria are authored   │ cheap to build in only   │
+│                         │ (the cycle skill, the   │ if the authoring surface │
+│                         │ task-authoring rubric,  │ is actually locatable.   │
+│                         │ prior wave criteria).   │                          │
+│                         │ Which shipped criteria  │                          │
+│                         │ presume a PR body, a    │                          │
+│                         │ push, or any workflow   │                          │
+│                         │ the builders do not     │                          │
+│                         │ have? Propose the       │                          │
+│                         │ venue-neutral phrasing. │                          │
+│ concurrency-and-fences  │ What is actually in     │ The concurrent-session   │
+│                         │ flight right now - open │ dup hazard, plus the     │
+│                         │ PRs, foreign claims on  │ declared overlap on the  │
+│                         │ the epic tree, live     │ hetzner slice's file.    │
+│                         │ worktrees, and Cloud    │                          │
+│                         │ Console wave 28's       │                          │
+│                         │ fence? Where exactly do │                          │
+│                         │ scripts/pds-*, elixir-  │                          │
+│                         │ path-escape-check.sh    │                          │
+│                         │ and                     │                          │
+│                         │ .github/workflows/**    │                          │
+│                         │ collide?                │                          │
+└─────────────────────────┴─────────────────────────┴──────────────────────────┘
+                                                                                
+Where the wave stands                                                           
+                                                                                
+STRATEGIZE COMPLETE. Fifteen surveyors flying. This Paper is the wave's living  
+story: Digest appends the survey digest and the verify plan before the verifiers
+fly; Decide appends the decisions and the wave plan before the builders fly;    
+Review closes it as the debrief.                                                
+                                                                                
+▌ Epic task: task-2ac1f95237c4a8e5. Deferred slices this wave inherits: pds-    
+▌ w44-judgment-coverage-ladder, pds-w44-hetzner-offline-door, pds-w44-charter-  
+▌ sweep-adjudication, pds-w44-lv-verdict-unresolved-spec-arm. Owed reviews:     
+▌ #9377 (b83501922) and #9380 (ab8c86b05). Slice task ids are filed at Decide   
+▌ and named here when they exist.                                               
+                                                                                
+Survey digest - 15 reports, and the fail-before is already satisfied            
+                                                                                
+▌ DIGEST COMPLETE. The wave's declared FAIL-BEFORE - 'if the verify round       
+▌ cannot make the shipped census print a falsehood against a real tree, the     
+▌ spine is CUT' - was satisfied TWICE during the SURVEY, independently, by two  
+▌ agents who did not talk to each other. price-provenance-audit replaced the    
+▌ 610-line scripts/pds-record-parity.test.sh with a two-line 'exit 0' and the   
+▌ BYTE-IDENTICAL shipped census still printed 'THROUGH CPU=1.45+3.00=4.45s ...  
+▌ (76 checks, 0 failures)', rc=0, ERRORS 0. census-rot-mutation did the same    
+▌ at 32699 bytes -> 105 bytes and diffed the output against a captured          
+▌ baseline: EMPTY. The spine stands. It does not need the verify round to earn  
+▌ its place; the verify round now exists to size it and to keep it from         
+▌ pricing the census out of its own door.                                       
+                                                                                
+Three independent confirmations of the direction's ground truth, all by run: (1)
+the census's whole run costs ~2.4-2.8 s CPU while printing a 40.33 s row -      
+arithmetically impossible, no further argument needed; (2) grep over the 835-   
+line script returns ZERO timing primitives, hashes or date arithmetic in        
+executable position - every '/usr/bin/time' occurrence is INSIDE a quoted price 
+string; (3) the verb set is exactly --check | --selftest | --list-refs | --help.
+There is no --measure.                                                          
+                                                                                
+What the survey ESTABLISHED (not inherited)                                     
+                                                                                
+• ALL THREE claimed rot classes fire against a real tree. STALE PRICE: deleting 
+  a whole 76-check harness leaves the output byte-identical. STALE DISPOSITION  
+  EVIDENCE: neutralising pds-charter-ledger-sweep.sh to rc=0 leaves CONTENT-RED 
+  printed verbatim with its 2026-08-03 stamp. ORPHANED DISPOSITION: giving the  
+  hetzner runner both legs flips it to THROUGH, moves 4 of 20 -> 5 of 20, and   
+  the ENVIRONMENT row asserting a credential refusal goes silently unread - and 
+  the census's own --selftest reports 8 PASS / 0 FAIL over the orphan.          
+• A FOURTH ROT CLASS, found twice independently: EVIDENCE-ABOUT-THE-WRONG-ARM.  
+  The hetzner row cites '--selftest rc=3' while the script's own :13 and :964   
+  declare --selftest-offline 'the CREDENTIAL-FREE arm and the CI-able gate'; the
+  scratch-target row's blocker clause names hermeticity, which is now REFUTED.  
+  No hash and no re-run catches either - only reading the cited file:line       
+  against the claim does. Two instances is an invariant, not two typos.         
+• A FIFTH GAP the direction did not name: the PRICE shape validator at census   
+  :549-558 lives inside the terminal ELSE branch. The four rows that are        
+  actually THROUGH the door get NO price shape check at all. The most-gated rows
+  are the least-validated.                                                      
+• #9380's leg A ADMITS A FRAUDULENT THROUGH, proven end-to-end with a price     
+  attached. Root cause is five lines: the taint-harvest loop comment-filters    
+  L[i], the EXECUTION scan splices L[j] (j=i+1,i+2) in RAW. Any comment within  
+  two lines below any System.cmd satisfies predicate 3. A second shape needs no 
+  comment at all. The shipped selftest is green because its fraud fixture       
+  forgets to BIND - it tests the wrong fraudster.                               
+• #9377's shipped NON-VACUITY block IS a stub - it asserts a constant defined in
+  the test file itself, plus two verbatim duplicates of earlier tests. But the  
+  FILE is not vacuous: test 2 reads persisted bytes back and discriminates the  
+  new arm by a distinct flash string. The builder's hand mutation IS recorded in
+  the closed task's criterion-4 evidence (paper.ex:152 prefixed 'false and ',   
+  RED at test line 264 naming ESCALATED). The proof was performed and never     
+  shipped. The @moduledoc's claim that the escalation is 'reproduced BY RUN in  
+  the same file' is a FALSE SENTENCE ON MERGED CODE.                            
+• --selftest-offline is genuinely credential-free and hermetic: rc=0 x3 under   
+  env -i with empty HOME, prints '0 hetzner/hcloud variables', zero repo        
+  residue. Its price is 1.97-2.30 s CPU, NOT the 3.75-3.90 s the deferred task's
+  brief carries - a ~1.7x stale figure inside the very wave whose thesis is     
+  stale figures.                                                                
+• pds-scratch-target_test.sh's hermeticity blocker is REFUTED by run: 32 PASS / 
+  0 FAIL with 10 denial-shim Postgres binaries on PATH, and again under env -i. 
+  Its price has been 4.30 s (charter), 8.91 s (census) and 9.45 s (re-measured) 
+  across three waves. It is a CANDIDATE DOOR, not a price refusal - and the     
+  census contains NO numeric price threshold anywhere, so 'PRICE' is a class    
+  with no predicate. The revealed cut sits unstated in (4.45, 8.91].            
+• pds-elixir-receipt-census.exs's UNMEASURED-LOCAL is an UNPAID measurement, not
+  an honest gap: the three gated arms cost 28.97 + 32.19 + 5.38 = 66.54 s CPU.  
+  That makes it the MOST EXPENSIVE door in the inventory, 1.65x pds-ledger-     
+  census_test.sh. D646's fan-out blindness does NOT apply - the gated arms spawn
+  no child BEAM, and the outer meter READ HIGHER than the census's own internal 
+  self-report, the inverse signature of concealment.                            
+• pds-ledger-census_test.sh is 144 checks (D637's 107 is dead) and its price is 
+  ~100% dead weight: 144 x 'census --help' with zero fixture work costs MORE    
+  than the whole suite. A two-line lazy-urllib change cuts it 29% CPU with      
+  144/144 still passing. Do not tier it - cut its boot cost and it stops being a
+  tiering case.                                                                 
+• The charter sweep's arrival count has moved a THIRD time: 41 -> 45 -> 59 (49  
+  distinct slugs), because the IDIOM vocabulary is MINED FROM THE CHARTER in-   
+  process - a bigger charter changes the LENS, not just the corpus. Its --      
+  selftest is a HOSTAGE of the CONTENT-RED: it fails at its FIRST gate and never
+  reaches any of its three lens assertions. And its fail-open at :203 was       
+  REPRODUCED - a dead bp shim produces NOT-A-TASK verdict lines byte-identical  
+  to an honest run, with a live-doc control dropping NOT-A-TASK from 16 to 1 to 
+  prove the branch is not dead code. The false absence is PERSISTED to          
+  confirm.json.                                                                 
+• The lv_verdict '?' reorder is correctly ruled out, for a STRONGER reason than 
+  wave 44 gave: a '?' spec supplies no join key, so hoisting the residual arm   
+  widens BY PROXY - the exact inverse of the residual block's own PDS-D572      
+  doctrine. The buildable half is different work: SPLIT arm 2 (one class name   
+  over two disjoint predicates) and PRINT the unnameable-spec count as a derived
+  BOUND. Today N=0 by run across all 11 live plugin specs.                      
+• The criterion-venue defect is 11 criteria across 7 of 15 w43/w44 slices, not  
+  two. On BUILT slices: 4 of 7 PR-body criteria left permanently unstamped, 2   
+  rescued by silently re-venuing. And the justification stamped on both rescued 
+  rows - 'the commit message becomes the PR body' - is FALSE: bp-epic-          
+  cycle.workflow.js:870 opens PRs with an explicit --body, which suppresses gh's
+  commit autofill.                                                              
+                                                                                
+Coverage map - checked and FOUND, checked and NOT FOUND                         
+                                                                                
+Absences are decisions-in-waiting. These are the corners the fleet reached, and 
+the corners it did not.                                                         
+                                                                                
+┌─────────────────────────┬─────────────────────────┬──────────────────────────┐
+│ Surface                 │ Verdict                 │ What it means for the    │
+│                         │                         │ wave                     │
+│ scripts/pds-door-       │ FOUND -                 │ The spine's subject is   │
+│ census.sh (835 lines,   │ prices/dispositions are │ fully mapped. No further │
+│ all branches)           │ string literals at      │ reading needed.          │
+│                         │ :123-137 / :146-149;    │                          │
+│                         │ single exec at :401;    │                          │
+│                         │ rot check :585-602      │                          │
+│                         │ existence-only          │                          │
+│ A --measure verb /      │ NOT FOUND anywhere in   │ New ground. No prior     │
+│ meter / hash / date     │ executable position     │ task in Barkpark         │
+│ arithmetic              │                         │ proposes one (4 separate │
+│                         │                         │ bp searches).            │
+│ A numeric PRICE         │ NOT FOUND - grep for    │ 'PRICE' is a class with  │
+│ threshold in the census │ threshold|tier|budget|C │ no predicate. An unmade  │
+│                         │ PU_ returns only prose  │ ruling, not a defect to  │
+│                         │ inside the ledger       │ fix silently.            │
+│                         │ literal                 │                          │
+│ THROUGH-branch price    │ NOT FOUND - validator   │ Any provenance design    │
+│ shape validation        │ is nested in the        │ must cover the THROUGH   │
+│                         │ terminal else           │ branch, not extend the   │
+│                         │                         │ PRICE-class validator.   │
+│ HUMAN-GATE class rows / │ NOT FOUND - zero rows,  │ Untested arms inside the │
+│ Port.open selftest      │ zero arms               │ instrument. Same shape,  │
+│ fixtures                │                         │ two places.              │
+│ ROSTER-VERDICT-FRESH    │ FOUND SHIPPED in pds-   │ A price hash is a PORT,  │
+│ (anchor_mfa + def_fp,   │ elixir-receipt-         │ not an invention. Its    │
+│ @key_normaliser, re-key │ census.exs :737-746,    │ known blind spot (same-  │
+│ migration rule)         │ :2256-2305              │ file only) is filed as   │
+│                         │                         │ pds-w39-roster-fresh-    │
+│                         │                         │ callee-blindspot.        │
+│ Any repo gate that      │ NOT FOUND across 8      │ docs-anchors-            │
+│ hashes the artifact it  │ staleness gates         │ check.sh:162 is          │
+│ makes a claim about     │                         │ existence-only too. The  │
+│                         │                         │ census inherited a repo- │
+│                         │                         │ wide pattern; it is not  │
+│                         │                         │ an outlier.              │
+│ Open PRs touching       │ NOT FOUND - zero of 13  │ No inbound merge-order   │
+│ scripts/pds-* or        │ open PRs                │ wait. All four           │
+│ elixir-path-escape-     │                         │ dependency SHAs re-      │
+│ check.sh                │                         │ verified as ancestors of │
+│                         │                         │ origin/main by this      │
+│                         │                         │ digest.                  │
+│ ELIXIR_TEST_ONLY_PATHS  │ NOT FOUND - it is a     │ THE BRIEF'S PREDICTED    │
+│ inside                  │ shell variable at       │ .github COLLISION DOES   │
+│ .github/workflows/elixi │ scripts/elixir-path-    │ NOT EXIST. The hetzner   │
+│ r.yml                   │ escape-check.sh:89;     │ slice writes zero bytes  │
+│                         │ elixir.yml:45 says so   │ of .github/.             │
+│                         │ and :196-197 shells out │                          │
+│ Console wave 28's       │ FOUND: 'In fence:       │ THE REAL COLLISION.      │
+│ declared fence          │ cloud/,                 │ #9377's paper.ex lives   │
+│                         │ api/lib/barkpark_web/li │ inside it. Priority 1 is │
+│                         │ ve/' (charter :121, on  │ fence-clean ONLY if the  │
+│                         │ an OPEN PR #9384)       │ repair stays in          │
+│                         │                         │ api/test/.               │
+│ A stranded 152-line     │ FOUND on the            │ Reuse it or lose it. A   │
+│ #9377 verifier probe    │ filesystem, invisible   │ git clean destroys it.   │
+│ (untracked,             │ to every git search     │                          │
+│ wf_cff43d8b-660-25)     │                         │                          │
+│ The worktree branch     │ FOUND but EMPTY -       │ A name that reads like   │
+│ named pds-review-9377   │ clean, 0 commits ahead  │ live work. Nobody is     │
+│                         │ of origin/main          │ reviewing #9377. Do not  │
+│                         │                         │ stand down on it.        │
+│ .claude/workflows/bp-   │ NOT REACHED by SIX of   │ The largest coverage     │
+│ pds-charter.md (D-      │ the fifteen surveyors   │ hole.                    │
+│ number bodies)          │                         │ D633/D637/D639/D646/D647 │
+│                         │                         │ /D648/D649/D650/D572     │
+│                         │                         │ were quoted from CODE    │
+│                         │                         │ and TASKS, not read from │
+│                         │                         │ the charter for          │
+│                         │                         │ coverage.                │
+│ ubuntu-latest / any CI  │ NOT REACHED - every     │ No pds door has ever     │
+│ runner behaviour for    │ hermeticity and price   │ executed on a foreign    │
+│ any pds door            │ proof is macOS-local    │ runner. The first CI run │
+│                         │                         │ is the only real         │
+│                         │                         │ evidence.                │
+│ api/test/barkpark/pds_d │ NOT OPENED by anyone    │ If it pins 40.33s, re-   │
+│ oor_census_test.exs     │                         │ pricing reds the Elixir  │
+│ (does it PIN the stale  │                         │ gate and the fix must    │
+│ price literals?)        │                         │ co-land.                 │
+│ Whether ANY CI workflow │ NOT RE-VERIFIED - two   │ If true, the 40.33 s     │
+│ invokes pds-ledger-     │ bp tasks assert it is   │ 'door price' prices a    │
+│ census_test.sh          │ invoked by NO workflow  │ door nobody walks        │
+│                         │                         │ through - wave 43's law  │
+│                         │                         │ with a mirror.           │
+│ live_scope.ex / caps.ex │ NOT OPENED - taken from │ The exact circularity    │
+│ / access.ex (the #9377  │ the commit message and  │ the independent review   │
+│ mechanism story)        │ the artifact's own      │ exists to break, still   │
+│                         │ moduledoc               │ unbroken.                │
+└─────────────────────────┴─────────────────────────┴──────────────────────────┘
+                                                                                
+Where the reports contradict the direction, and each other                      
+                                                                                
+• THE DIRECTION SAID '3 of 19'. The wish said it too. BOTH ARE DEAD: the census 
+  enters its own denominator by design and prints 20 with 4 THROUGH. Confirmed  
+  by two independent runs. This is the ELEVENTH consecutive wave in which the   
+  dispatch is refuted from the artifact - and this time the direction refuted   
+  itself before the survey did.                                                 
+• THE DIRECTION SAID the census costs 2.80 s CPU / 4.13 s wall; a surveyor      
+  measured 2.44 s CPU / 3.47 s wall; both under load1 12-19. The FINDING is     
+  unaffected (the gap to 40.33 s only widens) but neither figure is quotable as 
+  the code's price. Every number in this wave was taken on a host at load1 12-  
+  33. NOTHING here may enter a ledger row without a quiet-host re-take.         
+• THE LEDGER-CENSUS PRICE IS STALE-HIGH, not stale-low: the row says 40.33 s CPU
+  / 68.24 s wall; a re-measure at load1 33 got 32.22 s / 42.61 s. So the price  
+  column is wrong in BOTH directions across different rows. A staleness arm that
+  only catches growth catches half the defect.                                  
+• THE HETZNER SLICE'S DECLARED FILE SET IS TOO NARROW. The bp task declares only
+  the rider + elixir-path-escape-check.sh. Landing exactly those two produces a 
+  green census carrying a FALSE ENVIRONMENT row AND price=UNMEASURED-LOCAL on   
+  the door it just measured three times. BOTH LEGS OR NEITHER must be widened to
+  FOUR files.                                                                   
+• THE LADDER'S NUMBERS SURVIVE THE NEW BASE (252 population, 74 judged-coverage,
+  PROVEN-BACKED 23 with |A|=20, |B|=3) - but OVERLAP IS 0, so leg_a + leg_b and 
+  Enum.count(MapSet.union(...)) BOTH PRINT 23. A builder can ship the forbidden 
+  addition, satisfy every number-quoting criterion, and pass. The injection     
+  proof is the ONLY discriminator that exists at this base.                     
+• THE CHARTER SWEEP IS THE LAST SLICE, NOT A FREE-STANDING ONE. Its fingerprint 
+  hashes the whole normalized charter line, so adjudicating before the WAVE-45  
+  charter merges orphans every row it writes - and two of the 59 arrivals are   
+  self-referential (its own dispatch row at charter:12685, and the adjudication 
+  table file itself at charter:2782).                                           
+                                                                                
+What Decide cannot live without                                                 
+                                                                                
+• Does repairing #9377's stub require touching                                  
+  api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex? If yes, wave 45 
+  writes inside Console wave 28's declared fence and needs sequencing or a      
+  dispensation. This single answer decides whether the wave has a cross-epic    
+  collision at all.                                                             
+• Does the NON-VACUITY block stay GREEN under the paper.ex:152 mutation while   
+  test 2 reds? That is the one decisive experiment. A green there is the stub   
+  proven by run rather than by reading.                                         
+• What staleness KEY is legal? The census prices ITSELF, so a naive content hash
+  makes its own row permanently PRICE-STALE. And pds-elixir-receipt-census.exs's
+  price is CORPUS-sized (804 files) - the instrument can be byte-identical while
+  its price moves. The key must be self-exempting and corpus-aware, or the first
+  false-green is already scheduled.                                             
+• Does an ORPHANED-DISPOSITION error have a false-positive mode? A row          
+  legitimately retained as history reds a naive check. The design needs a       
+  retire/supersede shape, not just an error.                                    
+• Does api/test/barkpark/pds_door_census_test.exs pin any price literal, and    
+  does any CI workflow invoke the ledger census? These decide whether re-pricing
+  is free or must co-land with a test change - and whether the ledger-census    
+  'door price' prices anything at all.                                          
+                                                                                
+Verify plan - 13 assignments IN FLIGHT                                          
+                                                                                
+Every assignment below is Opus (fable is unavailable and forbidden this wave;   
+no_fable:true remaps every fable-selecting site). Each names what will be RUN as
+proof - reading is not proof for a claim of the form 'the gate passes'.         
+                                                                                
+┌────┬────────────────────────────────────┬────────────────────────────────────┐
+│ #  │ Question                           │ Proof it must RUN                  │
+│ 1  │ Does the shipped NON-VACUITY block │ CC=/usr/bin/clang mix test on      │
+│    │ stay GREEN under the paper.ex:152  │ pds_w44_grant_door_test.exs at     │
+│    │ 'false and ' mutation while test 2 │ origin/main, green then mutated;   │
+│    │ reds, and can the repair stay      │ quote both left/right              │
+│    │ inside api/test/?                  │                                    │
+│ 2  │ Is api/lib/barkpark_web/live/      │ git show of the charter branch +   │
+│    │ genuinely fenced by Console w28,   │ gh pr view 9384 + git merge-base   │
+│    │ and is #9384 merged or open?       │                                    │
+│ 3  │ Can a hash-keyed price provenance  │ time the census with and without a │
+│    │ be added without pricing the       │ 20-file shasum pass; prototype     │
+│    │ census out of its own door?        │ PRICE-STALE and prove it reds by   │
+│    │                                    │ mutation                           │
+│ 4  │ Do an orphan check and a THROUGH-  │ --check before/after in a          │
+│    │ branch shape check change ANY      │ worktree, diffed against a         │
+│    │ current row's class on the real    │ captured baseline                  │
+│    │ tree?                              │                                    │
+│ 5  │ Does the FOUR-file hetzner slice   │ build all four edits in a          │
+│    │ land clean - 5 of 20, no orphan,   │ worktree; run --check, --selftest, │
+│    │ no UNMEASURED-LOCAL - and does the │ and --selftest-offline x3 with     │
+│    │ two-statement rider shape avoid    │ load stamped                       │
+│    │ BOUND-UNEXEC?                      │                                    │
+│ 6  │ Re-derive the two ladder injection │ instrumented census probe, both    │
+│    │ mutants at the new base: does      │ injections, printed OVERLAP        │
+│    │ UNION hold at 23 while the naive   │                                    │
+│    │ sum moves to 24 and 25?            │                                    │
+│ 7  │ Does the paren-balanced argument-  │ --check and --selftest             │
+│    │ list fix for leg A close both      │ before/after on the real tree;     │
+│    │ fraud shapes WITHOUT reclassifying │ both fraud fixtures must red       │
+│    │ any current row?                   │                                    │
+│ 8  │ Split the 59 arrivals into         │ run the sweep against a FROZEN     │
+│    │ genuinely-new claims vs moved      │ blob sha; re-confirm the 11 non-   │
+│    │ fingerprints, and prove the fail-  │ task slugs with a working bp       │
+│    │ open fix exits 2 UNCHECKED without │                                    │
+│    │ a new CI red                       │                                    │
+│ 9  │ Does any CI workflow invoke the    │ git grep over .github + run the    │
+│    │ ledger census or the door census,  │ ExUnit door test                   │
+│    │ and does pds_door_census_test.exs  │                                    │
+│    │ pin a price literal?               │                                    │
+│ 10 │ Does the pinned Elixir 1.18.1      │ docker run hexpm/elixir:1.18.1-*   │
+│    │ container reproduce #9380's Format │ mix format --check-formatted on    │
+│    │ failure and accept the fix?        │ df3d5f468 and 535b2a4f9            │
+│ 11 │ Quiet-host re-take of the three    │ re-measure receipt-census arms,    │
+│    │ contested prices, with an          │ ledger-census, door census,        │
+│    │ interleaved calibration burn       │ hetzner-offline at the lowest load │
+│    │                                    │ reachable; report the load, do not │
+│    │                                    │ hide it                            │
+│ 12 │ Does gh pr create --body actually  │ gh pr create --help + a throwaway  │
+│    │ suppress commit autofill, and what │ body test; rewrite the three       │
+│    │ is the exact venue-rule insertion? │ DEFERRED slices' criteria          │
+│ 13 │ Is the lv_verdict fixture's        │ delete the fixture line and run -- │
+│    │ literal sessionless route load-    │ selftest; run the full census and  │
+│    │ bearing, and how many real-tree    │ read the REACH ladder              │
+│    │ clauses hit arm 2's not-routed     │                                    │
+│    │ predicate?                         │                                    │
+└────┴────────────────────────────────────┴────────────────────────────────────┘
+                                                                                
+▌ PREMISE SMOKE, run by this digest before the fleet flew: all seven wave-      
+▌ 44/43 merge SHAs re-confirmed as ancestors of origin/main ab8c86b05 by git    
+▌ merge-base --is-ancestor (a46ee2425, b83501922, f2b24b2ab, 90cdc7478,         
+▌ ab8c86b05, 3a32373b8, 014923a43). The one premise that FAILED smoke is the    
+▌ brief's own: the .github/workflows collision it predicted does not exist,     
+▌ because ELIXIR_TEST_ONLY_PATHS is a shell variable in scripts/, not workflow  
+▌ YAML. That is a finding, not a foundation - and the collision that IS real    
+▌ sits on a surface nobody was asked to look at.                                
+                                                                                
+DECIDE — the verify round's verdict, and what flies                             
+                                                                                
+Base at Decide is a723ec0dd — the wave's declared base moved TWICE while it flew
+(dispatch pinned ab8c86b05, digest ran at 0d1936832, Decide re-derived at       
+a723ec0dd). scripts/pds-door-census.sh is byte-identical at all three, so wave- 
+44's census work is unaffected; every .exs and api/lib anchor was re-derived.   
+All seven wave-44 commits re-confirmed as ancestors by git merge-base --is-     
+ancestor.                                                                       
+                                                                                
+Charter PR #9412 is OPEN and reporting checks — docs-only, three .md files, 931 
+insertions, zero deletions, carrying PDS-D656 through D663 plus two verify-round
+re-derivation recipe rows. It is NOT yet on main, so this Paper is what a       
+builder can read today.                                                         
+                                                                                
+THE SPINE SURVIVED — the fail-before was satisfied, then satisfied again        
+                                                                                
+The declared fail-before was: if the verify round cannot make the SHIPPED census
+print a falsehood against a real tree, the spine is CUT and this wave becomes   
+pay-the-debts-only. It was satisfied TWICE in the SURVEY round, by two agents   
+independently, and never seriously contested afterwards.                        
+                                                                                
+price-provenance-audit replaced the 610-line scripts/pds-record-parity.test.sh  
+(32,699 bytes) with a two-line exit 0 (105 bytes). The byte-identical shipped   
+census still printed: THROUGH CPU=1.45+3.00=4.45s LOCAL meter=… (76 checks, 0   
+failures), rc=0, ERRORS 0. A price, a check count AND a zero-failures claim, all
+asserted for a program containing no checks.                                    
+                                                                                
+census-rot-mutation did the same at 32,699 -> 105 bytes and diffed against a    
+captured baseline: EMPTY.                                                       
+                                                                                
+Three confirmations of the direction, all by run: the census's whole run costs  
+2.38 s CPU while printing a 40.33 s row (arithmetically impossible); grep       
+returns ZERO timing, hash or date primitives in executable position (every      
+/usr/bin/time occurrence is inside a quoted price string); and the verb set is  
+exactly --check|--selftest|--list-refs|--help.                                  
+                                                                                
+VERIFICATION RESULTS — per assignment, including the refutations                
+                                                                                
+PROVEN                                                                          
+                                                                                
+┌─────────────────────────┬─────────────────────────┬──────────────────────────┐
+│ assignment              │ verdict                 │ the decisive line        │
+│ v-9377-stub-mutation    │ PROVEN, and worse than  │ Flipping the TEST-LOCAL  │
+│                         │ 'a stub'                │ literal to do: true with │
+│                         │                         │ paper.ex byte-identical  │
+│                         │                         │ reds :348 alone — left:  │
+│                         │                         │ true / right: false. The │
+│                         │                         │ assertion observes zero  │
+│                         │                         │ bytes of product code.   │
+│ v-measure-verb-and-key  │ Key is legal,           │ Editing a price literal: │
+│                         │ affordable, fixpoint    │ elided key UNCHANGED     │
+│                         │ SOLVED                  │ 1dca8d50…f71931 while    │
+│                         │                         │ naive sha moves          │
+│                         │                         │ c88dbb2c… -> 318ea31a….  │
+│                         │                         │ Editing ONE BYTE of      │
+│                         │                         │ body: key moves ->       │
+│                         │                         │ 99463587…. Cost +1.9% as │
+│                         │                         │ three forks, +14% as a   │
+│                         │                         │ per-file loop.           │
+│ v-orphan-and-through-   │ All three defects       │ A directly contradictory │
+│ shape                   │ PROVEN, repairs built,  │ orphan row leaves output │
+│                         │ blast radius zero       │ BYTE-IDENTICAL, rc=0,    │
+│                         │                         │ stderr EMPTY, selftest 8 │
+│                         │                         │ PASS / 0 FAIL. Repaired: │
+│                         │                         │ rc=1 naming 'ORPHANED    │
+│                         │                         │ DISPOSITION — the ledger │
+│                         │                         │ carries class            │
+│                         │                         │ ENVIRONMENT … COMPUTED   │
+│                         │                         │ as THROUGH'.             │
+│ v-9380-lega-fraud-fix   │ CONFIRMED and FIXED,    │ Three fraud shapes each  │
+│                         │ plus a third fraud      │ classify LEGA-BOUND-EXEC │
+│                         │ shape                   │ on shipped code. Fixed:  │
+│                         │                         │ all decline to BOUND-    │
+│                         │                         │ UNEXEC while a five-line │
+│                         │                         │ Port.open door goes      │
+│                         │                         │ LEGA-BOUND-EXEC.         │
+│                         │                         │ Selftest 8 -> 13 arms,   │
+│                         │                         │ each reds on revert.     │
+│ v-charter-sweep-        │ Fail-open reproduced    │ A dead bp AND an expired │
+│ arrivals                │ TWICE, byte-identically │ token (exit 3, VALID     │
+│                         │                         │ JSON, unauthorized) both │
+│                         │                         │ produce output identical │
+│                         │                         │ to a healthy run, still  │
+│                         │                         │ printing 'Each was       │
+│                         │                         │ CONFIRMED with a second  │
+│                         │                         │ read'. Live-doc control  │
+│                         │                         │ flips all 14 to          │
+│                         │                         │ MISCLASSIFIED.           │
+│ v-ladder-injection-     │ Numbers survive the new │ legA=20 legB=3           │
+│ proof                   │ base; OVERLAP=0 is the  │ naive_sum=23 UNION=23    │
+│                         │ finding                 │ OVERLAP=0. The addition  │
+│                         │                         │ and the union are        │
+│                         │                         │ numerically              │
+│                         │                         │ indistinguishable today  │
+│                         │                         │ — the injection mutants  │
+│                         │                         │ are the only             │
+│                         │                         │ discriminator that       │
+│                         │                         │ exists.                  │
+│ v-criterion-venue-rule  │ Mechanism PROVEN by     │ --title T --body B sends │
+│                         │ four arms               │ exactly B, the commit    │
+│                         │                         │ body appearing nowhere;  │
+│                         │                         │ --fill sends the commit; │
+│                         │                         │ no --body REFUSES non-   │
+│                         │                         │ interactively; --fill -- │
+│                         │                         │ body B sends exactly B.  │
+│                         │                         │ No silent-autofill path  │
+│                         │                         │ exists.                  │
+│ v-formatter-1181-       │ Procedure works; the    │ …-debian-bookworm-       │
+│ container               │ TAG was a fabrication   │ 20241016 is 'no such     │
+│                         │                         │ manifest'. The working   │
+│                         │                         │ tag …-20260610 was       │
+│                         │                         │ already in this charter  │
+│                         │                         │ at :10834. api/ AND      │
+│                         │                         │ cloud/ on main are green │
+│                         │                         │ under BOTH formatters —  │
+│                         │                         │ no ambient drift.        │
+└─────────────────────────┴─────────────────────────┴──────────────────────────┘
+                                                                                
+REFUTED — where verification contradicted the direction, the brief, or the      
+charter                                                                         
+                                                                                
+┌──────────────────────────────────────┬───────────────────────────────────────┐
+│ claim                                │ refuted by run                        │
+│ The direction: 'the NON-VACUITY      │ NO. Both red, on the identical        │
+│ block stays GREEN while test 2 reds' │ oracle, because the block IS test 2   │
+│                                      │ duplicated. That refutation is the    │
+│                                      │ diagnosis.                            │
+│ PDS-D648: sys EXCEEDS user on the    │ BOTH HALVES FALSE. sys ~= user        │
+│ hetzner door; CPU owes 'nothing to   │ (0.97/0.94), and the byte-identical   │
+│ load'                                │ workload spans 1.91–3.90 s, tracking  │
+│                                      │ load. D656 supersedes the reasoning;  │
+│                                      │ the CPU unit survives.                │
+│ The task brief: hetzner costs        │ 1.91 s at load1 ~8 (Decide's own run, │
+│ 3.75–3.90 s CPU                      │ env -i, rc=0). A 2x overstatement.    │
+│ The ledger row: pds-ledger-          │ 24.05–24.34 s CPU, wall 28.15–28.58,  │
+│ census_test.sh costs 40.33 s CPU /   │ 144 checks, two trials at load1 ~8.   │
+│ 68.24 s wall                         │ Wrong by 40% on CPU and 59% on wall.  │
+│ The brief: 'the .github/workflows    │ DOES NOT EXIST.                       │
+│ collision with Console'              │ ELIXIR_TEST_ONLY_PATHS is a shell     │
+│                                      │ variable at elixir-path-escape-       │
+│                                      │ check.sh:89. The real collision is    │
+│                                      │ api/lib/barkpark_web/live/ — a        │
+│                                      │ surface nobody was asked to look at.  │
+│ The digest: '11 PR-body criteria     │ 7 across 5, and 2 orphaned. Three of  │
+│ across 7 of 15 slices; 4 orphaned'   │ the ten regex hits name PR as the     │
+│                                      │ SUBJECT of a check, not as a venue.   │
+│ PDS-D650: the denominator is 19      │ It is 20 with 4 doors, and has been   │
+│                                      │ since #9380. The census enters its    │
+│                                      │ own denominator by design.            │
+│ The hetzner task: TWO files          │ FIVE edits across THREE files. The    │
+│                                      │ fifth — internal/cli/testdata/ in the │
+│                                      │ dispatch set — was named by nobody,   │
+│                                      │ and without it a fixture-only PR reds │
+│                                      │ the new door with the Elixir gate     │
+│                                      │ legitimately SKIPPED.                 │
+│ The ladder brief: every code anchor  │ All dead. The sum is :4101 not :4033  │
+│                                      │ (now bare acc); receipt_functions     │
+│                                      │ :3342 not ~3274; roster_functions     │
+│                                      │ :3353 not ~3285; 7,402 lines not      │
+│                                      │ 7,106; selftest 33/22 not 25/16.      │
+│ D637: pds-scratch-target_test.sh     │ REFUTED. 32 PASS / 0 FAIL with ten    │
+│ hermeticity 'unproven'               │ Postgres denial shims on PATH, zero   │
+│                                      │ violations, and again under env -i.   │
+└──────────────────────────────────────┴───────────────────────────────────────┘
+                                                                                
+COVERAGE — including the not-founds, which are load-bearing                     
+                                                                                
+Both coverage deficits were EMPTY: every dispatched survey agent and every      
+dispatched verifier reported. Ten verifiers ran; nothing this wave rests on an  
+unanswered question.                                                            
+                                                                                
+• NOT-FOUND, decisive: no CI workflow invokes any pds instrument. git grep -in  
+  'pds' origin/main -- .github returns ONE line and it is a prose comment. Four 
+  instruments ride the required Elixir gate through api/test ExUnit shells plus 
+  ELIXIR_TEST_ONLY_PATHS, not through .github at all.                           
+• NOT-FOUND, decisive: pds-ledger-census_test.sh has NO executable caller       
+  anywhere in the repo — 20 hits, all prose. Its 40 s price prices a door nobody
+  walks through, which reframes the tiering question rather than answering it.  
+• NOT-FOUND, decisive: no test pins any price VALUE. api/test is clean of 40.33 
+  / 68.24 / 8.91 / 4.45 / 3.32. Re-pricing is free of test edits — but RE-      
+  CLASSING is not (length(price_rows) >= 2 at :305).                            
+• NOT-FOUND: zero open PRs touch shared/paper.ex, and Cloud Console Hardening   
+  has written ZERO commits into its own fenced api/lib/barkpark_web/live/ in its
+  entire epic lifetime.                                                         
+• NOT-FOUND: PROVEN-BACKED appears zero times in the census output and zero     
+  times in its owning doc — rung 4 is new code, not an edit.                    
+• NOT-FOUND, and it is the epic's oldest hole: no pds door has ever executed on 
+  a foreign CI runner. Every hermeticity and price proof is macOS-local.        
+  Restated, not closed; filed as pds-w45-bl-foreign-runner-first-door.          
+• NOT RUN: the full Elixir suite. The #9377 no-leak proof covers two files in   
+  one invocation, not suite scale. Named in the slice as a risk the builder must
+  close.                                                                        
+                                                                                
+DECISIONS — each with its one-line why                                          
+                                                                                
+┌──────┬───────────────────────────────────┬───────────────────────────────────┐
+│ #    │ decision                          │ why                               │
+│ D656 │ A price lies when it does not     │ CPU moved 2x on a byte-identical  │
+│      │ descend from a meter the          │ workload within one wave, so the  │
+│      │ instrument itself drove; and the  │ unit alone was never the          │
+│      │ LOAD STAMP is part of the price.  │ guarantee. D648's conclusion      │
+│      │                                   │ survives; its reasoning is        │
+│      │                                   │ superseded.                       │
+│ D657 │ The #9377 repair is               │ The shipped block is a tautology  │
+│      │ Code.compile_string inside        │ plus a duplicate; the repair      │
+│      │ api/test ALONE, and it is fence-  │ needs no api/lib byte, which is   │
+│      │ clean.                            │ exactly what keeps it out of      │
+│      │                                   │ Console's declared fence.         │
+│ D658 │ Leg A must read the ARGUMENT      │ Three fraud shapes produce        │
+│      │ LIST, not the neighbourhood.      │ THROUGH with a price attached —   │
+│      │                                   │ and the window also DECLINES an   │
+│      │                                   │ honest five-line Port.open door,  │
+│      │                                   │ so the fix is not 'decline more'. │
+│ D659 │ Six rot classes; an orphaned      │ The rot check tests existence     │
+│      │ disposition is an ERROR;          │ only, and the four rows that      │
+│      │ retirement is the only escape     │ actually gate carry no price-     │
+│      │ hatch and requires the dupe check │ shape check in the instrument OR  │
+│      │ in the same slice.                │ its rider.                        │
+│ D660 │ PROVEN-BACKED is ONE Enum.count   │ OVERLAP is 0, so the forbidden    │
+│      │ over ONE MapSet.union, and the    │ addition prints the right         │
+│      │ injection proof must SHIP.        │ integer. Evidence quoting '23'    │
+│      │                                   │ proves nothing.                   │
+│ D661 │ The '?' variable-bound decline is │ The reorder widens the residual   │
+│      │ RULED OUT, with a source-derived  │ by proxy (87/322, integrity arm   │
+│      │ reason.                           │ still PASS) and the arm has no    │
+│      │                                   │ join key — lvs_joinable? drops    │
+│      │                                   │ the module name upstream. A       │
+│      │                                   │ recorded rule-out is the honest   │
+│      │                                   │ outcome.                          │
+│ D662 │ Criterion venue is neutral, and   │ gh pr create --body suppresses    │
+│      │ evidence TYPE is too.             │ commit autofill, so a PR-body     │
+│      │                                   │ criterion is unmeetable the       │
+│      │                                   │ moment a builder finishes — a 57% │
+│      │                                   │ loss rate on built work.          │
+│ D663 │ The sweep ADJUDICATION defers to  │ The vocabulary is mined from the  │
+│      │ wave 46; its FAIL-OPEN builds     │ charter in-process (41 -> 45 ->   │
+│      │ now.                              │ 59), so this wave's own charter   │
+│      │                                   │ PR moves it a fourth time. The    │
+│      │                                   │ fail-open is independent of all   │
+│      │                                   │ that.                             │
+└──────┴───────────────────────────────────┴───────────────────────────────────┘
+                                                                                
+THE EPIC'S NEXT SENTENCE, earned by run: A PRICE LIES WHEN IT DOES NOT DESCEND  
+FROM A METER THE INSTRUMENT ITSELF DROVE — AND A DISPOSITION LIES WHEN ITS      
+EVIDENCE NAMES A RUN THE INSTRUMENT NEVER RE-TAKES. Sharpened by the            
+measurements: A PRICE IS QUOTABLE ONLY AGAINST ITS OWN LOAD STAMP.              
+                                                                                
+THE WAVE PLAN — 8 slices, 5 in round 1                                          
+                                                                                
+┌───┬───────────────┬───┬───────────────┬───────────────┬──────┬───────────────┐
+│ # │ slice         │ r │ task id       │ surface       │ mode │ gate          │
+│   │               │ o │               │               │ l    │               │
+│   │               │ u │               │               │      │               │
+│   │               │ n │               │               │      │               │
+│   │               │ d │               │               │      │               │
+│ 1 │ #9377's non-  │ 1 │ pds-w45-      │ api/test/…/pd │ opus │ cd api &&     │
+│   │ vacuity stops │   │ grant-door-   │ s_w44_grant_d │      │ CC=/usr/bin/c │
+│   │ being a       │   │ nonvacuity    │ oor_test.exs  │      │ lang mix test │
+│   │ tautology     │   │               │ ONLY          │      │ test/barkpark │
+│   │ over its own  │   │               │               │      │ _web/live/stu │
+│   │ literal       │   │               │               │      │ dio/pds_w44_g │
+│   │               │   │               │               │      │ rant_door_tes │
+│   │               │   │               │               │      │ t.exs         │
+│ 2 │ Leg A reads   │ 1 │ pds-w45-lega- │ scripts/pds-  │ opus │ bash          │
+│   │ the ARGUMENT  │   │ argument-list │ door-         │      │ scripts/pds-  │
+│   │ LIST; the     │   │               │ census.sh     │      │ door-         │
+│   │ enumerator    │   │               │ (awk +        │      │ census.sh --  │
+│   │ stops dying   │   │               │ instruments + │      │ selftest ; -- │
+│   │ silently      │   │               │ selftest)     │      │ check ;       │
+│   │               │   │               │               │      │ shellcheck -S │
+│   │               │   │               │               │      │ error ; mix   │
+│   │               │   │               │               │      │ test          │
+│   │               │   │               │               │      │ pds_door_cens │
+│   │               │   │               │               │      │ us_test.exs   │
+│ 3 │ PROVEN-BACKED │ 1 │ pds-w44-      │ pds-elixir-   │ opus │ elixir        │
+│   │ as a union,   │   │ judgment-     │ receipt-      │      │ scripts/pds-  │
+│   │ never an      │   │ coverage-     │ census.exs +  │      │ elixir-       │
+│   │ addition —    │   │ ladder        │ docs/decision │      │ receipt-      │
+│   │ and the '?'   │   │               │ s/            │      │ census.exs ;  │
+│   │ prose stops   │   │               │               │      │ --selftest ;  │
+│   │ overclaiming  │   │               │               │      │ bash          │
+│   │               │   │               │               │      │ scripts/check │
+│   │               │   │               │               │      │ -doc-         │
+│   │               │   │               │               │      │ budgets.sh    │
+│ 4 │ The sweep's   │ 1 │ pds-w45-      │ scripts/pds-  │ opus │ bash          │
+│   │ fail-open     │   │ sweep-failope │ charter-      │      │ scripts/pds-  │
+│   │ closes; its   │   │ n             │ ledger-       │      │ charter-      │
+│   │ selftest      │   │               │ sweep.sh      │      │ ledger-       │
+│   │ stops being   │   │               │               │      │ sweep.sh --   │
+│   │ the corpus's  │   │               │               │      │ selftest      │
+│   │ hostage       │   │               │               │      │               │
+│ 5 │ A criterion   │ 1 │ pds-w45-      │ .claude/workf │ opus │ node --check  │
+│   │ names the     │   │ criterion-    │ lows/bp-epic- │      │ .claude/workf │
+│   │ CLAIM, not    │   │ venue         │ cycle.workflo │      │ lows/bp-epic- │
+│   │ the container │   │               │ w.js          │      │ cycle.workflo │
+│   │               │   │               │               │      │ w.js          │
+│ 6 │ The ledger    │ 2 │ pds-w45-      │ scripts/pds-  │ opus │ bash          │
+│   │ stops lying   │ ( │ census-       │ door-         │      │ scripts/pds-  │
+│   │ by silence:   │ a │ ledger-integr │ census.sh     │      │ door-         │
+│   │ orphan,       │ f │ ity           │ (cond + rot   │      │ census.sh --  │
+│   │ retire, dupe, │ t │               │ check +       │      │ selftest ; -- │
+│   │ THROUGH       │ e │               │ selftest)     │      │ check ;       │
+│   │ shape,        │ r │               │               │      │ shellcheck -S │
+│   │ evidenced     │ 2 │               │               │      │ error ; mix   │
+│   │ UNMEASURED    │ ) │               │               │      │ test          │
+│   │               │   │               │               │      │ pds_door_cens │
+│   │               │   │               │               │      │ us_test.exs   │
+│ 7 │ The price     │ 3 │ pds-w45-      │ scripts/pds-  │ opus │ bash          │
+│   │ column learns │ ( │ price-provena │ door-         │      │ scripts/pds-  │
+│   │ to expire:    │ a │ nce           │ census.sh     │      │ door-         │
+│   │ content key,  │ f │               │ (key + verb)  │      │ census.sh --  │
+│   │ PRICE-STALE,  │ t │               │               │      │ check ; --    │
+│   │ --measure     │ e │               │               │      │ selftest ; -- │
+│   │               │ r │               │               │      │ measure ; mix │
+│   │               │ 6 │               │               │      │ test          │
+│   │               │ ) │               │               │      │ pds_door_cens │
+│   │               │   │               │               │      │ us_test.exs   │
+│ 8 │ The hetzner   │ 4 │ pds-w44-      │ rider +       │ opus │ bash          │
+│   │ offline arm   │ ( │ hetzner-      │ escape-check  │      │ scripts/elixi │
+│   │ becomes door  │ a │ offline-door  │ x2 + census   │      │ r-path-       │
+│   │ 5 of 20 —     │ f │               │ ledger x2     │      │ escape-check. │
+│   │ FIVE edits,   │ t │               │               │      │ sh --selftest │
+│   │ THREE files   │ e │               │               │      │ ; --match     │
+│   │               │ r │               │               │      │ test ; pds-   │
+│   │               │ 6 │               │               │      │ door-         │
+│   │               │ , │               │               │      │ census.sh --  │
+│   │               │ 7 │               │               │      │ check ; mix   │
+│   │               │ ) │               │               │      │ test          │
+└───┴───────────────┴───┴───────────────┴───────────────┴──────┴───────────────┘
+                                                                                
+HIGH-FLIP-RISK, declared. Slice 1 — whether a Code.compile_string substitution  
+proves what a tautology did not, on a LIVE authorization door, and whether the  
+repair stays out of api/lib and therefore out of Console's fence. Slice 2 —     
+whether the argument-list predicate still admits a fraudulent THROUGH, and      
+whether it now DECLINES an honest door; the fix must be proven in BOTH          
+directions and the Port.open arm is the second-direction oracle. Slice 6 —      
+whether the retire shape is a bypass, and whether the orphan check has a false- 
+positive mode. All three warrant a genuinely INDEPENDENT second reviewer before 
+merge; this workflow spawns one reviewer, so that dispatch is the lead's manual 
+step.                                                                           
+                                                                                
+ROUNDS ARE LAW. Slices 6, 7 and 8 all edit scripts/pds-door-census.sh and are   
+strictly sequenced behind slice 2 and each other. They do NOT build this run;   
+the lead dispatches each after its dependency MERGES. A round-1 slice whose     
+dependency is unmerged burns a builder to produce a BLOCKED report.             
+                                                                                
+FABLE WAS UNAVAILABLE. Every slice is built at opus@medium, including three (2, 
+6, 7) that are genuinely hard on the difficulty axis and would otherwise have   
+gone to fable. That is a recorded constraint, not a judgment that these slices  
+are routine.                                                                    
+                                                                                
+BACKLOG FILED — the future, not just the present                                
+                                                                                
+┌────────────────────────────────────┬─────────────────────────────────────┬───┐
+│ task id                            │ what                                │ p │
+│                                    │                                     │ r │
+│                                    │                                     │ i │
+│                                    │                                     │ o │
+│                                    │                                     │ r │
+│                                    │                                     │ i │
+│                                    │                                     │ t │
+│                                    │                                     │ y │
+│ pds-w45-bl-sweep-adjudication-     │ Adjudicate the sweep's 59 arrivals  │ 1 │
+│ frozen-blob                        │ against a FROZEN BLOB SHA, never a  │   │
+│                                    │ count. 13 of them are a LENS        │   │
+│                                    │ repair, not judgment; bucket        │   │
+│                                    │ 'reflow' is empty.                  │   │
+│ pds-w45-bl-grant-door-untested-    │ Three untested arms in the merged   │ 1 │
+│ arms                               │ grant door (grant_graded?'s OR,     │   │
+│                                    │ write_target_scope's fail-closed,   │   │
+│                                    │ doc_field totality) plus a denial   │   │
+│                                    │ flash with TWO producers that       │   │
+│                                    │ cannot say which door refused.      │   │
+│ pds-w45-bl-ledger-census-lazy-     │ The 144-check harness costs 144     │ 2 │
+│ urllib                             │ interpreter boots, not 144 checks.  │   │
+│                                    │ Lazy urllib is 2 lines for -29%     │   │
+│                                    │ CPU, measured. Refuse the cheap-    │   │
+│                                    │ arm/expensive-arm split.            │   │
+│ pds-w45-bl-scratch-target-class-   │ Its hermeticity refusal is REFUTED  │ 2 │
+│ refuted                            │ by run, and the remaining PRICE     │   │
+│                                    │ clause has no predicate — the       │   │
+│                                    │ census has no numeric threshold     │   │
+│                                    │ anywhere.                           │   │
+│ pds-w45-bl-receipt-census-self-    │ The census misstates its own gating │ 2 │
+│ claims                             │ on merged code, and hand-types two  │   │
+│                                    │ numbers inside the very @blind_spot │   │
+│                                    │ list D633 built to stop that.       │   │
+│ pds-w45-bl-foreign-runner-first-   │ No pds door has ever run on a       │ 2 │
+│ door                               │ foreign CI runner. D648 already     │   │
+│                                    │ directs that CI overwrite the local │   │
+│                                    │ figure; nothing ever has.           │   │
+│ pds-w44-lv-verdict-unresolved-     │ SUPERSEDED by PDS-D661 and demoted  │ 4 │
+│ spec-arm                           │ to priority 4 — left open only as a │   │
+│                                    │ tripwire for the day declined_live  │   │
+│                                    │ stops being 0.                      │   │
+└────────────────────────────────────┴─────────────────────────────────────┴───┘
+                                                                                
+▌ A note on what this wave refused to do. Rival A — 'pay the debts, period' —   
+▌ would have shipped two of its own three slices into an instrument they        
+▌ silently corrupt: hetzner-offline manufactures the orphaned ENVIRONMENT row,  
+▌ and the sweep adjudication makes CONTENT-RED outlive its red. That is why     
+▌ the ledger-integrity slice is a PREREQUISITE for the wish's own item 2 and    
+▌ not a tangent. And the sharpest attack on the winner — that 'measured versus  
+▌ cached-with-provenance' is philosophy, not a defect — was answered not by     
+▌ argument but by a run: the shipped census prices a gutted two-line harness    
+▌ at 4.45 s and 76 checks, and its 40.33 s row is wrong by 40% today.           
+                                                                                
+DEBRIEF — what shipped, what it cost, and the grade                             
+                                                                                
+Reviewed 2026-08-03 by the wave reviewer, in an isolated worktree, with every   
+gate re-run on the FINAL branch rather than read from a builder report. Five of 
+five round-1 slices are green and PUSHED with PRs open; three round-2+ slices   
+were deferred by design and their tasks say so. Grade: A.                       
+                                                                                
+WHAT SHIPPED — per slice, with the branch the lead should integrate. Three      
+branches carry a reviewer commit on top of the builder commit; two are the      
+builder branch unchanged, because the diff was correct as built and there was   
+nothing honest to add.                                                          
+                                                                                
+┌────────────────┬─────────────────┬───────┬─────────────────┬─────────────────┐
+│ task           │ final branch    │ PR    │ gate re-run on  │ verdict         │
+│                │                 │       │ the final state │                 │
+│ pds-w45-grant- │ loop-epic/9377- │ #9433 │ mix test        │ The tautology   │
+│ door-          │ s-non-vacuity-  │       │ pds_w44_grant_d │ is gone and     │
+│ nonvacuity     │ stops-being-a-  │       │ oor_test.exs -> │ replaced by a   │
+│                │ tautolo-0-r     │       │ 5 tests, 0      │ real            │
+│                │                 │       │ failures; mix   │ substitution on │
+│                │                 │       │ format --check- │ the SHIPPED     │
+│                │                 │       │ formatted rc=0  │ module.         │
+│                │                 │       │                 │ REVIEWER FIX    │
+│                │                 │       │                 │ (c07e9fcb2):    │
+│                │                 │       │                 │ the guard was   │
+│                │                 │       │                 │ mutant !=       │
+│                │                 │       │                 │ original, which │
+│                │                 │       │                 │ proves only     │
+│                │                 │       │                 │ that SOMETHING  │
+│                │                 │       │                 │ was replaced;   │
+│                │                 │       │                 │ global: false   │
+│                │                 │       │                 │ takes the FIRST │
+│                │                 │       │                 │ match, so it    │
+│                │                 │       │                 │ now pins the    │
+│                │                 │       │                 │ expression to   │
+│                │                 │       │                 │ EXACTLY ONE     │
+│                │                 │       │                 │ occurrence.     │
+│                │                 │       │                 │ Proven by       │
+│                │                 │       │                 │ mutation: an    │
+│                │                 │       │                 │ absent          │
+│                │                 │       │                 │ expression reds │
+│                │                 │       │                 │ AT the new      │
+│                │                 │       │                 │ guard.          │
+│ pds-w45-lega-  │ loop-epic/leg-  │ #9434 │ selftest 14     │ Membership      │
+│ argument-list  │ a-reads-the-    │       │ PASS / 0 FAIL;  │ replaces        │
+│                │ argument-list-  │       │ --check rc=0    │ proximity in    │
+│                │ not-the-ne-1-r  │       │ and BYTE-       │ both            │
+│                │                 │       │ IDENTICAL to    │ directions, and │
+│                │                 │       │ the pre-review  │ the enumerator  │
+│                │                 │       │ baseline;       │ stops dying     │
+│                │                 │       │ shellcheck -S   │ silently.       │
+│                │                 │       │ error rc=0; mix │ REVIEWER FIX    │
+│                │                 │       │ test            │ (08a5b74ee):    │
+│                │                 │       │ pds_door_census │ FRAUD D — the   │
+│                │                 │       │ _test.exs 8     │ span balanced   │
+│                │                 │       │ tests, 0        │ the parens but  │
+│                │                 │       │ failures        │ returned the    │
+│                │                 │       │                 │ WHOLE closing   │
+│                │                 │       │                 │ line, so a      │
+│                │                 │       │                 │ token named     │
+│                │                 │       │                 │ AFTER the       │
+│                │                 │       │                 │ closing paren   │
+│                │                 │       │                 │ still read as   │
+│                │                 │       │                 │ membership. Now │
+│                │                 │       │                 │ cut to the      │
+│                │                 │       │                 │ paren column;   │
+│                │                 │       │                 │ the arm reds    │
+│                │                 │       │                 │ LEGA-BOUND-EXEC │
+│                │                 │       │                 │ on revert.      │
+│ pds-w44-       │ loop-           │ #9438 │ census rc=0; -- │ The strongest   │
+│ judgment-      │ epic/proven-    │       │ selftest rc=0,  │ slice of the    │
+│ coverage-      │ backed-as-a-    │       │ 34 cases / 23   │ wave. The       │
+│ ladder         │ union-never-an- │       │ mutants incl.   │ number 23 is    │
+│                │ additi-2        │       │ PASS LADDER-    │ worthless as    │
+│                │ (unchanged)     │       │ UNION-NOT-SUM;  │ evidence        │
+│                │                 │       │ check-doc-      │ (OVERLAP is 0), │
+│                │                 │       │ budgets PASS    │ the builder     │
+│                │                 │       │                 │ knew it, and    │
+│                │                 │       │                 │ shipped the     │
+│                │                 │       │                 │ only thing that │
+│                │                 │       │                 │ can             │
+│                │                 │       │                 │ discriminate —  │
+│                │                 │       │                 │ a count-free    │
+│                │                 │       │                 │ relation token, │
+│                │                 │       │                 │ verified red in │
+│                │                 │       │                 │ the other       │
+│                │                 │       │                 │ direction. The  │
+│                │                 │       │                 │ doc figures     │
+│                │                 │       │                 │ were re-derived │
+│                │                 │       │                 │ from MY run,    │
+│                │                 │       │                 │ not the report: │
+│                │                 │       │                 │ JUDGED 67,      │
+│                │                 │       │                 │ EXCLUDED 178,   │
+│                │                 │       │                 │ 74/252 = 29.4%, │
+│                │                 │       │                 │ all match.      │
+│ pds-w45-sweep- │ loop-epic/the-  │ #9441 │ sweep --        │ The fail-open   │
+│ failopen       │ charter-sweep-  │       │ selftest rc=0   │ is closed and I │
+│                │ s-fail-open-    │       │ "SELFTEST OK: 3 │ re-derived it   │
+│                │ closes-and-3-r  │       │ of 3"; door     │ INDEPENDENTLY:  │
+│                │                 │       │ census --check  │ an expired-     │
+│                │                 │       │ rc=0, --        │ token shim over │
+│                │                 │       │ selftest 8/8,   │ a pinned ledger │
+│                │                 │       │ shellcheck rc=0 │ snapshot now    │
+│                │                 │       │                 │ gives rc=2      │
+│                │                 │       │                 │ UNCHECKED       │
+│                │                 │       │                 │ naming the      │
+│                │                 │       │                 │ slug, where     │
+│                │                 │       │                 │ before it was   │
+│                │                 │       │                 │ byte-identical  │
+│                │                 │       │                 │ to a healthy    │
+│                │                 │       │                 │ run. REVIEWER   │
+│                │                 │       │                 │ FIX             │
+│                │                 │       │                 │ (6c42cf3e6):    │
+│                │                 │       │                 │ the census row  │
+│                │                 │       │                 │ that describes  │
+│                │                 │       │                 │ this instrument │
+│                │                 │       │                 │ co-lands,       │
+│                │                 │       │                 │ because the     │
+│                │                 │       │                 │ sweep fix alone │
+│                │                 │       │                 │ makes that row  │
+│                │                 │       │                 │ a stale         │
+│                │                 │       │                 │ receipt.        │
+│ pds-w45-       │ loop-epic/a-    │ #9442 │ node --check    │ One additive    │
+│ criterion-     │ criterion-      │       │ rc=0            │ bullet, epic-   │
+│ venue          │ names-the-      │       │                 │ neutral, purely │
+│                │ claim-not-the-  │       │                 │ additive: full- │
+│                │ cont-4          │       │                 │ file diff is    │
+│                │ (unchanged)     │       │                 │ one hunk        │
+│                │                 │       │                 │ 137a138, and    │
+│                │                 │       │                 │ the merge-gated │
+│                │                 │       │                 │ row shifted 141 │
+│                │                 │       │                 │ -> 142 byte-    │
+│                │                 │       │                 │ identical (cmp: │
+│                │                 │       │                 │ 189 bytes, re-  │
+│                │                 │       │                 │ derived by me). │
+│                │                 │       │                 │ Cheapest slice  │
+│                │                 │       │                 │ in the wave and │
+│                │                 │       │                 │ it              │
+│                │                 │       │                 │ retroactively   │
+│                │                 │       │                 │ unblocks        │
+│                │                 │       │                 │ unstamped       │
+│                │                 │       │                 │ criteria on     │
+│                │                 │       │                 │ merged work.    │
+└────────────────┴─────────────────┴───────┴─────────────────┴─────────────────┘
+                                                                                
+WHAT STALLED — nothing. Three slices were deferred by the sequenced-rounds law, 
+each on a hard dependency that has to merge first: pds-w45-census-ledger-       
+integrity (round 2, after #9434 — same file, ~180 lines move), pds-w45-price-   
+provenance (round 3, after round 2 — same file, built on top), pds-w44-hetzner- 
+offline-door (round 4, after both — it needs the retire shape and --measure     
+those rounds create). Their tasks are open, unclaimed and 0/N met, which is the 
+honest state, not a stall.                                                      
+                                                                                
+THE TWO FINDINGS REVIEW ADDED, AND THE RULES THEY BUY                           
+                                                                                
+PDS-D664 — A REPAIRED PREDICATE CARRIES ITS OLD DEFECT FOR EXACTLY ONE LINE.    
+arg_span replaced the three-line proximity window with a real paren-balance     
+walk, and the three fraud shapes flipped as designed. It still returned the     
+whole CLOSING LINE, so "System.cmd(...) ; File.regular?(@fraud)" — a token named
+after the closing paren, on the call's own line — still read as argument-list   
+membership: bound, never executed, THROUGH with a price. One line of the old    
+window living inside the new predicate, past a 13-arm green selftest. THE RULE: 
+when you replace a window with a boundary, the boundary is where the window's   
+last residue hides — test the token that sits just OUTSIDE the new edge, not    
+only the ones that sat inside the old one.                                      
+                                                                                
+PDS-D665 — BOTH LEGS OR NEITHER APPLIES TO EVIDENCE STRINGS, NOT ONLY TO        
+DECLARED PATH SETS. The wish states the both-legs law for the hetzner slice's   
+ELIXIR_TEST_ONLY_PATHS entry. It bit somewhere nobody named: the sweep's own fix
+makes --selftest rc=0, which turns the door census row whose evidence quotes "--
+selftest rc=1" into a stale receipt the moment it merges — on the instrument    
+whose entire subject is receipts that lie. The builder was fenced out of the    
+census and correctly recorded the correction in two durable venues rather than  
+reaching across the fence. Review co-landed the one-line row edit on the SAME   
+branch: a behaviour and the receipt describing it merge together or not at all. 
+A fence that splits those two has to be closed by whoever holds both, and the   
+fix belongs on the branch that causes the drift.                                
+                                                                                
+LEDGER AUDIT — three fixes, and one defect the audit itself surfaced            
+                                                                                
+Every slice task was claimed before work, stamped mid-claim with real evidence  
+rather than batched at the end, and left in_progress with only the merge-gated  
+row open — with one exception, now fixed. Tasks outside this wave were not      
+touched.                                                                        
+                                                                                
+• pds-w45-criterion-venue sat at lifecycle_status=open while HOLDING a live     
+  claim with 7 criteria stamped — a worked, claimed row reading as unstarted on 
+  every board. Re-claimed as the reviewer (epoch 9) so the lifecycle matches    
+  reality: in_progress, 8/9 met.                                                
+• pds-w45-criterion-venue[4] ("The lead-owned merge-gated row ... is EXPLICITLY 
+  EXEMPTED and is left byte-identical") was PROVEN but UNSTAMPED: bp task stamp 
+  refuses any --criterion-text containing the substring "merge-gated", so a row 
+  that DESCRIBES the gated row is refused as though it WERE one. Re-derived     
+  independently (cmp on the two lines: IDENTICAL, 189 bytes; full-file diff one 
+  hunk 137a138) and stamped with the override, with that provenance in the      
+  evidence.                                                                     
+• pds-w45-census-row-check-evidence — filed by the sweep builder as follow-up   
+  work — was DONE by the reviewer commit on the sweep branch. Claimed, its      
+  single criterion stamped with the new row verbatim plus four runs, and left   
+  in_progress: it closes when #9441 merges.                                     
+• The stamp-guard defect is NOT newly filed: it duplicates pds-w27-bl-stamp-    
+  guard-substring-false-positive (wave 27, still open, root-caused to           
+  internal/cli/tasks_stamp_cmd.go). A new task was created, the server flagged  
+  the duplicate, and it was DELETED rather than left to double-count the        
+  backlog. The recurrence is recorded here instead.                             
+• Three follow-ups filed BY THE BUILDERS are published children of the epic and 
+  honest: pds-w45-argspan-sigil-and-silent-bound (sigil-blind blanking, the     
+  silent 40-line bound), task-ac55ff2388510d67 (the ladder's :stale arm is a NO-
+  OP and nothing proves it), pds-w45-census-row-check-evidence (above).         
+                                                                                
+GRADE — A                                                                       
+                                                                                
+WHAT EARNS IT. The wave paid all three items the wish named and paid them in the
+order the dependencies allow. The second-review debt on #9377 is now discharged 
+BY THE MERGING ARTIFACT rather than by a reviewer's hand mutation — that was the
+live gap on merged code, and it is the difference between "someone proved it    
+once" and "the repo proves it every run". The ladder slice is the wave's best   
+work: it recognised that its own headline number is evidence of nothing, said so
+in the printed output, and shipped the only discriminator that exists as a      
+selftest case verified in both directions. The sweep slice reproduced its fail- 
+open with the CORRECT oracle after the criterion named the wrong one, and closed
+it with the discriminator that was already on the wire. Four of five slices     
+refuted something in their own dispatch by run — the eleventh, twelfth and      
+thirteenth consecutive refutations — and each wrote the correction into the     
+artifact instead of quietly satisfying a figure that does not exist.            
+                                                                                
+WHAT KEEPS IT OFF A+. Two of the five needed a reviewer fix to a predicate that 
+had just been tightened, and in both cases the defect was one step past where   
+the builder stopped looking: the first occurrence rather than the only          
+occurrence, the closing line rather than the closing paren. Both slices had     
+green, honest, non-vacuous selftests through the defect. The wave also left     
+three real UNPROVEN arms shipping green by print rather than by mutation — the  
+ladder's :stale filter, arg_span's "every call opening on the line" clause, and 
+its 40-line bound — each filed, none closed, and each is exactly the shape this 
+epic exists to refuse. And every price and timing in this wave is LOCAL: no PDS 
+door has yet run on a foreign runner, so the price column remains an instrument 
+calibrated against one host.                                                    
+                                                                                
+NOT A CRITICISM, ON THE RECORD: the wish's item 4 (the unbuilt "?" variable-    
+bound decline) was RULED OUT with a reason, not quietly dropped — PDS-D661 — and
+the ladder slice printed declined_live=0 as a BOUND on the sentence instead,    
+derived THROUGH lvs_joinable?/1 so the number cannot drift from the predicate it
+describes. Ruling it out was the right half of "finish it or rule it out".      
+                                                                                
+WHAT THE NEXT WAVE TAKES                                                        
+                                                                                
+MERGE ORDER FIRST. The five round-1 PRs are file-disjoint except that #9434 and 
+#9441 both touch scripts/pds-door-census.sh — #9434 in the classifier and the   
+selftest, #9441 at line 123 of PDS_DOOR_DISPOSITIONS only — so either order     
+merges without a conflict. Then dispatch the deferred slices STRICTLY in        
+dependency order, re-deriving every anchor at each merged base, because each one
+moves the file the next one reads.                                              
+                                                                                
+┌───────┬────────────────────────┬────────────────────┬────────────────────────┐
+│ order │ slice                  │ dispatches after   │ why the order is not   │
+│       │                        │                    │ negotiable             │
+│ 1     │ pds-w45-census-ledger- │ #9434 merges       │ Same file; the leg-A   │
+│       │ integrity              │                    │ repair moves ~180      │
+│       │                        │                    │ lines and every anchor │
+│       │                        │                    │ in its brief is a line │
+│       │                        │                    │ number.                │
+│ 2     │ pds-w45-price-         │ round 2 merges     │ Built on top of the    │
+│       │ provenance             │                    │ retire shape and the   │
+│       │                        │                    │ orphan check; the      │
+│       │                        │                    │ elided-key design      │
+│       │                        │                    │ assumes them.          │
+│ 3     │ pds-w44-hetzner-       │ rounds 2 AND 3     │ It needs --measure to  │
+│       │ offline-door           │ merge              │ add its price row and  │
+│       │                        │                    │ the retire shape to    │
+│       │                        │                    │ dispose the orphaned   │
+│       │                        │                    │ ENVIRONMENT row. BOTH  │
+│       │                        │                    │ LEGS OR NEITHER: the   │
+│       │                        │                    │ instrument AND its     │
+│       │                        │                    │ ELIXIR_TEST_ONLY_PATHS │
+│       │                        │                    │ entry, or it is        │
+│       │                        │                    │ #9290/#9292 a third    │
+│       │                        │                    │ time.                  │
+└───────┴────────────────────────┴────────────────────┴────────────────────────┘
+                                                                                
+THEN WAVE 46'S OWN WORK, in the order the census's printed output ranks it:     
+adjudicate the sweep's 59 unresolved-claim arrivals (the vocabulary is mined    
+from the charter and THIS wave's charter PR moved it again, which is precisely  
+why it could not be done here); price the receipt census's UNMEASURED-LOCAL     
+expensive arm; and either justify or tier pds-ledger-census_test.sh at 40.33 s  
+CPU on a 2-4 vCPU runner rather than shrugging at it. One standing debt outranks
+all of them for credibility: NO pds door has ever been measured on a foreign    
+runner, so every figure in the price column is a loaded local mac.              
+                                                                                
+▌ THE SECOND-REVIEWER DEBT, NAMED RATHER THAN ASSUMED DISCHARGED. #9433 is a    
+▌ HIGH-FLIP-RISK slice on a live grant/tenancy door, and this workflow spawns   
+▌ exactly ONE reviewer — so the independent second pass is a MANUAL LEAD STEP   
+▌ before merge. I re-derived the substitution from source and mutation-proved   
+▌ my own guard, but a genuinely independent pair of eyes on the authorization   
+▌ judgment is still owed. Every PR here also carries an open MERGE-GATED        
+▌ criterion that is the lead's to close on merge: #9433[8], #9434[10],          
+▌ #9438[14], #9441[9], #9442[8].                                                
+
+Related
+  3.80  PDS wave 30 - Finish the round, and pay the first L1  (paper)
+        tags: honest-gates (92·90), measurement (88·75), pds (95·95), wave-
+              strategy (85·70)
+  3.25  PDS wave 46 - a price that cannot be compared is not a price  (paper)
+        tags: honest-gates (92·93), measurement (88·90), pds (95·95)
+  3.25  PDS wave 47 - an open row is a claim about the code  (paper)
+        tags: honest-gates (92·92), measurement (88·90), pds (95·95)
+  3.20  PDS wave 40 - follow the value, and face the three hundred  (paper)
+        tags: honest-gates (92·90), measurement (88·85), pds (95·95)
+  3.18  PDS wave 26 - The verbs that still lie, and the writer that lies about
+        writing  (paper)
+        tags: honest-gates (92·88), pds (95·96), wave-strategy (85·93)

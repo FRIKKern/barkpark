@@ -1,0 +1,41 @@
+{
+  "agent_type": "legendary-experimenter",
+  "assignment_id": "experiment-03",
+  "assignment_snapshot_digest": "afd6034cab31b9633efcbf9a7b16983a71c80461692cc9daaf968afe2613a9f8",
+  "candidate_ids": [],
+  "epic_id": "task-a768c69e659add58",
+  "inventory_digest": "3e480a9fcf44da65a07aa1fcad8e981911006568d23b89ad8891f26a5d96e69e",
+  "papers": [
+    {
+      "fixture_id": "CCH29",
+      "revision": "18768b0a14c2eead927181c4a0e37c18",
+      "slug": "cloud-console-hardening-wave-29-2026-08-03"
+    },
+    {
+      "fixture_id": "PDS45",
+      "revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "slug": "pds-wave-45-2026-08-03"
+    },
+    {
+      "fixture_id": "CCH28",
+      "revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "slug": "cloud-console-hardening-wave-28-2026-08-03"
+    },
+    {
+      "fixture_id": "PDS44",
+      "revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "slug": "pds-wave-44-2026-08-03"
+    }
+  ],
+  "round": 1,
+  "schema_version": "legendary-paper-e03-assignment/v1",
+  "stop_condition": "Terminal/navigation/identity/discovery/error/provenance baseline and stable verification complete; no repair candidate built.",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-05",
+  "wave_revision": "a06716c4-2dd5-4bda-b9a9-a484b009abb2",
+  "widths": [
+    20,
+    40,
+    80,
+    120
+  ]
+}

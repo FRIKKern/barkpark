@@ -1,0 +1,1547 @@
+CLOUD CONSOLE HARDENING — WAVE 28: THE INSTRUMENT FIXED “I COULD NOT LOOK” AT THE ROOT AND LEFT IT STANDING AT THE
+OBJECT — AND THE ENVIRONMENT IT RUNS IN IS THE ONE PLACE IT CANNOT LOOK
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Wave 27 was the best-argued wave this epic has run. It refuted both of the lead's headline findings, paid Standing Law 0
+by hand with 57 re-parented rows, and proved that the instrument certifying this epic's health was manufacturing false
+defect reports out of a directory it could not read. Five of its six person-facing slices are on main. One PR is open —
+#9356 — and it is the one everything else reads through.
+
+The lead offered this wave a binary: (a) give the CI job the history the instrument needs, or (b) restructure the red
+control to assert clause (a) alone. Both are defensible. Both are also incomplete, and this Paper's headline finding is
+why: measured live, in this session, the WAVE-27-FIXED predicate — the one on #9356, with both of its new refusals armed
+— still emits six verbatim “commit … is not an ancestor of origin/main” sentences inside a shallow clone. Same disease,
+same prose, one condition over, in the exact environment the instrument runs in automatically.
+
+The wish, and what is already true about each item
+
+┌───┬────────────────────────────────────────────────────────┬─────────────────────────────────────────────────────────┐
+│ 1 │ #9356 is red because console-harness.yml checks out at │ CONFIRMED and ENLARGED. Depth-1 clone of this repo:     │
+│   │ fetch-depth:1; decide (a) fetch-depth:0 or (b)         │ origin/main RESOLVES as a ref, but every registered     │
+│   │ restructure the control                                │ commit is rc 128 “Not a valid object name”. The #9356   │
+│   │                                                        │ predicate passes BOTH of its new refusal legs there and │
+│   │                                                        │ prints six false ancestry sentences at b=FAIL. The      │
+│   │                                                        │ binary is false — the fix is the DISCRIMINATION, and it │
+│   │                                                        │ makes both (a) and (b) correct rather than either being │
+│   │                                                        │ a workaround.                                           │
+│ 2 │ the D307 door guard is now a wave, not a slice; budget │ CONFIRMED as filed: cchi-w27-bl-d307-create-time-door-  │
+│   │ for a `surface` ENUM and a BACKFILL                    │ guard, open, 0/5, parent cch-instruments-epic, files    │
+│   │                                                        │ [api/lib/barkpark/content/mutations.ex].                │
+│   │                                                        │ apply_mutations is public (mutations.ex:31) and         │
+│   │                                                        │ reachable non-admin through MutateController → POST     │
+│   │                                                        │ /v1/data/mutate/:dataset (router.ex:2322). The BACKFILL │
+│   │                                                        │ is a ledger write, not code — wave 27 proved the lead's │
+│   │                                                        │ hands are the right instrument for that class.          │
+│ 3 │ re-derive orphans with the fixed instrument, from a    │ DONE, in this Paper. 2026-08-03T12:35:45Z · tree        │
+│   │ real git tree, quoting UTC stamp + tree sha + RESOLVED │ dfdc31db96b85b66515a1cba3f92a9e9bd81b09b · root         │
+│   │ ROOT                                                   │ <scratchpad>/wt-w28 → NO-SEAL a=FAIL b=PASS c=PASS      │
+│   │                                                        │ orphans=57 considering=1 residue=60 (live 59). Wave     │
+│   │                                                        │ 27's debrief read 62; five rows have left since.        │
+│ 4 │ person-facing residue: .preview-url deploy-row         │ ONE PREMISE FAILS SMOKE. `.preview-url` is a DOM CHILD  │
+│   │ siblings; the desktop band; the render-path bypass     │ of `.deploy-ref` (app.js:10289 emits `<div              │
+│   │ remainder                                              │ class="deploy-ref">branch → <a class="preview-url       │
+│   │                                                        │ mono">`), and #9357 landed `.deploy-ref { overflow-     │
+│   │                                                        │ wrap: anywhere }` at app.css:1847 — whose own committed │
+│   │                                                        │ comment at :1841-1843 says it covers `.preview-url`     │
+│   │                                                        │ inside it by inheritance. The next silent clip is NOT   │
+│   │                                                        │ there. The desktop band is D323, a measured negative,   │
+│   │                                                        │ correctly closed.                                       │
+│ 5 │ cch-w22-s7 was split and five criteria stamped by      │ D325 is explicit: stamp C6/C7/C8/C12/C14, DROP C9 (its  │
+│   │ D325; finish or close the remainder against            │ symbol `cuePaints` has zero occurrences under cloud/    │
+│   │ origin/main's bytes                                    │ and its second anchor file does not exist), close       │
+│   │                                                        │ C15/C16 `n/a — split`. This is a LEDGER action for the  │
+│   │                                                        │ lead at Decide, not a builder slice. `bp task get cch-  │
+│   │                                                        │ w22-s7` returns nothing under that id — resolving the   │
+│   │                                                        │ real id is survey work.                                 │
+└───┴────────────────────────────────────────────────────────┴─────────────────────────────────────────────────────────┘
+
+THE FINDING: wave 27 named the shallow clone in its own fix's header comment, and did not close it
+
+seal-predicate.mjs:453 is one line: `try { execFileSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', commit,
+'origin/main'], …); } catch { problems.push(`commit ${commit} is not an ancestor of origin/main`); }`. The catch is
+unconditional. Charter D318 enumerated exactly what it swallows — “not-a-git-repo / no-origin-main / shallow-clone /
+unknown-sha” — and wave 27's fix closed the first two and wrote the other two into a comment.
+
+The wave-27 header comment says it out loud, verbatim: “the ancestry `catch` at the top of `verifyCommit` swallows not-
+a-git-repo, no origin/main, a shallow clone and an unknown sha into one identical claim about the PRODUCT.” The remedy
+that follows checks that `.github/workflows/cloud.yml` exists and that `git rev-parse --show-toplevel` resolves to REPO.
+A depth-1 CI clone satisfies both.
+
+Measured live in this session, controlled pair, same live ledger, same minute, nothing varied but the clone:
+
+┌────────────────────────────┬─────────────────────────────┬─────────────────────────────┬─────────────────────────────┐
+│ full worktree at           │ not shallow, all objects    │ origin/main's (pre-#9356)   │ rc 1 · NO-SEAL a=FAIL       │
+│ origin/main                │ present                     │                             │ b=PASS c=PASS orphans=57    │
+│ `git clone --depth 1` of   │ is-shallow-repository =     │ #9356's FIXED predicate,    │ rc 1 · NO-SEAL a=FAIL       │
+│ the same repo              │ true; origin/main RESOLVES; │ both new refusals armed     │ b=FAIL c=PASS · SIX false   │
+│                            │ `merge-base --is-ancestor   │                             │ “commit … is not an         │
+│                            │ a78fd4e8c origin/main` → rc │                             │ ancestor of origin/main”    │
+│                            │ 128 `fatal: Not a valid     │                             │ sentences                   │
+│                            │ object name`                │                             │                             │
+└────────────────────────────┴─────────────────────────────┴─────────────────────────────┴─────────────────────────────┘
+
+▌ The instrument that certifies this epic reports “I could not look” as “I found a defect” — the exact sin wave 27
+▌ fixed — in the one environment where it runs without a human present. That is not a test failure. It is the sixth
+▌ standing-test clause, live, on the very instrument that authored it.
+
+THE DIRECTION: one disease, two audiences — the console and its instrument both stop asserting what they did not measure
+
+This wave has one sentence and it points in both directions at once. A system that could not determine something must
+say so. It must not substitute a plausible guess, a default, or the negative branch of a two-way test it was unable to
+run.
+
+Pointed at the INSTRUMENT, that sentence resolves the lead's binary by refusing it. Option (a) alone leaves the
+predicate lying in every other shallow environment — a container, a fork PR, an agent's `--depth 1`, any future job.
+Option (b) alone leaves standing the fact the lead correctly identified as bigger than the test: that every seal run
+under this workflow is structurally unable to evaluate clause (b). The answer that pays both is the DISCRIMINATION:
+teach the git legs to tell rc 1 (“not an ancestor”, an honest answer about the product) from rc 128 / missing object /
+shallow repository (“I could not look”, an honest answer about the environment). Once the predicate can tell those
+apart, (b) becomes the correct shape for the control — it asserts the floor it is actually about — and (a) becomes a
+verified environment declaration rather than a workaround, because a regression back to depth-1 would then produce an
+honest INFRA-FAULT the job can assert on.
+
+Pointed at the PERSON, the same sentence is already sitting in the ledger as open rows. A refused connection is reported
+as “A network step timed out. Retry usually fixes this.” — the console did not classify the failure, so it guessed, and
+the guess carries ADVICE. A person switches on “Deployment failed” alerts across email and every chat channel, and the
+event has zero producers anywhere in the repository — the console tells them they are subscribed to something that
+cannot arrive. These are not clipping bugs. They are the epic's founding vision, in its purest form, and they are the
+wave's person bodies.
+
+What the finished wave looks like
+
+• #9356 is MERGED, first and alone, and it merged because its control was restructured to assert clause (a) — the floor
+  it exists to test — not because anything red was weakened. Nothing about the depth-1 environment changed to get it
+  green.
+• The seal predicate has a THIRD refusal in the same discipline as its first two: HISTORY-UNAVAILABLE. Run it in a
+  shallow clone and it exits 2 with a named code and zero invented findings, exactly as it now does in a git-archive
+  extraction. Mutation-proved with a REAL `git clone --depth 1`, not a stub — the wave-27 lesson is that stubbing the
+  leg only moves the failure.
+• console-harness.yml stops being an environment the instrument cannot work in. The seal job declares the history it
+  needs, and a self-check reds if that declaration silently reverts — a guard on the guard's environment, which is the
+  class of defect this whole wave is about.
+• The D307 door guard is ARMED, not ruled on for a third wave. `surface` becomes an enum; the open rows are backfilled
+  BY THE LEAD'S HAND at Decide (wave 27 proved that pattern with 57 re-parents); the fence widening is a numbered
+  charter decision written before a builder touches mutations.ex; and the refusal is scoped to this epic's parent_id so
+  its blast radius is this epic, not the whole task system.
+• At least four — target five — slices where a PERSON is misinformed or cannot reach a control, led by the two rows
+  where the console gives a confident wrong answer to a question it never asked.
+
+What this wave deliberately does NOT do
+
+• It does not spend a slice on `.preview-url`. That premise failed smoke: #9357 already covers it by inheritance and the
+  committed CSS comment says so. Booking it would be paying twice for one fix.
+• It does not chase orphans to zero. 57 is stated with all three provenance facts and repaid only by rows that leave
+  honestly. Wave 27 already made the largest Law-0 payment in the epic's history; a wave spent on ledger hygiene is the
+  disease the charter names at waves 9/10/11.
+• It does not touch .github/required-checks.json, and it registers nothing.
+
+The direction debate: three candidates, argued, one committed
+
+Rival A — “Finish the instrument, build the door” (the wish read literally)
+
+Take the lead's binary, pick one leg, and spend the rest of the wave on the D307 door guard as a full multi-slice build:
+the `surface` enum, the backfill, the fence ruling, the refusal, the mutation proof. Clean, obedient, and it retires the
+highest-leverage row in the epic.
+
+WHY IT LOSES. Three counts. First, arithmetic: four instrument slices against a floor of four person bodies means eight
+slices minimum, and this epic's own history says a wave that spends 4-of-6 on instruments moves the row count the wrong
+way (waves 9/10/11: +11, +16, +7). Second, the door guard's dependency chain — enum → backfill → fence ruling → refusal
+— is SERIAL and cannot fan out to parallel builders, so it converts a fan-out wave into a queue. Third and worst, it
+accepts the false binary. Picking (a) or (b) at speed leaves the predicate lying in every shallow environment that is
+not this one workflow, and this Paper has now proved live that such an environment exists and that the epic's own
+instrument is in it.
+
+Rival B — “Pay Law 0 to zero and drive at the seal”
+
+orphans is 57 and a=FAIL is the only clause failing. Spend the wave closing, forwarding and adjudicating residue —
+including the cch-w22-s7 split D325 already ruled — and get the epic within sight of an honest SEAL.
+
+WHY IT LOSES. It is the epic's stated disease wearing a productivity costume. The charter's vision is that the CONSOLE
+stops lying; a wave with zero person bodies fails the ratio outright and would be the fourth restatement of a law rather
+than a payment of it. It also mistakes the seal for the goal — D318 proved the predicate could SEAL an epic that does
+not exist, which means a falling orphan count was never the thing worth optimising. HARVESTED ANYWAY: this Paper quotes
+the reading with all three provenance facts, and the cch-w22-s7 adjudication is booked as a Decide-phase ledger action
+for the lead, costing zero builders.
+
+Rival C — “One disease, two audiences” — COMMITTED
+
+Two instrument slices that pay the environment question properly plus the discrimination that generalises it; one door-
+guard slice made buildable by moving its backfill dependency onto the lead's hands at Decide; and four-to-five person
+bodies chosen so that at least two of them are literally the same defect the instrument has — a system asserting a fact
+it did not measure.
+
+WHY IT WINS. It is the only candidate where the instrument work and the person work are the SAME argument, which means
+the wave's finding transfers: the sentence that fixes the seal predicate is the sentence a builder applies to
+`connection refused`. It keeps the ratio at four-plus without inventing filler. It refuses the lead's binary on evidence
+rather than on preference — the depth-1 run is measured, not reasoned. And it ships the door guard ARMED this wave by
+removing the dependency that blocked it, rather than ruling on it for a third consecutive wave.
+
+The sharpest attack on the winner, and how the wave absorbs it
+
+▌ “You are deferring the D307 door guard AGAIN. Wave 26 ruled on it, wave 27 filed it, and ‘build the enum, defer the
+▌ refusal’ is exactly the shape that lets wave 29 defer it a fourth time. Meanwhile you have talked yourself into a
+▌ THIRD instrument slice nobody asked for.”
+
+TAKEN, and it changes the plan rather than being argued away. The wave does not ship the enum and defer the refusal — it
+ships the refusal ARMED, and it removes the blocker by re-classifying it. D324 gave four honest reasons the guard could
+not ship: (i) no classifier, (ii) the fence widening is not a builder's call, (iii) CI is post-hoc detection not
+refusal, (iv) shipping before the backfill makes the guard's first act on main a refusal of legitimate filings. Reasons
+(i) and (iv) are LEDGER work, and wave 27 proved conclusively that ledger work belongs to the lead's hands at Decide —
+57 re-parents, executed in minutes, with the post-condition asserted on the destination roster. Reason (ii) is a
+numbered charter decision, which is also a Decide-phase artifact. Reason (iii) argues FOR the door, not against it. So
+the builder's slice is what remains: the enum validation and the refusal, scoped to one parent_id, with a mutation proof
+that shows it can both refuse and pass. If survey finds the backfill is larger or messier than wave 27's re-parent — a
+real risk, since `surface` is populated on 24 of 343 rows and is free prose — the wave scopes the guard's population to
+rows the backfill actually reached and says so, rather than arming a refusal over rows it cannot classify.
+
+On the third instrument slice: it is not a third, it is the CORRECT first. Without the discrimination, both of the
+lead's options are workarounds, and this Paper has the run output proving it. The wave's own ratio discipline still
+binds — if the discrimination and the environment declaration cannot be shown to be one coherent slice at Decide, the
+environment half merges with #9356 and the wave spends the recovered budget on a fifth person body.
+
+Premise smoke — every inherited premise this direction leans on, run rather than quoted
+
+┌──────────────────────────────────────┬───────────────────────────────────────┬───────────────────────────────────────┐
+│ Wave 27's five slices are on main;   │ `git merge-base --is-ancestor <sha>   │ CONFIRMED. a78fd4e8c, c4a359d0c,      │
+│ only #9356 is open (lead notes, L6)  │ origin/main` for all six named shas;  │ 713795305, 7c8fa229a, 271d4a244,      │
+│                                      │ `gh pr view 9356`                     │ dfdc31db9 all ancestors. #9356 OPEN;  │
+│                                      │                                       │ `Console gate` and `Console client    │
+│                                      │                                       │ unit harness` both FAILURE.           │
+│ console-harness.yml checks out at    │ `git show                             │ CONFIRMED for console-unit (bare      │
+│ fetch-depth 1 (wish item 1)          │ origin/main:.github/workflows/console │ `actions/checkout@v4`, v4's default   │
+│                                      │ -harness.yml`                         │ depth is 1). NUANCE the wish does not │
+│                                      │                                       │ carry: the `changes` job at :104 DOES │
+│                                      │                                       │ set fetch-depth: 0, so the file       │
+│                                      │                                       │ already contains the remedy pattern   │
+│                                      │                                       │ for a different job.                  │
+│ A depth-1 clone “has neither         │ `git clone --depth 1`; `git branch -  │ HALF REFUTED, and the half that fails │
+│ origin/main nor those commits” (wish │ r`; `git merge-base --is-ancestor     │ matters. origin/main DOES exist as a  │
+│ item 1)                              │ a78fd4e8c origin/main`                │ ref in a depth-1 clone. Only the      │
+│                                      │                                       │ OBJECTS are missing (rc 128 `Not a    │
+│                                      │                                       │ valid object name`). A remedy that    │
+│                                      │                                       │ checks “does origin/main resolve?”    │
+│                                      │                                       │ would therefore pass and change       │
+│                                      │                                       │ nothing.                              │
+│ #9356's fix closes the wrong-root    │ Copied #9356's predicate into the     │ CONFIRMED for the ROOT class and      │
+│ class (D318, wave 27)                │ depth-1 clone and ran it live         │ REFUTED as a general fix. Both new    │
+│                                      │                                       │ refusal legs PASS in a shallow clone; │
+│                                      │                                       │ six false ancestry sentences print    │
+│                                      │                                       │ anyway. b=FAIL from a clone, b=PASS   │
+│                                      │                                       │ from a full tree, same ledger, same   │
+│                                      │                                       │ minute.                               │
+│ `.preview-url` is the next silent    │ `git show                             │ FAILS SMOKE — a FINDING, not a        │
+│ clip (wish item 4)                   │ origin/main:cloud/priv/static/app.css │ foundation. app.css:1847 `.deploy-ref │
+│                                      │ | grep`; `app.js` previewRow          │ { … overflow-wrap: anywhere }`        │
+│                                      │                                       │ (landed #9357) and app.js emits       │
+│                                      │                                       │ `.preview-url` INSIDE `.deploy-ref`.  │
+│                                      │                                       │ The committed comment at :1841-1843   │
+│                                      │                                       │ states the inheritance explicitly.    │
+│                                      │                                       │ Already paid.                         │
+│ The D307 door guard's target is      │ `git grep apply_mutations`; router.ex │ CONFIRMED.                            │
+│ reachable through a real non-admin   │ route table                           │ `Content.apply_mutations/3` is public │
+│ write path                           │                                       │ at mutations.ex:31; callers are       │
+│                                      │                                       │ MutateController (POST                │
+│                                      │                                       │ /v1/data/mutate/:dataset,             │
+│                                      │                                       │ router.ex:2322), Sync.Applier and     │
+│                                      │                                       │ papers/value_writeback. Not an admin- │
+│                                      │                                       │ only path. mutations.ex:470-545       │
+│                                      │                                       │ already hosts a create-time door      │
+│                                      │                                       │ guard, so the pattern exists in-file. │
+│ cch-w26-bl-deploy-row-siblings-      │ `bp task get`                         │ REFUTED. It is DONE at 10/10 — that   │
+│ unwrapped is residue                 │                                       │ IS #9357. The residual row the wish   │
+│                                      │                                       │ is reaching for does not exist under  │
+│                                      │                                       │ that id.                              │
+│ Every code site the direction names  │ `git cat-file -e origin/main:<path>`  │ ALL PRESENT: mutations.ex,            │
+│ still exists on origin/main          │ × 9                                   │ sites/deploy.ex, app.js, app.css,     │
+│                                      │                                       │ scenarios.mjs, overflow-guard.mjs,    │
+│                                      │                                       │ console-harness.yml, and both wave-27 │
+│                                      │                                       │ ledger recipes under                  │
+│                                      │                                       │ tooling/grip/ledger/.                 │
+│ Charter D-numbers this direction     │ `git show                             │ ALL PRESENT AND COVERING. D324 in     │
+│ cites (D307, D317, D318, D319, D321, │ origin/main:.claude/workflows/…charte │ particular authorises exactly the     │
+│ D322, D324, D325) exist AND cover    │ r.md`, read verbatim                  │ four-reason deferral this direction   │
+│ what they are cited for              │                                       │ dismantles, and names `surface` at    │
+│                                      │                                       │ 24/343 free prose — the number the    │
+│                                      │                                       │ direction budgets against.            │
+└──────────────────────────────────────┴───────────────────────────────────────┴───────────────────────────────────────┘
+
+▌ Two premises failed smoke and both are stated rather than dropped: `.preview-url` is already paid, and “a depth-1
+▌ clone has no origin/main” is false in the half that would have shaped the remedy. One premise was ENLARGED: the
+▌ wrong-root fix does not generalise, and the proof is a live run rather than an argument.
+
+The shape the wave is aiming at — seven named, five expected
+
+Tentative. Decide finalises after two exploration rounds; survey may kill any of these and is expected to promote at
+least one replacement on its own evidence, as wave 27's flick-to-bottom and progressbar bodies were.
+
+┌───┬────────────────────────────────────────────────────┬────────┬────────────────────────────────────────────────────┐
+│ 1 │ #9356 unhostaged — the empty-roster control        │ instru │ Merges FIRST and ALONE. Nothing red is weakened;   │
+│   │ asserts CLAUSE (a), not the overall verdict        │ ment   │ the control stops being hostage to clauses it does │
+│   │                                                    │        │ not test.                                          │
+│ 2 │ HISTORY-UNAVAILABLE — the git legs tell “not an    │ instru │ The crown. Generalises wave 27's fix to the        │
+│   │ ancestor” from “I could not look”, mutation-proved │ ment   │ condition its own comment names.                   │
+│   │ in a real `--depth 1` clone                        │        │                                                    │
+│ 3 │ The seal job's environment is DECLARED and its     │ instru │ May merge into #2 at Decide if they are one        │
+│   │ regression is detectable                           │ ment   │ coherent change; the wave's ratio recovers a slice │
+│   │                                                    │        │ if so.                                             │
+│ 4 │ A refused connection stops being reported as a     │ PERSON │ `cch-w27-bl-connection-refused-classified-as-      │
+│   │ timeout with retry advice                          │        │ timeout`, open, 0/4. The console guesses a         │
+│   │                                                    │        │ classification and attaches ADVICE to the guess.   │
+│ 5 │ The “Deployment failed” toggle stops promising     │ PERSON │ `cch-w27-bl-deployment-failed-toggle-fires-        │
+│   │ alerts nothing can send                            │        │ nothing`, open, 0/6. Default-ON across email and   │
+│   │                                                    │        │ every chat channel; D321 measured ZERO dispatch    │
+│   │                                                    │        │ sites. Needs a policy ruling at Decide: remove the │
+│   │                                                    │        │ control or wire the producer.                      │
+│ 6 │ The deploy-stage `detail` remainder — what #9355   │ PERSON │ D321(3)/(4): `Sites.Deploy.fail/2` writes one      │
+│   │ actually closed and what is still raw              │        │ reason to BOTH `failure_reason:` and `detail:`;    │
+│   │                                                    │        │ deploy.ex:842 `detail: stage.detail ||             │
+│   │                                                    │        │ stage_line(stage)` is a second path. Survey must   │
+│   │                                                    │        │ establish what remains after #9355.                │
+│ 7 │ The D307 door guard, ARMED — `surface` enum +      │ instru │ Backfill and fence ruling are LEAD work at Decide, │
+│   │ create-time refusal scoped to this epic's          │ ment   │ not builder work. Builder ships enum + refusal + a │
+│   │ parent_id                                          │        │ mutation proof that can both refuse and pass.      │
+│ — │ A fifth person body                                │ PERSON │ Held open deliberately. D311's `#cred-back`        │
+│   │                                                    │        │ finding (four of five exits fail to resume, fix is │
+│   │                                                    │        │ path-asymmetric) is the leading candidate to check │
+│   │                                                    │        │ for whether it was ever built.                     │
+└───┴────────────────────────────────────────────────────┴────────┴────────────────────────────────────────────────────┘
+
+▌ RATIO: at least four slices where a PERSON is misinformed or cannot reach a control. Items 4, 5, 6 and one survey-
+▌ promoted body are the four; the wave does not ship if fewer than four survive.
+
+The survey plan — 17 assignments, and why each one can change the plan
+
+Width is deliberate. Every load-bearing assumption in the direction above appears below as a question a surveyor can
+answer with a run.
+
+┌──────────────────────────────────┬─────────────────────────────────────────┬─────────────────────────────────────────┐
+│ shallow-clone-discrimination     │ Enumerate EVERY git read seal-          │ This is the crown slice's entire        │
+│                                  │ predicate.mjs makes (merge-base --is-   │ design. If rc 1 is untrustworthy in a   │
+│                                  │ ancestor :453, git show --format= :429, │ grafted clone, the refusal must key on  │
+│                                  │ git show --name-only :432, rev-parse -- │ shallowness itself and not only on      │
+│                                  │ show-toplevel in                        │ object presence — a materially          │
+│                                  │ assertReadableRepoRoot) and for each    │ different guard.                        │
+│                                  │ establish which exit codes/conditions   │                                         │
+│                                  │ are an HONEST ANSWER ABOUT THE PRODUCT  │                                         │
+│                                  │ versus 'I could not look'. Run each     │                                         │
+│                                  │ under: full clone, `git clone --depth   │                                         │
+│                                  │ 1`, `--depth 50` where the commit       │                                         │
+│                                  │ exists but history is grafted, a `--    │                                         │
+│                                  │ filter=blob:none` partial clone, and a  │                                         │
+│                                  │ clone with no `origin` remote. Does     │                                         │
+│                                  │ `git rev-parse --is-shallow-repository` │                                         │
+│                                  │ combined with `git cat-file -e          │                                         │
+│                                  │ <sha>^{commit}` fully discriminate, or  │                                         │
+│                                  │ is there a residual case where rc 1     │                                         │
+│                                  │ from --is-ancestor is UNTRUSTWORTHY     │                                         │
+│                                  │ because history is truncated?           │                                         │
+│ ci-fetch-depth-blast-radius      │ What does `fetch-depth: 0` actually     │ Decides whether the environment         │
+│                                  │ cost the `console-unit` job — clone     │ declaration is cheap and local or a     │
+│                                  │ wall-clock, runner disk — and what      │ whole-workflow change, and whether the  │
+│                                  │ already pays it in this repo (console-  │ seal predicate is the only instrument   │
+│                                  │ harness.yml's `changes` job at :104     │ in a hostile environment.               │
+│                                  │ sets it; find every other)? Which OTHER │                                         │
+│                                  │ jobs or workflows anywhere in .github/  │                                         │
+│                                  │ invoke seal-predicate.mjs or any other  │                                         │
+│                                  │ git-reading instrument, and at what     │                                         │
+│                                  │ depth? Is there any job that would      │                                         │
+│                                  │ silently start evaluating clause (b)    │                                         │
+│                                  │ differently if depth changed?           │                                         │
+│ 9356-red-anatomy                 │ Read the failing assertion in           │ Slice 1 is the merge-first slice; its   │
+│                                  │ cloud/priv/static/__preview__/seal-     │ diff must be precisely the smallest     │
+│                                  │ predicate.test.mjs (wave 27's empty-    │ honest restructuring. And if other      │
+│                                  │ roster control, ~:1262) and pull the    │ tests are hostage too, the slice grows. │
+│                                  │ actual CI log for the failing `Console  │                                         │
+│                                  │ client unit harness` job on PR #9356.   │                                         │
+│                                  │ State exactly what the control asserts  │                                         │
+│                                  │ today, what an assertion on CLAUSE (a)  │                                         │
+│                                  │ ALONE would look like in that file's    │                                         │
+│                                  │ own idiom, and audit every OTHER test   │                                         │
+│                                  │ in the file for the same hostage shape  │                                         │
+│                                  │ — a test asserting an overall verdict   │                                         │
+│                                  │ while testing one clause.               │                                         │
+│ seal-predicate-remaining-lies    │ Beyond the git legs: enumerate every    │ If the HTTP path can fail open or       │
+│                                  │ OTHER leg of seal-predicate.mjs that    │ manufacture residue, the wave's crown   │
+│                                  │ can collapse 'unreadable' into 'defect' │ slice is incomplete and clause (a)      │
+│                                  │ or fail OPEN. Specifically clause (a)'s │ needs the same discipline clause (b) is │
+│                                  │ HTTP reads via q() at :345 (what        │ getting.                                │
+│                                  │ happens on HTTP 500, a timeout, an auth │                                         │
+│                                  │ failure, a truncated JSON body?) and    │                                         │
+│                                  │ bucket (c)'s hardcoded human-gate _ids. │                                         │
+│                                  │ After wave 27's EMPTY-ROSTER floor, is  │                                         │
+│                                  │ there any remaining path to a false     │                                         │
+│                                  │ SEAL or a false NO-SEAL?                │                                         │
+│ door-guard-buildability          │ Read                                    │ Determines whether the door guard is    │
+│                                  │ api/lib/barkpark/content/mutations.ex:4 │ one builder slice or three, and whether │
+│                                  │ 70-545's existing create-time door      │ its test scaffolding is trustworthy or  │
+│                                  │ guard VERBATIM and report its exact     │ must be rebuilt first.                  │
+│                                  │ shape: where in apply_mutations it      │                                         │
+│                                  │ fires, what it inspects, how it returns │                                         │
+│                                  │ a refusal, and what its tests look      │                                         │
+│                                  │ like. Then map the shape of a task      │                                         │
+│                                  │ CREATE mutation as `bp` actually sends  │                                         │
+│                                  │ it — where does `surface` land in the   │                                         │
+│                                  │ payload, and is it visible at the same  │                                         │
+│                                  │ point the existing guard runs?          │                                         │
+│                                  │ Critically: check whether the existing  │                                         │
+│                                  │ mutations tests PIN a defect rather     │                                         │
+│                                  │ than prove a guard (the hazard cchi-    │                                         │
+│                                  │ w27-bl-d307-create-time-door-guard's    │                                         │
+│                                  │ criterion 4 names, citing seal-         │                                         │
+│                                  │ predicate.test.mjs:229-238 as prior     │                                         │
+│                                  │ art).                                   │                                         │
+│ surface-backfill-census          │ Live ledger census: for every OPEN      │ The backfill is the door guard's hard   │
+│                                  │ child of cloud-console-hardening-epic   │ dependency and the wave's plan moves it │
+│                                  │ AND cch-instruments-epic, report the    │ to the lead's hands. If it cannot be    │
+│                                  │ `surface` value (D324 measured 24 of    │ produced as a mechanical list, the      │
+│                                  │ 343 populated, free prose). Propose a   │ guard slice must shrink to the          │
+│                                  │ MINIMAL enum and test it against the    │ population the backfill reached.        │
+│                                  │ real corpus — does 2 values (console |  │                                         │
+│                                  │ instrument) classify every open row     │                                         │
+│                                  │ unambiguously, or does the prose demand │                                         │
+│                                  │ more? Emit the actual proposed backfill │                                         │
+│                                  │ map as an executable list so the lead   │                                         │
+│                                  │ can pay it by hand at Decide the way    │                                         │
+│                                  │ wave 27 paid 57 re-parents.             │                                         │
+│ connection-refused-body          │ Read `cch-w27-bl-connection-refused-    │ This is the wave's flagship person body │
+│                                  │ classified-as-timeout` in full, then    │ and the direct human twin of the seal-  │
+│                                  │ trace the classifier:                   │ predicate finding. If no instrument     │
+│                                  │ FailureCopy.humanize and                │ reaches the element, the slice must     │
+│                                  │ merge_job_status/4 in                   │ ship its own cruel fixture in the same  │
+│                                  │ cloud/lib/.../router.ex (~:8460), plus  │ commit (D322's ordering law).           │
+│                                  │ every caller. What is the REAL corpus   │                                         │
+│                                  │ of deploy failure reasons the control   │                                         │
+│                                  │ plane can produce? Where exactly does   │                                         │
+│                                  │ an unclassified reason get routed to    │                                         │
+│                                  │ timeout copy, and what does honest copy │                                         │
+│                                  │ look like for 'I could not classify     │                                         │
+│                                  │ this'? Does ANY committed instrument's  │                                         │
+│                                  │ selector reach the element that paints  │                                         │
+│                                  │ it (standing-test clause 5)?            │                                         │
+│ deployment-failed-toggle         │ Read `cch-w27-bl-deployment-failed-     │ It is a person body only if the toggle  │
+│                                  │ toggle-fires-nothing` in full.          │ is reachable and the event really has   │
+│                                  │ Enumerate every render of the toggle    │ no producer. It also needs a POLICY     │
+│                                  │ (console SPA, notification settings,    │ RULING at Decide, which must be made on │
+│                                  │ email, each chat channel) and every     │ measurement, not preference.            │
+│                                  │ claim it makes to a person. Re-verify   │                                         │
+│                                  │ D321(2)'s 'ZERO dispatch sites for      │                                         │
+│                                  │ :deployment_failed' on origin/main      │                                         │
+│                                  │ TODAY, including internal/** (the Go    │                                         │
+│                                  │ provisioner) which wave 27's own        │                                         │
+│                                  │ debrief admits was only grepped, never  │                                         │
+│                                  │ read. Then answer the policy question   │                                         │
+│                                  │ with evidence: is the honest remedy     │                                         │
+│                                  │ removing the control, disabling it with │                                         │
+│                                  │ a stated reason, or wiring the          │                                         │
+│                                  │ producer?                               │                                         │
+│ deploy-detail-remainder          │ Diff c4a359d0c (#9355) precisely and    │ Determines whether candidate 6 is a     │
+│                                  │ state what it closed of D321(3) —       │ real slice or already paid — exactly    │
+│                                  │ `Sites.Deploy.fail/2` writing one       │ the class of premise that failed smoke  │
+│                                  │ reason to BOTH `failure_reason:` and    │ for .preview-url.                       │
+│                                  │ `detail:` at deploy.ex:970-971 — and    │                                         │
+│                                  │ D321(4), `broadcast_stage/2` shipping   │                                         │
+│                                  │ `detail: stage.detail` raw through      │                                         │
+│                                  │ events.ex. Then check what remains:     │                                         │
+│                                  │ deploy.ex:842 `detail: stage.detail ||  │                                         │
+│                                  │ stage_line(stage)` is a SECOND path; is │                                         │
+│                                  │ it person-reachable? Is the rail-       │                                         │
+│                                  │ versus-row divergence (rail 'connection │                                         │
+│                                  │ refused' vs row 'A network step timed   │                                         │
+│                                  │ out') still live on main?               │                                         │
+│ preview-url-already-paid         │ ADVERSARIALLY test the Strategist's     │ If .preview-url drags anywhere, the     │
+│                                  │ premise-smoke kill. app.css:1847        │ wish's item 4 is live and the           │
+│                                  │ `.deploy-ref { overflow-wrap: anywhere  │ Strategist's kill was wrong — that is a │
+│                                  │ }` (from #9357) and app.js's previewRow │ slice back on the board and a           │
+│                                  │ emits `.preview-url` inside `.deploy-   │ correction the wave must state.         │
+│                                  │ ref`. RUN overflow-guard.mjs against a  │                                         │
+│                                  │ cruel fixture carrying a maximal branch │                                         │
+│                                  │ AND a maximal preview host at every     │                                         │
+│                                  │ CLIP_WIDTH in both themes: does         │                                         │
+│                                  │ `.preview-url` lose pixels ANYWHERE on  │                                         │
+│                                  │ origin/main today? Also check whether   │                                         │
+│                                  │ `.preview-url` is ever rendered OUTSIDE │                                         │
+│                                  │ `.deploy-ref` anywhere in app.js.       │                                         │
+│ fifth-person-body-hunt           │ Sweep the live residue (57 orphans / 59 │ The wave names seven and expects five;  │
+│                                  │ live rows under cloud-console-          │ a measured fifth person body in reserve │
+│                                  │ hardening-epic) for person-facing       │ is what keeps the ratio from being met  │
+│                                  │ bodies matching this wave's frame — the │ by filler.                              │
+│                                  │ console asserting a fact it did not     │                                         │
+│                                  │ measure, or a control a person cannot   │                                         │
+│                                  │ reach. Rank the top five by strength of │                                         │
+│                                  │ existing evidence. Explicitly resolve   │                                         │
+│                                  │ D311's `#cred-back` finding ('four of   │                                         │
+│                                  │ five exits fail to resume, and the fix  │                                         │
+│                                  │ is path-asymmetric'): was it ever       │                                         │
+│                                  │ built, and is it live on origin/main?   │                                         │
+│ w22-s7-resolution                │ Find the REAL doc id for `cch-w22-s7`   │ This is Decide-phase ledger work        │
+│                                  │ (a bare `bp task get cch-w22-s7`        │ costing zero builders — but only if the │
+│                                  │ returns nothing). Read all 16           │ commands are correct and re-derived,    │
+│                                  │ acceptance criteria against D325's      │ since D325 was written against a        │
+│                                  │ ruling and against origin/main's actual │ different tree.                         │
+│                                  │ bytes: D325 stamps C6/C7/C8/C12/C14,    │                                         │
+│                                  │ DROPS C9 (symbol `cuePaints` has zero   │                                         │
+│                                  │ occurrences under cloud/; its second    │                                         │
+│                                  │ anchor file does not exist), and closes │                                         │
+│                                  │ C15/C16 as `n/a — split`. Emit the      │                                         │
+│                                  │ exact stamp/close commands the lead     │                                         │
+│                                  │ runs at Decide, and flag any criterion  │                                         │
+│                                  │ where D325's reading disagrees with     │                                         │
+│                                  │ today's bytes.                          │                                         │
+│ law0-provenance                  │ From a FRESH worktree detached at       │ Law 0 must be paid or accounted for     │
+│                                  │ origin/main, re-derive the seal reading │ every wave, and D306's trap is that     │
+│                                  │ independently and quote UTC stamp, tree │ `orphans = residue − gates − forwarded` │
+│                                  │ sha and RESOLVED REPO ROOT (D319). The  │ makes a re-parent and a close           │
+│                                  │ Strategist read `NO-SEAL a=FAIL b=PASS  │ indistinguishable.                      │
+│                                  │ c=PASS orphans=57 considering=1         │                                         │
+│                                  │ residue=60 (live 59)` at 2026-08-       │                                         │
+│                                  │ 03T12:35:45Z, tree dfdc31db9. Then      │                                         │
+│                                  │ decompose the residue into three        │                                         │
+│                                  │ buckets — legitimately re-parentable to │                                         │
+│                                  │ cch-instruments-epic, honestly          │                                         │
+│                                  │ closeable with evidence, and genuinely  │                                         │
+│                                  │ open console work — and state the re-   │                                         │
+│                                  │ parent count and the close count as TWO │                                         │
+│                                  │ SEPARATE INTEGERS (D306).               │                                         │
+│ instrument-environment-audit     │ Is the seal predicate the only          │ If this is a class, the wave's crown    │
+│                                  │ instrument in a hostile environment, or │ finding generalises into a repo-wide    │
+│                                  │ is this a CLASS? For every committed    │ lesson and possibly a shared guard; if  │
+│                                  │ instrument this epic owns — overflow-   │ the seal predicate is alone, the slice  │
+│                                  │ guard.mjs, cssom-parity.mjs,            │ stays narrow.                           │
+│                                  │ breakpoint-sweep.mjs, smoke.mjs,        │                                         │
+│                                  │ design/emit.mjs + check.mjs,            │                                         │
+│                                  │ scripts/required-checks-*.sh,           │                                         │
+│                                  │ scripts/{cloud,console}-path-escape-    │                                         │
+│                                  │ check.sh — establish which make git or  │                                         │
+│                                  │ filesystem reads beyond the checked-out │                                         │
+│                                  │ worktree, and whether the CI job that   │                                         │
+│                                  │ runs them can actually serve those      │                                         │
+│                                  │ reads. Report any instrument whose CI   │                                         │
+│                                  │ environment structurally prevents part  │                                         │
+│                                  │ of its check.                           │                                         │
+│ fence-and-concurrency            │ Map collision risk. Enumerate every     │ The door-guard slice is illegal without │
+│                                  │ OPEN PR and every live git worktree     │ the fence sentence, and a collision     │
+│                                  │ touching cloud/**,                      │ with the PDS wave on a hot Elixir file  │
+│                                  │ api/lib/barkpark/content/**,            │ would strand a builder.                 │
+│                                  │ .github/workflows/** and scripts/**.    │                                         │
+│                                  │ Confirm whether the concurrent PDS wave │                                         │
+│                                  │ (api/lib/barkpark/tenancy/,             │                                         │
+│                                  │ scripts/pds-*) reaches                  │                                         │
+│                                  │ api/lib/barkpark/content/mutations.ex.  │                                         │
+│                                  │ Then quote the charter's fence text     │                                         │
+│                                  │ verbatim on the mutations.ex            │                                         │
+│                                  │ dispensation ('narrow, do not widen',   │                                         │
+│                                  │ scoped to the ledger close-bypass       │                                         │
+│                                  │ guard) and draft the EXACT numbered     │                                         │
+│                                  │ sentence a wave-28 charter decision     │                                         │
+│                                  │ needs to widen it to a filing-law       │                                         │
+│                                  │ guard.                                  │                                         │
+│ overflow-guard-anchor-map        │ Map overflow-guard.mjs on origin/main   │ Wave 27 proved by-name anchor           │
+│                                  │ TODAY: the full DEFECTS registry, every │ assignment eliminates the serial-merge  │
+│                                  │ leg block's boundaries, the shared      │ tax entirely; skipping it reintroduces  │
+│                                  │ trailing context, and which regions are │ the leg-transplant hazard the lead      │
+│                                  │ unclaimed. Assign candidate anchors BY  │ warns about.                            │
+│                                  │ NAME for this wave's slices (the D326   │                                         │
+│                                  │ pattern that let wave 27's six diffs    │                                         │
+│                                  │ merge in any order), and state which    │                                         │
+│                                  │ candidate slices would collide if built │                                         │
+│                                  │ concurrently. Also re-check the LATENT  │                                         │
+│                                  │ false-attribution defect D322 filed:    │                                         │
+│                                  │ the `W26-deploy-fail-clip` leg's        │                                         │
+│                                  │ clipper assertion is not panel-scoped   │                                         │
+│                                  │ and blames 'a failed deploy's reason'   │                                         │
+│                                  │ for a different element's overflow.     │                                         │
+│ standing-test-sixth-clause-sweep │ The wave's sixth standing-test clause — │ This is the wave's thesis stated as a   │
+│                                  │ an instrument pointed at an unreadable  │ search. Any hit consumed by a person is │
+│                                  │ input reports defect-shaped prose for   │ a candidate person body; any hit        │
+│                                  │ 'I could not look' — generalises. Sweep │ consumed by a gate is the same defect   │
+│                                  │ cloud/** and the instrument files for   │ as the crown finding.                   │
+│                                  │ the same shape: a bare `catch {}` that  │                                         │
+│                                  │ pushes a definite finding, a `|| false` │                                         │
+│                                  │ that turns an unknown into a negative,  │                                         │
+│                                  │ a try/rescue that returns a confident   │                                         │
+│                                  │ default, a two-way test whose negative  │                                         │
+│                                  │ branch is taken when the test could not │                                         │
+│                                  │ run. Report the top hits ranked by      │                                         │
+│                                  │ whether a PERSON or a GATE consumes the │                                         │
+│                                  │ wrong answer.                           │                                         │
+└──────────────────────────────────┴─────────────────────────────────────────┴─────────────────────────────────────────┘
+
+Where the wave stands
+
+┌────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Strategize │ COMPLETE — this Paper. Direction committed; 17 survey assignments cut; premise smoke run with TWO       │
+│            │ failures (`.preview-url` already paid; 'a depth-1 clone has no origin/main' is false) and ONE           │
+│            │ enlargement (wave 27's wrong-root fix does not cover the shallow clone — proved by live run).           │
+│ Survey     │ IN FLIGHT — 17 Opus surveyors.                                                                          │
+│ Digest     │ not started — appends the survey digest and the verify plan here BEFORE the verifiers fly.              │
+│ Verify     │ not started.                                                                                            │
+│ Decide     │ not started — appends decisions, the charter D-numbers, the Law-0 payment and the wave plan here BEFORE │
+│            │ the builders fly. Owns three lead-hand artifacts: the `surface` backfill, the cch-w22-s7 stamp/close,   │
+│            │ and the fence-widening sentence.                                                                        │
+│ Build      │ not started.                                                                                            │
+│ Review     │ not started — closes this Paper as the debrief.                                                         │
+└────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+▌ PROVENANCE LAW (D319), paid at Strategize: 2026-08-03T12:35:45Z · tree dfdc31db96b85b66515a1cba3f92a9e9bd81b09b ·
+▌ resolved root <scratchpad>/wt-w28 → NO-SEAL a=FAIL b=PASS c=PASS orphans=57 considering=1 successor=cch-instruments-
+▌ epic mode=live stubbed=0 waived=0. Every seal run this wave quotes all three.
+
+▌ REGISTER NOTHING. .github/required-checks.json is not touched by any slice in this wave.
+
+Survey digest — 17 reports, and the wave's own sixth clause fired inside FOUR of them
+
+Seventeen surveyors reported; coverage deficit none. The headline is not any single finding — it is that the standing
+test's sixth clause (an instrument pointed at the WRONG ROOT reports defect-shaped prose for a condition that is only "I
+could not look") fired four separate times inside this survey itself, in four different surveyors, in four different
+ways. Every one of them was a read of a tree that was not origin/main. This is now the wave's most-replicated finding
+and it is no longer a claim about one instrument.
+
+┌───┬──────────────────────────────┬─────────────────────────────────────────┬─────────────────────────────────────────┐
+│ 1 │ w22-s7-resolution            │ D325 killed criterion C9 because        │ cuePaints is ALIVE at overflow-         │
+│   │                              │ "cuePaints has ZERO occurrences         │ guard.mjs:4129-4130. The ledger note    │
+│   │                              │ anywhere under cloud/"                  │ recording the ZERO-hits grep was run in │
+│   │                              │                                         │ a checkout whose HEAD (a31faa52d) is    │
+│   │                              │                                         │ not an ancestor of origin/main. D325's  │
+│   │                              │                                         │ C9 kill is REFUTED on both its anchors. │
+│ 2 │ fence-and-concurrency        │ "D306/D307/D319/D321/D323/D324/D325 do  │ REFUTED by git-show. The charter on     │
+│   │                              │ not exist in this charter; the table    │ origin/main is 3454 lines and carries   │
+│   │                              │ ends at D250; next free number is D251" │ D300 through D326 as full rows. The     │
+│   │                              │                                         │ surveyor read the primary checkout's    │
+│   │                              │                                         │ 2525-line copy. Next free number is     │
+│   │                              │                                         │ D327, not D251.                         │
+│ 3 │ shallow-clone-discrimination │ the ancestry leg is at seal-            │ Substance CORRECT, anchors WRONG. On    │
+│   │                              │ predicate.mjs:276, the diff legs at     │ origin/main the bare-catch ancestry leg │
+│   │                              │ :252/:255                               │ is :453-454 and the Infra-throwing diff │
+│   │                              │                                         │ legs are :457-458. On #9356's head they │
+│   │                              │                                         │ are :489. No line in the report         │
+│   │                              │                                         │ resolves in either tree.                │
+│ 4 │ instrument-environment-audit │ each independently discovered mid-run   │ Correct behaviour, and the reason those │
+│   │ / deploy-detail-remainder /  │ that the primary checkout is behind     │ three reports are trustworthy. Named    │
+│   │ connection-refused-body      │ origin/main and re-derived from git     │ here as the control group: the          │
+│   │                              │ show                                    │ discipline works when applied.          │
+└───┴──────────────────────────────┴─────────────────────────────────────────┴─────────────────────────────────────────┘
+
+The consequence for the wave is a promotion, not a footnote. The direction argued the discrimination fix from ONE live
+measurement of one instrument. The survey turned that into a repo-wide, cross-language pattern with a named control
+group — and it supplied the model arm from the epic's own code, four lines below the defect.
+
+What is now ESTABLISHED
+
+1. The seal predicate's two git legs disagree about the same failure class, four lines apart
+
+On origin/main, seal-predicate.mjs:453-454 catches ANY throw from merge-base --is-ancestor and pushes a definite product
+claim ("commit X is not an ancestor of origin/main"). :457-458 catches the identical class from git show and throws
+Infra → exit 2 INFRA-FAULT. The honest arm is already in the file, applied to one leg and not its neighbour. That is a
+far stronger charter sentence than "add discrimination to the git legs", and it explains why the lead's stubbing remedy
+failed: stubbing :453 hands control to :457, which correctly raises Infra. The lead patched the leg that was already
+right.
+
+2. The discrimination the direction proposed is INSUFFICIENT — proved live, and this is the survey's crown
+
+The direction proposed keying on rc 1 (product) vs rc 128 / missing object / shallow (environment). A surveyor built
+four real clones and measured the truth table. The residual case breaks it: in a --depth 1 clone with the commit object
+fetched IN (grafted), cat-file -e returns rc 0, git show --name-only returns rc 0 with real bytes — and merge-base --is-
+ancestor returns rc 1 for a commit a full clone confirms IS an ancestor. Object presence is not the discriminator; the
+truncated WALK is. Ancestry degrades before the diff does.
+
+┌─────────────────────────────────────────┬─────────────────────┬────────┬─────────────────────────────────────────────┐
+│ full clone, commit on main              │ rc 0                │ rc 0   │ PRODUCT                                     │
+│ full clone, commit not on main          │ rc 1                │ rc 0   │ PRODUCT                                     │
+│ full clone, sha never existed           │ rc 128              │ rc 128 │ PRODUCT — the register cites a phantom sha, │
+│                                         │                     │        │ a real defect                               │
+│ --depth 1, old commit                   │ rc 128              │ rc 128 │ ENV                                         │
+│ --depth 50, commit in window            │ rc 0                │ rc 0   │ PRODUCT                                     │
+│ --depth N + object fetched in (grafted) │ rc 1 — FALSE        │ rc 0   │ ENV masquerading as PRODUCT — the leg both  │
+│                                         │                     │        │ remedies miss                               │
+│ origin remote removed                   │ rc 128 (on the REF) │ rc 0   │ ENV — needs its own probe, ref vs object    │
+└─────────────────────────────────────────┴─────────────────────┴────────┴─────────────────────────────────────────────┘
+
+So the refusal must key on shallowness itself (rev-parse --is-shallow-repository), on ref resolution (rev-parse --verify
+--quiet origin/main) and on object presence (cat-file -e <sha>^{commit}) as three SEPARATE probes — not on an exit code
+alone. A guard phrased as "is this a valid git work tree?" waves the grafted case through, which is exactly wave 27's
+shape repeated one level down.
+
+3. #9356's red is ONE assertion, and the workflow already forbade the shape that produced it
+
+The failure is seal-predicate.test.mjs:1273 — assert.equal(sealed.status, SEAL) — actual 1, expected 0, with the
+mutant's own token reading a=PASS b=FAIL c=PASS. Clause (a), the only thing that control is about, PASSES in CI. And
+console-harness.yml:239-248 on origin/main already states, verbatim, that depth-1 makes the predicate "manufacture a
+false NO SEAL out of a shallow clone" and that "the test file is hermetic instead". Wave 27's empty-roster control is
+the first and only exit-code-asserting run in the file that goes down the LIVE path. It violates a contract the job had
+written down.
+
+This flips both of the lead's options. Option (b) is not a dodge — it RESTORES the file's own stated invariant. Option
+(a) does not merely change clone cost: seal-predicate.test.mjs:35 sets REPO = resolve(HERE, '../../../..') and passes --
+repo REPO to ~15 spawns, so the suite is hermetic today only by accident — because depth-1 makes every git read fail
+uniformly. Flip to fetch-depth: 0 and clause (b) begins returning real answers about real epic commits, and the suite's
+verdict silently becomes a function of history state with not one test line changed. Option (a) alone converts a
+hermetic suite into a history-coupled one.
+
+4. Clause (a) has FOUR unguarded lies of its own, and one is a FALSE SEAL
+
+The wave has been treating clause (b) as the diseased half. It is not the only one.
+
+┌────┬─────────────────────────────┬─────────────────────────────────────────────────────────┬─────────────────────────┐
+│ a1 │ FALSE SEAL by page          │ fetchRoster hardcodes limit=500 and reads               │ LATENT — epic roster    │
+│    │ truncation                  │ .result.documents. result.count is the PAGE SIZE, not   │ 288 today. Guard is one │
+│    │                             │ the total (measured: limit=2 → count=2). No total, no   │ line and does not       │
+│    │                             │ hasMore. Cross 500 rows and tail residue is invisible → │ exist.                  │
+│    │                             │ orphans=0 → a=PASS → SEAL.                              │                         │
+│ a2 │ FALSE NO-SEAL by successor  │ forwarded is built from fetchRoster(SUCCESSOR).         │ LATENT — successor 183. │
+│    │ truncation                  │ Truncate that page and legitimately-forwarded rows fall │                         │
+│    │                             │ out of the Set and are printed as "residue carrying no  │                         │
+│    │                             │ forwarding address".                                    │                         │
+│ a3 │ FALSE NO-SEAL on bucket (c) │ A typo'd filter key returns HTTP 200 count:0            │ LIVE mechanism, no      │
+│    │                             │ (measured). fetchById returns documents[0] || null, so  │ floor.                  │
+│    │                             │ ANY filter-contract drift makes all three hardcoded     │                         │
+│    │                             │ gates resolve null → c=FAIL → "3 human gates failed to  │                         │
+│    │                             │ resolve". Wave 27's empty-roster floor guards clause    │                         │
+│    │                             │ (a)'s roster and never touches (c).                     │                         │
+│ a4 │ MUTE fail-closed            │ curl runs without --fail. A wrong-dataset read returns  │ Honest but uncoded.     │
+│    │                             │ HTTP 404 with a valid JSON error body carrying a        │                         │
+│    │                             │ request_id; JSON.parse succeeds, the Infra guard is     │                         │
+│    │                             │ never reached, and .result.documents throws a bare      │                         │
+│    │                             │ TypeError → exit 2 naming neither the status nor the    │                         │
+│    │                             │ request_id.                                             │                         │
+└────┴─────────────────────────────┴─────────────────────────────────────────────────────────┴─────────────────────────┘
+
+Two premise corrections that come with it. BP_TOKEN is decorative on this endpoint — a bogus bearer returned HTTP 200
+with the full document set, so "auth failure" is not a live failure mode today. And truncated-JSON is already handled
+correctly (Infra with the first 60 chars quoted). Do not spend a slice on either.
+
+5. The D307 door guard is BUILDABLE but the direction's in-file precedent is FALSE, and the backfill is worse than
+feared
+
+The direction said mutations.ex:470-545 already hosts a create-time door guard. It does not. That range is
+ensure_claim_not_dropped/4, an UPDATE fence whose first clause (mutations.ex:550) structurally exempts every fresh birth
+— and whose own header comment names that hole. The create clause at :132-158 has zero guard hooks; guards exist on
+exactly four clauses (createOrReplace, replace, both patch clauses), and create/createIfNotExists are unguarded by ruled
+intent (D53: "structurally incapable of touching a live row"). That rationale is about clobbering an existing row and
+says nothing about a FORGED BIRTH. The D307 guard would be the first guard ever wired into the create clause — a
+charter-visible widening, not an added line.
+
+What is easier than advertised: surface IS visible at the guard point. incoming_content(attrs) already exists and is
+already the argument passed to both existing guards, and a committed test proves the flat Sanity envelope is not an
+escape. Zero new plumbing.
+
+What is harder: surface is not a declared task field at all (zero hits in tasks/schema.ex), and the identifier surface
+is ALREADY a reserved schema-DSL keyword meaning field placement (body|sidebar) across every plugin schema JSON. And the
+backfill does not exist as a mechanical artifact: a composite classifier built from every structured field the ledger
+carries scored 6/15 (40%) blind against the ledger's own human-written labels — worse than the 67% false-refusal rate
+D324 measured on the drafted predicate. 86 of 230 open rows (37%) are undecidable from every field sampled.
+
+▌ THE POPULATION NUMBER THE WAVE MUST QUOTE. surface is populated on 36 of 471 rows across both epics and on 15 of 230
+▌ OPEN rows. On the 56 live orphans specifically it is populated on 5 and null on 51 — a guard armed today over that
+▌ population refuses 91% of legitimate filings. D324's "24 of 343" is not refuted, it is a DIFFERENT ROSTER (343 was
+▌ the pre-re-parent census). Quote the roster definition or the fraction means nothing.
+
+A surveyor also found that two committed tests PIN the current hole as expected behaviour —
+mutate_controller_test.exs:526 and :542, the latter explicitly recording "RESIDUAL HARM… NO COMPENSATING CONTROL SHIPS
+IN THIS SLICE". Their fixtures carry no parent_id, so a parent_id-scoped refusal leaves both green. A guard scoped any
+wider turns them red, and one of them is a test asserting the absence of the very guard being shipped.
+
+6. D306 fires on the wave that wrote it: the wish's "57 re-parented rows" is the ORPHAN count
+
+Re-derived independently from a fresh detached worktree at origin/main (resolved root quoted, non-shallow): NO-SEAL
+a=FAIL b=PASS c=PASS orphans=57 considering=1 residue=60 (live 59), roster 288 {done 194, open 59, cancelled 34,
+considering 1}. Against wave 27's 343 {189/119/34/1} the delta decomposes exactly: RE-PARENTED 55 (only a re-parent
+shrinks the denominator) and CLOSED 5 (189→194, cancelled unchanged). 119 − 55 − 5 = 59. ✓ 57 is neither integer — it is
+today's orphan count. Wave 28 quotes 55 and 5.
+
+▌ PROVENANCE CORRECTION (D319). The Strategize line quoted "tree dfdc31db96b8…". That is the COMMIT sha. The tree at
+▌ that commit is 3cf1bda5661b6a119d017d1c8582fd2a93f356ed. D319 asks for a tree sha precisely because a tree is
+▌ content-identity; labelling the commit as the tree is a level-skip of the kind this epic polices. Same object, wrong
+▌ label — the reading is unaffected.
+
+7. The .preview-url kill SURVIVED adversarial attack, on measurement
+
+A surveyor was tasked to red the Strategist and could not. Driven from a clean detached worktree at origin/main, the
+committed cruel-fixture leg W27-deploy-ref-branch-bounded measured 20/20 cells clean, rc 0 across 10 widths × 2 themes,
+60 rows, with every per-cell urlLost NEGATIVE (worst margin −76.44px). The leg is not green by construction: it dies if
+the cruel branch drops below 40 chars or gains a break opportunity, it measures the inheritance per cell rather than
+asserting it in prose, and it has a committed 52-findings-pre-fix record. .preview-url is rendered at exactly one place
+repo-wide and always inside .deploy-ref. The slice comes off the board on evidence.
+
+But the concern behind wish item 4 is not dead — it moved one element over. .deploy-detail, the class app.js paints the
+raw server deploy-stage detail into, appears in overflow-guard.mjs exactly once, in a COMMENT declaring it OUT of the
+measured surface. Zero assertions. That is the shape of "a guard whose SELECTOR cannot reach the defect", written down
+by the instrument itself.
+
+8. The person bodies, re-priced
+
+┌────────────────────────────────────────────────────────┬─────────────────────────────────────────────────────────────┐
+│ connection refused classified as timeout               │ CONFIRMED at failure_copy.ex:479-481, and the only          │
+│                                                        │ instrument reaching it ASSERTS THE DEFECT IS CORRECT        │
+│                                                        │ (failure_copy_test.exs:123). The fix is a CORRECTION of a   │
+│                                                        │ green test, not an addition. ROUTING CORRECTED: on the      │
+│                                                        │ DEPLOY path a refused connection never reaches the          │
+│                                                        │ classifier (deploy.ex:1042 rewrites every transport error). │
+│                                                        │ It bites on the PROVISION path via router.ex:8464           │
+│                                                        │ merge_job_status. Filing it against the deploy row sends a  │
+│                                                        │ builder to a surface the string cannot reach. Corpus        │
+│                                                        │ caveat: the OS-generated family cannot be enumerated from   │
+│                                                        │ source, so a criterion phrased "list every reason" is       │
+│                                                        │ unsatisfiable — judge each ARM instead.                     │
+│ Deployment failed toggle fires nothing                 │ CONFIRMED and STRENGTHENED. Seven dispatch literals across  │
+│                                                        │ four callers, none of them :deployment_failed. The Go side  │
+│                                                        │ is now READ, not just grepped, and exonerated: the builder  │
+│                                                        │ reports state over a transition route that broadcasts SSE   │
+│                                                        │ and returns JSON with no notification seam. The toggle      │
+│                                                        │ makes FOUR person-facing claims, one requiring no action at │
+│                                                        │ all (email default true at the DB migration). Every         │
+│                                                        │ downstream leg already exists — schema, migration,          │
+│                                                        │ @chat_default_on, both render heads, worker, delivery log,  │
+│                                                        │ SPA fixtures. ONE call is missing. ANCHOR CORRECTION: the   │
+│                                                        │ task names Sites.Deploy.fail/2 which DOES NOT EXIST on      │
+│                                                        │ main; and THREE seams mark a deployment failed (builder     │
+│                                                        │ route, agent route, stale_deployment_reaper), so a route-   │
+│                                                        │ side dispatch silently misses the reaper.                   │
+│ deploy-stage detail remainder                          │ MOSTLY PAID by #9355. What remains is ONE unclassified key  │
+│                                                        │ — deployment_json's top-level detail is scrubbed but never  │
+│                                                        │ classified, beside a humanized failure_reason in the same   │
+│                                                        │ payload. Its browser reader is a sub-second race            │
+│                                                        │ (deployDetailHtml renders only while active; a settled      │
+│                                                        │ failed row shows nothing). RAIL-VS-ROW DIVERGENCE IS DEAD — │
+│                                                        │ both sides now say the same WRONG sentence, which is the    │
+│                                                        │ connection-refused body, not this one. RECOMMENDATION: fold │
+│                                                        │ into the classifier slice.                                  │
+│ FIFTH BODY — deployment_failed EMAIL still unhumanized │ NEW, and the strongest drop-in. event_email.ex:61 and :67   │
+│                                                        │ call detail/1 (scrub only, no classify) while :53-56 calls  │
+│                                                        │ cause_then_capture (the D310 humanize-then-capture body).   │
+│                                                        │ The same person, the same minute, reads a classified cause  │
+│                                                        │ on the dashboard and raw reaper jargon in their inbox. D310 │
+│                                                        │ already ruled the shape, so a builder inherits a decided    │
+│                                                        │ design. Confirmed live on origin/main this session.         │
+│ D311 #cred-back                                        │ BUILT AND LIVE — do not re-file. dismissLaunchConnectSheet  │
+│                                                        │ clears the stash on every exit and re-enters on back;       │
+│                                                        │ openProviderPicker is deleted. Residual is a STALE-OPEN     │
+│                                                        │ ledger row (cch-w25-bl-cred-back-lands-on-a-picker-nobody-  │
+│                                                        │ came-from) whose subject no longer exists — adjudicate by   │
+│                                                        │ content at Decide, zero builder cost.                       │
+│ SIXTH BODY — domain_status resolve_all                 │ NEW, and it is the crown finding pointed at a human.        │
+│                                                        │ resolve_all collapses raise, :exit, :timeout, :nxdomain and │
+│                                                        │ no-nameserver into an empty list via a bare `_ -> []`, and  │
+│                                                        │ probe_dns emits the definite sentence "No A/AAAA record for │
+│                                                        │ X has propagated yet" at :pending WITH REMEDIATION ADVICE   │
+│                                                        │ ATTACHED TO THE GUESS. The same call feeds a second stage,  │
+│                                                        │ so one unreachable resolver degrades two.                   │
+└────────────────────────────────────────────────────────┴─────────────────────────────────────────────────────────────┘
+
+9. Honest negatives — three places the wave should NOT spend
+
+• overflow-guard.mjs separates environment from defect correctly: die() is used for CDP bring-up and measurement
+  breakage, distinct from the failures[] path, and its navigating-catch is loop-bounded and throws on exhaustion.
+• registry.ex's ~20 `_ -> true|false` catch-alls are Repo.one() nil-vs-1 matches, not unknown-to-definite collapses;
+  barkpark_in_team? documents its fail-closed intent.
+• app.js's catch-to-null totalisers: the one consumer traced (presenceSlotHtml) renders "Roster unreachable" — honest
+  about not knowing. The other two consumers are UNTRACED and are a verify question, not a filed slice.
+
+Also negative on scope: the git/history axis is NOT a class. seal-predicate.mjs is the only instrument this epic owns
+that execs git at all. cssom-parity.mjs weighed and REJECTED a git-derived baseline in committed prose, naming
+origin/main-ref availability among the contexts it must survive; all three path-escape scripts enumerate with find
+citing D31. Slice 2 stays single-file. What generalises is the DOCTRINE, and it has two working implementations already
+in-tree: cssom-parity.mjs:608 (throws on unreadable input) and required-checks-verify.sh (hard-fails on a protection
+read it cannot make, deliberately, "an unreadable input is a failure and never a skip").
+
+Coverage map — what was checked, and JUST AS LOUDLY what was NOT
+
+Checked and FOUND
+
+┌──────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────┐
+│ seal-predicate.mjs — every git leg + error handling      │ 3 git reads mapped; asymmetric handling confirmed at :453 │
+│                                                          │ vs :457 on origin/main                                    │
+│ seal-predicate.mjs — clause (a) HTTP legs                │ q(), fetchRoster, fetchById, bucket (c) all read; four    │
+│                                                          │ unguarded failure modes derived; API behaviour measured   │
+│                                                          │ live (count/limit/404/typo'd filter/bogus token)          │
+│ seal-predicate.test.mjs                                  │ 1310 lines on the PR head; the ONE hostage assertion      │
+│                                                          │ isolated at :1273; the other 63 tests structurally        │
+│                                                          │ explained; :35 REPO = real repo root found                │
+│ console-harness.yml (origin/main, 646 lines)             │ 7 jobs, 7 independent checkouts, ONE fetch-depth: 0       │
+│                                                          │ (changes job, :104); the depth-1 hazard already           │
+│                                                          │ documented in its own comment at :239-248                 │
+│ all 44 workflows                                         │ 15 fetch-depth: 0 lines across 13 workflows; every        │
+│                                                          │ clause-(b)-class git reader outside console-harness       │
+│                                                          │ already sets it                                           │
+│ clone cost, measured                                     │ bare depth-1 5s/63M vs full 9s/115M; worktree totals 283M │
+│                                                          │ → 322M (+13.8%)                                           │
+│ mutations.ex                                             │ apply_mutations/3 public at :31; create clause :132-158   │
+│                                                          │ unguarded; ensure_claim_not_dropped exempts fresh births  │
+│                                                          │ at :550; incoming_content/1 reusable                      │
+│ router.ex                                                │ POST /v1/data/mutate/:dataset at :2322 (non-admin);       │
+│                                                          │ merge_job_status at :8460 humanizing at :8464             │
+│ tasks/schema.ex                                          │ surface NOT declared; parent_id declared at :528;         │
+│                                                          │ `surface` collides with the schema-DSL placement keyword  │
+│ the live ledger                                          │ both rosters censused (288 / 183); surface populated      │
+│                                                          │ 36/471 and 5/56 on live orphans; backfill classifier      │
+│                                                          │ measured at 40% blind accuracy                            │
+│ failure_copy.ex, event_email.ex, render.ex, deploy.ex,   │ every named arm read on origin/main and confirmed         │
+│ domain_status.ex                                         │                                                           │
+│ overflow-guard.mjs                                       │ 25-entry registry mapped 190-216; all 25 leg blocks       │
+│                                                          │ bounded; three shared regions identified; W27-deploy-ref  │
+│                                                          │ leg RUN twice at rc 0                                     │
+│ 8 open PRs + 225 live worktrees                          │ ZERO touch mutations.ex; ZERO hold a dirty console-       │
+│                                                          │ harness.yml; overflow-guard.mjs dirty in SIX worktrees,   │
+│                                                          │ one in UU conflict                                        │
+│ charter D300-D326 on origin/main                         │ all present, all covering what they are cited for; next   │
+│                                                          │ free number is D327                                       │
+└──────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────┘
+
+Checked and NOT FOUND — absences are decisions-in-waiting
+
+┌──────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────┐
+│ NO live seal run exists in ANY workflow                  │ grep of .github/, scripts/, Makefile* returns only the    │
+│                                                          │ test invocation. Remedy (a)'s "it fixes every FUTURE      │
+│                                                          │ clause-(b) reading in CI" value is entirely PROSPECTIVE — │
+│                                                          │ there is no second live reading waiting to be unblocked.  │
+│ assertReadableRepoRoot does not exist on origin/main     │ It is #9356's unmerged code. Nobody has audited the root  │
+│                                                          │ leg against a shallow clone; that audit can only happen   │
+│                                                          │ on the branch.                                            │
+│ console-harness.yml has NO fetch-depth key at all        │ The wish says it "checks out at fetch-depth: 1". It does  │
+│                                                          │ not — it inherits actions/checkout@v4's default. Remedy   │
+│                                                          │ (a) is an ADD with 8+ workflows of precedent, not an      │
+│                                                          │ edit.                                                     │
+│ No test anywhere covers deployment_json's top-level      │ #9355's 403-line test covers SSE, console[].detail and    │
+│ detail key                                               │ stages[].detail and nothing else. The remainder is        │
+│                                                          │ untested.                                                 │
+│ ZERO dispatch sites for :deployment_failed, repo-wide,   │ internal/builder + internal/provisioner READ (35 files):  │
+│ Elixir AND Go                                            │ four hits, all irrelevant. The transition route           │
+│                                                          │ broadcasts SSE and returns JSON with no notification      │
+│                                                          │ seam.                                                     │
+│ No API-token-expiry scanner among the 14 cloud workers   │ token_expiring (default TRUE) has no producer AND no      │
+│                                                          │ machinery that could become one. It is the removal        │
+│                                                          │ candidate, not a wiring candidate.                        │
+│ No existing test would red if a deployment_failed        │ router_notifications_test.exs:390 loops                   │
+│ dispatch were added then removed                         │ EventEmail.build/4 on hand-built payloads — green today   │
+│                                                          │ with zero dispatchers. A new test in that shape certifies │
+│                                                          │ nothing.                                                  │
+│ modal-oracle.mjs's unreadableSheets count is read by     │ grep repo-wide returns the assignment line itself. Its    │
+│ NOTHING                                                  │ sibling cssom-parity.mjs already throws on the identical  │
+│                                                          │ condition. Capped in severity because no job invokes      │
+│                                                          │ modal-oracle at all.                                      │
+│ ZERO browser fixtures carry a network/timeout/refused    │ Every scenarios.mjs failure_reason is a build error, the  │
+│ failure_reason                                           │ cruel string, or the github-push copy. The overflow-guard │
+│                                                          │ legs reach the BOX but can never hold this sentence —     │
+│                                                          │ clause 4, not clause 5.                                   │
+│ .deploy-detail has ZERO assertions in overflow-guard.mjs │ Its single occurrence is a comment declaring it out of    │
+│                                                          │ the measured surface.                                     │
+│ No row in the 57 orphans carries a close_reason or       │ Bucket 2 (honestly closeable) is ZERO that any surveyor   │
+│ evidence stamp                                           │ could certify. The residue contains no free wins: orphans │
+│                                                          │ move only by re-parenting (12 candidates named) or by     │
+│                                                          │ building.                                                 │
+│ --filter=blob:none partial clone: UNTESTED               │ Clone over file:// exceeded budget. Expected honest       │
+│                                                          │ ancestry with a lazily-failing diff — the exact MIRROR of │
+│                                                          │ the shallow case. A third failure mode (a HANG) would be  │
+│                                                          │ catchable by neither exit code nor stub.                  │
+└──────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────┘
+
+Corners no surveyor reached
+
+• What a REAL actions/checkout@v4 workspace contains. Every shallow measurement in this survey is from a local `git
+  clone --depth 1` over file://. actions/checkout fetches a NARROW REFSPEC and a merge ref for PRs, so CI may present
+  the MISSING-REF shape (rc 128 on origin/main) rather than the MISSING-OBJECT shape measured. A guard tested only
+  against a depth-limited clone could still be green-by-construction on a real runner.
+• Whether --is-shallow-repository reports true inside a git WORKTREE of a shallow repo — and inside the epic-cycle
+  worktrees every builder in this epic works in. If it under-reports there, the guard is green by construction in the
+  very place it will be built.
+• 15+ of the ~20 Elixir rescue sites in cloud/lib: health.ex:26, notifications.ex:436, usage.ex:575-659, push/jwt.ex:36-
+  100, sites/deploy.ex:1259. Only domain_status.ex was read in full.
+• Task DESCRIPTIONS for the 86 undecidable backfill rows. The 40% classifier accuracy is a floor on the fields SAMPLED,
+  not a proof that no classifier works — this is the single experiment that could turn 'not mechanically producible'
+  into 'producible'.
+• Whether app.js's fleetMutate and fetchOffloadTask consumers render honestly for {status: 0, data: null}. One traced
+  consumer is honest; two are unchecked.
+• js/, web/ and webhook payloads as consumers of deployment_json's detail key. Only internal/cli was checked.
+• Whether stale_deployment_reaper reaches Registry.transition_deployment_fenced/4 or issues its own Repo.update_all.
+  This decides whether the notification dispatch has ONE insertion point or two.
+
+Where the reports CONTRADICT each other or the direction
+
+┌────┬───────────────────────────────────────────────────────┬─────────────────────────────────────────────────────────┐
+│ 1  │ Direction: "mutations.ex:470-545 already hosts a      │ REFUTED by bytes. It is an UPDATE fence that exempts    │
+│    │ create-time door guard, the in-file pattern exists."  │ fresh births. The D307 guard is the FIRST guard on the  │
+│    │                                                       │ create clause. The direction's reachability half        │
+│    │                                                       │ (apply_mutations public at :31, non-admin at            │
+│    │                                                       │ /v1/data/mutate/:dataset) is CONFIRMED.                 │
+│ 2  │ Direction: the fix is rc 1 vs rc 128 discrimination.  │ INCOMPLETE by live measurement. The grafted case        │
+│    │                                                       │ returns rc 1 falsely. Must key on shallowness, ref and  │
+│    │                                                       │ object as three separate probes.                        │
+│ 3  │ Wish: console-harness.yml "checks out at fetch-depth: │ There is no fetch-depth key. It is the checkout         │
+│    │ 1".                                                   │ default. Practical difference: remedy (a) is an ADD.    │
+│ 4  │ Wish + Direction: "57 rows re-parented by hand."      │ 57 is the orphan count. Re-parented 55, closed 5 — two  │
+│    │                                                       │ separate integers, as D306 demands.                     │
+│ 5  │ Direction: provenance "tree dfdc31db9…".              │ That is the commit sha. The tree is 3cf1bda56.          │
+│ 6  │ fence-and-concurrency: "D306-D325 do not exist; next  │ REFUTED — stale checkout. They exist as full charter    │
+│    │ free is D251."                                        │ rows. Next free is D327.                                │
+│ 7  │ D325 (charter): C9 dropped because cuePaints has zero │ REFUTED — cuePaints is live at overflow-guard.mjs:4129. │
+│    │ occurrences.                                          │ C9 may still be dropped on JUDGMENT (D253 ruled the     │
+│    │                                                       │ predicate wrong but STRICT — it can only red a cued     │
+│    │                                                       │ screen, never green a broken one) but not on the stated │
+│    │                                                       │ reason.                                                 │
+│ 8  │ Direction: candidate (6), the deploy-stage detail     │ Downgraded by measurement to a HALF-slice with a sub-   │
+│    │ remainder, is a slice.                                │ second browser window. Recommendation: fold into the    │
+│    │                                                       │ classifier slice.                                       │
+│ 9  │ Direction: .preview-url is already paid.              │ UPHELD on measurement (20/20 clean, rc 0) — and the     │
+│    │                                                       │ concern relocates to .deploy-detail, which no           │
+│    │                                                       │ instrument measures.                                    │
+│ 10 │ Task row: fix at Sites.Deploy.fail/2.                 │ No such function on origin/main. And three seams mark a │
+│    │                                                       │ deployment failed, not one.                             │
+│ 11 │ Task row: connection-refused bites on the deploy row. │ It cannot — deploy.ex:1042 rewrites transport errors.   │
+│    │                                                       │ It bites on provision/deprovision via router.ex:8464.   │
+└────┴───────────────────────────────────────────────────────┴─────────────────────────────────────────────────────────┘
+
+What Decide cannot live without knowing
+
+• Whether the CI runner's shallow shape is MISSING-OBJECT or MISSING-REF. These need different probes, and every
+  measurement so far is from a local clone that may present the wrong one. This decides the discrimination's shape, not
+  just its wording.
+• Whether --is-shallow-repository is true inside a git worktree of a shallow repo — because that is where the builder
+  will test the guard.
+• Whether the clause-(a) lies (truncation floor, bucket-(c) cardinality floor, curl --fail) fold into the HISTORY-
+  UNAVAILABLE slice as one coherent "the predicate stops asserting what it did not measure" change, or whether they are
+  a separate slice. This is the wave's ratio pivot: folding them recovers a person body.
+• Whether flipping console-unit to fetch-depth: 0 changes any test verdict TODAY. Cheap to produce (run the suite in a
+  full clone and a depth-1 clone, diff per-test results) and it IS the exact blast radius.
+• Whether the backfill is mechanically producible from task DESCRIPTIONS. If yes, the door guard arms over a real
+  population; if no, it arms over the rows the backfill reached and the wave says so.
+• Whether :agent_unreachable's :detail is ever non-empty at its dispatch site — this decides whether the fifth person
+  body is one event or two.
+• Which function hosts the deployment_failed dispatch so all three failure seams are covered.
+
+The verify fleet — 12 assignments, all Opus (Fable unavailable), 9 of them RUN something
+
+This is the LAST look. Every assignment closes a named unknown or proves a load-bearing claim by RUNNING it. Nine of
+twelve carry a command; the three that do not are genuine lookups.
+
+┌───────────────────────────────┬──────────────────────────────────────────┬───────────────────────────────────────────┐
+│ v1-ci-shallow-shape           │ Is the CI runner's shallow shape         │ A refspec-narrowed clone reproducing      │
+│                               │ MISSING-OBJECT or MISSING-REF? Every     │ actions/checkout's fetch, plus the four-  │
+│                               │ measurement so far is a local clone that │ probe truth table (is-shallow / verify    │
+│                               │ may present the wrong one.               │ origin/main / cat-file -e / is-ancestor)  │
+│                               │                                          │ in each shape — AND the same probes       │
+│                               │                                          │ inside a git WORKTREE of a shallow repo.  │
+│ v2-predicate-in-shallow       │ Does #9356's OWN fixed predicate still   │ Run the branch predicate in a --depth 1   │
+│                               │ emit product-shaped ancestry prose in a  │ clone AND in a grafted clone AND in a     │
+│                               │ real depth-1 clone, and does the         │ full clone against the live ledger; then  │
+│                               │ proposed three-probe discrimination      │ run it with a register entry citing a     │
+│                               │ actually silence it without silencing a  │ genuinely non-ancestor sha to prove the   │
+│                               │ REAL non-ancestor?                       │ guard can still LOSE.                     │
+│ v3-9356-red-and-restructure   │ Does the clause-(a)-only restructuring   │ node --test seal-predicate.test.mjs in a  │
+│                               │ actually go green in a depth-1 clone,    │ full clone and in a --depth 1 clone,      │
+│                               │ and does the mutant ever reach exit 2    │ diffing per-test results; then apply the  │
+│                               │ INFRA (which would red the new regex)?   │ proposed :1273-1275 restructuring in a    │
+│                               │                                          │ worktree and re-run in BOTH.              │
+│ v4-fetch-depth-blast-radius   │ Which specific assertions change verdict │ The same two-environment test diff as v3  │
+│                               │ if console-unit gets fetch-depth: 0?     │ but on UNMODIFIED bytes, plus a read of   │
+│                               │ This is the exact blast radius and it is │ whether console-harness.yml:239-248's     │
+│                               │ cheap.                                   │ committed comment would become false.     │
+│ v5-clause-a-lies              │ Are the four clause-(a) failure modes    │ Drive the predicate with a curl shim      │
+│                               │ real when DRIVEN, not just read? Each is │ returning a 404 error body; point --epic  │
+│                               │ currently a two-step inference.          │ at a parent with a truncated page; break  │
+│                               │                                          │ the filter contract and watch bucket (c)  │
+│                               │                                          │ print c=FAIL. Also: do the OTHER TWO      │
+│                               │                                          │ hardcoded gates resolve live right now?   │
+│ v6-door-guard-shape           │ Given the create clause has never        │ CC=clang mix test the mutate controller   │
+│                               │ carried a guard, what is the minimal     │ test file on unmodified bytes; then add a │
+│                               │ correct wiring — and does a parent_id-   │ scoped refusal in a worktree and re-run,  │
+│                               │ scoped refusal really leave both pinning │ proving refuse AND pass AND both pinning  │
+│                               │ tests green?                             │ tests still green.                        │
+│ v7-backfill-from-descriptions │ Do task DESCRIPTIONS rescue the 86       │ Fetch full docs for the open rows, re-run │
+│                               │ undecidable rows? This is the one        │ the classifier blind against the 15       │
+│                               │ experiment that could make the backfill  │ ground-truth labels, and report accuracy. │
+│                               │ mechanical.                              │ Emit the executable list into             │
+│                               │                                          │ tooling/grip/ledger/ so Decide can pay    │
+│                               │                                          │ it.                                       │
+│ v8-deployment-failed-seam     │ Which single function covers all THREE   │ Read stale_deployment_reaper's perform/1  │
+│                               │ failure seams, does a site deployment    │ to settle whether it reaches              │
+│                               │ resolve a team_id there, and is          │ transition_deployment_fenced/4; then      │
+│                               │ :agent_unreachable's :detail ever non-   │ write a test that drives a real           │
+│                               │ empty?                                   │ transition and asserts a delivery —       │
+│                               │                                          │ proving it FAILS today (zero dispatchers) │
+│                               │                                          │ before any fix exists.                    │
+│ v9-connection-refused-arms    │ The fix must CORRECT a green test. Does  │ CC=clang mix test failure_copy_test.exs   │
+│                               │ the corrected copy survive the module's  │ on unmodified bytes; then apply the arm   │
+│                               │ own idempotency and scrub invariants,    │ split in a worktree and re-run, proving   │
+│                               │ and are arms 12 and 13 real siblings?    │ :123 corrected, the timeout rows byte-    │
+│                               │                                          │ identical, and idempotency intact.        │
+│ v10-domain-status-body        │ Is the sixth person body real when       │ CC=clang mix test the domain_status test  │
+│                               │ DRIVEN, and what does an honest status   │ file; then inject a failing dns_fun       │
+│                               │ look like given overall/1's              │ through the existing seams and show the   │
+│                               │ ok>pending>failed ordering?              │ person-facing sentence and its attached   │
+│                               │                                          │ remediation for a resolver that never     │
+│                               │                                          │ answered.                                 │
+│ v11-deploy-detail-and-preview │ Is the .deploy-detail caption a real     │ Run overflow-guard.mjs --defect W27-      │
+│                               │ clip on a cruel fixture, and does the    │ deploy-ref-branch-bounded on a free port  │
+│                               │ .preview-url kill hold on a SECOND       │ from a clean worktree (confirm rc         │
+│                               │ independent run?                         │ unpiped); then drive deployDetailHtml's   │
+│                               │                                          │ caption at the same ten widths with a     │
+│                               │                                          │ cruel unbounded detail and report a real  │
+│                               │                                          │ number.                                   │
+│ v12-ledger-and-anchors        │ Re-derive the seal reading and the 55/5  │ Run the predicate unpiped from a fresh    │
+│                               │ split from a clean tree; confirm the 12  │ detached worktree, capture rc with        │
+│                               │ re-parent candidates; settle whether     │ out=$(cmd); rc=$?; re-derive the roster   │
+│                               │ cch-w22-s7's C9 belongs in the successor │ census from the API; write the Decide-    │
+│                               │ now that cuePaints is proved alive.      │ ready stamp commands into                 │
+│                               │                                          │ tooling/grip/ledger/.                     │
+└───────────────────────────────┴──────────────────────────────────────────┴───────────────────────────────────────────┘
+
+▌ PREMISE SMOKE PAID AT DIGEST. Every charter D-number cited by the wish and the direction (D306, D307, D319, D321,
+▌ D322, D323, D324, D325, D326) was git-shown on origin/main and read for COVERAGE, not merely existence — all nine
+▌ authorize what they are cited for, and the survey's claim that they are absent is a stale-checkout artifact. Next
+▌ free number is D327. Every named code site was git-shown on origin/main: apply_mutations/3 :31 and POST
+▌ /v1/data/mutate/:dataset :2322 CONFIRMED (non-admin reachable); failure_copy.ex:479-481, event_email.ex:61/:67 +
+▌ detail/1, deploy.ex:842, domain_status.ex:494-506 CONFIRMED. TWO premises FAILED smoke and are findings, not
+▌ foundations: mutations.ex:470-545 is not a create-time guard, and seal-predicate.mjs's ancestry leg is :453 on main
+▌ / :489 on the branch, never :276.
+
+▌ REGISTER NOTHING. .github/required-checks.json is not touched by any assignment or slice in this wave.
+
+Verification round — what the deep fleet PROVED, and the premises it REFUTED
+
+Eleven verifiers flew, every one reported, and the coverage deficit is EMPTY on both rounds. Their proofs carry
+actually-run output, and five things the wave was handed did not survive contact. Trust the proofs over the prose; every
+claim below is quoted from a run.
+
+┌─────────────────────────────────┬─────────────────────────────────────────┬──────────────────────────────────────────┐
+│ v1 CI shallow shape             │ REFUTES the direction's own correction  │ actions/checkout@v4 makes TWO shapes.    │
+│                                 │                                         │ push to main = MISSING-OBJECT.           │
+│                                 │                                         │ pull_request = MISSING-REF: only         │
+│                                 │                                         │ refs/remotes/pull/N/merge exists, `rev-  │
+│                                 │                                         │ parse --verify --quiet origin/main` rc   │
+│                                 │                                         │ 1, the head OBJECT present rc 0, is-     │
+│                                 │                                         │ ancestor still rc 128. Every upstream    │
+│                                 │                                         │ measurement used `git clone --depth 1`,  │
+│                                 │                                         │ which only ever reproduces the PUSH      │
+│                                 │                                         │ shape.                                   │
+│ v1 (cont.)                      │ KILLS the obvious discriminator         │ `--is-shallow-repository` OVER-reports:  │
+│                                 │                                         │ .git/shallow holds ONE graft             │
+│                                 │                                         │ (360b675903...) that is NOT on main's    │
+│                                 │                                         │ ancestry, yet the developer host, every  │
+│                                 │                                         │ epic worktree, and a plain `git clone`   │
+│                                 │                                         │ over file:// all answer true. main's own │
+│                                 │                                         │ scripts/pds-record-parity.sh:261         │
+│                                 │                                         │ walk_truncation() answers correctly in   │
+│                                 │                                         │ all eight shapes.                        │
+│ v2 predicate in shallow         │ CONFIRMS the premise, then breaks the   │ #9356's OWN fixed predicate prints       │
+│                                 │ naive fix                               │ b=FAIL and six verbatim `commit ... is   │
+│                                 │                                         │ not an ancestor of origin/main`          │
+│                                 │                                         │ sentences in a real depth-1 clone; the   │
+│                                 │                                         │ same bytes on a full clone print zero.   │
+│                                 │                                         │ But a GLOBAL Infra throw takes the suite │
+│                                 │                                         │ to 57/64 in depth-1 AND 63/64 in a FULL  │
+│                                 │                                         │ clone -- tests 61/62 red because the new │
+│                                 │                                         │ probes catch the git-archive root first. │
+│ v3 #9356 red + restructure      │ PROVES option (b) is sufficient and     │ Restructured control: d1 64/64 rc 0;     │
+│                                 │ standalone                              │ full 64/64 rc 0; faithful-depth-1-with-  │
+│                                 │                                         │ origin/main 64/64 rc 0. AND IT CAN LOSE: │
+│                                 │                                         │ with the floor restored the mutant       │
+│                                 │                                         │ prints `REFUSED reason=EMPTY-ROSTER      │
+│                                 │                                         │ a=UNEVALUATED` and both new assertions   │
+│                                 │                                         │ red.                                     │
+│ v3 (cont.)                      │ RECOVERS the cost that looked lost      │ terminal-clean.json with children        │
+│                                 │                                         │ EMPTIED, unmutated predicate, depth-1    │
+│                                 │                                         │ clone -> exit 0, `VERDICT: SEAL`,        │
+│                                 │                                         │ `Sealed 0 children of cloud-console-     │
+│                                 │                                         │ hardening-epic`. The fabrication         │
+│                                 │                                         │ assertion is relocatable, not deletable. │
+│                                 │                                         │ Also: the :1276 regex matches the        │
+│                                 │                                         │ substring inside `NO-SEAL a=PASS` -- a   │
+│                                 │                                         │ fifth-clause defect already in the file. │
+│ v4 fetch-depth blast radius     │ REFUTES remedy (a) on a NEW axis        │ On origin/main the suite has ZERO per-   │
+│                                 │                                         │ test difference between a full and a     │
+│                                 │                                         │ depth-1 clone (diffrc=0). But            │
+│                                 │                                         │ test.mjs:35 sets REPO = the real repo    │
+│                                 │                                         │ root and passes --repo to ~15 spawns --  │
+│                                 │                                         │ the suite is hermetic today ONLY BY      │
+│                                 │                                         │ ACCIDENT. Rewinding origin/main to       │
+│                                 │                                         │ 58862f621~1 in a FULL clone reds the     │
+│                                 │                                         │ identical assertion.                     │
+│ v5 clause-(a) lies              │ One CONFIRMED false SEAL, two REFUTED   │ Page size lowered to 3 -> `VERDICT:      │
+│                                 │                                         │ SEAL`, `orphans=0`, rc 0 over a roster   │
+│                                 │                                         │ of 288 with 57 orphans. Successor        │
+│                                 │                                         │ truncation REFUTED (parent_id single-    │
+│                                 │                                         │ valued; limit=1 on a 183-row successor   │
+│                                 │                                         │ left the verdict byte-identical).        │
+│                                 │                                         │ Bucket-(c) filter drift REFUTED (the run │
+│                                 │                                         │ refuses at R3 first) -- but the          │
+│                                 │                                         │ CARDINALITY FLOOR is real: an empty gate │
+│                                 │                                         │ table prints nothing and still reads     │
+│                                 │                                         │ c=PASS.                                  │
+│ v6 door-guard shape             │ REFUTES the SEAT                        │ mutations.ex is the wrong file:          │
+│                                 │                                         │ Writer.ensure_task_born_adjudicated/5    │
+│                                 │                                         │ (writer.ex:749, wired :145) is a shipped │
+│                                 │                                         │ create-time HARD refusal. Built it: 4-   │
+│                                 │                                         │ of-8 RED on unguarded bytes -> 9/9       │
+│                                 │                                         │ green; mutate_controller_test 36/36;     │
+│                                 │                                         │ tasks+content 1553/0. Scoping mutation-  │
+│                                 │                                         │ proved: disable that one leg -> 36       │
+│                                 │                                         │ tests, 23 failures. And a REAL BYPASS:   │
+│                                 │                                         │ POST /api/documents/task returns 201 for │
+│                                 │                                         │ a surface-less epic filing.              │
+│ v7 surface backfill             │ REFUTES the backfill's producibility    │ Blind on the 15 open surface-bearing     │
+│                                 │                                         │ rows: description classifier 7/15 (47%), │
+│                                 │                                         │ structured-field 6/15 (40%), a one-line  │
+│                                 │                                         │ constant 11/15 (73%). Both classifiers   │
+│                                 │                                         │ are BELOW the majority baseline. 31 of   │
+│                                 │                                         │ 36 surface rows were created 2026-08-    │
+│                                 │                                         │ 02/03; only 5 of the 347 older rows      │
+│                                 │                                         │ carry it; 144 of 215 unvalued open rows  │
+│                                 │                                         │ predate the convention.                  │
+│ v8 deployment-failed seam       │ CORRECTS the covering set from ONE to   │ StaleDeploymentReaper.perform/1 never    │
+│                                 │ TWO                                     │ calls the fenced writer --               │
+│                                 │                                         │ Registry.reap_stale_deployments/0 issues │
+│                                 │                                         │ FOUR bare Repo.update_all calls setting  │
+│                                 │                                         │ status failed. A route-side dispatch     │
+│                                 │                                         │ silently misses every reaped deployment. │
+│                                 │                                         │ Probe on unmodified main: 4 tests, 3     │
+│                                 │                                         │ failures, each having FIRST asserted the │
+│                                 │                                         │ row IS failed.                           │
+│ v9 connection-refused arms      │ BUILDS it and CORRECTS the routing      │ Baseline 76/0 -> split arm with :123     │
+│                                 │                                         │ CORRECTED 77/0; 194/0 across five        │
+│                                 │                                         │ FailureCopy-coupled suites;              │
+│                                 │                                         │ stage_caption suite 8/0. The deploy      │
+│                                 │                                         │ TRANSPORT hop never reaches the          │
+│                                 │                                         │ classifier (deploy.ex:1042), but the     │
+│                                 │                                         │ PROVISION banner and the deploy RAIL     │
+│                                 │                                         │ FOOTER both do. grep for the network     │
+│                                 │                                         │ literal under cloud/priv/static/ returns │
+│                                 │                                         │ ZERO hits, so NO browser fixture is      │
+│                                 │                                         │ owed.                                    │
+│ v10 domain-status body          │ CONFIRMS the crown, then breaks the     │ Five fault modes and one genuine empty   │
+│                                 │ naive fix                               │ control returned a BYTE-IDENTICAL tuple, │
+│                                 │                                         │ remediation attached. And the mutation:  │
+│                                 │                                         │ emitting :unknown WITHOUT an explicit    │
+│                                 │                                         │ overall/1 clause gave envelope.ok true,  │
+│                                 │                                         │ overall ok, serving unknown -- the fix   │
+│                                 │                                         │ manufacturing the disease it treats.     │
+│ v11 deploy-detail + preview-url │ KILLS a wish premise on MEASUREMENT     │ `.preview-url` from a clean detached     │
+│                                 │                                         │ worktree, rc captured UNPIPED: rc 0,     │
+│                                 │                                         │ 20/20 cells clean, every urlLost         │
+│                                 │                                         │ NEGATIVE (worst -76.44px). `.deploy-     │
+│                                 │                                         │ detail` with a 240-char/205-unbreakable  │
+│                                 │                                         │ cruel detail: lost -99.72 to -119.22,    │
+│                                 │                                         │ scrollWidth == clientWidth everywhere.   │
+│                                 │                                         │ MUTATION CONTROL: delete the one word-   │
+│                                 │                                         │ break declaration -> rc 1, 16 findings.  │
+│                                 │                                         │ The green is a measurement.              │
+│ Law 0 + anchors                 │ SPLITS the integer the wish conflated   │ NO-SEAL a=FAIL b=PASS c=PASS orphans=57, │
+│                                 │                                         │ roster 288 {194/59/34/1}, UTC 2026-08-   │
+│                                 │                                         │ 03T13:22:31.636Z, TREE 3cf1bda56 (the    │
+│                                 │                                         │ quoted dfdc31db9 is the COMMIT sha),     │
+│                                 │                                         │ root a fresh detached worktree. 343-288  │
+│                                 │                                         │ = 55 RE-PARENTED; done 189->194 = 5      │
+│                                 │                                         │ CLOSED; 119-55-5=59. And cch-w22-s7      │
+│                                 │                                         │ reads met 0 of 16, unclaimed -- the five │
+│                                 │                                         │ 'stamped' criteria never landed.         │
+└─────────────────────────────────┴─────────────────────────────────────────┴──────────────────────────────────────────┘
+
+COVERAGE, INCLUDING THE NOT-FOUNDS. Three verifiers did not open the charter and said so; v2 did not open console-
+harness.yml and carried the digest's reading at its own authority level; v5 did not re-derive the clause-(b) axis; v11
+did not re-verify the deploy-stage CLASSIFICATION half; v7 could not compare row membership against the survey's 86-row
+undecidable list because only the count was reported, so its 121-vs-86 is a set-SIZE comparison over slightly different
+denominators and must never be printed as a subtraction. v1 could not execute on a real GitHub runner -- its two CI
+shapes are FAITHFUL RECONSTRUCTIONS of actions/checkout@v4's fetch refspecs, corroborated by console-harness.yml's own
+committed comment, not observations. Two verifiers' evidence lives in throwaway worktrees and is uncommitted; their
+exact output is quoted in the slice briefs so a builder re-authors rather than re-derives.
+
+▌ THE SIXTH STANDING CLAUSE FIRED FOUR TIMES INSIDE THIS WAVE'S OWN SURVEY, and once inside a committed ledger note
+▌ the charter cited. tooling/grip/ledger/cch-w27-w22s7-split-and-c12-2026-08-02.md:86 records `grep -rn 'cuePaints'
+▌ cloud/  # ZERO hits repo-wide` -- run in a checkout whose HEAD is NOT an ancestor of origin/main. cuePaints is alive
+▌ at overflow-guard.mjs:4129. An instrument pointed at the wrong TREE reports defect-shaped prose for a condition that
+▌ is only 'I could not look', and this time the instrument was a grep.
+
+Decisions -- D327 through D334
+
+Each mirrors the charter row of the same number; the charter is the epic's memory, this is the wave's story. The charter
+update is open as docs-only PR #9384 and may not be on origin/main while the builders fly -- this Paper is what a
+builder can read today.
+
+┌──────┬───────────────────────────────────────────────────────┬───────────────────────────────────────────────────────┐
+│ D327 │ #9356's red is ONE assertion; option (b), and it      │ The mutant's own token reads a=PASS -- the control is │
+│      │ merges FIRST and ALONE.                               │ hostage to a clause it does not test, and console-    │
+│      │                                                       │ harness.yml:239-248 already forbade the shape, so     │
+│      │                                                       │ this RESTORES the file's invariant rather than        │
+│      │                                                       │ weakening it.                                         │
+│ D328 │ The discrimination is FOUR probes read separately,    │ rc 1 is ambiguous in a grafted clone, is-shallow      │
+│      │ ported from walk_truncation, degrading PER-DEFECT to  │ over-reports on the build host, the PR shape has no   │
+│      │ b=UNEVALUATED at exit 1 -- never a global exit-2.     │ origin/main ref at all -- and a global throw discards │
+│      │                                                       │ clause (a) and reds the control D327 installs, which  │
+│      │                                                       │ is exactly the trap the lead reverted.                │
+│ D329 │ fetch-depth: 0 is REFUSED; the environment            │ Its price is not clone cost (~1.8x) but converting a  │
+│      │ declaration is paid as a prose correction instead.    │ hermetic suite into a history-coupled one with no     │
+│      │                                                       │ test line changed -- proved by rewinding origin/main  │
+│      │                                                       │ in a FULL clone and watching the same assertion red.  │
+│ D330 │ Clause (a)'s truncation false-SEAL, bucket (c)'s      │ One of the four alleged lies drives rc 0 SEAL over a  │
+│      │ missing cardinality floor and curl's mute error fold  │ roster it never read; two are refuted; the fourth     │
+│      │ into the discrimination slice; successor truncation   │ fails closed and only its sentence is broken.         │
+│      │ comes off the board.                                  │                                                       │
+│ D331 │ The D307 door guard's seat is writer.ex:145, not      │ A create-time hard refusal has shipped at that seat   │
+│      │ mutations.ex; the fence widens by exactly one file;   │ all along, so D324's fence-widening reason was moot - │
+│      │ the enum is armed HARD and the PRESENCE requirement   │ - and a presence requirement armed today would refuse │
+│      │ is deliberately NOT.                                  │ 91% of legitimate filings, because surface is a       │
+│      │                                                       │ three-day-old convention no classifier beats a        │
+│      │                                                       │ constant on.                                          │
+│ D332 │ domain_status gets `unknown`, ordered failed >        │ The naive version manufactures a false seal (proved   │
+│      │ unknown > pending > ok with an EXPLICIT overall/1     │ by mutation), a server-only change is a no-op plus a  │
+│      │ clause, contained to attempted stages, carrying NO    │ never-terminating 4s poll, and unknown is already     │
+│      │ remediation, folded in the SPA in the same commit.    │ this schema's ratified word for 'we cannot probe'.    │
+│ D333 │ The deployment-failed covering set is TWO seams (the  │ The reaper issues four bare Repo.update_all calls and │
+│      │ fenced writer + the reaper), post-transaction and     │ never touches the fenced writer, and the email is     │
+│      │ edge-triggered, with a site-keyed dispatch helper     │ dead code until a dispatcher exists, so booking it    │
+│      │ outside the router -- and the email fix ships in the  │ separately would produce a guard green by             │
+│      │ SAME slice.                                           │ construction.                                         │
+│ D334 │ Law 0: 55 re-parented and 5 closed -- two integers,   │ D306 fired on the wave that wrote it: orphans =       │
+│      │ and neither is 57. Plus three instrument defects and  │ residue - gates - forwarded made the movement and the │
+│      │ the .preview-url kill, all filed.                     │ reading indistinguishable, and the wish inherited the │
+│      │                                                       │ confusion.                                            │
+└──────┴───────────────────────────────────────────────────────┴───────────────────────────────────────────────────────┘
+
+NOT TAKEN, STATED RATHER THAN DRIFTED: fetch-depth: 0 (D329); successor-roster truncation (D330, structurally
+impossible); the bucket-(c) filter-drift mode (D330, refuted); .preview-url AND .deploy-detail (D334, both measured
+clean, the second with a mutation control); the surface presence requirement (D331); the repo-wide `_ -> []` sweep (D332
+--
+four of six candidates are NOT the shape and two are the model arms to cite). REGISTER NOTHING; .github/required-
+checks.json is untouched by every slice.
+
+The wave plan -- 8 slices, 4 of them person bodies, 7 in round 1
+
+FABLE IS UNAVAILABLE THIS WAVE, so every slice dispatches on Opus regardless of its difficulty axis. Two slices carry
+judgments flip-prone enough to warrant an independent second re-derivation before merge, and both say so in their brief.
+
+┌──────────────────────────────┬────────────────────────┬──────────────────────────────┬───────────────────────────────┐
+│ cch-w28-s1-empty-roster-     │ 1                      │ seal-predicate.test.mjs, on  │ node --test                   │
+│ control-asserts-clause-a     │                        │ PR #9356's branch -- merges  │ cloud/priv/static/__preview__ │
+│                              │                        │ FIRST and ALONE              │ /seal-predicate.test.mjs, in  │
+│                              │                        │                              │ a FULL clone AND a real `git  │
+│                              │                        │                              │ clone --depth 1` clone, rc    │
+│                              │                        │                              │ captured unpiped              │
+│ cch-w28-s2-history-          │ 2 -- AFTER s1 merges   │ seal-predicate.mjs + its     │ the same suite in both        │
+│ unavailable-discrimination   │                        │ test                         │ clones, plus four real-clone  │
+│                              │                        │                              │ shape proofs (pristine depth- │
+│                              │                        │                              │ 1, grafted, simulated         │
+│                              │                        │                              │ checkout@v4 PR shape, full)   │
+│ cch-w28-s3-console-harness-  │ 1                      │ .github/workflows/console-   │ a YAML parse exiting 0, plus  │
+│ hermeticity-prose            │                        │ harness.yml -- comment lines │ the re-derived guard-cmd /    │
+│                              │                        │ only                         │ test-count / network-coupling │
+│                              │                        │                              │ evidence                      │
+│ cch-w28-s4-d307-door-guard-  │ 1 -- HIGH-FLIP-RISK:   │ api/lib/barkpark/content/wri │ CC=clang mix test             │
+│ armed-at-the-birth-seat      │ the SEAT and the BLAST │ ter.ex +                     │ test/barkpark_web/controllers │
+│                              │ RADIUS                 │ mutate_controller_test.exs   │ /mutate_controller_test.exs   │
+│                              │                        │                              │ AND test/barkpark/tasks       │
+│                              │                        │                              │ test/barkpark/content         │
+│ cch-w28-s5-refused-          │ 1 -- PERSON            │ failure_copy.ex + its test + │ CC=clang mix test             │
+│ connection-is-not-a-timeout  │                        │ ONE line of router.ex        │ test/barkpark_cloud/failure_c │
+│                              │                        │ (:10254)                     │ opy_test.exs plus the five    │
+│                              │                        │                              │ FailureCopy-coupled suites    │
+│                              │                        │                              │ and                           │
+│                              │                        │                              │ sites_deploy_stage_caption_te │
+│                              │                        │                              │ st.exs                        │
+│ cch-w28-s6-deployment-       │ 1 -- PERSON -- HIGH-   │ registry.ex + notifications/ │ CC=clang mix test on the new  │
+│ failed-alerts-actually-      │ FLIP-RISK: the SEAM    │ -- router.ex is FORBIDDEN to │ producer-level dispatch tests │
+│ dispatch                     │ COVERAGE               │ this slice                   │ plus                          │
+│                              │                        │                              │ router_notifications_test.exs │
+│ cch-w28-s7-domain-status-    │ 1 -- PERSON            │ domain_status.ex + app.js    │ CC=clang mix test             │
+│ stops-guessing-at-an-        │                        │ (domainStage* ONLY) +        │ test/barkpark_cloud/domain_st │
+│ unreachable-resolver         │                        │ __app.test.mjs (INSERT after │ atus_test.exs; node --check   │
+│                              │                        │ the domainStages block) + a  │ cloud/priv/static/app.js;     │
+│                              │                        │ 4th fixture scenario         │ node                          │
+│                              │                        │                              │ cloud/priv/static/__app.test. │
+│                              │                        │                              │ mjs                           │
+│ cch-w28-s8-never-deployed-   │ 1 -- PERSON            │ app.js (siteRow region ONLY) │ node --check                  │
+│ site-row-says-so             │                        │ + __app.test.mjs (SOLE owner │ cloud/priv/static/app.js;     │
+│                              │                        │ of the EOF append point)     │ node                          │
+│                              │                        │                              │ cloud/priv/static/__app.test. │
+│                              │                        │                              │ mjs                           │
+└──────────────────────────────┴────────────────────────┴──────────────────────────────┴───────────────────────────────┘
+
+ANCHOR DISCIPLINE, the D326 pattern that avoided wave 27's serial-merge tax entirely. Three files are shared and every
+claim is assigned BY NAME: router.ex -- s5 owns the `detail:` line at :10254 and NOTHING else, s6 is forbidden it, s8
+needs none of it (site_json/2 already carries current_deployment_id, verified). app.js -- s7 owns
+domainStageRows/domainStages, s8 owns the siteRow region. __app.test.mjs -- s7 INSERTS after the existing domainStages
+block, s8 is the SOLE owner of the EOF append point. seal-predicate.* is sequenced rather than shared: s2 does not
+dispatch until s1 is on main.
+
+BACKLOG FILED THIS WAVE, six rows, all published under the epic: cch-w28-bl-capacity-arm-blames-hetzner-for-azure (a
+bare `quota` token tells an Azure-failed person Hetzner ran out of servers); cch-w28-bl-overflow-guard-clipper-blames-
+the-wrong-panel (D322's latent false attribution, plus two further defects found in the same six lines -- a 40-char
+truncated dedupe key and a filler that degrades to the first panel in document order); cch-w28-bl-usage-meters-say-
+unmetered-when-they-could-not-measure (the same shape as D332, weaker, honestly priced); cch-w28-bl-w22s7-split-stamps-
+never-landed-and-c9-kill-is-refuted (the ledger work, with corrected anchors and the unrun mutation that would settle
+C9); cch-w28-bl-orphans-swallows-the-disclosed-considering-row (a row printed on two mutually exclusive lines, plus
+three draft twins the predicate cannot see); cch-w28-bl-auto-deploy-refusal-has-no-event-at-all.
+
+▌ WHAT WOULD FALSIFY THIS WAVE. If s2's four probes cannot be shown to answer correctly in a REAL grafted clone and a
+▌ REAL simulated pull_request checkout -- not a stub, not a JSON fixture -- then the discrimination is a sentence with
+▌ an exit code and s1's green was bought rather than earned. If s4's guard cannot be shown to REFUSE and to PASS over
+▌ HTTP, and to leave the two D53 pinning tests green ONLY because of its parent scoping, then the door was never
+▌ armed. And if s7's `unknown` does not set terminal:true in the shipped app.js, the console keeps polling a dead
+▌ resolver forever and the person is no better off than before -- a server-only fix here is a regression wearing a
+▌ decision's clothes.
+
+DEBRIEF — the wave as it will merge, and the grade it earned
+
+Seven round-1 slices were briefed, seven were built, seven are green, and all seven are PUSHED with a PR open — six new
+PRs (#9404-#9409) plus #9356, whose head was fast-forwarded to carry cch-w28-s1 so the fix rides the PR it was written
+for rather than duplicating it. cch-w28-s2 is round 2 by design and correctly sits `open` on the ledger. The reviewer
+re-ran every slice gate on the FINAL branch, fixed four things in place rather than reporting them, and proved the wave
+coheres by merging all seven onto origin/main in one probe branch: the FULL cloud suite is 2693 tests / 0 failures
+there, and __app.test.mjs is 797/797.
+
+What shipped, per slice
+
+┌────────────────────────────┬─────────────────────────────┬─────────────────────────────┬─────────────────────────────┐
+│ cch-w28-s1 — the empty-    │ loop-epic/9356-goes-green-  │ FULL clone 65/65 rc 0; REAL │ Option (b) exactly as       │
+│ roster control asserts     │ without-weakening-the-th-0- │ --depth 1 --no-local clone  │ decided: no fetch-depth, no │
+│ clause (a)                 │ r → fast-forwarded onto     │ 65/65 rc 0 (shallowness     │ stubbed git leg, required-  │
+│                            │ #9356                       │ proved inside it: all-refs  │ checks.json untouched.      │
+│                            │                             │ log = 1 commit, `git rev-   │ Reviewer hardened the       │
+│                            │                             │ parse origin/main` exits    │ mutation anchors.           │
+│                            │                             │ 128)                        │                             │
+│ cch-w28-s3 — console-      │ loop-epic/console-harness-  │ YAML parses rc 0; the non-  │ Comment-only and every      │
+│ harness hermeticity prose  │ yml-stops-asserting-thre-1  │ comment-diff grep finds     │ sentence true of the bytes  │
+│                            │ → #9404                     │ NOTHING; suite on main re-  │ beside it. No fixes needed. │
+│                            │                             │ derived at 59/59; BP_SERVER │                             │
+│                            │                             │ on a dead port reds EXACTLY │                             │
+│                            │                             │ `not ok 56`                 │                             │
+│ cch-w28-s4 — the D307 door │ loop-epic/the-d307-filing-  │ mutate_controller_test.exs  │ HIGH-FLIP-RISK,             │
+│ guard, armed               │ law-door-guard-ships-arm-2- │ 46/0 rc 0; tasks+content    │ independently re-derived.   │
+│                            │ r → #9405                   │ 1554/0 rc 0; mix format     │ Reviewer deleted a FALSE    │
+│                            │                             │ clean                       │ sentence from the shipped   │
+│                            │                             │                             │ comment (see below).        │
+│ cch-w28-s5 — a refused     │ loop-epic/person-a-refused- │ failure_copy_test.exs 83/0  │ Both halves mutation-proved │
+│ connection is not a        │ connection-stops-being--3 → │ rc 0; the six-file sweep    │ by the builder; the test    │
+│ timeout                    │ #9406                       │ 202/0 rc 0                  │ that PINNED the defect as   │
+│                            │                             │                             │ correct was corrected, not  │
+│                            │                             │                             │ kept. No fixes needed.      │
+│ cch-w28-s6 —               │ loop-epic/person-the-       │ router_notifications +      │ HIGH-FLIP-RISK census re-   │
+│ :deployment_failed         │ deployment-failed-toggle-   │ deployment_failed_dispatch  │ derived. Reviewer added the │
+│ actually dispatches        │ stop-4-r → #9407            │ 29/0 rc 0; mix format clean │ missing cap test — the      │
+│                            │                             │                             │ wave's own clause 4, turned │
+│                            │                             │                             │ on the wave.                │
+│ cch-w28-s7 — an            │ loop-epic/person-an-        │ domain_status_test.exs 47/0 │ Reviewer DECIDED the open   │
+│ unreachable resolver is    │ unreachable-resolver-stops- │ rc 0; node --check rc 0;    │ P0 question the builder     │
+│ `unknown`                  │ bei-5-r → #9408             │ __app.test.mjs 796/796 rc   │ correctly escalated instead │
+│                            │                             │ 0; mix format clean         │ of deciding (see below).    │
+│ cch-w28-s8 — a never-      │ loop-epic/person-a-never-   │ node --check rc 0;          │ Fail-before proved by       │
+│ deployed row says “Not     │ deployed-site-row-in-the--6 │ __app.test.mjs 793/793 rc   │ stash, fixture asserts its  │
+│ deployed”                  │ → #9409                     │ 0; diff is exactly the two  │ own honesty, no new CSS. No │
+│                            │                             │ owned files                 │ fixes needed.               │
+└────────────────────────────┴─────────────────────────────┴─────────────────────────────┴─────────────────────────────┘
+
+The four things the reviewer FIXED rather than reported
+
+1. THE FALSE SENTENCE IN THE D307 GUARD'S HEADER (commit 73438f573). The shipped comment claimed that deleting the
+scoping arm takes mutate_controller_test.exs “from 36/36 to 23 failures, including the D53 create-family pins”. The
+builder had already measured 1 failure and stamped an honest --miss on the criterion — but left the brief's number
+standing in the code. Re-run independently at review (delete `not cch_epic_child?(parent) -> :ok`, change nothing else):
+46 tests / 1 failure, and that failure is this slice's own scoping test. The comment now states the measured result and
+says plainly that the scoping is a DESIGN boundary, not a load-bearing leg under today's corpus. An epic whose thesis is
+“stop asserting what you did not measure” cannot ship a header comment that does exactly that.
+
+2. `:nxdomain` IS AN ANSWER, NOT A FAULT (commits 90ab9999a + 438495a96) — a REVIEW DECISION superseding the letter of
+D332. The s7 builder built D332 as written, measured that one fifth of it was wrong, and filed task-3fbfff8c97b50c8f at
+priority 0 rather than quietly re-deciding. He was right on both counts. Re-measured at review on this host:
+`:inet.getaddrs` of a non-existent name returns `{:error, :nxdomain}` on BOTH families — which is precisely what a
+freshly attached, still-propagating domain looks like through the real transport. Shipped literally, D332 would have
+turned the MOST COMMON waiting state into “we could not check” and stripped its propagation advice: one lie swapped for
+another, in the very rung the slice existed to make honest. NXDOMAIN means the resolver ANSWERED. Fixed with
+`@answered_empty [:nxdomain]`, and — the half that matters for the standing test — the DNS test fakes now RETURN
+nxdomain for a missing record instead of `{:ok, []}`, a shape production never produces. task-3fbfff8c97b50c8f is closed
+with the ruling, its measurement and its residual gap on the record.
+
+3. THE REAP ALERT CAP IS NOW DRIVEN (commit ab2a6dce5). `@reap_alert_cap 25` decides that the 26th owner in a cluster
+incident hears nothing by email — a person-facing SUPPRESSION that no fixture crossed. The builder flagged it against
+himself; the review paid it: a test fails 27 deployments in one sweep and asserts exactly 25 emails plus the suppression
+log line, with `Registry.reap_alert_cap/0` exposed so the test reads the real constant instead of a copy. Mutation-
+proved: replacing `Enum.split(alerts, @reap_alert_cap)` with `{alerts, []}` reds exactly that test and nothing else.
+
+4. THE MUTATION ANCHORS IN s1's CONTROL (commit 52a80c7be). `String.prototype.replace` on an anchor that has drifted is
+a SILENT no-op, and `mutatedRun`'s own `notEqual(out, src)` guard would have been satisfied by the roster mutation alone
+— so a future refactor of seal-predicate.mjs could have left the floor mutation un-applied and the control passing
+vacuously. Each anchor is now asserted present before use.
+
+Orphans, re-derived with the fixed instrument from a real git tree
+
+All three things the wish demanded are quoted, not paraphrased. UTC 2026-08-03T14:43:51Z · tree sha 52a80c7be · RESOLVED
+REPO ROOT /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_e660e3b7-480-40.
+
+VERDICT-TOKEN: SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=75 considering=1 successor=cch-instruments-epic
+epic=cloud-console-hardening-epic mode=live stubbed=0 waived=0 roster=307 head=52a80c7be
+
+• Roster 307 {done 195, in_progress 7, open 70, cancelled 34, considering 1}. Residue 78 (live 77, considering 1);
+  forwarded under the successor 0; the three permanent human gates all resolve in-roster.
+• b=PASS here because this is a FULL clone. That is the wave's whole finding restated: the same predicate under console-
+  harness.yml still cannot evaluate clause (b) at all, and nothing in CI has changed about that.
+• D306's two integers, as deltas against wave 27's 117 / roster 343 {189, 119, 34, 1} at c2affd445 — RE-PARENTED OUT OF
+  THIS ROSTER = 36 (343 → 307), CLOSED = +6 done (189 → 195).
+• The 36 does not equal wave 27's 57 hand re-parents, and the reconciliation is stated rather than smoothed: 343 − 57 =
+  286, and ~21 rows were filed INTO the epic since (wave 28's 8 slice rows plus follow-ups), which lands at 307. Orphans
+  fell 117 → 75.
+
+Ledger audit
+
+Honest across the board, with no corrections owed. Every built slice is `in_progress`, published, with evidence stamped
+as the builder worked and the merge-gated criterion left open for the lead — s1 6/7, s3 6/7, s4 7/8 (criterion 4 an
+honest --miss carrying the refuting numbers), s5 7/8, s6 9/10, s7 10/11, s8 7/8. cch-w28-s2 correctly sits `open` as a
+deferred round-2 slice. Backlog rows filed by builders are published and open. The ONLY ledger mutation this review made
+was closing task-3fbfff8c97b50c8f with the nxdomain ruling (criteria 0 and 1 stamped with evidence, criterion 2 recorded
+as an honest --miss and closed over with a written criteria_override rather than graded by its own closer).
+
+Grade: A−
+
+WHAT EARNS IT. The wave's headline question was a judgment call between two defensible options and it was decided
+cleanly, then executed without cheating: #9356 is green in a REAL depth-1 clone with the thing that was red still red-
+able, the fabrication sentences relocated rather than deleted, and an unanchored regex that discriminated nothing
+repaired on the way past. Three builders reported measurements that CONTRADICTED their own briefs — the 23-failure
+prediction, the `returning:` prescription, the nxdomain classification — and each filed the contradiction instead of
+reinterpreting the criterion into something passable. That is the behaviour this epic exists to produce, and it is why
+the review caught real defects instead of typos. Four person-facing bodies landed with genuine fail-before proofs, and
+the cross-slice integration is proved by a 2693/0 full-suite run rather than asserted.
+
+WHAT HOLDS IT BACK. The instrument is still structurally blind in the only place it runs automatically — s2 was deferred
+by the sequenced-rounds law, which is correct process, but it means the epic is still certified by a predicate that can
+only give a partial verdict in CI, and s3 turned that from an unstated fact into a DOCUMENTED one, which by the wave's
+own standing test is a sentence, not a fix. The D307 door guard shipped armed but its hard tier can reach almost nothing
+(no fixture outside its own block carries a `surface` key) and its absence tier is a warn, so the filing law still holds
+because people are careful, not because a door refuses. s7 shipped a person-facing regression in the most common domain
+state that only review caught — the builder measured it and escalated correctly, but a wave that ships a decision it
+knows may be wrong is one review away from shipping it for real. And the domain rail now goes TERMINAL on `unknown` with
+no re-check affordance, which trades a spinning lie for a frozen truth.
+
+What the next wave should take
+
+• MERGE ORDER, and it matters: round 1 first (#9356, then #9404-#9409, which are file-disjoint and all merge cleanly
+  onto main in one probe). ONLY THEN cch-w28-s2 — it rewrites the same file #9356 rewrites and must mutate the
+  discrimination out of #9356's fail-before controls.
+• cch-w28-s2's hard constraint, armed as a tripwire by s1: HISTORY-UNAVAILABLE must surface as a verdict-token LETTER at
+  exit 1, never a process-level exit-2 INFRA-FAULT. An INFRA-FAULT prints a=UNKNOWN and will red s1's control —
+  deliberately.
+• The REQUIRED `Console gate` depends on guerrilla.barkpark.cloud being reachable (one live spawn, test 56). s3
+  documented it; nobody has fixed it. A required gate that a third-party host can red is the same defect class as a
+  guard no job runs.
+• The D307 guard's promotion: the `surface` ENUM plus the backfill of open rows, which is what turns the warn tier hard.
+  Until then “every epic row declares a surface” is false and the code says so.
+• The s7 residue: a re-check affordance for a TERMINAL `unknown` rail, and domainRungChip's missing `unknown` arm (task-
+  1daff7bc1bf46ceb) — a screen reader is still told “waiting” one layer below a rung that says it could not be checked.
+• cch-w22-s7's remainder, finished or closed against origin/main's bytes rather than rebuilt.
+
+▌ THE WAVE'S OWN SIXTH CLAUSE, PAID TWICE MORE. Wave 27 added it: an instrument pointed at the wrong ROOT reports
+▌ defect-shaped prose for a condition that is only “I could not look”. Wave 28 found the same shape in two more places
+▌ — a test bound to an exit code it does not test, which reported a DEFECT for an ENVIRONMENT, and a resolver
+▌ classification that would have reported “we could not check” for a domain that was simply still propagating. The fix
+▌ in both cases was the same move: separate the measurement from the absence of one, and say which you have.
+
+Related
+  2.50  Cloud Console Hardening — wave 27: the arithmetic was right and the instrument was wrong  (paper)
+        tags: cloud-console-hardening (95·95), cloud-control-plane (70·60), epic-cycle (60·45)
+  2.45  Cloud Console Hardening — wave 26: pay the ledger by MEASURING every row, and fix the one min-content cause that
+        breaks three screens at 900.  (paper)
+        tags: cloud-console-hardening (95·95), cloud-control-plane (70·55), epic-cycle (60·45)
+  2.15  The control plane stops asserting a health it never measured, and the watchdog written to catch a never-reported
+        box becomes reachable  (task)
+        tags: cloud-console-hardening (95·95), cloud-control-plane (70·80)
+  2.15  Cloud Console Hardening — wave 10 strategy: the vision's last two lies, and an epic whose own preconditions are
+        machine-derivable  (paper)
+        tags: cloud-console-hardening (95·95), cloud-control-plane (70·72)
+  2.15  Cloud Console Hardening — wave 12 strategy: the console stops lying to the PERSON, and the epic finally gets a
+        shape it can finish  (paper)
+        tags: cloud-console-hardening (95·95), cloud-control-plane (70·88)

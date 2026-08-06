@@ -1,0 +1,986 @@
+[1;38;5;188mCLOUD CONSOLE HARDENING — WAVE 29: “I COULD NOT LOOK” GETS A GRAMMAR, AND THE MERGE LANE STOPS BEING SOMEONE ELSE’S HOST[0m
+[38;5;232m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+                                                                                                                        
+[1;38;5;145mStatus: SURVEYING.[0m Strategize is closed; 16 Opus surveyors are in flight. Digest appends the survey digest and the      
+verify plan below before any verifier runs; Decide appends the decisions and the wave plan before any builder flies;    
+Review closes this Paper as the debrief.                                                                                
+                                                                                                                        
+Epic [38;5;217;48;5;232mcloud-console-hardening-epic[0m · predecessor wave Paper [38;5;217;48;5;232mcloud-console-hardening-wave-28-2026-08-03[0m · charter         
+[38;5;217;48;5;232m.claude/workflows/bp-cloud-console-hardening-charter.md[0m (read from [38;5;217;48;5;232morigin/main[0m, not the primary checkout, which is 401  
+commits behind).                                                                                                        
+                                                                                                                        
+[1;38;5;78mThe wish[0m                                                                                                                
+                                                                                                                        
+Seven numbered instructions. Condensed, with the load-bearing corrections preserved:                                    
+                                                                                                                        
+[38;5;59m1. [0m[1;38;5;145mFinish the discrimination.[0m [38;5;217;48;5;232mcch-w28-s2-history-unavailable-discrimination[0m is round 2 and #9356 has landed, so it is   
+   unblocked. Teach the git legs to tell rc 1 ("not an ancestor" — an honest answer about the PRODUCT) from rc 128 /    
+   missing object / shallow ("I could not look" — an honest answer about the ENVIRONMENT). Its hard constraint is       
+   already armed as a tripwire by s1: HISTORY-UNAVAILABLE must surface as a verdict-token LETTER at exit 1, never a     
+   process-level exit-2 INFRA-FAULT.                                                                                    
+[38;5;59m2. [0m[1;38;5;145mThe merge lane changed and every earlier brief is stale on this point.[0m Live protection enforces FOUR contexts as of  
+   today. [38;5;217;48;5;232mConsole gate[0m and [38;5;217;48;5;232mCloud gate[0m are BLOCKING, not advisory. [38;5;217;48;5;232mRequired-check spec drift[0m is GREEN on main for the    
+   first time this session.                                                                                             
+[38;5;59m3. [0m[1;38;5;145mA required gate a third-party host can red is the same defect class as a guard no job runs.[0m Wave 28 s3 documented    
+   that the now-REQUIRED [38;5;217;48;5;232mConsole gate[0m depends on [38;5;217;48;5;232mguerrilla.barkpark.cloud[0m being reachable, and nobody fixed it.         
+   Tolerable while advisory; an outage on someone else’s host is now a repo-wide merge freeze.                          
+[38;5;59m4. [0m[1;38;5;145mThe D307 guard’s promotion.[0m The guard is armed at the birth seat (#9405, [38;5;217;48;5;232ma723ec0dd[0m); the [38;5;217;48;5;232msurface[0m ENUM and the        
+   BACKFILL of open rows are what turn the WARN tier hard. The contested scoping criterion was re-measured by the lead: 
+   deleting only the scoping leg gives [1;38;5;145m46 tests / 1 failure[0m, not the 23 the criterion predicted — so the scoping is a   
+   DESIGN BOUNDARY, not a load-bearing guard. Do not restate it as load-bearing.                                        
+[38;5;59m5. [0m[1;38;5;145mThe s7 residue, person-facing.[0m A re-check affordance for a TERMINAL [38;5;217;48;5;232munknown[0m domain rail (the poll stops with no way  
+   back short of a navigation), plus [38;5;217;48;5;232mdomainRungChip[0m’s missing [38;5;217;48;5;232munknown[0m arm ([38;5;217;48;5;232mtask-1daff7bc1bf46ceb[0m).                      
+[38;5;59m6. [0m[38;5;217;48;5;232mcch-w22-s7[0m’s remainder — finished or closed against [38;5;217;48;5;232morigin/main[0m’s bytes rather than rebuilt.                         
+[38;5;59m7. [0m[38;5;217;48;5;232m.preview-url[0m IS NOT A SLICE and the wish was wrong about it. Wave 28’s smoke killed it; that row reads DONE 10/10. Do
+   not rebuild it.                                                                                                      
+                                                                                                                        
+[1;38;5;145mRatio floor: [0mat least four slices where a PERSON is misinformed or cannot reach a control.                              
+                                                                                                                        
+[1;38;5;145mThe standing test, now six clauses.[0m A fix whose only guard is a sentence is not fixed; a guard no job runs is a sentence
+with a shebang; a guard that cannot lose is a sentence with an exit code; a guard whose FIXTURE cannot produce the      
+defect is green by construction; a guard whose SELECTOR cannot reach the defect is green by construction even with a    
+cruel fixture; and an instrument POINTED AT THE WRONG ROOT — or reading an object its clone does not have — reports     
+defect-shaped prose for a condition that is only "I could not look".                                                    
+                                                                                                                        
+[1;38;5;145mREGISTER NOTHING.[0m Do not touch [38;5;217;48;5;232m.github/required-checks.json[0m — it now MATCHES live protection, and any edit re-opens a   
+drift that is finally closed.                                                                                           
+                                                                                                                        
+[1;38;5;78mGround truth re-derived at Strategize[0m                                                                                   
+                                                                                                                        
+Everything the lead handed down was treated as L6 and re-derived. Four measurements, each with its own command, all     
+taken from a detached worktree at [38;5;217;48;5;232morigin/main a723ec0dd[0m — never from the primary checkout, which reads [38;5;217;48;5;232m##               
+main...origin/main [ahead 48, behind 401][0m.                                                                              
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mFour contexts BLOCK merges[0m           [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mgh api repos/{owner}/{repo}/branches/[m[0m [38;5;232m│[0m [38;5;145m[1;38;5;145mCONFIRMED[0m — [38;5;217;48;5;232mElixir gate[0m,[0m              [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mmain/protection[0m[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mPR references an active task[0m,[0m         [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mCloud gate[0m, [38;5;217;48;5;232mConsole gate[0m;[0m             [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232menforce_admins: true[0m; identical to[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mthe committed spec on context AND[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe required [38;5;217;48;5;232mConsole gate[0m depends on[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mBP_SERVER=http://127.0.0.1:1 node --[m[0m  [38;5;232m│[0m [38;5;145m[1;38;5;145mCONFIRMED, and located to one line.[0m[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ma foreign host[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mtest cloud/priv/static/__preview__/se[m[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232m65 tests / 64 pass / not ok 56[0m —[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mal-predicate.test.mjs[0m[0m                 [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mwave 11: --ladder-[m[0m                    [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232monly reaches the ladder the live refu[m[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232msals never can[0m, failing at [38;5;217;48;5;232mseal-[m[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mpredicate.test.mjs:1090[0m with [38;5;217;48;5;232m2 !== 1[0m:[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mthe control demands NO_SEAL(1) and a[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mdead server yields INFRA(2). The[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mreaching line is [38;5;217;48;5;232m:1089[0m — [38;5;217;48;5;232mrun(['--[m[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mrepo', REPO, '--[m[0m                      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232msuccessor', 'TERMINAL'])[0m, a LIVE run[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThat roster read is anonymous[0m        [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcurl -[m[0m                                [38;5;232m│[0m [38;5;145m[1;38;5;145m200 in 340ms.[0m CI has no [38;5;217;48;5;232mBP_TEST[0m-[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mG .../v1/data/query/production/task -[m[0m [38;5;232m│[0m [38;5;145mscoped secret and does not need one —[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mH "Authorization: Bearer undefined"[0m[0m   [38;5;232m│[0m [38;5;145mthe gate is green today purely[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mbecause guerrilla is up and the[0m       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mroster is world-readable. An ACL[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mchange reds it as surely as an[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145moutage.[0m                               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe [38;5;217;48;5;232munknown[0m domain rung lies to a[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcloud/priv/static/app.js:9598 domainR[m[0m [38;5;232m│[0m [38;5;145m[1;38;5;145mCONFIRMED, and it is the epic’s exact[m[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mscreen reader[0m                        [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mungChip[0m vs [38;5;217;48;5;232m:9500 domainStageRows[0m[0m      [38;5;232m│[0m [38;5;145m[1;38;5;145mdisease.[0m The pure fold computes an[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mhonest [38;5;217;48;5;232munknown[0m role and its 60-line[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mheader explains at length why an[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145munmeasured rung must never fall into[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mthe waiting bucket. The RENDER has no[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232munknown[0m arm: it falls through to[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232m&middot;[0m and [38;5;217;48;5;232mstate = "waiting"[0m, so[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mthe [38;5;217;48;5;232maria-label[0m says "waiting" for a[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mcheck nobody made. The model knows;[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mthe screen lies.[0m                      [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;145mPremise smoke.[0m Every charter D-number this direction cites was [38;5;217;48;5;232mgit show[0m-n from [38;5;217;48;5;232morigin/main[0m and read for coverage, not   
+existence: D307 (Law 0’s filing half), D325 (the [38;5;217;48;5;232mcch-w22-s7[0m split), D331 (the D307 seat moves to [38;5;217;48;5;232mwriter.ex[0m, the presence
+requirement stays unarmed), D334 (Law 0 re-derived; [38;5;217;48;5;232m.preview-url[0m cleared 20/20 by measurement; D325’s kill of C9 REFUTED
+on both its stated reasons). All four exist and all four authorise what they are cited for. Two code sites confirmed    
+present on [38;5;217;48;5;232morigin/main[0m: [38;5;217;48;5;232mseal-predicate.mjs verifyCommit[0m (the [38;5;217;48;5;232mcatch[0m that collapses rc 1 and rc 128 into one sentence) and
+[38;5;217;48;5;232mapp.js:9598 domainRungChip[0m.                                                                                             
+                                                                                                                        
+[1;38;5;145mRoster at Strategize: [0m310 children — [38;5;217;48;5;232m{done 201, open 73, cancelled 35, considering 1}[0m. The seal predicate’s own         
+denominator (published-only) will read lower; wave 28 quoted [38;5;217;48;5;232mroster 307[0m at [38;5;217;48;5;232m52a80c7be[0m. Both integers get re-derived at   
+Decide.                                                                                                                 
+                                                                                                                        
+[1;38;5;78mDirection[0m                                                                                                               
+                                                                                                                        
+[1;38;5;145m"I could not look" gets a grammar — and the merge lane stops being someone else’s host.[0m                                 
+                                                                                                                        
+Wave 27 found the sentence at the ROOT. Wave 28 found it at the OBJECT and shipped it to two audiences — the instrument 
+and the person. Wave 29’s claim is that the sentence now has [1;38;5;145mthree[0m audiences, and that the third one arrived today,     
+uninvited, when branch protection went hard:                                                                            
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────────────────[0m[38;5;232m┬[0m[38;5;232m──────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m──────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m[1;38;5;145mThe predicate[0m[0m  [38;5;232m│[0m [38;5;145mrc 1 is an honest answer about the PRODUCT; rc[0m   [38;5;232m│[0m [38;5;145mSix verbatim false "not an ancestor" sentences[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145m128 / missing object / shallow / no [38;5;217;48;5;232morigin/main[0m[0m  [38;5;232m│[0m [38;5;145mat [38;5;217;48;5;232mb=FAIL[0m in any depth-1 clone. Two waves quoted[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mref is an honest answer about the ENVIRONMENT.[0m   [38;5;232m│[0m [38;5;145moutput of that shape as this epic’s primary[0m      [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mHISTORY-UNAVAILABLE surfaces as a verdict-token[0m  [38;5;232m│[0m [38;5;145mfinding.[0m                                         [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mLETTER at exit 1.[0m                                [38;5;232m│[0m                                                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[1;38;5;145mThe merge lane[0m[0m [38;5;232m│[0m [38;5;145mA context that BLOCKS a merge must be a function[0m [38;5;232m│[0m [38;5;145mOne line under a REQUIRED gate reaches[0m           [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mof the DIFF. It may red for this repo’s bytes[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mguerrilla.barkpark.cloud[0m. When that host blinks,[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mand for nothing else — not for a host we do not[0m  [38;5;232m│[0m [38;5;145mevery PR in the repo stops merging — not just[0m    [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mown, not for history the clone was never given.[0m  [38;5;232m│[0m [38;5;145mthis epic’s.[0m                                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[1;38;5;145mThe person[0m[0m     [38;5;232m│[0m [38;5;145mA screen may say "we could not check" or it may[0m  [38;5;232m│[0m [38;5;145mA crashed usage meter reads [38;5;217;48;5;232munmetered[0m — the same[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145msay what it measured. It may never spend the[0m     [38;5;232m│[0m [38;5;145mword the flow meters use for "we deliberately do[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mproduct’s vocabulary for a deliberate non-[0m       [38;5;232m│[0m [38;5;145mnot measure this". An unmeasurable domain rung[0m   [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m [38;5;145mmeasurement on a measurement that crashed.[0m       [38;5;232m│[0m [38;5;145mtells a screen reader "waiting". A resolver blip[0m [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                                                  [38;5;232m│[0m [38;5;145mleaves the rail TERMINAL with no way back short[0m  [38;5;232m│[0m
+[38;5;232m│[0m                [38;5;232m│[0m                                                  [38;5;232m│[0m [38;5;145mof a navigation.[0m                                 [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────────────────[0m[38;5;232m┴[0m[38;5;232m──────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m──────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;145mThis is not three themes stapled together.[0m It is one sentence that generates all three, which is the shape wave 28      
+already proved works — "one disease, two audiences", now three. The ratio floor is not a tax on this direction; four of 
+the strongest person rows on the board ARE instances of it.                                                             
+                                                                                                                        
+[1;38;5;59mWhat the finished wave looks like[0m                                                                                       
+                                                                                                                        
+[38;5;59m• [0m[1;38;5;145mThe seal predicate can be run anywhere and never invents a finding.[0m In a full clone it says [38;5;217;48;5;232mb=PASS[0m with a byte-       
+  identical token. In a pristine [38;5;217;48;5;232mgit clone --depth 1[0m, a grafted depth-1, and a simulated [38;5;217;48;5;232mactions/checkout@v4[0m PR shape it
+  says [38;5;217;48;5;232mHISTORY-UNAVAILABLE[0m with ZERO "is not an ancestor" sentences — at exit 1, as a letter, never as an exit-2 INFRA- 
+  FAULT that would red s1’s merged control. And on a full clone with a register entry retargeted to a present-but-      
+  genuinely-not-an-ancestor sha it still prints exactly ONE honest product sentence at [38;5;217;48;5;232mb=FAIL[0m. The discrimination is    
+  proved by clones, not by stubs.                                                                                       
+[38;5;59m• [0m[1;38;5;145mNo merge-blocking job can reach a host this repo does not own, and something reds if one regains the ability.[0m The     
+  predicate’s exit-2 on an unreachable server is CORRECT and stays exactly as it is — the wave does not green a red.    
+  What moves is the QUESTION: the live-network assertion leaves the required path for somewhere it can be honestly red  
+  without freezing the repo, and a hermetic control just as cruel keeps proving the contrast that test exists to prove. 
+  Backed by a ratchet in the [38;5;217;48;5;232mconsole-path-escape-check.sh --selftest[0m family that can lose.                              
+[38;5;59m• [0m[1;38;5;145mFour screens stop reporting a failed measurement as a fact about the product.[0m A meter that crashed says so. An        
+  unmeasurable rung says so, in its [38;5;217;48;5;232maria-label[0m as well as its glyph, and offers a re-check instead of a dead end. Copy  
+  stops naming a provider it never asked. A publish that silently refused to deploy leaves an event a person can find.  
+[38;5;59m• [0m[1;38;5;145mThe board is shorter and honest about it.[0m [38;5;217;48;5;232mcch-w22-s7[0m’s remainder is rebuilt against [38;5;217;48;5;232morigin/main[0m’s bytes — including   
+  the C9 leg D334 resurrected, whose substantive defect (collecting [38;5;217;48;5;232mws[0m and [38;5;217;48;5;232mte[0m but not [38;5;217;48;5;232moverflow[0m) has its own model arm   
+  400 lines below it in the same file.                                                                                  
+                                                                                                                        
+[1;38;5;59mWhat this wave deliberately does not take[0m                                                                               
+                                                                                                                        
+[38;5;59m• [0m[38;5;217;48;5;232m.preview-url[0m — D334 measured it 20/20 clean from a clean detached worktree, [38;5;217;48;5;232mrc 0[0m, worst [38;5;217;48;5;232murlLost[0m −6.44px inside the    
+  clipper. The row reads DONE 10/10. Named here so no surveyor re-opens it.                                             
+[38;5;59m• [0m[1;38;5;145mAny edit to [0m[38;5;217;48;5;232m.github/required-checks.json[0m. REGISTER NOTHING. The spec matches live protection on context and app_id    
+  today; [38;5;217;48;5;232mRequired-check spec drift[0m is green on main for the first time. An edit re-opens a drift that took eleven waves 
+  to close.                                                                                                             
+[38;5;59m• [0m[1;38;5;145mArming the D307 ABSENT tier.[0m D331 measured the backfill: a description classifier scores 47%, a structured classifier 
+  40%, and a one-line constant [38;5;217;48;5;232mreturn "instruments"[0m scores 73% — both classifiers below the majority baseline, on a     
+  three-day-old convention absent from 91% of the live population. A refusal cannot be armed over rows nobody can       
+  classify. At most a narrow ENUM question; the survey decides whether even that is a slice. [1;38;5;145mAnd the scoping leg is a   
+  design boundary, not a load-bearing guard[0m — 46 tests / 1 failure, not 23.                                             
+                                                                                                                        
+[1;38;5;78mDirection debate[0m                                                                                                        
+                                                                                                                        
+Two rivals were developed far enough to be shippable, then argued against each other. Neither was a straw man; both are 
+what a reasonable strategist would do with this wish.                                                                   
+                                                                                                                        
+[1;38;5;59mRival A — SCREENS ONLY[0m                                                                                                  
+                                                                                                                        
+Spend the whole wave on person rows. Take s2 because it is mandated and nothing else instrumental. The argument is      
+strong: the epic’s vision sentence is [1;38;5;145mthe console stops lying[0m, the ratio floor exists because instrument work keeps     
+crowding out screens, and the board carries at least a dozen live person rows. The finished wave would be six screens a 
+person can actually reach, which is the most legible good this epic produces.                                           
+                                                                                                                        
+[1;38;5;145mWhy it loses: [0mit was true yesterday and stopped being true today. The day four contexts started blocking, a host nobody 
+in this repo controls acquired the power to freeze every merge in the repository — and I measured the coupling live     
+rather than inferring it ([38;5;217;48;5;232mnot ok 56[0m). Rival A spends the wave on this epic’s screens while every OTHER concurrent wave  
+pays the outage. And it misreads the vision: a gate that reds for the wrong reason is the same lie, pointed at the fleet
+instead of at a customer.                                                                                               
+                                                                                                                        
+[1;38;5;59mRival B — THE LANE, END TO END[0m                                                                                          
+                                                                                                                        
+An instrument wave. Harden all four required contexts, finish s2, promote D307, run the live half of [38;5;217;48;5;232mrequired-          
+checks.test.sh[0m at four contexts for the first time, adjudicate [38;5;217;48;5;232mSecurity gate[0m’s registrability now that it is green. The 
+argument: the merge lane is the single highest-leverage surface in the repo and it has never been exercised in its      
+current shape.                                                                                                          
+                                                                                                                        
+[1;38;5;145mWhy it loses: [0mit violates two of this epic’s own laws at once. The ratio floor demands four person bodies. And Standing 
+Law 0 sends every gate, generator, harness and required-checks row to the SUCCESSOR epic [38;5;217;48;5;232mcch-instruments-epic[0m — so an   
+all-instrument wave filed under this parent would breach the filing law that wave 28 just armed a door guard for. Rival 
+B is a real wave; it is the successor’s wave, not this one’s.                                                           
+                                                                                                                        
+[1;38;5;59mWhy the winner won[0m                                                                                                      
+                                                                                                                        
+The winner is not a split of A and B. It is the observation that the SAME sentence generates both halves, so the wave   
+does not have to choose. "I could not look" ≠ "the thing is broken" is what s2 teaches a predicate, what the lane slice 
+teaches a required context, and what four screens on the board are already failing at. A wave with one sentence is a    
+wave whose Decide phase can adjudicate slices against a criterion instead of a wishlist — and it satisfies the ratio    
+floor with rows chosen on merit rather than on quota.                                                                   
+                                                                                                                        
+[1;38;5;59mThe sharpest attack on the winner, and how the wave absorbs it[0m                                                          
+                                                                                                                        
+[38;5;214m▌[0m [1;38;5;145mTHE GATE SLICE MAY BE A NON-DEFECT, AND THE "FIX" MAY BE A WEAKENING. [0mOn a dead server the predicate correctly        
+[38;5;214m▌[0m emitted an INFRA FAULT and the test correctly redded. That is an HONEST red. A wave that makes it green has softened  
+[38;5;214m▌[0m a guard and called it hardening — the exact failure this epic exists to catch, committed by the wave that cites the   
+[38;5;214m▌[0m standing test.                                                                                                        
+                                                                                                                        
+[1;38;5;145mAbsorbed, not hedged.[0m The wave does not green the red. The predicate’s exit-2 on an unreachable server is correct       
+behaviour and is not touched. The defect is narrower and different: a context that BLOCKS a merge is asking a question  
+whose answer lives on a host outside this repository. The remedy is relocation — the live assertion moves somewhere it  
+can be honestly red without freezing the lane — plus a hermetic control that is just as cruel and still proves the      
+contrast the test exists to prove (a live refusal never reaches the ladder; [38;5;217;48;5;232m--ladder-only[0m does). Three wrong fixes are  
+banned by name in the slice brief, because each is green by construction under standing clause 4:                       
+                                                                                                                        
+[38;5;59m1. [0m[38;5;217;48;5;232mtry[0m/[38;5;217;48;5;232mcatch[0m around the spawn — the control passes on a dead server AND on a broken predicate.                          
+[38;5;59m2. [0m[38;5;217;48;5;232massert(status === NO_SEAL || status === INFRA)[0m — a disjunction that admits the failure it was written to detect.     
+[38;5;59m3. [0mDeleting the control — the contrast at [38;5;217;48;5;232m:1089[0m IS the slice that shipped in wave 11; removing it retires a real proof  
+   to buy a green.                                                                                                      
+                                                                                                                        
+[1;38;5;145mThree further assumptions that could kill the direction, each now a survey question rather than a hedge: [0m(i) [38;5;217;48;5;232mCloud gate[0m 
+may carry its own foreign coupling I have not measured — survey 1; (ii) the fix may require a [38;5;217;48;5;232m.github/workflows/**[0m edit 
+that collides with the concurrent PDS wave — survey 12; (iii) the four person rows I named may be outranked on merit by 
+rows I did not (phone overflow, PAT-survives-demotion, the credential Back button) — survey 7 ranks all 73 open rows    
+without deference to this direction.                                                                                    
+                                                                                                                        
+[1;38;5;78mSurvey plan[0m                                                                                                             
+                                                                                                                        
+Sixteen broad assignments, one Opus surveyor each at medium effort. Width now buys precision at Verify. Every load-     
+bearing assumption in the direction above appears below as something a surveyor can refute.                             
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────[0m[38;5;232m┬[0m[38;5;232m───────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m1[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mgate-foreign-host[0m[0m     [38;5;232m│[0m [38;5;145mWalk the [38;5;217;48;5;232mneeds[0m graph of all four required[0m  [38;5;232m│[0m [38;5;145mDecides whether the lane slice is one line[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mcontexts and enumerate every command that[0m  [38;5;232m│[0m [38;5;145mor a family — and whether [38;5;217;48;5;232mCloud gate[0m needs[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mcan reach a host this repo does not[0m        [38;5;232m│[0m [38;5;145mits own slice.[0m                             [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mcontrol. I measured exactly one under[0m      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mConsole gate[0m. Is that the only one?[0m        [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mgate-history-coupling[0m[0m [38;5;232m│[0m [38;5;145mThe five [38;5;217;48;5;232mladderOnlyRun[0m sites read REAL git[0m [38;5;232m│[0m [38;5;145mThe second half of the lane slice. s1[0m      [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mhistory through [38;5;217;48;5;232m--repo REPO[0m. Do they[0m       [38;5;232m│[0m [38;5;145mproved 65/65 in a depth-1 clone — so[0m       [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145msurvive a real [38;5;217;48;5;232mgit clone --depth 1 --no-[m[0m   [38;5;232m│[0m [38;5;145meither the coupling is benign or s1’s[0m      [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mlocal[0m? Row [38;5;217;48;5;232mcch-w28-followup-seal-suite-[m[0m    [38;5;232m│[0m [38;5;145mclone differed from CI’s.[0m                  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mdepth1-coupling[0m (0/2) asks exactly this.[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232ms2-criteria-to-bytes[0m[0m  [38;5;232m│[0m [38;5;145mMap s2’s nine criteria to the exact bytes[0m  [38;5;232m│[0m [38;5;145ms2 is mandated and its port citation is a[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mthey change in [38;5;217;48;5;232mseal-predicate.mjs[0m. Confirm[0m [38;5;232m│[0m [38;5;145mpremise nobody has smoked. That file is[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mthe port source [38;5;217;48;5;232mscripts/pds-record-[m[0m        [38;5;232m│[0m [38;5;145mPDS-owned.[0m                                 [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mparity.sh:261 walk_truncation()[0m exists on[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232morigin/main[0m and does what the criterion[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mclaims.[0m                                    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m4[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232ms2-exit-contract[0m[0m      [38;5;232m│[0m [38;5;145mTrace how [38;5;217;48;5;232mInfra[0m propagates to the exit[0m     [38;5;232m│[0m [38;5;145mGetting this wrong reds a control that is[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mcode, and find where a HISTORY-UNAVAILABLE[0m [38;5;232m│[0m [38;5;145malready merged. The tripwire is armed on[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mLETTER can be emitted at exit 1 without[0m    [38;5;232m│[0m [38;5;145mpurpose.[0m                                   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mtouching the exit-2 path. Run s1’s clause-[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m(a) assertions against a candidate shape.[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m5[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mperson-unmetered[0m[0m      [38;5;232m│[0m [38;5;145mFind the SERVER producer of usage meters[0m   [38;5;232m│[0m [38;5;145mThe purest person-facing instance of the[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mand the client render. Prove or refute: a[0m  [38;5;232m│[0m [38;5;145mwave’s sentence. If it refutes, the ratio[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mmeter whose measurement CRASHED reaches a[0m  [38;5;232m│[0m [38;5;145mneeds another body.[0m                        [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mperson as [38;5;217;48;5;232munmetered[0m — the product’s own[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mword for a deliberate non-measurement.[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mName the non-admin route.[0m                  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m6[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mperson-domain-rung[0m[0m    [38;5;232m│[0m [38;5;145mConfirm the [38;5;217;48;5;232maria-label[0m an [38;5;217;48;5;232munknown[0m rung[0m     [38;5;232m│[0m [38;5;145mWish item 5, two halves in one slice. The[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mproduces, whether [38;5;217;48;5;232m.dom-rung--unknown[0m CSS[0m   [38;5;232m│[0m [38;5;145mpure fold is already honest — this is a[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mexists at all, and map the TERMINAL half:[0m  [38;5;232m│[0m [38;5;145mrender defect, which makes it small and[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mwhere [38;5;217;48;5;232mterminal[0m stops the 4s poll and what[0m  [38;5;232m│[0m [38;5;145mprovable.[0m                                  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mmount could host a re-check control.[0m       [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m7[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mperson-row-ranking[0m[0m    [38;5;232m│[0m [38;5;145mRead all 73 open children[0m                  [38;5;232m│[0m [38;5;145m[1;38;5;145mAmmunition against my own direction.[0m The[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m([38;5;217;48;5;232mbp task get cloud-console-hardening-[m[0m      [38;5;232m│[0m [38;5;145mratio picks must beat the alternatives on[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mepic -o json[0m → [38;5;217;48;5;232m.children[0m, key [38;5;217;48;5;232mdoc_id[0m) and[0m  [38;5;232m│[0m [38;5;145mmerit, not on fitting my sentence.[0m         [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mrank every person-facing row by how badly[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145ma real person is misinformed, non-admin[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mreachability, and slice size. Include rows[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mthis direction did NOT name.[0m               [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m8[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mw22s7-remainder[0m[0m       [38;5;232m│[0m [38;5;145mRe-derive [38;5;217;48;5;232mcch-w22-s7[0m against [38;5;217;48;5;232morigin/main[0m:[0m  [38;5;232m│[0m [38;5;145mWish item 6. D325 said stamp five and kill[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mwhich of its 16 criteria are stampable[0m     [38;5;232m│[0m [38;5;145mC9; D334 refuted the kill on BOTH stated[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mTODAY, and is D334’s C9 re-scope a real[0m    [38;5;232m│[0m [38;5;145mreasons. Somebody has to settle it against[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mbuildable leg? The substantive defect is[0m   [38;5;232m│[0m [38;5;145mreal bytes.[0m                                [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mthat [38;5;217;48;5;232moverflow-guard.mjs:4083[0m collects [38;5;217;48;5;232mws[0m[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mand [38;5;217;48;5;232mte[0m but not [38;5;217;48;5;232moverflow[0m, while the model[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145marm at [38;5;217;48;5;232m:4534[0m collects [38;5;217;48;5;232mov: cs.overflow[0m.[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m9[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232md307-promotion-cost[0m[0m   [38;5;232m│[0m [38;5;145mWhat would actually turn the ABSENT tier[0m   [38;5;232m│[0m [38;5;145mDecides slice vs. defer-with-a-sentence.[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mhard? Read [38;5;217;48;5;232mwriter.ex:749-880[0m including the[0m [38;5;232m│[0m [38;5;145m[1;38;5;145mDo not restate the scoping leg as load-[m[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mcorrected comment at [38;5;217;48;5;232m:824-834[0m, find[0m        [38;5;232m│[0m [38;5;145m[1;38;5;145mbearing — the measured mutation is 46[m[0m      [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mwhether a [38;5;217;48;5;232msurface[0m ENUM exists as schema[0m    [38;5;232m│[0m [38;5;145m[1;38;5;145mtests / 1 failure.[0m[0m                         [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145manywhere, and re-derive D331’s backfill[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mnumbers against TODAY’s roster.[0m            [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m10[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mrequired-checks-[m[0m      [38;5;232m│[0m [38;5;145mConfirm live protection matches the[0m        [38;5;232m│[0m [38;5;145mREGISTER NOTHING is the standing[0m           [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mfrozen[0m[0m                [38;5;232m│[0m [38;5;145mcommitted spec on context AND app_id. Read[0m [38;5;232m│[0m [38;5;145minstruction. I need to know precisely what[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mrequired-checks-verify.sh[0m, [38;5;217;48;5;232m-floor.sh[0m, [38;5;217;48;5;232m-[m[0m    [38;5;232m│[0m [38;5;145m"nothing" excludes — including whether a[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mgenerate.sh[0m. What could a wave do that[0m     [38;5;232m│[0m [38;5;145mworkflow rename counts.[0m                    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145msilently re-opens the drift?[0m               [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m11[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mguerrilla-as-ci-[m[0m      [38;5;232m│[0m [38;5;145mHow reliable is [38;5;217;48;5;232mguerrilla.barkpark.cloud[0m[0m   [38;5;232m│[0m [38;5;145mSizes the risk the lane slice removes. If[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mdependency[0m[0m            [38;5;232m│[0m [38;5;145mas a CI dependency? I measured the roster[0m  [38;5;232m│[0m [38;5;145mguerrilla has never blinked, the slice is[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mquery anonymous, 200, 340ms. Search bp[0m     [38;5;232m│[0m [38;5;145mprudence; if it 503s on this repo’s own[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mpapers/tasks and the repo for recorded[0m     [38;5;232m│[0m [38;5;145mmerges, it is urgent.[0m                      [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145moutages, 503s on [38;5;217;48;5;232mcloud/**[0m merges, rate[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mlimits, and any planned ACL change.[0m        [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m12[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mpds-collision-map[0m[0m     [38;5;232m│[0m [38;5;145mThe PDS wave runs concurrently on [38;5;217;48;5;232mapi/**[0m,[0m  [38;5;232m│[0m [38;5;145mA collision is far cheaper to route around[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mscripts/pds-*[0m. Enumerate open PRs, live[0m    [38;5;232m│[0m [38;5;145mat Decide than to merge out of at Build.[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mworktrees and recent commits holding[0m       [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145manything my candidate slices touch —[0m       [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mespecially [38;5;217;48;5;232mscripts/pds-record-parity.sh[0m[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m(s2’s port source) and [38;5;217;48;5;232mscripts/elixir-[m[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mpath-escape-check.sh[0m.[0m                      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m13[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mperson-alert-email-[m[0m   [38;5;232m│[0m [38;5;145mWave 28 (#9407) wired [38;5;217;48;5;232m:deployment_failed[0m[0m   [38;5;232m│[0m [38;5;145mThe sharpest sequencing available: wave 28[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mbytes[0m[0m                 [38;5;232m│[0m [38;5;145mso the default-on alert can actually send.[0m [38;5;232m│[0m [38;5;145mstopped the toggle lying, wave 29 stops[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mQuote the BYTES a person now receives for[0m  [38;5;232m│[0m [38;5;145mthe letter. The cap is a person-facing[0m     [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145ma [38;5;217;48;5;232mdeployment_failed[0m and an[0m                 [38;5;232m│[0m [38;5;145mSUPPRESSION.[0m                               [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232magent_unreachable[0m alert. Does [38;5;217;48;5;232mFailureCopy[0m[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mreach the mail path at all? And what does[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145ma person NOT get told when [38;5;217;48;5;232m@reap_alert_cap[0m[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145m(25/sweep) bites?[0m                          [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m14[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mperson-silent-deploy-[m[0m [38;5;232m│[0m [38;5;145mA content publish that silently refuses to[0m [38;5;232m│[0m [38;5;145mSame class as wave 28’s s6 — a state with[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mrefusal[0m[0m               [38;5;232m│[0m [38;5;145mdeploy mints a [38;5;217;48;5;232mcancelled[0m row and no event[0m  [38;5;232m│[0m [38;5;145mno dispatch site — pointed at the deploy[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mexists for it anywhere. Find the refusal[0m   [38;5;232m│[0m [38;5;145mtimeline instead of at alerts.[0m             [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145msite, the row it mints, the event[0m          [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mvocabulary, and what a person sees today.[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mConfirm a non-admin publish reaches it.[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m15[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mfailure-copy-quota-[m[0m   [38;5;232m│[0m [38;5;145mRead [38;5;217;48;5;232mfailure_copy.ex[0m as it stands after[0m    [38;5;232m│[0m [38;5;145mA small, sharp person slice adjacent to[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232marm[0m[0m                   [38;5;232m│[0m [38;5;145m#9406 and #9408. Find the bare [38;5;217;48;5;232mquota[0m[0m       [38;5;232m│[0m [38;5;145mcode two builders just touched, so the[0m     [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mtoken’s arm and prove which provider[0m       [38;5;232m│[0m [38;5;145mseam is warm.[0m                              [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mstrings can reach it — the row claims an[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mAzure-failed person is told Hetzner ran[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mout of servers.[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m16[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mhermetic-gate-[m[0m        [38;5;232m│[0m [38;5;145mWhat in-tree precedent exists for proving[0m  [38;5;232m│[0m [38;5;145mStanding clauses 2, 3, 4, 5 and 6 all[0m      [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mprecedent[0m[0m             [38;5;232m│[0m [38;5;145ma CI job hermetic? Read the path-escape[0m    [38;5;232m│[0m [38;5;145mapply to the lane slice at once. Without[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mratchet family and its [38;5;217;48;5;232m--selftest[0m. Could a[0m [38;5;232m│[0m [38;5;145mthis, the lane fix is a sentence with a[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145msimilar ratchet enumerate merge-blocking[0m   [38;5;232m│[0m [38;5;145mshebang.[0m                                   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mjobs and refuse a foreign host or a real-[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                       [38;5;232m│[0m [38;5;145mhistory read — and could it LOSE?[0m          [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────[0m[38;5;232m┴[0m[38;5;232m───────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;78mTasks this Paper drives[0m                                                                                                 
+                                                                                                                        
+Named at Strategize as CANDIDATES, not as the wave plan. Decide files and perfects the actual slice rows and links this 
+Paper onto each.                                                                                                        
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m─────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────[0m[38;5;232m┬[0m[38;5;232m──────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-s2-history-unavailable-discrimination[0m[0m   [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/9,[0m       [38;5;232m│[0m [38;5;145mMandated round-2 slice. Audience 1: the[0m          [38;5;232m│[0m
+[38;5;232m│[0m                                                 [38;5;232m│[0m [38;5;145munclaimed[0m       [38;5;232m│[0m [38;5;145mpredicate.[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-followup-seal-suite-depth1-coupling[0m[0m     [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/2[0m        [38;5;232m│[0m [38;5;145mAudience 2, half one: the required gate’s[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                                 [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mhistory coupling.[0m                                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145munfiled — the foreign-host coupling[0m             [38;5;232m│[0m [38;5;145m[1;38;5;145mNOT FILED[0m[0m       [38;5;232m│[0m [38;5;145mAudience 2, half two. Wave 28 s3 documented it;[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                                 [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mno row exists. Decide files it, and Law 0 sends[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                                 [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mit to [38;5;217;48;5;232mcch-instruments-epic[0m AT CREATE TIME.[0m       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mtask-1daff7bc1bf46ceb[0m[0m                           [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/3[0m        [38;5;232m│[0m [38;5;145m[1;38;5;145mPERSON.[0m The [38;5;217;48;5;232munknown[0m rung’s [38;5;217;48;5;232maria-label[0m + the[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                 [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mTERMINAL re-check affordance.[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-bl-usage-meters-say-unmetered-when-[m[0m     [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/3[0m        [38;5;232m│[0m [38;5;145m[1;38;5;145mPERSON.[0m The purest instance of the wave’s[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mthey-could-not-measure[0m[0m                          [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145msentence on a screen.[0m                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w26-bl-deployment-failed-email-still-[m[0m       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/3[0m        [38;5;232m│[0m [38;5;145m[1;38;5;145mPERSON.[0m Wave 28 made it send; wave 29 makes it[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232munhumanized[0m[0m                                     [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mreadable.[0m                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-bl-auto-deploy-refusal-has-no-event-at-[m[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/3[0m        [38;5;232m│[0m [38;5;145m[1;38;5;145mPERSON.[0m A refusal with no event anywhere.[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mall[0m[0m                                             [38;5;232m│[0m                 [38;5;232m│[0m                                                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-bl-capacity-arm-blames-hetzner-for-[m[0m     [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/3[0m        [38;5;232m│[0m [38;5;145m[1;38;5;145mPERSON.[0m Reserve body — small, sharp, warm seam.[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mazure[0m[0m                                           [38;5;232m│[0m                 [38;5;232m│[0m                                                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-bl-w22s7-split-stamps-never-landed-and-[m[0m [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/3[0m        [38;5;232m│[0m [38;5;145mWish item 6. Rebuilt against [38;5;217;48;5;232morigin/main[0m’s[0m       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mc9-kill-is-refuted[0m[0m                              [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145mbytes, not closed against them.[0m                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-s4-followup-promote-absent-surface-to-[m[0m  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mopen[0m 0/3[0m        [38;5;232m│[0m [38;5;145mWish item 4. Probably a defer-with-a-sentence;[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mhard[0m[0m                                            [38;5;232m│[0m                 [38;5;232m│[0m [38;5;145msurvey 9 decides.[0m                                [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m─────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────[0m[38;5;232m┴[0m[38;5;232m──────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[38;5;69m▌[0m [1;38;5;145mNext append: DIGEST.[0m The sixteen surveyor reports fold into a coverage-accounted digest and a verify plan, written    
+[38;5;69m▌[0m here BEFORE any verifier flies. Nothing below the Direction heading is a decision yet — Decide is what turns a        
+[38;5;69m▌[0m candidate into a slice.                                                                                               
+                                                                                                                        
+[1;38;5;78mSurvey digest — 16 reports, one sentence, three audiences[0m                                                               
+                                                                                                                        
+Sixteen surveyors reported; coverage deficit none. The direction survives, but it survives CORRECTED on its most urgent 
+half, and the survey found one hazard the direction did not anticipate that must be settled BEFORE Decide files a single
+row.                                                                                                                    
+                                                                                                                        
+[1;38;5;78mEstablished, and re-derived by this phase rather than inherited[0m                                                         
+                                                                                                                        
+[38;5;59m• [0mFOUR required contexts, live: Elixir gate, PR references an active task, Cloud gate, Console gate — all app_id 15368, 
+  enforce_admins true. Re-derived by me and independently by three surveyors. The committed .github/required-checks.json
+  byte-matches on context AND app_id. REGISTER NOTHING holds: no open PR touches that file.                             
+[38;5;59m• [0mAll eight wave-28 commits are ancestors of origin/main (0a1b4d2ea, dcba89411, a723ec0dd, 9b4e76d5c, 96a120b71,        
+  156f7669d, b348779d6, 0d1936832). Verified, not inherited.                                                            
+[38;5;59m• [0mEvery code site the wish points a builder at still exists on origin/main: seal-predicate.mjs:489-490 (the swallowing  
+  bare catch), :1096 (the b= ternary seam), walk_truncation() at pds-record-parity.sh:261 exactly, failure_copy.ex:475- 
+  478, app.js:9598 domainRungChip, overflow-guard.mjs:4083/:4129, usage.ex:210, auto_deploy_worker.ex:176.              
+[38;5;59m• [0mCharter D307/D325/D328/D330/D331/D334 all present on origin/main and D334 READ FOR COVERAGE — it does authorize the C9
+  refutation, the cuePaints-is-alive claim, and taking .preview-url off the board on measurement (rc 0, 20/20 cells     
+  clean). The wish item 7 is correct: do not rebuild it.                                                                
+                                                                                                                        
+[1;38;5;78mPREMISE SMOKE FAILURE — one phantom citation, caught before a builder chased it[0m                                         
+                                                                                                                        
+The charter at :536 names cssom-parity.mjs:608 as one of "two working in-tree implementations to cite" of the I-could-  
+not-look doctrine. git show origin/main gives line 608 as a Chrome DevTools build-banner template literal. The whole    
+790-line file contains zero merge-base, zero shallow probe, zero git dependency — its only relevant text is the :195-200
+comment REFUSING to take a git dependency. Wrong line AND "working implementation" overstates a documented refusal. The 
+companion anchor at :538 (:189-193) is also off by ~6. s2 needs only the pds-record-parity.sh:261 citation, which is    
+real and exact; the second citation must be struck or corrected in the slice brief, or a builder burns time on dead     
+bytes and cites them back into the ledger.                                                                              
+                                                                                                                        
+[1;38;5;78mCORRECTION 1 — the lane slice’s finished state as written is unachievable, and three surveyors found it independently[0m   
+                                                                                                                        
+"No merge-blocking job reaches a host this repository does not own" cannot be built. PR references an active task       
+reaches guerrilla.barkpark.cloud BY DESIGN and BY POLICY: pr-task-gate.yml:257 GETs the ledger, :202 POSTs a mutation   
+with a repo secret, and the step body converts the script’s exit 2 into exit 1 under the annotation "Ledger unreachable 
+— task backing UNVERIFIED", arguing in its own comment that "the only alternative to red is a green check that verified 
+nothing". docs/ops/merge-gates.md:75 codifies it: ledger outage = a red that says so.                                   
+                                                                                                                        
+[1;38;5;145mSo the repo has ALREADY adjudicated this wave’s question in committed bytes on a blocking gate. The honest defect class 
+is narrower and sharper:[0m                                                                                                
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mdependency[0m         [38;5;232m│[0m [38;5;145mSEMANTIC — the gate’s question IS about that host[0m [38;5;232m│[0m [38;5;145mACCIDENTAL — a unit test of a predicate[0m     [38;5;232m│[0m
+[38;5;232m│[0m                    [38;5;232m│[0m                                                   [38;5;232m│[0m [38;5;145mmakes a live roster call[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mretries[0m            [38;5;232m│[0m [38;5;145m3 attempts, 2s apart, curl -m 20 each[0m             [38;5;232m│[0m [38;5;145mnone[0m                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mfailure legibility[0m [38;5;232m│[0m [38;5;145mnamed annotation + step summary[0m                   [38;5;232m│[0m [38;5;145mnot ok 56 … 2 !== 1[0m                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145moperator override[0m  [38;5;232m│[0m [38;5;145mdocumented hotfix! lane[0m                           [38;5;232m│[0m [38;5;145mnone[0m                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mthe discriminator[0m  [38;5;232m│[0m [38;5;145mcomputed and printed[0m                              [38;5;232m│[0m [38;5;145mA YAML COMMENT telling a human to read a[0m    [38;5;232m│[0m
+[38;5;232m│[0m                    [38;5;232m│[0m                                                   [38;5;232m│[0m [38;5;145msolitary red at test 56 as "the ledger was[0m  [38;5;232m│[0m
+[38;5;232m│[0m                    [38;5;232m│[0m                                                   [38;5;232m│[0m [38;5;145munreachable"[0m                                [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+Exactly one of four required contexts fails the test "a required gate may be red by a third-party host only if it names 
+the condition and has a tested override", and it is Console gate. A ratchet phrased as a prohibition reds pr-task-      
+gate.yml the day it lands and its first act is to be waived — a guard that cannot lose, wearing an exemption. It must be
+a DECLARE-AND-JUSTIFY census (the CONSOLE_ESCAPE_EXEMPT "<path>TAB<why>" shape already in-tree) from the first commit.  
+Also: a ratchet homed only in the console-path-escape-check.sh family is structurally blind to pr-task-gate.yml — that  
+script is path-scoped to cloud/priv/static. Cloud gate and Elixir gate are clean at the YAML layer (zero curl/URL       
+tokens); their RUNTIME reach is UNMEASURED and is a verify assignment.                                                  
+                                                                                                                        
+[1;38;5;78mCORRECTION 2 — the wave’s own mandated fix can freeze every merge in the repo[0m                                           
+                                                                                                                        
+This is the largest build hazard the survey found and it was measured in a real pristine --depth 1 clone of origin/main,
+shallowness asserted INSIDE the clone (git log --oneline --all | wc -l == 1).                                           
+                                                                                                                        
+[38;5;59m• [0mThe suite passes 65/65 at CI’s checkout depth — and passes green-by-construction. A direct --ladder-only read in that 
+  same clone exits 0 while printing SIX verbatim "is not an ancestor of origin/main" sentences and b-clean=0/6 (a full  
+  clone reads 6/6). Not one of the five ladderOnlyRun assertions reads b-clean or counts the sentences. Standing clause 
+  5 verbatim: the fixture is a real shallow clone, cruel enough, and the SELECTOR still cannot reach the defect.        
+[38;5;59m• [0mseal-predicate.test.mjs:1055 hard-asserts a live --ladder-only read exits 0 (SEAL), and :1108 asserts the same.       
+  console-unit checks out at actions/checkout@v4’s depth-1 default (console-harness.yml:214, bare uses, no with:). If s2
+  emits HISTORY-UNAVAILABLE at exit 1 on the READ path, those sites red on a now-merge-BLOCKING Console gate. s2 and the
+  five sites must land in ONE PR.                                                                                       
+[38;5;59m• [0mA candidate ~20-line discrimination was BUILT AND RUN in a detached worktree at origin/main: full suite 65 tests / 64 
+  pass / 1 fail. On a real depth-1 clone it emits 6 HISTORY-UNAVAILABLE sentences and ZERO "is not an ancestor"         
+  sentences. All six of s1’s clause-(a) assertions SURVIVE (test 63 ok).                                                
+[38;5;59m• [0mThe single failure is a TRUE fail-before-control collision, not a regression: :1211 demands exactly 6 "is not an      
+  ancestor" lines from wave 27’s root-guard mutation control and gets 0. Baseline confirmed green pristine in the same  
+  worktree. THIS IS THE "mutate the discrimination out of #9356’s controls" work the wish mandates — it must be named in
+  the criteria or a builder will weaken the discrimination instead of rewriting the control.                            
+[38;5;59m• [0mA SECOND exit-2 trap survives an ancestry-only fix: the git show catch at :493-494 throws Infra, which routes to :1123
+  and prints a=UNKNOWN b=UNKNOWN c=UNKNOWN at code 2 — precisely the shape s1’s clause-(a) control is armed to red.     
+  Fixing only :489-490 moves the exit-2 one call deeper. Both must be re-classified in the same diff.                   
+[38;5;59m• [0mThe token tail is pinned: :1359 asserts /roster=0 repo=\S+ head=[0-9a-f]{7,}/. The letter goes in the b= slot, never  
+  appended.                                                                                                             
+                                                                                                                        
+[1;38;5;145mTHE ONE DECISION DECIDE CANNOT LIVE WITHOUT: does --ladder-only keep exit 0 and carry the condition as a letter in its  
+own LADDER-ONLY token (which has no b= slot today and prints a=NOT-READ c=NOT-READ), or does it exit 1 and force all    
+five sites rewritten? Two surveyors read this opposite ways. Today --ladder-only exits 0 with six unanswerable rows and 
+says nothing about it — which is this epic’s own defect class, inside the instrument that polices it. Verify V1 settles 
+it by running both shapes.[0m                                                                                              
+                                                                                                                        
+[1;38;5;78mCORRECTION 3 — the D307 guard is a live filing hazard for THIS wave, before any builder flies[0m                           
+                                                                                                                        
+The assignment asked what promoting ABSENT to hard costs. The answer is that the ENUM tier — already HARD, shipped in   
+#9405 — points at a vocabulary the epic does not use. Live roster: 143 published tasks carry a surface; exactly ONE     
+holds a value in @cch_surfaces (console|instrument|ledger), and it is the promotion task itself. Of 307 epic children,  
+43 carry surface and 42 are off-vocabulary descriptive prose — the epic’s practiced filing convention. Every off-vocab  
+row PREDATES the guard (latest 14:10:26Z vs the guard’s 15:08:46Z), so the guard has refused nothing yet and wave 29’s  
+filings are the FIRST that will meet it. Under presence+enum, 70 of 71 open rows would be refused. There is no surface  
+field in tasks/schema.ex at all (grep count 0) — one enforcement layer, versus three for lifecycle_status. The ABSENT   
+promotion is a DEFER with a measurement behind it; the reconciliation is not.                                           
+                                                                                                                        
+[1;38;5;78mThe person rows, re-ranked on merit — and two of them are already built[0m                                                 
+                                                                                                                        
+[38;5;59m• [0mSTALE-OPEN, do not rebuild: cch-w27-bl-connection-refused-classified-as-timeout (0/4) and cch-w27-bl-deployment-      
+  failed-toggle-fires-nothing (0/6) are substantively LANDED on origin/main — the refused arm carries its own "Split out
+  of the network class in wave 28 (D321(3))" comment, and registry.ex now has dispatch_deployment_failed/2, the edge    
+  guard, and the reaper fan-out. These are ledger closes. cch-w14-bl-site-open-phone-overflow (3/5) is likewise largely 
+  PAID by W15-S5, whose committed CSS comment names the row id and quotes its exact numbers.                            
+[38;5;59m• [0mcch-w26-bl-deployment-failed-email-still-unhumanized: HEADLINE REFUTED. #9407 already routes the email through        
+  cause_then_capture/1. The live defect MOVED CHANNEL — notifications/render.ex imports nothing, classifies nothing, and
+  never reads :detail, so the SAME dispatch gives an email reader a cause and a capture while a Slack/Discord reader    
+  gets neither. Same person, same minute, two stories. Rewrite the row at chat, not email.                              
+[38;5;59m• [0mA row nobody filed: registry.ex:6672-6687 splits alerts at @reap_alert_cap 25 and the dropped tail’s ONLY trace is a  
+  Logger.warning. A repo-wide grep finds no event, banner, email or API field. The 26th owner in a cluster-wide incident
+  is told nothing, and their experience is byte-identical to "alerts are off" or "the relay is down". Honest in the     
+  code, dishonest in the product.                                                                                       
+[38;5;59m• [0mtask-1daff7bc1bf46ceb (domainRungChip): CONFIRMED verbatim, with a refinement — the CLASS dom-rung--unknown IS emitted
+  correctly (interpolated from row.role); only the glyph and the aria-label state fall through to "waiting". And the one
+  existing test (__app.test.mjs:7938) pins that class, so it is GREEN WITH THE DEFECT FULLY PRESENT. No .dom-rung--     
+  unknown CSS exists, so unknown also renders pixel-identical to waiting. Both mounts (loadInstanceDomains :9673,       
+  loadSiteDomains :9702) already bump domainSeq and clear the timer on entry — safe re-entry points for a re-check.     
+[38;5;59m• [0mcch-w28-bl-auto-deploy-refusal-has-no-event-at-all is BIGGER than filed and the cheapest honest fix is a CONSOLE fix, 
+  not an alert event: refuse/1 mints an actionable remedy sentence naming the exact command, router.ex:10206 SERIALIZES 
+  it, and app.js discards it at TWO byte-identical gates (:10333 and :11203, st === "failed") plus deployDetailHtml’s   
+  deployIsActive guard. Reachable by any content editor via an HMAC-authed webhook — no cloud account required.         
+[38;5;59m• [0mcch-w28-bl-capacity-arm-blames-hetzner-for-azure: the arm is at :475-478, NOT the :470-473 the row cites (that lands  
+  on the DNS clause). The AZURE half is not derivable — zero quota/exceed strings anywhere under                        
+  internal/cli/cloud/azure/ including all 18 fixtures, and the Elixir Azure client returns atoms only. The DERIVABLE    
+  cruelty is a verb-less Hetzner DNS zone quota, which misses @dns_step and is answered "ran out of SERVER capacity" —  
+  wrong resource, provider correct. Reframe as a provider-AND-resource-blind literal.                                   
+[38;5;59m• [0mcch-w28-bl-usage-meters-say-unmetered: shape confirmed and STRONGER than filed (source does not discriminate either — 
+  both paths carry the same string, and app.js reads meter.source zero times). But reachability is source-read, not     
+  driven; the fixture cannot express a crashed meter; and usage_test.exs:231/:237 PIN the conflation and are the fail-  
+  before control. Ranked below the rows above until a crash reaches a pixel.                                            
+                                                                                                                        
+[1;38;5;78mCoverage map — checked and FOUND[0m                                                                                        
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mbranch protection (live API)[0m               [38;5;232m│[0m [38;5;145mfour contexts, app_id 15368, enforce_admins true — spec byte-matches[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpr-task-gate.yml + scripts/pr-task-gate.sh[0m [38;5;232m│[0m [38;5;145mTWO guerrilla reaches; exit 2 to exit 1 by design; bounded retries;[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mhotfix! override[0m                                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mconsole-harness.yml[0m                        [38;5;232m│[0m [38;5;145mConsole gate needs SIX leaves incl. overflow-guard (not five); zero[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mdirect network in the YAML; coupling transitive via node --test only[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcloud.yml / elixir.yml[0m                     [38;5;232m│[0m [38;5;145mNO foreign-host reach at the YAML layer; cloud/test and api/test grep[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mclean (api hits are PHX_HOST fixtures)[0m                                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mseal-predicate.mjs + .test.mjs[0m             [38;5;232m│[0m [38;5;145mevery seam located: :489-490, :493-494, :1096, :1104-1130, five[0m         [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mladderOnlyRun sites, the :1313-1318 after-note that already COMMITS the[0m [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145ms2 contract[0m                                                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mreal --depth 1 clone of origin/main[0m        [38;5;232m│[0m [38;5;145m65/65 pass; 6 false sentences at exit 0; dead BP_SERVER reds exactly[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mnot ok 56[0m                                                               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145moverflow-guard.mjs / app.css[0m               [38;5;232m│[0m [38;5;145mcuePaints ALIVE at :4129; :4083 omits overflow; model arm :4534[0m         [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mcollects ov; .set-row-name sets overflow: hidden[0m                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145musage.ex / app.js meters[0m                   [38;5;232m│[0m [38;5;145m:210 catch-all collapses four causes; "Not yet metered" at :16213; em[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mdash at :5219; meter.source read ZERO times[0m                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mfailure_copy.ex + azure fixtures[0m           [38;5;232m│[0m [38;5;145mbare quota arm at :475-478; humanize/1 is provider-BLIND (arity 1, 4[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mcall sites)[0m                                                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mnotifications/{event_email,render}.ex[0m      [38;5;232m│[0m [38;5;145mFailureCopy reaches the mail path ONLY; chat never reads :detail[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mlive guerrilla roster (4652 docs)[0m          [38;5;232m│[0m [38;5;145m143 surface rows, 1 in-vocabulary; 42 of 43 epic rows off-vocabulary[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mprose[0m                                                                   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mopen PRs (all 7)[0m                           [38;5;232m│[0m [38;5;145monly #8465 (writer.ex) and #6028 (app.js) touch candidate files; both[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mstale, mergeable UNKNOWN; nothing open touches required-checks.json[0m     [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;78mCoverage map — checked and NOT FOUND (absences are decisions in waiting)[0m                                                
+                                                                                                                        
+[38;5;59m• [0mNO script anywhere enforces the "MUST NEVER REGAIN a workflow-level on: paths: key" prohibition that protects two now-
+  blocking contexts. grep over scripts/*.sh returns nothing. cloud.yml does not even carry the sentence. A paths filter 
+  on either file makes a required context ABSENT on every non-matching PR — a permanent "is expected." and a repo-wide  
+  merge freeze.                                                                                                         
+[38;5;59m• [0mrequired-checks.test.sh §3c computes REAL_UNMAPPED against the real workflow tree and NEVER READS IT (grep returns one
+  line, the assignment). Its actual assertion is on the static committed JSON, which cannot change when a workflow is   
+  renamed. The blocking half runs --hermetic and makes no protection read at all — the ENTIRE drift surface is guarded  
+  only by a continue-on-error job.                                                                                      
+[38;5;59m• [0mNO surface field exists in api/lib/barkpark/tasks/schema.ex. NO .dom-rung--unknown CSS in app.css. NO re-check/check- 
+  again affordance anywhere in app.js. NO deployment_cancelled event in the 9-atom @events vocabulary. NO               
+  Plug.ErrorHandler anywhere in cloud/lib. NO Azure quota producer string anywhere under internal/cli/cloud/azure/. NO  
+  bp task row exists for Security gate registrability, nor for "the live half never ran at four contexts" — and the     
+  latter’s premise is now FALSE (both drift steps concluded success individually on a723ec0dd at four contexts).        
+[38;5;59m• [0mNO script enumerates merge-blocking jobs or audits workflows for host reach. The ratchet the direction describes has  
+  no in-tree implementation to extend — only shapes to copy (console-path-escape-check.test.sh case 9 already           
+  yaml.safe_loads the aggregator and EXECUTES its step body verbatim).                                                  
+[38;5;59m• [0mcch-w22-s7 reads 0/16 with claim null. D325’s five stamps NEVER LANDED and could not have — stamps are holder-only.   
+  Every line number D325 quotes is stale by ~+570 lines, and C7’s own criterion text cites a straddle assertion at      
+  :2004-2006 that is not there.                                                                                         
+                                                                                                                        
+Corners NO surveyor reached: docs/ops/merge-gates.md’s hotfix! lane end-to-end (is BARKPARK_TASK_TOKEN actually         
+provisioned? if unset the documented override ITSELF exits 1 and the lane has no escape at all); the RUNTIME host reach 
+of Cloud gate and Elixir gate (only the YAML layer is proven clean, and the Console coupling is proof that reach hides  
+one level down); the other five console-unit steps at depth 1; cloud/priv/static/__fixtures__/usage_meters.json;        
+breakpoint-sweep.test.mjs; the successor row cchi-w27-bl-w22s7-residue-derived-caps-and-refusals; and whether #9405 is  
+actually DEPLOYED to the server that accepts bp filings.                                                                
+                                                                                                                        
+[1;38;5;78mVerify plan — 14 assignments, in flight now[0m                                                                             
+                                                                                                                        
+This is the LAST look. Every row names what will be RUN; reading is proof for none of the load-bearing claims.          
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m─────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mV1[0m  [38;5;232m│[0m [38;5;145mThe s2 exit contract: does --ladder-only stay[0m     [38;5;232m│[0m [38;5;145mfable[0m [38;5;232m│[0m [38;5;145mthe candidate discrimination in a real --depth 1[0m   [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mexit 0 with a history letter, or exit 1 with five[0m [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mclone AND a simulated refs/pull/N/merge PR shape,[0m  [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145msites rewritten? Two surveyors read it opposite[0m   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mboth variants, full suite each[0m                     [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mways.[0m                                             [38;5;232m│[0m       [38;5;232m│[0m                                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV2[0m  [38;5;232m│[0m [38;5;145mDoes the naive s2 fix actually red Console gate[0m   [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mfull seal suite at depth 1, then the exit-1-on-[0m    [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mrepo-wide?[0m                                        [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mread variant; quote the failing test names[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV3[0m  [38;5;232m│[0m [38;5;145mIs the foreign-host census 1, 2 or 3 of the four[0m  [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145ma sentinel curl first on PATH across Console[0m       [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mcontexts — at RUNTIME, not at the YAML layer?[0m     [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mgate’s six leaves, the Cloud gate suite and the[0m    [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mElixir gate suite; count fires per gate[0m            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV4[0m  [38;5;232m│[0m [38;5;145mIs the hotfix! override REAL? If[0m                  [38;5;232m│[0m [38;5;145mfable[0m [38;5;232m│[0m [38;5;145mgh api actions/secrets + actions/variables; read[0m   [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mBARKPARK_TASK_TOKEN is unset the documented[0m       [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mmerge-gates.md end to end; run pr-task-gate.sh[0m     [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mescape hatch itself exits 1 — and the ratchet’s[0m   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145magainst an unreachable ledger and capture the exit[0m [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mcriterion becomes unsatisfiable.[0m                  [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mcode unpiped[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV5[0m  [38;5;232m│[0m [38;5;145mIs #9405 LIVE on guerrilla — i.e. will wave 29’s[0m  [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145ma real create of a throwaway epic child with an[0m    [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mown filings 422?[0m                                  [38;5;232m│[0m       [38;5;232m│[0m [38;5;145moff-vocabulary surface, and one with none; read[0m    [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthe status back[0m                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV6[0m  [38;5;232m│[0m [38;5;145mAre the two stale-open w27 rows really landed,[0m    [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mmix test failure_copy_test.exs and the[0m             [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mand is cch-w14 really paid?[0m                       [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mdeployment_failed dispatch test; identify[0m          [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mapp.js:10969’s container[0m                           [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV7[0m  [38;5;232m│[0m [38;5;145mDoes a real usage-meter crash reach a rendered[0m    [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mforce {:error, :exception}, run usage_test.exs,[0m    [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mpixel — fix slice or measurement slice?[0m           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mdrive usageMeterDisplay through the __app.test.mjs[0m [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mhook and capture the literal string; open the[0m      [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145musage_meters fixture[0m                               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV8[0m  [38;5;232m│[0m [38;5;145mProve __app.test.mjs:7938 is green-by-[0m            [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mmutate the state fallthrough, run __app.test.mjs,[0m  [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mconstruction, and that the aria-label defect is[0m   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mshow it stays green[0m                                [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145minvisible to the suite.[0m                           [38;5;232m│[0m       [38;5;232m│[0m                                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV9[0m  [38;5;232m│[0m [38;5;145mIs C9’s substantive leg provable HERE, or only on[0m [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mmembers leg at baseline, then .set-row-name[0m        [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mthe gating machine?[0m                               [38;5;232m│[0m       [38;5;232m│[0m [38;5;145moverflow: hidden to visible, re-run; report[0m        [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mhonestly whether macOS Chrome can pay the[0m          [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mcriterion[0m                                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV10[0m [38;5;232m│[0m [38;5;145mDoes the chat channel really ship a cause-free[0m    [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145ma targeted test that dispatches deployment_failed[0m  [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mline for the same dispatch that gives email a[0m     [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mand captures BOTH the email bytes and the chat[0m     [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mcause?[0m                                            [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mpayload[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV11[0m [38;5;232m│[0m [38;5;145mDoes the console really drop the deploy-refusal[0m   [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mdrive deployRow/deployDetailHtml with a cancelled[0m  [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mremedy, and does humanize/1 mangle it?[0m            [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrow carrying failure_reason; run[0m                   [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mFailureCopy.humanize on the refusal detail[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV12[0m [38;5;232m│[0m [38;5;145mIs §3c’s REAL_UNMAPPED hole real, and can the[0m     [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mrequired-checks.test.sh --hermetic, quoted; then[0m   [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mhermetic suite see a planted catch-all?[0m           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mplant a catch-all in a fixture tree and watch it[0m   [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m                                                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mstay green[0m                                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV13[0m [38;5;232m│[0m [38;5;145mWhich w22-s7 criteria are stampable with CORRECT[0m  [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mre-derive all five anchors at origin/main; fetch[0m   [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145manchors, and does the successor row already carry[0m [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mcchi-w27-bl-w22s7-residue-derived-caps-and-[0m        [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145ma C9-shaped criterion?[0m                            [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrefusals; test C12’s five number sets[0m              [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mV14[0m [38;5;232m│[0m [38;5;145mHas the PDS w45 collision surface moved? The map[0m  [38;5;232m│[0m [38;5;145mopus[0m  [38;5;232m│[0m [38;5;145mopen-PR re-scan, PDS builder branches, dirty[0m       [38;5;232m│[0m
+[38;5;232m│[0m     [38;5;232m│[0m [38;5;145mhas a known one-hour freshness window.[0m            [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mworktrees on candidate files[0m                       [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m─────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[38;5;214m▌[0m [1;38;5;145mWave status: VERIFYING. The direction holds — one sentence, three audiences — but the lane slice must be re-scoped    
+[38;5;214m▌[0m from a prohibition to a declare-and-justify census, s2 must land with the five ladderOnlyRun sites in ONE PR, and     
+[38;5;214m▌[0m the D307 vocabulary must be reconciled before Decide files a single row.[0m                                              
+                                                                                                                        
+[1;38;5;78mDECIDE — verification results, decisions, and the wave in flight[0m                                                        
+                                                                                                                        
+Ten verifiers ran. [1;38;5;145mCoverage was complete: every dispatched agent reported, in both the survey and the verify rounds.[0m    
+Nothing below is inherited — every load-bearing number was re-derived from origin/main bytes or from a real run, because
+the primary checkout reads [ahead 48, behind 402] and three separate verifiers measured a DIFFERENT PROGRAM there before
+re-running in a worktree.                                                                                               
+                                                                                                                        
+[1;38;5;59mWhat was PROVEN[0m                                                                                                         
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────────────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mFour contexts BLOCK merges, spec matches live exactly[0m    [38;5;232m│[0m [38;5;145mcontexts [Elixir gate, PR references an active task,[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mCloud gate, Console gate] all app_id 15368,[0m               [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145menforce_admins true, strict FALSE[0m                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe exit contract: variant A wins[0m                        [38;5;232m│[0m [38;5;145mvariant A 64/65 on EVERY shape; variant B 64/65 full[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mclone but 61/65 on every SHALLOW one — not ok 54, 56, 62,[0m [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mall "1 !== 0"[0m                                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145morigin/main today prints six FALSE sentences at depth 1,[0m [38;5;232m│[0m [38;5;145mdepth-1 clone: 6 x "is not an ancestor", b-clean=0/6, rc[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mand the suite is GREEN anyway[0m                            [38;5;232m│[0m [38;5;145m0 — and node --test gives 65 pass / 0 fail[0m                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mConsole gate is green only because a foreign host is up[0m  [38;5;232m│[0m [38;5;145mrefusing curl sentinel: 1 fire, not ok 56. Passthrough[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mAND anonymous[0m                                            [38;5;232m│[0m [38;5;145msentinel: rc 0, 65/65, same single curl to guerrilla with[0m [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mBearer undefined[0m                                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mCloud gate resolves discord.com live[0m                     [38;5;232m│[0m [38;5;145mERL_INETRC {lookup,[file]}: exactly ONE new failure —[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145msafe_url_test.exs:47, left: {:error, :unresolvable}[0m       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mElixir gate is runtime-CLEAN[0m                             [38;5;232m│[0m [38;5;145mfull api suite under both instruments: 13416 tests + 27[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mdoctests, 5 failures, 0 curl/wget fires, guerrilla[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mnxdomain for 605.7s[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mdomainRungChip guard cannot lose[0m                         [38;5;232m│[0m [38;5;145mbaseline 797/797/0; telling a screen reader an[0m            [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145munmeasurable rung is "done" -> STILL 797/797/0; glyph[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mmutation -> STILL 797/797/0[0m                               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpreviewRow test runs ZERO assertions[0m                     [38;5;232m│[0m [38;5;145mdeleting previewRow failure panel: 797/797 green.[0m         [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mDeleting deployRow twin: 796/1[0m                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe overflow guard certifies a 392px spill as clean[0m      [38;5;232m│[0m [38;5;145mM4 probe on unpatched bytes: rc 0, "22 / 22 cells clean[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145m... 0 identities hidden with no cue that can paint",[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mbeside id[...,246/638,...][0m                                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe D307 guard is LIVE on the filing server[0m              [38;5;232m│[0m [38;5;145moff-vocabulary create -> HTTP 422 validation_failed;[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145momitted -> lands; surface=console -> lands[0m                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe D307 guard is bypassed in two calls[0m                  [38;5;232m│[0m [38;5;145mcreate bare -> patch the refused prose (200) -> publish[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145m(200); read back _draft:false under the epic carrying the[0m [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145moff-vocabulary term[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe hotfix! lane is an ANTI-escape[0m                       [38;5;232m│[0m [38;5;145mstep body with the repo real (unset) token: rc=1; the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mlabel does not exist; scripts/pr-task-gate.test.sh PINS[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mthat red at 84 passed / 0 failed[0m                          [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────────────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;59mWhat was REFUTED — five premises the wave was handed[0m                                                                    
+                                                                                                                        
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+                                                                                                                        
+[1;38;5;145mOne charter premise failed smoke and is struck in the same PR: [0mthe charter cited cssom-parity.mjs:608 as a "working in- 
+tree implementation" of the doctrine. Line 608 is a Chrome build-banner template literal; the 790-line file execs no git
+at all, and the passage it means (:195-200) is a documented REFUSAL to take a git dependency. Wrong line and wrong      
+claim. A builder chasing it would have cited dead bytes back into the ledger.                                           
+                                                                                                                        
+[1;38;5;59mNot-founds worth as much as the finds[0m                                                                                   
+                                                                                                                        
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+[38;5;59m• [0m                                                                                                                      
+                                                                                                                        
+[1;38;5;78mDecisions[0m                                                                                                               
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mD335[0m [38;5;232m│[0m [38;5;145m--ladder-only KEEPS exit 0; the condition rides as b-[0m [38;5;232m│[0m [38;5;145mExit-1-on-read is invisible on a full clone and reds[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145munavailable letters. Verdict path emits b=HISTORY-[0m    [38;5;232m│[0m [38;5;145mthree tests on every shallow one — and console-unit[0m   [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mUNAVAILABLE at exit 1.[0m                                [38;5;232m│[0m [38;5;145mruns at depth 1 on every push to main, so it would[0m    [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mleave the now-blocking Console gate permanently red.[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD336[0m [38;5;232m│[0m [38;5;145mKey the discrimination on the merge-base rc, never on[0m [38;5;232m│[0m [38;5;145mIt resolves in a depth-1 clone and does NOT in a real[0m [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mwhether origin/main resolves.[0m                         [38;5;232m│[0m [38;5;145mPR checkout; only the merge-base rc is shape-[0m         [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mindependent.[0m                                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD337[0m [38;5;232m│[0m [38;5;145mRetire the wave's original finished state. The defect[0m [38;5;232m│[0m [38;5;145mThree of four contexts are coupled, two of them[0m       [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mclass is narrower: a required gate may be red by a[0m    [38;5;232m│[0m [38;5;145mlegitimately; a prohibition reds pr-task-gate.yml on[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mforeign host only if its OWN output names the[0m         [38;5;232m│[0m [38;5;145mday one.[0m                                              [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcondition and its escape is armed. Build the one[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcheap real defect; file the census as a declare-and-[0m  [38;5;232m│[0m                                                       [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mjustify row.[0m                                          [38;5;232m│[0m                                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD338[0m [38;5;232m│[0m [38;5;145mDo NOT build the hotfix lane this wave. File it, and[0m  [38;5;232m│[0m [38;5;145mPresuming the answer would put a security decision in[0m [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mlet a LEAD choose between provisioning a guerrilla[0m    [38;5;232m│[0m [38;5;145ma builder brief.[0m                                      [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mWRITE token in CI and decoupling the record to the[0m    [38;5;232m│[0m                                                       [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mGitHub side.[0m                                          [38;5;232m│[0m                                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD339[0m [38;5;232m│[0m [38;5;145mEvery wave-29 row declares an in-vocabulary surface.[0m  [38;5;232m│[0m [38;5;145mThe door is live and would 422 the epic's practised[0m   [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mThe ABSENT promotion stays a measured DEFER. The[0m      [38;5;232m│[0m [38;5;145mprose; under presence+enum 70 of 71 open rows would[0m   [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mscoping leg is a DESIGN BOUNDARY at 46 tests / 1[0m      [38;5;232m│[0m [38;5;145mbe refused.[0m                                           [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mfailure — never again 23.[0m                             [38;5;232m│[0m                                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD340[0m [38;5;232m│[0m [38;5;145mRe-aim four stale-open person rows rather than[0m        [38;5;232m│[0m [38;5;145mTheir headline fixes are already on main; rebuilding[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mrebuild them, and re-point cch-w26 at the chat[0m        [38;5;232m│[0m [38;5;145mthem would burn four builders on shipped code.[0m        [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mchannel.[0m                                              [38;5;232m│[0m                                                       [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;145mDeliberately not taken, named so no surveyor re-opens them: [0m.preview-url (measured 20/20 clean, rc 0 — the row reads    
+DONE 10/10); any edit to .github/required-checks.json (REGISTER NOTHING — the drift is green for the first time this    
+session); arming the D307 ABSENT tier; a repo-wide foreign-host ratchet; and the Console gate live-roster relocation,   
+which collides with s1's file fence and is filed for dispatch AFTER s1 merges.                                          
+                                                                                                                        
+[1;38;5;78mThe wave in flight — 8 slices, all round 1[0m                                                                              
+                                                                                                                        
+Five person-facing slices and three instrument slices. The ratio floor (>=4 person) is met on merit, not quota. [1;38;5;145mAll     
+eight run on opus: fable is unavailable this session, so a fable selection would be remapped anyway and claiming        
+otherwise would misreport what actually runs.[0m                                                                           
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145ms1 The seal predicate tells "I[0m     [38;5;232m│[0m [38;5;145mcch-w28-s2-history-unavailable-[0m    [38;5;232m│[0m [38;5;145minstr[0m [38;5;232m│[0m [38;5;145mnode --test seal-[0m                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcould not look" from "the thing is[0m [38;5;232m│[0m [38;5;145mdiscrimination[0m                     [38;5;232m│[0m [38;5;145mument[0m [38;5;232m│[0m [38;5;145mpredicate.test.mjs, in a full[0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mbroken"[0m                            [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mclone AND a real --depth 1 clone[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ms2 A merge-blocking gate stops[0m     [38;5;232m│[0m [38;5;145mcch-w29-s2-cloud-gate-stops-[0m       [38;5;232m│[0m [38;5;145minstr[0m [38;5;232m│[0m [38;5;145mmix test safe_url_test.exs, and[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145masking Discord's DNS for[0m           [38;5;232m│[0m [38;5;145mresolving-discord-com[0m              [38;5;232m│[0m [38;5;145mument[0m [38;5;232m│[0m [38;5;145magain under ERL_INETRC with[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpermission to merge[0m                [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mforeign DNS dead[0m                   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ms3 The overflow guard certifies "0[0m [38;5;232m│[0m [38;5;145mcch-w29-s3-overflow-guard-cue-[0m     [38;5;232m│[0m [38;5;145minstr[0m [38;5;232m│[0m [38;5;145mOVERFLOW_GUARD_PORT=4287 overflow-[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145midentities hidden" while 392px is[0m  [38;5;232m│[0m [38;5;145mpredicate-is-blind-to-overflow[0m     [38;5;232m│[0m [38;5;145mument[0m [38;5;232m│[0m [38;5;145mguard.mjs --defect W21-members-[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcut[0m                                [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mroster-identity-and-remove, then[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthe full 25-leg run[0m                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ms4 An unmeasurable domain rung[0m     [38;5;232m│[0m [38;5;145mtask-1daff7bc1bf46ceb[0m              [38;5;232m│[0m [38;5;145mconso[0m [38;5;232m│[0m [38;5;145mnode --check app.js && node[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mstops telling a screen reader it[0m   [38;5;232m│[0m                                    [38;5;232m│[0m [38;5;145mle[0m    [38;5;232m│[0m [38;5;145m__app.test.mjs[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mis "waiting"[0m                       [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ms5 A usage meter that CRASHED[0m      [38;5;232m│[0m [38;5;145mcch-w28-bl-usage-meters-say-[0m       [38;5;232m│[0m [38;5;145mconso[0m [38;5;232m│[0m [38;5;145mmix test the four usage suites;[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mstops reading as "Not yet metered"[0m [38;5;232m│[0m [38;5;145munmetered-when-they-could-not-[0m     [38;5;232m│[0m [38;5;145mle[0m    [38;5;232m│[0m [38;5;145mnode __app.test.mjs; smoke.mjs[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m [38;5;145mmeasure[0m                            [38;5;232m│[0m       [38;5;232m│[0m                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ms6 A publish that was REFUSED[0m      [38;5;232m│[0m [38;5;145mcch-w28-bl-auto-deploy-refusal-[0m    [38;5;232m│[0m [38;5;145mconso[0m [38;5;232m│[0m [38;5;145mnode --check app.js && node[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mstops rendering as a bare[0m          [38;5;232m│[0m [38;5;145mhas-no-event-at-all[0m                [38;5;232m│[0m [38;5;145mle[0m    [38;5;232m│[0m [38;5;145m__app.test.mjs; smoke.mjs[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m"Cancelled" pill[0m                   [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ms7 One failure, two stories: the[0m   [38;5;232m│[0m [38;5;145mcch-w26-bl-deployment-failed-[0m      [38;5;232m│[0m [38;5;145mconso[0m [38;5;232m│[0m [38;5;145mmix test[0m                           [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mchat reader gets no cause[0m          [38;5;232m│[0m [38;5;145memail-still-unhumanized[0m            [38;5;232m│[0m [38;5;145mle[0m    [38;5;232m│[0m [38;5;145mtest/barkpark_cloud/notifications/[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m(origin/main baseline: 30 tests, 0[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mfailures)[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145ms8 The capacity arm names one[0m      [38;5;232m│[0m [38;5;145mcch-w28-bl-capacity-arm-blames-[0m    [38;5;232m│[0m [38;5;145mconso[0m [38;5;232m│[0m [38;5;145mmix test failure_copy_test.exs[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mprovider and one resource for a[0m    [38;5;232m│[0m [38;5;145mhetzner-for-azure[0m                  [38;5;232m│[0m [38;5;145mle[0m    [38;5;232m│[0m [38;5;145m(origin/main baseline: 83 tests, 0[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mblind predicate[0m                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mfailures)[0m                          [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;145mHIGH-FLIP-RISK: s1's exit contract on the read path.[0m Two surveyors read it opposite ways and it was settled by running  
+both variants in four clone shapes. A genuinely independent second re-derivation is owed before that judgment is allowed
+to flip — the wave-reviewer must name it, and the lead dispatches it by hand.                                           
+                                                                                                                        
+[1;38;5;145mStanding Law 0 is honoured by splitting the parent, and the deviation is stated rather than smuggled: [0ms2 and s3 are     
+instrument rows filed under cch-instruments-epic; s1 was already a child of this epic when wave 28 filed it and stays   
+there; the five person rows stay under this epic.                                                                       
+                                                                                                                        
+[1;38;5;145mFile collisions, declared: [0mthree slices touch app.js in three disjoint regions (s4 ~9550-9730; s6 ~10090-10390 and      
+~11203; s5 ~5219 and ~16200-16320); s5 and s6 share scenarios.mjs; s4/s5/s6 append to __app.test.mjs in different       
+places. Every brief names its region and orders a rebase on origin/main before pushing. Suggested merge order: s4, then 
+s6, then s5.                                                                                                            
+                                                                                                                        
+[1;38;5;78mBacklog filed — twelve rows[0m                                                                                             
+                                                                                                                        
+Everything exploration surfaced that is real but not this wave, filed now as published children with honest             
+descriptions: the Console gate live-roster relocation (after s1 merges), the D307 patch-then-publish bypass, the 500-on-
+missing-brief filing door, token_expiring (0 producers, default TRUE), the .deploy-rail-live overflow, the hotfix anti- 
+escape, merge-gates.md's three stale claims, required-checks 3c's dead read, the reap-cap's untold 26th owner,          
+agent_unreachable's next-step-less letter, console-harness.yml's three falsified ADVISORY sentences, and the owed cch-  
+w22-s7 stamp set with its four honesty caveats.                                                                         
+                                                                                                                        
+[1;38;5;145mWave status: BUILDING. [0mCharter PR #9450 is open and reporting (docs-only, 7 markdown files, REGISTER NOTHING held).     
+Because it may not be on origin/main while the builders fly, every decision above is stated here IN FULL — this Paper is
+what a builder can read today.                                                                                          
+                                                                                                                        
+[1;38;5;78mDEBRIEF — the wave as it will merge[0m                                                                                     
+                                                                                                                        
+Wave status: [1;38;5;145mCOMPLETE.[0m Eight round-1 slices built, reviewed adversarially, fixed in place, re-gated on the final branch,
+pushed and PR'd. Grade [1;38;5;145mA[0m. Nothing was registered; [38;5;217;48;5;232m.github/required-checks.json[0m is byte-unchanged and the drift that     
+closed for the first time this session stays closed. This section supersedes the [1;38;5;145mWave status: BUILDING[0m line that closed 
+the DECIDE section above; every decision and proof recorded before it still stands, with the corrections named          
+explicitly below.                                                                                                       
+                                                                                                                        
+The wish's item 2 was re-derived, not trusted: [38;5;217;48;5;232mgh api repos/FRIKKern/barkpark/branches/main/protection[0m returns exactly  
+[38;5;217;48;5;232m["Elixir gate","PR references an active task","Cloud gate","Console gate"][0m with [38;5;217;48;5;232menforce_admins.enabled true[0m and [38;5;217;48;5;232mstrict  
+false[0m. Console gate and Cloud gate BLOCK. No slice touched anything under [38;5;217;48;5;232m.github/[0m.                                     
+                                                                                                                        
+[1;38;5;78mWhat shipped — final branch is the -r branch in every row[0m                                                               
+                                                                                                                        
+The lead merges these. Each row's last acceptance criterion is MERGE-GATED and stays open until the lead closes it on   
+merge — that is the only open criterion on any of the eight.                                                            
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-s2-history-unavailable-[m[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/the-seal-predicate-[m[0m      [38;5;232m│[0m [38;5;145m#9455[0m [38;5;232m│[0m [38;5;145mThe wave's centrepiece. Five[0m       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mdiscrimination[0m[0m                     [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mtells-i-could-not-loo-0-r[0m[0m          [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mprobes, never folding one rc into[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145manother; the fifth (DIFF[0m           [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mINTEGRITY) is the one nobody named[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mand it is the false PASS behind[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthe false FAIL. Re-proved by the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mreviewer in a pristine depth-1[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mclone: b-clean=0/6 b-[0m              [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145munavailable=6/6, rc 0, ZERO 'is[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mnot an ancestor' sentences; suite[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m74/74 there and in the worktree.[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mFLIP-RISK: an independent second[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mreviewer is owed on the NO-MERGE-[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mBASE corroborator.[0m                 [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w29-s2-cloud-gate-stops-[m[0m       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/a-merge-blocking-gate-[m[0m   [38;5;232m│[0m [38;5;145m#9458[0m [38;5;232m│[0m [38;5;145mA blocking gate stopped asking a[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mresolving-discord-com[0m[0m              [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mstops-asking-disco-1-r[0m[0m             [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthird party's nameservers for[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mpermission to merge. check/2 gains[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145man optional :resolver, default[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m&:inet.getaddrs/2, so every[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mproduction caller is byte-[0m         [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145midentical. 10/0, and 10/0 under[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mERL_INETRC {lookup,[file]}. The[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mseam is an affordance nothing[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mguards in production — filed, not[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mleft as a sentence.[0m                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w29-s3-overflow-guard-cue-[m[0m     [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/the-overflow-guard-[m[0m      [38;5;232m│[0m [38;5;145m#9459[0m [38;5;232m│[0m [38;5;145mThe four-part fail-before held: on[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mpredicate-is-blind-to-overflow[0m[0m     [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcertifies-0-identitie-2-r[0m[0m          [38;5;232m│[0m       [38;5;232m│[0m [38;5;145munpatched bytes the guard printed[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mOVERFLOW GUARD PASS and '0[0m         [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145midentities hidden' beside 430px of[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145ma cut identity. Reviewer[0m           [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mstrengthened the term from the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mshorthand to the X AXIS — see the[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mfixes section.[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mtask-1daff7bc1bf46ceb[0m[0m              [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/an-unmeasurable-domain-[m[0m  [38;5;232m│[0m [38;5;145m#9460[0m [38;5;232m│[0m [38;5;145mFour rungs made honest, not one:[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mrung-stops-tellin-3-r[0m[0m              [38;5;232m│[0m       [38;5;232m│[0m [38;5;145munknown gets its own glyph and[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mwords, and the three behind it[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mstop saying 'waiting'. .dom-rung--[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145munknown painted for the first time[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m(grep was 0). cssom baseline 1286 [0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m-> 1289, measured. Criterion 5[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m(the click) is a SOURCE-ORDER[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mguard, not a browser click —[0m       [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145msomeone should click it once on a[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mlive console.[0m                      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-bl-usage-meters-say-[m[0m       [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/a-usage-meter-that-[m[0m      [38;5;232m│[0m [38;5;145m#9461[0m [38;5;232m│[0m [38;5;145mOne catch-all at usage.ex:210[0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232munmetered-when-they-could-not-[m[0m     [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcrashed-stops-reading-4-r[0m[0m          [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mflattened seven inputs into one[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mmeasure[0m[0m                            [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mbyte-identical map. Split four[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mways with a normalised typed[0m       [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mreason; both render sites fixed at[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthe resolution each has. Cached[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145musage_samples rows written before[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthis commit still read 'Not yet[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mmetered' until the next sampler[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mtick — correct by construction,[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mworth knowing.[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-bl-auto-deploy-refusal-[m[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/a-publish-that-was-[m[0m      [38;5;232m│[0m [38;5;145m#9462[0m [38;5;232m│[0m [38;5;145mThree drop sites, and a grep for[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mhas-no-event-at-all[0m[0m                [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mrefused-stops-renderi-5-r[0m[0m          [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthe obvious string finds only two.[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mBoth traps disarmed: previewRow[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mexported (its test ran ZERO[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145massertions before), and the gr-p3[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mcancelled control adjudicated[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrather than deleted. Reviewer[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mnarrowed the refusal predicate —[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145msee the fixes section. EVENT half[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mexplicitly deferred and filed.[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w26-bl-deployment-failed-[m[0m      [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/one-failure-two-stories-[m[0m [38;5;232m│[0m [38;5;145m#9463[0m [38;5;232m│[0m [38;5;145mThe row's headline was refuted and[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232memail-still-unhumanized[0m[0m            [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mthe-email-reader-6-r[0m[0m               [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthe defect had MOVED CHANNEL: the[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mchat arm had zero body coverage of[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145many kind. New render_test.exs, 14[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mtests, pinning the scrub boundary[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145min both directions across five[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mshapers. An unclassified reason[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mnow egresses SCRUBBED to five[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthird-party hosts — the email's[0m    [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mown boundary since wave 13 S2, but[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mmore bytes than yesterday.[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mcch-w28-bl-capacity-arm-blames-[m[0m    [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mloop-epic/the-capacity-arm-names-[m[0m  [38;5;232m│[0m [38;5;145m#9464[0m [38;5;232m│[0m [38;5;145mRe-scoped correctly: the Azure[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mhetzner-for-azure[0m[0m                  [38;5;232m│[0m [38;5;145m[38;5;217;48;5;232mone-provider-and--7-r[0m[0m              [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mhalf is NOT derivable (zero hits[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145macross source, tests and 18[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mfixtures), so the fix rests[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mentirely on the resource-blindness[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mthe tree CAN produce — a verb-less[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mzone-quota capture told it ran out[0m [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mof SERVER capacity. Blast radius[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mbeyond the fence handled; three [0m   [38;5;232m│[0m
+[38;5;232m│[0m                                    [38;5;232m│[0m                                    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mco-edited test files, 123/0.[0m       [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;78mReviewer fixes — in place, gate-proven, none a redesign[0m                                                                 
+                                                                                                                        
+[38;5;59m• [0m[1;38;5;145mgraftList read prose. [0mIt detected 'store is not shallow' by comparing walkTruncation().reason to a literal sentence — 
+  a control path coupled to a string anyone may reword. It reads an explicit shallowStore boolean now. The builder named
+  this risk himself; it cost three lines.                                                                               
+[38;5;59m• [0m[1;38;5;145mThe overflow guard's cue predicate reads the X AXIS, not the shorthand. [0moverflow-x: visible; overflow-y: clip is a    
+  legal pair the spec does not blockify, so Chrome serialises it as "visible clip". Probed both ways with a 101-char    
+  email and an ancestor clip: the shipped shorthand test printed OVERFLOW GUARD PASS with ZERO name findings over 469px 
+  of a spilled identity (rc 0); the axis test reds at 22 findings, each naming overflow-x "visible". That is clause 5 of
+  the standing test firing inside the fix for clause 5.                                                                 
+[38;5;59m• [0m[1;38;5;145mA domain re-check that FAILED restored nothing. [0mBoth mounts bail on 404/error WITHOUT repainting, and the click       
+  handler disables the button and relabels it 'Checking…' — so the only way back from a terminal unmeasurable rail sat  
+  permanently disabled announcing work nobody was doing. Mutation-proven 803/1 -> 804/0.                                
+[38;5;59m• [0m[1;38;5;145mA stale stage caption is not a refusal. [0mRegistry.cancel_preview/2 changes only status + console, so a superseded      
+  preview keeps whatever caption Sites.Deploy last wrote — 'Uploading bundle', or on a cancelled LIVE row 'live at      
+  https://…'. The shipped detail-keyed predicate would have painted those inside the amber FAILURE panel: a progress    
+  line re-cast as an explained decision, the slice's own defect class one row over. Keyed on failure_reason now; the    
+  detail-only test legs adjudicated, not deleted.                                                                       
+[38;5;59m• [0m[1;38;5;145mThe Overview strip's "?" carries a sentence. [0mA bare glyph is what this epic refuses; a screen reader said 'DOCS,      
+  question mark'. The reason the Usage tab prints in full now rides along as title + aria-label.                        
+[38;5;59m• [0m[1;38;5;145mTwo now-false sentences corrected at the source. [0mevent_email.ex claimed 'Render.render/2 never reads it' — false as of
+  this very wave (closes cch-w29-bl-event-email-scrub-comment-stale); and cloud/DESIGN.md quoted the retired capacity   
+  literal as the shipped sentence. Budgets PASS.                                                                        
+[38;5;59m• [0m[1;38;5;145mOne cross-slice landmine defused. [0mrender_test.exs quoted "Hetzner ran out of server capacity for this size." while the
+  capacity-arm slice retires that literal IN THE SAME WAVE — green apart, RED TOGETHER. The leg now pins the class by   
+  derivation and asserts what it actually owes. Proved by an actual merge of both -r branches: 158/0. The three app.js  
+  slices were merged the same way: 814/0, smoke 102, cssom-parity PARITY PASS at 1289, __css_check 0 errors.            
+                                                                                                                        
+[1;38;5;78mWhat stalled, and what nobody proved[0m                                                                                    
+                                                                                                                        
+[38;5;59m• [0m[1;38;5;145mNothing stalled. [0mAll eight round-1 slices are green; there were no deferred rounds this wave, so there is no          
+  sequenced-rounds dispatch to chase.                                                                                   
+[38;5;59m• [0m[1;38;5;145mThe seal predicate's NO-MERGE-BASE corroborator [0mrests on ONE measured corroboration. A register entry on a genuinely  
+  disjoint history would degrade to HISTORY-UNAVAILABLE rather than the honest 'not an ancestor'. Fail-closed — it can  
+  never become a false PASS — but it is a behavioural claim, and it is this wave's flip-risk row.                       
+[38;5;59m• [0m[1;38;5;145mThe byte-identity test skips itself [0mon a checkout with unreadable history, so in a depth-1 CI clone it contributes    
+  nothing. The alternative pinned CI to a shape it does not have, which is what redded the roster control.              
+[38;5;59m• [0m[1;38;5;145mNo browser was driven anywhere. [0mThe domain re-check's guard reads source order, not behaviour; the refusal panel's    
+  ~230-character sentence has never been seen wrapping in a .deploy-row; the usage strip's new glyph was rendered only  
+  through the preview smoke.                                                                                            
+[38;5;59m• [0m[1;38;5;145mThe overflow guard's new term has no COMMITTED fixture [0mthat exercises it, because its fail-before requires shipping   
+  the defect in CSS. It is protected in CI only in the negative sense — inherent to the leg, not a deferred task.       
+                                                                                                                        
+[1;38;5;78mLedger audit[0m                                                                                                            
+                                                                                                                        
+All eight slice tasks: published, claimed, criteria stamped AS THE BUILDERS WORKED (evidence carries run output, not    
+assertions), lifecycle honest, and only the merge-gated criterion open on each — 12/13, 6/7, 9/10, 7/8, 7/8, 7/8, 6/7,  
+6/7. Several criteria carry the builder's own limitation written INTO the evidence rather than hidden: the seal         
+predicate's full-clone byte-identity substitution, the usage raise not being driven through the gatherer, the domain re-
+check's source-order guard. That is the behaviour the epic wants.                                                       
+                                                                                                                        
+Reviewer ledger fixes: every now-line named the PRE-REVIEW branch (and one said 'not pushed'), so all eight were re-    
+pulsed with the final -r branch, its PR number and the reviewer's fix. One new backlog row filed — [38;5;217;48;5;232mcch-w29-bl-safe-url- 
+resolver-seam-unguarded[0m — for the production affordance the new :resolver seam opens. The four rows builders filed were 
+verified published under the epic. No task outside this wave was touched.                                               
+                                                                                                                        
+[1;38;5;78mGrade — A[0m                                                                                                               
+                                                                                                                        
+Earned, not given. [1;38;5;145mWhat is genuinely strong: [0mthe discrimination slice is the best instrument work this epic has produced
+— five probes, a fifth leg nobody asked for that turns out to be the false PASS hiding behind the false FAIL, an exit   
+contract honoured rather than re-litigated, and four REAL clones instead of stubs. The overflow slice's four-part probe 
+is a model of refusing a comfortable non-mutation. Every builder report named its own weakest claim before anyone asked,
+and two of them argued with their brief and said so. The wish's ratio was not just met but exceeded — five person-facing
+rows, including two of the epic's purest examples.                                                                      
+                                                                                                                        
+[1;38;5;145mWhat falls short: [0mthree of the eight shipped a defect of exactly the class the epic exists to close, and a reviewer had 
+to catch them — a cue predicate that could not reach a defect one CSS axis over, a refusal predicate that would have re-
+cast a progress line as an explained decision, and a recovery control that ate itself on failure. A cross-slice literal 
+collision made two slices green apart and red together, which no builder could see and the wave's own file-fence        
+discipline did not prevent. And nothing in this wave was seen by a human eye in a browser: five person-facing rows      
+shipped on source-order guards and static renders. That is the gap between A and A+.                                    
+                                                                                                                        
+[1;38;5;78mWhat the next wave should take[0m                                                                                          
+                                                                                                                        
+[38;5;59m• [0m[1;38;5;145mThe D307 guard's promotion. [0mThe surface ENUM and the BACKFILL of open rows are what turn the WARN tier hard. The      
+  scoping leg is a DESIGN BOUNDARY (46 tests / 1 failure on deletion, not the 23 the criterion predicted) — do not      
+  restate it as load-bearing.                                                                                           
+[38;5;59m• [0m[1;38;5;145mcch-w22-s7's remainder, [0mstill adjudicated against origin/main's bytes rather than rebuilt. D325 stamped the five      
+  criteria the tree had already settled.                                                                                
+[38;5;59m• [0m[1;38;5;145mA BROWSER PASS over what this wave shipped. [0mClick the domain re-check; look at the refusal panel's 230-character      
+  sentence in a .deploy-row at 320px; look at the amber '?' in the fleet strip. Three of the five person rows have never
+  been seen by an eye.                                                                                                  
+[38;5;59m• [0m[1;38;5;145mThe instrument rows this wave opened: [0mcch-w29-bl-safe-url-resolver-seam-unguarded (a seam nothing stops production    
+  from using), the refused-auto-deploy event dispatcher (the toggle must not land ahead of it), the Go CLI usage twin,  
+  and task-79aa75e4be7a0067's two remaining stale capacity quotes in router.ex and a Go test comment.                   
+[38;5;59m• [0m[1;38;5;145mDispatch order: [0mmerge round 1 in any order — the eight -r branches are file-disjoint except for app.js (three slices, 
+  disjoint regions, merged and proven together at 814/0) and the notifications pair (proven together at 158/0). If      
+  anything else adds a CSS rule head before #9460 lands, RE-MEASURE the cssom baseline by running cssom-parity.mjs on   
+  the merge; never add up two deltas.                                                                                   
+                                                                                                                        
+[38;5;69m▌[0m [1;38;5;145mAn independent second reviewer is owed on #9455 before merge. [0mThis workflow spawns exactly one reviewer, so the       
+[38;5;69m▌[0m dispatch is a manual lead step. The judgment to re-derive independently is the NO-MERGE-BASE corroborator: whether    
+[38;5;69m▌[0m 'merge-base found no common ancestor' is genuinely inseparable from 'this store cannot place the commit'. It was      
+[38;5;69m▌[0m measured once, and it decides whether an honest product FAIL can be silently downgraded to an environment excuse.     
+
+Related
+  3.06  Cloud Console Hardening — wave 9 strategy: MEASURED must mean ABLE TO STOP A MERGE  (paper)
+        tags: cloud-console-hardening (96·95), epic-cycle (88·80), honest-gates (81·88)
+  2.86  The required-checks toolchain becomes blocking where it is offline, and survives its own registration  (task)
+        tags: cloud-console-hardening (96·95), honest-gates (81·85), ratchet-honesty (74·60)
+  2.85  Wave 4: install the teeth, and make the merge verb an artifact  (paper)
+        tags: epic-cycle (88·80), honest-gates (81·98), ratchet-honesty (74·92)
+  2.83  Wave 5: the flip, and the lane that keeps the fleet merging under it  (paper)
+        tags: epic-cycle (88·78), honest-gates (81·98), ratchet-honesty (74·90)
+  2.75  Close five false-green classes and the empty-diff brick in all three path dispatchers  (task)
+        tags: cloud-console-hardening (96·95), honest-gates (81·80), ratchet-honesty (74·50)

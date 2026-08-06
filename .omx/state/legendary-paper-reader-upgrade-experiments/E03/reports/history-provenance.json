@@ -1,0 +1,53 @@
+{
+  "papers": [
+    {
+      "current_document_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "first_history_uuid": "eed97c1b-e395-40ef-aee5-be408329ec81",
+      "fixture_id": "CCH29",
+      "history_exposes_current_rev_hash": false,
+      "limit_forwarded": false,
+      "reported_count": 14,
+      "requested_limit": 1,
+      "returned_count": 14,
+      "seconds": 1.519889,
+      "sha256": "ef0384914b7050aca6c7e3708c4c3237ebc1bf95017cf5eff9094d367e50c143"
+    },
+    {
+      "current_document_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "first_history_uuid": "4afe0099-26af-40eb-8943-f6935c16c29d",
+      "fixture_id": "PDS45",
+      "history_exposes_current_rev_hash": false,
+      "limit_forwarded": false,
+      "reported_count": 10,
+      "requested_limit": 1,
+      "returned_count": 10,
+      "seconds": 1.507296,
+      "sha256": "a81f7740f8b5aa6a1a4889a0eb3238032a8e83ce8545fc2f88fe5ec47eda2a3b"
+    },
+    {
+      "current_document_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "first_history_uuid": "7c1135de-733c-4325-aea6-31b9dbbda4d1",
+      "fixture_id": "CCH28",
+      "history_exposes_current_rev_hash": false,
+      "limit_forwarded": false,
+      "reported_count": 12,
+      "requested_limit": 1,
+      "returned_count": 12,
+      "seconds": 1.641085,
+      "sha256": "64931f01ecfabbe35b5237b2b55ab3d58b2757be998924792ca8193351db155d"
+    },
+    {
+      "current_document_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "first_history_uuid": "344fe5ee-c8a0-4bb9-8b5e-17a3562992d5",
+      "fixture_id": "PDS44",
+      "history_exposes_current_rev_hash": false,
+      "limit_forwarded": false,
+      "reported_count": 12,
+      "requested_limit": 1,
+      "returned_count": 12,
+      "seconds": 2.405382,
+      "sha256": "d8d512eadf2695ad53fe8563e2a5498ebfeab626841364bfb4b3b173161c5f26"
+    }
+  ],
+  "schema_version": "legendary-paper-e03-history/v1"
+}

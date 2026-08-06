@@ -1,0 +1,1040 @@
+[1;38;5;188mPDS WAVE 45 - THE PRICE COLUMN LEARNS TO EXPIRE[0m                                                                         
+[38;5;232m───────────────────────────────────────────────[0m                                                                         
+                                                                                                                        
+[38;5;69m▌[0m STRATEGIZE COMPLETE - the survey fleet is flying. GROUND TRUTH, DERIVED IN-PROCESS at origin/main ab8c86b05 in a      
+[38;5;69m▌[0m detached worktree, never the primary checkout (which is stale at a31faa52d and dirty across eight charters). I ran    
+[38;5;69m▌[0m scripts/pds-door-census.sh myself: rc=0, ERRORS 0, every program disposed. THE HEADLINE THE WISH DID NOT ASK FOR:     
+[38;5;69m▌[0m the census runs in 4.13 s wall / 2.80 s CPU - so it CANNOT have taken the 40.33 s CPU / 68.24 s wall figure it        
+[38;5;69m▌[0m prints. Every price and every disposition-evidence string is a hardcoded literal in PDS_DOOR_PRICES (:146-149) and    
+[38;5;69m▌[0m PDS_DOOR_DISPOSITIONS (:123-137). The CLASS column became an instrument in wave 44. The PRICE column became a shell   
+[38;5;69m▌[0m variable with a date stamp. And the denominator is 20 with 4 doors, not the 19 with 3 that both the wish and the      
+[38;5;69m▌[0m lead notes carry - the census counts itself, and says so at :12-14.                                                   
+                                                                                                                        
+[1;38;5;78mWhat I ran, and what it refuted[0m                                                                                         
+                                                                                                                        
+Eleven consecutive waves have refuted their own dispatch from the artifact. This is the twelfth, and the refutations are
+load-bearing rather than cosmetic - three of the five figures the brief and the lead notes hand down are contradicted by
+the instrument on merged main.                                                                                          
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m"the door count is 3 of 19, not an[0m   [38;5;232m│[0m [38;5;145mTHE COLUMN prints population 20 (18[0m   [38;5;232m│[0m [38;5;145mThe census entered its own[0m            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145munmeasured N" (lead notes, emphatic)[0m [38;5;232m│[0m [38;5;145m.sh + 2 .exs), THROUGH 4 of 20 - pds-[0m [38;5;232m│[0m [38;5;145mdenominator by design (:12-14: "a[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mdoor-census.sh, pds-elixir-receipt-[0m   [38;5;232m│[0m [38;5;145mcensus that hid itself would be the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mcensus.exs, pds-record-[0m               [38;5;232m│[0m [38;5;145mfirst thing it exists to catch"). 3-[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mparity.test.sh, pds-status-only-[0m      [38;5;232m│[0m [38;5;145mof-19 was true before #9380 merged.[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mresidue.exs[0m                           [38;5;232m│[0m [38;5;145mDo not quote it.[0m                      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m"prints a class + a MEASURED PRICE[0m   [38;5;232m│[0m [38;5;145mHALF TRUE. Class is computed: leg A[0m   [38;5;232m│[0m [38;5;145mTHE WAVE'S SPINE. A 4-second program[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mor a named blocker with file:line"[0m   [38;5;232m│[0m [38;5;145mis three mechanical predicates over[0m   [38;5;232m│[0m [38;5;145mcannot have measured a 68-second row.[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m(wish item, the wave's whole claim)[0m  [38;5;232m│[0m [38;5;145mthe tree, leg B is evaluated by[0m       [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mEXECUTING elixir-path-escape-[0m         [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mcheck.sh. Price is a string literal.[0m  [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mTimed: real 4,13 / user 0,81 / sys[0m    [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m1,99 for the entire run.[0m              [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m"my 'exactly three refusal reasons'[0m  [38;5;232m│[0m [38;5;145mThe VOCABULARY is six (:105-115). The[0m [38;5;232m│[0m [38;5;145mThe correction is right in direction[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mis FIVE by run plus a sixth (HUMAN-[0m  [38;5;232m│[0m [38;5;145mclasses actually USED by a row on[0m     [38;5;232m│[0m [38;5;145mand still not the run's number. A[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mGATE)"[0m                               [38;5;232m│[0m [38;5;145mmain are five: ENVIRONMENT (11),[0m      [38;5;232m│[0m [38;5;145mvocabulary entry no row exercises is[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mPRICE (2), CONTENT-RED (1), RED-BY-[0m   [38;5;232m│[0m [38;5;145mitself an untested arm.[0m               [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mDESIGN-REPORTER (1), NOT-YET-BUILT[0m    [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m(1). HUMAN-GATE is used by ZERO rows.[0m [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m"pds-live-hetzner-placement-group.sh [0m[38;5;232m│[0m [38;5;145mThe CLASS is defensible; the EVIDENCE[0m [38;5;232m│[0m [38;5;145mA LIVE FALSEHOOD-BY-OMISSION in the[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m- ENVIRONMENT, needs HCLOUD_TOKEN"[0m   [38;5;232m│[0m [38;5;145mis about the wrong arm. It cites `--[0m  [38;5;232m│[0m [38;5;145mshipped instrument, and the second-[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m(shipped disposition, :128)[0m          [38;5;232m│[0m [38;5;145mselftest` rc=3. The script's own[0m      [38;5;232m│[0m [38;5;145mcheapest arm in the whole inventory[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mheader at :12-13 and :964 declares `-[0m [38;5;232m│[0m [38;5;145msitting behind it.[0m                    [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m-selftest-offline` "the CREDENTIAL-[0m   [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mFREE arm and the CI-able gate". I ran[0m [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mit: rc=0, CPU 1.06+1.09 = 2.15 s at[0m   [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mload1 15.44.[0m                          [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m"pds-charter-ledger-sweep.sh is[0m      [38;5;232m│[0m [38;5;145mConfirmed as printed - but the census[0m [38;5;232m│[0m [38;5;145mThe wish's own slice 3 takes this row[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mCONTENT-RED, rc=1 today" (wish item[0m  [38;5;232m│[0m [38;5;145mdoes not RUN it. The string "by run[0m   [38;5;232m│[0m [38;5;145mto rc=0. The census will keep[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3)[0m                                   [38;5;232m│[0m [38;5;145m2026-08-03 ... rc=1" is a literal at[0m  [38;5;232m│[0m [38;5;145mprinting CONTENT-RED.[0m                 [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m:123.[0m                                 [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;78mThe three blind spots, and why two of them are this wave's own doing[0m                                                    
+                                                                                                                        
+The census has exactly one rot check, at :585-602, and it tests EXISTENCE: a ledger row naming a file that is no longer 
+on disk is an error. That catches deletion. It cannot catch the three shapes that actually rot a price column.          
+                                                                                                                        
+[38;5;59m• [0mSTALE PRICE. No content hash, no date arithmetic, no re-measurement. pds-record-parity.test.sh will print CPU=4.45s   
+  after someone doubles the harness's work, forever, and nothing reds.                                                  
+[38;5;59m• [0mSTALE DISPOSITION EVIDENCE. Five rows cite "by run 2026-08-03: <cmd> rc=N". The census never re-takes any of them. A  
+  disposition survives its own repair.                                                                                  
+[38;5;59m• [0mORPHANED DISPOSITION. Read the cond at :519-540: legA=yes AND legB=true short-circuits to THROUGH and the ledger is   
+  NEVER consulted. A disposition row for a now-THROUGH instrument is silently unread - not an error, not a warning, not 
+  printed.                                                                                                              
+                                                                                                                        
+[38;5;69m▌[0m THE COUPLING THAT MAKES THIS THE SPINE RATHER THAN A TANGENT: two of the three deferred slices the wish orders will   
+[38;5;69m▌[0m make the census lie the day they land. pds-w44-hetzner-offline-door puts --selftest-offline through a rider plus      
+[38;5;69m▌[0m ELIXIR_TEST_ONLY_PATHS - legA/legB then compute THROUGH and the ENVIRONMENT row at :128 becomes an unflagged orphan   
+[38;5;69m▌[0m asserting a refusal that is no longer the disposition. pds-w44-charter-sweep-adjudication takes the sweep from rc=1   
+[38;5;69m▌[0m to rc=0 - and CONTENT-RED, evidenced by a run nobody re-takes, outlives the red it names. Price provenance is a       
+[38;5;69m▌[0m PREREQUISITE for the wish's own item 2, not an addition to it.                                                        
+                                                                                                                        
+[1;38;5;78mThe direction[0m                                                                                                           
+                                                                                                                        
+The epic's law has walked one rung per wave. A receipt lies when the value it emits does not descend from the write     
+return. A class lies when it does not descend from its substitution (wave 42). A gate lies when its green costs nothing 
+to produce (wave 43). Wave 45's sentence is the one the new instrument earns:                                           
+                                                                                                                        
+[38;5;69m▌[0m A PRICE LIES WHEN IT DOES NOT DESCEND FROM A METER THE INSTRUMENT ITSELF DROVE - AND A DISPOSITION LIES WHEN ITS      
+[38;5;69m▌[0m EVIDENCE NAMES A RUN THE INSTRUMENT NEVER RE-TAKES.                                                                   
+                                                                                                                        
+What the finished wave looks like: ./scripts/pds-door-census.sh still exits 0 on main and still costs seconds - it is a 
+door, and its own 3.32 s row is its own gate cost, so any design that prices it out of its own door is disqualified     
+before it is written. But every number it prints is now either taken by a meter it drove in THIS run, or a cached       
+measurement carrying the content hash of the instrument it prices, so that a changed instrument turns the row PRICE-    
+STALE and reds. A --measure verb takes the measurement and emits the exact ledger row, so re-pricing is one command     
+rather than a hand ritual - the number descends from a meter the instrument drove, and anyone can re-take it.           
+Dispositions whose evidence is a RUN get re-run under an opt-in, threshold-printed tier, so CONTENT-RED cannot survive  
+its own repair. And an orphaned ledger row is an ERROR, because that is the exact shape both of this wave's own slices  
+create.                                                                                                                 
+                                                                                                                        
+Around that spine, the debts get paid at the new base. Priority order, and the reasoning behind it:                     
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m───[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145m#9377's SHIPPED non-vacuity test is a stub - make it[0m   [38;5;232m│[0m [38;5;145mThe only item on this list that is a LIVE GAP ON MERGED[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mreal, then review[0m                                      [38;5;232m│[0m [38;5;145mCODE. Wave 44's reviewer re-proved the narrowing by[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mhand-mutation; the merging artifact cannot reproduce[0m    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mthat proof. A security fix whose non-vacuity cannot be[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mre-run is a stamped receipt that overstates. This[0m       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145moutranks the spine on urgency, not on scope.[0m            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mPrice provenance, expiry, and orphan detection in pds-[0m [38;5;232m│[0m [38;5;145mThe spine. Unblocks slices 4 and 5 from corrupting the[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mdoor-census.sh[0m                                         [38;5;232m│[0m [38;5;145minstrument.[0m                                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3[0m [38;5;232m│[0m [38;5;145m#9380's genuinely independent second review - 37 KB of[0m [38;5;232m│[0m [38;5;145mD649 declared leg A's three predicates HIGH-FLIP-RISK[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mshell, one pair of eyes[0m                                [38;5;232m│[0m [38;5;145mand named the comment mutation as the oracle. It never[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mgot its builder's own review dispatch.[0m                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m4[0m [38;5;232m│[0m [38;5;145mpds-w44-hetzner-offline-door - BOTH LEGS OR NEITHER,[0m   [38;5;232m│[0m [38;5;145mI measured the arm today: rc=0, 2.15 s CPU. The[0m         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mplus its census row[0m                                    [38;5;232m│[0m [38;5;145mcheapest unclaimed door in the inventory. It also[0m       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mcarries the wave's sharpest overlap risk.[0m               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m5[0m [38;5;232m│[0m [38;5;145mpds-w44-charter-sweep-adjudication - 45 rulings, and[0m   [38;5;232m│[0m [38;5;145mVocabulary is mined from the charter, which has now[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mthe fail-open at :203[0m                                  [38;5;232m│[0m [38;5;145mlanded - and wave 44's own wave-log entry moved it[0m      [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145magain. Its bp_json(allow_error=True) fail-open is this[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mepic's law broken inside the instrument that enforces[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mit.[0m                                                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m6[0m [38;5;232m│[0m [38;5;145mpds-w44-judgment-coverage-ladder at the new base[0m       [38;5;232m│[0m [38;5;145m#9378 shifted every line number. PROVEN-BACKED must be[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mONE Enum.count over ONE MapSet.union, taken once, never[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mleg_a + leg_b. Its numbers have been dead three times.[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m7[0m [38;5;232m│[0m [38;5;145mlv_verdict/5's '?' variable-bound decline - finish[0m     [38;5;232m│[0m [38;5;145mWave 44 recorded a non-build rather than shipping a[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mproperly or rule out with a reason[0m                     [38;5;232m│[0m [38;5;145mcond reorder it could not justify. That was correct. It[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mis still owed a disposition.[0m                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m8[0m [38;5;232m│[0m [38;5;145mThe criterion-venue rubric fix[0m                         [38;5;232m│[0m [38;5;145mCheap, and it prevents a whole class of unmeetable[0m      [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mcriteria: name the CLAIM, accept any durable venue.[0m     [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m───[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;78mThe direction debate[0m                                                                                                    
+                                                                                                                        
+Three directions were developed far enough to cost something, then argued against each other.                           
+                                                                                                                        
+[1;38;5;59mRival A - pay the debts, period[0m                                                                                         
+                                                                                                                        
+Do exactly the wish's items 1 through 5: three deferred slices, two owed reviews, the lv_verdict half, the criterion    
+lesson. Do not touch the census - it exits 0, wave 44 declared it done, and reopening it is a fifth wave of arguing     
+about a column. This is the disciplined reading of the brief and it has a real claim on the wave.                       
+                                                                                                                        
+WHY IT LOSES: it hands the wave a false floor. Two of its own three slices silently corrupt the instrument, so "pay the 
+debts" manufactures the next wave's finding. And it violates the mandate the user restates every single wave - DERIVE,  
+NEVER TRANSCRIBE, INCLUDING FROM THIS BRIEF - by inheriting "the price column is an instrument now" as a premise instead
+of running it. I ran it. It is half an instrument, and the half that is prose is the half the column is named after.    
+                                                                                                                        
+[1;38;5;59mRival B - measure every price, every run[0m                                                                                
+                                                                                                                        
+The pure fix: no cache, no ledger, no staleness possible. The census drives the meter for every row on every invocation 
+and the price column is a measurement by construction.                                                                  
+                                                                                                                        
+WHY IT LOSES, on the epic's own evidence: D648 proved wall is not a property of a door on a shared host - a fixed       
+workload's wall spanned 5.8x at constant load while its user CPU spanned 27 percent. A re-measuring census becomes the  
+most expensive program in its own denominator: 40.33 s for pds-ledger-census_test.sh alone, plus the receipt census     
+whose expensive arm D646 showed conceals ~140 s minimum from any outer meter. It would also have to price ITSELF - a    
+fixpoint. Worst of all it converts a 4 s door into an ungateable one, killing the census's own THROUGH row, which is the
+single most self-defeating outcome available to this wave. The honest design is not "always measure" but "never assert a
+measurement you cannot re-take, and know when it expired."                                                              
+                                                                                                                        
+[1;38;5;59mRival C - spend the column, gate the cheap doors[0m                                                                        
+                                                                                                                        
+Take the census output at face value and do the obvious thing the wish's title demands - SPEND IT. Put every affordable 
+row through the required gate: hetzner offline at 2.15 s, pds-record-parity.test.sh at 4.45 s, pds-scratch-             
+target_test.sh at 8.91 s. Maximum visible progress, and it is exactly what four waves of arguing were FOR.              
+                                                                                                                        
+WHY IT LOSES AS A WHOLE DIRECTION, and why it is absorbed as a part: gating on unverified prices is D633's sin at one   
+remove. pds-scratch-target_test.sh's own shipped row says "Hermeticity on a runner WITHOUT local Postgres is unproven   
+here" - gating it is a day-one red on a foreign runner, the identical trap wave 44 documented for sheet-grid-js.yml.    
+Rival C survives as exactly ONE new door: the one whose price and green I measured myself today.                        
+                                                                                                                        
+[1;38;5;59mWhy the winner won[0m                                                                                                      
+                                                                                                                        
+The spine plus the debts, with hetzner-offline as the one new door, is the only direction in which the wish's own item 2
+does not manufacture the next wave's finding. It applies the epic's law to the epic's newest artifact, which is what    
+every wave of this epic has actually been about. And it converts "spend the column" from a slogan into something that is
+safe to do more than once.                                                                                              
+                                                                                                                        
+[1;38;5;59mThe sharpest attack on the winner, and how the wave absorbs it[0m                                                          
+                                                                                                                        
+[38;5;69m▌[0m THE ATTACK: "You are reopening a slice that shipped 11/12 with run evidence and rc=0 on main, on a distinction -      
+[38;5;69m▌[0m 'measured' versus 'cached with provenance' - that is philosophy, not a defect. Nobody is harmed by a three-day-old    
+[38;5;69m▌[0m CPU figure. This is the fifth consecutive wave arguing about a column, which is precisely what wave 44 ended."        
+                                                                                                                        
+That attack has real force, and the wave absorbs it by refusing to argue and making it a RUN. The spine ships only if   
+the verify round can demonstrate, by mutation against a real tree, a case where the shipped census prints a number or a 
+class the tree contradicts. I already hold one candidate - the hetzner row's wrong-arm evidence - and this wave's own   
+slices manufacture two more. IF THE VERIFIERS CANNOT MAKE THE SHIPPED CENSUS PRINT A FALSEHOOD AGAINST A REAL TREE, THE 
+SPINE IS CUT AND THIS WAVE BECOMES RIVAL A. That is the fail-before condition, declared before the fleet flies, and it  
+is the honest version of "derive, never transcribe" turned on my own direction.                                         
+                                                                                                                        
+Second-order absorption, as a criterion rather than a hope: the design must not balloon the census's own price. A       
+content hash per row is one shasum across 20 files - milliseconds. Re-running cheap dispositions is opt-in and          
+threshold-printed, never on --check's default path.                                                                     
+                                                                                                                        
+[1;38;5;78mStanding hazards this wave carries[0m                                                                                      
+                                                                                                                        
+[38;5;59m• [0mTHE FORMATTER VERSION TRAP, newly measured in wave 44: CI pins Elixir 1.18.1; this host runs 1.19.5. #9380 reddened   
+  Format while mix format --check-formatted exited 0 locally on the SAME commit. Apply CI's own suggested output        
+  verbatim and verify BOTH formatters accept it, or the red only moves.                                                 
+[38;5;59m• [0mOVERLAP RISK, declared: #9380 now owns scripts/elixir-path-escape-check.sh and the hetzner slice edits the same       
+  declared set. Cloud Console wave 28 runs concurrently and owns .github/workflows/**. Coordinate before touching       
+  either.                                                                                                               
+[38;5;59m• [0mBOTH LEGS OR NEITHER on the hetzner slice - the instrument AND its ELIXIR_TEST_ONLY_PATHS entry, or it is wave 42's   
+  #9290/#9292 a third time.                                                                                             
+[38;5;59m• [0mThe primary checkout is stale at a31faa52d and dirty across eight charter files. Read the charter via git show        
+  origin/main:<path>; build in worktrees only.                                                                          
+[38;5;59m• [0mA slice PR citing a D-number must not merge before the charter PR that defines it - the D643 rule, bought at the cost 
+  of 13 shipped citations pointing at decisions main did not define.                                                    
+[38;5;59m• [0mPUSH EARLY AND OPEN THE PR ON THE FIRST GREEN COMMIT. Wave 43 lost four branches because nothing was pushed until     
+  review, and review never ran.                                                                                         
+                                                                                                                        
+[1;38;5;78mThe survey plan[0m                                                                                                         
+                                                                                                                        
+Fifteen Opus surveyors at medium effort. Width now buys precision later: every load-bearing assumption in the direction 
+above is a question below, and the first three are aimed squarely at the spine's own fail-before condition.             
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m─────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mprice-provenance-audit[0m      [38;5;232m│[0m [38;5;145mRe-derive independently whether pds-door-[0m [38;5;232m│[0m [38;5;145mThis is the wave's spine. If any price is[0m  [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcensus.sh MEASURES or QUOTES its prices.[0m  [38;5;232m│[0m [38;5;145mgenuinely re-measured the direction[0m        [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mTime the full run; trace every value in[0m   [38;5;232m│[0m [38;5;145mnarrows sharply.[0m                           [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mTHE COLUMN back to either a computation[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mor a literal at scripts/pds-door-[0m         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcensus.sh:123-149. Which columns are[0m      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcomputed, which are quoted?[0m               [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcensus-rot-mutation[0m         [38;5;232m│[0m [38;5;145mMutation-prove the three claimed blind[0m    [38;5;232m│[0m [38;5;145mTHE FAIL-BEFORE. If none of the three can[0m  [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mspots against a real tree: (a) change a[0m   [38;5;232m│[0m [38;5;145mbe made to print a falsehood, the spine is[0m [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mpriced instrument's bytes and show the[0m    [38;5;232m│[0m [38;5;145mCUT.[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mprice still prints; (b) repair a CONTENT-[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mRED row's cause and show CONTENT-RED[0m      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mstill prints; (c) make a disposed[0m         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145minstrument satisfy legA+legB and show its[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mdisposition row goes silently unread.[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mWhich actually fire?[0m                      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mhetzner-offline-door[0m        [38;5;232m│[0m [38;5;145mVerify --selftest-offline is genuinely[0m    [38;5;232m│[0m [38;5;145mDoor number five and the live orphan[0m       [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcredential-free and hermetic (env -i, no[0m  [38;5;232m│[0m [38;5;145mdemonstration in one slice.[0m                [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mnetwork, no HCLOUD_*), re-measure its[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mCPU, and map EXACTLY what the rider plus[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mELIXIR_TEST_ONLY_PATHS entry must[0m         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcontain. What does the census then print[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mfor that row, and does the ENVIRONMENT[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mdisposition become an orphan?[0m             [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m9377-stub-nonvacuity[0m        [38;5;232m│[0m [38;5;145mRead[0m                                      [38;5;232m│[0m [38;5;145mA live gap on merged security code - the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mapi/test/barkpark_web/live/studio/pds_w44[0m [38;5;232m│[0m [38;5;145mhighest-urgency item in the wave.[0m          [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145m_grant_door_test.exs in full. Which case[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mis the non-vacuity or mutation proof, and[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mis it a stub? What would a REAL one[0m       [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145massert, and does shared/paper.ex's[0m        [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mnarrowing survive an independent re-[0m      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mderivation from source?[0m                   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m9380-independent-review[0m     [38;5;232m│[0m [38;5;145mGenuinely independent review of pds-door-[0m [38;5;232m│[0m [38;5;145mThe second owed review; D649 declared it[0m   [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcensus.sh's leg A: do the three[0m           [38;5;232m│[0m [38;5;145mHIGH-FLIP-RISK.[0m                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mpredicates admit a fraudulent THROUGH?[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mRun D649's comment mutation as the[0m        [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145moracle. Also audit the --selftest fixture[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mtree and whether the E1-E4 execution[0m      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mencodings are all covered.[0m                [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcharter-sweep-adjudication[0m  [38;5;232m│[0m [38;5;145mMap scripts/pds-charter-ledger-sweep.sh[0m   [38;5;232m│[0m [38;5;145mSlice five's scope and its own law-breach;[0m [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mand pds-charter-ledger-adjudication.md:[0m   [38;5;232m│[0m [38;5;145mthe count moved once already.[0m              [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mhow many unresolved-claim arrivals[0m        [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145magainst the CURRENT charter blob (D652[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145msaid 45), what the adjudication row[0m       [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mformat is, and the exact shape of the[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mfail-open at :203 with bp_json[0m            [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mallow_error=True.[0m                         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mjudgment-coverage-ladder[0m    [38;5;232m│[0m [38;5;145mRe-derive the ladder's anchors in[0m         [38;5;232m│[0m [38;5;145mSlice six. Its numbers have been dead[0m      [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mscripts/pds-elixir-receipt-census.exs at[0m  [38;5;232m│[0m [38;5;145mthree times; every line number shifted.[0m    [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mthe post-#9378 base. Where does PROVEN-[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mBACKED belong, what are leg A and leg B,[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mand why is the disposition sum near :4033[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mNOT a safe model for it?[0m                  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mlv-verdict-unresolved-arm[0m   [38;5;232m│[0m [38;5;145mRead lv_verdict/5 at census.exs:4766 and[0m  [38;5;232m│[0m [38;5;145mItem four. Finish properly or rule out[0m     [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mlv_chain_verdict. Is the '?' variable-[0m    [38;5;232m│[0m [38;5;145mwith a reason - both are acceptable[0m        [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mbound decline reachable through the[0m       [38;5;232m│[0m [38;5;145moutcomes.[0m                                  [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mresidual? Wave 44 confirmed from source[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mthat the arm ordering does not admit the[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mspecified reorder - is there a[0m            [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145msemantically-honest route, or is the[0m      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mright answer a recorded rule-out?[0m         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mreceipt-census-unmeasured[0m   [38;5;232m│[0m [38;5;145mpds-elixir-receipt-census.exs is THROUGH[0m  [38;5;232m│[0m [38;5;145mWish item three's first honest gap;[0m        [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mbut UNMEASURED-LOCAL. What IS the gated[0m   [38;5;232m│[0m [38;5;145mdetermines whether a price is even[0m         [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145marm's real price (the rider, not --[0m       [38;5;232m│[0m [38;5;145mobtainable.[0m                                [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mselftest), and can it be measured without[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mhitting D646's fan-out blindness?[0m         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mledger-census-tiering[0m       [38;5;232m│[0m [38;5;145mJustify or refuse pds-ledger-[0m             [38;5;232m│[0m [38;5;145mWish item three's second gap; a shrug is[0m   [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcensus_test.sh at 40.33 s CPU and 68.24 s[0m [38;5;232m│[0m [38;5;145mexplicitly not acceptable.[0m                 [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mwall on a 2-4 vCPU runner. Re-measure.[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mWhat are its 144 checks, is it[0m            [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mdecomposable into a cheap arm and an[0m      [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mexpensive one, and is the D647 figure[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mreproducible?[0m                             [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mscratch-target-hermeticity[0m  [38;5;232m│[0m [38;5;145mpds-scratch-target_test.sh is PRICE at[0m    [38;5;232m│[0m [38;5;145mThe third PRICE row, unexamined by the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145m8.91 s with hermeticity unproven without[0m  [38;5;232m│[0m [38;5;145mbrief - either a cheap win or a documented[0m [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mlocal Postgres. Prove or refute[0m           [38;5;232m│[0m [38;5;145mrefusal.[0m                                   [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mhermeticity on a Postgres-free[0m            [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145menvironment. Is it a further candidate[0m    [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mdoor or a genuine PRICE refusal?[0m          [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mgate-plumbing-and-formatter[0m [38;5;232m│[0m [38;5;145mMap elixir.yml's required legs,[0m           [38;5;232m│[0m [38;5;145mEvery slice touching a rider crosses this;[0m [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mELIXIR_TEST_ONLY_PATHS and[0m                [38;5;232m│[0m [38;5;145mwave 44 lost time to it twice.[0m             [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mELIXIR_COMPILE_PATHS semantics, and[0m       [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mreproduce the 1.18.1-vs-1.19.5 formatter[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mdivergence. What is the exact procedure[0m   [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mthat satisfies BOTH formatters?[0m           [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mprior-art-sweep[0m             [38;5;232m│[0m [38;5;145mSearch bp papers and tasks, and the epic[0m  [38;5;232m│[0m [38;5;145mD645's lesson: git-based greps[0m             [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mtree under task-2ac1f95237c4a8e5, for[0m     [38;5;232m│[0m [38;5;145mstructurally cannot see stranded work.[0m     [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mprior art on price staleness, ledger[0m      [38;5;232m│[0m [38;5;145mCheck the ledger too.[0m                      [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mexpiry, content-hash freshness, and[0m       [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145morphaned allowlist rows - anywhere in[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mthis repo, not only PDS. Has any of this[0m  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mbeen built and stranded?[0m                  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcriterion-venue-rubric[0m      [38;5;232m│[0m [38;5;145mFind where slice criteria are authored[0m    [38;5;232m│[0m [38;5;145mItem five - and it is cheap to build in[0m    [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145m(the cycle skill, the task-authoring[0m      [38;5;232m│[0m [38;5;145monly if the authoring surface is actually[0m  [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mrubric, prior wave criteria). Which[0m       [38;5;232m│[0m [38;5;145mlocatable.[0m                                 [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mshipped criteria presume a PR body, a[0m     [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mpush, or any workflow the builders do not[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mhave? Propose the venue-neutral phrasing.[0m [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mconcurrency-and-fences[0m      [38;5;232m│[0m [38;5;145mWhat is actually in flight right now -[0m    [38;5;232m│[0m [38;5;145mThe concurrent-session dup hazard, plus[0m    [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mopen PRs, foreign claims on the epic[0m      [38;5;232m│[0m [38;5;145mthe declared overlap on the hetzner[0m        [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mtree, live worktrees, and Cloud Console[0m   [38;5;232m│[0m [38;5;145mslice's file.[0m                              [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mwave 28's fence? Where exactly do[0m         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mscripts/pds-*, elixir-path-escape-[0m        [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcheck.sh and .github/workflows/**[0m         [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m                             [38;5;232m│[0m [38;5;145mcollide?[0m                                  [38;5;232m│[0m                                            [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m─────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;78mWhere the wave stands[0m                                                                                                   
+                                                                                                                        
+STRATEGIZE COMPLETE. Fifteen surveyors flying. This Paper is the wave's living story: Digest appends the survey digest  
+and the verify plan before the verifiers fly; Decide appends the decisions and the wave plan before the builders fly;   
+Review closes it as the debrief.                                                                                        
+                                                                                                                        
+[38;5;69m▌[0m Epic task: task-2ac1f95237c4a8e5. Deferred slices this wave inherits: pds-w44-judgment-coverage-ladder, pds-w44-      
+[38;5;69m▌[0m hetzner-offline-door, pds-w44-charter-sweep-adjudication, pds-w44-lv-verdict-unresolved-spec-arm. Owed reviews:       
+[38;5;69m▌[0m #9377 (b83501922) and #9380 (ab8c86b05). Slice task ids are filed at Decide and named here when they exist.           
+                                                                                                                        
+[1;38;5;78mSurvey digest - 15 reports, and the fail-before is already satisfied[0m                                                    
+                                                                                                                        
+[38;5;69m▌[0m DIGEST COMPLETE. The wave's declared FAIL-BEFORE - 'if the verify round cannot make the shipped census print a        
+[38;5;69m▌[0m falsehood against a real tree, the spine is CUT' - was satisfied TWICE during the SURVEY, independently, by two       
+[38;5;69m▌[0m agents who did not talk to each other. price-provenance-audit replaced the 610-line scripts/pds-record-               
+[38;5;69m▌[0m parity.test.sh with a two-line 'exit 0' and the BYTE-IDENTICAL shipped census still printed 'THROUGH                  
+[38;5;69m▌[0m CPU=1.45+3.00=4.45s ... (76 checks, 0 failures)', rc=0, ERRORS 0. census-rot-mutation did the same at 32699 bytes ->  
+[38;5;69m▌[0m 105 bytes and diffed the output against a captured baseline: EMPTY. The spine stands. It does not need the verify     
+[38;5;69m▌[0m round to earn its place; the verify round now exists to size it and to keep it from pricing the census out of its     
+[38;5;69m▌[0m own door.                                                                                                             
+                                                                                                                        
+Three independent confirmations of the direction's ground truth, all by run: (1) the census's whole run costs ~2.4-2.8 s
+CPU while printing a 40.33 s row - arithmetically impossible, no further argument needed; (2) grep over the 835-line    
+script returns ZERO timing primitives, hashes or date arithmetic in executable position - every '/usr/bin/time'         
+occurrence is INSIDE a quoted price string; (3) the verb set is exactly --check | --selftest | --list-refs | --help.    
+There is no --measure.                                                                                                  
+                                                                                                                        
+[1;38;5;59mWhat the survey ESTABLISHED (not inherited)[0m                                                                             
+                                                                                                                        
+[38;5;59m• [0mALL THREE claimed rot classes fire against a real tree. STALE PRICE: deleting a whole 76-check harness leaves the     
+  output byte-identical. STALE DISPOSITION EVIDENCE: neutralising pds-charter-ledger-sweep.sh to rc=0 leaves CONTENT-RED
+  printed verbatim with its 2026-08-03 stamp. ORPHANED DISPOSITION: giving the hetzner runner both legs flips it to     
+  THROUGH, moves 4 of 20 -> 5 of 20, and the ENVIRONMENT row asserting a credential refusal goes silently unread - and  
+  the census's own --selftest reports 8 PASS / 0 FAIL over the orphan.                                                  
+[38;5;59m• [0mA FOURTH ROT CLASS, found twice independently: EVIDENCE-ABOUT-THE-WRONG-ARM. The hetzner row cites '--selftest rc=3'  
+  while the script's own :13 and :964 declare --selftest-offline 'the CREDENTIAL-FREE arm and the CI-able gate'; the    
+  scratch-target row's blocker clause names hermeticity, which is now REFUTED. No hash and no re-run catches either -   
+  only reading the cited file:line against the claim does. Two instances is an invariant, not two typos.                
+[38;5;59m• [0mA FIFTH GAP the direction did not name: the PRICE shape validator at census :549-558 lives inside the terminal ELSE   
+  branch. The four rows that are actually THROUGH the door get NO price shape check at all. The most-gated rows are the 
+  least-validated.                                                                                                      
+[38;5;59m• [0m#9380's leg A ADMITS A FRAUDULENT THROUGH, proven end-to-end with a price attached. Root cause is five lines: the     
+  taint-harvest loop comment-filters L[i], the EXECUTION scan splices L[j] (j=i+1,i+2) in RAW. Any comment within two   
+  lines below any System.cmd satisfies predicate 3. A second shape needs no comment at all. The shipped selftest is     
+  green because its fraud fixture forgets to BIND - it tests the wrong fraudster.                                       
+[38;5;59m• [0m#9377's shipped NON-VACUITY block IS a stub - it asserts a constant defined in the test file itself, plus two verbatim
+  duplicates of earlier tests. But the FILE is not vacuous: test 2 reads persisted bytes back and discriminates the new 
+  arm by a distinct flash string. The builder's hand mutation IS recorded in the closed task's criterion-4 evidence     
+  (paper.ex:152 prefixed 'false and ', RED at test line 264 naming ESCALATED). The proof was performed and never        
+  shipped. The @moduledoc's claim that the escalation is 'reproduced BY RUN in the same file' is a FALSE SENTENCE ON    
+  MERGED CODE.                                                                                                          
+[38;5;59m• [0m--selftest-offline is genuinely credential-free and hermetic: rc=0 x3 under env -i with empty HOME, prints '0         
+  hetzner/hcloud variables', zero repo residue. Its price is 1.97-2.30 s CPU, NOT the 3.75-3.90 s the deferred task's   
+  brief carries - a ~1.7x stale figure inside the very wave whose thesis is stale figures.                              
+[38;5;59m• [0mpds-scratch-target_test.sh's hermeticity blocker is REFUTED by run: 32 PASS / 0 FAIL with 10 denial-shim Postgres     
+  binaries on PATH, and again under env -i. Its price has been 4.30 s (charter), 8.91 s (census) and 9.45 s (re-        
+  measured) across three waves. It is a CANDIDATE DOOR, not a price refusal - and the census contains NO numeric price  
+  threshold anywhere, so 'PRICE' is a class with no predicate. The revealed cut sits unstated in (4.45, 8.91].          
+[38;5;59m• [0mpds-elixir-receipt-census.exs's UNMEASURED-LOCAL is an UNPAID measurement, not an honest gap: the three gated arms    
+  cost 28.97 + 32.19 + 5.38 = 66.54 s CPU. That makes it the MOST EXPENSIVE door in the inventory, 1.65x pds-ledger-    
+  census_test.sh. D646's fan-out blindness does NOT apply - the gated arms spawn no child BEAM, and the outer meter READ
+  HIGHER than the census's own internal self-report, the inverse signature of concealment.                              
+[38;5;59m• [0mpds-ledger-census_test.sh is 144 checks (D637's 107 is dead) and its price is ~100% dead weight: 144 x 'census --help'
+  with zero fixture work costs MORE than the whole suite. A two-line lazy-urllib change cuts it 29% CPU with 144/144    
+  still passing. Do not tier it - cut its boot cost and it stops being a tiering case.                                  
+[38;5;59m• [0mThe charter sweep's arrival count has moved a THIRD time: 41 -> 45 -> 59 (49 distinct slugs), because the IDIOM       
+  vocabulary is MINED FROM THE CHARTER in-process - a bigger charter changes the LENS, not just the corpus. Its --      
+  selftest is a HOSTAGE of the CONTENT-RED: it fails at its FIRST gate and never reaches any of its three lens          
+  assertions. And its fail-open at :203 was REPRODUCED - a dead bp shim produces NOT-A-TASK verdict lines byte-identical
+  to an honest run, with a live-doc control dropping NOT-A-TASK from 16 to 1 to prove the branch is not dead code. The  
+  false absence is PERSISTED to confirm.json.                                                                           
+[38;5;59m• [0mThe lv_verdict '?' reorder is correctly ruled out, for a STRONGER reason than wave 44 gave: a '?' spec supplies no    
+  join key, so hoisting the residual arm widens BY PROXY - the exact inverse of the residual block's own PDS-D572       
+  doctrine. The buildable half is different work: SPLIT arm 2 (one class name over two disjoint predicates) and PRINT   
+  the unnameable-spec count as a derived BOUND. Today N=0 by run across all 11 live plugin specs.                       
+[38;5;59m• [0mThe criterion-venue defect is 11 criteria across 7 of 15 w43/w44 slices, not two. On BUILT slices: 4 of 7 PR-body     
+  criteria left permanently unstamped, 2 rescued by silently re-venuing. And the justification stamped on both rescued  
+  rows - 'the commit message becomes the PR body' - is FALSE: bp-epic-cycle.workflow.js:870 opens PRs with an explicit -
+  -body, which suppresses gh's commit autofill.                                                                         
+                                                                                                                        
+[1;38;5;78mCoverage map - checked and FOUND, checked and NOT FOUND[0m                                                                 
+                                                                                                                        
+Absences are decisions-in-waiting. These are the corners the fleet reached, and the corners it did not.                 
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mSurface[0m                              [38;5;232m│[0m [38;5;145mVerdict[0m                               [38;5;232m│[0m [38;5;145mWhat it means for the wave[0m            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mscripts/pds-door-census.sh (835[0m      [38;5;232m│[0m [38;5;145mFOUND - prices/dispositions are[0m       [38;5;232m│[0m [38;5;145mThe spine's subject is fully mapped.[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mlines, all branches)[0m                 [38;5;232m│[0m [38;5;145mstring literals at :123-137 / :146-[0m   [38;5;232m│[0m [38;5;145mNo further reading needed.[0m            [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m149; single exec at :401; rot check[0m   [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m:585-602 existence-only[0m               [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mA --measure verb / meter / hash /[0m    [38;5;232m│[0m [38;5;145mNOT FOUND anywhere in executable[0m      [38;5;232m│[0m [38;5;145mNew ground. No prior task in Barkpark[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mdate arithmetic[0m                      [38;5;232m│[0m [38;5;145mposition[0m                              [38;5;232m│[0m [38;5;145mproposes one (4 separate bp[0m           [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145msearches).[0m                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mA numeric PRICE threshold in the[0m     [38;5;232m│[0m [38;5;145mNOT FOUND - grep for[0m                  [38;5;232m│[0m [38;5;145m'PRICE' is a class with no predicate.[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcensus[0m                               [38;5;232m│[0m [38;5;145mthreshold|tier|budget|CPU_ returns[0m    [38;5;232m│[0m [38;5;145mAn unmade ruling, not a defect to fix[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145monly prose inside the ledger literal[0m  [38;5;232m│[0m [38;5;145msilently.[0m                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mTHROUGH-branch price shape[0m           [38;5;232m│[0m [38;5;145mNOT FOUND - validator is nested in[0m    [38;5;232m│[0m [38;5;145mAny provenance design must cover the[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mvalidation[0m                           [38;5;232m│[0m [38;5;145mthe terminal else[0m                     [38;5;232m│[0m [38;5;145mTHROUGH branch, not extend the PRICE-[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mclass validator.[0m                      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mHUMAN-GATE class rows / Port.open[0m    [38;5;232m│[0m [38;5;145mNOT FOUND - zero rows, zero arms[0m      [38;5;232m│[0m [38;5;145mUntested arms inside the instrument.[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mselftest fixtures[0m                    [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mSame shape, two places.[0m               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mROSTER-VERDICT-FRESH (anchor_mfa +[0m   [38;5;232m│[0m [38;5;145mFOUND SHIPPED in pds-elixir-receipt-[0m  [38;5;232m│[0m [38;5;145mA price hash is a PORT, not an[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mdef_fp, @key_normaliser, re-key[0m      [38;5;232m│[0m [38;5;145mcensus.exs :737-746, :2256-2305[0m       [38;5;232m│[0m [38;5;145minvention. Its known blind spot [0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mmigration rule)[0m                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m(same-file only) is filed as pds-w39-[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mroster-fresh-callee-blindspot.[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mAny repo gate that hashes the[0m        [38;5;232m│[0m [38;5;145mNOT FOUND across 8 staleness gates[0m    [38;5;232m│[0m [38;5;145mdocs-anchors-check.sh:162 is[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145martifact it makes a claim about[0m      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mexistence-only too. The census[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145minherited a repo-wide pattern; it is[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mnot an outlier.[0m                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mOpen PRs touching scripts/pds-* or[0m   [38;5;232m│[0m [38;5;145mNOT FOUND - zero of 13 open PRs[0m       [38;5;232m│[0m [38;5;145mNo inbound merge-order wait. All four[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145melixir-path-escape-check.sh[0m          [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mdependency SHAs re-verified as[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mancestors of origin/main by this[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mdigest.[0m                               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mELIXIR_TEST_ONLY_PATHS inside[0m        [38;5;232m│[0m [38;5;145mNOT FOUND - it is a shell variable at[0m [38;5;232m│[0m [38;5;145mTHE BRIEF'S PREDICTED .github[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m.github/workflows/elixir.yml[0m         [38;5;232m│[0m [38;5;145mscripts/elixir-path-escape-[0m           [38;5;232m│[0m [38;5;145mCOLLISION DOES NOT EXIST. The hetzner[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mcheck.sh:89; elixir.yml:45 says so[0m    [38;5;232m│[0m [38;5;145mslice writes zero bytes of .github/.[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mand :196-197 shells out[0m               [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mConsole wave 28's declared fence[0m     [38;5;232m│[0m [38;5;145mFOUND: 'In fence: cloud/,[0m             [38;5;232m│[0m [38;5;145mTHE REAL COLLISION. #9377's paper.ex[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mapi/lib/barkpark_web/live/' (charter[0m  [38;5;232m│[0m [38;5;145mlives inside it. Priority 1 is fence-[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145m:121, on an OPEN PR #9384)[0m            [38;5;232m│[0m [38;5;145mclean ONLY if the repair stays in[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mapi/test/.[0m                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mA stranded 152-line #9377 verifier[0m   [38;5;232m│[0m [38;5;145mFOUND on the filesystem, invisible to[0m [38;5;232m│[0m [38;5;145mReuse it or lose it. A git clean[0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mprobe (untracked, wf_cff43d8b-660-[0m   [38;5;232m│[0m [38;5;145mevery git search[0m                      [38;5;232m│[0m [38;5;145mdestroys it.[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m25)[0m                                  [38;5;232m│[0m                                       [38;5;232m│[0m                                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe worktree branch named pds-[0m       [38;5;232m│[0m [38;5;145mFOUND but EMPTY - clean, 0 commits[0m    [38;5;232m│[0m [38;5;145mA name that reads like live work.[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mreview-9377[0m                          [38;5;232m│[0m [38;5;145mahead of origin/main[0m                  [38;5;232m│[0m [38;5;145mNobody is reviewing #9377. Do not[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mstand down on it.[0m                     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m.claude/workflows/bp-pds-charter.md[0m  [38;5;232m│[0m [38;5;145mNOT REACHED by SIX of the fifteen[0m     [38;5;232m│[0m [38;5;145mThe largest coverage hole.[0m            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m(D-number bodies)[0m                    [38;5;232m│[0m [38;5;145msurveyors[0m                             [38;5;232m│[0m [38;5;145mD633/D637/D639/D646/D647/D648/D649/D6[0m [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145m50/D572 were quoted from CODE and[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mTASKS, not read from the charter for[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mcoverage.[0m                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mubuntu-latest / any CI runner[0m        [38;5;232m│[0m [38;5;145mNOT REACHED - every hermeticity and[0m   [38;5;232m│[0m [38;5;145mNo pds door has ever executed on a[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mbehaviour for any pds door[0m           [38;5;232m│[0m [38;5;145mprice proof is macOS-local[0m            [38;5;232m│[0m [38;5;145mforeign runner. The first CI run is[0m   [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mthe only real evidence.[0m               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mapi/test/barkpark/pds_door_census_te[0m [38;5;232m│[0m [38;5;145mNOT OPENED by anyone[0m                  [38;5;232m│[0m [38;5;145mIf it pins 40.33s, re-pricing reds[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mst.exs (does it PIN the stale price[0m  [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mthe Elixir gate and the fix must co-[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mliterals?)[0m                           [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mland.[0m                                 [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mWhether ANY CI workflow invokes pds-[0m [38;5;232m│[0m [38;5;145mNOT RE-VERIFIED - two bp tasks assert[0m [38;5;232m│[0m [38;5;145mIf true, the 40.33 s 'door price'[0m     [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mledger-census_test.sh[0m                [38;5;232m│[0m [38;5;145mit is invoked by NO workflow[0m          [38;5;232m│[0m [38;5;145mprices a door nobody walks through -[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m                                       [38;5;232m│[0m [38;5;145mwave 43's law with a mirror.[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mlive_scope.ex / caps.ex / access.ex[0m  [38;5;232m│[0m [38;5;145mNOT OPENED - taken from the commit[0m    [38;5;232m│[0m [38;5;145mThe exact circularity the independent[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m(the #9377 mechanism story)[0m          [38;5;232m│[0m [38;5;145mmessage and the artifact's own[0m        [38;5;232m│[0m [38;5;145mreview exists to break, still[0m         [38;5;232m│[0m
+[38;5;232m│[0m                                      [38;5;232m│[0m [38;5;145mmoduledoc[0m                             [38;5;232m│[0m [38;5;145munbroken.[0m                             [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;78mWhere the reports contradict the direction, and each other[0m                                                              
+                                                                                                                        
+[38;5;59m• [0mTHE DIRECTION SAID '3 of 19'. The wish said it too. BOTH ARE DEAD: the census enters its own denominator by design and
+  prints 20 with 4 THROUGH. Confirmed by two independent runs. This is the ELEVENTH consecutive wave in which the       
+  dispatch is refuted from the artifact - and this time the direction refuted itself before the survey did.             
+[38;5;59m• [0mTHE DIRECTION SAID the census costs 2.80 s CPU / 4.13 s wall; a surveyor measured 2.44 s CPU / 3.47 s wall; both under
+  load1 12-19. The FINDING is unaffected (the gap to 40.33 s only widens) but neither figure is quotable as the code's  
+  price. Every number in this wave was taken on a host at load1 12-33. NOTHING here may enter a ledger row without a    
+  quiet-host re-take.                                                                                                   
+[38;5;59m• [0mTHE LEDGER-CENSUS PRICE IS STALE-HIGH, not stale-low: the row says 40.33 s CPU / 68.24 s wall; a re-measure at load1  
+  33 got 32.22 s / 42.61 s. So the price column is wrong in BOTH directions across different rows. A staleness arm that 
+  only catches growth catches half the defect.                                                                          
+[38;5;59m• [0mTHE HETZNER SLICE'S DECLARED FILE SET IS TOO NARROW. The bp task declares only the rider + elixir-path-escape-        
+  check.sh. Landing exactly those two produces a green census carrying a FALSE ENVIRONMENT row AND price=UNMEASURED-    
+  LOCAL on the door it just measured three times. BOTH LEGS OR NEITHER must be widened to FOUR files.                   
+[38;5;59m• [0mTHE LADDER'S NUMBERS SURVIVE THE NEW BASE (252 population, 74 judged-coverage, PROVEN-BACKED 23 with |A|=20, |B|=3) - 
+  but OVERLAP IS 0, so leg_a + leg_b and Enum.count(MapSet.union(...)) BOTH PRINT 23. A builder can ship the forbidden  
+  addition, satisfy every number-quoting criterion, and pass. The injection proof is the ONLY discriminator that exists 
+  at this base.                                                                                                         
+[38;5;59m• [0mTHE CHARTER SWEEP IS THE LAST SLICE, NOT A FREE-STANDING ONE. Its fingerprint hashes the whole normalized charter     
+  line, so adjudicating before the WAVE-45 charter merges orphans every row it writes - and two of the 59 arrivals are  
+  self-referential (its own dispatch row at charter:12685, and the adjudication table file itself at charter:2782).     
+                                                                                                                        
+[1;38;5;78mWhat Decide cannot live without[0m                                                                                         
+                                                                                                                        
+[38;5;59m• [0mDoes repairing #9377's stub require touching api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex? If yes,    
+  wave 45 writes inside Console wave 28's declared fence and needs sequencing or a dispensation. This single answer     
+  decides whether the wave has a cross-epic collision at all.                                                           
+[38;5;59m• [0mDoes the NON-VACUITY block stay GREEN under the paper.ex:152 mutation while test 2 reds? That is the one decisive     
+  experiment. A green there is the stub proven by run rather than by reading.                                           
+[38;5;59m• [0mWhat staleness KEY is legal? The census prices ITSELF, so a naive content hash makes its own row permanently PRICE-   
+  STALE. And pds-elixir-receipt-census.exs's price is CORPUS-sized (804 files) - the instrument can be byte-identical   
+  while its price moves. The key must be self-exempting and corpus-aware, or the first false-green is already scheduled.
+[38;5;59m• [0mDoes an ORPHANED-DISPOSITION error have a false-positive mode? A row legitimately retained as history reds a naive    
+  check. The design needs a retire/supersede shape, not just an error.                                                  
+[38;5;59m• [0mDoes api/test/barkpark/pds_door_census_test.exs pin any price literal, and does any CI workflow invoke the ledger     
+  census? These decide whether re-pricing is free or must co-land with a test change - and whether the ledger-census    
+  'door price' prices anything at all.                                                                                  
+                                                                                                                        
+[1;38;5;78mVerify plan - 13 assignments IN FLIGHT[0m                                                                                  
+                                                                                                                        
+Every assignment below is Opus (fable is unavailable and forbidden this wave; no_fable:true remaps every fable-selecting
+site). Each names what will be RUN as proof - reading is not proof for a claim of the form 'the gate passes'.           
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m#[0m  [38;5;232m│[0m [38;5;145mQuestion[0m                                               [38;5;232m│[0m [38;5;145mProof it must RUN[0m                                      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m1[0m  [38;5;232m│[0m [38;5;145mDoes the shipped NON-VACUITY block stay GREEN under[0m    [38;5;232m│[0m [38;5;145mCC=/usr/bin/clang mix test on[0m                          [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mthe paper.ex:152 'false and ' mutation while test 2[0m    [38;5;232m│[0m [38;5;145mpds_w44_grant_door_test.exs at origin/main, green then[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mreds, and can the repair stay inside api/test/?[0m        [38;5;232m│[0m [38;5;145mmutated; quote both left/right[0m                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2[0m  [38;5;232m│[0m [38;5;145mIs api/lib/barkpark_web/live/ genuinely fenced by[0m      [38;5;232m│[0m [38;5;145mgit show of the charter branch + gh pr view 9384 + git[0m [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mConsole w28, and is #9384 merged or open?[0m              [38;5;232m│[0m [38;5;145mmerge-base[0m                                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3[0m  [38;5;232m│[0m [38;5;145mCan a hash-keyed price provenance be added without[0m     [38;5;232m│[0m [38;5;145mtime the census with and without a 20-file shasum[0m      [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mpricing the census out of its own door?[0m                [38;5;232m│[0m [38;5;145mpass; prototype PRICE-STALE and prove it reds by[0m       [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mmutation[0m                                               [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m4[0m  [38;5;232m│[0m [38;5;145mDo an orphan check and a THROUGH-branch shape check[0m    [38;5;232m│[0m [38;5;145m--check before/after in a worktree, diffed against a[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mchange ANY current row's class on the real tree?[0m       [38;5;232m│[0m [38;5;145mcaptured baseline[0m                                      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m5[0m  [38;5;232m│[0m [38;5;145mDoes the FOUR-file hetzner slice land clean - 5 of 20,[0m [38;5;232m│[0m [38;5;145mbuild all four edits in a worktree; run --check, --[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mno orphan, no UNMEASURED-LOCAL - and does the two-[0m     [38;5;232m│[0m [38;5;145mselftest, and --selftest-offline x3 with load stamped[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mstatement rider shape avoid BOUND-UNEXEC?[0m              [38;5;232m│[0m                                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m6[0m  [38;5;232m│[0m [38;5;145mRe-derive the two ladder injection mutants at the new[0m  [38;5;232m│[0m [38;5;145minstrumented census probe, both injections, printed[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mbase: does UNION hold at 23 while the naive sum moves[0m  [38;5;232m│[0m [38;5;145mOVERLAP[0m                                                [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mto 24 and 25?[0m                                          [38;5;232m│[0m                                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m7[0m  [38;5;232m│[0m [38;5;145mDoes the paren-balanced argument-list fix for leg A[0m    [38;5;232m│[0m [38;5;145m--check and --selftest before/after on the real tree;[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mclose both fraud shapes WITHOUT reclassifying any[0m      [38;5;232m│[0m [38;5;145mboth fraud fixtures must red[0m                           [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mcurrent row?[0m                                           [38;5;232m│[0m                                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m8[0m  [38;5;232m│[0m [38;5;145mSplit the 59 arrivals into genuinely-new claims vs[0m     [38;5;232m│[0m [38;5;145mrun the sweep against a FROZEN blob sha; re-confirm[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mmoved fingerprints, and prove the fail-open fix exits[0m  [38;5;232m│[0m [38;5;145mthe 11 non-task slugs with a working bp[0m                [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m2 UNCHECKED without a new CI red[0m                       [38;5;232m│[0m                                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m9[0m  [38;5;232m│[0m [38;5;145mDoes any CI workflow invoke the ledger census or the[0m   [38;5;232m│[0m [38;5;145mgit grep over .github + run the ExUnit door test[0m       [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mdoor census, and does pds_door_census_test.exs pin a[0m   [38;5;232m│[0m                                                        [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mprice literal?[0m                                         [38;5;232m│[0m                                                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m10[0m [38;5;232m│[0m [38;5;145mDoes the pinned Elixir 1.18.1 container reproduce[0m      [38;5;232m│[0m [38;5;145mdocker run hexpm/elixir:1.18.1-* mix format --check-[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m#9380's Format failure and accept the fix?[0m             [38;5;232m│[0m [38;5;145mformatted on df3d5f468 and 535b2a4f9[0m                   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m11[0m [38;5;232m│[0m [38;5;145mQuiet-host re-take of the three contested prices, with[0m [38;5;232m│[0m [38;5;145mre-measure receipt-census arms, ledger-census, door[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145man interleaved calibration burn[0m                        [38;5;232m│[0m [38;5;145mcensus, hetzner-offline at the lowest load reachable;[0m  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m                                                        [38;5;232m│[0m [38;5;145mreport the load, do not hide it[0m                        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m12[0m [38;5;232m│[0m [38;5;145mDoes gh pr create --body actually suppress commit[0m      [38;5;232m│[0m [38;5;145mgh pr create --help + a throwaway body test; rewrite[0m   [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mautofill, and what is the exact venue-rule insertion?[0m  [38;5;232m│[0m [38;5;145mthe three DEFERRED slices' criteria[0m                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m13[0m [38;5;232m│[0m [38;5;145mIs the lv_verdict fixture's literal sessionless route[0m  [38;5;232m│[0m [38;5;145mdelete the fixture line and run --selftest; run the[0m    [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145mload-bearing, and how many real-tree clauses hit arm[0m   [38;5;232m│[0m [38;5;145mfull census and read the REACH ladder[0m                  [38;5;232m│[0m
+[38;5;232m│[0m    [38;5;232m│[0m [38;5;145m2's not-routed predicate?[0m                              [38;5;232m│[0m                                                        [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[38;5;69m▌[0m PREMISE SMOKE, run by this digest before the fleet flew: all seven wave-44/43 merge SHAs re-confirmed as ancestors    
+[38;5;69m▌[0m of origin/main ab8c86b05 by git merge-base --is-ancestor (a46ee2425, b83501922, f2b24b2ab, 90cdc7478, ab8c86b05,      
+[38;5;69m▌[0m 3a32373b8, 014923a43). The one premise that FAILED smoke is the brief's own: the .github/workflows collision it       
+[38;5;69m▌[0m predicted does not exist, because ELIXIR_TEST_ONLY_PATHS is a shell variable in scripts/, not workflow YAML. That is  
+[38;5;69m▌[0m a finding, not a foundation - and the collision that IS real sits on a surface nobody was asked to look at.           
+                                                                                                                        
+[1;38;5;78mDECIDE — the verify round's verdict, and what flies[0m                                                                     
+                                                                                                                        
+Base at Decide is [1;38;5;145ma723ec0dd[0m — the wave's declared base moved TWICE while it flew (dispatch pinned ab8c86b05, digest ran 
+at 0d1936832, Decide re-derived at a723ec0dd). scripts/pds-door-census.sh is byte-identical at all three, so wave-44's  
+census work is unaffected; every .exs and api/lib anchor was re-derived. All seven wave-44 commits re-confirmed as      
+ancestors by git merge-base --is-ancestor.                                                                              
+                                                                                                                        
+Charter PR [1;38;5;145m#9412[0m is OPEN and reporting checks — docs-only, three .md files, 931 insertions, zero deletions, carrying    
+PDS-D656 through D663 plus two verify-round re-derivation recipe rows. It is NOT yet on main, so this Paper is what a   
+builder can read today.                                                                                                 
+                                                                                                                        
+[1;38;5;78mTHE SPINE SURVIVED — the fail-before was satisfied, then satisfied again[0m                                                
+                                                                                                                        
+The declared fail-before was: if the verify round cannot make the SHIPPED census print a falsehood against a real tree, 
+the spine is CUT and this wave becomes pay-the-debts-only. It was satisfied TWICE in the SURVEY round, by two agents    
+independently, and never seriously contested afterwards.                                                                
+                                                                                                                        
+[1;38;5;145mprice-provenance-audit[0m replaced the 610-line scripts/pds-record-parity.test.sh (32,699 bytes) with a two-line exit 0    
+(105 bytes). The byte-identical shipped census still printed: THROUGH CPU=1.45+3.00=4.45s LOCAL meter=… (76 checks, 0   
+failures), rc=0, ERRORS 0. A price, a check count AND a zero-failures claim, all asserted for a program containing no   
+checks.                                                                                                                 
+                                                                                                                        
+[1;38;5;145mcensus-rot-mutation[0m did the same at 32,699 -> 105 bytes and diffed against a captured baseline: EMPTY.                  
+                                                                                                                        
+Three confirmations of the direction, all by run: the census's whole run costs 2.38 s CPU while printing a 40.33 s row  
+(arithmetically impossible); grep returns ZERO timing, hash or date primitives in executable position (every            
+/usr/bin/time occurrence is inside a quoted price string); and the verb set is exactly --check|--selftest|--list-refs|--
+help.                                                                                                                   
+                                                                                                                        
+[1;38;5;78mVERIFICATION RESULTS — per assignment, including the refutations[0m                                                        
+                                                                                                                        
+[1;38;5;59mPROVEN[0m                                                                                                                  
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145massignment[0m                 [38;5;232m│[0m [38;5;145mverdict[0m                                    [38;5;232m│[0m [38;5;145mthe decisive line[0m                          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-9377-stub-mutation[0m       [38;5;232m│[0m [38;5;145mPROVEN, and worse than 'a stub'[0m            [38;5;232m│[0m [38;5;145mFlipping the TEST-LOCAL literal to do:[0m     [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mtrue with paper.ex byte-identical reds[0m     [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145m:348 alone — left: true / right: false.[0m    [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mThe assertion observes zero bytes of[0m       [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mproduct code.[0m                              [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-measure-verb-and-key[0m     [38;5;232m│[0m [38;5;145mKey is legal, affordable, fixpoint SOLVED[0m  [38;5;232m│[0m [38;5;145mEditing a price literal: elided key[0m        [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mUNCHANGED 1dca8d50…f71931 while naive sha[0m  [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mmoves c88dbb2c… -> 318ea31a…. Editing ONE[0m  [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mBYTE of body: key moves -> 99463587…. Cost[0m [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145m+1.9% as three forks, +14% as a per-file[0m   [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mloop.[0m                                      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-orphan-and-through-shape[0m [38;5;232m│[0m [38;5;145mAll three defects PROVEN, repairs built,[0m   [38;5;232m│[0m [38;5;145mA directly contradictory orphan row leaves[0m [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m [38;5;145mblast radius zero[0m                          [38;5;232m│[0m [38;5;145moutput BYTE-IDENTICAL, rc=0, stderr EMPTY,[0m [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mselftest 8 PASS / 0 FAIL. Repaired: rc=1[0m   [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mnaming 'ORPHANED DISPOSITION — the ledger[0m  [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mcarries class ENVIRONMENT … COMPUTED as[0m    [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mTHROUGH'.[0m                                  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-9380-lega-fraud-fix[0m      [38;5;232m│[0m [38;5;145mCONFIRMED and FIXED, plus a third fraud[0m    [38;5;232m│[0m [38;5;145mThree fraud shapes each classify LEGA-[0m     [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m [38;5;145mshape[0m                                      [38;5;232m│[0m [38;5;145mBOUND-EXEC on shipped code. Fixed: all[0m     [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mdecline to BOUND-UNEXEC while a five-line[0m  [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mPort.open door goes LEGA-BOUND-EXEC.[0m       [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mSelftest 8 -> 13 arms, each reds on[0m        [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mrevert.[0m                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-charter-sweep-arrivals[0m   [38;5;232m│[0m [38;5;145mFail-open reproduced TWICE, byte-[0m          [38;5;232m│[0m [38;5;145mA dead bp AND an expired token (exit 3,[0m    [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m [38;5;145midentically[0m                                [38;5;232m│[0m [38;5;145mVALID JSON, unauthorized) both produce[0m     [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145moutput identical to a healthy run, still[0m   [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mprinting 'Each was CONFIRMED with a second[0m [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mread'. Live-doc control flips all 14 to[0m    [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mMISCLASSIFIED.[0m                             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-ladder-injection-proof[0m   [38;5;232m│[0m [38;5;145mNumbers survive the new base; OVERLAP=0 is[0m [38;5;232m│[0m [38;5;145mlegA=20 legB=3 naive_sum=23 UNION=23[0m       [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m [38;5;145mthe finding[0m                                [38;5;232m│[0m [38;5;145mOVERLAP=0. The addition and the union are[0m  [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mnumerically indistinguishable today — the[0m  [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145minjection mutants are the only[0m             [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mdiscriminator that exists.[0m                 [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-criterion-venue-rule[0m     [38;5;232m│[0m [38;5;145mMechanism PROVEN by four arms[0m              [38;5;232m│[0m [38;5;145m--title T --body B sends exactly B, the[0m    [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mcommit body appearing nowhere; --fill[0m      [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145msends the commit; no --body REFUSES non-[0m   [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145minteractively; --fill --body B sends[0m       [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mexactly B. No silent-autofill path exists.[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mv-formatter-1181-container[0m [38;5;232m│[0m [38;5;145mProcedure works; the TAG was a fabrication[0m [38;5;232m│[0m [38;5;145m…-debian-bookworm-20241016 is 'no such[0m     [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mmanifest'. The working tag …-20260610 was[0m  [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145malready in this charter at :10834. api/[0m    [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mAND cloud/ on main are green under BOTH[0m    [38;5;232m│[0m
+[38;5;232m│[0m                            [38;5;232m│[0m                                            [38;5;232m│[0m [38;5;145mformatters — no ambient drift.[0m             [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;59mREFUTED — where verification contradicted the direction, the brief, or the charter[0m                                      
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────────────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mclaim[0m                                                    [38;5;232m│[0m [38;5;145mrefuted by run[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe direction: 'the NON-VACUITY block stays GREEN while[0m  [38;5;232m│[0m [38;5;145mNO. Both red, on the identical oracle, because the block[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mtest 2 reds'[0m                                             [38;5;232m│[0m [38;5;145mIS test 2 duplicated. That refutation is the diagnosis.[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mPDS-D648: sys EXCEEDS user on the hetzner door; CPU owes[0m [38;5;232m│[0m [38;5;145mBOTH HALVES FALSE. sys ~= user (0.97/0.94), and the byte-[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m'nothing to load'[0m                                        [38;5;232m│[0m [38;5;145midentical workload spans 1.91–3.90 s, tracking load. D656[0m [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145msupersedes the reasoning; the CPU unit survives.[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe task brief: hetzner costs 3.75–3.90 s CPU[0m            [38;5;232m│[0m [38;5;145m1.91 s at load1 ~8 (Decide's own run, env -i, rc=0). A 2x[0m [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145moverstatement.[0m                                            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe ledger row: pds-ledger-census_test.sh costs 40.33 s[0m  [38;5;232m│[0m [38;5;145m24.05–24.34 s CPU, wall 28.15–28.58, 144 checks, two[0m      [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mCPU / 68.24 s wall[0m                                       [38;5;232m│[0m [38;5;145mtrials at load1 ~8. Wrong by 40% on CPU and 59% on wall.[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe brief: 'the .github/workflows collision with[0m         [38;5;232m│[0m [38;5;145mDOES NOT EXIST. ELIXIR_TEST_ONLY_PATHS is a shell[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mConsole'[0m                                                 [38;5;232m│[0m [38;5;145mvariable at elixir-path-escape-check.sh:89. The real[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mcollision is api/lib/barkpark_web/live/ — a surface[0m       [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mnobody was asked to look at.[0m                              [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe digest: '11 PR-body criteria across 7 of 15 slices;[0m  [38;5;232m│[0m [38;5;145m7 across 5, and 2 orphaned. Three of the ten regex hits[0m   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m4 orphaned'[0m                                              [38;5;232m│[0m [38;5;145mname PR as the SUBJECT of a check, not as a venue.[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mPDS-D650: the denominator is 19[0m                          [38;5;232m│[0m [38;5;145mIt is 20 with 4 doors, and has been since #9380. The[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mcensus enters its own denominator by design.[0m              [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe hetzner task: TWO files[0m                              [38;5;232m│[0m [38;5;145mFIVE edits across THREE files. The fifth —[0m                [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145minternal/cli/testdata/ in the dispatch set — was named by[0m [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mnobody, and without it a fixture-only PR reds the new[0m     [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mdoor with the Elixir gate legitimately SKIPPED.[0m           [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mThe ladder brief: every code anchor[0m                      [38;5;232m│[0m [38;5;145mAll dead. The sum is :4101 not :4033 (now bare acc);[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mreceipt_functions :3342 not ~3274; roster_functions :3353[0m [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mnot ~3285; 7,402 lines not 7,106; selftest 33/22 not[0m      [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145m25/16.[0m                                                    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD637: pds-scratch-target_test.sh hermeticity 'unproven'[0m  [38;5;232m│[0m [38;5;145mREFUTED. 32 PASS / 0 FAIL with ten Postgres denial shims[0m  [38;5;232m│[0m
+[38;5;232m│[0m                                                          [38;5;232m│[0m [38;5;145mon PATH, zero violations, and again under env -i.[0m         [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────────────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;59mCOVERAGE — including the not-founds, which are load-bearing[0m                                                             
+                                                                                                                        
+Both coverage deficits were EMPTY: every dispatched survey agent and every dispatched verifier reported. Ten verifiers  
+ran; nothing this wave rests on an unanswered question.                                                                 
+                                                                                                                        
+[38;5;59m• [0mNOT-FOUND, decisive: no CI workflow invokes any pds instrument. git grep -in 'pds' origin/main -- .github returns ONE 
+  line and it is a prose comment. Four instruments ride the required Elixir gate through api/test ExUnit shells plus    
+  ELIXIR_TEST_ONLY_PATHS, not through .github at all.                                                                   
+[38;5;59m• [0mNOT-FOUND, decisive: pds-ledger-census_test.sh has NO executable caller anywhere in the repo — 20 hits, all prose. Its
+  40 s price prices a door nobody walks through, which reframes the tiering question rather than answering it.          
+[38;5;59m• [0mNOT-FOUND, decisive: no test pins any price VALUE. api/test is clean of 40.33 / 68.24 / 8.91 / 4.45 / 3.32. Re-pricing
+  is free of test edits — but RE-CLASSING is not (length(price_rows) >= 2 at :305).                                     
+[38;5;59m• [0mNOT-FOUND: zero open PRs touch shared/paper.ex, and Cloud Console Hardening has written ZERO commits into its own     
+  fenced api/lib/barkpark_web/live/ in its entire epic lifetime.                                                        
+[38;5;59m• [0mNOT-FOUND: PROVEN-BACKED appears zero times in the census output and zero times in its owning doc — rung 4 is new     
+  code, not an edit.                                                                                                    
+[38;5;59m• [0mNOT-FOUND, and it is the epic's oldest hole: no pds door has ever executed on a foreign CI runner. Every hermeticity  
+  and price proof is macOS-local. Restated, not closed; filed as pds-w45-bl-foreign-runner-first-door.                  
+[38;5;59m• [0mNOT RUN: the full Elixir suite. The #9377 no-leak proof covers two files in one invocation, not suite scale. Named in 
+  the slice as a risk the builder must close.                                                                           
+                                                                                                                        
+[1;38;5;78mDECISIONS — each with its one-line why[0m                                                                                  
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m#[0m    [38;5;232m│[0m [38;5;145mdecision[0m                                              [38;5;232m│[0m [38;5;145mwhy[0m                                                   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD656[0m [38;5;232m│[0m [38;5;145mA price lies when it does not descend from a meter[0m    [38;5;232m│[0m [38;5;145mCPU moved 2x on a byte-identical workload within one[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mthe instrument itself drove; and the LOAD STAMP is[0m    [38;5;232m│[0m [38;5;145mwave, so the unit alone was never the guarantee.[0m      [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mpart of the price.[0m                                    [38;5;232m│[0m [38;5;145mD648's conclusion survives; its reasoning is[0m          [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145msuperseded.[0m                                           [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD657[0m [38;5;232m│[0m [38;5;145mThe #9377 repair is Code.compile_string inside[0m        [38;5;232m│[0m [38;5;145mThe shipped block is a tautology plus a duplicate;[0m    [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mapi/test ALONE, and it is fence-clean.[0m                [38;5;232m│[0m [38;5;145mthe repair needs no api/lib byte, which is exactly[0m    [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mwhat keeps it out of Console's declared fence.[0m        [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD658[0m [38;5;232m│[0m [38;5;145mLeg A must read the ARGUMENT LIST, not the[0m            [38;5;232m│[0m [38;5;145mThree fraud shapes produce THROUGH with a price[0m       [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mneighbourhood.[0m                                        [38;5;232m│[0m [38;5;145mattached — and the window also DECLINES an honest[0m     [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mfive-line Port.open door, so the fix is not 'decline[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mmore'.[0m                                                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD659[0m [38;5;232m│[0m [38;5;145mSix rot classes; an orphaned disposition is an ERROR;[0m [38;5;232m│[0m [38;5;145mThe rot check tests existence only, and the four rows[0m [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mretirement is the only escape hatch and requires the[0m  [38;5;232m│[0m [38;5;145mthat actually gate carry no price-shape check in the[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mdupe check in the same slice.[0m                         [38;5;232m│[0m [38;5;145minstrument OR its rider.[0m                              [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD660[0m [38;5;232m│[0m [38;5;145mPROVEN-BACKED is ONE Enum.count over ONE[0m              [38;5;232m│[0m [38;5;145mOVERLAP is 0, so the forbidden addition prints the[0m    [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mMapSet.union, and the injection proof must SHIP.[0m      [38;5;232m│[0m [38;5;145mright integer. Evidence quoting '23' proves nothing.[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD661[0m [38;5;232m│[0m [38;5;145mThe '?' variable-bound decline is RULED OUT, with a[0m   [38;5;232m│[0m [38;5;145mThe reorder widens the residual by proxy (87/322,[0m     [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145msource-derived reason.[0m                                [38;5;232m│[0m [38;5;145mintegrity arm still PASS) and the arm has no join key[0m [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145m— lvs_joinable? drops the module name upstream. A[0m     [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mrecorded rule-out is the honest outcome.[0m              [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD662[0m [38;5;232m│[0m [38;5;145mCriterion venue is neutral, and evidence TYPE is too.[0m [38;5;232m│[0m [38;5;145mgh pr create --body suppresses commit autofill, so a[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mPR-body criterion is unmeetable the moment a builder[0m  [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mfinishes — a 57% loss rate on built work.[0m             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mD663[0m [38;5;232m│[0m [38;5;145mThe sweep ADJUDICATION defers to wave 46; its FAIL-[0m   [38;5;232m│[0m [38;5;145mThe vocabulary is mined from the charter in-process[0m   [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m [38;5;145mOPEN builds now.[0m                                      [38;5;232m│[0m [38;5;145m(41 -> 45 -> 59), so this wave's own charter PR moves[0m [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mit a fourth time. The fail-open is independent of all[0m [38;5;232m│[0m
+[38;5;232m│[0m      [38;5;232m│[0m                                                       [38;5;232m│[0m [38;5;145mthat.[0m                                                 [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;145mTHE EPIC'S NEXT SENTENCE, earned by run: [0mA PRICE LIES WHEN IT DOES NOT DESCEND FROM A METER THE INSTRUMENT ITSELF DROVE 
+— AND A DISPOSITION LIES WHEN ITS EVIDENCE NAMES A RUN THE INSTRUMENT NEVER RE-TAKES. Sharpened by the measurements: A  
+PRICE IS QUOTABLE ONLY AGAINST ITS OWN LOAD STAMP.                                                                      
+                                                                                                                        
+[1;38;5;78mTHE WAVE PLAN — 8 slices, 5 in round 1[0m                                                                                  
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m───[0m[38;5;232m┬[0m[38;5;232m─────────────────────────[0m[38;5;232m┬[0m[38;5;232m───[0m[38;5;232m┬[0m[38;5;232m─────────────────────────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────[0m[38;5;232m┬[0m[38;5;232m──────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145m#[0m [38;5;232m│[0m [38;5;145mslice[0m                   [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m [38;5;145mtask id[0m                 [38;5;232m│[0m [38;5;145msurface[0m                 [38;5;232m│[0m [38;5;145mmode[0m [38;5;232m│[0m [38;5;145mgate[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mo[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145ml[0m    [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mu[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mn[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145md[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145m#9377's non-vacuity[0m     [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mpds-w45-grant-door-[0m     [38;5;232m│[0m [38;5;145mapi/test/…/pds_w44_gran[0m [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mcd api &&[0m               [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mstops being a tautology[0m [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mnonvacuity[0m              [38;5;232m│[0m [38;5;145mt_door_test.exs ONLY[0m    [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mCC=/usr/bin/clang mix[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mover its own literal[0m    [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mtest[0m                    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mtest/barkpark_web/live/[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mstudio/pds_w44_grant_do[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mor_test.exs[0m             [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mLeg A reads the[0m         [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mpds-w45-lega-argument-[0m  [38;5;232m│[0m [38;5;145mscripts/pds-door-[0m       [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mbash scripts/pds-door-[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mARGUMENT LIST; the[0m      [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mlist[0m                    [38;5;232m│[0m [38;5;145mcensus.sh (awk +[0m        [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcensus.sh --selftest ; [0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145menumerator stops dying[0m  [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145minstruments + selftest)[0m [38;5;232m│[0m      [38;5;232m│[0m [38;5;145m--check ; shellcheck -S[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145msilently[0m                [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145merror ; mix test[0m        [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mpds_door_census_test.ex[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145ms[0m                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3[0m [38;5;232m│[0m [38;5;145mPROVEN-BACKED as a[0m      [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mpds-w44-judgment-[0m       [38;5;232m│[0m [38;5;145mpds-elixir-receipt-[0m     [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145melixir scripts/pds-[0m     [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145munion, never an[0m         [38;5;232m│[0m   [38;5;232m│[0m [38;5;145mcoverage-ladder[0m         [38;5;232m│[0m [38;5;145mcensus.exs +[0m            [38;5;232m│[0m      [38;5;232m│[0m [38;5;145melixir-receipt-[0m         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145maddition — and the '?'[0m  [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mdocs/decisions/[0m         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcensus.exs ; --selftest[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mprose stops[0m             [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145m; bash scripts/check-[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145moverclaiming[0m            [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mdoc-budgets.sh[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m4[0m [38;5;232m│[0m [38;5;145mThe sweep's fail-open[0m   [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mpds-w45-sweep-failopen[0m  [38;5;232m│[0m [38;5;145mscripts/pds-charter-[0m    [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mbash scripts/pds-[0m       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mcloses; its selftest[0m    [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mledger-sweep.sh[0m         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcharter-ledger-sweep.sh [0m[38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mstops being the[0m         [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145m--selftest[0m              [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mcorpus's hostage[0m        [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m5[0m [38;5;232m│[0m [38;5;145mA criterion names the[0m   [38;5;232m│[0m [38;5;145m1[0m [38;5;232m│[0m [38;5;145mpds-w45-criterion-venue[0m [38;5;232m│[0m [38;5;145m.claude/workflows/bp-[0m   [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mnode --check[0m            [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mCLAIM, not the[0m          [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mepic-cycle.workflow.js[0m  [38;5;232m│[0m      [38;5;232m│[0m [38;5;145m.claude/workflows/bp-[0m   [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mcontainer[0m               [38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mepic-cycle.workflow.js[0m  [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m6[0m [38;5;232m│[0m [38;5;145mThe ledger stops lying[0m  [38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m [38;5;145mpds-w45-census-ledger-[0m  [38;5;232m│[0m [38;5;145mscripts/pds-door-[0m       [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mbash scripts/pds-door-[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mby silence: orphan,[0m     [38;5;232m│[0m [38;5;145m([0m [38;5;232m│[0m [38;5;145mintegrity[0m               [38;5;232m│[0m [38;5;145mcensus.sh (cond + rot[0m   [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcensus.sh --selftest ; [0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mretire, dupe, THROUGH[0m   [38;5;232m│[0m [38;5;145ma[0m [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mcheck + selftest)[0m       [38;5;232m│[0m      [38;5;232m│[0m [38;5;145m--check ; shellcheck -S[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mshape, evidenced[0m        [38;5;232m│[0m [38;5;145mf[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145merror ; mix test[0m        [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mUNMEASURED[0m              [38;5;232m│[0m [38;5;145mt[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mpds_door_census_test.ex[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145ms[0m                       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m2[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m)[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m7[0m [38;5;232m│[0m [38;5;145mThe price column learns[0m [38;5;232m│[0m [38;5;145m3[0m [38;5;232m│[0m [38;5;145mpds-w45-price-[0m          [38;5;232m│[0m [38;5;145mscripts/pds-door-[0m       [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mbash scripts/pds-door-[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mto expire: content key,[0m [38;5;232m│[0m [38;5;145m([0m [38;5;232m│[0m [38;5;145mprovenance[0m              [38;5;232m│[0m [38;5;145mcensus.sh (key + verb)[0m  [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcensus.sh --check ; --[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mPRICE-STALE, --measure[0m  [38;5;232m│[0m [38;5;145ma[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mselftest ; --measure ;[0m  [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mf[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mmix test[0m                [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mt[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mpds_door_census_test.ex[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145ms[0m                       [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m6[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m)[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m8[0m [38;5;232m│[0m [38;5;145mThe hetzner offline arm[0m [38;5;232m│[0m [38;5;145m4[0m [38;5;232m│[0m [38;5;145mpds-w44-hetzner-[0m        [38;5;232m│[0m [38;5;145mrider + escape-check x2[0m [38;5;232m│[0m [38;5;145mopus[0m [38;5;232m│[0m [38;5;145mbash scripts/elixir-[0m    [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mbecomes door 5 of 20 —[0m  [38;5;232m│[0m [38;5;145m([0m [38;5;232m│[0m [38;5;145moffline-door[0m            [38;5;232m│[0m [38;5;145m+ census ledger x2[0m      [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mpath-escape-check.sh --[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m [38;5;145mFIVE edits, THREE files[0m [38;5;232m│[0m [38;5;145ma[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mselftest ; --match test[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mf[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145m; pds-door-census.sh --[0m [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mt[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m [38;5;145mcheck ; mix test[0m        [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145me[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145mr[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m6[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m,[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m7[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m│[0m   [38;5;232m│[0m                         [38;5;232m│[0m [38;5;145m)[0m [38;5;232m│[0m                         [38;5;232m│[0m                         [38;5;232m│[0m      [38;5;232m│[0m                         [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m───[0m[38;5;232m┴[0m[38;5;232m─────────────────────────[0m[38;5;232m┴[0m[38;5;232m───[0m[38;5;232m┴[0m[38;5;232m─────────────────────────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────[0m[38;5;232m┴[0m[38;5;232m──────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[1;38;5;145mHIGH-FLIP-RISK, declared. [0mSlice 1 — whether a Code.compile_string substitution proves what a tautology did not, on a    
+LIVE authorization door, and whether the repair stays out of api/lib and therefore out of Console's fence. Slice 2 —    
+whether the argument-list predicate still admits a fraudulent THROUGH, and whether it now DECLINES an honest door; the  
+fix must be proven in BOTH directions and the Port.open arm is the second-direction oracle. Slice 6 — whether the retire
+shape is a bypass, and whether the orphan check has a false-positive mode. All three warrant a genuinely INDEPENDENT    
+second reviewer before merge; this workflow spawns one reviewer, so that dispatch is the lead's manual step.            
+                                                                                                                        
+[1;38;5;145mROUNDS ARE LAW. [0mSlices 6, 7 and 8 all edit scripts/pds-door-census.sh and are strictly sequenced behind slice 2 and each
+other. They do NOT build this run; the lead dispatches each after its dependency MERGES. A round-1 slice whose          
+dependency is unmerged burns a builder to produce a BLOCKED report.                                                     
+                                                                                                                        
+[1;38;5;145mFABLE WAS UNAVAILABLE. [0mEvery slice is built at opus@medium, including three (2, 6, 7) that are genuinely hard on the    
+difficulty axis and would otherwise have gone to fable. That is a recorded constraint, not a judgment that these slices 
+are routine.                                                                                                            
+                                                                                                                        
+[1;38;5;78mBACKLOG FILED — the future, not just the present[0m                                                                        
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m───────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m──────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mtask id[0m                                   [38;5;232m│[0m [38;5;145mwhat[0m                                                          [38;5;232m│[0m [38;5;145mpriority[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-bl-sweep-adjudication-frozen-blob[0m [38;5;232m│[0m [38;5;145mAdjudicate the sweep's 59 arrivals against a FROZEN BLOB SHA,[0m [38;5;232m│[0m [38;5;145m1[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mnever a count. 13 of them are a LENS repair, not judgment;[0m    [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mbucket 'reflow' is empty.[0m                                     [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-bl-grant-door-untested-arms[0m       [38;5;232m│[0m [38;5;145mThree untested arms in the merged grant door (grant_graded?'s[0m [38;5;232m│[0m [38;5;145m1[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mOR, write_target_scope's fail-closed, doc_field totality)[0m     [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mplus a denial flash with TWO producers that cannot say which[0m  [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mdoor refused.[0m                                                 [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-bl-ledger-census-lazy-urllib[0m      [38;5;232m│[0m [38;5;145mThe 144-check harness costs 144 interpreter boots, not 144[0m    [38;5;232m│[0m [38;5;145m2[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mchecks. Lazy urllib is 2 lines for -29% CPU, measured. Refuse[0m [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mthe cheap-arm/expensive-arm split.[0m                            [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-bl-scratch-target-class-refuted[0m   [38;5;232m│[0m [38;5;145mIts hermeticity refusal is REFUTED by run, and the remaining[0m  [38;5;232m│[0m [38;5;145m2[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mPRICE clause has no predicate — the census has no numeric[0m     [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mthreshold anywhere.[0m                                           [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-bl-receipt-census-self-claims[0m     [38;5;232m│[0m [38;5;145mThe census misstates its own gating on merged code, and hand-[0m [38;5;232m│[0m [38;5;145m2[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mtypes two numbers inside the very @blind_spot list D633 built[0m [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mto stop that.[0m                                                 [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-bl-foreign-runner-first-door[0m      [38;5;232m│[0m [38;5;145mNo pds door has ever run on a foreign CI runner. D648 already[0m [38;5;232m│[0m [38;5;145m2[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145mdirects that CI overwrite the local figure; nothing ever has.[0m [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w44-lv-verdict-unresolved-spec-arm[0m    [38;5;232m│[0m [38;5;145mSUPERSEDED by PDS-D661 and demoted to priority 4 — left open[0m  [38;5;232m│[0m [38;5;145m4[0m        [38;5;232m│[0m
+[38;5;232m│[0m                                           [38;5;232m│[0m [38;5;145monly as a tripwire for the day declined_live stops being 0.[0m   [38;5;232m│[0m          [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m───────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m──────────[0m[38;5;232m┘[0m
+                                                                                                                        
+[38;5;69m▌[0m A note on what this wave refused to do. Rival A — 'pay the debts, period' — would have shipped two of its own three   
+[38;5;69m▌[0m slices into an instrument they silently corrupt: hetzner-offline manufactures the orphaned ENVIRONMENT row, and the   
+[38;5;69m▌[0m sweep adjudication makes CONTENT-RED outlive its red. That is why the ledger-integrity slice is a PREREQUISITE for    
+[38;5;69m▌[0m the wish's own item 2 and not a tangent. And the sharpest attack on the winner — that 'measured versus cached-with-   
+[38;5;69m▌[0m provenance' is philosophy, not a defect — was answered not by argument but by a run: the shipped census prices a      
+[38;5;69m▌[0m gutted two-line harness at 4.45 s and 76 checks, and its 40.33 s row is wrong by 40% today.                           
+                                                                                                                        
+[1;38;5;78mDEBRIEF — what shipped, what it cost, and the grade[0m                                                                     
+                                                                                                                        
+Reviewed 2026-08-03 by the wave reviewer, in an isolated worktree, with every gate re-run on the FINAL branch rather    
+than read from a builder report. Five of five round-1 slices are green and PUSHED with PRs open; three round-2+ slices  
+were deferred by design and their tasks say so. Grade: A.                                                               
+                                                                                                                        
+WHAT SHIPPED — per slice, with the branch the lead should integrate. Three branches carry a reviewer commit on top of   
+the builder commit; two are the builder branch unchanged, because the diff was correct as built and there was nothing   
+honest to add.                                                                                                          
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m──────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145mtask[0m                     [38;5;232m│[0m [38;5;145mfinal branch[0m              [38;5;232m│[0m [38;5;145mPR[0m    [38;5;232m│[0m [38;5;145mgate re-run on the final[0m  [38;5;232m│[0m [38;5;145mverdict[0m                   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mstate[0m                     [38;5;232m│[0m                           [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-grant-door-[0m      [38;5;232m│[0m [38;5;145mloop-epic/9377-s-non-[0m     [38;5;232m│[0m [38;5;145m#9433[0m [38;5;232m│[0m [38;5;145mmix test[0m                  [38;5;232m│[0m [38;5;145mThe tautology is gone and[0m [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mnonvacuity[0m               [38;5;232m│[0m [38;5;145mvacuity-stops-being-a-[0m    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mpds_w44_grant_door_test.e[0m [38;5;232m│[0m [38;5;145mreplaced by a real[0m        [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mtautolo-0-r[0m               [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mxs -> 5 tests, 0[0m          [38;5;232m│[0m [38;5;145msubstitution on the[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mfailures; mix format --[0m   [38;5;232m│[0m [38;5;145mSHIPPED module. REVIEWER[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mcheck-formatted rc=0[0m      [38;5;232m│[0m [38;5;145mFIX (c07e9fcb2): the[0m      [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mguard was mutant !=[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145moriginal, which proves[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145monly that SOMETHING was[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mreplaced; global: false[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mtakes the FIRST match, so[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mit now pins the[0m           [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mexpression to EXACTLY ONE[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145moccurrence. Proven by[0m     [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mmutation: an absent[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mexpression reds AT the[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mnew guard.[0m                [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-lega-argument-[0m   [38;5;232m│[0m [38;5;145mloop-epic/leg-a-reads-[0m    [38;5;232m│[0m [38;5;145m#9434[0m [38;5;232m│[0m [38;5;145mselftest 14 PASS / 0[0m      [38;5;232m│[0m [38;5;145mMembership replaces[0m       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mlist[0m                     [38;5;232m│[0m [38;5;145mthe-argument-list-not-[0m    [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mFAIL; --check rc=0 and[0m    [38;5;232m│[0m [38;5;145mproximity in both[0m         [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mthe-ne-1-r[0m                [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mBYTE-IDENTICAL to the [0m    [38;5;232m│[0m [38;5;145mdirections, and the[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mpre-review baseline;[0m      [38;5;232m│[0m [38;5;145menumerator stops dying[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mshellcheck -S error rc=0;[0m [38;5;232m│[0m [38;5;145msilently. REVIEWER FIX[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mmix test[0m                  [38;5;232m│[0m [38;5;145m(08a5b74ee): FRAUD D —[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mpds_door_census_test.exs[0m  [38;5;232m│[0m [38;5;145mthe span balanced the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m8 tests, 0 failures[0m       [38;5;232m│[0m [38;5;145mparens but returned the[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mWHOLE closing line, so a[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mtoken named AFTER the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mclosing paren still read[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mas membership. Now cut to[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mthe paren column; the arm[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mreds LEGA-BOUND-EXEC on[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mrevert.[0m                   [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w44-judgment-[0m        [38;5;232m│[0m [38;5;145mloop-epic/proven-backed-[0m  [38;5;232m│[0m [38;5;145m#9438[0m [38;5;232m│[0m [38;5;145mcensus rc=0; --selftest[0m   [38;5;232m│[0m [38;5;145mThe strongest slice of[0m    [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mcoverage-ladder[0m          [38;5;232m│[0m [38;5;145mas-a-union-never-an-[0m      [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mrc=0, 34 cases / 23[0m       [38;5;232m│[0m [38;5;145mthe wave. The number 23[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m [38;5;145madditi-2 (unchanged)[0m      [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mmutants incl. PASS [0m       [38;5;232m│[0m [38;5;145mis worthless as evidence[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mLADDER-UNION-NOT-SUM;[0m     [38;5;232m│[0m [38;5;145m(OVERLAP is 0), the[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mcheck-doc-budgets PASS[0m    [38;5;232m│[0m [38;5;145mbuilder knew it, and[0m      [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mshipped the only thing[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mthat can discriminate — a[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mcount-free relation[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mtoken, verified red in[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mthe other direction. The[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mdoc figures were re-[0m      [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mderived from MY run, not[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mthe report: JUDGED 67,[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mEXCLUDED 178, 74/252 =[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145m29.4%, all match.[0m         [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-sweep-failopen[0m   [38;5;232m│[0m [38;5;145mloop-epic/the-charter-[0m    [38;5;232m│[0m [38;5;145m#9441[0m [38;5;232m│[0m [38;5;145msweep --selftest rc=0[0m     [38;5;232m│[0m [38;5;145mThe fail-open is closed[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m [38;5;145msweep-s-fail-open-closes-[0m [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m"SELFTEST OK: 3 of 3";[0m    [38;5;232m│[0m [38;5;145mand I re-derived it[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mand-3-r[0m                   [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mdoor census --check rc=0, [0m[38;5;232m│[0m [38;5;145mINDEPENDENTLY: an [0m        [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145m--selftest 8/8,[0m           [38;5;232m│[0m [38;5;145mexpired-token shim over a[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m [38;5;145mshellcheck rc=0[0m           [38;5;232m│[0m [38;5;145mpinned ledger snapshot[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mnow gives rc=2 UNCHECKED[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mnaming the slug, where[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mbefore it was byte-[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145midentical to a healthy[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mrun. REVIEWER FIX[0m         [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145m(6c42cf3e6): the census[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mrow that describes this[0m   [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145minstrument co-lands,[0m      [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mbecause the sweep fix[0m     [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145malone makes that row a[0m    [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mstale receipt.[0m            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145mpds-w45-criterion-venue[0m  [38;5;232m│[0m [38;5;145mloop-epic/a-criterion-[0m    [38;5;232m│[0m [38;5;145m#9442[0m [38;5;232m│[0m [38;5;145mnode --check rc=0[0m         [38;5;232m│[0m [38;5;145mOne additive bullet, [0m     [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mnames-the-claim-not-the-[0m  [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mepic-neutral, purely[0m      [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m [38;5;145mcont-4 (unchanged)[0m        [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145madditive: full-file diff[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mis one hunk 137a138, and[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mthe merge-gated row[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mshifted 141 -> 142 byte-[0m  [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145midentical (cmp: 189[0m       [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mbytes, re-derived by me).[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mCheapest slice in the[0m     [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mwave and it retroactively[0m [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145munblocks unstamped[0m        [38;5;232m│[0m
+[38;5;232m│[0m                          [38;5;232m│[0m                           [38;5;232m│[0m       [38;5;232m│[0m                           [38;5;232m│[0m [38;5;145mcriteria on merged work.[0m  [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m──────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+WHAT STALLED — nothing. Three slices were deferred by the sequenced-rounds law, each on a hard dependency that has to   
+merge first: pds-w45-census-ledger-integrity (round 2, after #9434 — same file, ~180 lines move), pds-w45-price-        
+provenance (round 3, after round 2 — same file, built on top), pds-w44-hetzner-offline-door (round 4, after both — it   
+needs the retire shape and --measure those rounds create). Their tasks are open, unclaimed and 0/N met, which is the    
+honest state, not a stall.                                                                                              
+                                                                                                                        
+[1;38;5;78mTHE TWO FINDINGS REVIEW ADDED, AND THE RULES THEY BUY[0m                                                                   
+                                                                                                                        
+PDS-D664 — A REPAIRED PREDICATE CARRIES ITS OLD DEFECT FOR EXACTLY ONE LINE. arg_span replaced the three-line proximity 
+window with a real paren-balance walk, and the three fraud shapes flipped as designed. It still returned the whole      
+CLOSING LINE, so "System.cmd(...) ; File.regular?(@fraud)" — a token named after the closing paren, on the call's own   
+line — still read as argument-list membership: bound, never executed, THROUGH with a price. One line of the old window  
+living inside the new predicate, past a 13-arm green selftest. THE RULE: when you replace a window with a boundary, the 
+boundary is where the window's last residue hides — test the token that sits just OUTSIDE the new edge, not only the    
+ones that sat inside the old one.                                                                                       
+                                                                                                                        
+PDS-D665 — BOTH LEGS OR NEITHER APPLIES TO EVIDENCE STRINGS, NOT ONLY TO DECLARED PATH SETS. The wish states the both-  
+legs law for the hetzner slice's ELIXIR_TEST_ONLY_PATHS entry. It bit somewhere nobody named: the sweep's own fix makes 
+--selftest rc=0, which turns the door census row whose evidence quotes "--selftest rc=1" into a stale receipt the moment
+it merges — on the instrument whose entire subject is receipts that lie. The builder was fenced out of the census and   
+correctly recorded the correction in two durable venues rather than reaching across the fence. Review co-landed the one-
+line row edit on the SAME branch: a behaviour and the receipt describing it merge together or not at all. A fence that  
+splits those two has to be closed by whoever holds both, and the fix belongs on the branch that causes the drift.       
+                                                                                                                        
+[1;38;5;78mLEDGER AUDIT — three fixes, and one defect the audit itself surfaced[0m                                                    
+                                                                                                                        
+Every slice task was claimed before work, stamped mid-claim with real evidence rather than batched at the end, and left 
+in_progress with only the merge-gated row open — with one exception, now fixed. Tasks outside this wave were not        
+touched.                                                                                                                
+                                                                                                                        
+[38;5;59m• [0mpds-w45-criterion-venue sat at lifecycle_status=open while HOLDING a live claim with 7 criteria stamped — a worked,   
+  claimed row reading as unstarted on every board. Re-claimed as the reviewer (epoch 9) so the lifecycle matches        
+  reality: in_progress, 8/9 met.                                                                                        
+[38;5;59m• [0mpds-w45-criterion-venue[4] ("The lead-owned merge-gated row ... is EXPLICITLY EXEMPTED and is left byte-identical")   
+  was PROVEN but UNSTAMPED: bp task stamp refuses any --criterion-text containing the substring "merge-gated", so a row 
+  that DESCRIBES the gated row is refused as though it WERE one. Re-derived independently (cmp on the two lines:        
+  IDENTICAL, 189 bytes; full-file diff one hunk 137a138) and stamped with the override, with that provenance in the     
+  evidence.                                                                                                             
+[38;5;59m• [0mpds-w45-census-row-check-evidence — filed by the sweep builder as follow-up work — was DONE by the reviewer commit on 
+  the sweep branch. Claimed, its single criterion stamped with the new row verbatim plus four runs, and left            
+  in_progress: it closes when #9441 merges.                                                                             
+[38;5;59m• [0mThe stamp-guard defect is NOT newly filed: it duplicates pds-w27-bl-stamp-guard-substring-false-positive (wave 27,    
+  still open, root-caused to internal/cli/tasks_stamp_cmd.go). A new task was created, the server flagged the duplicate,
+  and it was DELETED rather than left to double-count the backlog. The recurrence is recorded here instead.             
+[38;5;59m• [0mThree follow-ups filed BY THE BUILDERS are published children of the epic and honest: pds-w45-argspan-sigil-and-      
+  silent-bound (sigil-blind blanking, the silent 40-line bound), task-ac55ff2388510d67 (the ladder's :stale arm is a NO-
+  OP and nothing proves it), pds-w45-census-row-check-evidence (above).                                                 
+                                                                                                                        
+[1;38;5;78mGRADE — A[0m                                                                                                               
+                                                                                                                        
+WHAT EARNS IT. The wave paid all three items the wish named and paid them in the order the dependencies allow. The      
+second-review debt on #9377 is now discharged BY THE MERGING ARTIFACT rather than by a reviewer's hand mutation — that  
+was the live gap on merged code, and it is the difference between "someone proved it once" and "the repo proves it every
+run". The ladder slice is the wave's best work: it recognised that its own headline number is evidence of nothing, said 
+so in the printed output, and shipped the only discriminator that exists as a selftest case verified in both directions.
+The sweep slice reproduced its fail-open with the CORRECT oracle after the criterion named the wrong one, and closed it 
+with the discriminator that was already on the wire. Four of five slices refuted something in their own dispatch by run 
+— the eleventh, twelfth and thirteenth consecutive refutations — and each wrote the correction into the artifact instead
+of quietly satisfying a figure that does not exist.                                                                     
+                                                                                                                        
+WHAT KEEPS IT OFF A+. Two of the five needed a reviewer fix to a predicate that had just been tightened, and in both    
+cases the defect was one step past where the builder stopped looking: the first occurrence rather than the only         
+occurrence, the closing line rather than the closing paren. Both slices had green, honest, non-vacuous selftests through
+the defect. The wave also left three real UNPROVEN arms shipping green by print rather than by mutation — the ladder's  
+:stale filter, arg_span's "every call opening on the line" clause, and its 40-line bound — each filed, none closed, and 
+each is exactly the shape this epic exists to refuse. And every price and timing in this wave is LOCAL: no PDS door has 
+yet run on a foreign runner, so the price column remains an instrument calibrated against one host.                     
+                                                                                                                        
+NOT A CRITICISM, ON THE RECORD: the wish's item 4 (the unbuilt "?" variable-bound decline) was RULED OUT with a reason, 
+not quietly dropped — PDS-D661 — and the ladder slice printed declined_live=0 as a BOUND on the sentence instead,       
+derived THROUGH lvs_joinable?/1 so the number cannot drift from the predicate it describes. Ruling it out was the right 
+half of "finish it or rule it out".                                                                                     
+                                                                                                                        
+[1;38;5;78mWHAT THE NEXT WAVE TAKES[0m                                                                                                
+                                                                                                                        
+MERGE ORDER FIRST. The five round-1 PRs are file-disjoint except that #9434 and #9441 both touch scripts/pds-door-      
+census.sh — #9434 in the classifier and the selftest, #9441 at line 123 of PDS_DOOR_DISPOSITIONS only — so either order 
+merges without a conflict. Then dispatch the deferred slices STRICTLY in dependency order, re-deriving every anchor at  
+each merged base, because each one moves the file the next one reads.                                                   
+                                                                                                                        
+[38;5;232m┌[0m[38;5;232m───────[0m[38;5;232m┬[0m[38;5;232m─────────────────────────────────[0m[38;5;232m┬[0m[38;5;232m────────────────────[0m[38;5;232m┬[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┐[0m
+[38;5;232m│[0m [38;5;145morder[0m [38;5;232m│[0m [38;5;145mslice[0m                           [38;5;232m│[0m [38;5;145mdispatches after[0m   [38;5;232m│[0m [38;5;145mwhy the order is not negotiable[0m                       [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m1[0m     [38;5;232m│[0m [38;5;145mpds-w45-census-ledger-integrity[0m [38;5;232m│[0m [38;5;145m#9434 merges[0m       [38;5;232m│[0m [38;5;145mSame file; the leg-A repair moves ~180 lines and[0m      [38;5;232m│[0m
+[38;5;232m│[0m       [38;5;232m│[0m                                 [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mevery anchor in its brief is a line number.[0m           [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m2[0m     [38;5;232m│[0m [38;5;145mpds-w45-price-provenance[0m        [38;5;232m│[0m [38;5;145mround 2 merges[0m     [38;5;232m│[0m [38;5;145mBuilt on top of the retire shape and the orphan[0m       [38;5;232m│[0m
+[38;5;232m│[0m       [38;5;232m│[0m                                 [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mcheck; the elided-key design assumes them.[0m            [38;5;232m│[0m
+[38;5;232m│[0m [38;5;145m3[0m     [38;5;232m│[0m [38;5;145mpds-w44-hetzner-offline-door[0m    [38;5;232m│[0m [38;5;145mrounds 2 AND 3[0m     [38;5;232m│[0m [38;5;145mIt needs --measure to add its price row and the[0m       [38;5;232m│[0m
+[38;5;232m│[0m       [38;5;232m│[0m                                 [38;5;232m│[0m [38;5;145mmerge[0m              [38;5;232m│[0m [38;5;145mretire shape to dispose the orphaned ENVIRONMENT row.[0m [38;5;232m│[0m
+[38;5;232m│[0m       [38;5;232m│[0m                                 [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mBOTH LEGS OR NEITHER: the instrument AND its[0m          [38;5;232m│[0m
+[38;5;232m│[0m       [38;5;232m│[0m                                 [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mELIXIR_TEST_ONLY_PATHS entry, or it is #9290/#9292 a[0m  [38;5;232m│[0m
+[38;5;232m│[0m       [38;5;232m│[0m                                 [38;5;232m│[0m                    [38;5;232m│[0m [38;5;145mthird time.[0m                                           [38;5;232m│[0m
+[38;5;232m└[0m[38;5;232m───────[0m[38;5;232m┴[0m[38;5;232m─────────────────────────────────[0m[38;5;232m┴[0m[38;5;232m────────────────────[0m[38;5;232m┴[0m[38;5;232m───────────────────────────────────────────────────────[0m[38;5;232m┘[0m
+                                                                                                                        
+THEN WAVE 46'S OWN WORK, in the order the census's printed output ranks it: adjudicate the sweep's 59 unresolved-claim  
+arrivals (the vocabulary is mined from the charter and THIS wave's charter PR moved it again, which is precisely why it 
+could not be done here); price the receipt census's UNMEASURED-LOCAL expensive arm; and either justify or tier pds-     
+ledger-census_test.sh at 40.33 s CPU on a 2-4 vCPU runner rather than shrugging at it. One standing debt outranks all of
+them for credibility: NO pds door has ever been measured on a foreign runner, so every figure in the price column is a  
+loaded local mac.                                                                                                       
+                                                                                                                        
+[38;5;69m▌[0m THE SECOND-REVIEWER DEBT, NAMED RATHER THAN ASSUMED DISCHARGED. #9433 is a HIGH-FLIP-RISK slice on a live             
+[38;5;69m▌[0m grant/tenancy door, and this workflow spawns exactly ONE reviewer — so the independent second pass is a MANUAL LEAD   
+[38;5;69m▌[0m STEP before merge. I re-derived the substitution from source and mutation-proved my own guard, but a genuinely        
+[38;5;69m▌[0m independent pair of eyes on the authorization judgment is still owed. Every PR here also carries an open MERGE-GATED  
+[38;5;69m▌[0m criterion that is the lead's to close on merge: #9433[8], #9434[10], #9438[14], #9441[9], #9442[8].                   
+
+Related
+  3.80  PDS wave 30 - Finish the round, and pay the first L1  (paper)
+        tags: honest-gates (92·90), measurement (88·75), pds (95·95), wave-strategy (85·70)
+  3.25  PDS wave 46 - a price that cannot be compared is not a price  (paper)
+        tags: honest-gates (92·93), measurement (88·90), pds (95·95)
+  3.25  PDS wave 47 - an open row is a claim about the code  (paper)
+        tags: honest-gates (92·92), measurement (88·90), pds (95·95)
+  3.20  PDS wave 40 - follow the value, and face the three hundred  (paper)
+        tags: honest-gates (92·90), measurement (88·85), pds (95·95)
+  3.18  PDS wave 26 - The verbs that still lie, and the writer that lies about writing  (paper)
+        tags: honest-gates (92·88), pds (95·96), wave-strategy (85·93)

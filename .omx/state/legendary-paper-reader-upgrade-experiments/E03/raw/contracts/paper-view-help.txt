@@ -1,0 +1,19 @@
+usage: bp paper view <slug> [flags]
+  render a paper's block tree to ANSI terminal output
+
+flags:
+  --theme dark|light|auto    palette (default auto → detect background)
+  --width <N>                target columns (default: stdout TTY width, else 80)
+  --profile auto|none|ansi16|ansi256|truecolor
+                             color profile (default auto → ANSI256 on a TTY,
+                             NoColor when piped)
+  --perspective published|drafts|raw
+                             read view (default published; papers are public)
+  -o json                    emit the raw paper document (default: rendered ANSI)
+  -s, --server <name|url>    target a saved server or URL
+  --epic-id <id>              release gate epic (requires all release pins)
+  --wave-id <id>              release gate Wave key
+  --release-gate-id <uuid>    immutable open admission
+  --revision-id <uuid>        immutable Wave revision (wire: wave_revision)
+  --candidate-id <uuid>       exact immutable Paper candidate
+  --paper-role campaign|successor

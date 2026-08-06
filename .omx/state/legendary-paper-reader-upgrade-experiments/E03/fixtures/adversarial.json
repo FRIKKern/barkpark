@@ -1,0 +1,84 @@
+{
+  "fixtures": [
+    {
+      "expected": "typed not_found with request id",
+      "id": "missing-paper",
+      "kind": "missing",
+      "slug": "e03-definitely-missing-paper"
+    },
+    {
+      "blocks": [
+        {
+          "level": "NaN",
+          "type": "heading"
+        },
+        {
+          "header": "not-array",
+          "rows": [
+            null
+          ],
+          "type": "table"
+        }
+      ],
+      "expected": "explicit supported error",
+      "id": "malformed-source",
+      "kind": "malformed"
+    },
+    {
+      "expected": "no silent truncation",
+      "id": "long-token",
+      "kind": "long_token",
+      "token": "E03_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "widths": [
+        20,
+        40,
+        80,
+        120
+      ]
+    },
+    {
+      "document": {
+        "_type": "paper",
+        "blocks": []
+      },
+      "expected": "explicit missing slug/revision behavior",
+      "id": "missing-identity",
+      "kind": "missing_fields"
+    },
+    {
+      "expected": "typed validation error",
+      "id": "bad-history-uuid",
+      "kind": "history",
+      "revision": "not-a-uuid"
+    },
+    {
+      "accepts": [
+        "application/json",
+        "text/html",
+        "text/plain"
+      ],
+      "expected": "status and envelope remain intentional",
+      "id": "error-html-vs-json",
+      "kind": "negotiation"
+    },
+    {
+      "expected": "bounded deterministic forwarding",
+      "id": "limit-zero-negative-huge",
+      "kind": "pagination",
+      "limits": [
+        0,
+        -1,
+        1,
+        999999
+      ]
+    },
+    {
+      "expected": "distinguish text from navigable linkage",
+      "id": "task-token-only",
+      "kind": "task_link",
+      "text": "task-deadbeef without structured mark"
+    }
+  ],
+  "frozen_before_round_2": true,
+  "schema_version": "legendary-paper-e03-adversarial/v1"
+}

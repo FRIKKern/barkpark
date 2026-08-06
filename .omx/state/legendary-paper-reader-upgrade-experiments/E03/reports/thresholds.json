@@ -1,0 +1,21 @@
+{
+  "declared_before_round_2": true,
+  "hard_thresholds": {
+    "discovery": "Paper schema, capabilities, source negotiation, and errors are deterministic and documented",
+    "errors": "typed nonzero errors retain specific code and request id",
+    "headers": "113/113 authored headers retain structural role",
+    "hierarchy": "H1/H2/H3 remain non-color distinguishable",
+    "idempotence": "two verifier runs return identical artifact_set_sha256",
+    "identity": "slug, exact _rev, and history UUID roles are explicit and not conflated",
+    "limit": "requested limit 1 returns at most one history record",
+    "lists": "406/406 CCH29 nested-list words survive",
+    "marks": "388/388 mark records retain supported semantic distinction",
+    "navigation": "outline, bounded pager, Paper history, and task links observable",
+    "provenance": "ETag or equivalent immutable revision attestation is observable",
+    "surface_exercise": "32/32 width/profile cells plus machine API, history, schema, capabilities, negotiation, and typed-error probes",
+    "text": "100% heading/header/list/marked authored text survives or is explicitly quarantined",
+    "tones": "30/30 callouts retain a non-color semantic tone cue",
+    "width": "zero visible lines over requested 20/40/80/120 columns; long tokens degrade explicitly"
+  },
+  "schema_version": "legendary-paper-e03-thresholds/v1"
+}

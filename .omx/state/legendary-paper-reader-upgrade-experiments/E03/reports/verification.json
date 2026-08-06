@@ -1,0 +1,163 @@
+{
+  "schema_version": "legendary-paper-experiment-result/v1",
+  "assignment_id": "experiment-03",
+  "round": 1,
+  "candidate_ids": [],
+  "idempotency_key": "legendary-paper-reader-upgrade-experiment-03-baseline-v1",
+  "status": "completed",
+  "summary": "Frozen terminal, navigation, identity, discovery, error, and provenance baseline completed for four exact Paper revisions across 32 width/profile cells plus machine CLI/API and deployed-contract probes. The measurement assignment passed reproducibility, while the current readers and contracts fail multiple predeclared hard thresholds.",
+  "evidence": "repo://.omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/verification.json",
+  "evidence_revision": "342cdfc877a8a9309c17643ff8f9ff6be1c413cd",
+  "payload": {
+    "assignment_id": "experiment-03",
+    "round": 1,
+    "candidate_ids": [],
+    "input_hashes": {
+      "assignment_snapshot_digest": "afd6034cab31b9633efcbf9a7b16983a71c80461692cc9daaf968afe2613a9f8",
+      "inventory_digest": "3e480a9fcf44da65a07aa1fcad8e981911006568d23b89ad8891f26a5d96e69e",
+      "wave_revision": "a06716c4-2dd5-4bda-b9a9-a484b009abb2",
+      "fixture_CCH29_sha256": "2524c05d63ac96c31f31e4c8a54219be64d23e8356ec7acd27978c358509ec15",
+      "fixture_PDS45_sha256": "5894db69f3d3f9ddc0416bd5e5e6b50dc72c1d962efb56ac7fd863b1a8d1caa7",
+      "fixture_CCH28_sha256": "4519c9ac819e4c666c376bfbae11007d0e6c31765a692c99ccd2ad4188a57d0e",
+      "fixture_PDS44_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d"
+    },
+    "fixture_manifest_path": ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/hash-manifest.json",
+    "fixture_manifest_sha256": "59eed0447713caeb86caf13e9b9c3af7a388b1fd155195421acc91d0499ed351",
+    "artifact_set_sha256": "d278f4d1255793d2456460e5575042be00b707e407c30c4ec81ea1f09d2a6fe1",
+    "commands_or_probes": [
+      "bp paper view --profile ansi256 --width {20,40,80,120} for four exact revision pins",
+      "bp paper view --profile none --width {20,40,80,120} for four exact revision pins",
+      "bp doc get for four exact revision pins",
+      "bp doc history --limit 1 for four Papers",
+      "bp schema get paper",
+      "bp paper view missing-paper typed-error control",
+      "GET /v1/capabilities",
+      "GET /papers/{slug}/source with Accept application/json, text/html, and text/plain",
+      "missing Paper public/source negotiation controls",
+      "python3 .omx/state/legendary-paper-reader-upgrade-experiments/E03/scripts/verify.py"
+    ],
+    "surface_matrix": {
+      "render_cells": 32,
+      "expected_render_cells": 32,
+      "papers": 4,
+      "widths": [20, 40, 80, 120],
+      "profiles": ["ansi256", "none"],
+      "machine_cli_api_papers": 4,
+      "history_papers": 4,
+      "deployed_contract_cells": 17,
+      "controls": 10,
+      "known_bad_targets": 12,
+      "adversarial_fixtures": 8
+    },
+    "scores": {
+      "surface_exercise": "32/32 render cells plus all declared machine/history/schema/capability/negotiation/error probes",
+      "width_containment": "32/32 cells contained; 0 overflow cells and 0 overflow lines",
+      "heading_text_exact": "1116/1160 repeated render-cell comparisons (96.21%)",
+      "header_structural_carriers": "0/32 cells",
+      "tone_label_carriers": "0/32 cells",
+      "revision_carriers": "0/32 cells",
+      "history_limit_forwarding": "0/4 Papers",
+      "human_cli_tui_line_parity": "exact aggregate parity: 61573 lines on each surface",
+      "line_counts_by_width": {
+        "20": 72242,
+        "40": 28662,
+        "80": 13278,
+        "120": 8964
+      },
+      "max_lines_in_one_cell_by_width": {
+        "20": 13111,
+        "40": 5224,
+        "80": 2357,
+        "120": 1547
+      }
+    },
+    "threshold_results": {
+      "surface_exercise": "PASS",
+      "width": "PASS",
+      "idempotence": "PASS",
+      "errors": "PASS for machine CLI typed missing-Paper control",
+      "text": "FAIL",
+      "headers": "FAIL",
+      "hierarchy": "FAIL: no evidenced non-color H1/H2/H3 carrier",
+      "lists": "FAIL",
+      "marks": "FAIL",
+      "tones": "FAIL",
+      "navigation": "FAIL",
+      "limit": "FAIL",
+      "identity": "FAIL in human projections",
+      "provenance": "FAIL on deployed Paper source responses",
+      "discovery": "FAIL because deployed source content negotiation is inconsistent"
+    },
+    "observed_facts": [
+      "All 32 declared terminal cells were captured from the four exact revision pins; ANSI256 renders contained ANSI escapes and NoColor renders did not.",
+      "ANSI-stripped Unicode-codepoint width measurement found zero lines beyond the requested widths.",
+      "At width 20 the eight render cells expanded to 72242 total lines; the largest single cell was CCH28 at 13111 lines. Totals declined to 28662, 13278, and 8964 at widths 40, 80, and 120.",
+      "The two terminal surfaces had identical aggregate line counts, 61573 each; heading text matched in 558/580 repeated comparisons on each surface.",
+      "No render cell exposed a structural header carrier, explicit tone label, or pinned revision carrier.",
+      "Paper view help exposed width selection but no outline, pager, or history option.",
+      "Source marks contained zero structured task links; three textual task-like tokens were present.",
+      "A requested history limit of 1 returned 14, 10, 12, and 12 records for CCH29, PDS45, CCH28, and PDS44 respectively.",
+      "History identities were UUIDs and none equaled the current document _rev hash.",
+      "The missing-Paper CLI control exited 4 and retained both not_found and request_id text.",
+      "For all four deployed Paper source endpoints, Accept application/json and text/plain returned 406 while Accept text/html returned 200 with an application/json body.",
+      "No deployed Paper source response exposed an ETag. The capabilities endpoint returned 200 with ETag W/\"caps-67eb1a68b92f197b\" and a request-id header; Paper schema discovery returned 200.",
+      "Missing public/source HTTP probes with JSON or text Accept headers returned negotiation-level 406 responses with request IDs rather than an identity-level typed 404."
+    ],
+    "inferences": [
+      "Width containment does not compensate for severe vertical line expansion, absent navigation, or loss of semantic carriers.",
+      "A textual task token is not equivalent to a navigable task relationship.",
+      "Document _rev hashes and history UUIDs are distinct identity domains and should be labeled separately.",
+      "The deployed source endpoint's media-type behavior makes machine discovery fragile even though capabilities and schema discovery themselves succeed."
+    ],
+    "recommendations": [
+      "Treat this as the frozen pre-candidate baseline for later candidate comparisons; do not select a final format from E03 alone.",
+      "Require explicit non-color hierarchy/header/tone/revision carriers and structured task linkage in any candidate.",
+      "Require bounded paging/outline/history navigation and prove limit forwarding before a candidate can pass.",
+      "Normalize source content negotiation, typed missing-resource errors, ETag or equivalent immutable attestation, and request-id behavior across media types."
+    ],
+    "unresolved_unknowns": [
+      "Unicode codepoint counts are a conservative reproducible proxy, not a full wcwidth measurement for every terminal and glyph.",
+      "The deployed-contract snapshot is time-bound and may change independently of the frozen local artifacts.",
+      "Studio and real-mail-reader behavior are outside E03 and are neither passed nor failed here."
+    ],
+    "evidence_paths": [
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/baseline.json",
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/render-matrix.json",
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/history-provenance.json",
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/thresholds.json",
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/failure-taxonomy.json",
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/timing.json",
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/hash-manifest.json",
+      ".omx/state/legendary-paper-reader-upgrade-experiments/E03/raw"
+    ],
+    "validation": {
+      "status": "PASS",
+      "check_count_per_run": 253,
+      "verifier_runs": [
+        {
+          "run": 1,
+          "status": "PASS",
+          "artifact_set_sha256": "d278f4d1255793d2456460e5575042be00b707e407c30c4ec81ea1f09d2a6fe1"
+        },
+        {
+          "run": 2,
+          "status": "PASS",
+          "artifact_set_sha256": "d278f4d1255793d2456460e5575042be00b707e407c30c4ec81ea1f09d2a6fe1"
+        }
+      ],
+      "independent_leader_replay": "PASS twice with 253 checks and the identical artifact-set SHA",
+      "stable_hashed_file_count": 76
+    },
+    "timing": {
+      "build_wall_seconds": 56.524017,
+      "probe_seconds": 44.237593,
+      "contract_seconds": 3.645173
+    },
+    "risks": [
+      "Transient deployed 5xx responses were retried with bounded attempts during capture; raw stable artifacts record only the decisive responses.",
+      "Aggregate repeated-cell semantic scores are diagnostic baselines and must not be mistaken for unique source-node denominators."
+    ],
+    "stop_condition": "Satisfied: terminal/navigation/identity/discovery/error/provenance baseline and stable verification are complete; no repair candidate was built.",
+    "verdict": "BASELINE_ESTABLISHED_CURRENT_TERMINAL_AND_CONTRACTS_FAIL_HARD_THRESHOLDS"
+  }
+}
