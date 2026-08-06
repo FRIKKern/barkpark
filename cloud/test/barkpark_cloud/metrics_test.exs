@@ -13,12 +13,23 @@ defmodule BarkparkCloud.MetricsTest do
     * service_health is the newest beat's check roll-up (reused from Telemetry)
     * non-health events are filtered out of the window
     * garbage / empty / nil-payload inputs never raise (the totality guarantee)
+    * `latest` carries the newest beat's scalars (db size + named top relations,
+      the swap PAIR, the BEAM footprint) with the same nil-not-zero discipline,
+      proven against a REAL captured beat
   """
   use ExUnit.Case, async: true
 
   alias BarkparkCloud.Metrics
+  alias BarkparkCloud.RealAgentBeats
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.AgentEvent
+
+  # The series key set is DEFINED by Metrics's @vitals; asserting it whole is the
+  # tripwire that a key added there is a deliberate contract change (the Go
+  # renderer's metricTopSpecs must gain it too or the number ships invisibly).
+  @series_keys [:beam_pss, :beam_swap, :cpu, :disk, :load, :mem, :swap]
+
+  defp empty_series, do: Map.new(@series_keys, &{&1, []})
 
   @now ~U[2026-07-09 12:00:00.000000Z]
 
@@ -57,10 +68,19 @@ defmodule BarkparkCloud.MetricsTest do
       assert env.collected_at == "2026-07-09T12:00:00.000000Z"
       assert env.instance == %{id: "bp-123", host: "203.0.113.9", provider: "azure"}
       assert env.points == 30
-      assert Map.keys(env.series) |> Enum.sort() == [:cpu, :disk, :load, :mem]
-      assert env.series == %{cpu: [], mem: [], disk: [], load: []}
+      assert Map.keys(env.series) |> Enum.sort() == @series_keys
+      assert env.series == empty_series()
       assert env.beat == %{last_seen_at: nil, age_seconds: nil, status: "absent"}
       assert env.service_health == %{pass: 0, total: 0, failing: []}
+
+      # A never-phoned-home box still destructures `latest` — all-absent, never
+      # a zeroed database or a swap reading nobody took.
+      assert env.latest == %{
+               db_size: nil,
+               top_relations: nil,
+               swap: %{used_pct: nil, total_bytes: nil},
+               beam: %{pss_bytes: nil, swap_bytes: nil}
+             }
     end
 
     test "points echoes the requested (clamped) window size" do
@@ -113,6 +133,116 @@ defmodule BarkparkCloud.MetricsTest do
 
       ats = Enum.map(env.series.cpu, & &1.at)
       assert ats == Enum.sort(ats), "series must be ascending by timestamp"
+    end
+  end
+
+  describe "build/3 — the new vitals series (swap + the BEAM)" do
+    test "swap and the BEAM's own footprint trend beside the shipped four" do
+      events = [
+        health(10, %{
+          "swap_used_percent" => 55,
+          "beam_pss_bytes" => 1_258_798_080,
+          "beam_swap_bytes" => 329_543_680
+        }),
+        health(70, %{
+          "swap_used_percent" => 40,
+          "beam_pss_bytes" => 1_000_000_000,
+          "beam_swap_bytes" => 0
+        })
+      ]
+
+      env = build(events)
+
+      assert Enum.map(env.series.swap, & &1.value) == [40, 55]
+      assert Enum.map(env.series.beam_pss, & &1.value) == [1_000_000_000, 1_258_798_080]
+      # A real 0 of paged-out BEAM is data (nothing swapped out yet), not a gap.
+      assert Enum.map(env.series.beam_swap, & &1.value) == [0, 329_543_680]
+    end
+
+    test "the -1 sentinel is a GAP in the new series too, exactly like the old four" do
+      env =
+        build([
+          health(5, %{
+            "swap_used_percent" => -1,
+            "swap_total_bytes" => -1,
+            "beam_pss_bytes" => -1,
+            "beam_swap_bytes" => -1
+          })
+        ])
+
+      assert [%{value: nil}] = env.series.swap
+      assert [%{value: nil}] = env.series.beam_pss
+      assert [%{value: nil}] = env.series.beam_swap
+    end
+
+    test "a pre-upgrade beat that never sends the keys is all gaps, never zeros" do
+      env = build([health(5, RealAgentBeats.pre_upgrade())])
+
+      assert [%{value: nil}] = env.series.swap
+      assert [%{value: nil}] = env.series.beam_pss
+      assert [%{value: nil}] = env.series.beam_swap
+      # The vitals that box DOES report still trend.
+      assert [%{value: 12}] = env.series.cpu
+      assert [%{value: 95}] = env.series.disk
+    end
+  end
+
+  describe "build/3 — latest (the newest beat's scalars)" do
+    test "a REAL captured beat folds into the storage + swap + BEAM scalars" do
+      # Not a hand-built map: the exact jsonb the router landed for guerrilla.
+      env = build([health(10, RealAgentBeats.guerrilla()), health(70, %{"cpu_percent" => 1})])
+
+      assert env.latest.db_size == 3_525_639_191
+      assert env.latest.swap == %{used_pct: 55, total_bytes: 2_147_479_552}
+      assert env.latest.beam == %{pss_bytes: 1_258_798_080, swap_bytes: 329_543_680}
+
+      # The named breakdown answers "what is taking up space", biggest first.
+      assert [
+               %{name: "mutation_events", bytes: 1_534_328_832},
+               %{name: "revisions", bytes: 1_332_666_368} | _
+             ] = env.latest.top_relations
+    end
+
+    test "latest reads the NEWEST beat only — an older beat never overrules it" do
+      events = [
+        health(10, %{"pg_size_bytes" => 999, "swap_total_bytes" => 0, "swap_used_percent" => 0}),
+        health(70, %{"pg_size_bytes" => 111, "swap_total_bytes" => 2048, "swap_used_percent" => 90})
+      ]
+
+      env = build(events)
+      assert env.latest.db_size == 999
+      assert env.latest.swap == %{used_pct: 0, total_bytes: 0}
+    end
+
+    test "a swapless box's honest 0 total SURVIVES — it is the answer, not a gap" do
+      env = build([health(5, %{"swap_used_percent" => 0, "swap_total_bytes" => 0})])
+      # 0 total is what lets a renderer say "none configured" without the control
+      # plane minting a reason word for it.
+      assert env.latest.swap == %{used_pct: 0, total_bytes: 0}
+    end
+
+    test "the -1 sentinel becomes nil in latest — distinct from a swapless 0" do
+      env = build([health(5, %{"swap_used_percent" => -1, "swap_total_bytes" => -1, "pg_size_bytes" => -1})])
+
+      assert env.latest.swap == %{used_pct: nil, total_bytes: nil}
+      assert env.latest.db_size == nil
+    end
+
+    test "an unmeasured relation list is nil; a measured-empty one stays []" do
+      assert build([health(5, %{})]).latest.top_relations == nil
+      assert build([health(5, %{"pg_top_relations" => []})]).latest.top_relations == []
+    end
+
+    test "a nil-payload beat still yields the fixed latest shape, never raises" do
+      env =
+        build([%AgentEvent{type: "health", payload: nil, inserted_at: DateTime.add(@now, -5, :second)}])
+
+      assert env.latest == %{
+               db_size: nil,
+               top_relations: nil,
+               swap: %{used_pct: nil, total_bytes: nil},
+               beam: %{pss_bytes: nil, swap_bytes: nil}
+             }
     end
   end
 
@@ -188,7 +318,7 @@ defmodule BarkparkCloud.MetricsTest do
       for junk <- [[], [%{}], ["x"]] do
         env = Metrics.build(bp(), junk, now: @now, points: 5)
         assert env.beat.status == "absent"
-        assert env.series == %{cpu: [], mem: [], disk: [], load: []}
+        assert env.series == empty_series()
       end
     end
   end

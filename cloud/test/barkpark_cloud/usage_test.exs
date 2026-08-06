@@ -22,6 +22,8 @@ defmodule BarkparkCloud.UsageTest do
   """
   use ExUnit.Case, async: true
 
+  alias BarkparkCloud.RealAgentBeats
+  alias BarkparkCloud.Telemetry
   alias BarkparkCloud.Usage
 
   @meter_keys ~w(documents datasets webhooks db_size disk cpu ram req_per_s p95_ms seats instances api_requests bandwidth)a
@@ -349,6 +351,36 @@ defmodule BarkparkCloud.UsageTest do
       assert m.db_size.measured_at == nil
       assert m.disk.value == "unmetered"
       assert m.disk.measured_at == nil
+    end
+
+    test "a REAL captured beat flips db_size to a real number, not 'unmetered'" do
+      # The producer envelope, not a hand-built map: the exact jsonb the router
+      # landed for guerrilla. db_size was pre-wired end to end and dark only
+      # because the probe reported -1 — the first honest beat lights it up with
+      # NO composer change.
+      normalized =
+        RealAgentBeats.guerrilla()
+        |> Telemetry.normalize()
+        |> Map.put(:reported_at, "2026-08-06T12:57:30Z")
+
+      m = meters(%{telemetry: normalized})
+
+      assert m.db_size.value == 3_525_639_191
+      assert m.db_size.source == "telemetry.pg_size_bytes"
+      assert m.db_size.measured_at == "2026-08-06T12:57:30Z"
+      # …and the sibling telemetry meters land off the same real beat.
+      assert m.disk.value == 76
+      assert m.cpu.value == 100
+      assert m.ram.value == 64
+    end
+
+    test "a REAL pre-upgrade beat keeps db_size honestly unmetered (-1, never a fake size)" do
+      normalized = Telemetry.normalize(RealAgentBeats.pre_upgrade())
+      m = meters(%{telemetry: normalized})
+
+      assert m.db_size.value == "unmetered"
+      # That box's disk IS measured — a partial box degrades one meter, not all.
+      assert m.disk.value == 95
     end
   end
 
