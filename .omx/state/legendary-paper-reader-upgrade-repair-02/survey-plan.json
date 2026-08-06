@@ -1,0 +1,1021 @@
+{
+  "schema_version": 1,
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+  "assignment_count": 60,
+  "inventory_count": 36,
+  "lenses": [
+    "revision_source_identity_pin",
+    "real_reader_environment_readiness",
+    "predecessor_failure_reachability_and_repair_seam"
+  ],
+  "assignments": [
+    {
+      "assignment_id": "repair02-survey-01",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::api"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-02",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::cli"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-03",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-04",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::email_gmail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-05",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::email_mime"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-06",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-07",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::public_browser"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-08",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::studio_authenticated"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-09",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-10",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::api"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-11",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::cli"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-12",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-13",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::email_gmail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-14",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::email_mime"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-15",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-16",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::public_browser"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-17",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::studio_authenticated"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-18",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-19",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::api"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-20",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::cli"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-21",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-22",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::email_gmail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-23",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::email_mime"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-24",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-25",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::public_browser"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-26",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::studio_authenticated"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-27",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-28",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::api"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-29",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::cli"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-30",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-31",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::email_gmail"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-32",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::email_mime"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-33",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-34",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::public_browser"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-35",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::studio_authenticated"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-36",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "revision_source_identity_pin",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "revision and source identity",
+        "authored-carrier denominators",
+        "found/not_found/partial verdict",
+        "commands or captures",
+        "unvisited scope"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-37",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::api",
+        "cloud-console-hardening-wave-28-2026-08-03::cli",
+        "cloud-console-hardening-wave-28-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-38",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::email_gmail",
+        "cloud-console-hardening-wave-28-2026-08-03::email_mime",
+        "cloud-console-hardening-wave-28-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-39",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::public_browser",
+        "cloud-console-hardening-wave-28-2026-08-03::studio_authenticated",
+        "cloud-console-hardening-wave-28-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-40",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::api",
+        "cloud-console-hardening-wave-29-2026-08-03::cli",
+        "cloud-console-hardening-wave-29-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-41",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::email_gmail",
+        "cloud-console-hardening-wave-29-2026-08-03::email_mime",
+        "cloud-console-hardening-wave-29-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-42",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::public_browser",
+        "cloud-console-hardening-wave-29-2026-08-03::studio_authenticated",
+        "cloud-console-hardening-wave-29-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-43",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::api",
+        "pds-wave-44-2026-08-03::cli",
+        "pds-wave-44-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-44",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::email_gmail",
+        "pds-wave-44-2026-08-03::email_mime",
+        "pds-wave-44-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-45",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::public_browser",
+        "pds-wave-44-2026-08-03::studio_authenticated",
+        "pds-wave-44-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-46",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::api",
+        "pds-wave-45-2026-08-03::cli",
+        "pds-wave-45-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-47",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::email_gmail",
+        "pds-wave-45-2026-08-03::email_mime",
+        "pds-wave-45-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-48",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "real_reader_environment_readiness",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::public_browser",
+        "pds-wave-45-2026-08-03::studio_authenticated",
+        "pds-wave-45-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "real-reader availability receipt",
+        "proxy-vs-real classification",
+        "exact widths or client",
+        "blocked dependency",
+        "smallest executable harness boundary"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-49",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::public_browser",
+        "cloud-console-hardening-wave-29-2026-08-03::public_browser",
+        "pds-wave-44-2026-08-03::public_browser"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-50",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::public_browser",
+        "cloud-console-hardening-wave-28-2026-08-03::studio_authenticated",
+        "cloud-console-hardening-wave-29-2026-08-03::studio_authenticated"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-51",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::studio_authenticated",
+        "pds-wave-45-2026-08-03::studio_authenticated",
+        "cloud-console-hardening-wave-28-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-52",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::tui_terminal",
+        "pds-wave-44-2026-08-03::tui_terminal",
+        "pds-wave-45-2026-08-03::tui_terminal"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-53",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::email_mime",
+        "cloud-console-hardening-wave-29-2026-08-03::email_mime",
+        "pds-wave-44-2026-08-03::email_mime"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-54",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::email_mime",
+        "cloud-console-hardening-wave-28-2026-08-03::email_gmail",
+        "cloud-console-hardening-wave-29-2026-08-03::email_gmail"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-55",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::email_gmail",
+        "pds-wave-45-2026-08-03::email_gmail",
+        "cloud-console-hardening-wave-28-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-56",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::email_outlook",
+        "pds-wave-44-2026-08-03::email_outlook",
+        "pds-wave-45-2026-08-03::email_outlook"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-57",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "cloud-console-hardening-wave-28-2026-08-03::email_apple_mail",
+        "cloud-console-hardening-wave-29-2026-08-03::email_apple_mail",
+        "pds-wave-44-2026-08-03::email_apple_mail"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-58",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "pds-wave-45-2026-08-03::email_apple_mail",
+        "cloud-console-hardening-wave-28-2026-08-03::cli",
+        "cloud-console-hardening-wave-29-2026-08-03::cli"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-59",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "pds-wave-44-2026-08-03::cli",
+        "pds-wave-45-2026-08-03::cli",
+        "cloud-console-hardening-wave-28-2026-08-03::api"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    },
+    {
+      "assignment_id": "repair02-survey-60",
+      "agent_type": "epic-surveyor",
+      "effort": "medium",
+      "lens": "predecessor_failure_reachability_and_repair_seam",
+      "unit_ids": [
+        "cloud-console-hardening-wave-29-2026-08-03::api",
+        "pds-wave-44-2026-08-03::api",
+        "pds-wave-45-2026-08-03::api"
+      ],
+      "required_output": [
+        "reproduced or refuted predecessor failure",
+        "exact hard cells",
+        "implementation seam",
+        "collision risk",
+        "evidence path and sample size"
+      ]
+    }
+  ]
+}

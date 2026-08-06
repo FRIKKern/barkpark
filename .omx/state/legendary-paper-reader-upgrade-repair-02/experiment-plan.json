@@ -1,0 +1,349 @@
+{
+  "schema_version": 1,
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+  "assignment_count": 15,
+  "environment_gate": "All three baseline results must replay byte-identically, contain no credential material, and prove every required real-reader environment available before Diverge.",
+  "pilot_contract": {
+    "per_batch_elapsed_budget_seconds": 1800,
+    "error_budget": 0,
+    "failure_threshold": 0,
+    "capacity_rule": "Largest fully passing disjoint batch within the elapsed and zero-error budget; use the smallest result across materially different unit classes.",
+    "batches": {
+      "repair02-experiment-13": [
+        "cloud-console-hardening-wave-29-2026-08-03::api",
+        "cloud-console-hardening-wave-29-2026-08-03::cli",
+        "cloud-console-hardening-wave-29-2026-08-03::email_apple_mail",
+        "cloud-console-hardening-wave-29-2026-08-03::email_gmail",
+        "cloud-console-hardening-wave-29-2026-08-03::email_mime",
+        "cloud-console-hardening-wave-29-2026-08-03::email_outlook",
+        "cloud-console-hardening-wave-29-2026-08-03::public_browser",
+        "cloud-console-hardening-wave-29-2026-08-03::studio_authenticated",
+        "cloud-console-hardening-wave-29-2026-08-03::tui_terminal"
+      ],
+      "repair02-experiment-14": [
+        "pds-wave-45-2026-08-03::api",
+        "pds-wave-45-2026-08-03::cli",
+        "pds-wave-45-2026-08-03::email_apple_mail",
+        "pds-wave-45-2026-08-03::email_gmail",
+        "pds-wave-45-2026-08-03::email_mime",
+        "pds-wave-45-2026-08-03::email_outlook",
+        "pds-wave-45-2026-08-03::public_browser",
+        "pds-wave-45-2026-08-03::studio_authenticated",
+        "pds-wave-45-2026-08-03::tui_terminal"
+      ],
+      "repair02-experiment-15": [
+        "cloud-console-hardening-wave-28-2026-08-03::api",
+        "cloud-console-hardening-wave-28-2026-08-03::cli",
+        "cloud-console-hardening-wave-28-2026-08-03::email_apple_mail",
+        "cloud-console-hardening-wave-28-2026-08-03::email_gmail",
+        "cloud-console-hardening-wave-28-2026-08-03::email_mime",
+        "cloud-console-hardening-wave-28-2026-08-03::email_outlook",
+        "cloud-console-hardening-wave-28-2026-08-03::public_browser",
+        "cloud-console-hardening-wave-28-2026-08-03::studio_authenticated",
+        "cloud-console-hardening-wave-28-2026-08-03::tui_terminal",
+        "pds-wave-44-2026-08-03::api",
+        "pds-wave-44-2026-08-03::cli",
+        "pds-wave-44-2026-08-03::email_apple_mail",
+        "pds-wave-44-2026-08-03::email_gmail",
+        "pds-wave-44-2026-08-03::email_mime",
+        "pds-wave-44-2026-08-03::email_outlook",
+        "pds-wave-44-2026-08-03::public_browser",
+        "pds-wave-44-2026-08-03::studio_authenticated",
+        "pds-wave-44-2026-08-03::tui_terminal"
+      ]
+    }
+  },
+  "no_winner_stop": "If Converge cannot name one integrated candidate that passes the complete E10+E11+E12 union twice with zero FAIL, BLOCKED, proxy, unstable, or missing real-reader cells, Pilot is unauthorized and this immutable wave closes unsuccessful.",
+  "assignments": [
+    {
+      "assignment_id": "repair02-experiment-01",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "baseline",
+      "objective": "Preservation, schema, mutation, and failure-integrity calibration",
+      "dependencies": [],
+      "required_evidence": [
+        "E10 complete hard-cell manifest",
+        "815/113/1374/388 and nested-list denominators",
+        "source preimage/digest",
+        "CAS/quarantine/byte-exact rollback receipts"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E01"
+    },
+    {
+      "assignment_id": "repair02-experiment-02",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "baseline",
+      "objective": "Real human-reader environment preflight",
+      "dependencies": [],
+      "required_evidence": [
+        "authenticated Studio receipt",
+        "Chrome/Safari/Firefox exact 320 and 390 CSS-pixel frames",
+        "delivered Gmail/Outlook/Apple Mail receipts",
+        "VoiceOver and NVDA or equivalent receipts",
+        "deployed cache-freshness and conditional-request receipts",
+        "Studio session-expiry and reconnect receipts"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E02"
+    },
+    {
+      "assignment_id": "repair02-experiment-03",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "baseline",
+      "objective": "Terminal and platform-truth calibration",
+      "dependencies": [],
+      "required_evidence": [
+        "TUI widths 1/20/40/80/120",
+        "typed error matrix",
+        "request IDs and six identities",
+        "ETag/discovery/pagination/history/interaction traces"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E03"
+    },
+    {
+      "assignment_id": "repair02-experiment-04",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "diverge",
+      "objective": "Strict canonical packet compiler",
+      "dependencies": [
+        "repair02-experiment-01",
+        "repair02-experiment-02",
+        "repair02-experiment-03"
+      ],
+      "required_evidence": [
+        "runnable isolated candidate",
+        "recursive validation and immutable quarantine",
+        "revision-fenced adapters for all nine classes",
+        "two stable reruns"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E04"
+    },
+    {
+      "assignment_id": "repair02-experiment-05",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "diverge",
+      "objective": "Lossless compatibility AST boundary",
+      "dependencies": [
+        "repair02-experiment-01",
+        "repair02-experiment-02",
+        "repair02-experiment-03"
+      ],
+      "required_evidence": [
+        "runnable isolated candidate",
+        "raw-source preservation",
+        "typed lossless semantic tree",
+        "nine explicit reader adapters and two stable reruns"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E05"
+    },
+    {
+      "assignment_id": "repair02-experiment-06",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "diverge",
+      "objective": "Versioned projection service",
+      "dependencies": [
+        "repair02-experiment-01",
+        "repair02-experiment-02",
+        "repair02-experiment-03"
+      ],
+      "required_evidence": [
+        "runnable isolated candidate",
+        "separate projection identity/provenance/validator",
+        "source byte preservation",
+        "nine adapters and two stable reruns"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E06"
+    },
+    {
+      "assignment_id": "repair02-experiment-07",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "attack",
+      "objective": "Attack preservation, schema, CAS, retry, rollback, and idempotence",
+      "dependencies": [
+        "repair02-experiment-04",
+        "repair02-experiment-05",
+        "repair02-experiment-06"
+      ],
+      "required_evidence": [
+        "complete E10 matrix per candidate",
+        "positive and hostile controls",
+        "zero-threshold verdict",
+        "rejected candidate receipts"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E07"
+    },
+    {
+      "assignment_id": "repair02-experiment-08",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "attack",
+      "objective": "Attack browser, Studio, delivered mail, MIME, AT, cache, and geometry",
+      "dependencies": [
+        "repair02-experiment-04",
+        "repair02-experiment-05",
+        "repair02-experiment-06"
+      ],
+      "required_evidence": [
+        "complete E11 real-reader matrix",
+        "actual client widths",
+        "session expiry and reconnect",
+        "zero BLOCKED/proxy verdict"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E08"
+    },
+    {
+      "assignment_id": "repair02-experiment-09",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "attack",
+      "objective": "Attack TUI, interactions, errors, identities, validators, discovery, and pagination",
+      "dependencies": [
+        "repair02-experiment-04",
+        "repair02-experiment-05",
+        "repair02-experiment-06"
+      ],
+      "required_evidence": [
+        "complete E12 matrix",
+        "five terminal widths",
+        "control sanitization",
+        "typed recovery and traceability"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E09"
+    },
+    {
+      "assignment_id": "repair02-experiment-10",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "converge",
+      "objective": "Rebuild and reproduce preservation/schema/mutation core",
+      "dependencies": [
+        "repair02-experiment-07",
+        "repair02-experiment-08",
+        "repair02-experiment-09"
+      ],
+      "required_evidence": [
+        "one integrated candidate",
+        "rejected mechanisms deleted",
+        "full hard-cell union run 1",
+        "stable golden hashes"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E10"
+    },
+    {
+      "assignment_id": "repair02-experiment-11",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "converge",
+      "objective": "Reproduce human-reader semantics and availability",
+      "dependencies": [
+        "repair02-experiment-07",
+        "repair02-experiment-08",
+        "repair02-experiment-09"
+      ],
+      "required_evidence": [
+        "same integrated candidate",
+        "real browser/Studio/mail/AT receipts",
+        "full hard-cell union run 2",
+        "stable golden hashes"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E11"
+    },
+    {
+      "assignment_id": "repair02-experiment-12",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "converge",
+      "objective": "Reproduce terminal and platform truth",
+      "dependencies": [
+        "repair02-experiment-07",
+        "repair02-experiment-08",
+        "repair02-experiment-09"
+      ],
+      "required_evidence": [
+        "same integrated candidate",
+        "TUI/platform/identity/error proof",
+        "cross-run hash comparison",
+        "explicit winner or no-winner verdict"
+      ],
+      "hard_stop": "Any FAIL, BLOCKED, proxy, credential-bearing artifact, or unstable replay is non-pass.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E12"
+    },
+    {
+      "assignment_id": "repair02-experiment-13",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "pilot",
+      "objective": "CCH29 disjoint nine-class density and nested-list batch",
+      "dependencies": [
+        "repair02-experiment-10",
+        "repair02-experiment-11",
+        "repair02-experiment-12"
+      ],
+      "required_evidence": [
+        "nine-unit batch manifest",
+        "golden fixtures",
+        "elapsed time <= 1800 seconds",
+        "zero observed error and zero blocked/proxy cells"
+      ],
+      "hard_stop": "Pilot is forbidden unless the same integrated candidate passed every hard cell twice with zero FAIL, BLOCKED, proxy, or unstable cells.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E13"
+    },
+    {
+      "assignment_id": "repair02-experiment-14",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "pilot",
+      "objective": "PDS45 disjoint nine-class headerless/null-intent batch",
+      "dependencies": [
+        "repair02-experiment-10",
+        "repair02-experiment-11",
+        "repair02-experiment-12"
+      ],
+      "required_evidence": [
+        "nine-unit batch manifest",
+        "golden fixtures",
+        "elapsed time <= 1800 seconds",
+        "zero observed error and zero blocked/proxy cells"
+      ],
+      "hard_stop": "Pilot is forbidden unless the same integrated candidate passed every hard cell twice with zero FAIL, BLOCKED, proxy, or unstable cells.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E14"
+    },
+    {
+      "assignment_id": "repair02-experiment-15",
+      "agent_type": "legendary-experimenter",
+      "effort": "medium",
+      "round": "pilot",
+      "objective": "CCH28 plus PDS44 disjoint eighteen-unit marks/tone/capacity batch",
+      "dependencies": [
+        "repair02-experiment-10",
+        "repair02-experiment-11",
+        "repair02-experiment-12"
+      ],
+      "required_evidence": [
+        "eighteen-unit batch manifest",
+        "golden fixtures",
+        "elapsed time <= 1800 seconds",
+        "zero observed error and zero blocked/proxy cells"
+      ],
+      "hard_stop": "Pilot is forbidden unless the same integrated candidate passed every hard cell twice with zero FAIL, BLOCKED, proxy, or unstable cells.",
+      "evidence_root": ".omx/state/legendary-paper-reader-upgrade-repair-02/experiments/E15"
+    }
+  ]
+}

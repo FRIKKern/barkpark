@@ -1,0 +1,616 @@
+{
+  "schema_version": 1,
+  "epic_id": "task-a768c69e659add58",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+  "prior_wave": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-01",
+  "profile": "legendary",
+  "inventory": [
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::public_browser",
+      "class": "paper_public_browser",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "public_browser",
+      "required_cells": [
+        "real Chrome, Safari, and Firefox",
+        "client widths 320 and 390 CSS px",
+        "200 percent reflow",
+        "long-token containment",
+        "DOM and accessibility semantics",
+        "cache and conditional requests"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::studio_authenticated",
+      "class": "paper_studio_authenticated",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "studio_authenticated",
+      "required_cells": [
+        "real authenticated Studio mount",
+        "client widths 320 and 390 CSS px",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "session expiry and reconnect",
+        "immutable Paper identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::tui_terminal",
+      "class": "paper_tui_terminal",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "tui_terminal",
+      "required_cells": [
+        "terminal widths 1, 20, 40, 80, and 120",
+        "control sanitization",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "history and Related navigation",
+        "typed recovery"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::email_mime",
+      "class": "paper_email_mime",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "email_mime",
+      "required_cells": [
+        "RFC MIME generation",
+        "multipart structure",
+        "plain-text parity",
+        "HTML semantics",
+        "header safety",
+        "long-token containment"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::email_gmail",
+      "class": "paper_email_gmail",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "email_gmail",
+      "required_cells": [
+        "real delivered Gmail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::email_outlook",
+      "class": "paper_email_outlook",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "email_outlook",
+      "required_cells": [
+        "real delivered Outlook rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::email_apple_mail",
+      "class": "paper_email_apple_mail",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "email_apple_mail",
+      "required_cells": [
+        "real delivered Apple Mail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::cli",
+      "class": "paper_cli",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "cli",
+      "required_cells": [
+        "CLI discovery and help",
+        "structured output",
+        "typed errors and exit codes",
+        "identity and revision",
+        "history and pagination",
+        "terminal sanitization"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-28-2026-08-03::api",
+      "class": "paper_api",
+      "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+      "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "reader": "api",
+      "required_cells": [
+        "API discovery and schema",
+        "typed 401/404/405/406/422/500/timeout",
+        "request IDs",
+        "six identity domains",
+        "ETags and conditional requests",
+        "pagination and perspective validation"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::public_browser",
+      "class": "paper_public_browser",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "public_browser",
+      "required_cells": [
+        "real Chrome, Safari, and Firefox",
+        "client widths 320 and 390 CSS px",
+        "200 percent reflow",
+        "long-token containment",
+        "DOM and accessibility semantics",
+        "cache and conditional requests"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::studio_authenticated",
+      "class": "paper_studio_authenticated",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "studio_authenticated",
+      "required_cells": [
+        "real authenticated Studio mount",
+        "client widths 320 and 390 CSS px",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "session expiry and reconnect",
+        "immutable Paper identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::tui_terminal",
+      "class": "paper_tui_terminal",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "tui_terminal",
+      "required_cells": [
+        "terminal widths 1, 20, 40, 80, and 120",
+        "control sanitization",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "history and Related navigation",
+        "typed recovery"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::email_mime",
+      "class": "paper_email_mime",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "email_mime",
+      "required_cells": [
+        "RFC MIME generation",
+        "multipart structure",
+        "plain-text parity",
+        "HTML semantics",
+        "header safety",
+        "long-token containment"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::email_gmail",
+      "class": "paper_email_gmail",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "email_gmail",
+      "required_cells": [
+        "real delivered Gmail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::email_outlook",
+      "class": "paper_email_outlook",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "email_outlook",
+      "required_cells": [
+        "real delivered Outlook rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::email_apple_mail",
+      "class": "paper_email_apple_mail",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "email_apple_mail",
+      "required_cells": [
+        "real delivered Apple Mail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::cli",
+      "class": "paper_cli",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "cli",
+      "required_cells": [
+        "CLI discovery and help",
+        "structured output",
+        "typed errors and exit codes",
+        "identity and revision",
+        "history and pagination",
+        "terminal sanitization"
+      ]
+    },
+    {
+      "unit_id": "cloud-console-hardening-wave-29-2026-08-03::api",
+      "class": "paper_api",
+      "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+      "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "reader": "api",
+      "required_cells": [
+        "API discovery and schema",
+        "typed 401/404/405/406/422/500/timeout",
+        "request IDs",
+        "six identity domains",
+        "ETags and conditional requests",
+        "pagination and perspective validation"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::public_browser",
+      "class": "paper_public_browser",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "public_browser",
+      "required_cells": [
+        "real Chrome, Safari, and Firefox",
+        "client widths 320 and 390 CSS px",
+        "200 percent reflow",
+        "long-token containment",
+        "DOM and accessibility semantics",
+        "cache and conditional requests"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::studio_authenticated",
+      "class": "paper_studio_authenticated",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "studio_authenticated",
+      "required_cells": [
+        "real authenticated Studio mount",
+        "client widths 320 and 390 CSS px",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "session expiry and reconnect",
+        "immutable Paper identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::tui_terminal",
+      "class": "paper_tui_terminal",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "tui_terminal",
+      "required_cells": [
+        "terminal widths 1, 20, 40, 80, and 120",
+        "control sanitization",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "history and Related navigation",
+        "typed recovery"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::email_mime",
+      "class": "paper_email_mime",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "email_mime",
+      "required_cells": [
+        "RFC MIME generation",
+        "multipart structure",
+        "plain-text parity",
+        "HTML semantics",
+        "header safety",
+        "long-token containment"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::email_gmail",
+      "class": "paper_email_gmail",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "email_gmail",
+      "required_cells": [
+        "real delivered Gmail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::email_outlook",
+      "class": "paper_email_outlook",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "email_outlook",
+      "required_cells": [
+        "real delivered Outlook rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::email_apple_mail",
+      "class": "paper_email_apple_mail",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "email_apple_mail",
+      "required_cells": [
+        "real delivered Apple Mail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::cli",
+      "class": "paper_cli",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "cli",
+      "required_cells": [
+        "CLI discovery and help",
+        "structured output",
+        "typed errors and exit codes",
+        "identity and revision",
+        "history and pagination",
+        "terminal sanitization"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-44-2026-08-03::api",
+      "class": "paper_api",
+      "paper_id": "pds-wave-44-2026-08-03",
+      "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "reader": "api",
+      "required_cells": [
+        "API discovery and schema",
+        "typed 401/404/405/406/422/500/timeout",
+        "request IDs",
+        "six identity domains",
+        "ETags and conditional requests",
+        "pagination and perspective validation"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::public_browser",
+      "class": "paper_public_browser",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "public_browser",
+      "required_cells": [
+        "real Chrome, Safari, and Firefox",
+        "client widths 320 and 390 CSS px",
+        "200 percent reflow",
+        "long-token containment",
+        "DOM and accessibility semantics",
+        "cache and conditional requests"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::studio_authenticated",
+      "class": "paper_studio_authenticated",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "studio_authenticated",
+      "required_cells": [
+        "real authenticated Studio mount",
+        "client widths 320 and 390 CSS px",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "session expiry and reconnect",
+        "immutable Paper identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::tui_terminal",
+      "class": "paper_tui_terminal",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "tui_terminal",
+      "required_cells": [
+        "terminal widths 1, 20, 40, 80, and 120",
+        "control sanitization",
+        "focus and scroll ownership",
+        "click and Enter parity",
+        "history and Related navigation",
+        "typed recovery"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::email_mime",
+      "class": "paper_email_mime",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "email_mime",
+      "required_cells": [
+        "RFC MIME generation",
+        "multipart structure",
+        "plain-text parity",
+        "HTML semantics",
+        "header safety",
+        "long-token containment"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::email_gmail",
+      "class": "paper_email_gmail",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "email_gmail",
+      "required_cells": [
+        "real delivered Gmail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::email_outlook",
+      "class": "paper_email_outlook",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "email_outlook",
+      "required_cells": [
+        "real delivered Outlook rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::email_apple_mail",
+      "class": "paper_email_apple_mail",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "email_apple_mail",
+      "required_cells": [
+        "real delivered Apple Mail rendering",
+        "narrow geometry",
+        "structural semantics",
+        "reading order",
+        "link and label behavior",
+        "source-message identity"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::cli",
+      "class": "paper_cli",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "cli",
+      "required_cells": [
+        "CLI discovery and help",
+        "structured output",
+        "typed errors and exit codes",
+        "identity and revision",
+        "history and pagination",
+        "terminal sanitization"
+      ]
+    },
+    {
+      "unit_id": "pds-wave-45-2026-08-03::api",
+      "class": "paper_api",
+      "paper_id": "pds-wave-45-2026-08-03",
+      "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "reader": "api",
+      "required_cells": [
+        "API discovery and schema",
+        "typed 401/404/405/406/422/500/timeout",
+        "request IDs",
+        "six identity domains",
+        "ETags and conditional requests",
+        "pagination and perspective validation"
+      ]
+    }
+  ],
+  "scale_contract": {
+    "unit_definition": "One immutable revision-pinned published Paper evaluated in one homogeneous reader/evidence class",
+    "unit_count": 36,
+    "inventory_evidence": "Committed wave-open.json reproduces 4 frozen Paper revisions x 9 homogeneous reader/evidence classes = 36 unique units; repair-01 remained at zero assignments and is superseded before Survey because it collapsed materially different TUI, delivered-email, CLI, and API gates",
+    "target_surfaces": [
+      "public_browser",
+      "studio_authenticated",
+      "tui_terminal",
+      "email_mime",
+      "email_gmail",
+      "email_outlook",
+      "email_apple_mail",
+      "cli",
+      "api"
+    ],
+    "concurrency_width": 3,
+    "minimum_multiplier": 5,
+    "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
+    "excluded_inventory": [
+      {
+        "unit_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+        "reason": "Immutable predecessor completed Converge with no winner and Pilot 0/3; evidence retained but counters cannot transfer."
+      },
+      {
+        "unit_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-01",
+        "reason": "Pre-dispatch authority remained at zero assignments and is superseded because its 20-unit inventory mixed materially different reader evidence classes."
+      },
+      {
+        "unit_id": "papers-updated-at-or-before-2026-08-03T13:10:59.490413Z",
+        "reason": "Already reconciled by the final 653-Paper structure-rhythm census; including them would duplicate settled work."
+      },
+      {
+        "unit_id": "draft-only-papers",
+        "reason": "Not published reader surfaces and outside this published-reader transformation."
+      },
+      {
+        "unit_id": "non-paper-documents",
+        "reason": "Tasks and code units require different gates and cannot share this Paper-reader inventory."
+      }
+    ],
+    "quality_rubric": {
+      "reader_visibility": "All nine homogeneous reader/evidence classes execute against real readers; BLOCKED, proxy, static-only, local-preview-only, DOM-only, or AX-snapshot-only evidence never passes.",
+      "preservation": "All 815 blocks, 113 authored header cells, 1374 body cells, 388 marks, every CCH29 nested-list word, and source preimage/digest are count- and hash-exact; exactly 11 intentionally headerless tables remain headerless.",
+      "schema": "Recursive validation rejects or immutably quarantines malformed structures, unequal aliases, and ambiguous legacy forms without choosing precedence or inventing intent.",
+      "geometry": "TUI lines are bounded at widths 1, 20, 40, 80, and 120; real public, Studio, Gmail, Outlook, and Apple Mail clients pass declared narrow-width, reflow, and long-token checks without clipping or authored loss.",
+      "accessibility": "Real browser and delivered-reader checks prove headings, lists, tables, callouts, landmarks, reading order, labels, focus, and reflow; VoiceOver plus NVDA or an explicitly equivalent real assistive-technology pair must pass.",
+      "interaction": "Mouse, keyboard focus, scroll ownership, click and Enter equivalence, selection state, history, Related, reconnect, session expiry, and recovery pass executable behavioral checks.",
+      "platform_truth": "Typed 401, 404, 405, 406, 422, 500, and timeout behavior, request IDs, six identity domains, ETags, conditional requests, discovery, help/schema/OpenAPI, pagination, history limits, and perspective validation agree.",
+      "mutation_safety": "Every source mutation requires the expected revision; passing paths perform no read-side mutation, allow no unfenced fallback, retain immutable quarantine evidence, and prove byte-exact rollback from captured preimage and digest.",
+      "failure_integrity": "Observed counts for false not-found, silent scope or perspective substitution, silent secondary failure, retry-erased failure, identity conflation, terminal control leak, non-idempotence, rollback mismatch, and unfenced mutation are all exactly zero; no averaging is allowed.",
+      "environment_preflight": "Before Diverge, authenticated Studio, deployed cache/reconnect, real Gmail/Outlook/Apple Mail delivery, real browser widths, VoiceOver plus NVDA or equivalent, and the complete five-width terminal harness each produce reproducible availability receipts.",
+      "pilot": "One integrated candidate passes the full E10+E11+E12 hard-cell union twice with stable hashes and zero FAIL, BLOCKED, or proxy cells; three disjoint batches then pass within 1800 seconds each at error budget zero.",
+      "no_winner": "Any FAIL, BLOCKED, proxy, unstable replay, missing real-reader cell, or positive hard-failure count forbids Pilot; if no candidate clears the complete union twice, the wave closes unsuccessful and is replaced."
+    },
+    "failure_threshold": 0
+  },
+  "experiment_contract": {
+    "rounds": [
+      "baseline",
+      "diverge",
+      "attack",
+      "converge",
+      "pilot"
+    ],
+    "required_results_per_round": 3,
+    "selection_required": true
+  }
+}
