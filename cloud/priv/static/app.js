@@ -3851,7 +3851,37 @@
     return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
   }
 
+  // cch-w36-s3 — THE UNKNOWN ARM, and why the picker needs one. Every branch
+  // below is decided by canMintAnyAbility(), a TWO-valued read of a
+  // THREE-valued fact: with /v1/me still in flight, or FAILED (500 / offline),
+  // it answers false and the member branch then states a cap as fact. Measured
+  // on the shipped bytes before this fix: an owner whose /v1/me answered 500
+  // received the plain-member picker, byte-identical (434 bytes) to a real
+  // member's — and smoke's `tokens-member` expectation passed against it,
+  // verbatim, all four assertions. We do not accuse someone of being a member
+  // on the strength of an answer that never arrived.
+  function tokenAbilitiesUnknownHtml(state) {
+    var failed = state === "failed";
+    var name = failed ? "We couldn't check your account" : "Checking your account…";
+    var sub = failed ? meFailureCopy() : "Reading which abilities this account may mint.";
+    // Both notes state the CONSEQUENCE, because the Create button still works:
+    // the server caps an unproven actor at read, so that is what would be minted.
+    var note = failed
+      ? "Your role didn't load, so we can't show which abilities you may pick. Retry in a moment — a token created now would be read-only."
+      : "Your role hasn't loaded yet. Reopen this in a moment to pick abilities — a token created now would be read-only.";
+    return '<div class="field"><span class="label">Abilities</span>' +
+      '<div class="set-check-list">' +
+        '<div class="set-check set-check--scope" id="token-scope-unknown" data-me-state="' + esc(state) + '">' +
+          '<span class="set-check-main"><span class="set-check-name">' + esc(name) + "</span>" +
+          '<span class="set-check-sub">' + esc(sub) + "</span></span></div>" +
+      "</div>" +
+      '<p class="field-hint dim" id="token-unknown-note">' + esc(note) + "</p>" +
+      "</div>";
+  }
+
   function tokenAbilitiesFieldHtml() {
+    var state = meState();
+    if (state !== "loaded") return tokenAbilitiesUnknownHtml(state);
     if (canMintAnyAbility()) {
       var abilityRows = TOKEN_ABILITIES.map(function (a) {
         // GR34 .set-check grammar (generalized from the old .token-ability idiom):
@@ -12424,7 +12454,7 @@
       if (r.status === 200) {
         clearParkedInvite();
         // The team roster (and possibly the account's team) changed.
-        meCache = null;
+        clearMe(); // cch-w36-s3: the error flags travel with the cache
         // cch-w12-s1: the Who axis is derived from that roster, so the cached
         // copy is stale the moment the accept lands — drop it and let the next
         // Activity paint re-read.
@@ -13572,6 +13602,66 @@
   // Real team name + account email for the topbar chip — replaces the opaque
   // "Team a1b2c3d4" id-slice. Cached for the session; refetched on login.
   var meCache = null;
+  // cch-w36-s3 — THE THREE-VALUED READ OF /v1/me. The twin of subCache /
+  // subLoaded / subError / subErrorFault one screen below, on a much higher
+  // stakes axis: a GET /v1/me that answered 500 used to leave meCache null
+  // FOREVER, in a state BYTE-IDENTICAL to cold boot, so no renderer could tell
+  // "we never asked" from "the answer failed". Every authority predicate
+  // (canMintAnyAbility, billingIsOwner, providerCanWrite, …) reads meCache
+  // falsy as "not privileged", so an OWNER whose /v1/me blipped was told, as
+  // fact, "Members can create read-only tokens. Ask an admin for write, deploy,
+  // or root." — asking themselves for permission they already hold.
+  //
+  // `meLoaded` = the server's real answer is in at least once. `meError` +
+  // `meErrorFault` ({status, data, transport} — exactly faultCopy()'s
+  // arguments) = the last read FAILED, which is a different fact from "you are
+  // a member". A role we do not know is not a role of member.
+  var meLoaded = false;
+  var meError = false;
+  var meErrorFault = null;
+
+  // The ONE place a /v1/me answer becomes cached state — success OR failure, so
+  // no caller can absorb the happy half and silently drop the other (which is
+  // precisely what loadMe, loadMembers and loadEnvVars each did). Returns
+  // whether the answer landed.
+  function absorbMe(r) {
+    if (r && r.ok && r.data) {
+      meCache = r.data;
+      meLoaded = true;
+      meError = false;
+      meErrorFault = null; // cleared in lockstep — a stale fault must never outlive its flag
+      return true;
+    }
+    meError = true;
+    meErrorFault = { status: r ? r.status : 0, data: r && r.data, transport: r && r.transport };
+    return false;
+  }
+
+  // Drop the cached account. Called at all three sites the cache is cleared:
+  // the declaration above (cold), the invitation accept (the team changed), and
+  // sign-out — the error flags travel with it or a dead fault outlives its data.
+  function clearMe() {
+    meCache = null;
+    meLoaded = false;
+    meError = false;
+    meErrorFault = null;
+  }
+
+  // "loading" (never asked, or in flight) · "failed" (the answer did not
+  // arrive) · "loaded" (the server told us). Any surface that renders a CLAIM
+  // about the person's role must branch on this, never on meCache's falsiness.
+  function meState() {
+    if (meCache) return "loaded";
+    if (meError) return "failed";
+    return "loading";
+  }
+
+  // Honest copy for the failed read, classified from the retained fault the
+  // same way the subscription retry card classifies its own.
+  function meFailureCopy() {
+    var f = meErrorFault || {};
+    return faultCopy(f.status || 0, f.data, "We couldn't check your account. Retry in a moment.", f.transport);
+  }
 
   function setAccountChip(team, email) {
     var name = (team && team.name) || (email ? email.split("@")[0] : null) || "My team";
@@ -13608,9 +13698,9 @@
   function loadMe() {
     setAccountChip(null, null); // immediate placeholder
     applyOperatorGate();        // fail-closed while me is unknown (hidden)
-    api("GET", "/v1/me").then(function (r) {
+    return api("GET", "/v1/me").then(function (r) {
       if (r.ok && r.data) {
-        meCache = r.data;
+        absorbMe(r);
         setAccountChip(r.data.team, r.data.user && r.data.user.email);
         // /v1/me is the operator truth (GR9): flip the sidebar entry on now that
         // platform_operator is known, and refresh the scope label's team name.
@@ -13637,6 +13727,27 @@
           paintActivityFilters();
           ensureActivityActors();
         }
+      } else {
+        // cch-w36-s3 — THE MISSING ELSE, and it was the whole defect. api()
+        // ends in a .catch returning {ok:false,status:0,…}, so this promise
+        // NEVER rejects and a missing .catch is inert; the load-bearing hole is
+        // that every failure class (500, 502, offline, malformed body) landed in
+        // the same silent no-op. The write below is what makes meState() read
+        // "failed" instead of the cold "loading" — delete this else and the
+        // post-500 state goes back to being byte-identical to cold boot, which
+        // is exactly what the distinguishability test in __app.test.mjs reds on.
+        //
+        // The repaint seams were stranded inside the success arm too: a screen
+        // painted while me was unknown sat on its provisional render forever.
+        // Billing and Activity re-render here so they re-derive from the failed
+        // state. applyOperatorGate() re-runs to keep the sidebar entry hidden
+        // (fail-closed, GR9) — the operator VIEW's own copy belongs to the
+        // operator band (cch-w36-s4), so the operator loader is deliberately
+        // NOT re-entered here.
+        absorbMe(r); // records {status, data, transport} — the fault faultCopy() needs
+        applyOperatorGate();
+        if (currentView() === "billing") renderBilling();
+        if (currentView() === "activity") paintActivityFilters();
       }
     });
   }
@@ -17648,7 +17759,17 @@
     var ctx = membersContext();
     if (ctx) { fetchMembers(ctx); return; }
     api("GET", "/v1/me").then(function (r) {
-      if (r.ok && r.data) meCache = r.data;
+      // cch-w36-s3: a /v1/me that FAILED is not a determinate "you have no
+      // team". It used to fall through to the empty state below and report a
+      // 500 as a fact about the account. The honest copy already existed one
+      // hop away — membersErrorHtml/membersFailureCopy, with its own status-0
+      // and 403 arms — and it carries the Retry this state actually needs.
+      if (!absorbMe(r)) {
+        box.innerHTML = membersErrorHtml(r.status);
+        var rb0 = box.querySelector("[data-members-retry]");
+        if (rb0) rb0.addEventListener("click", loadMembers);
+        return;
+      }
       var c = membersContext();
       if (!c) {
         box.innerHTML = '<div class="empty-state"><h2>No team yet</h2>' +
@@ -18026,7 +18147,14 @@
     var ctx = membersContext();
     if (ctx) { fetchEnvVars(ctx); return; }
     api("GET", "/v1/me").then(function (r) {
-      if (r.ok && r.data) meCache = r.data;
+      // cch-w36-s3, the twin of loadMembers above: a failed role read is not a
+      // teamless account. envVarsErrorHtml carries the honest copy + Retry.
+      if (!absorbMe(r)) {
+        box.innerHTML = envVarsErrorHtml(r.status);
+        var rb0 = box.querySelector("[data-env-retry]");
+        if (rb0) rb0.addEventListener("click", loadEnvVars);
+        return;
+      }
       var c = membersContext();
       if (!c) {
         box.innerHTML = '<div class="empty-state"><h2>No team yet</h2>' +
@@ -18469,7 +18597,7 @@
     var s = session();
     if (!s || !s.token) {
       closeEvents();
-      meCache = null;
+      clearMe(); // cch-w36-s3: meLoaded/meError/meErrorFault clear with the cache
       subCache = null;
       subLoaded = false;
       subError = false;
@@ -20365,6 +20493,21 @@
       // can't reach it — same seam as renderActivateResult). canMintAnyAbility
       // mirrors the server's pat_abilities_allowed? (owner/admin vs member=read).
       canMintAnyAbility: canMintAnyAbility, tokenAbilitiesFieldHtml: tokenAbilitiesFieldHtml,
+      // cch-w36-s3 — the three-valued /v1/me state and the loaders that write
+      // it. Impure (they fetch and paint), like loadTokens/loadInstanceSites
+      // above: the collapse lived in the fetch callback, which is exactly why a
+      // pure-helper-only harness could not see an owner being rendered as a
+      // member. meFlags() is the read the harness needs to prove the post-500
+      // state is DISTINGUISHABLE from the cold one — on origin/main both are
+      // {role:null, loaded:false, error:false}.
+      loadMe: loadMe, clearMe: clearMe, meState: meState, meFailureCopy: meFailureCopy,
+      meFlags: function () {
+        return {
+          role: (meCache && meCache.role) || null,
+          loaded: meLoaded, error: meError, fault: meErrorFault,
+        };
+      },
+      loadMembers: loadMembers, loadEnvVars: loadEnvVars,
       tokenRevealHtml: tokenRevealHtml, openTokenModal: openTokenModal,
       revealToken: revealToken, tokenRow: tokenRow,
       // gr-w3 v4 shell: the reset-route extractor (GR13 — was unexported), the

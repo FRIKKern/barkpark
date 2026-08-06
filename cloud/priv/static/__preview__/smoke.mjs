@@ -2325,9 +2325,24 @@ const EXPECTATIONS = {
       // The list still renders the member's own read token.
       const list = reg.get("token-list").innerHTML || "";
       assert.ok(list.includes("My read token"), "the member sees their own token");
+      // cch-w36-s3 — THIS EXPECTATION USED TO PASS FOR THE WRONG REASON, and
+      // stayed green through the entire defect. The picker is gated on
+      // canMintAnyAbility(), a TWO-valued read of a THREE-valued fact: with
+      // /v1/me unanswered or FAILED it returns false, so an OWNER whose /v1/me
+      // answered 500 received this very picker — byte-identical, 434 bytes —
+      // and the four assertions below passed against it VERBATIM, 4/4. The
+      // member sentence may only be asserted against a CONFIRMED member, so
+      // the state is pinned FIRST: a role we do not know is not a role of
+      // member, and this scenario's /v1/me answers 200 with role:"member".
+      assert.equal(hooks.meState(), "loaded",
+        "the member picker may only be asserted against a CONFIRMED /v1/me answer — an owner-after-500 renders the unknown arm, and this assertion is what tells them apart");
+      assert.equal(hooks.meFlags().role, "member",
+        "and the confirmed answer must actually say member; got " + JSON.stringify(hooks.meFlags()));
       // The picker (gated on meCache.role) offers read-only scope — NO checkboxes
       // for write/deploy/root, plus the honest ask-an-admin copy.
       const picker = hooks.tokenAbilitiesFieldHtml();
+      assert.ok(picker.indexOf("token-scope-unknown") === -1,
+        "a CONFIRMED member must get the member picker, never the unknown-role arm");
       assert.ok(picker.includes("set-check--scope"), "read scope is stated, not a pickable ghost");
       assert.ok(picker.includes("Members can create read-only tokens"), "honest copy names the cap");
       assert.ok(!picker.includes('class="token-ab"'), "no ability checkboxes are rendered for a member");
