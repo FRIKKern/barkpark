@@ -48,6 +48,8 @@ func run(args []string) int {
 		healthURL  = fs.String("health-url", "", "this server's public origin for the health gate (empty skips it)")
 		healthTok  = fs.String("health-token", "", "token for the health gate's DB-read probe (optional)")
 		printCmds  = fs.Bool("print-allowed-commands", false, "print the approved command allowlist and exit")
+		sitesDir   = fs.String("sites-dir", "", "sites root measured per-slug (empty resolves BARKPARK_SITES_DIR, then "+defaultSitesDir+")")
+		spaceEvery = fs.Duration("space-interval", agent.DefaultSpaceInterval, "cadence of the space report (its own, slower than --interval)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -70,11 +72,34 @@ func run(args []string) int {
 		return 1
 	}
 
+	// The sites root is RESOLVED here, once, and travels in the payload — never
+	// re-derived downstream. BARKPARK_SITES_DIR is set on no box in the fleet
+	// (the agent's own environ carries only BARKPARK_CONTROL_URL and
+	// BARKPARK_HEALTH_URL), so an env-read silently falls back on every box;
+	// reporting the path that was actually read makes a wrong root visible
+	// rather than silent (charter D59).
+	resolvedSitesDir := resolveSitesDir(*sitesDir, os.Getenv("BARKPARK_SITES_DIR"))
+
 	a := &agent.Agent{
 		ControlURL: *controlURL,
 		Token:      token,
 		Interval:   *interval,
 		Runner:     agent.ExecRunner{},
+		// Space rides its OWN cadence and its OWN route — not the 60s beat
+		// (charter D58). Every probe is bounded and direct-argv (D59); each
+		// failure keeps its unmeasured sentinel rather than landing a partial
+		// number.
+		SpaceInterval: *spaceEvery,
+		SpaceProbes: agent.SpaceConfig{
+			RootProbe:    agent.NewRootSpaceProbe(),
+			JournalProbe: agent.NewJournalSpaceProbe(),
+			// The database measures itself — the SAME probes the beat uses,
+			// never a du over PGDATA.
+			PGSizeProbe:         agent.NewPGSizeProbe(*checkout),
+			PGTopRelationsProbe: agent.NewPGTopRelationsProbe(*checkout),
+			SitesDir:            resolvedSitesDir,
+			SitesProbe:          agent.NewSitesSpaceProbe(resolvedSitesDir),
+		},
 		ReportProbes: agent.ReportConfig{
 			Checkout:  *checkout,
 			DiskProbe: dfRootProbe,
@@ -114,6 +139,13 @@ func run(args []string) int {
 			fmt.Fprintf(os.Stderr, "barkpark-agent: cycle failed: %v\n", err)
 			return 1
 		}
+		// The space cycle runs too, but does NOT decide the exit code: a
+		// control plane that predates the space route answers 404, and a smoke
+		// test of the beat must not fail because of that skew. The error is
+		// printed, so the skew is visible instead of silent.
+		if err := a.ReportSpaceOnce(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-agent: space cycle failed: %v\n", err)
+		}
 		return 0
 	}
 
@@ -140,6 +172,26 @@ func agentHealthGateOpts(base, token string) setup.HealthGate {
 		RequireDatabaseStatusOperational: true,
 		StubsOptional:                    true,
 	}
+}
+
+// defaultSitesDir is where site deploys land when nothing says otherwise —
+// the same default deploy/site-deploy.sh:128 applies.
+const defaultSitesDir = "/opt/barkpark/sites"
+
+// resolveSitesDir picks the sites root the space probe will read, in
+// precedence order: the explicit --sites-dir flag, then BARKPARK_SITES_DIR,
+// then defaultSitesDir. It NEVER returns empty, and the answer is carried in
+// the payload: BARKPARK_SITES_DIR is set on no box today, so every box takes
+// the fallback, and a fallback nobody can see is a wrong number nobody can
+// explain (charter D59).
+func resolveSitesDir(flagValue, envValue string) string {
+	if d := strings.TrimSpace(flagValue); d != "" {
+		return d
+	}
+	if d := strings.TrimSpace(envValue); d != "" {
+		return d
+	}
+	return defaultSitesDir
 }
 
 // readToken reads, trims, and validates the agent token from path. An empty
