@@ -1,0 +1,1936 @@
+{
+  "assignment_id": "restart-experiment-11",
+  "candidate_outcomes": [
+    {
+      "blocked_cells": 21,
+      "candidate": "E04",
+      "counts": {
+        "BLOCKED": 21,
+        "FAIL": 10,
+        "PASS": 12
+      },
+      "observed_failures": 10,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    },
+    {
+      "blocked_cells": 17,
+      "candidate": "E05",
+      "counts": {
+        "BLOCKED": 17,
+        "FAIL": 24,
+        "PASS": 2
+      },
+      "observed_failures": 24,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    },
+    {
+      "blocked_cells": 17,
+      "candidate": "E06",
+      "counts": {
+        "BLOCKED": 17,
+        "FAIL": 10,
+        "PASS": 16
+      },
+      "observed_failures": 10,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    }
+  ],
+  "counts": {
+    "BLOCKED": 55,
+    "FAIL": 44,
+    "PASS": 30
+  },
+  "round": "converge",
+  "rows": [
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 57,
+        "intentional_headerless_tables": 0,
+        "tables": 18
+      },
+      "fixture": "CCH28",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 57,
+        "tables": 18
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 35,
+        "intentional_headerless_tables": 0,
+        "tables": 11
+      },
+      "fixture": "CCH29",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 35,
+        "tables": 11
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 12,
+        "intentional_headerless_tables": 2,
+        "tables": 5
+      },
+      "fixture": "PDS44",
+      "observed": {
+        "headerless_tables": 2,
+        "scoped_header_cells": 12,
+        "tables": 5
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 9,
+        "intentional_headerless_tables": 9,
+        "tables": 12
+      },
+      "fixture": "PDS45",
+      "observed": {
+        "headerless_tables": 9,
+        "scoped_header_cells": 9,
+        "tables": 12
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 57,
+        "intentional_headerless_tables": 0,
+        "tables": 18
+      },
+      "fixture": "CCH28",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 57,
+        "tables": 18
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 35,
+        "intentional_headerless_tables": 0,
+        "tables": 11
+      },
+      "fixture": "CCH29",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 35,
+        "tables": 11
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 12,
+        "intentional_headerless_tables": 2,
+        "tables": 5
+      },
+      "fixture": "PDS44",
+      "observed": {
+        "headerless_tables": 2,
+        "scoped_header_cells": 12,
+        "tables": 5
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E04",
+      "evidence_kind": "PROXY_HARNESS_FROM_CANDIDATE_JSON",
+      "expected": {
+        "authored_header_cells": 9,
+        "intentional_headerless_tables": 9,
+        "tables": 12
+      },
+      "fixture": "PDS45",
+      "observed": {
+        "headerless_tables": 9,
+        "scoped_header_cells": 9,
+        "tables": 12
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 57,
+        "intentional_headerless_tables": 0,
+        "tables": 18
+      },
+      "fixture": "CCH28",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 0,
+        "tables": 18
+      },
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 35,
+        "intentional_headerless_tables": 0,
+        "tables": 11
+      },
+      "fixture": "CCH29",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 0,
+        "tables": 11
+      },
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 12,
+        "intentional_headerless_tables": 2,
+        "tables": 5
+      },
+      "fixture": "PDS44",
+      "observed": {
+        "headerless_tables": 2,
+        "scoped_header_cells": 0,
+        "tables": 5
+      },
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 9,
+        "intentional_headerless_tables": 9,
+        "tables": 12
+      },
+      "fixture": "PDS45",
+      "observed": {
+        "headerless_tables": 9,
+        "scoped_header_cells": 0,
+        "tables": 12
+      },
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 57,
+        "intentional_headerless_tables": 0,
+        "tables": 18
+      },
+      "fixture": "CCH28",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 0,
+        "tables": 18
+      },
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": false,
+          "MIME-Version": true,
+          "Message-ID": false,
+          "Subject": true,
+          "To": false
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "FAIL",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 35,
+        "intentional_headerless_tables": 0,
+        "tables": 11
+      },
+      "fixture": "CCH29",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 0,
+        "tables": 11
+      },
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": false,
+          "MIME-Version": true,
+          "Message-ID": false,
+          "Subject": true,
+          "To": false
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "FAIL",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 12,
+        "intentional_headerless_tables": 2,
+        "tables": 5
+      },
+      "fixture": "PDS44",
+      "observed": {
+        "headerless_tables": 2,
+        "scoped_header_cells": 0,
+        "tables": 5
+      },
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": false,
+          "MIME-Version": true,
+          "Message-ID": false,
+          "Subject": true,
+          "To": false
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "FAIL",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E05",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 9,
+        "intentional_headerless_tables": 9,
+        "tables": 12
+      },
+      "fixture": "PDS45",
+      "observed": {
+        "headerless_tables": 9,
+        "scoped_header_cells": 0,
+        "tables": 12
+      },
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": false,
+          "MIME-Version": true,
+          "Message-ID": false,
+          "Subject": true,
+          "To": false
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "FAIL",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 57,
+        "intentional_headerless_tables": 0,
+        "tables": 18
+      },
+      "fixture": "CCH28",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 57,
+        "tables": 18
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 35,
+        "intentional_headerless_tables": 0,
+        "tables": 11
+      },
+      "fixture": "CCH29",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 35,
+        "tables": 11
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 12,
+        "intentional_headerless_tables": 2,
+        "tables": 5
+      },
+      "fixture": "PDS44",
+      "observed": {
+        "headerless_tables": 2,
+        "scoped_header_cells": 12,
+        "tables": 5
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "CANDIDATE_STATIC_ARTIFACT",
+      "expected": {
+        "authored_header_cells": 9,
+        "intentional_headerless_tables": 9,
+        "tables": 12
+      },
+      "fixture": "PDS45",
+      "observed": {
+        "headerless_tables": 9,
+        "scoped_header_cells": 9,
+        "tables": 12
+      },
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 57,
+        "intentional_headerless_tables": 0,
+        "tables": 18
+      },
+      "fixture": "CCH28",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 57,
+        "tables": 18
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": true,
+          "MIME-Version": true,
+          "Message-ID": true,
+          "Subject": true,
+          "To": true
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "PASS",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 35,
+        "intentional_headerless_tables": 0,
+        "tables": 11
+      },
+      "fixture": "CCH29",
+      "observed": {
+        "headerless_tables": 0,
+        "scoped_header_cells": 35,
+        "tables": 11
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": true,
+          "MIME-Version": true,
+          "Message-ID": true,
+          "Subject": true,
+          "To": true
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "PASS",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 12,
+        "intentional_headerless_tables": 2,
+        "tables": 5
+      },
+      "fixture": "PDS44",
+      "observed": {
+        "headerless_tables": 2,
+        "scoped_header_cells": 12,
+        "tables": 5
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": true,
+          "MIME-Version": true,
+          "Message-ID": true,
+          "Subject": true,
+          "To": true
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "PASS",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "table_header_intent",
+      "candidate": "E06",
+      "evidence_kind": "LOCAL_MIME_HTML_PART_NOT_DELIVERED",
+      "expected": {
+        "authored_header_cells": 9,
+        "intentional_headerless_tables": 9,
+        "tables": 12
+      },
+      "fixture": "PDS45",
+      "observed": {
+        "headerless_tables": 9,
+        "scoped_header_cells": 9,
+        "tables": 12
+      },
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "observed": {
+        "content_type": "multipart/alternative",
+        "headers": {
+          "From": true,
+          "MIME-Version": true,
+          "Message-ID": true,
+          "Subject": true,
+          "To": true
+        },
+        "html": true,
+        "plain": true
+      },
+      "reason": "RFC MIME structure and required sender/recipient/message identity",
+      "status": "PASS",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "callout_semantics",
+      "candidate": "E04",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 30,
+      "fixture": "aggregate",
+      "observed": 30,
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "mark_semantics",
+      "candidate": "E04",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 388,
+      "fixture": "aggregate",
+      "observed": 0,
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "main_landmark",
+      "candidate": "E04",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 4,
+      "fixture": "aggregate",
+      "observed": 4,
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "callout_semantics",
+      "candidate": "E04",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 30,
+      "fixture": "aggregate",
+      "observed": 30,
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mark_semantics",
+      "candidate": "E04",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 388,
+      "fixture": "aggregate",
+      "observed": 0,
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "main_landmark",
+      "candidate": "E04",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 4,
+      "fixture": "aggregate",
+      "observed": 4,
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "callout_semantics",
+      "candidate": "E05",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 30,
+      "fixture": "aggregate",
+      "observed": 0,
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "mark_semantics",
+      "candidate": "E05",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 388,
+      "fixture": "aggregate",
+      "observed": 345,
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "main_landmark",
+      "candidate": "E05",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 4,
+      "fixture": "aggregate",
+      "observed": 4,
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "callout_semantics",
+      "candidate": "E05",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 30,
+      "fixture": "aggregate",
+      "observed": 0,
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mark_semantics",
+      "candidate": "E05",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 388,
+      "fixture": "aggregate",
+      "observed": 345,
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "main_landmark",
+      "candidate": "E05",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 4,
+      "fixture": "aggregate",
+      "observed": 4,
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "callout_semantics",
+      "candidate": "E06",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 30,
+      "fixture": "aggregate",
+      "observed": 30,
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "mark_semantics",
+      "candidate": "E06",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 388,
+      "fixture": "aggregate",
+      "observed": 208,
+      "status": "FAIL",
+      "surface": "public"
+    },
+    {
+      "axis": "main_landmark",
+      "candidate": "E06",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 4,
+      "fixture": "aggregate",
+      "observed": 4,
+      "status": "PASS",
+      "surface": "public"
+    },
+    {
+      "axis": "callout_semantics",
+      "candidate": "E06",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 30,
+      "fixture": "aggregate",
+      "observed": 30,
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "mark_semantics",
+      "candidate": "E06",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 388,
+      "fixture": "aggregate",
+      "observed": 208,
+      "status": "FAIL",
+      "surface": "email_html"
+    },
+    {
+      "axis": "main_landmark",
+      "candidate": "E06",
+      "evidence_kind": "DIRECT_STATIC_REPLAY",
+      "expected": 4,
+      "fixture": "aggregate",
+      "observed": 4,
+      "status": "PASS",
+      "surface": "email_html"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 1280,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "desktop"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 390,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "390"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 320,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "320"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 640,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "reflow-200"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 1280,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "desktop"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 390,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "390"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 320,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "320"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E04",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 640,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "reflow-200"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 1280,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "desktop"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 390,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "390"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 320,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "320"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 640,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "reflow-200"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 1280,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "desktop"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 390,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "390"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 320,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "320"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E05",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 640,
+        "focusOrder": [],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "reflow-200"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 1280,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "desktop"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 390,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "390"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 320,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "320"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 640,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "public",
+      "viewport": "reflow-200"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 1280,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "desktop"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 390,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "390"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 500,
+        "expected_clientWidth": 320,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "320"
+    },
+    {
+      "axis": "focus_order_overflow_exact_frame",
+      "candidate": "E06",
+      "evidence_kind": "INDEPENDENT_RULE_REPLAY_OF_E08_BROWSER_MEASUREMENT",
+      "fixture": "CCH28",
+      "observed": {
+        "clientWidth": 1280,
+        "expected_clientWidth": 640,
+        "focusOrder": [
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0",
+          "div:0"
+        ],
+        "overflow": false
+      },
+      "status": "FAIL",
+      "surface": "email",
+      "viewport": "reflow-200"
+    },
+    {
+      "axis": "full_browser_frame_coverage",
+      "candidate": "E04",
+      "fixture": "all",
+      "observed_cells": 8,
+      "reason": "E08 captured every frame only for CCH28; no golden frames exist for the other three fixtures",
+      "required_cells": 32,
+      "status": "BLOCKED",
+      "surface": "public_and_email_html"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "full_browser_frame_coverage",
+      "candidate": "E05",
+      "fixture": "all",
+      "observed_cells": 8,
+      "reason": "E08 captured every frame only for CCH28; no golden frames exist for the other three fixtures",
+      "required_cells": 32,
+      "status": "BLOCKED",
+      "surface": "public_and_email_html"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "full_browser_frame_coverage",
+      "candidate": "E06",
+      "fixture": "all",
+      "observed_cells": 8,
+      "reason": "E08 captured every frame only for CCH28; no golden frames exist for the other three fixtures",
+      "required_cells": 32,
+      "status": "BLOCKED",
+      "surface": "public_and_email_html"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    }
+  ],
+  "schema_version": "legendary-paper-reader-e11-matrix/v1"
+}

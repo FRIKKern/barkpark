@@ -1,0 +1,10 @@
+{
+  "schema_version": "legendary-paper-reader-cache-freshness/v1",
+  "cases": [
+    {"id": "exact-validator", "request": "If-None-Match exact", "expected_status": 304, "expected_body_bytes": 0},
+    {"id": "stale-validator", "request": "If-None-Match stale after publish", "expected_status": 200, "expected_identity": "new exact source revision"},
+    {"id": "reconnect-after-publish", "request": "connected reader reconnect", "expected": "new revision or explicit conflict, never stale success"}
+  ],
+  "identity_domains": ["document", "document_revision", "release", "projection", "cache", "cycle"],
+  "hard_rule": "All cases run against a deployed candidate with pairwise-distinct identity domains and server-joinable request IDs. Local simulations remain blocked."
+}

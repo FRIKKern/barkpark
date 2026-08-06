@@ -1,0 +1,10 @@
+{
+  "blocked_cells": "reports/blocked-cells.json",
+  "disposition": "NO_WINNER_PILOT_UNAUTHORIZED",
+  "matrix": "reports/human-reader-matrix.json",
+  "next_authorized_action": "Leader records unsuccessful Experiment and opens a new immutable replacement wave; do not dispatch Pilot in this wave.",
+  "observed_failures": "reports/observed-failures.json",
+  "requirements": "fixtures/replacement-wave-requirements.json",
+  "round": "converge",
+  "schema_version": "legendary-paper-reader-e11-handoff/v1"
+}

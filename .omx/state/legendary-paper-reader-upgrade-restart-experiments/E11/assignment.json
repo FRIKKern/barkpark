@@ -1,0 +1,17 @@
+{
+  "schema_version": "legendary-paper-restart-experiment-assignment/v1",
+  "assignment_id": "restart-experiment-11",
+  "assignment_uuid": "1f343fdc-85c3-4aeb-a5e8-0fb2a13eaef8",
+  "agent_type": "legendary-experimenter",
+  "model_reasoning_effort": "medium",
+  "round": "converge",
+  "epic_task_id": "task-a768c69e659add58",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+  "wave_revision": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+  "inventory_digest": "227c9defff49f185dc5e580f731ab2419da17fc2dc5cf2304a664e4b230f7ccc",
+  "plan_digest": "9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45",
+  "responsibility": "human_reader_experience_no_winner_convergence",
+  "write_boundary": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11",
+  "candidate_selection_authorized": false,
+  "pilot_authorized": false
+}

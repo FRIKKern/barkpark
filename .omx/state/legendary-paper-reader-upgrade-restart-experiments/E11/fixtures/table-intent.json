@@ -1,0 +1,11 @@
+{
+  "schema_version": "legendary-paper-reader-table-intent/v1",
+  "fixtures": {
+    "CCH28": {"tables": 18, "authored_header_cells": 57, "intentional_headerless_tables": 0},
+    "CCH29": {"tables": 11, "authored_header_cells": 35, "intentional_headerless_tables": 0},
+    "PDS44": {"tables": 5, "authored_header_cells": 12, "intentional_headerless_tables": 2},
+    "PDS45": {"tables": 12, "authored_header_cells": 9, "intentional_headerless_tables": 9}
+  },
+  "totals": {"tables": 46, "authored_header_cells": 113, "intentional_headerless_tables": 11},
+  "hard_rule": "Every authored header cell renders with column-header semantics; every intentional headerless table remains headerless. Never infer or invent a header."
+}

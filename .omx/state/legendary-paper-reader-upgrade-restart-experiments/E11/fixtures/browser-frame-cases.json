@@ -1,0 +1,18 @@
+{
+  "schema_version": "legendary-paper-reader-browser-frames/v1",
+  "fixtures": ["CCH28", "CCH29", "PDS44", "PDS45"],
+  "surfaces": ["public", "email_html"],
+  "frames": [
+    {"id": "desktop", "css_width": 1280, "zoom_percent": 100},
+    {"id": "mobile-390", "css_width": 390, "zoom_percent": 100},
+    {"id": "mobile-320", "css_width": 320, "zoom_percent": 100},
+    {"id": "reflow-200", "css_width": 640, "zoom_percent": 200}
+  ],
+  "hard_rules": [
+    "Captured documentElement.clientWidth equals the declared CSS width; a browser minimum-width substitution is a failed fixture, not a pass.",
+    "scrollWidth is no greater than clientWidth plus one CSS pixel; wide tables use keyboard-focusable bounded containers.",
+    "Every focus target has a stable nonempty identity, focus order follows DOM reading order, and no duplicate anonymous target substitutes for proof.",
+    "Golden screenshots or DOM frames cover all 32 fixture/surface/frame cells and are hash-stable across two runs."
+  ],
+  "expected_cells": 32
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": "legendary-paper-reader-mime-contract/v1",
+  "content_type": "multipart/alternative",
+  "required_parts": ["text/plain", "text/html"],
+  "required_headers": ["From", "To", "Subject", "Message-ID", "MIME-Version"],
+  "hard_rule": "All four fixtures parse as RFC messages with both alternative parts and every required header before delivery testing."
+}

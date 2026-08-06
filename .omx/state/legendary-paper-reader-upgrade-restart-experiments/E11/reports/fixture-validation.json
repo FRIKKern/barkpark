@@ -1,0 +1,53 @@
+{
+  "checks": {
+    "all_fixture_files": true,
+    "browser_cells": true,
+    "mail_cells": true,
+    "pilot_stays_closed": true,
+    "table_denominators": true
+  },
+  "rows": [
+    {
+      "file": "table-intent.json",
+      "schema_version": "legendary-paper-reader-table-intent/v1",
+      "status": "PASS"
+    },
+    {
+      "file": "dom-semantics.json",
+      "schema_version": "legendary-paper-reader-dom-semantics/v1",
+      "status": "PASS"
+    },
+    {
+      "file": "mime-contract.json",
+      "schema_version": "legendary-paper-reader-mime-contract/v1",
+      "status": "PASS"
+    },
+    {
+      "file": "browser-frame-cases.json",
+      "schema_version": "legendary-paper-reader-browser-frames/v1",
+      "status": "PASS"
+    },
+    {
+      "file": "studio-lifecycle.json",
+      "schema_version": "legendary-paper-reader-studio-lifecycle/v1",
+      "status": "PASS"
+    },
+    {
+      "file": "delivered-mail-clients.json",
+      "schema_version": "legendary-paper-reader-delivered-mail/v1",
+      "status": "PASS"
+    },
+    {
+      "file": "cache-freshness.json",
+      "schema_version": "legendary-paper-reader-cache-freshness/v1",
+      "status": "PASS"
+    },
+    {
+      "file": "assistive-technology.json",
+      "schema_version": "legendary-paper-reader-at/v1",
+      "status": "PASS"
+    }
+  ],
+  "schema_version": "legendary-paper-reader-fixture-validation/v1",
+  "status": "PASS"
+}

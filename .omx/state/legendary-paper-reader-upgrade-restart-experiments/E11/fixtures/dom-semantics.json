@@ -1,0 +1,9 @@
+{
+  "schema_version": "legendary-paper-reader-dom-semantics/v1",
+  "totals": {"callouts": 30, "authored_mark_nodes": 388, "minimum_document_landmarks": 4},
+  "hard_rules": [
+    "Each callout exposes a programmatic note/status/alert role and an accessible tone or purpose label.",
+    "Each authored mark node has a one-to-one semantic carrier; flattening or merging away a marked node fails.",
+    "Each document exposes one main content landmark and a single logical heading sequence without duplicate main landmarks."
+  ]
+}

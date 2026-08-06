@@ -1,0 +1,8 @@
+{
+  "schema_version": "legendary-paper-reader-at/v1",
+  "technologies": ["VoiceOver Safari", "NVDA Firefox or equivalent Windows screen reader"],
+  "fixtures": ["CCH28", "CCH29", "PDS44", "PDS45"],
+  "required_checks": ["landmark navigation", "heading order", "table header association", "intentional headerless announcement", "callout purpose", "mark semantics where exposed", "focus order", "overflow-container discoverability"],
+  "required_receipt_fields": ["technology", "version", "browser", "fixture", "commands", "spoken_or_braille_transcript", "failures", "status"],
+  "hard_rule": "Real AT receipts pass every required check. DOM/AX-tree inspection alone is not a pass."
+}

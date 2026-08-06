@@ -1,0 +1,141 @@
+{
+  "archive_sha256": "bf254b6bcaf590724f7b4d52f769167264f4bc5ee92761ed2cfcc0c25f3c7682",
+  "files": [
+    {
+      "bytes": 1280,
+      "path": "README.md",
+      "sha256": "8876034abf4b4dde7d1081e4512805da74d3506914cf270df1676540582c19c4"
+    },
+    {
+      "bytes": 861,
+      "path": "assignment.json",
+      "sha256": "a4eed55b13db8900bcb3baf55691f2a22744e4bfd3526b85e76e7fdf97b1617d"
+    },
+    {
+      "bytes": 683,
+      "path": "fixtures/assistive-technology.json",
+      "sha256": "949f48e79120b6ccb296182492bd89d350919534a4e8b9ce3dd68052829e29a4"
+    },
+    {
+      "bytes": 1023,
+      "path": "fixtures/browser-frame-cases.json",
+      "sha256": "7f2d046fe5d0b43891208b9c9bb96c2a997d0c56076e0e31016ce9fb50a41411"
+    },
+    {
+      "bytes": 771,
+      "path": "fixtures/cache-freshness.json",
+      "sha256": "bfbfa5a58edb4c3272a0913fb486609a96a953c2770d1a2995783ed89fd92998"
+    },
+    {
+      "bytes": 504,
+      "path": "fixtures/delivered-mail-clients.json",
+      "sha256": "bd9197689653e5c1e855f072f030df4d0525bfcdcc758af98db6aae3c74e56a8"
+    },
+    {
+      "bytes": 527,
+      "path": "fixtures/dom-semantics.json",
+      "sha256": "729b70f07a76c080ae2ae6f144658ff2f56456a165565f71623ad2af1524abc8"
+    },
+    {
+      "bytes": 374,
+      "path": "fixtures/mime-contract.json",
+      "sha256": "d388bb059c8a6a9251770fcf9b17421b858317df22e6df358d12c364ad91002e"
+    },
+    {
+      "bytes": 792,
+      "path": "fixtures/replacement-wave-requirements.json",
+      "sha256": "06434bf0809778a011d51eb1194bafcf6641f1fb81ad766518bc02bc0ed38100"
+    },
+    {
+      "bytes": 827,
+      "path": "fixtures/studio-lifecycle.json",
+      "sha256": "0c89a74cc00214d6bdeb5b8dd2bb288d94eae0555f9509c0e48c88b9d554c8ce"
+    },
+    {
+      "bytes": 724,
+      "path": "fixtures/table-intent.json",
+      "sha256": "2080aad75ea1ee10e287ea0beb50cda77f3f00dac7038dbc11cacf9154549e06"
+    },
+    {
+      "bytes": 505,
+      "path": "handoff.json",
+      "sha256": "4f9ff75a37007e9f0b72a55350218820333b0029439149468d946bd4d3413ea0"
+    },
+    {
+      "bytes": 13631,
+      "path": "reports/blocked-cells.json",
+      "sha256": "e18af89646f9baded25d178d009c2976cfd261a7ec41c2862ab3416e156f2b88"
+    },
+    {
+      "bytes": 437,
+      "path": "reports/credential-scan-false-positive-attempt.json",
+      "sha256": "5d2a468dbaaf7aed413d63683bbda5fbac17740349f547e8d07ea5aa851f396a"
+    },
+    {
+      "bytes": 347,
+      "path": "reports/credential-scan.json",
+      "sha256": "aa7f7d1f914b22d196ce2890fa25aea2cfafe59f7b31c281c933a806fd45ff3d"
+    },
+    {
+      "bytes": 1404,
+      "path": "reports/fixture-validation.json",
+      "sha256": "99e1256433d7c538b5f3cd6ad3a49f9a827d242a61ccadbc7abf12328e2dd7f8"
+    },
+    {
+      "bytes": 49681,
+      "path": "reports/human-reader-matrix.json",
+      "sha256": "5bd28d328ada436fb00d2200f1a499ca0d6f1880a453ba9b1587ec54aad9578d"
+    },
+    {
+      "bytes": 564,
+      "path": "reports/input-hashes.json",
+      "sha256": "ae05b2f236fb02cba3edeb30bd422d102146d06129f04077bb7c92873ed210b2"
+    },
+    {
+      "bytes": 1063,
+      "path": "reports/no-winner.json",
+      "sha256": "e1dbf4520dd5d50043da3c7131678199144e6bc4f7acf8ea96fdfb2074cf6755"
+    },
+    {
+      "bytes": 23580,
+      "path": "reports/observed-failures.json",
+      "sha256": "1e84ab1ad2ce5a995432bfda20100112367fa46f2b85ad14ce9d883a1515d893"
+    },
+    {
+      "bytes": 957,
+      "path": "reports/replay-1.json",
+      "sha256": "2a35763168db122eee419ee9fad684f8ba29c942017d681aee340916806d5304"
+    },
+    {
+      "bytes": 957,
+      "path": "reports/replay-2.json",
+      "sha256": "b561d8b3e7c535f3298f1271ef86e219e6995bb843690feb5eeb7f6011a1cba8"
+    },
+    {
+      "bytes": 250,
+      "path": "reports/reproducibility.json",
+      "sha256": "7468e7e1eb3ec08c4baae5e2f26004e237a79a5337b304755cee2f11dcb4dc2f"
+    },
+    {
+      "bytes": 255,
+      "path": "reports/timing.json",
+      "sha256": "fad7a98f243e30b887fead1675b7e90c330b5c8d87c31a19c0ee21faada0bf82"
+    },
+    {
+      "bytes": 2121,
+      "path": "result.json",
+      "sha256": "86a2230284c47efe63e948f1e593ac2bedcba6789ab2ff45442b4c0aa442c48c"
+    },
+    {
+      "bytes": 19509,
+      "path": "scripts/converge.py",
+      "sha256": "2a0ef802364a09ffcf723b5859a040cd4344a896471dc770087175d116253f1f"
+    },
+    {
+      "bytes": 4865,
+      "path": "scripts/verify.py",
+      "sha256": "ec41d28f21a606544128116287499ecbd430e2fefef42aa9c84382fbfa1f8d01"
+    }
+  ],
+  "schema_version": "legendary-paper-reader-e11-hashes/v1"
+}

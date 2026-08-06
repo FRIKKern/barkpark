@@ -1,0 +1,48 @@
+{
+  "candidate_outcomes": [
+    {
+      "blocked_cells": 21,
+      "candidate": "E04",
+      "counts": {
+        "BLOCKED": 21,
+        "FAIL": 10,
+        "PASS": 12
+      },
+      "observed_failures": 10,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    },
+    {
+      "blocked_cells": 17,
+      "candidate": "E05",
+      "counts": {
+        "BLOCKED": 17,
+        "FAIL": 24,
+        "PASS": 2
+      },
+      "observed_failures": 24,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    },
+    {
+      "blocked_cells": 17,
+      "candidate": "E06",
+      "counts": {
+        "BLOCKED": 17,
+        "FAIL": 10,
+        "PASS": 16
+      },
+      "observed_failures": 10,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    }
+  ],
+  "counts": {
+    "BLOCKED": 55,
+    "FAIL": 44,
+    "PASS": 30
+  },
+  "round": "converge",
+  "run": 2,
+  "semantic_sha256": "5bd28d328ada436fb00d2200f1a499ca0d6f1880a453ba9b1587ec54aad9578d"
+}

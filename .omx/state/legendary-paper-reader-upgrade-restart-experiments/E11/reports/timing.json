@@ -1,0 +1,12 @@
+{
+  "measurement": "direct DOM/MIME plus retained browser-rule replay",
+  "runs": {
+    "1": {
+      "wall_nanoseconds": 50435792
+    },
+    "2": {
+      "wall_nanoseconds": 58776500
+    }
+  },
+  "schema_version": "legendary-paper-reader-e11-timing/v1"
+}

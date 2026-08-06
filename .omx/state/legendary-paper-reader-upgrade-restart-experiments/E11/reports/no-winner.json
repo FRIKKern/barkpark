@@ -1,0 +1,46 @@
+{
+  "candidate_outcomes": [
+    {
+      "blocked_cells": 21,
+      "candidate": "E04",
+      "counts": {
+        "BLOCKED": 21,
+        "FAIL": 10,
+        "PASS": 12
+      },
+      "observed_failures": 10,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    },
+    {
+      "blocked_cells": 17,
+      "candidate": "E05",
+      "counts": {
+        "BLOCKED": 17,
+        "FAIL": 24,
+        "PASS": 2
+      },
+      "observed_failures": 24,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    },
+    {
+      "blocked_cells": 17,
+      "candidate": "E06",
+      "counts": {
+        "BLOCKED": 17,
+        "FAIL": 10,
+        "PASS": 16
+      },
+      "observed_failures": 10,
+      "verdict": "REJECT",
+      "winner_eligible": false
+    }
+  ],
+  "candidate_selected": false,
+  "decision_basis": "Every candidate has observed zero-threshold failures and BLOCKED required real-reader cells.",
+  "pilot_authorized": false,
+  "replacement_wave_required": true,
+  "round": "converge",
+  "schema_version": "legendary-paper-reader-e11-no-winner/v1"
+}

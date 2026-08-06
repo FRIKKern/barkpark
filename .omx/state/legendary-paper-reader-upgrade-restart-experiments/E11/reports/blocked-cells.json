@@ -1,0 +1,458 @@
+{
+  "count": 55,
+  "meaning": "Required real-reader or complete-frame evidence unavailable; never counted as pass or fail.",
+  "round": "converge",
+  "rows": [
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "mime_plus_from_to_message_id",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "observed": null,
+      "reason": "candidate exposes JSON adapter, not an RFC message",
+      "status": "BLOCKED",
+      "surface": "email_mime"
+    },
+    {
+      "axis": "full_browser_frame_coverage",
+      "candidate": "E04",
+      "fixture": "all",
+      "observed_cells": 8,
+      "reason": "E08 captured every frame only for CCH28; no golden frames exist for the other three fixtures",
+      "required_cells": 32,
+      "status": "BLOCKED",
+      "surface": "public_and_email_html"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "CCH28",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "CCH29",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "PDS44",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E04",
+      "fixture": "PDS45",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "full_browser_frame_coverage",
+      "candidate": "E05",
+      "fixture": "all",
+      "observed_cells": 8,
+      "reason": "E08 captured every frame only for CCH28; no golden frames exist for the other three fixtures",
+      "required_cells": 32,
+      "status": "BLOCKED",
+      "surface": "public_and_email_html"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "CCH28",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "CCH29",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "PDS44",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E05",
+      "fixture": "PDS45",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "full_browser_frame_coverage",
+      "candidate": "E06",
+      "fixture": "all",
+      "observed_cells": 8,
+      "reason": "E08 captured every frame only for CCH28; no golden frames exist for the other three fixtures",
+      "required_cells": 32,
+      "status": "BLOCKED",
+      "surface": "public_and_email_html"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "CCH28",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "CCH29",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "PDS44",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    },
+    {
+      "axis": "authenticated_expiry_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "no safe authenticated connected Studio session",
+      "status": "BLOCKED",
+      "surface": "studio"
+    },
+    {
+      "axis": "gmail_outlook_apple_mail",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "no delivery or real mail-client receipt",
+      "status": "BLOCKED",
+      "surface": "delivered_mail"
+    },
+    {
+      "axis": "freshness_after_publish_and_reconnect",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "isolated candidate has no deployed cache lifecycle",
+      "status": "BLOCKED",
+      "surface": "cache"
+    },
+    {
+      "axis": "real_at_reading_order",
+      "candidate": "E06",
+      "fixture": "PDS45",
+      "reason": "no real AT session; DOM evidence is not proxy-passed",
+      "status": "BLOCKED",
+      "surface": "assistive_technology"
+    }
+  ],
+  "schema_version": "legendary-paper-reader-e11-blocked/v1"
+}

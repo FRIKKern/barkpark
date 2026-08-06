@@ -1,0 +1,9 @@
+{
+  "schema_version": "legendary-paper-reader-delivered-mail/v1",
+  "clients": ["Gmail", "Outlook", "Apple Mail"],
+  "fixtures": ["CCH28", "CCH29", "PDS44", "PDS45"],
+  "widths": [390, 320],
+  "expected_cells": 24,
+  "required_receipt_fields": ["client", "client_version", "fixture", "width", "delivery_message_id", "render_capture_sha256", "reading_order", "overflow", "status"],
+  "hard_rule": "Twenty-four delivered-client cells pass; decoded local MIME and HTTP preview are not delivery receipts."
+}

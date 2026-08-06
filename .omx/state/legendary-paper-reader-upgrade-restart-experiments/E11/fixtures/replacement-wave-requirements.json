@@ -1,0 +1,16 @@
+{
+  "schema_version": "legendary-paper-reader-replacement-wave/v1",
+  "fixture_files": [
+    "table-intent.json",
+    "dom-semantics.json",
+    "mime-contract.json",
+    "browser-frame-cases.json",
+    "studio-lifecycle.json",
+    "delivered-mail-clients.json",
+    "cache-freshness.json",
+    "assistive-technology.json"
+  ],
+  "zero_thresholds": ["authored_content_loss", "invented_author_intent", "schema_invalidity", "page_or_display_overflow", "reading_order_failures", "missing_target_reader", "proxy_passes_for_missing_readers"],
+  "advance_rule": "A replacement immutable wave may authorize Pilot only after one runnable candidate passes every executable fixture twice with stable golden hashes and zero BLOCKED cells.",
+  "current_wave_disposition": "NO_WINNER_PILOT_UNAUTHORIZED"
+}

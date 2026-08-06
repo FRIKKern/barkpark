@@ -1,0 +1,11 @@
+{
+  "schema_version": "legendary-paper-reader-studio-lifecycle/v1",
+  "cases": [
+    {"id": "authenticated-load", "expected": "exact revision-bound content and responsive controls"},
+    {"id": "session-expiry", "expected": "editing is fenced; authored state is retained; reauthentication is announced"},
+    {"id": "reconnect-same-revision", "expected": "state and focus restore without duplicate writes"},
+    {"id": "reconnect-new-revision", "expected": "conflict is explicit; no silent overwrite or perspective substitution"}
+  ],
+  "required_receipt_fields": ["fixture", "connected_session_id_hash", "source_revision", "event_sequence", "focus_sequence", "final_revision", "status"],
+  "hard_rule": "All four cases pass for all four fixtures in a safe authenticated Studio session. Static adapter JSON is not evidence."
+}
