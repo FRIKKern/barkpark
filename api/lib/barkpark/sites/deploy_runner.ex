@@ -1788,7 +1788,18 @@ defmodule Barkpark.Sites.DeployRunner do
       "finished_at" => iso_or_nil(Map.get(render, :finished_at) || DateTime.utc_now())
     }
 
-    File.write(terminal_record_path(dir, manifest.slug, tag), Jason.encode!(payload))
+    # The record is named from the LOG's own stem whenever a log path exists, so
+    # `record_path_for_log/1` — the only name an eviction has to work from once
+    # the manifest is gone — always resolves to the record this call wrote. For a
+    # tagged run the two names are identical; for a PRE-CHANGE manifest (log
+    # `<slug>.log`, tag "legacy") they diverge, and deriving from the log is what
+    # keeps that run's eviction honest instead of orphan-tombstoning it.
+    record_path =
+      if is_binary(log_file),
+        do: record_path_for_log(log_file),
+        else: terminal_record_path(dir, manifest.slug, tag)
+
+    File.write(record_path, Jason.encode!(payload))
   rescue
     error ->
       Logger.warning("[site-deploy] could not write the terminal record: #{inspect(error)}")
