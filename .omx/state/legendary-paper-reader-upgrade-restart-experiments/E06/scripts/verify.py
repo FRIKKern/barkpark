@@ -5,7 +5,6 @@ import hashlib
 import html
 import json
 import re
-import time
 from email import policy
 from email.parser import BytesParser
 from html.parser import HTMLParser
@@ -104,7 +103,6 @@ def check_projection_schema(projection: dict[str, Any]) -> list[str]:
     return errors
 
 
-started = time.monotonic()
 checks: list[str] = []
 failures: list[str] = []
 conditional_rows = []
@@ -280,7 +278,6 @@ verification = {
 }
 report("conditional-validators.json", {"schema_version":"legendary-paper-restart-e06-conditional/v1","rows":conditional_rows})
 report("verification.json", verification)
-report("timing.json", {"schema_version":"legendary-paper-restart-e06-timing/v1","verify_seconds":round(time.monotonic()-started,6)})
 print(json.dumps(verification, sort_keys=True, separators=(",", ":")))
 if failures:
     raise SystemExit(1)
