@@ -1547,6 +1547,68 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-06 — wave 33 REVIEW (round 1 shipped, grade A−)
+
+**All five round-1 slices built, reviewed, gate-green and PUSHED WITH PRs** — #9685 (r2, the remaining
+silent withholds in `notifications.ex`), #9686 (s8, the member self-scoped delivery read), #9687 (s3,
+the build console stops printing a tail as a log), #9688 (s4, the captured 5xx body gets a reader),
+#9689 (s5, the four gate aggregators disclose green-on-nothing). No round-2 deferrals: every slice this
+wave was round 1, so the frontier is empty and the lead can merge in any order except the one noted below.
+
+**What landed.** Nine untraced withhold branches were DERIVED — not remembered — by an egress-reachability
+fixpoint over `notifications.ex`, three funnelled into `suppressed` rows and six named-consented, with the
+census reding on a STALE consent row as well as a new untraced one. `GET /v1/notifications/deliveries`
+stops 403ing the people it notifies: owner/admin still reads the whole team log, everyone else reads it
+self-scoped on `lower(recipient)` — and the surface says out loud that it can answer "was I emailed?" and
+never "did the team's Slack get it?". Both server-side console bounds now disclose what they discarded as
+extra keys on the entry map, with no migration and no serializer change, and the panel's bare count grew
+words. `api()`'s captured non-JSON 5xx body finally reaches a reader, behind the first behavioural fixture
+for `api()` that has ever existed (`api: api` was absent from the hook map). And the four aggregators
+emit one multi-line `::notice::` when they green on nothing, ratcheted by a 106-assertion harness that
+derives the demanded sentence from each workflow's own `name:` and matches MESSAGE TEXT, never
+`annotations_count`.
+
+**THE REVIEW FINDING THAT MATTERS: an optional filter's failure mode is to VANISH.** s8's self-scope fence
+rides `list_deliveries/2`'s `:recipient` option, and `maybe_delivery_recipient/2` fences only on a non-empty
+binary — right for the admin read (nil = no fence), and silently fail-OPEN for a member. A non-admin whose
+stored address is blank fell straight through to the UNFENCED query and was handed the whole team's log.
+Proved, not argued: with the new guard stubbed out the added test returns **200 carrying a colleague's row**.
+The router now owns the failure mode of the decision it makes — no fenceable address, no read. **The law:
+when a security decision is expressed as an OPTIONAL argument to a general-purpose query builder, the
+absence of that argument means "no restriction". Whoever makes the decision must also own its absence.**
+
+**The second finding is the one the builder named himself, and he was right to.** Every JS test proved the
+member's delivery log was BUILT; none proved it was MOUNTED, so re-adding the old `if (!canManage) return;`
+would have shipped a permanent "Loading delivery log…" with the harness fully green. A source-shape pin was
+added and labelled as the weaker kind — the harness has no DOM — and it reds on exactly that regression.
+
+**Cross-slice, on the integration merge of all five: full `cloud` suite 2864 tests / 0 failures**, harness
+862/862, `mix format --check-formatted` clean, and all four sibling ratchets s5 was worried about re-run
+green on its head (`security-gate-shape` 68/0, the three `*-path-escape-check.test.sh` 114/122/172).
+Wave 32's law — *a narrow gate cannot see a repo-wide ratchet; run the full suite on the integration
+merge, every wave* — was honoured and paid nothing this time, which is what a law looks like when it works.
+
+**THE LEDGER COULD NOT BE COMPLETED, and that is a system fact, not a slice fact.** `bp task create` and
+`bp doc create` return a server-side 500 (`request_id GMkRloZmVQXGYRYADfUi`) for BOTH builders and the
+reviewer, across ~2 hours; `doc patch` + `doc publish` work fine. Four discovered rows therefore exist only
+as prose, parked on the epic task's `discovered_backlog_w33` field and in the Paper debrief: the
+`deployments.detail` varchar(255)-under-a-2 KB-validator RAISE (p2, pinned by a deliberate defect-asserting
+test in `registry_test.exs`), `loadSubscription`'s fault still dropping `text`, widening `WithholdCensus`
+beyond one file (needs an interprocedural `has_trace?` first), and the open question of whether
+`enqueue_channel/4`'s Oban `{:error,_}` arm is reachable in production at all.
+
+**What the next wave must know.** (1) **#9686 is HIGH-FLIP-RISK and an INDEPENDENT second reviewer is owed
+before merge** — it widens a delivery read from admins to every member over `last_error`, a column whose
+leak was real one wave ago (#9591), and the write-seam classification has TEST proof only, never runtime
+proof, because no failed delivery has been written since that deploy. (2) The self-scoped read is 30.8 ms /
+3798 buffers against 0.037 ms / 6 for the admin read on a seeded 200k-row team, because `lower(recipient)`
+is unindexed; it scales with the team's WHOLE log rather than the page size and this table has no retention
+policy — the index `(team_id, lower(recipient), inserted_at)` is the natural first row of wave 34.
+(3) #9689 self-dispatches the full Elixir suite by design; its probe branch is deleted and its output is
+quoted in the PR body. (4) `dr-bl-500-caption-lie` (#9585) still owns the SERVER half of s3's population,
+is still in ANOTHER epic, and still must not be adopted.
+
+
 ### 2026-08-06 — wave 33 DECIDE (build in flight)
 
 Five slices, all round 1, all file-disjoint by region; Paper `cch-wave-33-2026-08-06`. **The wave's
