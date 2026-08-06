@@ -542,3 +542,75 @@ the fleet autoupdate kill-switch, so it is a privilege grant needing explicit co
 `dr-w2-s7-scoped-search-permission-clamp` (the P0 live leak — D35 assigns this wave's ONE reviewer to
 it, with the satisfiable post-merge wording) and `dr-w2-s4-scrub-knows-our-own-token` (secret-boundary,
 and D29's mutation control already proved the table certifies patterns it cannot see).
+
+### Wave 2026-08-06 — REVIEWED · Paper `deploy-truth-wave-2-2026-08-06` · grade **A**
+
+**Seven of seven round-1 slices built, reviewed, gate-green on their final state, pushed and PR'd.
+Nothing merged — the lead merges.** `dr-w2-s8` (the AFTER measurement) is round 2 BY DESIGN, behind
+s2 + s3 + s6 landing AND deploying.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| Build-keyed durable log + tombstone | `dr-w2-s1-recorder-build-id-keyed-log` | `…keyed-on-the-de-0-r` | [#9727](https://github.com/FRIKKern/barkpark/pull/9727) | 66 tests, 0 failures |
+| Provisioner rm_rf wedge | `dr-w2-s2-provision-rmrf-wedge` | `…identical-failures--1` (unchanged) | [#9729](https://github.com/FRIKKern/barkpark/pull/9729) | 26 tests, 0 failures |
+| Poll grace for 5xx + named refusal | `dr-w2-s3-poll-grace-5xx-and-named-refusal` | `…beat-stops-killi-2-r` | [#9730](https://github.com/FRIKKern/barkpark/pull/9730) | 58 tests, 0 failures |
+| The scrub learns our own prefix | `dr-w2-s4-scrub-knows-our-own-token` | `…learns-barkpark--3-r` | [#9731](https://github.com/FRIKKern/barkpark/pull/9731) | 109 tests, 0 failures |
+| CLI status stops lying | `dr-w2-s5-cli-status-stops-lying` | `…stops-reporting-liv-4` (unchanged) | [#9732](https://github.com/FRIKKern/barkpark/pull/9732) | build + vet + all Go packages ok |
+| One extractor · HEALTH slow vs broken | `dr-w2-s6-engine-one-extractor-health-slow-vs-broken` | `…stops-narrowing-one-fa-5` (unchanged) | [#9733](https://github.com/FRIKKern/barkpark/pull/9733) | 862/862 · engine self-tests 274/274 + 158/158 |
+| Scoped-search permission clamp (**P0**) | `dr-w2-s7-scoped-search-permission-clamp` | `…serving-pri-6` (unchanged) | [#9734](https://github.com/FRIKKern/barkpark/pull/9734) | 23 tests, 0 failures (+29 in the two inverted suites) |
+
+**What landed.** The wave's thesis held: the black box recorder was built AND the repair was cut from
+the first recovered log. All three clauses of the wish move. REPAIR — the provisioner's DELETE window
+is closed (swap-then-unlink, per-slug lock, presence-integrity freshness), which is the single bug
+behind 25 identical search-capstone failures; a pool blip on one poll beat stops killing a finished
+build; HEALTH stops calling a slow site broken. DIAGNOSE — a build log is now keyed on the DEPLOYMENT
+and survives the next launch, a terminal record outlives the log with exit code, reason, stage fold
+and an exact-name journald command, and the provision arm that swallowed 63% of this fleet's failures
+is a NAMED typed refusal. NOTICE — `bp cloud site status` stops printing a serene "live" over a failed
+newest deploy and prints the ledger's `failure_class` the control plane has been shipping all along.
+A P0 authorization leak was closed on the side, keyed on the PERMISSION and moving both routes together.
+
+**What did NOT land, and must be said plainly.** Nothing is merged, so the AFTER number still does not
+exist — that is `dr-w2-s8`, and it is deferred by design, not by failure. Nothing was proven ON THE BOX
+this wave: every slice's evidence is hermetic. The durable record is durable but not yet READABLE — s1
+deliberately exposes no HTTP read path, so the operator still cannot fetch a build log; that read path
+is the obvious next slice and it is now unblocked by s4. And the scrub fix was measured against a
+SOURCE-CODE proxy corpus, not the real `failure_reason` column (charter D13's real replay is still owed).
+
+**Review fixes made in place** (four commits across three `-r` branches):
+1. **s1** — `write_terminal_record/2` named the record from `<slug>-<tag>` while every eviction resolves
+   it from the LOG's stem. For a pre-change manifest those diverged, so evicting that log wrote an ORPHAN
+   tombstone beside the real record and the read answered `:missing` where the truth was `:evicted` — the
+   exact conflation the slice exists to remove.
+2. **s1 × s2, the cross-slice fix** — s2 added `{:swap_aside_failed, _}` and `{:lock_aborted, _}` to the
+   provisioner's error vocabulary in the same wave; neither had a `describe_provision_reason/1` clause, so
+   both would have reached the operator as Elixir tuple jargon through the brand-new
+   `site_provision_failed` body. That is the wave's own narrowing, one wave later, in a new spelling.
+3. **s3** — the poll loop's typed-5xx exit was the one terminal path that dropped the graced-refusal note,
+   so "grace never hides" was false on exactly the path where a real fault follows transient blips.
+4. **s4** — Fix B reached the key clause past `_`, which put every `*_token`/`*_password` identifier in a
+   captured stack trace inside its reach, and `=` is not in the value's stop set: `hashed_password == before`
+   rendered `hashed_password =[redacted] before`. A comparison is not an assignment. Two negatives pin it
+   and both red without the guard. The slice also left its test table unformatted; `mix format` run.
+
+**Ledger.** All seven slice tasks sit `in_progress` with honest evidence stamped as the builders worked
+and merge-gated criteria correctly left open for the lead. No overclaims found — every `--miss` this wave
+is a real miss with a stated reason (s1's OOM/tee probe, s4's real-corpus replay, s6's PR-body pair, s7's
+live probe). One omission repaired: `dr-w2-s2-verify-capstone-selfheal-live` — the builder tried eight
+times to file it and guerrilla's `/v1/data/mutate` was 500ing throughout, so the reviewer filed and
+published it. Five other follow-ups were already filed and published against the epic.
+
+**Merge order matters.** s2 → s6 (s2 makes capstone build, s6 makes its slow render a SLOW verdict instead
+of a false BROKEN; merging s2 alone leaves capstone red at HEALTH) → s1 (it names s2's two new error
+shapes, so it is coherent only after s2) → s4 → s3 → s5 → s7. **s7 and s4 are both HIGH-FLIP-RISK and both
+are owed a genuinely independent second reviewer before merge** (D35 assigns this wave's ONE spawned
+reviewer to s7; the s4 second pair of eyes is a MANUAL LEAD STEP). s6 is the wave's one deliberately
+PERMISSIVE change — a site taking up to 90s to first-200 now goes LIVE with a SLOW verdict.
+
+**Next wave takes:** the read path for the durable record (s1 shipped the data, nothing reads it — that is
+the "figure out typical deployment issues" clause still half-open), then `dr-w2-s8` the moment s2+s3+s6
+are merged AND deployed, then the live proof on the box (`dr-w2-s2-verify-capstone-selfheal-live`,
+`task-7059f3bf9fdd37cf`'s quiet-box re-measurement of the 8s/90s constants), then the two audits this wave
+named but did not take: `dr-w2-s7-followup-scoped-media-public-read-audit` (P1, the scoped media surface
+and `/v1/graph`'s second copy of the visibility predicate) and `dr-w2-s4-followup-raw-log-order` (P1, the
+raw-log read path still scrubs before stripping ANSI).
