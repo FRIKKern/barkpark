@@ -475,6 +475,7 @@ defmodule BarkparkCloud.Web.Router do
   # perfectly idle machine. Shape is fixed so a consumer can always destructure.
   @unmetered_pressure %{
     cpu_percent: nil,
+    cpu_cores: nil,
     mem_used_percent: nil,
     load1: nil,
     disk_used_percent: nil,
@@ -8743,6 +8744,14 @@ defmodule BarkparkCloud.Web.Router do
   defp merge_pressure(map, %{payload: payload, reported_at: at}) when is_map(payload) do
     Map.put(map, :pressure, %{
       cpu_percent: measured_or_nil(Map.get(payload, "cpu_percent")),
+      # The strained fence's DENOMINATOR (charter D52): sustained load-PER-CORE,
+      # never a raw load number and never a hardcoded core count. It rides here
+      # rather than beside `server_type` because `server_type` is a nullable
+      # LAUNCH PIN, not observed truth — wrong or empty on adopted boxes — while
+      # this is `runtime.NumCPU()` off the beat itself. An agent that predates
+      # the field simply omits it, so it renders nil and a nil vital never
+      # strains (D42's factual arm).
+      cpu_cores: measured_or_nil(Map.get(payload, "cpu_cores")),
       mem_used_percent: measured_or_nil(Map.get(payload, "mem_used_percent")),
       load1: measured_or_nil(Map.get(payload, "load1")),
       disk_used_percent: measured_or_nil(Map.get(payload, "disk_used_percent")),

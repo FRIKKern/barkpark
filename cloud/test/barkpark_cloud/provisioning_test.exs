@@ -2523,6 +2523,7 @@ defmodule BarkparkCloud.ProvisioningTest do
           bp,
           Map.merge(pre_vitals_report(), %{
             "cpu_percent" => 100,
+            "cpu_cores" => 2,
             "mem_used_percent" => 58,
             "load1" => 5.57,
             "swap_used_percent" => 99,
@@ -2537,6 +2538,11 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert pressure["cpu_percent"] == 100
       assert pressure["mem_used_percent"] == 58
       assert pressure["load1"] == 5.57
+      # The fence's DENOMINATOR (D52): load1 5.57 on 2 cores is 2.79x — strained.
+      # The same 5.57 on an 8-core box is 0.70x — idle. Without cores on the row
+      # the consumer cannot tell those apart, and a hardcoded 2 goes silently
+      # wrong on the first 4-core box.
+      assert pressure["cpu_cores"] == 2
       assert pressure["disk_used_percent"] == 41
       # The vital `mem_used_percent` HIDES: MemAvailable clears the floor
       # precisely because the BEAM has been paged out, so a box reporting a
@@ -2578,10 +2584,12 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       # What it did not measure reads "we did not measure" — a 0 here would be a
       # perfectly idle machine, which is a lie about a box nobody has metered.
-      for key <- ~w(cpu_percent mem_used_percent load1 swap_used_percent
+      for key <- ~w(cpu_percent cpu_cores mem_used_percent load1 swap_used_percent
                     swap_total_bytes beam_pss_bytes beam_swap_bytes) do
         assert Map.has_key?(pressure, key), "the pressure block must always carry #{key}"
-        assert pressure[key] == nil, "#{key} must be unmetered (nil), got #{inspect(pressure[key])}"
+
+        assert pressure[key] == nil,
+               "#{key} must be unmetered (nil), got #{inspect(pressure[key])}"
       end
     end
 
@@ -2631,7 +2639,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       assert pressure["reported_at"] == nil
 
-      for key <- ~w(cpu_percent mem_used_percent load1 disk_used_percent
+      for key <- ~w(cpu_percent cpu_cores mem_used_percent load1 disk_used_percent
                     swap_used_percent swap_total_bytes beam_pss_bytes beam_swap_bytes) do
         assert Map.has_key?(pressure, key)
         assert pressure[key] == nil
@@ -2661,7 +2669,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       assert pressure["reported_at"] == nil
 
-      for key <- ~w(cpu_percent mem_used_percent load1 disk_used_percent
+      for key <- ~w(cpu_percent cpu_cores mem_used_percent load1 disk_used_percent
                     swap_used_percent swap_total_bytes beam_pss_bytes beam_swap_bytes) do
         assert pressure[key] == nil
       end
