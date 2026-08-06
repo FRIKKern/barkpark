@@ -668,20 +668,6 @@ defmodule Barkpark.Sites.DeployRunner do
   defp describe_provision_reason({:rename_failed, reason}),
     do: redact("could not rename the staged site source: #{format_posix(reason)}")
 
-  # The two reason shapes the same wave's provisioner swap introduced. Without
-  # their own clauses they fall to `inspect/1` and reach the operator as Elixir
-  # tuple jargon — which is the exact narrowing this arm exists to end, one wave
-  # later and in a new spelling.
-  defp describe_provision_reason({:swap_aside_failed, reason}),
-    do:
-      redact(
-        "could not move the live site source aside before swapping in the new one: " <>
-          format_posix(reason)
-      )
-
-  defp describe_provision_reason({:lock_aborted, slug}),
-    do: redact("another deploy of #{slug} holds the provision lock and it could not be acquired")
-
   defp describe_provision_reason(reason) when is_binary(reason), do: redact(reason)
 
   defp describe_provision_reason(%{__exception__: true} = error),
