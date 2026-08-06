@@ -893,6 +893,74 @@ defmodule BarkparkCloud.RegistryTest do
       assert List.last(console)["line"] == "line 305"
     end
 
+    # cch-w33-s3: BOTH bounds must DISCLOSE what they discarded. A console that
+    # silently drops is indistinguishable from a complete one, and the panel
+    # renders a bare line count as though it were the whole log.
+
+    test "cch-w33-s3: a truncated line DISCLOSES its original length" do
+      d = deployment_fixture(team_fixture())
+      {:ok, d} = Registry.append_deployment_console(d.id, String.duplicate("x", 5_000))
+
+      # The chop itself is unchanged (the line stays exactly 2 KB) — what is new
+      # is that the entry says so.
+      assert [%{"line" => line, "truncated_from" => 5_000}] = d.console
+      assert String.length(line) == 2_000
+
+      # …and it PERSISTS: this is a jsonb column, not a computed field.
+      assert [%{"truncated_from" => 5_000}] = Repo.get(Deployment, d.id).console
+    end
+
+    test "cch-w33-s3: a line of EXACTLY 2 KB is untouched and carries NO marker" do
+      d = deployment_fixture(team_fixture())
+      {:ok, d} = Registry.append_deployment_console(d.id, String.duplicate("x", 2_000))
+
+      assert [%{"line" => line} = entry] = d.console
+      assert String.length(line) == 2_000
+      refute Map.has_key?(entry, "truncated_from")
+    end
+
+    test "cch-w33-s3: the ring drop DISCLOSES its cumulative count on the oldest survivor" do
+      d = deployment_fixture(team_fixture())
+
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = Repo.get(Deployment, d.id).console
+      assert length(console) == 300
+      oldest = List.first(console)
+      assert oldest["line"] == "line 6"
+      assert oldest["dropped_before"] == 5
+
+      # CUMULATIVE, not per-call: ten more lines drop ten more, and the count on
+      # the new oldest survivor carries the running total forward.
+      for i <- 306..315 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = Repo.get(Deployment, d.id).console
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 16"
+      assert List.first(console)["dropped_before"] == 15
+
+      # The marker rides on the OLDEST survivor only — never on the newest line.
+      refute Map.has_key?(List.last(console), "dropped_before")
+    end
+
+    test "cch-w33-s3: BELOW the cap nothing is dropped and the count reads 0" do
+      d = deployment_fixture(team_fixture())
+
+      for i <- 1..10 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = Repo.get(Deployment, d.id).console
+      assert length(console) == 10
+      oldest = List.first(console)
+      refute Map.has_key?(oldest, "dropped_before")
+      assert Map.get(oldest, "dropped_before", 0) == 0
+    end
+
     test "best-effort: a late line after the deploy is terminal still records" do
       d = deployment_fixture(team_fixture())
       {:ok, _} = Registry.transition_deployment(d, %{status: "failed", failure_reason: "boom"})
@@ -942,6 +1010,40 @@ defmodule BarkparkCloud.RegistryTest do
                Registry.set_deployment_detail(Ecto.UUID.generate(), "hello")
 
       assert {:error, :not_found} = Registry.set_deployment_detail("not-a-uuid", "hello")
+    end
+
+    # cch-w33-s3: the THIRD consumer of validate_console_line/1. `detail` is a
+    # bare string column, so it can carry no marker — which is exactly why the
+    # validator kept its {:ok, binary} return shape and the console disclosure
+    # rides in a separate `console_line_meta/1` sibling. Changing the /1 return
+    # shape would have broken this with-chain silently.
+    test "cch-w33-s3: a caption at the column limit round-trips through the shared validator" do
+      d = detail_deployment_fixture(team_fixture())
+
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, String.duplicate("y", 255))
+      assert String.length(d.detail) == 255
+      assert Repo.get(Deployment, d.id).detail == d.detail
+    end
+
+    # cch-w33-s3, FOUND WHILE BUILDING, NOT FIXED HERE — filed as
+    # `cch-deployment-detail-column-overflow`.
+    #
+    # This pins a DEFECT, deliberately. The shared validator truncates at 2 KB,
+    # but `deployments.detail` is an Ecto :string — varchar(255)
+    # (priv/repo/migrations/20260703100000_add_detail_to_deployments.exs:14). So
+    # a caption of 256..2_000 chars is neither rejected NOR truncated to fit: it
+    # reaches Repo.update and RAISES, out of a function whose @doc promises
+    # best-effort telemetry that never affects the build's outcome, through a
+    # route that documents only 200/404/422. The fix is a column migration or a
+    # detail-specific cap — both outside this slice's file set.
+    #
+    # WHEN THAT TASK LANDS: delete this test and assert the truncation instead.
+    test "cch-w33-s3: a caption ABOVE the column limit currently RAISES (see cch-deployment-detail-column-overflow)" do
+      d = detail_deployment_fixture(team_fixture())
+
+      assert_raise Postgrex.Error, ~r/22001|too long/, fn ->
+        Registry.set_deployment_detail(d.id, String.duplicate("y", 5_000))
+      end
     end
   end
 

@@ -1211,6 +1211,76 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert List.last(console)["line"] == "line 305"
     end
 
+    # cch-w33-s3: the PROVISION twin of the deploy-side disclosure. This file had
+    # NO oversized-line fixture at all before this wave — the chop was untested
+    # on this side, so it could have been silently rejecting rather than
+    # truncating and nothing here would have noticed.
+
+    test "cch-w33-s3: an oversized line TRUNCATES and DISCLOSES its original length" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, job} =
+               Registry.append_provision_console(job.id, String.duplicate("x", 5_000))
+
+      assert [%{"line" => line, "truncated_from" => 5_000}] = job.console
+      assert String.length(line) == 2_000
+
+      # PERSISTS — a refetch, not just the returned struct.
+      assert [%{"line" => persisted, "truncated_from" => 5_000}] =
+               Repo.get(ProvisionJob, job.id).console
+
+      assert String.length(persisted) == 2_000
+    end
+
+    test "cch-w33-s3: a line of EXACTLY 2 KB is untouched and carries NO marker" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, job} =
+               Registry.append_provision_console(job.id, String.duplicate("x", 2_000))
+
+      assert [%{"line" => line} = entry] = job.console
+      assert String.length(line) == 2_000
+      refute Map.has_key?(entry, "truncated_from")
+    end
+
+    test "cch-w33-s3: the ring drop DISCLOSES its cumulative count on the oldest survivor" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_provision_console(job.id, "line #{i}")
+      end
+
+      console = Repo.get(ProvisionJob, job.id).console
+      assert List.first(console)["dropped_before"] == 5
+
+      for i <- 306..315 do
+        {:ok, _} = Registry.append_provision_console(job.id, "line #{i}")
+      end
+
+      console = Repo.get(ProvisionJob, job.id).console
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 16"
+      assert List.first(console)["dropped_before"] == 15
+    end
+
+    test "cch-w33-s3: BELOW the cap nothing is dropped and the count reads 0" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_console(job.id, "create: started")
+
+      assert [entry] = job.console
+      refute Map.has_key?(entry, "dropped_before")
+      assert Map.get(entry, "dropped_before", 0) == 0
+    end
+
     test "best-effort: a late line after the job is terminal still records" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
@@ -2329,6 +2399,72 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       assert row_for(user, bp)["provision_error"] ==
                "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
+    end
+  end
+
+  # ── cch-w33-s3: the disclosure reaches the browser, ON THE WIRE ─────────────
+  #
+  # The whole design of this slice rests on one claim: `truncated_from` and
+  # `dropped_before` are EXTRA KEYS on a schemaless jsonb console entry, so they
+  # need NO migration and NO serializer change. That claim is only worth
+  # anything if it is proved end-to-end rather than asserted — both serializer
+  # folds (`scrub_entry/2`, `caption_entry/3`) Map.put back only the keys they
+  # fetched, and a fold that rebuilt the entry instead would drop these silently
+  # while every context-level test above stayed green.
+  describe "cch-w33-s3: console disclosure survives the builder POST → user GET" do
+    defp wire_deployment(team) do
+      bp = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      {site, d}
+    end
+
+    defp console_over_the_wire(user, site, dep_id) do
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/sites/#{site.id}/deployments", nil, user_token)
+      assert conn.status == 200
+
+      row = Enum.find(json_body(conn)["deployments"], &(&1["id"] == dep_id))
+      assert row, "the deployment must be on the user-authed deployments page"
+      row["console"]
+    end
+
+    test "truncated_from reaches a user-authed GET unchanged (no migration, no serializer change)" do
+      {user, team} = user_with_team()
+      {site, d} = wire_deployment(team)
+
+      # As the BUILDER does it: the real route, the real worker token.
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{d.id}/console",
+          %{line: String.duplicate("x", 5_000)},
+          @worker_token
+        )
+
+      assert conn.status == 200
+
+      assert [%{"line" => line, "truncated_from" => 5_000}] =
+               console_over_the_wire(user, site, d.id)
+
+      assert String.length(line) == 2_000
+    end
+
+    test "dropped_before reaches the same GET on the oldest surviving entry" do
+      {user, team} = user_with_team()
+      {site, d} = wire_deployment(team)
+
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = console_over_the_wire(user, site, d.id)
+
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 6"
+      assert List.first(console)["dropped_before"] == 5
+      refute Map.has_key?(List.last(console), "dropped_before")
     end
   end
 end

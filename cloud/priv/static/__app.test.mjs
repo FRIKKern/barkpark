@@ -2864,6 +2864,102 @@ test("dwb-18: once the first log line arrives, a still-queued row renders the co
   assert.doesNotMatch(console, /Waiting for the first log line/);
 });
 
+// ── cch-w33-s3: the console count stops reading as though it were the whole log
+//
+// 2,881 failed production deployments across NINE sites end on a console entry
+// whose OWN status is still "running" — the narration stopped mid-stage and the
+// panel printed a bare "2 lines" as if that were the complete build log. (The
+// volume is falling — 821/day on 2026-07-29, 7/day on 2026-08-04 — and the
+// failure REASON was never missing: the red fail panel renders above this.) The
+// count now discloses what it is not showing, WITHOUT inflating itself.
+
+test("cch-w33-s3: a terminal row whose last entry is still running says the narration was cut", () => {
+  const d = {
+    id: "dep-cut", status: "failed",
+    console: [
+      { line: "PLAN: resolved", at: null, stage: "PLAN", status: "done" },
+      { line: "BUILD: npm ci", at: null, stage: "BUILD", status: "running" },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.match(html, /narration ended mid-BUILD/);
+  // THE TRAP: the count must still read the real number of entries. A naive
+  // implementation renders "3 lines" here, making the very number this test
+  // exists to make honest MORE wrong.
+  assert.match(html, /deploy-console-count">2 lines/);
+});
+
+test("cch-w33-s3: a fully terminal narration gets a bare count, no disclosure", () => {
+  const d = {
+    id: "dep-whole", status: "failed",
+    console: [
+      { line: "PLAN: resolved", at: null, stage: "PLAN", status: "done" },
+      { line: "BUILD: exited 1", at: null, stage: "BUILD", status: "failed" },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.doesNotMatch(html, /narration ended/);
+  assert.match(html, /deploy-console-count">2 lines</);
+});
+
+test("cch-w33-s3: an ACTIVE row is never accused of a cut narration", () => {
+  // Mid-flight, a trailing "running" entry is the whole point — the stream is
+  // still open. Only a TERMINAL row can have been cut off.
+  const d = {
+    id: "dep-live", status: "building",
+    console: [{ line: "BUILD: npm ci", at: null, stage: "BUILD", status: "running" }],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("building"));
+  assert.doesNotMatch(html, /narration ended/);
+});
+
+test("cch-w33-s3: a status-less console (the overwhelming majority) claims nothing", () => {
+  // Most console entries are a plain {line, at}. Absent status is SILENCE, not
+  // evidence of a cut — a guard that fired here would libel every historic row.
+  const d = {
+    id: "dep-plain", status: "failed",
+    console: [{ line: "cloning acme/web", at: null }, { line: "build failed", at: null }],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.doesNotMatch(html, /narration ended/);
+  assert.match(html, /deploy-console-count">2 lines</);
+});
+
+test("cch-w33-s3: the server's ring drop and line chop surface on the same seam", () => {
+  const d = {
+    id: "dep-dropped", status: "failed",
+    console: [
+      { line: "line 6", at: null, dropped_before: 5 },
+      { line: "xxxx", at: null, truncated_from: 5000 },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.match(html, /5 earlier lines dropped/);
+  assert.match(html, /1 line truncated/);
+  // Still not inflated: two entries, two lines.
+  assert.match(html, /deploy-console-count">2 lines/);
+});
+
+test("cch-w33-s3: dropped_before === 0 and a marker-less console disclose nothing", () => {
+  const d = {
+    id: "dep-clean", status: "failed",
+    console: [{ line: "a", at: null, dropped_before: 0 }, { line: "b", at: null }],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.doesNotMatch(html, /dropped/);
+  assert.doesNotMatch(html, /truncated/);
+  assert.match(html, /deploy-console-count">2 lines</);
+});
+
+test("cch-w33-s3: the pre-claim and empty-console silences are untouched", () => {
+  // Guarded because this slice edits the same function: an absent panel is
+  // honest silence, and a console entry on a queued row must not flip
+  // deployIsPreClaim's calm caption into a dark empty panel.
+  assert.equal(hooks.deployConsoleHtml({ id: "q", status: "queued" }, false), "");
+  assert.equal(hooks.deployConsoleHtml({ id: "t", status: "failed", console: [] }, false), "");
+  assert.equal(hooks.deployIsPreClaim({ id: "q", status: "queued" }, "queued"), true);
+});
+
 // ── failureCopy: raw builder failure_reason → human copy for the deploy-fail row
 
 test("failureCopy maps a known builder reason to friendly copy", () => {
