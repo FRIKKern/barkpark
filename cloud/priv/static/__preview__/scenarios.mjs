@@ -2544,7 +2544,11 @@ export const SCENARIOS = {
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance + "/timeline",
     data: {
-      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      // cch-w35-s4: the label said "as a non-admin" while me() omitted the role
+      // argument and me() DEFAULTS to "owner" — so this fixture was an owner
+      // being answered 403 by an admin gate, a state the server cannot produce.
+      // The role is now the one the scenario claims.
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [webSite, blogSite],
@@ -4339,7 +4343,15 @@ export function route(name, method, path, state) {
   // — the widened maybe_audit_target clause this review added, because that is
   // the exact request the Activity chip row has always sent.
   if (p === "/v1/audit") {
-    if (d.auditDenied) return { status: 403, body: { error: "forbidden" } };
+    // cch-w35-s4: the refusal carries the server's EVIDENCE, because the real one
+    // does. Auth.require_primary_team_admin answers this route with
+    // `forbidden(conn, required: "admin", scope: "primary_team")` — note
+    // "primary_team", NOT "team": a fixture that modelled a refusal shape the
+    // server never sends would be its own kind of lie. The console renders the
+    // `required` label and deliberately ignores `scope`.
+    if (d.auditDenied) {
+      return { status: 403, body: { error: "forbidden", required: "admin", scope: "primary_team" } };
+    }
     const q = new URLSearchParams(String(path || "").split("?")[1] || "");
     const ttype = q.get("target_type");
     const tid = q.get("target_id");
