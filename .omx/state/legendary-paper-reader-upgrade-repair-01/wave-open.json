@@ -1,0 +1,66 @@
+{
+  "schema_version": "legendary-paper-reader-repair-wave-open/v1",
+  "epic_id": "task-a768c69e659add58",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-01",
+  "profile": "legendary",
+  "prior_wave": {
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+    "wave_revision": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+    "inventory_digest": "227c9defff49f185dc5e580f731ab2419da17fc2dc5cf2304a664e4b230f7ccc",
+    "disposition": "converge_complete_no_winner_pilot_unauthorized"
+  },
+  "inventory": [
+    {"unit_id":"cloud-console-hardening-wave-28-2026-08-03::cli_api","class":"paper_reader","paper_id":"cloud-console-hardening-wave-28-2026-08-03","paper_revision":"49c1534d9fb76d0d9adc7b97f25ec471","reader":"cli_api"},
+    {"unit_id":"cloud-console-hardening-wave-28-2026-08-03::email","class":"paper_reader","paper_id":"cloud-console-hardening-wave-28-2026-08-03","paper_revision":"49c1534d9fb76d0d9adc7b97f25ec471","reader":"email"},
+    {"unit_id":"cloud-console-hardening-wave-28-2026-08-03::public","class":"paper_reader","paper_id":"cloud-console-hardening-wave-28-2026-08-03","paper_revision":"49c1534d9fb76d0d9adc7b97f25ec471","reader":"public"},
+    {"unit_id":"cloud-console-hardening-wave-28-2026-08-03::studio","class":"paper_reader","paper_id":"cloud-console-hardening-wave-28-2026-08-03","paper_revision":"49c1534d9fb76d0d9adc7b97f25ec471","reader":"studio"},
+    {"unit_id":"cloud-console-hardening-wave-28-2026-08-03::tui80","class":"paper_reader","paper_id":"cloud-console-hardening-wave-28-2026-08-03","paper_revision":"49c1534d9fb76d0d9adc7b97f25ec471","reader":"tui80"},
+    {"unit_id":"cloud-console-hardening-wave-29-2026-08-03::cli_api","class":"paper_reader","paper_id":"cloud-console-hardening-wave-29-2026-08-03","paper_revision":"18768b0a14c2eead927181c4a0e37c18","reader":"cli_api"},
+    {"unit_id":"cloud-console-hardening-wave-29-2026-08-03::email","class":"paper_reader","paper_id":"cloud-console-hardening-wave-29-2026-08-03","paper_revision":"18768b0a14c2eead927181c4a0e37c18","reader":"email"},
+    {"unit_id":"cloud-console-hardening-wave-29-2026-08-03::public","class":"paper_reader","paper_id":"cloud-console-hardening-wave-29-2026-08-03","paper_revision":"18768b0a14c2eead927181c4a0e37c18","reader":"public"},
+    {"unit_id":"cloud-console-hardening-wave-29-2026-08-03::studio","class":"paper_reader","paper_id":"cloud-console-hardening-wave-29-2026-08-03","paper_revision":"18768b0a14c2eead927181c4a0e37c18","reader":"studio"},
+    {"unit_id":"cloud-console-hardening-wave-29-2026-08-03::tui80","class":"paper_reader","paper_id":"cloud-console-hardening-wave-29-2026-08-03","paper_revision":"18768b0a14c2eead927181c4a0e37c18","reader":"tui80"},
+    {"unit_id":"pds-wave-44-2026-08-03::cli_api","class":"paper_reader","paper_id":"pds-wave-44-2026-08-03","paper_revision":"8bbd5d874a1b697f1e4e437c473f8e52","reader":"cli_api"},
+    {"unit_id":"pds-wave-44-2026-08-03::email","class":"paper_reader","paper_id":"pds-wave-44-2026-08-03","paper_revision":"8bbd5d874a1b697f1e4e437c473f8e52","reader":"email"},
+    {"unit_id":"pds-wave-44-2026-08-03::public","class":"paper_reader","paper_id":"pds-wave-44-2026-08-03","paper_revision":"8bbd5d874a1b697f1e4e437c473f8e52","reader":"public"},
+    {"unit_id":"pds-wave-44-2026-08-03::studio","class":"paper_reader","paper_id":"pds-wave-44-2026-08-03","paper_revision":"8bbd5d874a1b697f1e4e437c473f8e52","reader":"studio"},
+    {"unit_id":"pds-wave-44-2026-08-03::tui80","class":"paper_reader","paper_id":"pds-wave-44-2026-08-03","paper_revision":"8bbd5d874a1b697f1e4e437c473f8e52","reader":"tui80"},
+    {"unit_id":"pds-wave-45-2026-08-03::cli_api","class":"paper_reader","paper_id":"pds-wave-45-2026-08-03","paper_revision":"b992fd8aaa028b0dab30a8da76f077fd","reader":"cli_api"},
+    {"unit_id":"pds-wave-45-2026-08-03::email","class":"paper_reader","paper_id":"pds-wave-45-2026-08-03","paper_revision":"b992fd8aaa028b0dab30a8da76f077fd","reader":"email"},
+    {"unit_id":"pds-wave-45-2026-08-03::public","class":"paper_reader","paper_id":"pds-wave-45-2026-08-03","paper_revision":"b992fd8aaa028b0dab30a8da76f077fd","reader":"public"},
+    {"unit_id":"pds-wave-45-2026-08-03::studio","class":"paper_reader","paper_id":"pds-wave-45-2026-08-03","paper_revision":"b992fd8aaa028b0dab30a8da76f077fd","reader":"studio"},
+    {"unit_id":"pds-wave-45-2026-08-03::tui80","class":"paper_reader","paper_id":"pds-wave-45-2026-08-03","paper_revision":"b992fd8aaa028b0dab30a8da76f077fd","reader":"tui80"}
+  ],
+  "scale_contract": {
+    "unit_definition": "One immutable revision-pinned published Paper rendered in one required reader",
+    "unit_count": 20,
+    "inventory_evidence": "Committed wave-open.json plus four live revision reads; 4 Papers x 5 readers = 20 unique units; predecessor Converge E10-E12 requires a renewed immutable experiment",
+    "target_surfaces": ["public", "studio", "tui80", "email", "cli_api"],
+    "concurrency_width": 3,
+    "minimum_multiplier": 5,
+    "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
+    "excluded_inventory": [
+      {"unit_id":"legendary-paper-reader-upgrade-wave-2026-08-06-restart","reason":"Immutable predecessor wave is retained as failed experiment evidence; its rejected candidates and missing Pilot cannot be rewritten."},
+      {"unit_id":"papers-updated-at-or-before-2026-08-03T13:10:59.490413Z","reason":"Already reconciled by the final 653-Paper structure-rhythm census; including them would duplicate settled work."},
+      {"unit_id":"draft-only-papers","reason":"Not published reader surfaces and outside this published-reader transformation."},
+      {"unit_id":"non-paper-documents","reason":"Tasks and code units require different gates and cannot share this Paper-reader inventory."}
+    ],
+    "quality_rubric": {
+      "reader_visibility": "All five real reader families render complete authored content; BLOCKED, proxy, or static-only evidence never passes.",
+      "preservation": "All 815 blocks, 113 authored headers, 1374 body cells, 388 marks, and CCH29 nested-list words are preserved; 11 intentionally headerless tables remain headerless.",
+      "schema": "Recursive validation rejects or quarantines malformed structures and unequal aliases without inventing intent.",
+      "geometry": "Every terminal line is bounded at widths 1, 20, 40, 80, and 120; public, Studio, and email contain long tokens without clipping.",
+      "accessibility": "Heading, list, table, callout, landmark, reading-order, label, focus, and reflow semantics pass executable checks.",
+      "interaction": "Mouse, focus, scroll, click, Enter, state, history, Related, and recovery are executable and behaviorally equivalent where applicable.",
+      "platform_truth": "Typed 401, 404, 405, 406, 422, 500, and timeout behavior, request IDs, six identity domains, ETags, discovery, and pagination agree.",
+      "safety": "Zero terminal control leaks, authored loss, false not-found, identity conflation, retry-erased failure, non-idempotence, rollback failure, or unfenced mutation.",
+      "pilot": "One candidate passes every hard gate twice, then three disjoint real-reader batches reproduce stable golden hashes at zero observed failure."
+    },
+    "failure_threshold": 0
+  },
+  "experiment_contract": {
+    "rounds": ["baseline", "diverge", "attack", "converge", "pilot"],
+    "required_results_per_round": 3,
+    "selection_required": true
+  }
+}
