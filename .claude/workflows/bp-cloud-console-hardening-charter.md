@@ -1610,6 +1610,75 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-06 — wave 34 REVIEW (round 1 shipped, four PRs open, grade A)
+
+Four round-1 slices built, all green, **all four pushed and PR'd** — the reviewer's own step 11, after
+six consecutive waves stranded work on local branches in a shared checkout.
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| A failed read is not an empty one + the absence-as-answer census | `cch-w34-s1-absence-is-not-an-answer` | `…an-empt-0` | [#9738](https://github.com/FRIKKern/barkpark/pull/9738) | none — nothing to fix |
+| Health never measured; the never-reported watchdog becomes reachable | `cch-w34-s2-health-never-measured` | `…a-heal-1-r` | [#9739](https://github.com/FRIKKern/barkpark/pull/9739) | `StalenessWorker` moduledoc synced to the two-arm query |
+| The four gates' disclosure headline survives delivery | `cch-w34-s3-disclosure-survives-delivery` | `…headl-2` | [#9740](https://github.com/FRIKKern/barkpark/pull/9740) | none — nothing to fix |
+| Keyset cursors seek — ROW comparator at three sites, no migration | `cch-w34-s4-delivery-log-cursor-seeks` | `…instead-of-3-r` | [#9741](https://github.com/FRIKKern/barkpark/pull/9741) | committed the SQL-shape guard |
+
+**The wave's spine held: every slice shipped a guard that was proven able to LOSE, by mutation, on
+disk.** s1's census is a SET DIFF, not a count — mutant M5 fixes one collapse and ships another in one
+commit, the population stays at exactly 5, and it still exits 1 naming both (a `count <= N` gate is
+green on that commit; the reviewer independently reproduced ARRIVED-on-refold). s3's ratchet now
+models GitHub's parser rather than the source: deleting a `title=` property outright used to leave it
+at 106 passed / 0 failed. s2's online-invariant guard reds on a planted probe. s4's ties red on both a
+relaxed comparator and a reversed id half.
+
+**Two live truths were confirmed against GitHub, not argued** — the `::notice title=<X> gate: green,
+nothing ran` comma truncation was read back off two independent heads (#9677/`dad4b33bb` and
+#9731/`f16d51d2`), delivering `title="Elixir gate: green"` with the body intact: the one field a person
+skims said the flat opposite of its own annotation.
+
+**REVIEWER'S ONE SUBSTANTIVE ADDITION (s4).** The builder verified the rendered SQL with a hand-run
+telemetry probe pasted into a task stamp — an assertion nobody re-runs, on a slice whose whole defect
+class is invisible to the suite. `cloud/test/barkpark_cloud/cursor_sql_shape_test.exs` now captures
+`[:barkpark_cloud, :repo, :query]` off the three real public entry points and asserts the rendered SQL
+(ROW comparator on `($2,$3::uuid)`, no `::timestamp`, no equality tiebreak). **Measured proof it was
+needed:** planting `type(^ts, :utc_datetime_usec)` reds ONLY this file — `router_test.exs`'s four
+keyset-tie pins stay green (174 tests, 1 failure). The two-hour Europe/Oslo boundary slip is invisible
+to every row-level assertion, because all `barkpark_cloud_test*` databases are pinned `Etc/UTC`.
+
+**WHAT THE LEAD MUST DO BEFORE MERGING #9739.** Widening the staleness candidate set changes WHO GETS
+EMAILED. Every managed/byo box on an active subscription that has never reported and predates the
+threshold now enters the sweep and fires one `:agent_unreachable` mail to its team — at least the 3
+known production boxes, possibly more. **Run the new predicate read-only against `cloud-db-1` and count
+rows and distinct teams first.** Parts 1 (writers → `"unknown"`) and 3 (JSON counters) are independent
+of the query widening and can land alone if the count is uncomfortable. Two HIGH-FLIP-RISK judgments
+were re-derived independently by the reviewer and both HELD (the `agent_status "online"` sole-producer
+claim; s1's pre-host quiet) — but s1's pre-host silence is a PRODUCT call that this diff now asserts as
+ratified law while deleting its only citation, and it deserves a genuinely independent second look.
+
+**Ledger.** All four tasks `in_progress`, published, honest miss-notes where a criterion needed a
+pushed head. Reviewer filed the one row the build could not (guerrilla was 500ing on `/v1/data/mutate`
+through both s2's and s4's builds): `cch-w34-bl-media-search-cursor-or-decomposition` —
+`api/lib/barkpark/media/delivery/search.ex:272`, filed **measure-before-rewrite**, because the Cloud
+38.7x is a measurement of Cloud tables. s2's blocked follow-up (the annotation comma truncation) needed
+NO row: s3 fixed it in this same wave. No task outside the wave was touched.
+
+**NEXT WAVE takes the deferred round-2 pair, in dependency order, and the residue this wave named.**
+Merge round 1 first; then `cch-w34-s5-detail-column-is-text` (waits on s2 — same
+`registry.ex`/`registry_test.exs`; carries a MIGRATION on an auto-deploying surface, so the lead orders
+that merge), then `cch-w34-s6-console-says-never-reported` (waits on s1 AND s2 — s1 owns `app.js` and
+the census pin, s2 ships the `unreachable_count` seam it renders). Then the named residue:
+`cch-w34-bl-bare-friendly-renders-billing-copy-on-four-reads` (four reads still render the billing
+sentence on a 403), `cch-w34-bl-five-remaining-absence-collapses`,
+`cch-w34-bl-census-depth-limit-loadproviders` (the census is a LOWER BOUND — depth-1 inlining and
+`?? []` / `r.ok ? … : []` evade it entirely, and nobody has measured how big that blind half is), and
+`cch-w34-bl-git-ref-has-no-length-validation`. Two structural gaps worth a slice each: the census's
+mutation driver is NOT committed (its ability-to-lose is evidenced but not re-runnable), and the
+control plane still cannot distinguish NEVER-REPORTED from reported-once-then-quiet in the payload —
+s6 must infer it from `last_seen_at == nil`, which is exactly the unstated derivation this epic exists
+to eliminate. An `ever_reported` fact would end it.
+
+Paper: `cch-wave-34-2026-08-06`.
+
+
 ### 2026-08-06 — wave 33 REVIEW (round 1 shipped, grade A−)
 
 **All five round-1 slices built, reviewed, gate-green and PUSHED WITH PRs** — #9685 (r2, the remaining
