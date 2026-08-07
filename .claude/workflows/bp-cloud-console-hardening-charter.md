@@ -1815,6 +1815,76 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-07 — wave 38 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The lifecycle rail answers authority three-valued | `cch-w38-s1-lifecycle-rail-authority-is-three-valued` | `…rail-stops-sellin-0-r` | [#9955](https://github.com/FRIKKern/barkpark/pull/9955) | the new smoke expectation had been inserted between the `gr-p3 D-04` section header and the entry that header labels — header restored, block given its own |
+| The two primary-team gates stop calling a missing grant a bad body | `cch-w38-s2-no-team-stops-being-a-422` | `…the-two-primary-1-r` | [#9956](https://github.com/FRIKKern/barkpark/pull/9956) | the owner gate's `@doc` still opened "preserving the same … contract" for a contract it had just changed; and `router.ex:5120/:5162`'s unreachable `422 no_team` clause annotated so it is not miscounted as a live route contract |
+| The spec-gate packet is costed and refused | `cch-w38-s3-spec-gate-packet-and-roster-disposition` | `…is-costed-and-refus-2` | [#9957](https://github.com/FRIKKern/barkpark/pull/9957) | none — the builder's commit stands unchanged |
+
+**WHAT LANDED.** The wave's own headline is now true at the surface AND one click later. `app.js`
+gains ONE canonical three-valued `instanceAdminAuthority()` (`@canonical
+capability:console-authority-predicate`), threaded INTO `lifecycleActionsModel` as an explicit third
+argument so the MODEL decides and the harness can see it at all — `paintLifecycleActions` and the
+seven elevated write functions have zero `__bpTestHook` reach. `refuse` renders the shipped
+disable-and-explain arm carrying `FORBIDDEN_ROLE_COPY.admin` VERBATIM; `unknown` reuses the row's own
+"Checking capabilities…" grammar; `grant` is proven byte-identical to the shipped 2-arg call **by
+assertion, not prose**. Zero CSS — `cssom-parity` 1305 (baseline 1305), MISSES 0, baseline absent from
+the diff. Alongside it the three post-click arms stop selling a permanent refusal as transient:
+`rollbackRefusalTerminal` now ORs in `forbidden`/`no_team` so the confirm modal stops offering **Try
+again** into a 403 forever, and `attachDomain`'s 422 arm excludes `no_team` so a teamless caller is no
+longer told their DOMAIN SYNTAX is wrong. Server-side, `auth.ex`'s two `require_primary_team_*` gates
+answer a missing grant `403 {forbidden, reason: "no_team", scope: "primary_team"}` instead of a 422 —
+two code lines whose real deliverable is the fail-before pin these arms had never had.
+
+**THE GUARDS CAN LOSE, RE-PROVEN AT REVIEW, NOT READ.** S1: replacing
+`instanceAdminAuthority()`'s body with `return "grant"` reds `__app.test.mjs` (918/1) **and**
+`smoke.mjs` (rc 1, 2 FAILs) — two independent instruments, not one. S2: the fail-before proof was
+re-run against `origin/main`'s `auth.ex` bytes fetched with `git show ef77af274:` rather than the
+index — **28 tests, 2 failures**, both `left: 422 / right: 403`. Beyond the slice gates, review
+independently ran the FULL cloud suite on the S2 branch: **2953 tests, 0 failures**, which the builder
+had (correctly) declined to quote from a host under wave load.
+
+**THE FLIP-RISK JUDGMENT, INDEPENDENTLY RE-DERIVED.** S1's authority read (`meCache.role` against the
+server's two divergent team axes) was re-derived at review from `auth.ex:122-130 / :365-393 /
+:405-421` and `router.ex:10812-10815` — not by re-reading the builder's reasoning. It holds for THIS
+band's routes because `api()` pins `x-barkpark-team` on every authed request including `/v1/me`, and
+the "do not extend to the members band" fence in the predicate's comment is exactly the right size. A
+genuinely independent SECOND reviewer is still owed before merge; this workflow spawns one reviewer,
+so that dispatch is a manual lead step.
+
+**WHAT DID NOT LAND, NAMED RATHER THAN CLAIMED.** Only ONE of D428's seven elevated verbs
+(`runDecommission`) is rendered by `lifecycleActionsModel`; `retryInstance`, `removeInstance` and
+`patchAutoupdate` live in `instanceActionsHtml`/`updatePanelHtml` and are STILL offered live to a
+member. S1 stamped its criterion 2 a MISS rather than flipping it, and filed
+`cch-w38-bl-three-elevated-verbs-still-unpredicated`. Review found and filed one more:
+`cch-w38-bl-unknown-authority-has-no-recovery-seam` — a PERMANENTLY failed `/v1/me` leaves the rail on
+"Checking capabilities…" forever with a dead Decommission and no recovery seam (`data-life-retry`
+exists only when the CAPABILITIES read failed). The console already ships the honest shape one screen
+over (`app.js:3969` renders `meFailureCopy()` for exactly this state), so the fix is a fourth arm, not
+a redesign. The 15 INLINE `422 no_team` emitters stay at 422 by design — filed as
+`cch-w38-bl-inline-no-team-emitters-now-diverge-from-the-gates`, whose first two criteria are BUILD
+THE GUARD FIRST.
+
+**LEDGER.** Three slice tasks, all claimed, all stamped AS THE WORK HAPPENED, all left `in_progress`
+with the merge-gated criteria open for the lead (S1 [14], S2 [9]). No lifecycle lie found and no `bp`
+correction was needed — the first wave in this epic's log where review changed nothing on the board
+except to ADD a finding. S3's own roster pass is the reason: children 464 — done 253 / open 161 /
+cancelled 46, open fell exactly 13 with the arithmetic closing, both-open duplicate pairs 6 → 0, and
+two P0s that shipped a week ago stopped being quoted as open. Note for the lead: S3 sits at **11/11
+met, `in_progress`, with no merge-gated criterion by design** — close it when #9957 merges.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** Dispatch order is merge round 1 first — #9957 (docs-only, zero
+conflict), then #9956 (`auth.ex`, expect ~4 prose conflict hunks against #9919), then #9955 (`app.js`,
+which #9920's census content-matches). Then the obvious crown: **finish the seven verbs**. S1 built
+the predicate and the vocabulary; three of D428's seven are still live affordances a member can click,
+and `cch-w38-bl-three-elevated-verbs-still-unpredicated` + the recovery-seam row are a coherent,
+already-costed slice pair over one file. Pair it with the `#9921`-gated spec-gate packet the moment
+that PR merges — S3 has already costed every command in it, and the ORDERING TRAP (sweep BEFORE the
+spec PR merges) is written down.
+
+
 ### 2026-08-07 — wave 38 DECIDE (build in flight)
 
 Cut under a GitHub Actions outage with 15 finished PRs queued: **three slices, two new code PRs**,
