@@ -52,10 +52,19 @@
 //                                 providerCanWrite().
 //
 //   (Re-derive both: grep -n 'function submitProviderCred' app.js, and the same
-//   for submitInlineProviderCred. Line numbers are NEVER written down here —
-//   they rot on any sibling shift, charter D41 / bp-honest-gates D5 — the PIN
-//   below is keyed on the function name for exactly that reason, and every line
-//   number this census prints is DERIVED at run time from the live file.)
+//   for submitInlineProviderCred. NO LINE NUMBER IS WRITTEN DOWN IN THIS FILE,
+//   and every line number this census prints — app.js sites and the six router
+//   overlay sites alike — is DERIVED at run time from the live file. That is a
+//   description of the file as it stands, not an aspiration: it was FALSE until
+//   charter D528, when the PIN's 79 documentary `line:` fields were deleted
+//   (nothing read them; all 79 were stale) and the inline-cond overlay's six
+//   typed-and-printed router lines were replaced by a resolver over the live
+//   router source. Line numbers rot on any sibling shift — charter D41 /
+//   bp-honest-gates D5 — so the PIN is keyed on the function name, and a
+//   printed numeral is only ever this run's reading of the tree. cch-w47-rv
+//   made that sentence a CHECK rather than a promise: (2h) below reads this
+//   file's own bytes and exits 2 on any typed `<file>:<digits>`. It had to —
+//   D528 left seven of them behind in `note:` prose, all seven already stale.)
 //
 // Route-keyed, those two collapse into one row, the row scores "predicated",
 // and the ONE REAL DEFECT this instrument exists to see becomes structurally
@@ -129,6 +138,16 @@
 //   conn.assigns.current_team)` form, so the check survives line drift — but it
 //   cannot tell WHICH route grew a seventh. It tells you to go look.
 //
+//   The overlay also PRINTS a `router.ex:NNNN` per route, and those six numbers
+//   are DERIVED by the same two regexes at run time — nothing compares them to
+//   anything, so they cannot red and cannot go stale. What IS pinned is the six
+//   ROUTE NAMES, and the print pairs name to line BY SOURCE ORDER. So the one
+//   thing this print can still get wrong is a router that REORDERS these six
+//   while keeping the count at six: the lines stay right and the names slide.
+//   On any count change the pairing is dropped and the derived lines print
+//   UNLABELED, because a mis-labelled failure message is a new false statement
+//   of exactly the kind this census exists to remove.
+//
 // Exit codes:
 //   0 — the derived call-site set EQUALS the pin, and every invariant holds
 //   1 — ADD and/or REMOVE: the set differs from the pin, both named
@@ -167,9 +186,14 @@ const src = fs.readFileSync(APP, "utf8");
 // ═══════════════════════════════════════════════════════════════════════════
 // THE PIN — 79 write call sites, keyed by `fn|VERB route`.
 //
-// `line` is DOCUMENTARY ONLY. It is printed for orientation and never compared:
-// pinning line numbers would red on every edit above a call site and teach
-// people to re-pin without reading, which is how a pin becomes a rubber stamp.
+// A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
+// `app.js:NNNN` this census prints is DERIVED from the live file at run time
+// (`lineOf`, below) and looked up by KEY, so it is correct by construction. The
+// rows used to carry a documentary `line:` beside it; measured, all 79 were
+// stale (median drift 524, max 928, zero correct) and nothing read them —
+// setting one to 999999 left the report BYTE-IDENTICAL at rc 0. A number no
+// check can red and no reader can trust is not orientation, it is a second
+// answer that disagrees with the first. Deleted (charter D528).
 //
 // Adding a row is a DECISION — it means "this affordance is honest, or its
 // dishonesty is owned by a filed task". It is never a way to quiet the gate.
@@ -202,123 +226,123 @@ const C_MEMBER_REMOVE = "Accounts.remove_member_as/3";
 const PIN = [
   // ── account & session self-service — every one of these acts on the caller's
   // ── OWN account, so plain membership is the honest tier.
-  { line: 1163, fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/enroll", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: enrol your own 2FA" },
-  { line: 1184, fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/confirm", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1224, fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/recovery-codes", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1246, fn: "run", verb: "DELETE", route: "/v1/account/two-factor", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `run` is the confirm-modal callback" },
-  { line: 1293, fn: "run", verb: "DELETE", route: "/v1/account/sessions", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: sign out your other sessions" },
-  { line: 1325, fn: "openAccountModal", verb: "DELETE", route: "/v1/auth/logout", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1537, fn: "paint", verb: "DELETE", route: "/v1/account/sessions/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `paint` is loadSessions' repaint closure (sessions fold)" },
-  { line: 1436, fn: "submitPasswordChange", verb: "PUT", route: "/v1/account/password", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/enroll", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: enrol your own 2FA" },
+  { fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/confirm", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/recovery-codes", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "run", verb: "DELETE", route: "/v1/account/two-factor", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `run` is the confirm-modal callback" },
+  { fn: "run", verb: "DELETE", route: "/v1/account/sessions", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: sign out your other sessions" },
+  { fn: "openAccountModal", verb: "DELETE", route: "/v1/auth/logout", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "paint", verb: "DELETE", route: "/v1/account/sessions/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `paint` is loadSessions' repaint closure (sessions fold)" },
+  { fn: "submitPasswordChange", verb: "PUT", route: "/v1/account/password", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
 
   // ── instance lifecycle — resurrect stands up (and bills) a real box.
-  { line: 1938, fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: null, auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:8290 refuses non-admins inside a cond; no Auth.* names it" },
+  { fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: null, auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. resurrect/1 refuses non-admins inside a cond; no Auth.* names it — the overlay below derives the line" },
 
   // ── providers — THE DECISIVE PAIR. Same route, opposite verdicts.
-  { line: 2313, fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. The launch wizard's .launch-connect-provider button renders unconditionally" },
-  { line: 2744, fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
-  { line: 2794, fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
+  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. The launch wizard's .launch-connect-provider button renders unconditionally" },
+  { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
+  { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
 
   // ── github (team-level installation)
-  { line: 2878, fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. #github-disconnect is wired whenever an installation exists" },
+  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. #github-disconnect is wired whenever an installation exists" },
 
   // ── notifications — every write is wired behind notifCanManage()
-  { line: 3683, fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
-  { line: 3720, fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
-  { line: 3740, fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
-  { line: 3742, fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
-  { line: 3788, fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
-  { line: 3798, fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
+  { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
+  { fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
+  { fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
+  { fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
 
   // ── tokens — see ruling (c). NOT elevated; the cap is on the ability set.
-  { line: 4044, fn: "submitToken", verb: "POST", route: "/v1/tokens", elevated: false, predicate: "canMintAnyAbility", auth_fn: A_USER, context_fn: C_PAT_ABILITIES, note: "any member may mint; the owner/admin cap is on the requested abilities, below the router" },
-  { line: 4163, fn: "confirmRevokeToken", verb: "DELETE", route: "/v1/tokens/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: revoke your own token" },
+  { fn: "submitToken", verb: "POST", route: "/v1/tokens", elevated: false, predicate: "canMintAnyAbility", auth_fn: A_USER, context_fn: C_PAT_ABILITIES, note: "any member may mint; the owner/admin cap is on the requested abilities, below the router" },
+  { fn: "confirmRevokeToken", verb: "DELETE", route: "/v1/tokens/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: revoke your own token" },
 
   // ── unauthenticated auth flows — no principal exists yet to elevate
-  { line: 4462, fn: "onSubmit", verb: "POST", route: "/v1/auth/two-factor-challenge", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the challenge token is the credential" },
-  { line: 4540, fn: "requestPasswordReset", verb: "POST", route: "/v1/auth/request-reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
-  { line: 4565, fn: "submitReset", verb: "POST", route: "/v1/auth/reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
-  { line: 4597, fn: "submitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the path is a two-way branch on authMode" },
+  { fn: "onSubmit", verb: "POST", route: "/v1/auth/two-factor-challenge", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the challenge token is the credential" },
+  { fn: "requestPasswordReset", verb: "POST", route: "/v1/auth/request-reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "submitReset", verb: "POST", route: "/v1/auth/reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "submitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the path is a two-way branch on authMode" },
 
   // ── studio / onboarding
-  { line: 5544, fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { line: 6230, fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
+  { fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
 
   // ── instance detail — the console's densest unpredicated cluster
-  { line: 6750, fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6776, fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6794, fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6750" },
-  { line: 6830, fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6893, fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook" },
-  { line: 6954, fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook" },
-  { line: 7245, fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:2058 refuses non-admin sessions inside a cond" },
-  { line: 7270, fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { line: 7637, fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6750" },
+  { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook" },
+  { fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook" },
+  { fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. POST /v1/fleet/supports refuses non-admin sessions inside a cond — the overlay below derives the line" },
+  { fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
 
   // ── operator console — the console's highest-privilege writes, and both of
   // ── them build their path from a constant (ruling (b)).
-  { line: 7732, fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
-  { line: 8107, fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
+  { fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
+  { fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
 
   // ── sites
-  { line: 8395, fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
+  { fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
 
   // ── webhook catalog proxy — user-authed + team-scoped, member tier
-  { line: 9142, fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy: user-authed + team-scoped fail-closed" },
-  { line: 9189, fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9211, fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9340, fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9370, fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9411, fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9472, fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy: user-authed + team-scoped fail-closed" },
+  { fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
 
-  { line: 10206, fn: "runVerifyNow", verb: "POST", route: "/v1/barkparks/:*/verify", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "runVerifyNow", verb: "POST", route: "/v1/barkparks/:*/verify", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
 
   // ── site writes — ruling (a): require_ability is a no-op for a session
-  { line: 10801, fn: "loadSite", verb: "PATCH", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: A_ABILITY, context_fn: H_TEAM_SITE, note: "ruling (a): a session carries [\"root\"]" },
-  { line: 11078, fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
-  { line: 11437, fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
-  { line: 11649, fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
-  { line: 12059, fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
-  { line: 12223, fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
-  { line: 12317, fn: "submitSiteGithub", verb: "POST", route: "/v1/sites/:*/github/connect", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 12333, fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "loadSite", verb: "PATCH", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: A_ABILITY, context_fn: H_TEAM_SITE, note: "ruling (a): a session carries [\"root\"]" },
+  { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
+  { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
+  { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
+  { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
+  { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
+  { fn: "submitSiteGithub", verb: "POST", route: "/v1/sites/:*/github/connect", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
 
-  { line: 12605, fn: "submitInviteAccept", verb: "POST", route: "/v1/invitations/accept", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the invitation token is the authority" },
-  { line: 12689, fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
+  { fn: "submitInviteAccept", verb: "POST", route: "/v1/invitations/accept", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the invitation token is the authority" },
+  { fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
 
   // ── launch + billing
-  { line: 13129, fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:8082 refuses non-admin sessions inside a cond" },
-  { line: 13222, fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
-  { line: 13513, fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
-  { line: 13621, fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
-  { line: 13781, fn: "subscribe", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
+  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. go_live/1 refuses non-admin sessions inside a cond — the overlay below derives the line" },
+  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
+  { fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
+  { fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
+  { fn: "subscribe", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
 
-  { line: 14685, fn: "mintSseTicket", verb: "POST", route: "/v1/auth/sse-ticket", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 15135, fn: "bootOAuth", verb: "POST", route: "/v1/auth/oauth/exchange", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "mintSseTicket", verb: "POST", route: "/v1/auth/sse-ticket", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "bootOAuth", verb: "POST", route: "/v1/auth/oauth/exchange", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
 
   // ── the /new flow (a second, parallel console surface)
-  { line: 16240, fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
-  { line: 16345, fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED; second call site on the same route as :13129" },
-  { line: 16410, fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
-  { line: 17136, fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 17173, fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 17207, fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { line: 17284, fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6776" },
+  { fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
+  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED; second call site on the same route as :13129" },
+  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
+  { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6776" },
 
   // ── team membership — every write behind assignableRoles(ctx.role)
-  { line: 18126, fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
-  { line: 18186, fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "same fence; RANK-RELATIVE below it — the same admin is refused on a peer and allowed on a member" },
-  { line: 18233, fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "same fence; RANK-RELATIVE below it, with an owner escape hatch the PATCH path lacks" },
-  { line: 18261, fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
+  { fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
+  { fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "same fence; RANK-RELATIVE below it — the same admin is refused on a peer and allowed on a member" },
+  { fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "same fence; RANK-RELATIVE below it, with an owner escape hatch the PATCH path lacks" },
+  { fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
   // ── env vars — elevated, and ONLY the inline cond says so
-  { line: 18474, fn: "submitEnvVar", verb: "POST", route: "/v1/env-vars", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "router.ex:4302 refuses non-admins inside a cond; the form renders only when canWrite" },
-  { line: 18502, fn: "confirmDeleteEnvVar", verb: "DELETE", route: "/v1/env-vars/:*", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "router.ex:4360; the Delete action renders only when canWrite" },
+  { fn: "submitEnvVar", verb: "POST", route: "/v1/env-vars", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "POST /v1/env-vars refuses non-admins inside a cond; the form renders only when canWrite" },
+  { fn: "confirmDeleteEnvVar", verb: "DELETE", route: "/v1/env-vars/:*", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "DELETE /v1/env-vars/:id, same inline cond; the Delete action renders only when canWrite" },
 
   // ── device-link activation
-  { line: 18665, fn: "activateInspect", verb: "POST", route: "/v1/auth/device/inspect", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: inspect your own device code" },
-  { line: 18710, fn: "submitActivateDecision", verb: "POST", route: "/v1/auth/device/approve|/v1/auth/device/deny", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; THE LITERAL-PREFIX TRAP — see ruling (b)" },
+  { fn: "activateInspect", verb: "POST", route: "/v1/auth/device/inspect", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: inspect your own device code" },
+  { fn: "submitActivateDecision", verb: "POST", route: "/v1/auth/device/approve|/v1/auth/device/deny", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; THE LITERAL-PREFIX TRAP — see ruling (b)" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -348,7 +372,7 @@ const RESOLVERS = [
   // THE TRAP. A literal PREFIX with a variable last segment. A naive extractor
   // accepts it and mis-routes to "/v1/auth/device/" — a route that does not
   // exist. It is resolved here, by name, rather than silently believed.
-  { fn: "submitActivateDecision", verb: "POST", expr: '"/v1/auth/device/" + decision', route: "/v1/auth/device/approve|/v1/auth/device/deny", why: "decision is 'approve' | 'deny' (router.ex:952 / :974)" },
+  { fn: "submitActivateDecision", verb: "POST", expr: '"/v1/auth/device/" + decision', route: "/v1/auth/device/approve|/v1/auth/device/deny", why: "decision is 'approve' | 'deny' — both routes exist: grep -n 'post \"/v1/auth/device/' router.ex" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -359,22 +383,64 @@ const RESOLVERS = [
 //
 // SIX, NOT SEVEN. cch-w36-s5's brief mandated "the SEVEN post-guard inline-cond
 // routes"; the grep it prescribed returns SIX. The seventh site BY CONTENT is
-// router.ex:4653 — `admin? = Accounts.team_admin?(user, team)` — invisible to
-// that grep because it binds a local. It is EXCLUDED BY NAME, not counted: it
+// the one reading `admin? = Accounts.team_admin?(user, team)` — invisible to
+// that grep because it binds a local; its line is DERIVED and printed as the
+// overlay's EXCLUDED row, never written down here. It is EXCLUDED BY NAME, not counted: it
 // is a self-scope NARROWING on a GET (the notification delivery log fences a
 // member to their own rows), never a refusal. Inventing a seventh row would
 // have made the overlay wrong in the other direction.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const INLINE_COND_SITES = [
-  { line: 2058, route: "POST /v1/fleet/supports" },
-  { line: 2222, route: "DELETE /v1/fleet/supports/:id" },
-  { line: 4302, route: "POST /v1/env-vars" },
-  { line: 4360, route: "DELETE /v1/env-vars/:id" },
-  { line: 8082, route: "POST /v1/launch + POST /v1/go-live (go_live/1)" },
-  { line: 8290, route: "POST /v1/resurrect (resurrect/1)" },
+// THE ROUTES ARE PINNED. THE LINE NUMBERS ARE NOT, AND NEVER AGAIN WILL BE.
+// These six used to carry a typed `line:` that the census PRINTED, and all six
+// were stale (drift 82, 87, 94, 98, 230, 235; router.ex at the recorded 8082 is
+// now a bare `conn`). Pin-and-check was built and REFUSED: router.ex took 102
+// commits in 30 days and all six of these lines moved within a SINGLE calendar
+// day, so a numeral corrected at merge is wrong by the next one — and this
+// census runs FIRST of three in the same CI job (console-harness.yml), so a
+// drift red would convert an unrelated router insertion into a three-census
+// outage. DERIVE AND PRINT; never pin and compare.
+const INLINE_COND_ROUTES = [
+  "POST /v1/fleet/supports",
+  "DELETE /v1/fleet/supports/:id",
+  "POST /v1/env-vars",
+  "DELETE /v1/env-vars/:id",
+  "POST /v1/launch + POST /v1/go-live (go_live/1)",
+  "POST /v1/resurrect (resurrect/1)",
 ];
-const INLINE_COND_EXCLUDED = { line: 4653, why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
+const INLINE_COND_EXCLUDED = { why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
+
+// KEY ON THE TWO PRECISE FORMS, NEVER THE BARE STRING. `grep -n 'team_admin?'
+// router.ex` returns NINE hits, not eight — six refusal-form, one excluded
+// local binding, and TWO DECOYS that are not call sites of this predicate at
+// all. Re-derive them, do not trust a numeral: run that grep and you will find
+//
+//   · a DOC-COMMENT in the env-var route's `@doc`-style header, reading
+//     "… Write-gated to owner/admin (Accounts.team_admin?/2)." — prose, not code
+//   · `admin: Authz.team_admin?(user, team)` — a DIFFERENT MODULE's function,
+//     inside a payload map, not a refusal
+//
+// (Their line numbers are deliberately not recorded here. This file writes down
+// no line numbers at all — see the header — and two decoy numerals would be the
+// first to rot, in a comment nothing can red.) A resolver keying on the bare
+// string mis-splits by TWO: it reports eight refusals against six recorded
+// routes and reds on prose. The two regexes below are exactly the forms check
+// (2f) already counted, so deriving the lines changes nothing it tests.
+const REFUSAL_FORM = /Accounts\.team_admin\?\(conn\.assigns\.current_user, conn\.assigns\.current_team\)/;
+const LOCAL_FORM = /admin\?\s*=\s*Accounts\.team_admin\?\(user, team\)/;
+
+// One entry PER OCCURRENCE (a line carrying the form twice yields it twice), so
+// the derived array's LENGTH is exactly the occurrence count check (2f) tests —
+// deriving the lines must not quietly change what the check counts.
+function siteLines(source, re) {
+  const g = new RegExp(re.source, "g");
+  const out = [];
+  source.split("\n").forEach((text, i) => {
+    const n = (text.match(g) || []).length;
+    for (let k = 0; k < n; k++) out.push(i + 1);
+  });
+  return out;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE EXTRACTOR
@@ -569,11 +635,7 @@ for (const r of withContext) {
   console.log(`  ${pad(`${LABEL}:${live ? live.line : "gone"}`, 34)}${pad(r.verb + " " + r.route, 52)}${pad(r.auth_fn || "—", 26)}→ ${r.context_fn}`);
 }
 
-console.log("");
-console.log("inline-cond overlay (charter D421): " + INLINE_COND_SITES.length + " router routes refuse non-admins inside a `cond`:");
-for (const s of INLINE_COND_SITES) console.log(`  router.ex:${pad(String(s.line), 8)}${s.route}`);
-console.log(`  EXCLUDED  router.ex:${INLINE_COND_EXCLUDED.line} — ${INLINE_COND_EXCLUDED.why}`);
-
+// The inline-cond overlay PRINTS BELOW, behind check (2f) — see the note there.
 // ═══════════════════════════════════════════════════════════════════════════
 // THE CHECKS. Ordered so the most fundamental failure is reported first: an
 // instrument that lost its footing (2) must never be read as a clean diff (1).
@@ -695,28 +757,61 @@ if (dupes.length) {
   if (router === null) {
     die2(["FAIL(2): router.ex not readable at " + ROUTER + " — the inline-cond overlay cannot be checked."]);
   }
-  const refusalForm = /Accounts\.team_admin\?\(conn\.assigns\.current_user, conn\.assigns\.current_team\)/g;
-  const localForm = /admin\?\s*=\s*Accounts\.team_admin\?\(user, team\)/g;
-  const refusals = (router.match(refusalForm) || []).length;
-  const locals = (router.match(localForm) || []).length;
-  if (refusals !== INLINE_COND_SITES.length || locals !== 1) {
+  const refusalLines = siteLines(router, REFUSAL_FORM);
+  const localLines = siteLines(router, LOCAL_FORM);
+  const refusals = refusalLines.length;
+  const locals = localLines.length;
+  const paired = refusals === INLINE_COND_ROUTES.length;
+  if (!paired || locals !== 1) {
     die2([
       "FAIL(2): the inline-cond overlay moved.",
-      `  expected ${INLINE_COND_SITES.length} refusal-form sites and 1 excluded local-binding site`,
+      `  expected ${INLINE_COND_ROUTES.length} refusal-form sites and 1 excluded local-binding site`,
       `  found    ${refusals} refusal-form and ${locals} local-binding`,
       "",
-      refusals > INLINE_COND_SITES.length
+      refusals > INLINE_COND_ROUTES.length
         ? "  A router route grew an inline non-admin refusal. That is an ELEVATION no `Auth.*` grep\n" +
           "  can see — so no console predicate is likely to have followed it. Find it, decide whether\n" +
           "  the console call site in front of it is predicated, and record the row."
-        : "  An inline refusal disappeared. Either a route was lowered to plain member (update the\n" +
-          "  affected PIN rows' elevated/context_fn) or a refusal was LOST (that is the bug).",
+        : refusals < INLINE_COND_ROUTES.length
+          ? "  An inline refusal disappeared. Either a route was lowered to plain member (update the\n" +
+            "  affected PIN rows' elevated/context_fn) or a refusal was LOST (that is the bug)."
+          : "  The excluded local-binding site changed count. It is a self-scope narrowing, not a\n" +
+            "  refusal — if a second one appeared, decide which it is before touching this overlay.",
       "",
-      "  Recorded overlay:",
-      ...INLINE_COND_SITES.map((s) => `    router.ex:${s.line}  ${s.route}`),
-      `    EXCLUDED router.ex:${INLINE_COND_EXCLUDED.line} — ${INLINE_COND_EXCLUDED.why}`,
+      "  Recorded overlay ROUTES (the pinned half — line numbers are never recorded here):",
+      ...INLINE_COND_ROUTES.map((r) => `    ${r}`),
+      "",
+      // TRAP (iii): pairing derived lines to route names POSITIONALLY is only
+      // meaningful when there are as many lines as names. On an ADD there are
+      // more, and pairing would print 8 lines against 6 names — the gate's own
+      // failure text would become a NEW false statement, which is the exact
+      // defect class this instrument exists to close. Unlabeled instead.
+      paired
+        ? "  Derived refusal-form lines in router.ex, paired to those routes by source order:"
+        : "  Derived refusal-form lines in router.ex, UNLABELED — there are " + refusals + " of them and " +
+          INLINE_COND_ROUTES.length + " recorded routes,\n  so naming them positionally would mis-label every site after the change:",
+      ...(paired
+        ? refusalLines.map((l, i) => `    router.ex:${pad(String(l), 8)}${INLINE_COND_ROUTES[i]}`)
+        : refusalLines.map((l) => `    router.ex:${l}`)),
+      locals === 1
+        ? `    EXCLUDED router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`
+        : `    EXCLUDED local-binding form: ${locals} site(s)${locals ? " at router.ex:" + localLines.join(", router.ex:") : ""} — expected exactly 1, ${INLINE_COND_EXCLUDED.why}`,
     ]);
   }
+
+  // THE DERIVED PRINT SITS HERE, BEHIND THE CHECK — never in front of it.
+  // Reaching this line means the content-matched check already agreed that the
+  // overlay is the six routes it records, so pairing line to route by source
+  // order is sound. Put a drift check FIRST and a real elevation — a seventh
+  // inline-cond refusal — gets reported as "line numbers are stale", which is
+  // the misdiagnosis this ordering exists to prevent.
+  console.log("");
+  console.log("inline-cond overlay (charter D421): " + INLINE_COND_ROUTES.length + " router routes refuse non-admins inside a `cond`");
+  console.log("  (every line below DERIVED from the live router.ex just now, paired by source order):");
+  for (let i = 0; i < INLINE_COND_ROUTES.length; i++) {
+    console.log(`  router.ex:${pad(String(refusalLines[i]), 8)}${INLINE_COND_ROUTES[i]}`);
+  }
+  console.log(`  EXCLUDED  router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`);
 }
 
 // (2g) EVERY PINNED PREDICATE MUST NAME A REAL DECLARATION IN app.js.
@@ -770,6 +865,49 @@ if (dupes.length) {
   }
 }
 
+// (2h) THE HEADER'S OWN CLAIM, MADE LOSABLE (cch-w47-rv).
+//
+//      The header at the top of this file asserts, flatly, that NO LINE NUMBER
+//      IS WRITTEN DOWN HERE. Charter D528 made that true of the 79 PIN rows and
+//      of the six printed router lines — and left SEVEN behind in prose that
+//      nothing read and nothing could red: five `note:` strings naming
+//      router.ex lines for the inline-cond sites, the excluded local-binding
+//      site, and the two /v1/auth/device routes. Every one of them was already
+//      stale (the notes said 2058/4302/4360/8082/8290 against a router that
+//      derives 2140/4396/4458/8312/8525), which is precisely the defect class
+//      the D528 half-A deletion existed to remove — a claim of derivation with
+//      typed decoys underneath it.
+//
+//      So the claim is now a CHECK. This arm reads THIS file's own bytes and
+//      refuses any `<source file>:<digits>` literal. The derived prints are
+//      untouched by it: they are built at run time from template literals
+//      (`router.ex:${...}`, `${LABEL}:${s.line}`), so the SOURCE carries no
+//      digits for this regex to find. It fails LOUD rather than silently
+//      tolerating the next one somebody types into a comment.
+{
+  const selfSrc = fs.readFileSync(new URL(import.meta.url), "utf8");
+  const written = [];
+  selfSrc.split("\n").forEach((text, i) => {
+    const m = /\b(app\.js|router\.ex|index\.html|app\.css|[A-Za-z0-9_-]+\.mjs):\d+/.exec(text);
+    if (m) written.push(`  __binding_census.mjs:${i + 1}  ${m[0]}   ${text.trim().slice(0, 96)}`);
+  });
+  if (written.length) {
+    die2([
+      "FAIL(2h): a line number is written down in this file.",
+      "",
+      "  The header of this file claims that every line number it prints is DERIVED and that",
+      "  none is recorded here. A typed `file:NNNN` breaks that claim the moment a sibling",
+      "  shifts — and nothing else in this census can red on it, which is how the previous",
+      "  seven survived, all seven of them stale.",
+      "",
+      "  Name the CONTENT instead (a function name, a route, the grep that finds it), or let",
+      "  the derived print own the numeral. Never restate a numeral this file cannot check.",
+      "",
+      ...written,
+    ]);
+  }
+}
+
 // ── (1) THE SET DIFF. ADD and REMOVE. Never a count. ────────────────────────
 const liveKeys = [...seenByKey.keys()];
 const pinKeys = [...pinByKey.keys()];
@@ -789,7 +927,11 @@ if (arrivals.length || departures.length) {
   }
   for (const k of departures) {
     const r = pinByKey.get(k);
-    console.error(`  REMOVED   ${r.verb} ${r.route}  (was ${LABEL}:${r.line}, in ${r.fn})`);
+    // No line number here, and that is not an omission: the site is GONE from
+    // the live file, so there is nothing to derive it from. `${r.fn}` is the
+    // key's own half and stays true. Printing a remembered line would be the
+    // one number in this report that no live file backs.
+    console.error(`  REMOVED   ${r.verb} ${r.route}  (in ${r.fn}, no longer present in ${LABEL})`);
     console.error("            Its PIN row now describes a tree that no longer exists. Delete the row in");
     console.error("            the same commit that removed the call site, so the pin stays a description.");
   }
