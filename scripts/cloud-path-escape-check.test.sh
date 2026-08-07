@@ -92,7 +92,7 @@ fi
 # scanner, and this case would notice it even if the floor were removed.
 n="$(printf '%s' "$out" | sed -n 's/^cloud-path-escape-check: \([0-9]*\) distinct.*/\1/p')"
 if [ "${n:-0}" -ge 6 ]; then
-  ok "resolved $n repo-root reads (measured population is 6, == CLOUD_ESCAPE_MIN)"
+  ok "resolved $n repo-root reads (at least CLOUD_ESCAPE_MIN=6; the floor is a lower bound, not the population)"
 else
   no "resolved only ${n:-0} repo-root reads — scanner is under-matching"
 fi
