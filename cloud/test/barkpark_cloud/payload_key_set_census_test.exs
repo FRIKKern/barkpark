@@ -582,7 +582,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     {"DeployLedger.census/3", :unread, "total_sites",
      "dr-w18-s5 — the population behind a site list the server cut at 50. The Go side's existing marker is over its OWN 10-row clamp and is structurally blind to the server cut."},
     {"DeployLedger.census/3", :unread, "truncated",
-     "dr-w18-s5 — the server-side cut marker, twin of total_sites above."}
+     "dr-w18-s5 — the server-side cut marker, twin of total_sites above."},
+    {"DeployLedger.census/3", :phantom, "scope",
+     "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/4`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
   ]
 
   # MERGE RESOLUTION (wave-18 review, dr-w18-s2 rebased onto origin/main).
@@ -693,8 +695,23 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # collected" and "222 json tag(s) found". 123 is neither main's 110 + s2's
   # delta nor s2's 121 — the arithmetic guess would have been wrong in both
   # directions, which is exactly why the technique is measurement.
+  #
+  # W19 S1 (this branch merged with origin/main): the go-tag floor moves
+  # 222 -> 225, MEASURED off the `==` refusal's own count ("225 json tag(s)
+  # found in internal/cloudclient, floor is EXACTLY 222") on the merged tree,
+  # never by arithmetic. The arithmetic guess is 222+5=227 and it is WRONG:
+  # this branch declares FIVE new json tag names on the census decoders
+  # (scope, team, site_ids, registered_sites, registered_sites_population),
+  # but `Go.all_tags/1` is a file-GLOBAL union of NAMES, so a name already
+  # declared anywhere in client.go adds nothing. Counted against
+  # origin/main's copy of the file: `team` was already there (2 sites) and
+  # `scope` was already there (1 site); `site_ids`, `registered_sites` and
+  # `registered_sites_population` are new names. The union therefore grows by
+  # THREE. Note which two rode free — it is NOT the pair a reader would
+  # guess, which is the whole reason this number is measured and not derived.
+  # The emitted floor does NOT move: this branch writes no serializer.
   @emitted_floor 123
-  @go_tag_floor 222
+  @go_tag_floor 225
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 56 keys with the :when unwrap, 42 without.

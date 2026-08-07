@@ -374,14 +374,15 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # The other row is NOT armed: dr-w18-s3 counts the digest's loss but leaves its
   # AUDIENCE the platform allowlist, so that row's closer is a later slice.
   @empty_audience_allowlist %{
-    "fleet_deploy_census" =>
-      "EMPTY BY CONSTRUCTION today: its only reader, FleetDeployCensus, sends " <>
-        "GET /v1/operator/deploy-ledger/census, which `Auth.require_platform_operator` " <>
-        "gates on the `:platform_admin_emails` allowlist — unset on prod and unsettable " <>
-        "through any route, console action or User field, so ZERO accounts can read the " <>
-        "epic's headline number. CLOSER: dr-w18-s1 gives the client a reader for the " <>
-        "team-scoped GET /v1/deploy-ledger/census (tier `user(s)`), which every member " <>
-        "of every team can reach; when it lands, delete this row.",
+    # `fleet_deploy_census` used to sit here: its only reader sent
+    # GET /v1/operator/deploy-ledger/census, gated on the `:platform_admin_emails`
+    # allowlist that is unset on prod and unsettable through any route, console
+    # action or User field — ZERO accounts could read the epic's headline number.
+    # Its named CLOSER (dr-w18-s1) is THIS branch: the client now reads the
+    # team-scoped GET /v1/deploy-ledger/census, tier `user`, which every member of
+    # every team can reach. The "allowlist cannot rot" test reds on an excuse that
+    # stopped being true and ordered this deletion by name, so the row is gone in
+    # the same commit as the reader that closed it.
     "fleet_operator_digest" =>
       "EMPTY BY CONSTRUCTION today: `deliver_fleet_digest/1` resolves its recipients " <>
         "through `platform_admin_emails/0`, whose only source is the " <>
