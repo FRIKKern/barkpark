@@ -175,6 +175,34 @@ defmodule BarkparkCloud.NotificationsPlatformAdminEnvTest do
     assert operator_call(user).status == 200
   end
 
+  ## 6. The far end of the same chain: what the DIGEST does with the empty set
+  ##
+  ##    §1-§5 prove the chain fails CLOSED — an unset variable is nobody, and the
+  ##    operator gate 403s. dr-w18-s3 adds the other consequence of that same
+  ##    empty set, which had no test at all: the daily fleet digest resolves the
+  ##    same population, finds nobody, and used to return a success nothing
+  ##    counted. Driven here from the REAL runtime.exs boot path rather than an
+  ##    `Application.put_env`, so the assertion is about the deployed
+  ##    configuration and not about a value a test typed in.
+
+  test "an unset variable makes the daily fleet digest a COUNTED loss, not a quiet success" do
+    _registered = user_fixture()
+    assert boot_with_env(nil) == []
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, :no_admins} = Notifications.deliver_fleet_digest([])
+      end)
+
+    # The loss is greppable and it is a WARNING — the same env state that dark-
+    # ens the operator console also silences the one push channel for fleet
+    # health, and now says so.
+    assert log =~ "fleet_digest phase=settled"
+    assert log =~ "recipients=0 sent=0"
+    assert log =~ "reason=no_platform_admins"
+    assert log =~ "[warning]"
+  end
+
   # The one link no Elixir test can OBSERVE is also the one that was broken, and
   # it shipped with nothing watching it. This is the narrowest honest tripwire:
   # a text assertion that the bare passthrough line is still in the

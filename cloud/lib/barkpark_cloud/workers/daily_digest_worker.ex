@@ -10,7 +10,15 @@ defmodule BarkparkCloud.Workers.DailyDigestWorker do
   It never computes a verdict and never calls GitHub — it reads only the update
   columns the fleet already polls (`Registry.all_barkparks/0`) and hands them to
   `Notifications.deliver_fleet_digest/1`, which resolves the operator recipients
-  and renders/sends. Zero platform admins is a logged no-op there.
+  and renders/sends.
+
+  Zero platform admins is NOT a no-op any more (dr-w18-s3). It is a COUNTED
+  LOSS: `deliver_fleet_digest/1` emits `fleet_digest phase=settled recipients=0
+  sent=0` at WARNING plus a `:telemetry` event, then returns `{:ok, :no_admins}`.
+  This job still completes — a missing recipient list is not this job failing,
+  and discarding it would only turn one unread Oban state into another (there is
+  no Oban read route in the console at all) — so the accounting record, not the
+  job state, is the thing that says the digest reached nobody.
 
   `unique: [period: 86_400]` guards against a double-enqueue landing two digests
   in the same day (the cron plugin fires once per tick, but a manual re-enqueue
@@ -30,6 +38,10 @@ defmodule BarkparkCloud.Workers.DailyDigestWorker do
     result = Registry.all_barkparks() |> Notifications.deliver_fleet_digest()
 
     case result do
+      # Deliberately silent HERE: `Notifications.deliver_fleet_digest/1` already
+      # emitted the countable loss (warning + telemetry). A second line would be
+      # a second vocabulary for the same event, which is how a reader ends up
+      # trusting whichever one they grepped first.
       {:ok, :no_admins} ->
         :ok
 
