@@ -14098,10 +14098,13 @@
     return billingCanManage(me.role) ? "owner" : "blocked";
   }
 
+  // cch-w49-s1: the tier states its NAME, its note and its CTA — and no price.
+  // There is no amount anywhere server-side for it to state (see PLAN_CATALOG);
+  // the real figure arrives on Stripe's own checkout page, which is the first
+  // surface in this flow that knows one.
   function launchPlanTierHtml(t, withCta) {
     return '<div class="new-tier">' +
-      '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
-        '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
+      '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span></div>" +
       '<p class="dim">' + esc(t.note) + "</p>" +
       (withCta
         ? '<button class="btn btn-primary btn-block new-plan" data-plan="' + esc(t.plan) + '" type="button">Choose ' + esc(t.name) + "</button>"
@@ -14110,9 +14113,11 @@
   }
 
   // The plan grid, authority-honest. An owner (or an unknown role) gets the
-  // CTAs; a principal the server WILL refuse gets the same prices with no dead
+  // CTAs; a principal the server WILL refuse gets the same cards with no dead
   // button and one sentence naming who can pay — never a disabled ghost (the
-  // GR36 plain-member law).
+  // GR36 plain-member law). BOTH arms state the same thing, and neither states
+  // a price: the blocked arm used to quote two figures while withholding the
+  // button, which is the money claim without even the affordance behind it.
   function launchPlanGridHtml(authority) {
     var withCta = authority !== "blocked";
     var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; })
@@ -14182,14 +14187,38 @@
   }
 
   // =========================================================== BILLING
-  // GR19: ONE quota-honest plan catalog — names, USD PLACEHOLDER prices, and the
-  // REAL enforced instance ceilings (server Billing @default_limits: Free 1 /
-  // Supporter 3 / Support++ 10). The $ figures stay placeholders until the
-  // cloud-console-billing-live-gate human gate sets live Stripe prices.
+  // GR19 / cch-w49-s1: ONE plan catalog — the tier's plan id, its display name
+  // and one honest sentence. It carries NO NUMERAL, by design, because this
+  // client cannot support one:
+  //   • THE PRICE was a hand-typed USD placeholder ($0/$69/$499) that rendered
+  //     as fact under a button opening a real Stripe session. No amount exists
+  //     anywhere server-side to check it against — STRIPE_PRICE_* are Stripe
+  //     price IDs, not amounts — so no guard could ever cover it, and adding a
+  //     server price field would only MOVE the claim, not ground it. The
+  //     authoritative figure is Stripe's own checkout page, one click away.
+  //   • THE CEILING (1/3/10 managed instances) was a real server default, but
+  //     it was stated on a screen that never asks: not one of the six billing
+  //     actors issues GET /v1/usage/summary, Usage.instance_quota/1 answers nil
+  //     for an unsubscribed AND for a past_due team, and the one actor who sees
+  //     the three-card grid is on plan "trial", which this catalog has no card
+  //     for. A true number quoted from the wrong place is still not knowledge.
+  // So every surface states the tier, the features and the CTA — and no number.
+  // Guarded by the absent-arm assertion in __preview__/smoke.mjs, which reds
+  // across all six #billing actors the moment a numeral returns.
+  //
+  // `instances` SURVIVES as data and reaches NO DOM. It is the client half of
+  // the cross-layer mirror in cloud/test/barkpark_cloud/billing_client_mirror_test.exs
+  // (cch-w49-s3), which reads this constant by running and reds if it drifts
+  // from Billing.limits/0's enforced ceiling. It is deliberately NOT rendered:
+  // the formatter that used to print it (planInstanceLimit) is deleted, and the
+  // smoke absent-arm guard reds the moment the number reaches a billing screen.
+  // A number nobody is shown states nothing to anybody; a number pinned to the
+  // server is the seam a future usage-fed ceiling would land on. `price` and
+  // `per` are GONE outright — those had no server counterpart to be pinned to.
   var PLAN_CATALOG = [
-    { plan: "free", name: "Free", price: "$0", per: "", note: "Get started. No card required.", free: true, instances: 1 },
-    { plan: "supporter", name: "Supporter", price: "$69", per: "/mo", note: "Managed hosting for your instance.", instances: 3 },
-    { plan: "support_plus", name: "Support++", price: "$499", per: "/mo", note: "Priority support and more capacity.", instances: 10 }
+    { plan: "free", name: "Free", note: "Get started. No card required.", free: true, instances: 1 },
+    { plan: "supporter", name: "Supporter", note: "Managed hosting for your instance.", instances: 3 },
+    { plan: "support_plus", name: "Support++", note: "Priority support and more capacity.", instances: 10 }
   ];
 
   var RECOMMENDED = "supporter";
@@ -14198,15 +14227,12 @@
     return PLAN_CATALOG.filter(function (x) { return x.plan === plan; })[0] || null;
   }
 
-  function planInstanceLimit(t) {
-    return t.instances + " managed instance" + (t.instances === 1 ? "" : "s");
-  }
-
-  // Per-plan feature bullets — the real ceiling leads. (The old shared
-  // unlimited-instances bullet was false: every plan has a ceiling.)
+  // Per-plan feature bullets. It leads with what this client can actually
+  // stand behind. The old lead bullet was a hand-typed instance ceiling
+  // ("3 managed instances") on a screen that never fetches the quota — see
+  // PLAN_CATALOG; the honest instance count lives on Usage, which asks.
   function planFeatures(t) {
     return [
-      planInstanceLimit(t),
       "Automated provisioning & updates",
       "Daily backups",
       "Custom domains with automatic TLS",
@@ -14219,11 +14245,6 @@
     return '<ul class="plan-feats">' +
       planFeatures(t).map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
       "</ul>";
-  }
-
-  function priceFor(plan) {
-    var t = catalogPlan(plan);
-    return t ? t.price : "—";
   }
 
   // The team's plan per the server. A past_due team KEEPS its paid plan —
@@ -14358,8 +14379,8 @@
 
   // A button-free plan card for the read-only (non-owner) view. Reuses the same
   // pure models as the owner card — planFromSub / billingStatusBadge /
-  // billingStatusLabel / billingPeriodLine / priceFor / planFeatsHtml — so the
-  // numbers never diverge; it just omits every affordance.
+  // billingStatusLabel / billingPeriodLine / planFeatsHtml — so the two views
+  // never diverge; it just omits every affordance.
   function readOnlyPlanCardHtml(sub) {
     var isTrial = !!sub && sub.plan === "trial";
     if (isTrial) {
@@ -14381,7 +14402,6 @@
                 : '<span class="plan-rec">') + esc(billingStatusBadge(sub)) + "</span>"
             : "") +
         "</div>" +
-        '<div class="plan-price">' + esc(priceFor(plan)) + "<small>/mo</small></div>" +
         planFeatsHtml(catalogPlan(plan)) +
         (sub ? '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) + "</p>" : "") +
         (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
@@ -14519,7 +14539,6 @@
         '<div class="plan-head"><span class="plan-name">' + esc(t.name) + "</span>" +
           '<span class="plan-rec">Recommended</span></div>' +
         '<p class="plan-tagline">Optimized for shipping to production.</p>' +
-        '<div class="plan-price">' + t.price + "<small>" + (t.per || "") + "</small></div>" +
         planFeatsHtml(t) +
         '<button class="btn btn-primary btn-block" id="plan-continue">Continue</button>' +
         '<a class="plan-more" id="plan-more">See more plan options</a>' +
@@ -14634,7 +14653,6 @@
             : '<span class="plan-rec">') +
             esc(billingStatusBadge(sub)) + "</span></div>" +
         '<p class="plan-tagline">Your current subscription.</p>' +
-        '<div class="plan-price">' + esc(priceFor(sub.plan)) + "<small>/mo</small></div>" +
         planFeatsHtml(catalogPlan(sub.plan)) +
         '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
@@ -14663,9 +14681,16 @@
   }
 
   // C-03: the trial state — countdown chip + the RATIFIED CTA, VERBATIM from the
-  // ratification record (task-2ed0ea068f37345d): "Pick a plan below to keep it.
-  // No card needed." (the v4 prototype carries a superseded draft — never copy
-  // from it). The plan grid opens right below so "below" stays true. Trial
+  // ratification record (task-2ed0ea068f37345d): "Pick a plan below to keep it."
+  // (the v4 prototype carries a superseded draft — never copy from it).
+  // cch-w49-s1 DROPPED the second sentence that used to follow it, "No card
+  // needed.": the ratification's whole honesty warrant is teardown + the T-3/T-1
+  // reminders, and it never covered card collection. Under that sentence the two
+  // paid cards are live Subscribe buttons and create_checkout_session/3 sends
+  // mode=subscription with a real price and NO payment_method_collection and NO
+  // trial_period_days — a card is exactly what is needed. The FOUR other "no
+  // card" sentences in this file are TRUE (start_trial touches Stripe not at
+  // all) and stay. The plan grid opens right below so "below" stays true. Trial
   // expiry is a REAL teardown (TrialExpiryWorker), so this copy never borrows
   // the dunning "suspended — not deleted" promise; the 3-day/1-day reminders it
   // names are the worker's real warn schedule.
@@ -14679,7 +14704,7 @@
         '<div class="plan-head"><span class="plan-name">Free trial</span>' +
           chipOpen + esc(chip) + "</span></div>" +
         '<p class="plan-tagline">A real dedicated instance, free while your trial runs. When the trial ends, the instance is torn down.</p>' +
-        '<p class="trial-cta">Pick a plan below to keep it. No card needed.</p>' +
+        '<p class="trial-cta">Pick a plan below to keep it.</p>' +
         "<p class=\"plan-meta dim\">We'll remind you 3 days and 1 day before the trial ends.</p>" +
       "</div>";
   }
@@ -14690,8 +14715,10 @@
     if (grid) { grid.hidden = false; renderTiers(); }
   }
 
-  // One tier card (pure — node-pinned). Quota-honest: every card states its REAL
-  // instance ceiling. A subscribed team changes plans in the portal, self-serve.
+  // One tier card (pure — node-pinned). It states the tier, one sentence and
+  // the action — no price and no instance ceiling, neither of which this screen
+  // can support (see PLAN_CATALOG). A subscribed team changes plans in the
+  // portal, self-serve.
   function tierCardHtml(t, active, subscribed) {
     var isCurrent = t.plan === active;
     var btn;
@@ -14710,9 +14737,7 @@
     }
     return '<div class="tier' + (isCurrent ? " tier-current" : "") + (t.free ? " tier-free" : "") + '">' +
       '<div class="tier-name">' + esc(t.name) + "</div>" +
-      '<div class="tier-price">' + t.price + "<small>" + t.per + "</small></div>" +
       '<p class="tier-note">' + esc(t.note) + "</p>" +
-      '<p class="tier-quota">' + esc(planInstanceLimit(t)) + "</p>" +
       btn +
     "</div>";
   }
@@ -22358,8 +22383,11 @@
       // billing-chip model, and the portal-return flag. DOM mounts
       // (renderCurrentPlan/renderTrial/renderBillingChip/openBillingPortal +
       // handleBillingPortalReturn) are smoke+browser-verified.
+      // cch-w49-s1 dropped `planInstanceLimit` from this seam with the function
+      // itself: nothing formats the instance count for a screen any more. The
+      // catalog's `instances` data survives here for the cross-layer mirror
+      // (cch-w49-s3 reads planCatalog by running); it reaches no DOM.
       planCatalog: PLAN_CATALOG.slice(),
-      planInstanceLimit: planInstanceLimit,
       planFeatures: planFeatures,
       planFromSub: planFromSub,
       // gr-p4-billing (G-01, GR36): the owner-honest gate + the paid-plan test
