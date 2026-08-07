@@ -266,6 +266,7 @@ defmodule BarkparkCloud.Web.Router do
     Metrics,
     Notifications,
     OAuth,
+    PublishClock,
     Push,
     Registry,
     Repo,
@@ -6615,7 +6616,11 @@ defmodule BarkparkCloud.Web.Router do
         {:ok, %{deployments: deployments, next_cursor: next_cursor}} ->
           json(conn, 200, %{
             deployments: Enum.map(deployments, &deployment_json/1),
-            next_cursor: next_cursor
+            next_cursor: next_cursor,
+            # deploy-reliability W14 S6: the publish→web clock's FIRST production
+            # caller. A SIBLING node — `deployments` and `next_cursor` are byte
+            # unchanged, and `deployment_json/1` is not touched.
+            publish_clock: publish_clock_node(site)
           })
 
         {:error, :invalid_cursor} ->
@@ -6625,6 +6630,43 @@ defmodule BarkparkCloud.Web.Router do
           })
       end
     end)
+  end
+
+  # The per-site publish clock, on the ONE surface a site owner can actually
+  # reach. `PublishClock` was ruled the vital in W11 (D161), written in W11,
+  # made readable in W12 — and had ZERO production callers until this line: every
+  # operator read path is behind `require_platform_operator` and
+  # `PLATFORM_ADMIN_EMAILS` is unset on prod (D165), so an operator-only surface
+  # is a dead end, not a missing env var.
+  #
+  # THE SEAM, and its limit: this route rides the 2-arity `with_team_site`, i.e.
+  # `:session` auth with no ability check and no admin gate, so a plain team
+  # MEMBER gets 200. It is SESSION-ONLY (D219) — a read PAT gets 401 here — so
+  # no CI job or automation credential can compute this number. Re-tiering the
+  # route belongs to cloud-console-hardening's auth fence, not here.
+  #
+  # 24h is the window because the WINDOW decides the refusal, not the floor:
+  # measured 2026-08-07, a publishing site reads n=7 over 1h (refused) and n=23
+  # over 6h and 24h. The window is named inside the node beside its sample.
+  #
+  # The trigger fact is the SITE'S OWN, never "zero rows this window": a site
+  # with no `content_webhook_secret_encrypted` can never record a publish
+  # (`ContentPublish.record/3` writes on exactly one HMAC-verified arm), and
+  # telling that owner "no data yet" would be a falsehood aimed at precisely the
+  # owner who most needs the truth (D201).
+  defp publish_clock_node(site) do
+    to = DateTime.utc_now()
+    from = DateTime.add(to, -24 * 3600, :second)
+
+    secret =
+      case Registry.reveal_site_content_secret(site) do
+        {:ok, nil} -> :absent
+        {:ok, _secret} -> :present
+        # Stored but undecryptable. Reported as UNKNOWN, never read as absent.
+        :error -> :unreadable
+      end
+
+    PublishClock.site_node(site.id, from, to, content_webhook_secret: secret)
   end
 
   # GET /v1/sites/:id/deployments/:dep_id → 200 {deployment} — the STAGE-AWARE
