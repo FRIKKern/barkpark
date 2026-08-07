@@ -1116,6 +1116,35 @@ type Site struct {
 	PrebuiltEnabled bool   `json:"prebuilt_enabled"`
 	InsertedAt      string `json:"inserted_at"`
 	UpdatedAt       string `json:"updated_at"`
+	// LastDeployment is the LATEST PRODUCTION deployment for this site, embedded
+	// by GET /v1/sites (router.ex `put_last_deployment/3`, fed by the ONE batched
+	// `Registry.latest_deployment_status_map/1`). It is nil-honest: nil means the
+	// site has no production deployment row at all (a preview-only or
+	// never-deployed site), NOT that the site is healthy and not that the key was
+	// lost. Only GET /v1/sites carries it — GET /v1/sites/:id does not.
+	//
+	// deploy-reliability W17: this embed shipped in search-template W15 and had
+	// ZERO Go readers until now, so `bp sites` walked an N+1 over
+	// /v1/sites/:id/deployments instead, reading each site's status at a
+	// DIFFERENT INSTANT. One field here collapses that to one read at one instant.
+	LastDeployment *SiteDeploymentEmbed `json:"last_deployment"`
+}
+
+// SiteDeploymentEmbed is the four-key slice of a deployment that GET /v1/sites
+// embeds per site. The keyset is deliberately narrow and is fenced by the
+// search-template D24 honesty law: status, trigger and the two timestamps, and
+// NOTHING else — no console URL, no build_log_url, no content_rev, and no
+// environment key (the query is already `environment == "production"`).
+//
+// Do not widen this struct to chase a field the wire does not carry: an absent
+// key decoded into a zero value is exactly the "measured empty" lie this epic
+// exists to remove. `Trigger` is a POINTER for that reason — the control plane
+// genuinely sends null for a deployment nobody attributed.
+type SiteDeploymentEmbed struct {
+	Status     string  `json:"status"`
+	Trigger    *string `json:"trigger"`
+	InsertedAt string  `json:"inserted_at"`
+	UpdatedAt  string  `json:"updated_at"`
 }
 
 // Deployment is one build-and-release of a Site, as returned by the
