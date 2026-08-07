@@ -266,6 +266,7 @@ defmodule BarkparkCloud.Web.Router do
     Metrics,
     Notifications,
     OAuth,
+    PublishClock,
     Push,
     Registry,
     Repo,
@@ -6615,7 +6616,11 @@ defmodule BarkparkCloud.Web.Router do
         {:ok, %{deployments: deployments, next_cursor: next_cursor}} ->
           json(conn, 200, %{
             deployments: Enum.map(deployments, &deployment_json/1),
-            next_cursor: next_cursor
+            next_cursor: next_cursor,
+            # deploy-reliability W14 S6: the publish→web clock's FIRST production
+            # caller. A SIBLING node — `deployments` and `next_cursor` are byte
+            # unchanged, and `deployment_json/1` is not touched.
+            publish_clock: publish_clock_node(site, opts[:before])
           })
 
         {:error, :invalid_cursor} ->
@@ -6625,6 +6630,84 @@ defmodule BarkparkCloud.Web.Router do
           })
       end
     end)
+  end
+
+  # The per-site publish clock, on the ONE surface a site owner can actually
+  # reach. `PublishClock` was ruled the vital in W11 (D161), written in W11,
+  # made readable in W12 — and had ZERO production callers until this line: every
+  # operator read path is behind `require_platform_operator` and
+  # `PLATFORM_ADMIN_EMAILS` is unset on prod (D165), so an operator-only surface
+  # is a dead end, not a missing env var.
+  #
+  # THE SEAM, and its limit: this route rides the 2-arity `with_team_site`, i.e.
+  # `:session` auth with no ability check and no admin gate, so a plain team
+  # MEMBER gets 200. It is SESSION-ONLY (D219) — a read PAT gets 401 here — so
+  # no CI job or automation credential can compute this number. Re-tiering the
+  # route belongs to cloud-console-hardening's auth fence, not here.
+  #
+  # 24h is the window because the WINDOW decides the refusal, not the floor:
+  # measured 2026-08-07, a publishing site reads n=7 over 1h (refused) and n=23
+  # over 6h and 24h. The window is named inside the node beside its sample.
+  #
+  # The trigger fact is the SITE'S OWN, never "zero rows this window": a site
+  # with no `content_webhook_secret_encrypted` can never record a publish
+  # (`ContentPublish.record/3` writes on exactly one HMAC-verified arm), and
+  # telling that owner "no data yet" would be a falsehood aimed at precisely the
+  # owner who most needs the truth (D201).
+  #
+  # REVIEW (W14): TWO GUARDS THE FIRST CUT DID NOT HAVE, both about the fact that
+  # this route is not a dashboard curiosity — it is the read `bp cloud site
+  # status` itself performs, so the whole owner-facing surface slice 1 built
+  # hangs off this handler answering 200.
+  #
+  #   1. PAGE ONE ONLY. The node describes a 24h WINDOW, not the page. Recomputing
+  #      it on every page of a keyset walk is the identical answer re-derived, and
+  #      `census/3` defaults `verify_seek_bound: true` — a filtered count over the
+  #      whole deployments table with no index for `became_live_at < inserted_at`.
+  #      A deep walk therefore paid for one seq scan per page. On a paged read the
+  #      node says where the number lives instead of recomputing it.
+  #   2. IT MAY NOT TAKE THE LEDGER DOWN. An added SIBLING node must never be able
+  #      to turn a working 200 into a 500: the deployments array is the answer the
+  #      owner (and the CLI) came for, and the clock is commentary beside it. A
+  #      raised census degrades to a node that NAMES the failure — never a silent
+  #      omission, which would read as "no clock for this site" and be a lie of
+  #      exactly the kind this epic exists to end.
+  defp publish_clock_node(_site, before) when is_binary(before) and before != "" do
+    %{
+      computed?: false,
+      state: "not_computed_on_a_paged_read",
+      note:
+        "the publish clock describes a 24h window for this site, not this page of the ledger — it is computed on the FIRST page only. Read it without ?before=/?cursor= rather than treating its absence here as a missing clock"
+    }
+  end
+
+  defp publish_clock_node(site, _before) do
+    try do
+      publish_clock_node(site)
+    rescue
+      e ->
+        %{
+          computed?: false,
+          state: "census_failed",
+          note:
+            "the publish clock could not be read for this site (#{inspect(e.__struct__)}) — the deployments below are unaffected, and this is reported rather than omitted so an absent clock is never mistaken for a site that has none"
+        }
+    end
+  end
+
+  defp publish_clock_node(site) do
+    to = DateTime.utc_now()
+    from = DateTime.add(to, -24 * 3600, :second)
+
+    secret =
+      case Registry.reveal_site_content_secret(site) do
+        {:ok, nil} -> :absent
+        {:ok, _secret} -> :present
+        # Stored but undecryptable. Reported as UNKNOWN, never read as absent.
+        :error -> :unreadable
+      end
+
+    PublishClock.site_node(site.id, from, to, content_webhook_secret: secret)
   end
 
   # GET /v1/sites/:id/deployments/:dep_id → 200 {deployment} — the STAGE-AWARE

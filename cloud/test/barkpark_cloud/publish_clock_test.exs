@@ -62,6 +62,27 @@ defmodule BarkparkCloud.PublishClockTest do
   WHERE p.received_at >= $1 AND p.received_at < $2
   """
 
+  # The census query, verbatim, as the pin expects it — compared by EQUALITY
+  # after comment-stripping and whitespace normalization, so an ADDED predicate
+  # fails here rather than sliding past seven `contains` assertions.
+  @expected_census_sql """
+  SELECT p.id, p.site_id, p.received_at, p.doc_type, p.enqueued,
+         d.id AS deployment_id, d.became_live_at
+  FROM content_publishes p
+  LEFT JOIN LATERAL (
+    SELECT dd.id, dd.became_live_at
+    FROM deployments dd
+    WHERE dd.site_id = p.site_id
+      AND dd.became_live_at IS NOT NULL
+      AND dd.became_live_at >= p.received_at
+      AND dd.inserted_at >= p.received_at
+    ORDER BY dd.became_live_at
+    LIMIT 1
+  ) d ON TRUE
+  WHERE p.received_at >= $1 AND p.received_at < $2
+    AND ($3::uuid IS NULL OR p.site_id = $3)
+  """
+
   ## ── 1. The join rule ──────────────────────────────────────────────────────
 
   describe "the join rule (D176)" do
@@ -77,6 +98,35 @@ defmodule BarkparkCloud.PublishClockTest do
       # reader cannot mistake it for the thing that makes the answer correct.
       assert sql =~ "PERFORMANCE PREDICATE ONLY"
       assert sql =~ "THE HONESTY GUARD"
+    end
+
+    # D216. THE SEVEN `=~` ASSERTIONS ABOVE ARE A HALF GUARD, and the missing
+    # half is exactly what W14 S6 did to this query. Measured, not predicted:
+    # appending `AND p.doc_type = 'zzz-no-such-type'` to @census_sql — which
+    # DESTROYS the query's answer — reds 6 of 11 behavioural tests and the pin
+    # test is NOT among the six. It stayed green while the query it certifies
+    # returned nothing, because `contains` cannot see an ADDITION.
+    #
+    # So the pin is now EQUALITY-SHAPED, on two axes: the exact predicate LIST
+    # (an added predicate is a new element), and normalized-whitespace equality
+    # of the whole statement. Neither is a `=~`.
+    test "the query text is PINNED BY EQUALITY, so an ADDED predicate cannot pass unseen" do
+      sql = PublishClock.census_sql()
+
+      # Axis 1: the predicate list, in order, comments stripped. A destructive
+      # `AND p.doc_type = …` appended anywhere shows up here as an extra element.
+      assert predicates(sql) == [
+               "dd.site_id = p.site_id",
+               "dd.became_live_at IS NOT NULL",
+               "dd.became_live_at >= p.received_at",
+               "dd.inserted_at >= p.received_at",
+               "p.received_at >= $1",
+               "p.received_at < $2",
+               "($3::uuid IS NULL OR p.site_id = $3)"
+             ]
+
+      # Axis 2: the whole statement, whitespace-normalized and comment-stripped.
+      assert normalize(sql) == normalize(@expected_census_sql)
     end
 
     test "the guard is not decoration: an in-flight build is NOT credited, and without the guard it would be" do
@@ -110,8 +160,11 @@ defmodule BarkparkCloud.PublishClockTest do
 
       # The guarded answer, from the module's OWN query text: it credits the
       # deployment this publish actually caused, at 214.3s.
+      # THREE bound parameters since W14 S6: $3 is the nullable site bound, and
+      # `nil` is the fleet path. Two raises `ArgumentError: parameters must be of
+      # length 3` — an ARITY failure, never evidence that the bound is wrong.
       %{rows: [[_pid, _sid, _rat, _dt, _enq, guarded_id, guarded_live]]} =
-        Repo.query!(PublishClock.census_sql(), [naive(@from), naive(@to)])
+        Repo.query!(PublishClock.census_sql(), [naive(@from), naive(@to), nil])
 
       assert uuid(guarded_id) == real.id
       assert wait(publish_at, guarded_live) == 214.3
@@ -383,7 +436,302 @@ defmodule BarkparkCloud.PublishClockTest do
     end
   end
 
-  ## ── 5. This slice touched nothing else ────────────────────────────────────
+  ## ── 5. The per-site caller (W14 S6, D215/D214/D222/D201) ──────────────────
+
+  describe "the site bound" do
+    test "the per-site denominator is the SITE'S, not the fleet's — two sites, two answers" do
+      at = ~U[2026-08-01 15:00:00.000000Z]
+
+      busy = site_fixture()
+      quiet = site_fixture()
+
+      # Three deliveries on `busy`, one on `quiet`. Fleet-wide: four.
+      for i <- 0..2 do
+        moment = DateTime.add(at, i * 600, :second)
+
+        deployment!(busy,
+          inserted_at: DateTime.add(moment, 30, :second),
+          became_live_at: DateTime.add(moment, 90, :second)
+        )
+
+        publish!(busy, moment)
+      end
+
+      deployment!(quiet,
+        inserted_at: DateTime.add(at, 30, :second),
+        became_live_at: DateTime.add(at, 90, :second)
+      )
+
+      publish!(quiet, at)
+
+      fleet = PublishClock.census(@from, @to, now: @now)
+      # A TEXT uuid crosses the raw-SQL boundary here. Handing it to Repo.query!
+      # undumped raises DBConnection.EncodeError ("expected a binary of 16
+      # bytes"), which is why site_bound/1 goes through Ecto.UUID.dump!/1.
+      busy_census = PublishClock.census(@from, @to, now: @now, site_id: busy.id)
+      quiet_census = PublishClock.census(@from, @to, now: @now, site_id: quiet.id)
+
+      assert fleet.deliveries == 4
+      assert fleet.scope == "fleet"
+      assert is_nil(fleet.site_id)
+
+      # THE BUG THIS TEST EXISTS TO CATCH: reusing the fleet count per site.
+      assert busy_census.deliveries == 3
+      assert quiet_census.deliveries == 1
+      refute busy_census.deliveries == fleet.deliveries
+      refute quiet_census.deliveries == fleet.deliveries
+
+      assert busy_census.scope == "site"
+      assert busy_census.site_id == busy.id
+      assert bucket(busy_census, "delivered").count == 3
+      assert bucket(quiet_census, "delivered").count == 1
+
+      # …and the fleet path still answers through the SAME constant, unchanged.
+      assert bucket(fleet, "delivered").count == 4
+    end
+
+    test "censor_node's zero branch no longer quotes the FLEET's live deploys at one site's zero" do
+      # A busy neighbour with live deploys, and a site of our own with NONE and
+      # no publishes. Unscoped, the zero arm printed the neighbour's deploys as
+      # if they were ours — observed on the live corpus as "0 of 2 live deploys".
+      neighbour = site_fixture()
+
+      for i <- 0..1 do
+        moment = DateTime.add(~U[2026-08-01 08:00:00.000000Z], i * 600, :second)
+
+        deployment!(neighbour,
+          inserted_at: moment,
+          became_live_at: DateTime.add(moment, 60, :second)
+        )
+      end
+
+      mine = site_fixture()
+
+      fleet = PublishClock.census(@from, @to, now: @now)
+      mine_census = PublishClock.census(@from, @to, now: @now, site_id: mine.id)
+
+      # The fleet still counts the fleet, and says so.
+      assert fleet.censor.line =~ "0 of 2 live deploys"
+      assert fleet.censor.line =~ "(fleet-wide)"
+      assert fleet.censor.scope == "fleet"
+
+      # The site counts ITSELF. Not "0 of 2" — the 2 was never ours.
+      assert mine_census.deliveries == 0
+      assert mine_census.censor.censored?
+      assert mine_census.censor.line =~ "0 of 0 live deploys"
+      assert mine_census.censor.line =~ "for this site"
+      assert mine_census.censor.scope == "site"
+      refute mine_census.censor.line =~ "0 of 2 live deploys"
+    end
+
+    test "a site-scoped census REFUSES percentiles even when the sample clears min_sample" do
+      site = site_fixture()
+      base = ~U[2026-08-01 06:00:00.000000Z]
+
+      # 20 delivered rows on ONE site — the fleet path would compute here.
+      for i <- 1..20 do
+        at = DateTime.add(base, i * 600, :second)
+
+        deployment!(site,
+          inserted_at: DateTime.add(at, 1, :millisecond),
+          became_live_at: DateTime.add(at, i, :second)
+        )
+
+        publish!(site, at)
+      end
+
+      fleet = PublishClock.census(@from, @to, now: @now)
+      per_site = PublishClock.census(@from, @to, now: @now, site_id: site.id)
+
+      # Same rows, same sample — the fleet computes, the site refuses.
+      assert fleet.wait_seconds.sample == 20
+      refute fleet.wait_seconds.refused
+      assert fleet.wait_seconds.p50 == 10.0
+
+      assert per_site.wait_seconds.sample == 20
+      assert per_site.wait_seconds.refused
+      assert per_site.wait_seconds.p50 == nil
+      assert per_site.wait_seconds.p90 == nil
+      assert per_site.wait_seconds.p99 == nil
+      assert per_site.wait_seconds.max == nil
+      # The reason is the UNBOUNDED LATERAL, not the sample size — clearing the
+      # floor removes the second reason and leaves this one load-bearing.
+      assert per_site.wait_seconds.reason =~ "bounded BELOW and not above"
+      assert per_site.wait_seconds.reason =~ "dr-w12-rv-publish-clock-match-ceiling"
+
+      # What ships instead: buckets, plus the censored lower bound.
+      assert bucket(per_site, "delivered").count == 20
+      assert Map.has_key?(per_site.waiting, :at_least_seconds)
+    end
+
+    test "the refusal is COMPUTED, the WINDOW is named beside the sample, and the calibration is stated" do
+      site = site_fixture()
+      base = ~U[2026-08-01 06:00:00.000000Z]
+
+      # Seven deliveries — the shape a 1h window has on a publishing site today
+      # (measured 2026-08-07: last_1h = 7 per site, last_6h = 23, last_24h = 23).
+      for i <- 1..7 do
+        at = DateTime.add(base, i * 60, :second)
+
+        deployment!(site,
+          inserted_at: DateTime.add(at, 1, :millisecond),
+          became_live_at: DateTime.add(at, i, :second)
+        )
+
+        publish!(site, at)
+      end
+
+      narrow = PublishClock.census(base, DateTime.add(base, 3600, :second), now: @now)
+
+      assert narrow.wait_seconds.sample == 7
+      assert narrow.wait_seconds.refused
+      # COMPUTED from the sample it actually has, and the window is beside it —
+      # "n=7" is meaningless without the hours it was taken over.
+      assert narrow.wait_seconds.reason =~ "sample 7 below min_sample 20"
+      assert narrow.wait_seconds.reason =~ "1.0h window"
+      assert narrow.wait_seconds.window =~ "1.0h window"
+      assert narrow.window.label =~ "1.0h window"
+
+      # …and the node says WHICH population the floor is calibrated for, so a
+      # site publishing 3x/day is not left reading its permanent refusal as a
+      # verdict on its own health.
+      assert narrow.wait_seconds.calibrated_for =~ "calibrated for the FLEET"
+      assert narrow.wait_seconds.calibrated_for =~ "3x/day"
+      assert narrow.wait_seconds.calibrated_for =~ "Widen the WINDOW"
+
+      # The same rows over 24h clear the floor: the WINDOW decides the refusal.
+      wide = PublishClock.census(@from, @to, now: @now, site_id: nil)
+      assert wide.wait_seconds.sample == 7
+    end
+
+    test "per site the fan-out is 1, and coalesced rows are counted, never called 'your builds'" do
+      site = site_fixture()
+      at = ~U[2026-08-01 16:00:00.000000Z]
+
+      deployment!(site,
+        inserted_at: DateTime.add(at, 30, :second),
+        became_live_at: DateTime.add(at, 120, :second)
+      )
+
+      first = publish!(site, at)
+      _second = publish!(site, DateTime.add(at, 10, :second))
+
+      # The first publish owned the build; the second COALESCED onto it. That is
+      # the recorder's designed behaviour, and 31% of the fleet sample (36 of
+      # 115 rows on 2026-08-07) looks exactly like this.
+      :ok = ContentPublish.mark_enqueued(first, {:ok, %Oban.Job{conflict?: false}})
+
+      per_site = PublishClock.census(@from, @to, now: @now, site_id: site.id)
+
+      assert per_site.deliveries == 2
+      assert per_site.fan_out.note =~ "per site the fan-out is 1"
+      assert per_site.fan_out.note =~ "IS the number of human publishes"
+
+      assert per_site.coalesced.count == 1
+      assert per_site.coalesced.of == 2
+      assert per_site.coalesced.note =~ "COALESCED onto a rebuild another publish already owned"
+      assert per_site.coalesced.note =~ "not 'your builds'"
+
+      # Nothing anywhere calls these rows the owner's builds.
+      refute inspect(per_site) =~ "your builds\""
+    end
+  end
+
+  ## ── 6. The trigger the control plane cannot verify (D201) ─────────────────
+
+  describe "site_node/4's publish trigger" do
+    test "a site with NO content-webhook secret gets a PERMANENT structural refusal, not a data-gap excuse" do
+      site = site_fixture()
+
+      node =
+        PublishClock.site_node(site.id, @from, @to, now: @now, content_webhook_secret: :absent)
+
+      assert node.deliveries == 0
+      assert node.scope == "site"
+      assert node.censor.censored?
+
+      trigger = node.publish_trigger
+      assert trigger.content_webhook_secret == "absent"
+      refute trigger.verified_here?
+      assert trigger.permanent?
+      assert trigger.state == "no_trigger_in_this_control_plane"
+
+      # THE EXACT WORDING. The node may not claim a trigger exists.
+      assert trigger.note =~ "the control plane cannot verify the publish trigger from here"
+      assert trigger.note =~ PublishClock.unverifiable_trigger_copy()
+      assert trigger.note =~ "no content-webhook secret at all"
+      assert trigger.note =~ "STRUCTURAL zero, not a data gap"
+
+      # The falsehood this branch exists to prevent.
+      refute trigger.note =~ "we just have no data yet"
+    end
+
+    test "a webhook-bound site with a genuinely QUIET window gets a different sentence, and still no verification claim" do
+      site = site_fixture()
+
+      quiet =
+        PublishClock.site_node(site.id, @from, @to, now: @now, content_webhook_secret: :present)
+
+      assert quiet.deliveries == 0
+      assert quiet.publish_trigger.content_webhook_secret == "present"
+      assert quiet.publish_trigger.state == "secret_present_no_deliveries_in_window"
+      refute quiet.publish_trigger.permanent?
+      refute quiet.publish_trigger.verified_here?
+
+      # Same honest sentence, DIFFERENT diagnosis: a secret-less site can never
+      # record a publish; this one might simply have been quiet, and from the
+      # control plane the two are not the same statement.
+      assert quiet.publish_trigger.note =~ PublishClock.unverifiable_trigger_copy()
+
+      assert quiet.publish_trigger.note =~
+               "either a genuinely quiet window or a hook that was never wired"
+
+      absent =
+        PublishClock.site_node(site.id, @from, @to, now: @now, content_webhook_secret: :absent)
+
+      refute quiet.publish_trigger.note == absent.publish_trigger.note
+      refute quiet.publish_trigger.state == absent.publish_trigger.state
+      assert absent.publish_trigger.permanent? and not quiet.publish_trigger.permanent?
+    end
+
+    test "a site WITH deliveries still refuses to claim verification, and an undecryptable secret is UNKNOWN not absent" do
+      site = site_fixture()
+      at = ~U[2026-08-01 17:00:00.000000Z]
+
+      deployment!(site,
+        inserted_at: DateTime.add(at, 30, :second),
+        became_live_at: DateTime.add(at, 90, :second)
+      )
+
+      publish!(site, at)
+
+      recording =
+        PublishClock.site_node(site.id, @from, @to, now: @now, content_webhook_secret: :present)
+
+      assert recording.deliveries == 1
+      assert recording.publish_trigger.state == "deliveries_recorded"
+      refute recording.publish_trigger.verified_here?
+      assert recording.publish_trigger.note =~ PublishClock.unverifiable_trigger_copy()
+      assert recording.publish_trigger.note =~ "1 recorded delivery"
+
+      unreadable =
+        PublishClock.site_node(site.id, @from, @to,
+          now: @now,
+          content_webhook_secret: :unreadable
+        )
+
+      assert unreadable.publish_trigger.content_webhook_secret == "unreadable"
+      assert unreadable.publish_trigger.state == "secret_present_but_undecryptable"
+      assert unreadable.publish_trigger.note =~ "did not decrypt"
+      assert unreadable.publish_trigger.note =~ "rather than read as absent"
+
+      # And a site node never emits a percentile, whatever its trigger says.
+      assert recording.wait_seconds.refused
+      assert recording.wait_seconds.p50 == nil
+    end
+  end
+
+  ## ── 7. This slice touched nothing else ────────────────────────────────────
 
   describe "the module's own boundaries" do
     test "the retention answer and the readership caveat are written down, with numbers" do
@@ -440,6 +788,30 @@ defmodule BarkparkCloud.PublishClockTest do
   defp usec(%DateTime{microsecond: {us, _}} = dt), do: %{dt | microsecond: {us, 6}}
 
   defp bucket(census, name), do: Enum.find(census.buckets, &(&1.bucket == name))
+
+  # Comments out, whitespace collapsed — so the equality pin is about the QUERY,
+  # not about how it happens to be indented.
+  defp normalize(sql) do
+    sql
+    |> String.replace(~r/--[^\n]*/, "")
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+
+  # Every WHERE/AND predicate in the statement, in order. Anything a predicate
+  # is followed by (ORDER BY / LIMIT / the lateral's close) is cut off.
+  defp predicates(sql) do
+    sql
+    |> normalize()
+    |> String.split(~r/\b(?:WHERE|AND)\b/)
+    |> Enum.drop(1)
+    |> Enum.map(fn part ->
+      part
+      |> String.replace(~r/\s+(ORDER BY|LIMIT|\) d ON TRUE)\b.*$/, "")
+      |> String.trim()
+    end)
+    |> Enum.reject(&(&1 == ""))
+  end
 
   defp naive(%DateTime{} = dt), do: DateTime.to_naive(dt)
 
