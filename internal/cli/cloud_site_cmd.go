@@ -2009,12 +2009,24 @@ func siteFailureClass(dep, newest *cloudclient.SiteDeployment) string {
 // The span is the stamps the page ACTUALLY carried — never siteClock(), never an
 // imputed "last 24h" — and rows whose inserted_at will not parse are counted out
 // loud rather than silently dropped from the span.
+// THE BUCKETS SUM TO Rows, AND THAT IS A CONTRACT, NOT AN ACCIDENT (review, W14).
+// The first cut counted deferred/live/failed/waiting and nothing else — so a
+// `cancelled` row landed in NO bucket and a reader who subtracted the printed
+// counts from the denominator got an unexplained remainder with no name. That is
+// the same defect as the unnamed window one layer down: a census that does not
+// account for every row it read invites exactly the generalisation it exists to
+// stop. `cancelled` is a status this file already names (siteDeployCancelled), so
+// it gets its own count; Other is the catch-all for a status word the control
+// plane may add tomorrow, printed as "in another state" rather than silently
+// dropped. TestSiteWindowAccountsForEveryRowItRead pins the identity.
 type siteWindow struct {
 	Rows      int
 	Deferred  int
 	Failed    int
 	Live      int
 	Waiting   int
+	Cancelled int
+	Other     int
 	Stampless int
 	Oldest    string
 	Newest    string
@@ -2037,8 +2049,12 @@ func siteReadWindow(ledger []cloudclient.SiteDeployment) (siteWindow, bool) {
 			w.Failed++
 		case strings.EqualFold(strings.TrimSpace(r.Status), "live"):
 			w.Live++
+		case siteDeployCancelled(r.Status):
+			w.Cancelled++
 		case siteDeployWaiting(r.Status):
 			w.Waiting++
+		default:
+			w.Other++
 		}
 		t, ok := siteParseStamp(r.InsertedAt)
 		if !ok {
@@ -2074,12 +2090,21 @@ func renderSiteWindow(out *writer, w siteWindow) {
 	} else {
 		out.outf("  %d attempts read — none of them carried a readable inserted_at, so this window has no span", w.Rows)
 	}
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 6)
 	parts = append(parts, fmt.Sprintf("%d of %d deferred by the box", w.Deferred, w.Rows))
 	parts = append(parts, fmt.Sprintf("%d of %d live", w.Live, w.Rows))
 	parts = append(parts, fmt.Sprintf("%d of %d failed", w.Failed, w.Rows))
 	if w.Waiting > 0 {
 		parts = append(parts, fmt.Sprintf("%d of %d still running or queued", w.Waiting, w.Rows))
+	}
+	// Printed only when non-zero, but never omitted when non-zero: the three
+	// headline counts plus these two are exhaustive over the page, so the reader
+	// can subtract and land on nothing left over.
+	if w.Cancelled > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d cancelled", w.Cancelled, w.Rows))
+	}
+	if w.Other > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d in another state this CLI does not name", w.Other, w.Rows))
 	}
 	out.outf("  %s", strings.Join(parts, " · "))
 	if w.Stampless > 0 && w.Oldest != "" {
@@ -2104,6 +2129,11 @@ func siteWindowMap(w siteWindow) map[string]any {
 		"failed_count":   w.Failed,
 		"live_count":     w.Live,
 		"waiting_count":  w.Waiting,
+		// Always emitted, zero included: a machine reader checks the identity
+		// deferred+live+failed+waiting+cancelled+other == attempts_read, and an
+		// absent key would make that check unwritable.
+		"cancelled_count": w.Cancelled,
+		"other_count":     w.Other,
 	}
 	// Absent, never zero-valued: a span the page could not support must read as
 	// unknown, and "1970-01-01" is the most confident lie this node could tell.

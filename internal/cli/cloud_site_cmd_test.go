@@ -2911,3 +2911,79 @@ func TestRunCloudSiteStatusWindowOverAFailedNewestFixture(t *testing.T) {
 		}
 	}
 }
+
+// TestSiteWindowAccountsForEveryRowItRead is the review fix (W14): the census's
+// buckets must be EXHAUSTIVE over the page it read.
+//
+// The first cut counted deferred/live/failed/waiting only, so a `cancelled` row
+// landed in no bucket at all: the paragraph printed "12 of 20 deferred · 3 of 20
+// live · 1 of 20 failed", the reader subtracted, and the remaining rows were
+// simply gone with no name and no note. That is the same class of defect as the
+// unnamed window one layer up — a census that cannot account for its own
+// denominator invites the reader to invent the difference.
+//
+// The identity is asserted on the STRUCT (so it holds for every caller) and the
+// unnamed residue is proven to surface in the human block rather than vanish.
+func TestSiteWindowAccountsForEveryRowItRead(t *testing.T) {
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "d1", Status: "deferred", InsertedAt: "2026-08-07T10:00:00Z"},
+		{ID: "d2", Status: "live", InsertedAt: "2026-08-07T09:00:00Z"},
+		{ID: "d3", Status: "failed", InsertedAt: "2026-08-07T08:00:00Z"},
+		{ID: "d4", Status: "building", InsertedAt: "2026-08-07T07:00:00Z"},
+		{ID: "d5", Status: "cancelled", InsertedAt: "2026-08-07T06:00:00Z"},
+		{ID: "d6", Status: "canceled", InsertedAt: "2026-08-07T05:00:00Z"},
+		{ID: "d7", Status: "quiesced-by-a-word-this-cli-has-never-seen", InsertedAt: "2026-08-07T04:00:00Z"},
+		{ID: "d8", Status: "", InsertedAt: "2026-08-07T03:00:00Z"},
+	}
+	w, ok := siteReadWindow(ledger)
+	if !ok {
+		t.Fatal("a page with rows is a window")
+	}
+	sum := w.Deferred + w.Live + w.Failed + w.Waiting + w.Cancelled + w.Other
+	if sum != w.Rows {
+		t.Fatalf("the buckets must account for every row read: %d != %d (%+v)", sum, w.Rows, w)
+	}
+	if w.Cancelled != 2 {
+		t.Fatalf("both spellings of cancelled must be counted: %+v", w)
+	}
+	// A status word this CLI has never seen is still NON-TERMINAL, so it is a wait
+	// — the honest reading, and the reason `other` is a narrow safety net rather
+	// than a catch-all. Only a row carrying no status at all lands there.
+	if w.Waiting != 2 {
+		t.Fatalf("an unrecognised non-terminal status is a wait: %+v", w)
+	}
+	if w.Other != 1 {
+		t.Fatalf("a status-less row must land in the named residue, not in nothing: %+v", w)
+	}
+
+	var buf bytes.Buffer
+	renderSiteWindow(newWriter(&buf, &buf), w)
+	for _, want := range []string{
+		"2 of 8 cancelled",
+		"1 of 8 in another state this CLI does not name",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("the residue must be printed, not dropped (%q):\n%s", want, buf.String())
+		}
+	}
+
+	m := siteWindowMap(w)
+	// Emitted at zero too, or the identity is unwritable by a machine reader.
+	empty, _ := siteReadWindow([]cloudclient.SiteDeployment{{ID: "d1", Status: "live", InsertedAt: "2026-08-07T10:00:00Z"}})
+	for _, k := range []string{"cancelled_count", "other_count"} {
+		if _, present := m[k]; !present {
+			t.Fatalf("%s missing from the json census: %+v", k, m)
+		}
+		if _, present := siteWindowMap(empty)[k]; !present {
+			t.Fatalf("%s must be present even at zero: %+v", k, siteWindowMap(empty))
+		}
+	}
+	// And the census's own key guards still hold for the new keys.
+	for k := range m {
+		for _, banned := range []string{"rate", "percent", "deferral_depth"} {
+			if strings.Contains(k, banned) {
+				t.Fatalf("window key %q carries the banned substring %q", k, banned)
+			}
+		}
+	}
+}
