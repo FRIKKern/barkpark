@@ -597,32 +597,58 @@ async function main() {
 
   let cssom;
   try {
-    chrome = spawn(
-      chromeBin,
-      [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        "--disable-background-networking",
-        `--user-data-dir=${profile}`,
-        "--remote-debugging-port=0",
-        "about:blank",
-      ],
-      { stdio: "ignore" },
-    );
+    // REVIEW ADDITION to D101 — the FOURTH bring-up step, and the one that was
+    // still misclassified after the slice landed. An EXEC failure is not the
+    // same fault as "Chrome started and never came up": findChrome()'s X_OK
+    // preflight proves the file is there and executable, but it cannot see
+    // exec-time faults — a wrong-architecture or non-binary file (ENOEXEC, the
+    // arm64/amd64 runner-image mismatch class), EACCES from a mount option,
+    // ETXTBSY mid-download, or the file being swapped between the check and the
+    // spawn. Measured on this host (node v22.22.0, darwin): `spawn` throws
+    // ENOEXEC SYNCHRONOUSLY, so it landed in the catch block below UNTAGGED and
+    // printed `!! PARITY ERROR: spawn ENOEXEC` at exit 1 —
+    // console-harness.yml's `1)` arm, i.e. "This is a REAL CSS defect in
+    // app.css", over a message that says the browser could not be executed.
+    // Both delivery shapes are covered because node picks between them by
+    // platform and errno: the try/catch takes the synchronous throw, and the
+    // 'error' listener takes the asynchronous emit (which, with no listener,
+    // would be an uncaughtException — also exit 1, also a lie).
+    let spawnError = null;
+    try {
+      chrome = spawn(
+        chromeBin,
+        [
+          "--headless=new",
+          "--disable-gpu",
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-extensions",
+          "--disable-background-networking",
+          `--user-data-dir=${profile}`,
+          "--remote-debugging-port=0",
+          "about:blank",
+        ],
+        { stdio: "ignore" },
+      );
+      chrome.on("error", (e) => { spawnError = e; });
+    } catch (err) {
+      throw bringUpFailure(`Chrome could not be executed (${err.code || err.message}): ${chromeBin}`);
+    }
 
     const portFile = path.join(profile, "DevToolsActivePort");
     let devPort = null;
     for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+      if (spawnError) break; // no point waiting DEVTOOLS_CAP on a process that never execed
       try {
         const raw = fs.readFileSync(portFile, "utf8").split("\n");
         if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
       } catch { /* not written yet */ }
       await sleep(100);
+    }
+    if (spawnError) {
+      throw bringUpFailure(`Chrome could not be executed (${spawnError.code || spawnError.message}): ${chromeBin}`);
     }
     if (!devPort) throw bringUpFailure("Chrome never wrote DevToolsActivePort — it did not start");
 
