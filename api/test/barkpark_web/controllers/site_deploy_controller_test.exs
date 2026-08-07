@@ -67,6 +67,60 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
 
   defp stub(script), do: {"bash", ["-c", script]}
 
+  # Take over the Runner's registered name with a door that CANNOT answer a
+  # trigger — deterministically, on any machine, at any load.
+  #
+  # `DeployRunner.trigger/1` resolves the Runner by name and gives up on the
+  # call budget (`safe_call/3`). The interceptor sits on that name and:
+  #   * `{:trigger, _}` — forwards it to the real Runner off the loop, so the
+  #     deploy really is provisioned and spawned, and then DROPS the reply:
+  #     the caller is never answered, so its budget always expires;
+  #   * everything else — proxied verbatim, reply included, so status polling
+  #     still reads the real Runner's real state.
+  # Restored on exit. `async: false` (see the case header) is what makes
+  # borrowing a singleton's name safe here.
+  defp intercept_with_unanswering_door do
+    real = Process.whereis(DeployRunner)
+    assert is_pid(real), "the DeployRunner singleton must be alive to be intercepted"
+
+    door = spawn(fn -> unanswering_door_loop(real) end)
+    Process.unregister(DeployRunner)
+    Process.register(door, DeployRunner)
+
+    on_exit(fn ->
+      if Process.whereis(DeployRunner) == door, do: Process.unregister(DeployRunner)
+      Process.exit(door, :kill)
+
+      if Process.alive?(real) and is_nil(Process.whereis(DeployRunner)),
+        do: Process.register(real, DeployRunner)
+    end)
+
+    door
+  end
+
+  defp unanswering_door_loop(real) do
+    receive do
+      {:"$gen_call", _from, {:trigger, _req} = msg} ->
+        # Real work, no reply: the trigger lands on the box, the caller waits
+        # forever. Spawned so status calls stay answerable meanwhile.
+        spawn(fn ->
+          try do
+            GenServer.call(real, msg, 15_000)
+          catch
+            :exit, _ -> :ok
+          end
+        end)
+
+      {:"$gen_call", from, msg} ->
+        GenServer.reply(from, GenServer.call(real, msg, 15_000))
+
+      other ->
+        send(real, other)
+    end
+
+    unanswering_door_loop(real)
+  end
+
   defp body(slug, extra \\ %{}) do
     Map.merge(%{"slug" => slug, "build_id" => "b1", "mode" => "deploy"}, extra)
   end
@@ -143,14 +197,24 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
   # produces, rendered by the same renderer. 207 rows in 24h, wrong about the
   # cause AND the outcome.
   #
-  # This exercises the REAL Runner, not a stub: the answer budget is shrunk below
-  # the work the door genuinely does (provision + spawn), so the trigger really
-  # does outrun its caller.
+  # HOW THE UNANSWERED TRIGGER IS PRODUCED (dr-w13-s4). This used to shrink the
+  # answer budget to 1ms against the REAL Runner and bet that provision + spawn
+  # would outrun it — a RACE, which lost at random inside a required gate (main
+  # was red on it at b00d793c, byte-identical to a green run). A guard that
+  # loses at random is worse than one that cannot lose: it teaches the fleet to
+  # re-run reds. So the timeout is now produced BY CONSTRUCTION, not by speed:
+  # `intercept_with_unanswering_door/0` puts an interceptor on the Runner's
+  # registered name that forwards the trigger to the real Runner (the deploy
+  # genuinely starts, and finishes — the second half of this test) but NEVER
+  # replies to the caller's `$gen_call`. No amount of machine speed can make
+  # that call answer, so the 503 below can only fail for the right reason.
   describe "POST — the Runner did not answer" do
     setup do
       put_runner_cfg(
         enabled: true,
-        trigger_call_timeout_ms: 1,
+        # Any budget expires against a door that never answers; small only so
+        # the test is quick. Nothing here races the Runner's real work.
+        trigger_call_timeout_ms: 25,
         command: stub("echo 'BPSTAGE name=PLAN status=ok build_id=b1'\nexit 0")
       )
     end
@@ -160,6 +224,9 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
     } do
       # The half that makes the old message a lie: the flag IS on.
       assert DeployRunner.enabled?()
+
+      # And the door is guaranteed silent — not merely likely to be slow.
+      intercept_with_unanswering_door()
 
       res =
         conn
