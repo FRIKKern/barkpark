@@ -12174,25 +12174,41 @@ test("stepRingProgress fills a mid-BUILD deploy stage (was flat 0 without the es
 // a property: it asserted the three hand-typed placeholder prices and the three
 // hand-typed ceilings the console then stated to users as fact. It now pins the
 // opposite, which is the only thing this client can support — the catalog
-// carries identity and copy, and no numeral at all.
-test("PLAN_CATALOG carries no numeral: no price this tree has no amount for, no ceiling this screen never fetches", () => {
+// carries identity and copy, no price at all, and an `instances` datum that is
+// UNRENDERABLE — its formatter is deleted and its only reader is the
+// cross-layer mirror (cch-w49-s3), which pins it to Billing.limits/0. Review
+// note: the two keys are NOT the same case and this test refuses to conflate
+// them. Price has no server counterpart anywhere in the tree, so it is deleted
+// outright; the ceiling has a real, enforced, pinnable one, so it survives as
+// data and is banned from every screen instead.
+test("PLAN_CATALOG carries no price this tree has no amount for, and no ceiling any screen can print", () => {
   const cat = hooks.planCatalog;
   assert.equal(cat.length, 3, "exactly the three real plans");
   const by = {};
   for (const t of cat) by[t.plan] = t;
   assert.deepEqual(Object.keys(by).sort(), ["free", "support_plus", "supporter"], "the three plan ids survive");
-  // Identity + copy survive; every numeral-bearing key is GONE, so no render
-  // path can resurrect a figure by reaching back into the constant.
   for (const t of cat) {
     assert.ok(t.name && t.note, t.plan + " keeps its name and its sentence");
-    for (const dead of ["price", "per", "instances"]) {
+    // PRICE: deleted outright. No amount exists server-side (STRIPE_PRICE_* are
+    // price IDs), so no render path can reach back for a figure and no guard on
+    // any layer could ever have checked one.
+    for (const dead of ["price", "per"]) {
       assert.equal(t[dead], undefined, t.plan + " must carry no " + dead + " — nothing server-side backs one");
     }
     assert.ok(!/\$\s?\d/.test(JSON.stringify(t)), t.plan + " must state no currency amount");
-    assert.ok(!/\b\d+\s+managed instances?\b/.test(JSON.stringify(t)), t.plan + " must state no instance ceiling");
+    // CEILING: present as data, mirrored server-side, printable nowhere.
+    assert.equal(typeof t.instances, "number", t.plan + " keeps its mirrored ceiling datum");
   }
-  // The formatter that turned the ceiling into prose is gone with the data.
+  // Array.from re-homes the row into THIS realm: `cat` comes out of the vm
+  // sandbox, so `cat.map(...)` builds an array on the SANDBOX Array.prototype
+  // and deepStrictEqual — which compares prototypes — reds on identical values.
+  assert.deepEqual(Array.from(cat, (t) => t.instances), [1, 3, 10], "the mirrored ceilings, in catalog order");
+  // The formatter that turned the ceiling into prose is GONE — that is what
+  // makes the surviving datum unrenderable rather than merely unrendered. The
+  // rendered-bytes guarantee is smoke.mjs's absent-arm assertion across all six
+  // #billing actors; this is the unit half of the same claim.
   assert.equal(hooks.planInstanceLimit, undefined, "planInstanceLimit is retired, not merely unused");
+  assert.equal(hooks.priceFor, undefined, "priceFor is retired with the data it read");
 });
 
 test("planFeatures states only what this screen can stand behind — no ceiling, no unlimited fiction", () => {

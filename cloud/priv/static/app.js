@@ -14205,10 +14205,20 @@
   // So every surface states the tier, the features and the CTA — and no number.
   // Guarded by the absent-arm assertion in __preview__/smoke.mjs, which reds
   // across all six #billing actors the moment a numeral returns.
+  //
+  // `instances` SURVIVES as data and reaches NO DOM. It is the client half of
+  // the cross-layer mirror in cloud/test/barkpark_cloud/billing_client_mirror_test.exs
+  // (cch-w49-s3), which reads this constant by running and reds if it drifts
+  // from Billing.limits/0's enforced ceiling. It is deliberately NOT rendered:
+  // the formatter that used to print it (planInstanceLimit) is deleted, and the
+  // smoke absent-arm guard reds the moment the number reaches a billing screen.
+  // A number nobody is shown states nothing to anybody; a number pinned to the
+  // server is the seam a future usage-fed ceiling would land on. `price` and
+  // `per` are GONE outright — those had no server counterpart to be pinned to.
   var PLAN_CATALOG = [
-    { plan: "free", name: "Free", note: "Get started. No card required.", free: true },
-    { plan: "supporter", name: "Supporter", note: "Managed hosting for your instance." },
-    { plan: "support_plus", name: "Support++", note: "Priority support and more capacity." }
+    { plan: "free", name: "Free", note: "Get started. No card required.", free: true, instances: 1 },
+    { plan: "supporter", name: "Supporter", note: "Managed hosting for your instance.", instances: 3 },
+    { plan: "support_plus", name: "Support++", note: "Priority support and more capacity.", instances: 10 }
   ];
 
   var RECOMMENDED = "supporter";
@@ -22374,7 +22384,9 @@
       // (renderCurrentPlan/renderTrial/renderBillingChip/openBillingPortal +
       // handleBillingPortalReturn) are smoke+browser-verified.
       // cch-w49-s1 dropped `planInstanceLimit` from this seam with the function
-      // itself: the catalog no longer carries an instance count for it to format.
+      // itself: nothing formats the instance count for a screen any more. The
+      // catalog's `instances` data survives here for the cross-layer mirror
+      // (cch-w49-s3 reads planCatalog by running); it reaches no DOM.
       planCatalog: PLAN_CATALOG.slice(),
       planFeatures: planFeatures,
       planFromSub: planFromSub,
