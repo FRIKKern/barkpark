@@ -1381,8 +1381,23 @@ test("team picker: reads the real /v1/me shape, marks the active team, and says 
   // A LOADING state DISTINCT from an empty one. Rendering an empty list while
   // /v1/me is in flight tells a member of four teams they belong to none —
   // absence rendered as a determinate answer.
-  assert.ok(/if \(!meCache\)[\s\S]{0,240}Loading teams/.test(src),
-    "an unloaded /v1/me must render as LOADING, never as an empty team list");
+  //
+  // cch-w39-s1 REWROTE THIS, AND THE OLD FORM SHOWS WHY. It was a SOURCE-TEXT
+  // regex, `/if \(!meCache\)[\s\S]{0,240}Loading teams/` — two-valued, and
+  // satisfiable by a COMMENT that merely quotes the literal. It passed against
+  // this slice's fixed renderer for exactly that reason before it was rewritten.
+  // The requirement it should have stated is three-valued: loading says loading,
+  // and a FAILED /v1/me says what happened instead of claiming to still be
+  // loading forever (nothing re-reads it, so that spinner is terminal).
+  const menu = appRegion(src, "  function renderTeamMenu(", "\n  }\n");
+  assert.ok(/meState\(\)/.test(menu),
+    "the picker must decide on meState(), not on meCache's falsiness — failed is not loading");
+  assert.ok(/meSt === "loading"[\s\S]{0,120}Loading teams/.test(menu),
+    "an IN-FLIGHT /v1/me must still render as LOADING, never as an empty team list");
+  assert.ok(/meSt === "failed"[\s\S]{0,200}meFailureCopy\(\)/.test(menu),
+    "a FAILED /v1/me must report what happened, not keep claiming to load");
+  assert.ok(/meSt === "failed"[\s\S]{0,240}meRetryHtml\(\)/.test(menu),
+    "…and the failed arm must carry the shared retry — an unknown with no exit is the same lie");
 
   // Switching pins the team and does a FULL reload — every cache is team-scoped.
   assert.ok(/localStorage\.setItem\("bp\.active-team", id\)[\s\S]{0,160}location\.reload\(\)/.test(src),
@@ -15220,8 +15235,17 @@ async function driveMe(status, payload) {
   } finally { sandbox.fetch = saved; }
 }
 
-const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" } };
-const ME_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" } };
+// cch-w43-s1: these carry `team_authority` because the SERVER carries it —
+// /v1/me has stated it since wave 41 and app.js's pre-wave-42 role-literal
+// floors are gone, so a fixture without it is no longer an account the control
+// plane can mint. This file never imports scenarios.mjs (deliberately: the unit
+// seam pins app.js against hand-cut wire, not against the preview corpus), so
+// it is a SECOND producer of the /v1/me envelope and had to be widened in the
+// same commit — otherwise the floor deletion reds cch-w41-s3 below, whose
+// ME_ADMIN is the only admin fixture in the whole harness. admin/owner mirror
+// Authz: owner is both, admin is admin-not-owner, member is neither.
+const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" }, team_authority: { team_id: "t1", role: "owner", admin: true, owner: true } };
+const ME_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" }, team_authority: { team_id: "t1", role: "member", admin: false, owner: false } };
 const MEMBER_NOTE = "Members can create read-only tokens. Ask an admin for write, deploy, or root.";
 
 test("cch-w36-s3: the /v1/me state trio is hookable (RED on origin/main, where none of it exists)", () => {
@@ -15284,7 +15308,12 @@ test("cch-w36-s3: loadMe's FAILURE arm carries its own repaint seams — they we
   assert.ok(failureArm.length > 0, "loadMe must HAVE a failure arm at all");
   assert.ok(failureArm.includes("absorbMe(r)"), "the failure arm records the fault");
   assert.ok(failureArm.includes("applyOperatorGate()"), "the operator entry is re-hidden, fail-closed (GR9)");
-  for (const view of ["billing", "activity"]) {
+  // cch-w39-s1 EXTENDED THIS ARRAY (it did not restructure the arm): providers
+  // and notifications both decide their write affordances from meCache's role
+  // and neither was repainted on EITHER arm, so a screen painted while me was
+  // unknown kept its provisional render — and on the failure arm that is
+  // terminal, because nothing re-reads /v1/me.
+  for (const view of ["billing", "activity", "providers", "notifications"]) {
     assert.ok(failureArm.includes('currentView() === "' + view + '"'),
       "the failure arm must repaint " + view + " — a provisional render must not outlive the answer");
   }
@@ -15408,7 +15437,11 @@ test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass ag
 // true, member says false, and BOTH not-a-role states — never loaded, and a
 // /v1/me read that FAILED — say false, fail-closed.
 
-const ME_ADMIN = { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" } };
+// cch-w43-s1: the admin limb, now stated the way the server states it —
+// team_authority.admin true, owner false. This is the ONLY admin fixture in
+// the harness and the only reason the `|| admin` limb of the four predicates
+// can red at all.
+const ME_ADMIN = { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" }, team_authority: { team_id: "t1", role: "admin", admin: true, owner: false } };
 
 test("cch-w41-s3: all four owner|admin predicates hold owner+admin true, member false, and fail CLOSED on both not-a-role states", async () => {
   const predicates = ["providerCanWrite", "notifCanManage", "canMintAnyAbility", "canManageOnboarding"];
@@ -15507,6 +15540,187 @@ test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// cch-w38-s1 — THE INSTANCE RAIL STOPS SELLING WHAT THE SERVER WILL REFUSE,
+// AND STOPS DEMOTING AN OWNER IT COULD NOT CHECK.
+//
+// Measured on origin/main ef77af274 with a real browser (chrome-devtools against
+// __preview__/serve.mjs), stamped in ONE evaluated object so the reading cannot
+// be attributed to a hijacked page:
+//
+//     {"port":"4187","meRole":"member","decommission":{"disabled":false,
+//      "visible":true},"totalDisabled":0}
+//
+// A plain MEMBER — who reaches the instance-detail screen legitimately, because
+// there is no GET /v1/barkparks/:id and the screen is built from the
+// member-legal LIST — was offered a live, destroy-tier Decommission. One click
+// later the server answers 403, and at three of the seven elevated sites the
+// console called that permanent refusal transient: updateInstance and
+// rollbackInstance rendered "Please try again in a moment.", and
+// rollbackRefusalTerminal("forbidden") was FALSE, so the confirm modal wired a
+// live "Try again" that re-POSTs into the same 403 forever.
+//
+// WHY THIS BLOCK EXISTS AT ALL (D430). #9920's binding census cannot see this
+// fix: mutation-proven, adding a predicate leaves it rc 0 still printing "18
+// UNPREDICATED", and DELETING a shipped predicate is ALSO rc 0. So the guard is
+// here, and it is proven able to LOSE below. Note what it does NOT do: the
+// shipped assertion at :11858 matches `data-life-verb="decommission"[^>]*>` —
+// that [^>]* window SWALLOWS an added `disabled`, so a permanently-dead
+// Decommission passes it. These assertions name the attribute the mount binds
+// on, and the sentence rendered, not a permissive window around them.
+
+const W38_BP = { provider: "hetzner", host: "h", name: "web" };
+const W38_ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
+
+test("cch-w38-s1: the authority answer is THREE-VALUED and reads /v1/me's state, never meCache's falsiness", async () => {
+  assert.equal(typeof hooks.instanceAdminAuthority, "function", "the predicate must be hookable at all");
+
+  hooks.clearMe();
+  assert.equal(hooks.instanceAdminAuthority(), "unknown", "cold boot: we have not asked, so we do not know");
+
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.meState(), "failed");
+  assert.equal(hooks.instanceAdminAuthority(), "unknown",
+    "a FAILED /v1/me is not evidence of membership — an owner whose read blipped is not demoted");
+
+  await driveMe(200, ME_MEMBER);
+  assert.equal(hooks.instanceAdminAuthority(), "refuse");
+  await driveMe(200, ME_OWNER);
+  assert.equal(hooks.instanceAdminAuthority(), "grant");
+  await driveMe(200, { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "sam@acme.com" } });
+  assert.equal(hooks.instanceAdminAuthority(), "grant", "admin is the gate's own minimum, not owner");
+  hooks.clearMe();
+});
+
+test("cch-w38-s1: THE RAIL RENDERS ALL THREE — refused carries the SERVER's sentence, unknown carries none", () => {
+  const refused = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse"));
+  // The remedy: a DISABLED control that is still THERE, plus the one sentence
+  // that repairs it — FORBIDDEN_ROLE_COPY.admin, byte-identical to what the
+  // server's own 403 renders through friendly(). No new copy is minted here.
+  assert.match(refused, /inst-life-disabled/);
+  assert.ok(refused.includes('<button class="btn btn-sm" type="button" disabled title="' + W38_ADMIN_SENTENCE + '">Decommission</button>'),
+    "the refused verb is a disabled control, titled with the server's sentence");
+  assert.ok(refused.includes('<span class="inst-life-reason">' + W38_ADMIN_SENTENCE + "</span>"),
+    "…and the sentence is VISIBLE in the shipped reason span, not hover-only");
+  // THE PART THE [^>]* ASSERTION AT :11858 CANNOT SEE: no click hook, no
+  // destroy-tier styling, no typed-confirm ellipsis promising a modal.
+  assert.ok(refused.indexOf('data-life-verb="decommission"') === -1,
+    "a verb the server will refuse gets NO click hook — paintLifecycleActions binds on this attribute");
+  assert.ok(refused.indexOf("btn-danger") === -1, "and no destroy-tier styling");
+  assert.ok(refused.indexOf("Decommission&hellip;") === -1, "and no ellipsis promising a confirm modal");
+  assert.ok(refused.includes("Manage this instance via the bp CLI"), "the rail is never HIDDEN from a member (D428)");
+  assert.ok(refused.indexOf("Checking capabilities") === -1, "an ANSWERED /v1/me is not a checking state");
+
+  // UNKNOWN IS NOT REFUSE. While /v1/me is in flight or failed we say we are
+  // still checking — reusing the row's shipped loading grammar verbatim — and
+  // we accuse nobody of anything.
+  const unknown = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "unknown"));
+  assert.match(unknown, /inst-life-note">Checking capabilities&hellip;</,
+    "unknown states the truth: we are still checking");
+  assert.ok(unknown.indexOf(W38_ADMIN_SENTENCE) === -1,
+    "a role we do not know is NOT a role of member — no refusal sentence on an unanswered read");
+  assert.ok(unknown.indexOf('data-life-verb="decommission"') === -1,
+    "…and the destroy verb is not live while the answer is outstanding");
+  assert.match(unknown, /inst-life-disabled/);
+
+  // GRANT IS BYTE-IDENTICAL TO THE SHIPPED 2-ARG CALL — the default arm is what
+  // keeps this an ADD, and it is proven here rather than asserted in prose.
+  const twoArg = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP));
+  const granted = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "grant"));
+  assert.equal(granted, twoArg, "an omitted authority defaults to grant, byte for byte");
+  assert.match(granted, /data-life-verb="decommission"[^>]*>Decommission&hellip;</, "…and an admin's rail is untouched");
+
+  // The three states are genuinely distinct bytes — a fix that collapsed two of
+  // them into one would pass every individual assertion above.
+  assert.equal(new Set([refused, unknown, granted]).size, 3, "three states, three renders");
+});
+
+test("cch-w38-s1: the loading and unavailable frames carry the authority too — no frame offers a refused verb", () => {
+  // Frame 1 (capabilities not asked yet) and the conduit-failed frame both
+  // shipped decommission LIVE unconditionally. They are the frames a member
+  // actually sees first, so they are the frames most able to lie.
+  const frame1 = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(undefined, W38_BP, "refuse"));
+  assert.ok(frame1.indexOf('data-life-verb="decommission"') === -1, "frame 1 does not offer a refused verb");
+  assert.ok(frame1.includes(W38_ADMIN_SENTENCE), "…and it explains why, from frame 1");
+
+  const unavailable = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(null, W38_BP, "refuse"));
+  assert.ok(unavailable.indexOf('data-life-verb="decommission"') === -1, "nor does the conduit-failed frame");
+  assert.match(unavailable, /data-life-retry/, "…and that frame keeps its own Retry — the authority note never eats a recovery");
+
+  // The model carries the decision so the DOM mount cannot fork it.
+  assert.equal(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse").authority, "refuse");
+  assert.equal(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP).authority, "grant");
+});
+
+test("cch-w38-s1: THE POST-CLICK ARMS AGREE WITH THE RAIL — a permanent refusal is never sold as transient", () => {
+  // (a) updateInstance: a flat gate 403/422 used to land in the default arm's
+  // "Please try again in a moment." — copy for a TRANSIENT fault.
+  const forbidden = { error: "forbidden", required: "admin", scope: "primary_team" };
+  const c = hooks.updateConflict(forbidden);
+  assert.equal(c.kind, "other");
+  assert.equal(c.code, "forbidden");
+  // THE RETURN SHAPE IS UNCHANGED — updateConflictCopy's SIGNATURE grew, not
+  // updateConflict's object (test 598 deepEquals the whole thing).
+  assert.deepEqual(Object.keys(oauthPlain(c)).sort(), ["code", "kind", "pin"]);
+
+  const copy = hooks.updateConflictCopy(c, forbidden);
+  assert.equal(copy.body, W38_ADMIN_SENTENCE, "the update refusal renders the SERVER's own sentence");
+  assert.equal(copy.forceLabel, null, "…and offers no force override for an authority refusal");
+  assert.ok(hooks.updateConflictCopy(c, forbidden).body.indexOf("Please try again in a moment.") === -1);
+  const teamless = hooks.updateConflict({ error: "no_team" });
+  assert.ok(hooks.updateConflictCopy(teamless, { error: "no_team" }).body.indexOf("Please try again in a moment.") === -1,
+    "a teamless caller is told about the team, not asked to retry forever");
+  // The one-argument call still answers exactly as it always did.
+  assert.equal(hooks.updateConflictCopy({ kind: "already_running" }).title, "An update is already running");
+  assert.equal(hooks.updateConflictCopy({ kind: "other" }).body, "Please try again in a moment.",
+    "an UNCLASSIFIED failure keeps the transient sentence — this arm is narrow on purpose");
+
+  // (b)+(c) rollback: the copy, and the terminality that stops the retry loop.
+  assert.equal(hooks.rollbackConflictCopy("forbidden", forbidden).body, W38_ADMIN_SENTENCE);
+  assert.ok(hooks.rollbackConflictCopy("no_team", { error: "no_team" }).body.length > 0);
+  assert.equal(hooks.rollbackRefusalTerminal("forbidden"), true,
+    "a refusal decided by your ROLE cannot be repaired by Try again");
+  assert.equal(hooks.rollbackRefusalTerminal("no_team"), true);
+  assert.equal(hooks.rollbackRefusalTerminal("instance_unreachable"), false,
+    "…while a genuinely transient fault still offers the retry that can work");
+  assert.equal(hooks.rollbackRefusalTerminal("already_running"), false);
+  assert.equal(hooks.rollbackConflictCopy("instance_unreachable", {}).title, "Couldn't reach the instance",
+    "and every shipped refusal arm is untouched");
+});
+
+test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (its first assertion in this harness)", async () => {
+  // attachDomain had ZERO assertions across 15k lines. Its 422 arm sat ABOVE
+  // the friendly() fallthrough, so `422 {error:"no_team"}` — what
+  // require_primary_team_admin answers a caller with no team — was reported as
+  // "Only <name>.barkpark.cloud domains are supported for now."
+  const drive = async (status, payload) => {
+    const saved = { fetch: sandbox.fetch, document: sandbox.document };
+    const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+    dom.els["domain-input"].value = "shop.barkpark.cloud";
+    dom.els["domain-error"].hidden = true;
+    dom.els["domain-error"].textContent = "";
+    sandbox.fetch = fetchStub(status, payload);
+    sandbox.document = dom.document;
+    try {
+      hooks.attachDomain({ id: "bp1", name: "Production" });
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+    return dom.els["domain-error"];
+  };
+
+  const teamless = await drive(422, { error: "no_team" });
+  assert.equal(teamless.hidden, false, "the inline error still shows");
+  assert.ok(teamless.textContent.indexOf("Only <name>.barkpark.cloud domains are supported") === -1,
+    "a teamless caller's DOMAIN was never judged — do not tell them its syntax is wrong");
+  assert.match(teamless.textContent, /team/i, "the sentence names the real obstacle");
+
+  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps its sentence.
+  const badSyntax = await drive(422, { error: "invalid_domain" });
+  assert.equal(badSyntax.textContent, "Only <name>.barkpark.cloud domains are supported for now.",
+    "a real syntax refusal is unchanged — the fence is one code wide");
+  const taken = await drive(409, { error: "taken" });
+  assert.equal(taken.textContent, "That domain is already in use.");
+});
+
 // cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
 //
 // friendly() resolved the curated ERRORS map BEFORE it ever read data.details.
@@ -16174,6 +16388,69 @@ test("cch-w42-s1: membersContext sources the role from the SERVER's team_authori
   hooks.clearMe();
 });
 
+// ── cch-w43-s1 · THE COMPATIBILITY FLOORS ARE GONE, AND THEIR RETURN MUST RED ─
+// Wave 42 routed canManageOnboarding and membersContext through the band but
+// left two role-literal floors underneath, for "a control plane that does not
+// yet send team_authority". No such control plane exists: /v1/me has stated
+// team_authority since wave 41. What the floors actually did was hold the
+// PREVIEW CORPUS up — me() emitted four of /v1/me's six keys, so every rendered
+// scenario took the floor and the `grant` band had never been painted at all.
+// Measured on the shipped bytes: deleting both floors against the unwidened
+// corpus reds smoke by name (members-populated, env-populated, 2 scenario(s)
+// failed) and reds cch-w41-s3 here; widening scenarios.mjs's me() in the same
+// commit greens both. Those two facts are the same fact, which is why they
+// ride together.
+//
+// These two tests pin the DELETION. Re-introducing either floor — the
+// `if (meCache && meCache.team_authority) return false;` guard plus its
+// `role === "owner" || role === "admin"` literal, or membersContext's
+// `|| me.role` — is green against every other test in this file, because every
+// other fixture agrees with itself. Here the wire is made to DISAGREE, which is
+// the only shape a floor is observable in.
+
+test("cch-w43-s1: canManageOnboarding has NO role-literal floor — an envelope with no team_authority is a refusal, whatever its role string says", async () => {
+  // The exact envelope the deleted floor was written for: role "owner", no
+  // team_authority at all. The floor returned TRUE here. The band calls it
+  // refuse (nil authority is a determinate no) and that is now the whole
+  // answer, so restoring the floor reds this line.
+  hooks.clearMe();
+  await driveMe(200, { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" } });
+  assert.equal(hooks.teamAuthorityState(), "refuse", "no team_authority on the wire is a determinate NO");
+  assert.equal(hooks.canManageOnboarding(), false,
+    "MUTATION TARGET: restore the pre-wave-42 role read and this line is the red");
+  // Same for the admin literal, the other half of what was deleted.
+  hooks.clearMe();
+  await driveMe(200, { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" } });
+  assert.equal(hooks.canManageOnboarding(), false, "and the `|| admin` half of the floor is gone too");
+  // The positive control, so an unconditional false cannot ship green here:
+  // a STATED admin still opens the gate.
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.canManageOnboarding(), true, "a stated admin:true still grants — this is not a blanket deny");
+  // D439 holds: still boolean, never the band.
+  assert.equal(typeof hooks.canManageOnboarding(), "boolean", "the predicate stays two-valued");
+  hooks.clearMe();
+});
+
+test("cch-w43-s1: membersContext takes the role from team_authority ALONE — the envelope's role string is not a fallback", async () => {
+  // A determinate band with an authority that names no role. The deleted
+  // `|| me.role` fallback answered "owner" here, from the envelope string the
+  // server itself does not treat as authority; the floor-free read falls to
+  // "member", which is the fail-closed floor and grants nothing.
+  hooks.clearMe();
+  await driveMe(200, {
+    role: "owner",
+    team: { id: "t1", name: "Acme Inc" },
+    user: { id: "u6", email: "roo@acme.com" },
+    team_authority: { team_id: "t1", role: null, admin: false, owner: false },
+  });
+  const ctx = hooks.membersContext();
+  assert.equal(ctx.role, "member",
+    "MUTATION TARGET: restore `|| me.role` and this reads 'owner' — the red");
+  assert.equal(hooks.assignableRoles(ctx.role).length, 0, "so no manage control opens off a role nobody resolved");
+  hooks.clearMe();
+});
+
 test("cch-w37-s6: the failed-me body REPORTS, and never accuses", async () => {
   const html = hooks.operatorMeFailedHtml();
   assert.match(html, /We couldn't check your account/, "it names what actually happened");
@@ -16191,4 +16468,172 @@ test("cch-w37-s6: the failed-me body REPORTS, and never accuses", async () => {
   // team owner (charter D386's wrong remedy, and D411's intent carried over).
   for (const wrong of [/platform_operator/, /platform-gated/i, /not an operator/i, /ask (your|the) team owner/i])
     assert.doesNotMatch(html, wrong, "an unread answer is not a refusal");
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// cch-w39-s1 — THE UNKNOWN GETS AN EXIT
+//
+// Five surfaces read /v1/me's role two-valued and, with the read in flight or
+// FAILED, stated the false half as fact. The worst was billing: a genuine owner
+// on a 500 was told "Only the team owner can manage billing." with nothing on
+// the page to press. What lands here is (a) three-valued arms on every one of
+// those surfaces, (b) ONE shared retry control, and (c) the two missing loadMe
+// repaint seams.
+//
+// WHAT THESE TESTS DO NOT CLAIM. loadMe() is un-awaited at boot, so the RACE —
+// a surface painting before /v1/me settles and being repainted after — is not
+// provable in a node harness: this file's fetch stub resolves on a microtask
+// and smoke's runScenario awaits flush() before every check, so both
+// structurally false-green that class. The seams are pinned STRUCTURALLY
+// (region scans of loadMe's two arms, the shape this file already uses for the
+// billing/activity/operator seams). The render half is claimed; the race half
+// is not.
+// ══════════════════════════════════════════════════════════════════════════════
+
+test("cch-w39-s1: there is exactly ONE retry control, in the shipped grammar, on #9922's re-entry shape", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // ONE emitter, ONE wirer — not a fifth, sixth and seventh retry idiom.
+  assert.equal(src.split("function meRetryHtml(").length - 1, 1, "one emitter");
+  assert.equal(src.split("function wireMeRetry(").length - 1, 1, "one wirer");
+  assert.equal((src.match(/data-me-retry type="button">Retry</g) || []).length, 1,
+    "the button's bytes are authored in exactly one place");
+
+  // The SHIPPED grammar (data-*-retry + .btn.btn-primary.btn-sm), which already
+  // had three instances on main: data-members-retry, data-env-retry and
+  // #9922's operator-me-retry. No new CSS rule head is earned by a fourth.
+  const emit = appRegion(src, "  function meRetryHtml(", "\n  }\n");
+  assert.ok(emit.includes('class="btn btn-primary btn-sm"'), "the shipped button grammar, not a new class");
+  assert.ok(emit.includes(">Retry<"), "the one-word label, inherited (charter D438)");
+
+  // #9922's merged re-entry shape, verbatim: loadMe's success arm repaints the
+  // view itself, so re-entering on success would paint twice.
+  const wire = appRegion(src, "  function wireMeRetry(", "\n  }\n");
+  assert.ok(/loadMe\(\)\.then\(function \(\) \{/.test(wire), "it re-reads /v1/me, it does not fake a state");
+  assert.ok(wire.includes('meState() !== "loaded"'), "…and only repaints when the read STILL did not land");
+  assert.ok(wire.includes("btn.disabled = true"), "the press has an answer immediately");
+});
+
+test("cch-w39-s1: the shared unknown block reports, never accuses, and names no cause the read did not return", async () => {
+  hooks.clearMe();
+  const CONSEQUENCE = "Until it answers we can't tell whether this account may manage billing, so nothing was changed and nothing was refused.";
+
+  // LOADING — api() has no timeout, so a stalled read never settles and this
+  // arm is just as terminal as the failed one. It gets the same exit.
+  const loading = hooks.meUnknownHtml("loading", CONSEQUENCE);
+  assert.match(loading, /Checking your account…/, "the waiting state says it is waiting, verbatim");
+  assert.match(loading, /data-me-retry/, "a spinner with no exit is the same lie, politer");
+
+  // FAILED — meFailureCopy() classifies the RETAINED fault, so the sentence
+  // tracks the class rather than being one fixed apology.
+  await driveMe(500, { error: "server_error" });
+  const failed = hooks.meUnknownHtml("failed", CONSEQUENCE);
+  assert.match(failed, /We couldn't check your account/, "it names what actually happened");
+  assert.match(failed, /broke on our side/, "a 5xx is OURS, not the person's input");
+  assert.match(failed, /data-me-retry/, "and offers the exit");
+  assert.notEqual(failed, loading, "failed and waiting are themselves distinguishable");
+
+  // THE COPY FENCE (charter D438). Nothing here is newly authored: the block is
+  // the shipped headline + meFailureCopy() verbatim + a consequence sentence +
+  // the one-word Retry. In particular NO rate-limit sentence — /v1/me has no
+  // rate limiter, and naming a cause the read did not return would be this
+  // slice committing the exact sin it exists to remove.
+  for (const html of [loading, failed]) {
+    assert.doesNotMatch(html, /rate limit|slow down|too many requests/i, "no cause the read did not return");
+    assert.doesNotMatch(html, /check your (internet|connection)|try a different|reload the page/i,
+      "no newly authored next step");
+    assert.doesNotMatch(html, /ask (your|the) team owner|contact an admin/i, "and certainly no errand");
+    assert.doesNotMatch(html, /you are not|you do not have|only the team owner/i, "an unread answer is not a refusal");
+  }
+  hooks.clearMe();
+});
+
+test("cch-w39-s1: every converted surface's unknown arm is fail-CLOSED — zero write affordances but the Retry", async () => {
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+
+  const arms = {
+    providers: hooks.providerUnknownHtml("failed"),
+    notifications: hooks.notifMeUnknownHtml("failed"),
+    tokens: hooks.tokenAbilitiesFieldHtml(),
+  };
+  for (const [name, html] of Object.entries(arms)) {
+    // The ONLY control in an unknown arm is the retry: every <button> in it
+    // carries data-me-retry, so no write affordance can hide among them.
+    const buttons = (html.match(/<button/g) || []).length;
+    const retries = (html.match(/data-me-retry/g) || []).length;
+    assert.equal(buttons, retries, name + "'s unknown arm offers the retry and nothing else");
+    assert.ok(html.indexOf('type="checkbox"') === -1, name + " hands an unproven role no checkbox");
+    assert.doesNotMatch(html, /data-connect-submit|data-prov-disconnect|notif-save|plan-portal/,
+      name + " arms no write control on an unproven role");
+  }
+
+  // The pure page renderer refuses the whole member page under an unknown role:
+  // BOTH of its member sentences ("Only team admins can change these settings."
+  // on the email card, "managed by team admins" on the channels notice) are
+  // claims about a role nobody read.
+  const notifUnknown = hooks.notifPageHtml({ transport: "instance" }, { canManage: false, state: "failed" });
+  assert.ok(notifUnknown.indexOf("Only team admins can change these settings.") === -1,
+    "an unread /v1/me is not evidence that this person is not an admin");
+  assert.ok(notifUnknown.indexOf("managed by team admins") === -1, "…nor that the routing is somebody else's");
+  assert.match(notifUnknown, /data-me-retry/, "…and the page carries the exit");
+
+  // THE POSITIVE CONTROL SURVIVES, and it is the assertion that would catch an
+  // over-wide fix: a CONFIRMED member still reads the honest member page,
+  // byte-for-byte, because that page states something we actually know.
+  const member = hooks.notifPageHtml({ transport: "instance" }, { canManage: false, state: "loaded" });
+  assert.ok(member.includes("Only team admins can change these settings."), "a confirmed member keeps the honest copy");
+  assert.ok(member.indexOf("data-me-retry") === -1, "…and is offered no retry, because nothing failed");
+  const admin = hooks.notifPageHtml({ transport: "instance" }, { canManage: true, state: "loaded" });
+  assert.ok(admin.includes("notif-transport-seg"), "a confirmed admin still gets the full writable page");
+  hooks.clearMe();
+});
+
+test("cch-w39-s1: D444 — the retry lives INSIDE the unknown arm's subtree, never beside loaded content", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // BILLING. The unknown arm returns before the owner/member branches, and the
+  // Manage region holds the unknown block and NOTHING else — so the retry can
+  // never be a sibling of the loaded content smoke pins at #billing-manage.
+  const billing = appRegion(src, "  function renderBilling(", "\n  function showBillingSection(");
+  const unknownAt = billing.indexOf('meState() !== "loaded"');
+  const refusalAt = billing.indexOf("if (!billingIsOwner())");
+  assert.ok(unknownAt > 0 && refusalAt > unknownAt,
+    "the unknown arm must be decided BEFORE the refusal — that ordering IS the fix");
+  const unknownFn = appRegion(src, "  function renderBillingMeUnknown(", "\n  }\n");
+  assert.ok(unknownFn.includes("body.innerHTML = meUnknownHtml("),
+    "#billing-manage is REPLACED by the unknown block, never appended to");
+  assert.ok(unknownFn.includes("renderBillingCancel(false)") && unknownFn.includes("grid.hidden = true"),
+    "…with Cancel hidden and the plan grid closed: fail-closed");
+  assert.ok(unknownFn.indexOf("Only the team owner") === -1, "the accusing sentence is not reachable from this arm");
+
+  // PROVIDERS. The connect region is the whole arm — an else-if, so a loaded
+  // connect card and the retry can never coexist there.
+  const prov = appRegion(src, "  function renderProviderPage(", "\n  function renderConnectCard(");
+  assert.ok(/if \(state !== "loaded"\) \{[\s\S]{0,240}providerUnknownHtml\(state\)/.test(prov),
+    "the unknown arm owns #provider-connect outright");
+  assert.ok(prov.includes("} else if (write) renderConnectCard("), "the loaded card is the OTHER branch, not a sibling");
+  assert.ok(prov.includes('var write = state === "loaded" && !!canWrite'),
+    "fail-closed is stated, not assumed: an unloaded /v1/me cannot produce a write affordance here whatever the caller passed");
+});
+
+test("cch-w39-s1: loadMe repaints providers and notifications on BOTH arms", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "function loadMe(", "// =========================================================== SUBSCRIPTION");
+  const cut = region.indexOf("} else {");
+  const success = region.slice(0, cut);
+  const failure = region.slice(cut);
+
+  for (const [view, loader] of [["providers", "loadProviders()"], ["notifications", "loadNotifications()"]]) {
+    for (const [armName, arm] of [["success", success], ["failure", failure]]) {
+      assert.ok(arm.includes('currentView() === "' + view + '"') && arm.includes(loader),
+        "the " + armName + " arm must repaint " + view + " — a demotion there was permanent until a full reload");
+    }
+  }
+  // ADDED AS LINES, NOT REFACTORED INTO A DISPATCHER: the pre-existing seams
+  // are still spelled out one per line in the same arms (a repaintForMe()
+  // helper reds the failure-arm region test above, measured).
+  for (const kept of ["renderBilling()", "loadOperator()", "paintActivityFilters()"])
+    assert.ok(failure.includes(kept), "the shipped failure-arm seam " + kept + " is untouched");
+  assert.ok(!/function repaintForMe/.test(src), "no dispatcher was introduced");
 });

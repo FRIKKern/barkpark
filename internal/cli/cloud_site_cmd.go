@@ -1193,12 +1193,22 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	// A control plane that cannot answer this list is NOT a reason to fail the
 	// whole verb — the live pointer is still true — but it IS a reason to say the
 	// staleness check did not run, rather than to imply it passed.
+	//
+	// W11: the SAME single call now asks for siteStatusLedgerPage rows instead of
+	// one. limit=1 sees only the NEWEST pending row — i.e. the SHORTEST wait among
+	// everything still queued — so a two-day-old stranded sibling behind a fresh
+	// re-queue was invisible and the "still waiting" bound printed the most
+	// flattering number available. Erring optimistic is the direction this epic
+	// exists to eliminate. Row [0] is still the newest, so every existing reader of
+	// `newest` is unchanged; the rest of the page feeds the censored bound only.
 	var newest *cloudclient.SiteDeployment
-	page, lerr := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, 1, "")
+	var ledger []cloudclient.SiteDeployment
+	page, lerr := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, siteStatusLedgerPage, "")
 	switch {
 	case lerr != nil:
 		out.errf("could not read this site's newest deployment (%v) — the header below describes the LIVE build only, and a newer failed deploy would not show here", lerr)
 	case len(page.Deployments) > 0:
+		ledger = page.Deployments
 		n := page.Deployments[0]
 		newest = &n
 	}
@@ -1214,13 +1224,13 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 		}
 		if newest != nil {
 			payload["latest_deployment"] = siteDeploymentMap(*newest)
-			payload["staleness"] = siteStalenessMap(dep, newest)
+			payload["staleness"] = siteStalenessMap(dep, newest, ledger)
 		}
 		out.emitStructured(payload)
 		return exitOK
 	}
 
-	renderKV(out, spawnSiteStatusMap(site, dep, newest))
+	renderKV(out, spawnSiteStatusMap(site, dep, newest, ledger))
 	if dep == nil {
 		out.outf("")
 		if newest != nil && siteDeployFailed(newest.Status) {
@@ -1449,7 +1459,11 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 // build while the site's actual last word was a failure. `newest` is nil when the
 // list read failed or the site has no deployments at all; in neither case does
 // this function claim the two agree.
-func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment) map[string]any {
+//
+// `ledger` is the rest of that same page (newest first, `newest` included) — it
+// feeds ONE thing: the right-censored "still waiting" bound in the time-to-web
+// line, which must be taken from the OLDEST waiting row, not the newest.
+func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"site":      spawnSiteRef(s),
 		"kind":      hzCell(s.Kind),
@@ -1554,7 +1568,205 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 			m["reason"] = sanitizeCell(txt)
 		}
 	}
+	// THE CLOCK, slotted LAST and deliberately in a key of its own. Every other arm
+	// above competes over `status` and `reason`; this one writes only "time to web"
+	// and reads nothing either arm wrote, which is what keeps it structurally clear
+	// of the dr-w7 precedence bug (two arms writing `reason`, the second describing
+	// a different row than the status line named). Empty means the stamps could not
+	// support a sentence — never an imputed zero.
+	if line := siteTimeToWebLine(dep, ledger); line != "" {
+		m["time to web"] = line
+	}
 	return m
+}
+
+// siteStatusLedgerPage is how many ledger rows `status` asks for in its ONE list
+// call. See the comment at the call site: the newest row alone answers "did the
+// last thing that happened fail?", but it CANNOT answer "how long has anything
+// been waiting?" — that answer lives in the oldest still-pending row, which a
+// limit of 1 structurally hides. 20 is a bounded page, not a walk.
+const siteStatusLedgerPage = 20
+
+// siteClock is now, injectable so the duration tests are not a race.
+var siteClock = func() time.Time { return time.Now().UTC() }
+
+// siteShortDur renders a duration in TWO units — "4m25s", "2h39m", "3d04h".
+//
+// It exists because package cli's only duration renderer, deployCensusWidth,
+// floors at whole minutes ("%.0f minutes"), which is right for a census WINDOW
+// and wrong for a publish: a 265-second deploy prints "4 minutes" there, and
+// anything under 30 seconds prints "0 minutes" — a number that reads as "instant"
+// for a deploy that took half a minute. The two renderers are deliberately
+// different functions and a test pins that they disagree.
+func siteShortDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd%02dh", int(d.Hours())/24, int(d.Hours())%24)
+	}
+}
+
+// siteParseStamp reads one control-plane timestamp, refusing everything it cannot
+// prove. The refusal is the whole point: SiteDeployment.BecameLiveAt is a BARE
+// string, so an absent stamp arrives as "" — and time.Parse("") does not error
+// into nothing, it is simply never allowed to reach the arithmetic, because the
+// zero instant minus a 2026 timestamp is a time-to-web of roughly two millennia
+// printed as fact.
+func siteParseStamp(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999", "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+// siteTimeToWeb is how long this deployment took to reach visitors: the gap
+// between the control plane accepting it (inserted_at) and the switch that put it
+// in front of traffic (became_live_at).
+//
+// NAME THE CLOCK, because this one is easy to over-claim: t0 is inserted_at — the
+// moment the CONTROL PLANE picked the work up — not the moment a human hit
+// publish. Publish→insert is debounced (up to 60s) and measured to understate the
+// human-felt wait by ~4.8x over a 24h window, so every renderer of this number
+// must say whose clock it is. A later wave re-keys it to a true publish stamp.
+//
+// It refuses three ways and imputes nothing: an empty stamp (never went live), an
+// unparseable stamp (a control plane speaking a shape we do not model), and a
+// became_live_at that precedes inserted_at (clock skew or a repointed row — a
+// negative duration is not a fast deploy).
+func siteTimeToWeb(d cloudclient.SiteDeployment) (time.Duration, bool) {
+	live, lok := siteParseStamp(d.BecameLiveAt)
+	ins, iok := siteParseStamp(d.InsertedAt)
+	if !lok || !iok {
+		return 0, false
+	}
+	gap := live.Sub(ins)
+	if gap < 0 {
+		return 0, false
+	}
+	return gap, true
+}
+
+// siteDeployWaiting reports a row that is STILL IN FLIGHT — not terminal (live,
+// failed, cancelled) and not deferred, which is settled-but-re-queued and owns its
+// own vocabulary. These are the rows that can be "still waiting".
+func siteDeployWaiting(status string) bool {
+	s := strings.TrimSpace(status)
+	if s == "" {
+		return false
+	}
+	return !cloudclient.SiteDeploymentTerminal(s) && !siteDeployDeferred(s)
+}
+
+// siteWaitingSince is the RIGHT-CENSORED bound for a revision that has not reached
+// the web yet: how long the OLDEST still-waiting row newer than the live pointer
+// has been waiting. Censored because the wait is not over — the true time-to-web
+// is at least this, and unknowable until the switch happens.
+//
+// OLDEST, not newest, on purpose. The page arrives newest-first, so reading row
+// [0] reports the SHORTEST wait among everything pending and hides a stranded
+// two-day-old sibling behind a fresh re-queue. This function takes the maximum,
+// so it is order-independent, and it refuses any row whose inserted_at will not
+// parse rather than guessing a start.
+func siteWaitingSince(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) (time.Duration, string, bool) {
+	now := siteClock()
+	var (
+		worst   time.Duration
+		worstID string
+		found   bool
+	)
+	liveIdx := -1
+	if dep != nil {
+		for i, r := range ledger {
+			if strings.EqualFold(strings.TrimSpace(r.ID), strings.TrimSpace(dep.ID)) {
+				liveIdx = i
+				break
+			}
+		}
+	}
+	for i, r := range ledger {
+		if !siteDeployWaiting(r.Status) {
+			continue
+		}
+		if dep != nil {
+			if strings.EqualFold(strings.TrimSpace(r.ID), strings.TrimSpace(dep.ID)) {
+				continue
+			}
+			switch {
+			case liveIdx >= 0:
+				// Newest-first: anything at or below the live pointer's index is
+				// OLDER than what is serving and cannot be a pending newer revision.
+				if i > liveIdx {
+					continue
+				}
+			default:
+				// The live pointer is off this page. Fall back to stamps, and when
+				// they will not order the pair, KEEP the row: showing a waiter that
+				// might be old is the pessimistic direction, and this epic exists to
+				// stop erring the other way.
+				rt, rok := siteParseStamp(r.InsertedAt)
+				dt, dok := siteParseStamp(dep.InsertedAt)
+				if rok && dok && !rt.After(dt) {
+					continue
+				}
+			}
+		}
+		ins, ok := siteParseStamp(r.InsertedAt)
+		if !ok {
+			continue
+		}
+		waited := now.Sub(ins)
+		if waited <= 0 {
+			continue
+		}
+		if !found || waited > worst {
+			worst, worstID, found = waited, strings.TrimSpace(r.ID), true
+		}
+	}
+	return worst, worstID, found
+}
+
+// siteTimeToWebLine is the sentence this epic was founded on — how long it took
+// for what you are being served to actually reach the web, and whether anything
+// newer is still stuck behind it.
+//
+// POINTER-SCOPED WORDING, and this is load-bearing rather than style: a rollback
+// (cloud/lib/barkpark_cloud/sites/deploy.ex finish_rollback) repoints
+// current_deployment_id at an OLDER row WITHOUT restamping became_live_at, so
+// "your last publish" would name a build the user never published last. "The build
+// you are being served" is true under a rollback, a stale-live pointer and a
+// normal deploy alike.
+//
+// Returns "" when the stamps cannot support a sentence — the row simply gets no
+// clock, which is the honest shape of "we do not know".
+func siteTimeToWebLine(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) string {
+	line := ""
+	if dep != nil {
+		if ttw, ok := siteTimeToWeb(*dep); ok {
+			line = fmt.Sprintf("the build you are being served went live %s after the control plane picked it up (publishes are debounced up to 60s)", siteShortDur(ttw))
+		}
+	}
+	if waited, _, ok := siteWaitingSince(dep, ledger); ok {
+		clause := fmt.Sprintf("a newer revision is still waiting — at least %s so far", siteShortDur(waited))
+		if line == "" {
+			return clause
+		}
+		line += " (" + clause + ")"
+	}
+	return line
 }
 
 // siteFailureClass is the named failure class to show in a status header: the
@@ -1576,7 +1788,7 @@ func siteFailureClass(dep, newest *cloudclient.SiteDeployment) string {
 // comparison, so a script does not have to re-derive "is what is serving also the
 // last thing that happened?" by diffing two ids. Emitted only when the newest read
 // actually succeeded — an absent node means unknown, never "in sync".
-func siteStalenessMap(dep, newest *cloudclient.SiteDeployment) map[string]any {
+func siteStalenessMap(dep, newest *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"latest_deployment_id": newest.ID,
 		"latest_status":        newest.Status,
@@ -1590,6 +1802,24 @@ func siteStalenessMap(dep, newest *cloudclient.SiteDeployment) map[string]any {
 	m["latest_failed"] = siteDeployFailed(newest.Status)
 	if fc := strings.TrimSpace(newest.FailureClass); fc != "" {
 		m["failure_class"] = fc
+	}
+	// The censored wait, as a NUMBER a script can threshold on — and never as a
+	// bare duration. The pair is emitted together on purpose: a lone
+	// latest_waiting_seconds reads like a finished measurement, when it is a lower
+	// bound on a wait that has not ended. It is the OLDEST waiting row's, so
+	// alerting on it cannot be fooled by a fresh re-queue in front of a stranded
+	// sibling.
+	if waited, id, ok := siteWaitingSince(dep, ledger); ok {
+		m["latest_waiting_seconds_at_least"] = int64(waited.Seconds())
+		m["latest_waiting_censored"] = true
+		// AS-OF, because a censored bound without one is undated arithmetic: the
+		// same pinned window was measured returning 3 → 2 → 0 waiters in five
+		// minutes (charter D163), so a captured JSON blob carrying only a duration
+		// cannot say whether it describes now or an hour ago.
+		m["latest_waiting_as_of"] = siteClock().Format(time.RFC3339)
+		if id != "" {
+			m["latest_waiting_deployment_id"] = id
+		}
 	}
 	return m
 }
@@ -1661,6 +1891,22 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.Branch != "" {
 		m["branch"] = d.Branch
+	}
+	// deploy-reliability W11: the two clocks the wire has carried all along and
+	// this envelope threw away — it shipped 16 keys and not one timestamp, so a
+	// script reading `-o json` could see WHAT happened and never WHEN.
+	//
+	// time_to_web_seconds is ABSENT, never 0, whenever the stamps cannot prove it:
+	// a queued row has no became_live_at, and a zero there would read as "went live
+	// instantly" — the single most flattering lie this envelope could tell.
+	if ins := strings.TrimSpace(d.InsertedAt); ins != "" {
+		m["inserted_at"] = ins
+	}
+	if live := strings.TrimSpace(d.BecameLiveAt); live != "" {
+		m["became_live_at"] = live
+	}
+	if ttw, ok := siteTimeToWeb(d); ok {
+		m["time_to_web_seconds"] = int64(ttw.Seconds())
 	}
 	return m
 }

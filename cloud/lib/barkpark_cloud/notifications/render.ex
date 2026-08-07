@@ -108,8 +108,13 @@ defmodule BarkparkCloud.Notifications.Render do
 
   # cch-w32-s1 — the trial window, BUILT FROM THE INTEGER, never from `:detail`.
   #
-  # `TrialExpiryWorker` supplies both a `days` integer and a first-party `detail`
-  # sentence, and this arm reads only the integer. `detail` would have to travel
+  # `TrialExpiryWorker` used to supply both a `days` integer and a first-party
+  # `detail` sentence, and this arm read only the integer. As of cch-w42-s6 it
+  # supplies the FACTS ONLY (`%{days:, name:}`) — the sentence moved into the two
+  # recipient-aware `EventEmail` render arms, because a body authored per-TEAM
+  # could never soften an owner-only imperative for a member. This arm is
+  # unchanged, and that is the point: it never depended on the string. Had it
+  # done so, `detail` would have had to travel
   # through `cause/1`, i.e. `FailureCopy.humanize/1` = `classify() |> scrub()` —
   # a FAILURE taxonomy plus a credential redactor. There is nothing to classify
   # in control-plane-authored prose and nothing to scrub in an integer, and a

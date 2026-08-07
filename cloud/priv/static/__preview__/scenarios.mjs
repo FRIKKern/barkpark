@@ -965,10 +965,41 @@ function me(teamName, onb, role) {
     { key: "instance", done: !!onb.instance },
     { key: "published_doc", done: !!onb.published_doc },
   ];
+  // cch-w43-s1: the envelope is the one the SERVER mints, key for key. The
+  // shape is DERIVED from /v1/me's own response map (router.ex, the
+  // `get "/v1/me"` clause): user{id,email,confirmed,two_factor_enabled,
+  // platform_operator} · team{id,name,slug} · teams[]{id,name,slug,role} ·
+  // role · team_authority{team_id,role,admin,owner} · onboarding.
+  // __me_envelope_census.mjs re-derives that map at test time and diffs it
+  // against what route(name,"GET","/v1/me") actually serves, so this comment
+  // is not the guard — the census is, and it reds by key path when the two
+  // drift. Until wave 43 the corpus emitted FOUR of those six keys, which is
+  // why every rendered scenario ran on app.js's compatibility floors and the
+  // `grant` band had never been painted by any instrument.
+  //
+  // `platform_operator` is deliberately NOT set here: it is the operator axis,
+  // and operatorMe() (below) is the ONE producer that raises it, exactly as
+  // GR39 requires. The census unions over the whole corpus, so those scenarios
+  // are what prove the key is served at all.
+  const actorRole = role || "owner";
   return {
     user: { id: "usr_ada", email: "ada@acme.com", confirmed: true, two_factor_enabled: false },
     team: { id: IDS.team, name: teamName, slug: "acme" },
-    role: role || "owner",
+    // EVERY membership, the server's words. The corpus's actor belongs to the
+    // one team it is scoped to — a SECOND team here would be a scenario-level
+    // claim (a switcher with somewhere to switch to) that no fixture asks for.
+    teams: [{ id: IDS.team, name: teamName, slug: "acme", role: actorRole }],
+    role: actorRole,
+    // The authority the GATE enforces, stated on the wire. Scoped to the SAME
+    // team as `team:` and `role:` above — one resolved team, never a role from
+    // one team beside an id from another. admin/owner mirror Authz: owner is
+    // both, admin is admin-not-owner, everyone else is neither.
+    team_authority: {
+      team_id: IDS.team,
+      role: actorRole,
+      admin: actorRole === "owner" || actorRole === "admin",
+      owner: actorRole === "owner",
+    },
     onboarding: {
       completed: !!onb.completed,
       completed_at: onb.completed ? tMinus(80000) : null,
@@ -2174,6 +2205,28 @@ export const SCENARIOS = {
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      capabilities: lifecycleCapabilities,
+      domainStatus: dnsPendingDomain,
+    },
+  },
+  // ── Instance Overview as a plain MEMBER (cch-w38-s1) ──────────────────────
+  // Byte-identical to `panel-overview` except the /v1/me envelope carries
+  // role:"member" — the first plain-member scenario OUTSIDE GR33's settings
+  // scope, and the fixture that makes the instance band's authority answer
+  // observable at all. On origin/main this screen offered a member a live
+  // Decommission (browser-measured: {"port":"4187","meRole":"member",
+  // "decommission":{"disabled":false,"visible":true},"totalDisabled":0}); the
+  // expectation in smoke.mjs pins the disable-and-explain remedy (D428).
+  "panel-overview-member": {
+    label: "Instance Overview as a plain member — the lifecycle rail refuses up-front, with the server's own sentence",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],
@@ -3493,6 +3546,37 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w39-s1 — THE HEADLINE DEFECT, DRIVEN. A genuine OWNER of a paid team
+  // whose /v1/me 500s: on origin/main billingIsOwner() answered false (a
+  // two-valued read of a three-valued fact) and #billing-manage told the OWNER
+  // "Only the team owner can manage billing." with nothing on the page to
+  // press. It consumes the meFault override cch-w37-s6 already merged (route()
+  // in this file) rather than minting a second one, and deep-links to #billing
+  // — a residue family that already exists, so no 14th family is created.
+  "billing-me-unreadable": {
+    label: "Billing — an OWNER whose /v1/me 500s: the page reports the failed check with a retry instead of accusing them of not being the owner",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+
   // The owner AFTER an in-app cancel: the subscription is now cancel_at_period_end
   // (grace) — the plan card reads "Access until {date}" + the Ending badge, the
   // Cancel section is GONE (a second cancel is a no-op), but Manage billing stays

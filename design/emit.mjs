@@ -1789,8 +1789,12 @@ function sheetsBlock(themes = loadThemes()) {
 // ── surface: /papers reader skin (api/lib/barkpark_web/layouts/bulldocs.html.heex)
 // The reader article's `--paper-*` skin overrides (color.paper.reader) PLUS the
 // mail-client popup chrome (color.mailChrome, the ONLY --mail-* copy, relocated
-// into this one marker region). The reader theme-swaps via prefers-color-scheme
-// (it NEVER stamps data-theme), and DELIBERATELY diverges from the shared
+// into this one marker region). The reader is a HYBRID surface: default mode
+// follows prefers-color-scheme, but the reader's dark/light toggle stamps
+// html[data-theme] (pre-paint, localStorage `barkpark_theme` shared with
+// Studio) and the explicit stamp wins — so every mode pair emits THREE ways:
+// bare light fallback, @media dark (the no-JS/first-paint owner), and
+// [data-theme] companions. The reader DELIBERATELY diverges from the shared
 // paper-surface skin on --paper-rule (solid vs rgba) — never collapsed onto the
 // shared tokens this wave (charter D4). The load-bearing rationale comments are
 // emitted VERBATIM so `emit --write` preserves them; the callout --bp-tone-*
@@ -1798,15 +1802,16 @@ function sheetsBlock(themes = loadThemes()) {
 // TokensGen.callout/1) — byte-identical emission, single-sourced tone values.
 // Indented 4 spaces to sit inside the reader <style>; the marker block is CSS
 // comments, invisible to the browser.
-// Bulldocs reader theme block. The reader is a MEDIA surface (it NEVER stamps
-// data-theme; it theme-swaps via prefers-color-scheme) — so the per-theme dark
-// re-declarations nest inside the same @media idiom, prefixed with the theme
-// attribute. The reader page never stamps data-bp-theme today, so this block is
-// the structural hook (a theme swap reaches the reader skin the moment a surface
-// sets the attribute); reader-dark-parity stays green because the selectors carry
-// `html[data-bp-theme=X]` (not the bare `html[data-theme="dark"]` the guard
-// scans) and the dark re-skins live inside prefers-color-scheme blocks the guard
-// treats as reader coverage.
+// Bulldocs reader theme block. The reader defaults to the OS scheme, so the
+// per-theme dark re-declarations nest inside the same @media idiom, prefixed
+// with the theme attribute — PLUS `[data-theme]` companions (two attrs, so a
+// toggled mode beats both the theme-light block and the base [data-theme]
+// blocks that precede the themed region in the cascade). The reader page never
+// stamps data-bp-theme today, so this block is the structural hook (a theme
+// swap reaches the reader skin the moment a surface sets the attribute);
+// reader-dark-parity stays green because the guard's edit-side scan reads
+// paper-surface.css only, and the reader-coverage scan still finds these dark
+// re-skins inside prefers-color-scheme blocks.
 const bulldocsThemeBlock = (name, t) => {
   const rl = t.color.paper.reader.light;
   const rd = t.color.paper.reader.dark;
@@ -1838,6 +1843,25 @@ const bulldocsThemeBlock = (name, t) => {
     `--bp-tone-danger-bg: ${cd.danger.bg}; --bp-tone-danger-fg: ${cd.danger.fg};`,
     `--bp-tone-neutral-bg: ${cd.neutral.bg}; --bp-tone-neutral-fg: ${cd.neutral.fg};`,
   ];
+  // The [data-theme="light"] companion must re-declare every token the reader's
+  // @media dark block re-skins — the media block's selector outranks the bare
+  // paper-surface light fallbacks, so a forced-light reader under an OS-dark
+  // scheme would otherwise keep DARK callout tones / faint ink / chrome (the
+  // mirror image of the #1217 bug). Light values come from the shared surface
+  // family + paperCallout.light — the same values the un-stamped light path
+  // resolves through paper-surface.css.
+  const sf = t.color.paper.surface;
+  const cl = t.color.paperCallout.light;
+  const lightExtra = [
+    `--paper-ink-faint: ${sf["ink-faint"].light};`,
+    `--paper-chrome-bg: ${sf["chrome-bg"].light};`,
+    `--paper-chrome-border: ${sf["chrome-border"].light};`,
+    `--bp-tone-info-bg: ${cl.info.bg}; --bp-tone-info-fg: ${cl.info.fg};`,
+    `--bp-tone-success-bg: ${cl.success.bg}; --bp-tone-success-fg: ${cl.success.fg};`,
+    `--bp-tone-warning-bg: ${cl.warning.bg}; --bp-tone-warning-fg: ${cl.warning.fg};`,
+    `--bp-tone-danger-bg: ${cl.danger.bg}; --bp-tone-danger-fg: ${cl.danger.fg};`,
+    `--bp-tone-neutral-bg: ${cl.neutral.bg}; --bp-tone-neutral-fg: ${cl.neutral.fg};`,
+  ];
   const mailVars = (theme) =>
     [
       `--mail-paper: ${mc.paper[theme]}; --mail-bar: ${mc.bar[theme]}; --mail-rule: ${mc.rule[theme]};`,
@@ -1862,6 +1886,20 @@ const bulldocsThemeBlock = (name, t) => {
     ...mailVars("dark").map((l) => "  " + l),
     "      }",
     "    }",
+    `    ${p}[data-theme="light"] body:has(.bp-paper-article),`,
+    `    ${p}[data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
+    ...readerVars(rl, "light", lightExtra).map((l) => l.replace(/^ {8}/, "      ")),
+    "    }",
+    `    ${p}[data-theme="dark"] body:has(.bp-paper-article),`,
+    `    ${p}[data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
+    ...readerVars(rd, "dark", darkExtra).map((l) => l.replace(/^ {8}/, "      ")),
+    "    }",
+    `    ${p}[data-theme="light"] #bp-mailapp {`,
+    ...mailVars("light"),
+    "    }",
+    `    ${p}[data-theme="dark"] #bp-mailapp {`,
+    ...mailVars("dark"),
+    "    }",
   ].join("\n");
 };
 
@@ -1870,6 +1908,10 @@ function bulldocsBlock(themes = loadThemes()) {
   const rd = tokens.color.paper.reader.dark;
   const mc = tokens.color.mailChrome;
   const cd = tokens.color.paperCallout.dark; // dark callout tone re-stamps
+  const cl = tokens.color.paperCallout.light; // light re-stamps for [data-theme="light"]
+  const sfl = Object.fromEntries(
+    ["ink-faint", "chrome-bg", "chrome-border"].map((r) => [r, tokens.color.paper.surface[r].light])
+  );
   // S7 stub: the warm reading accent (color.reading-accent), UNCONSUMED until S8.
   const ra = (theme) => hslToHex(tokens.color["reading-accent"][theme]);
   const themed = themeBlocks(themes, bulldocsThemeBlock);
@@ -1889,14 +1931,16 @@ function bulldocsBlock(themes = loadThemes()) {
     "       `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline",
     "       `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on",
     "       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,",
-    "       etc.). Dark-mode note: the shared source keys dark on",
-    "       `html[data-theme=\"dark\"]`, which the reader NEVER stamps — so the shared",
-    "       dark tokens never match here, and the `prefers-color-scheme: dark` block",
-    "       below (also carried onto <main>) is what owns reader dark mode, flipping",
-    "       the palette to cool bp-dark with light ink so the inline `var(--paper-*)`",
-    "       HTML stays readable. Without the <main>-scoped override the shared light",
-    "       fallback would paint dark ink on the browser's dark theme — the",
-    "       visibility bug. */",
+    "       etc.). Dark-mode note: the reader stamps `html[data-theme]` only via",
+    "       its pre-paint toggle script (localStorage `barkpark_theme`, shared",
+    "       with Studio); before that script runs — and with JS off — the",
+    "       `prefers-color-scheme: dark` block below (also carried onto <main>)",
+    "       owns reader dark mode, flipping the palette to cool bp-dark with",
+    "       light ink so the inline `var(--paper-*)` HTML stays readable. The",
+    "       `html[data-theme]` companions further down repeat both palettes so an",
+    "       explicit toggle beats the OS scheme. Without the <main>-scoped",
+    "       override the shared light fallback would paint dark ink on the",
+    "       browser's dark theme — the visibility bug. */",
     "    body:has(.bp-paper-article),",
     "    body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {",
     `      --paper-bg:         ${rl["bg"]};`,
@@ -1933,13 +1977,14 @@ function bulldocsBlock(themes = loadThemes()) {
     `        --paper-reading-accent: ${ra("dark")}; /* S7 stub — S8 consumes */`,
     "        /* Callout TONE tokens + faint ink + chrome — the SAME reason as the",
     "           --paper-* above: paper-surface.css keys their DARK values on",
-    "           `html[data-theme=\"dark\"]`, which the reader NEVER stamps, so an",
-    "           OS-dark reader (prefers-color-scheme, no toggle) was left with the",
-    "           LIGHT callout tones (#eff6ff on a #131d19 page — a light box on the",
-    "           dark article). Re-skin them here, byte-mirroring the dark values in",
-    "           paper-surface.css's `html[data-theme=\"dark\"] .bp-paper-surface` block.",
-    "           Edit surfaces stamp data-theme and get those directly; this is the",
-    "           reader's prefers-color-scheme companion. */",
+    "           `html[data-theme=\"dark\"]`, which the reader stamps only after its",
+    "           pre-paint toggle script runs, so an OS-dark reader (no JS / first",
+    "           paint) was left with the LIGHT callout tones (#eff6ff on a #131d19",
+    "           page — a light box on the dark article). Re-skin them here,",
+    "           byte-mirroring the dark values in paper-surface.css's",
+    "           `html[data-theme=\"dark\"] .bp-paper-surface` block. Edit surfaces",
+    "           stamp data-theme and get those directly; this is the reader's",
+    "           prefers-color-scheme companion. */",
     `        --paper-ink-faint:    ${rd["ink-faint"]};`,
     `        --paper-chrome-bg:    ${rd["chrome-bg"]};`,
     `        --paper-chrome-border: ${rd["chrome-border"]};`,
@@ -1965,6 +2010,65 @@ function bulldocsBlock(themes = loadThemes()) {
     `        --mail-paper: ${mc.paper.dark}; --mail-bar: ${mc.bar.dark}; --mail-rule: ${mc.rule.dark};`,
     `        --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
     "      }",
+    "    }",
+    "    /* Explicit mode stamp — html[data-theme] companions to the light",
+    "       fallback + prefers-color-scheme pair above. The reader's pre-paint",
+    "       <head> script stamps data-theme from localStorage `barkpark_theme`",
+    "       (shared with Studio) or the OS scheme, and the dark/light toggle",
+    "       pill rewrites it — one attribute of extra specificity, so a toggled",
+    "       choice beats the @media blocks in BOTH directions. The @media pair",
+    "       stays byte-complete as the no-JS / first-paint fallback (it is also",
+    "       what the reader-dark-parity guard scans for coverage). */",
+    '    html[data-theme="light"] body:has(.bp-paper-article),',
+    '    html[data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {',
+    `      --paper-bg:         ${rl["bg"]};`,
+    `      --paper-bg-deep:    ${rl["bg-deep"]};`,
+    `      --paper-ink:        ${rl["ink"]};`,
+    `      --paper-ink-soft:   ${rl["ink-soft"]};`,
+    `      --paper-rule:       ${rl["rule"]};`,
+    `      --paper-accent:     ${rl["accent"]};`,
+    `      --paper-accent-soft: ${rl["accent-soft"]};`,
+    `      --paper-reading-accent: ${ra("light")}; /* S7 stub — S8 consumes */`,
+    "      /* Light re-declarations for every token the @media dark block above",
+    "         re-skins — its selector outranks the bare paper-surface light",
+    "         fallbacks, so WITHOUT these a forced-light reader under an OS-dark",
+    "         scheme keeps dark callout tones / faint ink / chrome (the mirror",
+    "         image of the #1217 bug). Values match the un-stamped light path. */",
+    `      --paper-ink-faint:    ${sfl["ink-faint"]};`,
+    `      --paper-chrome-bg:    ${sfl["chrome-bg"]};`,
+    `      --paper-chrome-border: ${sfl["chrome-border"]};`,
+    `      --bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,
+    `      --bp-tone-success-bg: ${cl.success.bg}; --bp-tone-success-fg: ${cl.success.fg};`,
+    `      --bp-tone-warning-bg: ${cl.warning.bg}; --bp-tone-warning-fg: ${cl.warning.fg};`,
+    `      --bp-tone-danger-bg:  ${cl.danger.bg}; --bp-tone-danger-fg:  ${cl.danger.fg};`,
+    `      --bp-tone-neutral-bg: ${cl.neutral.bg}; --bp-tone-neutral-fg: ${cl.neutral.fg};`,
+    "    }",
+    '    html[data-theme="dark"] body:has(.bp-paper-article),',
+    '    html[data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {',
+    `      --paper-bg:         ${rd["bg"]};`,
+    `      --paper-bg-deep:    ${rd["bg-deep"]};`,
+    `      --paper-ink:        ${rd["ink"]};`,
+    `      --paper-ink-soft:   ${rd["ink-soft"]};`,
+    `      --paper-rule:       ${rd["rule"]};`,
+    `      --paper-accent:     ${rd["accent"]};`,
+    `      --paper-accent-soft: ${rd["accent-soft"]};`,
+    `      --paper-reading-accent: ${ra("dark")}; /* S7 stub — S8 consumes */`,
+    `      --paper-ink-faint:    ${rd["ink-faint"]};`,
+    `      --paper-chrome-bg:    ${rd["chrome-bg"]};`,
+    `      --paper-chrome-border: ${rd["chrome-border"]};`,
+    `      --bp-tone-info-bg:    ${cd.info.bg}; --bp-tone-info-fg:    ${cd.info.fg};`,
+    `      --bp-tone-success-bg: ${cd.success.bg}; --bp-tone-success-fg: ${cd.success.fg};`,
+    `      --bp-tone-warning-bg: ${cd.warning.bg}; --bp-tone-warning-fg: ${cd.warning.fg};`,
+    `      --bp-tone-danger-bg:  ${cd.danger.bg}; --bp-tone-danger-fg:  ${cd.danger.fg};`,
+    `      --bp-tone-neutral-bg: ${cd.neutral.bg}; --bp-tone-neutral-fg: ${cd.neutral.fg};`,
+    "    }",
+    '    html[data-theme="light"] #bp-mailapp {',
+    `      --mail-paper: ${mc.paper.light}; --mail-bar: ${mc.bar.light}; --mail-rule: ${mc.rule.light};`,
+    `      --mail-ink: ${mc.ink.light}; --mail-soft: ${mc.soft.light}; --mail-accent: ${mc.accent.light};`,
+    "    }",
+    '    html[data-theme="dark"] #bp-mailapp {',
+    `      --mail-paper: ${mc.paper.dark}; --mail-bar: ${mc.bar.dark}; --mail-rule: ${mc.rule.dark};`,
+    `      --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
     "    }",
     ...(themed ? ["    " + THEME_BANNER, themed] : []),
   ].join("\n");

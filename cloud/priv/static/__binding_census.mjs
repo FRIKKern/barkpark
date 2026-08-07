@@ -137,7 +137,7 @@
 //       context_fn target, or a changed inline-cond overlay
 //
 // Run: node cloud/priv/static/__binding_census.mjs
-//      node cloud/priv/static/__binding_census.mjs <app.js> <router.ex> <accounts.ex>
+//      node cloud/priv/static/__binding_census.mjs <app.js> <router.ex> <accounts.ex> <authz.ex>
 //   (the argv overrides exist so a mutation driver can point the census at a
 //    patched COPY without writing inside this slice's fence)
 
@@ -148,6 +148,16 @@ const here = path.dirname(new URL(import.meta.url).pathname);
 const APP = process.argv[2] || path.join(here, "app.js");
 const ROUTER = process.argv[3] || path.join(here, "../../lib/barkpark_cloud/web/router.ex");
 const ACCOUNTS = process.argv[4] || path.join(here, "../../lib/barkpark_cloud/accounts.ex");
+const AUTHZ = process.argv[5] || path.join(here, "../../lib/barkpark_cloud/accounts/authz.ex");
+// A context_fn names authority BELOW the router, and that authority does not
+// all live in one module: the rank-relative member writes decide in
+// `Accounts.*` but the router re-derives the refusal ARM through `Authz.*`.
+// So check (2e) resolves a context_fn through this module → source map rather
+// than assuming accounts.ex. A module-qualified context_fn whose module is
+// absent here is a FAILURE, not a skip — otherwise naming an unmapped module
+// would be the way to buy silence from the check.
+const CONTEXT_SOURCES = { Accounts: ACCOUNTS, Authz: AUTHZ };
+const MODULE_QUALIFIED = /^([A-Z][A-Za-z0-9_]*)\.(.+)$/;
 // Report against a stable repo-relative label so the output reads the same from
 // any cwd; a mutant copy passed as argv[2] keeps its own path.
 const LABEL = process.argv[2] || "cloud/priv/static/app.js";
@@ -178,6 +188,16 @@ const H_TEAM_SITE_M = "with_team_site(conn, fn)";
 const H_PROXY = "proxy_instance_webhook/2";
 const C_TEAM_ADMIN = "Accounts.team_admin?/2";
 const C_PAT_ABILITIES = "Accounts.pat_abilities_allowed?/2";
+// The two rank-relative member writes. `with_team_role(conn, "admin")` is the
+// whole of their ROUTER authority and none of their real one: whether THIS
+// admin may touch THIS member is decided below the router, against a strict
+// rank ladder (team_membership.ex:48). PATCH decides in
+// `Accounts.update_member_role_as/4` (no owner escape hatch) and the router
+// re-runs `Authz.can_grant?/3` only to split the refusal into `outranked` vs
+// `cannot_grant_higher_role`; DELETE decides in `Accounts.remove_member_as/3`
+// (owner escape hatch present) and its cause is always `outranked`.
+const C_MEMBER_ROLE = "Accounts.update_member_role_as/4 + Authz.can_grant?/3";
+const C_MEMBER_REMOVE = "Accounts.remove_member_as/3";
 
 const PIN = [
   // ── account & session self-service — every one of these acts on the caller's
@@ -288,8 +308,8 @@ const PIN = [
 
   // ── team membership — every write behind assignableRoles(ctx.role)
   { line: 18126, fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
-  { line: 18186, fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
-  { line: 18233, fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
+  { line: 18186, fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "same fence; RANK-RELATIVE below it — the same admin is refused on a peer and allowed on a member" },
+  { line: 18233, fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "same fence; RANK-RELATIVE below it, with an owner escape hatch the PATCH path lacks" },
   { line: 18261, fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
   // ── env vars — elevated, and ONLY the inline cond says so
@@ -535,7 +555,13 @@ for (const r of pinnedUnpredicated) {
   console.log(`  ${pad(`${LABEL}:${live ? live.line : "gone"}`, 34)}${pad(r.verb, 7)}${pad(r.route, 58)}${r.auth_fn || r.context_fn}`);
 }
 
-const withContext = PIN.filter((r) => r.context_fn && r.context_fn.startsWith("Accounts."));
+// A context_fn may name more than one function (the router's refusal ARM and
+// the function that actually decides it are not always the same), joined with
+// " + " — the same form `auth_fn` already uses. Only the module-qualified parts
+// are checkable targets; the unqualified ones (`with_team_role(conn, …)`,
+// `proxy_instance_webhook/2`) are router-local labels, as they were before.
+const contextParts = (name) => name.split(" + ").map((s) => s.trim());
+const withContext = PIN.filter((r) => r.context_fn && contextParts(r.context_fn).some((p) => MODULE_QUALIFIED.test(p)));
 console.log("");
 console.log("context_fn bindings — authority that lives BELOW the router, which no auth_fn can name:");
 for (const r of withContext) {
@@ -621,14 +647,30 @@ if (dupes.length) {
 //      has been renamed or deleted is exactly the class of lie this epic is for.
 {
   const missing = [];
-  const accounts = fs.existsSync(ACCOUNTS) ? fs.readFileSync(ACCOUNTS, "utf8") : null;
-  if (accounts === null) missing.push("  accounts.ex not readable at " + ACCOUNTS);
-  else {
-    for (const name of new Set(withContext.map((r) => r.context_fn))) {
-      const bare = name.replace(/\/\d+$/, "").replace(/^Accounts\./, "");
-      if (!new RegExp("\\bdefp?\\s+" + bare.replace(/[?!]/g, "\\$&") + "\\(").test(accounts)) {
-        missing.push("  " + name + " — no matching def/defp in " + ACCOUNTS);
-      }
+  const sourceCache = new Map();
+  const readSource = (file) => {
+    if (!sourceCache.has(file)) {
+      sourceCache.set(file, fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
+    }
+    return sourceCache.get(file);
+  };
+  for (const target of new Set(withContext.flatMap((r) => contextParts(r.context_fn)))) {
+    const m = MODULE_QUALIFIED.exec(target);
+    if (!m) continue; // router-local label, not a module-qualified target
+    const [, mod] = m;
+    const file = CONTEXT_SOURCES[mod];
+    if (!file) {
+      missing.push("  " + target + " — module " + mod + " has no source file in CONTEXT_SOURCES");
+      continue;
+    }
+    const source = readSource(file);
+    if (source === null) {
+      missing.push("  " + target + " — " + mod + " source not readable at " + file);
+      continue;
+    }
+    const bare = m[2].replace(/\/\d+$/, "");
+    if (!new RegExp("\\bdefp?\\s+" + bare.replace(/[?!]/g, "\\$&") + "\\(").test(source)) {
+      missing.push("  " + target + " — no matching def/defp in " + file);
     }
   }
   if (missing.length) {

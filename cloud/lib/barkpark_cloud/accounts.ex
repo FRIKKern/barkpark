@@ -1688,12 +1688,14 @@ defmodule BarkparkCloud.Accounts do
   Members of `team` as `[%{user: %User{}, role: role, joined_at: inserted_at}]`,
   oldest membership first (stable, like `list_user_teams/1`).
   """
-  @spec list_team_members(Team.t()) :: [map()]
-  def list_team_members(%Team{} = team) do
+  @spec list_team_members(Team.t() | binary()) :: [map()]
+  def list_team_members(team) do
+    tid = team_id(team)
+
     from(m in TeamMembership,
       join: u in User,
       on: u.id == m.user_id,
-      where: m.team_id == ^team.id,
+      where: m.team_id == ^tid,
       order_by: [asc: m.inserted_at, asc: m.id],
       select: %{user: u, role: m.role, joined_at: m.inserted_at}
     )

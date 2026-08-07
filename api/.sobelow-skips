@@ -5,7 +5,7 @@ Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/t
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/sync/pusher.ex:210,104F576
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/sheets.ex:113,1FB65CC
 Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/media/renditions.ex:107,3D69773
-XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:67,6A41676
+XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:95,ADA708
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/epic_fleet/benchmark.ex:960,78E6342
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:252,21E5CDB
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:211,65F4F64

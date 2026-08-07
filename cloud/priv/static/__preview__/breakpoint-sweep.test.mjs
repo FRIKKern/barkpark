@@ -544,6 +544,16 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // this test exited 1 on 102/77 before these four numbers were re-read from
 // `scenarioReport`, which is the literal doing its job on a REVIEW edit rather
 // than a builder one.
+// cch-w38-s1 moved it a fifth time: `panel-overview-member` — the first
+// plain-member fixture outside GR33's settings scope, and the BEFORE/AFTER pin
+// for the instance rail's authority answer — is the 104th scenario and the 79th
+// residue entry. All three guards refused first, by name: the sweep exited 2 on
+// `UNLISTED scenario "panel-overview-member"`, smoke on `CENSUS: 1 committed
+// scenario(s) have NO expectation`, and this file failed FOUR tests (17, 21,
+// 44, 47) on 103/78. The numbers below — AND THIS TEST'S OWN TITLE, which is
+// where the census is really written — are `scenarioReport`'s, re-read after
+// the entry landed.
+//
 // cch-w37-s6 moved it a fifth time: `operator-me-unreadable` — the first
 // fixture that can fail the /v1/me READ while keeping the account present, and
 // therefore the first one to reach meState()=="failed" at all — is the 104th
@@ -552,16 +562,24 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // hash:#operator)` and this test exited 1 on 103/78 before the four numbers
 // below were RE-READ from `scenarioReport` (charter D413 — cch-w35-s4's brief
 // carried target numbers that were wrong; these are derived, never copied).
-test("the census reconciles: 104 scenarios, 25 distinct covered by 26 cells, 79 residue over 13 families", () => {
+// cch-w39-s1 moved it a SIXTH time: `billing-me-unreadable` — the first fixture
+// that fails the /v1/me read on a screen that makes a ROLE CLAIM (an owner told
+// "Only the team owner can manage billing.") — is the 105th scenario and the
+// 80th residue entry. It refused exactly as designed: the bare sweep exited 2
+// with `UNLISTED scenario "billing-me-unreadable" (family hash:#billing)` and
+// this test exited 1 on 104/79 before the four numbers below were RE-READ from
+// `scenarioReport` on THIS merge base (origin/main 9e39c60), never carried from
+// the brief.
+test("the census reconciles: 106 scenarios, 25 distinct covered by 26 cells, 81 residue over 13 families", () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 104);
+  assert.equal(r.total, 106);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 79, "79 is the RESIDUE, not the census");
+  assert.equal(r.residue, 81, "81 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 79, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 81, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

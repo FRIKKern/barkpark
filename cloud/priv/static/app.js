@@ -1676,7 +1676,24 @@
   // The always-live decommission action: it drives the console's own deprovision
   // (the existing Remove/DELETE path) and predates the capability conduit, so it
   // stays wired even when the payload is missing or claims decommission=false.
-  function decommissionAction(bp) {
+  // cch-w38-s1 — and it is the band's ONE console-executed write (D428 names it
+  // first of the seven elevated verbs), so it is the affordance the authority
+  // answer decides. grant → live, exactly as before. refuse → the shipped
+  // disable-and-explain arm carrying the SERVER'S OWN sentence (the same bytes
+  // its 403 renders through friendly()), never hidden — this rail is a
+  // discoverable product capability, not a settings section, and GR33's
+  // never-a-disabled-ghost law is scoped to the latter (D428). unknown → the
+  // control is not offered and NOTHING is claimed: no reason, and the card
+  // states "Checking capabilities…" beside it.
+  function decommissionAction(bp, authority) {
+    if (authority === "refuse") {
+      return { verb: "decommission", label: "Decommission", mode: "disabled",
+        reason: FORBIDDEN_ROLE_COPY.admin, resourceName: lifecycleCliName(bp) };
+    }
+    if (authority === "unknown") {
+      return { verb: "decommission", label: "Decommission", mode: "disabled",
+        reason: "", resourceName: lifecycleCliName(bp) };
+    }
     return { verb: "decommission", label: "Decommission", mode: "live", resourceName: lifecycleCliName(bp) };
   }
 
@@ -1689,15 +1706,22 @@
   // A wired provider yields one action per verb: capability true → CLI affordance,
   // capability false → disabled with the SERVER-OWNED gap reason (never invented;
   // the server emits no default_gap, so an absent per-verb gap shows no reason).
-  function lifecycleActionsModel(capPayload, bp) {
+  // cch-w38-s1 — THE THIRD ARGUMENT IS THE AUTHORITY ANSWER, and it is the
+  // MODEL's business, not the DOM mount's: paintLifecycleActions and all seven
+  // write functions have zero __bpTestHook reach, so a rail predicated at the
+  // mount could not be represented in the harness at all. Absent (every one of
+  // the existing 2-arg call sites) it defaults to "grant" — byte-identical
+  // behaviour to the shipped model, which is what keeps this an ADD.
+  function lifecycleActionsModel(capPayload, bp, authority) {
     bp = bp || {};
+    authority = authority || "grant";
     var kind = bp.provider || "hetzner";
     var pill = lifecyclePill(bp);
-    var decommission = decommissionAction(bp);
+    var decommission = decommissionAction(bp, authority);
 
     if (capPayload === undefined) {
       return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
-        loading: true, retry: false, devTier: false, actions: [decommission] };
+        loading: true, retry: false, devTier: false, authority: authority, actions: [decommission] };
     }
 
     var providers = capPayload && typeof capPayload === "object" ? capPayload.providers : null;
@@ -1706,7 +1730,7 @@
 
     if (!entry || devTier) {
       return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
-        loading: false, retry: !devTier, devTier: devTier, actions: [decommission] };
+        loading: false, retry: !devTier, devTier: devTier, authority: authority, actions: [decommission] };
     }
 
     var caps = entry.capabilities || {};
@@ -1721,7 +1745,7 @@
       return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
     });
     return { kind: kind, provider: bp.provider || null, pill: pill, available: true,
-      loading: false, retry: false, devTier: false, actions: actions };
+      loading: false, retry: false, devTier: false, authority: authority, actions: actions };
   }
 
   // Pure optimistic-transition reducer for the live decommission: applies the
@@ -1784,9 +1808,15 @@
       '<span class="inst-life-dot" aria-hidden="true"></span>' +
       '<span class="inst-life-label">' + esc(model.pill.label) + "</span></span>";
 
+    // cch-w38-s1 — an UNKNOWN authority reuses the shipped checking grammar
+    // verbatim (no new copy, no new CSS): while /v1/me is in flight or failed
+    // we say we are still checking, which is true, instead of rendering a
+    // refusal we cannot prove. It is appended rather than substituted so a
+    // "Capabilities unavailable." + Retry state never loses its recovery.
+    var checking = '<span class="inst-life-note">Checking capabilities&hellip;</span>';
     var status = "";
     if (model.loading) {
-      status = '<span class="inst-life-note">Checking capabilities&hellip;</span>';
+      status = checking;
     } else if (!model.available) {
       status = '<span class="inst-life-note' + (model.retry ? " inst-life-note--warn" : "") + '">' +
         esc(model.devTier
@@ -1794,6 +1824,7 @@
           : "Capabilities unavailable.") + "</span>" +
         (model.retry ? '<button class="btn btn-ghost btn-sm" type="button" data-life-retry>Retry</button>' : "");
     }
+    if (!model.loading && model.authority === "unknown") status += checking;
 
     var actions = model.actions || [];
     // The disabled PAUSE verb moves to the foot as the server's own sentence
@@ -1804,7 +1835,11 @@
     var live = null;
     var gridRows = actions.filter(function (a) {
       if (!a) return false;
-      if (a.mode === "live") { live = a; return false; }
+      // cch-w38-s1: the destroy-tier slot is DECOMMISSION'S, whichever of the
+      // three states it is in — a refused or still-checking rail keeps the same
+      // anatomy (foot control + its sentence) instead of shuffling the verb up
+      // into the command grid when the answer changes.
+      if (a.mode === "live" || a.verb === "decommission") { live = a; return false; }
       if (a.verb === "pause" && a.mode === "disabled") { pausedGap = a; return false; }
       return true;
     }).map(lifecycleActionHtml).join("");
@@ -2715,19 +2750,40 @@
     });
   }
 
+  // cch-w39-s1 — the providers unknown arm, pure so its bytes are node-pinnable.
+  // providerRosterHtml's signature is NOT widened (8 test call sites pass
+  // booleans); the three-valuedness lives here and in the mount below.
+  function providerUnknownHtml(state) {
+    return meUnknownHtml(state,
+      "Until it answers we can't tell whether this account may connect or disconnect a provider, so nothing was connected and nothing was refused.");
+  }
+
   function renderProviderPage(list, canWrite) {
+    // cch-w39-s1 — fail-CLOSED, stated rather than assumed: an unloaded /v1/me
+    // can never produce a write affordance here no matter what the caller
+    // passed. loadProviders already computes providerCanWrite() (false while
+    // unknown), so this is belt-and-braces for every other call path.
+    var state = meState();
+    var write = state === "loaded" && !!canWrite;
     var roster = $("#provider-roster");
     if (roster) {
       roster.innerHTML = '<div class="set-section">' +
         '<h2 class="set-h">Connected providers</h2>' +
         '<p class="set-purpose">Credentials Barkpark uses to provision on your account, encrypted at rest and never shown again. ' +
           "We show when each was connected — not a live-validity check.</p>" +
-        providerRosterHtml(list, canWrite) + "</div>";
-      if (canWrite) wireProviderDisconnect();
+        providerRosterHtml(list, write) + "</div>";
+      if (write) wireProviderDisconnect();
     }
     var connect = $("#provider-connect");
     if (connect) {
-      if (canWrite) renderConnectCard(list, null);
+      // The connect region is the WHOLE unknown arm's subtree (D444) — under an
+      // unknown role it holds the honest block and nothing else, so the Retry
+      // is never a sibling of a loaded connect card. A member (meState()
+      // "loaded", canWrite false) still gets the empty region, byte-unchanged.
+      if (state !== "loaded") {
+        connect.innerHTML = providerUnknownHtml(state);
+        wireMeRetry(connect, function () { renderProviderPage(list, providerCanWrite()); });
+      } else if (write) renderConnectCard(list, null);
       else connect.innerHTML = "";
     }
   }
@@ -3569,8 +3625,22 @@
   // The whole page: admin gets every section over the WHOLE team's log; a member
   // gets read-only email, the corrected admin-only notice (no save-rows, no write
   // affordances), and their OWN self-scoped delivery log.
+  // cch-w39-s1 — the notifications unknown arm. The MEMBER page is two claims,
+  // not one omission: "Only team admins can change these settings." on the
+  // email card and "managed by team admins" on the channels notice. Both are
+  // stated as fact from a read that may never have happened, so under an
+  // unknown role neither renders. What survives is the delivery log, which is
+  // self-scoped and is the person's own either way.
+  function notifMeUnknownHtml(state) {
+    return meUnknownHtml(state,
+      "Until it answers we can't tell whether this account may change notification settings, so nothing was changed and nothing was refused.");
+  }
+
   function notifPageHtml(s, opts) {
     opts = opts || {};
+    if (opts.state && opts.state !== "loaded") {
+      return notifMeUnknownHtml(opts.state) + notifDeliveriesShellHtml(true);
+    }
     if (!opts.canManage) {
       return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml() + notifDeliveriesShellHtml(true);
     }
@@ -3597,13 +3667,27 @@
     notifCache = s;
     var box = $("#notif-body");
     if (!box) return;
+    var meSt = meState();
     var canManage = notifCanManage();
     // A member reads the log SELF-SCOPED, and the channel axis is not offered in
     // that view — so drop any channel value a previous render left behind rather
     // than sending a filter the user can no longer see or clear.
     notifDeliverySelfScoped = !canManage;
     if (notifDeliverySelfScoped) notifDeliveryFilter.channel = null;
-    box.innerHTML = notifPageHtml(s, { canManage: canManage });
+    box.innerHTML = notifPageHtml(s, { canManage: canManage, state: meSt });
+
+    // cch-w39-s1 — the unknown arm's own wiring, ahead of every role branch
+    // below. The header's test-email action is a MUTATION, so it stays hidden
+    // (fail-closed); the delivery log is self-scoped and mounts exactly as it
+    // does for a member; and the Retry is the only control on the page.
+    if (meSt !== "loaded") {
+      var testBtn0 = $("#notif-test");
+      if (testBtn0) testBtn0.hidden = true;
+      wireMeRetry(box, function () { renderNotifications(s); });
+      wireNotifDeliveryFilters();
+      loadNotifDeliveries();
+      return;
+    }
 
     // The header "Send test email" action is admin-only (email test is a mutation).
     var testBtn = $("#notif-test");
@@ -4030,7 +4114,12 @@
     // the server caps an unproven actor at read, so that is what would be minted.
     var note = failed
       ? "Your role didn't load, so we can't show which abilities you may pick. Retry in a moment — a token created now would be read-only."
-      : "Your role hasn't loaded yet. Reopen this in a moment to pick abilities — a token created now would be read-only.";
+      // REVIEW (cch-w39-s1-r): this arm used to say "Reopen this in a moment",
+      // which was the only exit the sheet had. This slice gives it a Retry, so
+      // that instruction now points past the control sitting directly below it.
+      // Re-pointed at the mechanism that exists — the failed arm's shipped verb,
+      // not a newly authored next step (charter D438).
+      : "Your role hasn't loaded yet. Retry in a moment to pick abilities — a token created now would be read-only.";
     return '<div class="field"><span class="label">Abilities</span>' +
       '<div class="set-check-list">' +
         '<div class="set-check set-check--scope" id="token-scope-unknown" data-me-state="' + esc(state) + '">' +
@@ -4038,6 +4127,13 @@
           '<span class="set-check-sub">' + esc(sub) + "</span></span></div>" +
       "</div>" +
       '<p class="field-hint dim" id="token-unknown-note">' + esc(note) + "</p>" +
+      // cch-w39-s1 — the note above has said "Retry in a moment" since
+      // cch-w36-s3 with NOTHING on the sheet to press: the copy promised an
+      // exit the surface did not have, which is D438's inversion in its purest
+      // form. Same control every other unknown arm uses; no correctness change
+      // here, because the picker already branches on meState() first and the
+      // unknown arm renders zero checkboxes.
+      meRetryHtml() +
       "</div>";
   }
 
@@ -4103,6 +4199,17 @@
         });
       });
     }
+    // cch-w39-s1 — the unknown picker's Retry, and the modal is its own seam:
+    // loadMe has no re-entry for a transient sheet, deliberately. Re-opening
+    // rebuilds the picker from the answer that just landed (checkboxes AND the
+    // exclusivity wiring, which a partial repaint would have dropped) and
+    // carries the typed name across, so the press costs nothing already given.
+    wireMeRetry($("#modal-body"), function () {
+      var typed = (($("#token-name") || {}).value) || "";
+      openTokenModal();
+      var again = $("#token-name");
+      if (again) { again.value = typed; }
+    }, false);
     $("#token-submit").addEventListener("click", submitToken);
     $("#token-name").focus();
   }
@@ -5221,8 +5328,16 @@
     var activeId = (meCache && meCache.team && meCache.team.id) || "";
     var q = ((($("#team-menu-q") || {}).value) || "").toLowerCase();
 
+    // cch-w39-s1 — this used to be `if (!meCache)`, a TWO-valued read that
+    // rendered "Loading teams…" for a /v1/me that had already failed. Nothing
+    // re-reads it, so the picker claimed to be loading for the rest of the
+    // session — a spinner that outlives its request. Three-valued now: loading
+    // still says loading, and a FAILED read says so and offers the exit.
     var body;
-    if (!meCache) {
+    var meSt = meState();
+    if (meSt === "failed") {
+      body = '<div class="team-empty">' + esc(meFailureCopy()) + "</div>" + meRetryHtml();
+    } else if (meSt === "loading") {
       body = '<div class="team-empty">Loading teams…</div>';
     } else {
       var shown = teams.filter(function (t) {
@@ -5251,6 +5366,10 @@
       '<span class="team-avatar" aria-hidden="true">+</span>' +
       '<span class="team-name">Create team<span class="team-sub">Collaborate in a shared workspace</span></span>' +
       "</button>";
+
+    // cch-w39-s1 — the picker is an open/close surface loadMe has no repaint
+    // seam for, so its retry repaints on both outcomes (see wireMeRetry).
+    wireMeRetry(menu, renderTeamMenu, false);
 
     var q0 = $("#team-menu-q");
     if (q0) q0.addEventListener("input", function () {
@@ -6109,18 +6228,19 @@
     return "";
   }
 
-  // cch-w42-s1: the onboarding write gate now READS the authority the server
-  // states (teamAuthorityState) instead of re-deriving it from role literals.
-  // Still boolean — "grant" is the only true, so loading/failed/stale all fail
+  // cch-w42-s1: the onboarding write gate READS the authority the server states
+  // (teamAuthorityState) instead of re-deriving it from role literals. Still
+  // boolean — "grant" is the only true, so loading/failed/stale/refuse all fail
   // closed exactly as the old meCache-falsy read did.
+  //
+  // cch-w43-s1: the pre-wave-42 role-literal floor beneath this is GONE. It
+  // existed for a control plane that did not yet send team_authority — but
+  // /v1/me has sent it since wave 41 (router.ex, the `team_authority:` key of
+  // the /v1/me response map), and the preview corpus now mints it too, so the
+  // floor's only remaining job was to keep the corpus green while it lied. A
+  // fallback nothing real reaches is a fallback nothing can wrong-proof.
   function canManageOnboarding() {
-    var band = teamAuthorityState();
-    if (band !== "refuse") return band === "grant";
-    // A control plane that does not yet send team_authority answers "refuse"
-    // for every account, teamless or not, so the pre-wave-42 role read stays as
-    // the compatibility floor — never as an override of a stated refusal.
-    if (meCache && meCache.team_authority) return false;
-    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+    return teamAuthorityState() === "grant";
   }
   function firstStudioInstance(list) {
     for (var i = 0; i < (list || []).length; i++) if (attentionCanStudio(list[i])) return list[i];
@@ -6806,13 +6926,17 @@
     if (!box) return;
     // Frame 1: decommission is live from the first paint (it predates the
     // conduit), with a "checking capabilities" note — teardown is never absent.
-    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp));
+    // cch-w38-s1: the authority answer is read at PAINT time, both frames. At
+    // frame 1 /v1/me is usually already in (loadMe fires at shell boot, long
+    // before this route's capability read) — but when it is not, the rail says
+    // "checking", never "refused".
+    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp, instanceAdminAuthority()));
     api("GET", "/v1/providers/capabilities").then(function (r) {
       if (!box.isConnected && box.isConnected !== undefined) return; // navigated away
       // 404 (conduit not deployed yet) / 5xx / network → null → the honest
       // "capabilities unavailable" + Retry state, decommission still live.
       var payload = r && r.ok && r.data ? r.data : null;
-      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp));
+      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp, instanceAdminAuthority()));
     });
   }
 
@@ -6942,7 +7066,9 @@
       if (btn) { btn.disabled = false; btn.textContent = opts.force ? "Update anyway" : "Update"; }
       // Errors arrive as {error: {code}} — NOT the flat string friendly() reads.
       var c = updateConflict(r.data);
-      var copy = updateConflictCopy(c);
+      // cch-w38-s1: the raw envelope rides along so a gate refusal renders the
+      // SERVER's authority sentence instead of "Please try again in a moment."
+      var copy = updateConflictCopy(c, r.data);
       // Pin honesty: a pin conflict on a NON-forced call keeps the operator in a
       // modal that names the pin and offers the explicit force re-trigger.
       if (c.kind === "pinned" && !opts.force) {
@@ -7072,7 +7198,11 @@
         ? "That domain is already in use."
         : code === "already_attaching"
           ? "An attach is already running."
-          : r.status === 422
+          // cch-w38-s1: the 422 arm is about the DOMAIN, and `no_team` is not —
+          // require_primary_team_admin answers a teamless caller 422 {no_team},
+          // which used to be reported as bad domain syntax. It falls through to
+          // friendly(), which owns the sentence that actually repairs it.
+          : (r.status === 422 && code !== "no_team")
             ? "Only <name>.barkpark.cloud domains are supported for now."
             : friendly(r.data, "Something went wrong — please try again.");
       // textContent, not innerHTML — the literal "<name>" (and any echoed input)
@@ -7549,8 +7679,22 @@
   // a force re-trigger (forceLabel non-null); it always names the pin and carries
   // the charter's honest pin caveat. already_running/not_enabled/not_live are
   // terminal — no force.
-  function updateConflictCopy(c) {
+  // cch-w38-s1 — `data` is the OPTIONAL raw envelope, and it is a SIGNATURE
+  // growth on purpose: updateConflict's RETURN SHAPE must not gain a field
+  // (__app.test.mjs round-trips it through plain() and deepEquals the whole
+  // object — one extra key reds test 598). A gate refusal (403 forbidden / 422
+  // no_team) used to fall to the default arm's "Please try again in a moment.",
+  // which is a lie about a permanent refusal; friendly() on the identical bytes
+  // renders the server's own authority sentence.
+  function updateConflictCopy(c, data) {
     c = c || {};
+    if (c.kind === "other" && (c.code === "forbidden" || c.code === "no_team")) {
+      return {
+        title: "You can't update this instance",
+        body: friendly(data, c.code === "no_team" ? FORBIDDEN_REASON_COPY.no_team : FORBIDDEN_ROLE_COPY.admin),
+        forceLabel: null,
+      };
+    }
     if (c.kind === "pinned") {
       var at = c.pin ? " at " + vRel(c.pin) : "";
       return {
@@ -7595,19 +7739,33 @@
   // its config changes, so the modal's single recovery is Close. Transient ones
   // (already_running, instance_unreachable, instance_error, unknown) offer Try
   // again — for the unknown default, retrying is the honest safe bet. Pure.
+  // cch-w38-s1: a REFUSAL A RETRY CAN NEVER FIX IS TERMINAL. `forbidden` and
+  // `no_team` are decided by the caller's role, which no amount of Try again
+  // changes — offering one re-POSTs into a permanent 403 forever.
   function rollbackRefusalTerminal(code) {
     return code === "no_previous_slot" || code === "not_supported" ||
-      code === "not_enabled" || code === "feature_not_configured" || code === "not_live";
+      code === "not_enabled" || code === "feature_not_configured" || code === "not_live" ||
+      code === "forbidden" || code === "no_team";
   }
 
   // isu-w6: typed, honest copy for a rollback refusal. PURE — maps the charter's
-  // W6 refusal vocabulary (D23) to operator-facing title+body. Static strings only
-  // (no server free-text embedded), so nothing here can carry markup; `body` is the
-  // raw envelope, accepted for signature parity + future enrichment. NO force
+  // W6 refusal vocabulary (D23) to operator-facing title+body. Static strings only,
+  // with ONE cch-w38-s1 exception: the two AUTHORITY arms below run the envelope
+  // through friendly(), whose forbidden branch is length-bounded by
+  // FORBIDDEN_LABEL_RE — and the single consumer (ctl.fail → setText) writes
+  // textContent, never innerHTML, so nothing here can become markup either way.
+  // `body` was already the raw envelope, accepted for signature parity. NO force
   // affordance: unlike a pin conflict, a rollback refusal is always terminal.
   function rollbackConflictCopy(code, body) {
     body = body || {};
     switch (code) {
+      // cch-w38-s1: the two AUTHORITY refusals — the one place this mapper
+      // renders the envelope rather than a static string, because the sentence
+      // that repairs it (which role, or no team at all) is the server's own.
+      case "forbidden":
+        return { title: "You can't roll back this instance", body: friendly(body, FORBIDDEN_ROLE_COPY.admin) };
+      case "no_team":
+        return { title: "You can't roll back this instance", body: friendly(body, FORBIDDEN_REASON_COPY.no_team) };
       case "no_previous_slot":
         return {
           title: "Nothing to roll back to",
@@ -13537,6 +13695,18 @@
       return;
     }
 
+    // cch-w39-s1 — THE HEADLINE DEFECT, and it sat one line below this comment.
+    // billingIsOwner() is a TWO-valued read of a THREE-valued fact: with /v1/me
+    // in flight or FAILED it answers false, the arm below fires, and a genuine
+    // OWNER is told "Only the team owner can manage billing." — the console
+    // accusing someone of a role on the strength of an answer that never
+    // arrived, with nothing on the page to press. Browser-confirmed on main:
+    // meState()=="failed", role=null, the sentence visible, visibleRetryButtons
+    // empty. The unknown arm goes AHEAD of the refusal, and it is fail-CLOSED —
+    // it renders the same button-free plan card the member gets, hides the
+    // grid, and hides Cancel; the only control it adds is the Retry.
+    if (meState() !== "loaded") { renderBillingMeUnknown(box); return; }
+
     // GR36 plain-member law: a non-owner (admin OR member) sees the plan state
     // read-only with NO write CTA anywhere — never a disabled ghost. The honest
     // "Only the team owner can manage billing." copy lives in the Manage section.
@@ -13560,6 +13730,28 @@
     var grid = $("#billing-tiers");
     if (grid) grid.hidden = true;
     renderBillingManage(false);
+    renderBillingCancel(false);
+  }
+
+  // cch-w39-s1 — the UNKNOWN surface, which is NOT the member surface. It keeps
+  // everything the server actually told us (the plan card is /v1/subscription's
+  // truth, member-readable and role-free) and replaces the ROLE CLAIM — the
+  // Manage section's owner-gate sentence — with the honest unknown block. The
+  // whole region is the arm, so the Retry is never a sibling of loaded content
+  // (charter D444): #billing-manage holds the unknown block and nothing else,
+  // and the six plain-member expectations still render at meState()=="loaded",
+  // untouched.
+  function renderBillingMeUnknown(box) {
+    box.innerHTML = readOnlyPlanCardHtml(subCache);
+    var grid = $("#billing-tiers");
+    if (grid) grid.hidden = true;
+    showBillingSection("#billing-manage-section", true);
+    var body = $("#billing-manage");
+    if (body) {
+      body.innerHTML = meUnknownHtml(meState(),
+        "Until it answers we can't tell whether this account may manage billing, so nothing was changed and nothing was refused.");
+      wireMeRetry(body, renderBilling);
+    }
     renderBillingCancel(false);
   }
 
@@ -14060,11 +14252,100 @@
     return ta.admin ? "grant" : "refuse";
   }
 
+  // cch-w38-s1 — THE ONE AUTHORITY ANSWER THE INSTANCE BAND ASKS, AND IT IS
+  // THREE-VALUED. "grant" (the server will accept an admin-gated write on this
+  // team) · "refuse" (it will not, and a role grant is the remedy) · "unknown"
+  // (/v1/me has not answered, or FAILED — we have no business claiming either
+  // of the other two). Built on meState(), never on meCache's falsiness: a
+  // two-valued read of a three-valued fact is precisely the lie this wave
+  // exists to kill, and predicating seven click paths on one would have minted
+  // seven fresh copies of it.
+  //
+  // THE SERVER HAS TWO TEAM AXES AND THEY DIVERGE — read this before reusing
+  // the predicate anywhere else:
+  //   * /v1/teams/:id/*  (members, invitations) → Auth.require_team_role/3
+  //     gates the PATH team and IGNORES x-barkpark-team (auth.ex:365-393,
+  //     router.ex:10812-10815). Proven by a live probe: an admin pinned on team
+  //     A writing team B gets 403 {scope:"team"}; a member pinned on B writing
+  //     A gets 200.
+  //   * everything else → Auth.require_primary_team_admin/owner reads
+  //     :current_team, which resolve_team/2 fills FROM x-barkpark-team
+  //     (auth.ex:122-130, :405-421). Its NAME lies ("primary"); its BEHAVIOUR
+  //     agrees with meCache.
+  // Answering from meCache.role is correct for THIS band's routes because api()
+  // pins x-barkpark-team on every authed request INCLUDING /v1/me, and the team
+  // switcher does a full reload — so meCache.role IS the role on the team the
+  // write will be judged against. DO NOT extend this predicate to the members
+  // band: there the agreement is a coincidence held by one line inside
+  // membersContext() — re-derive it with:
+  //   grep -n 'function membersContext' cloud/priv/static/app.js
+  //
+  // @canonical capability:console-authority-predicate aka:role,canManage,isOwner,isAdmin,meCache.role
+  function instanceAdminAuthority() {
+    if (meState() !== "loaded") return "unknown";
+    return (meCache.role === "owner" || meCache.role === "admin") ? "grant" : "refuse";
+  }
+
   // Honest copy for the failed read, classified from the retained fault the
   // same way the subscription retry card classifies its own.
   function meFailureCopy() {
     var f = meErrorFault || {};
     return faultCopy(f.status || 0, f.data, "We couldn't check your account. Retry in a moment.", f.transport);
+  }
+
+  // cch-w39-s1 — THE ONE EXIT, and it is ONE control, not five. Every surface
+  // that branches on meState() renders this same block: the shipped headline,
+  // meFailureCopy() verbatim on the failed arm, a per-surface CONSEQUENCE
+  // sentence, and a single Retry. Nothing else is authored here — no next step
+  // ("check your connection", "ask your team owner") and no cause the read did
+  // not return, because a /v1/me that never answered reported no cause at all.
+  //
+  // WHY "loading" GETS THE EXIT TOO. api() (grep -n 'function api(') has no
+  // AbortController and no timeout, so a stalled /v1/me never settles: nothing
+  // ever flips meState() off "loading", and the sentence "Checking your
+  // account…" outlives the request that justified it. A spinner with no exit is
+  // the same lie as a refusal with no evidence, just politer.
+  function meUnknownHtml(state, consequence) {
+    var failed = state === "failed";
+    return '<div class="empty-state">' +
+      // The headline is a CONSTANT, emitted the same way operatorMeFailedHtml
+      // emits its own — esc() here would ship "We couldn&#39;t", which is the
+      // same words spelled differently on two surfaces.
+      "<h2>" + (failed ? "We couldn't check your account" : "Checking your account…") + "</h2>" +
+      (failed ? "<p>" + esc(meFailureCopy()) + "</p>" : "") +
+      '<p class="muted">' + esc(consequence) + "</p>" +
+      meRetryHtml() + "</div>";
+  }
+
+  // The retry itself, in the SHIPPED grammar (data-*-retry + .btn.btn-primary
+  // .btn-sm), which already has three instances on main: data-members-retry,
+  // data-env-retry and #9922's id="operator-me-retry". This is a fourth
+  // instance of a known idiom, not a new one — and it is the ONLY one the five
+  // unknown arms below use.
+  function meRetryHtml() {
+    return '<p><button class="btn btn-primary btn-sm" data-me-retry type="button">Retry</button></p>';
+  }
+
+  // #9922's merged re-entry shape, verbatim: loadMe's SUCCESS arm re-enters the
+  // view's own loader itself, its failure arm deliberately does not — so
+  // repaint here ONLY when the read still did not land, or the surface paints
+  // twice. The button disables on click so the press has an answer immediately;
+  // whichever path wins replaces the node, so it is never re-enabled in place.
+  // `selfHealing` (default true) says loadMe's OWN arms repaint this surface
+  // when the read lands, so re-entering on success would paint it twice. Pass
+  // false for a surface loadMe has no seam for — the token modal is transient
+  // and deliberately has none, and there the retry must repaint on BOTH
+  // outcomes or a successful read leaves the stale unknown picker on screen,
+  // which is the exact lie this slice exists to kill.
+  function wireMeRetry(root, repaint, selfHealing) {
+    var btn = root && root.querySelector ? root.querySelector("[data-me-retry]") : null;
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      loadMe().then(function () {
+        if (selfHealing === false || meState() !== "loaded") repaint();
+      });
+    });
   }
 
   function setAccountChip(team, email) {
@@ -14131,6 +14412,12 @@
           paintActivityFilters();
           ensureActivityActors();
         }
+        // cch-w39-s1 — the fourth and fifth twins. Providers and Notifications
+        // BOTH decide their write affordances from meCache's role and NEITHER
+        // was repainted here, so a promotion (or a demotion) on those two
+        // screens was invisible until a full page reload.
+        if (currentView() === "providers") loadProviders();
+        if (currentView() === "notifications") loadNotifications();
       } else {
         // cch-w36-s3 — THE MISSING ELSE, and it was the whole defect. api()
         // ends in a .catch returning {ok:false,status:0,…}, so this promise
@@ -14163,6 +14450,14 @@
         // zero /v1/operator/* routes, grants nothing, and the sidebar entry
         // above stays hidden.
         if (currentView() === "operator") loadOperator();
+        // cch-w39-s1 — the same two seams on the arm that needs them MORE. A
+        // failed /v1/me is terminal (nothing re-reads it), so without these a
+        // deep-linked #providers / #notifications kept whatever it painted
+        // while me was unknown, with no exit on the page. Re-entering is
+        // fail-CLOSED: meState() is "failed", so both loaders take their
+        // unknown arm — zero write affordances, one Retry.
+        if (currentView() === "providers") loadProviders();
+        if (currentView() === "notifications") loadNotifications();
       }
     });
   }
@@ -18140,7 +18435,15 @@
     var ta = me.team_authority;
     return {
       teamId: me.team.id,
-      role: (ta && ta.role) || me.role || "member", // ta.role is authoritative; the fallback is the pre-wave-42 wire
+      // cch-w43-s1: `|| me.role` is gone. `grant` requires a non-nil ta by
+      // construction; `refuse` does NOT (a teamless account refuses with ta
+      // nil), but the `me.team && me.team.id` guard above already returned
+      // null for exactly that account — /v1/me builds `team_authority` from
+      // the same resolved team as `team:`, so a present team and a nil
+      // authority is not a shape the route can send. The envelope's role
+      // string therefore no longer speaks for the server's resolved authority,
+      // and "member" is the fail-closed floor for a ta that names no role.
+      role: (ta && ta.role) || "member",
       userId: me.user && me.user.id,
     };
   }
@@ -20660,6 +20963,7 @@
       // renderProviderPage / renderConnectCard / disconnectProvider /
       // loadCapabilityMatrix) are browser-verified.
       providerDisplayName: providerDisplayName, providerRosterHtml: providerRosterHtml,
+      providerUnknownHtml: providerUnknownHtml,
       providerConnectModel: providerConnectModel, providerConnectCardHtml: providerConnectCardHtml,
       providerIsConnected: providerIsConnected,
       // cch wave 13 — WHICH cloud account a connection points at, shown before a
@@ -20674,6 +20978,16 @@
       lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,
+      // cch-w38-s1: the ONE canonical three-valued authority read, exported
+      // because the rail's mount and all seven elevated write functions have
+      // zero hook reach — a positive control written against the other exports
+      // cannot represent a member at all.
+      instanceAdminAuthority: instanceAdminAuthority,
+      // cch-w38-s1: attachDomain had ZERO assertions in the harness, and its
+      // 422 arm was telling a TEAMLESS caller their domain syntax was wrong.
+      // Impure (it fetches and paints its inline error), driven the same way
+      // loadMembers/loadEnvVars are.
+      attachDomain: attachDomain,
       lifecycleOptimistic: lifecycleOptimistic, lifecycleVerbs: LIFECYCLE_VERBS.map(function (v) { return v.verb; }),
       // isu-w5 console operator update panel: the per-instance update-truth
       // derivations + the 409 pin-force flow + the fleet rollout banner. All pure
@@ -21019,6 +21333,8 @@
       // state is DISTINGUISHABLE from the cold one — on origin/main both are
       // {role:null, loaded:false, error:false}.
       loadMe: loadMe, clearMe: clearMe, meState: meState, meFailureCopy: meFailureCopy,
+      // cch-w39-s1 — the one shared unknown block + the one shared retry.
+      meUnknownHtml: meUnknownHtml, meRetryHtml: meRetryHtml,
       // cch-w37-s6 — the Operator console's FAILED-me body. Pure, so the node
       // harness can pin its bytes; the reachability proof (that a real 500 on
       // /v1/me actually lands here) belongs to smoke's operator-me-unreadable
@@ -21185,6 +21501,7 @@
         .map(function (s) { return s.value; })
         .filter(function (v) { return v != null; }),
       notifMemberAdminNoticeHtml: notifMemberAdminNoticeHtml, notifPageHtml: notifPageHtml,
+      notifMeUnknownHtml: notifMeUnknownHtml,
       // cch-w32-s1: the chat-test toast, pulled out of the fetch callback so the
       // zero-reach case is pinnable. `sendChatTest` was the surface that said
       // "Sent to slack." over a fan-out that reached nobody.
