@@ -165,7 +165,7 @@ func rollbackCell(s *string) string {
 func rollbackFail(out *writer, ref string, err error) int {
 	var re *cloudclient.RollbackError
 	if errors.As(err, &re) {
-		return useError(out, rollbackErrLabel(re.Code), rollbackMessage(ref, re), rollbackExit(re.HTTPStatus, re.Reason))
+		return useError(out, rollbackErrLabel(re.Code), rollbackMessage(ref, re), rollbackExit(re.HTTPStatus, re.Reason, re.Code))
 	}
 	return cloudFail(out, "roll instance back", err)
 }
@@ -184,8 +184,14 @@ func rollbackFail(out *writer, ref string, err error) int {
 // server-side re-classification of the STATUS must not silently change the exit a
 // caller has always seen for the same cause. Only a reason the CLI RECOGNISES may
 // override the status, so an unknown cause can never move an exit code.
-func rollbackExit(status int, reason string) int {
-	if reason == "no_team" {
+//
+// The cause is read from `reason` OR from the code itself — the SAME predicate
+// rollbackMessage/2 uses, and they must not diverge: a control plane that answers
+// 403 {"error":"no_team"} (the flat shape, code-as-cause at the new status) would
+// otherwise print the "run `bp team use`" sentence and exit 3 in the same breath,
+// telling the reader two different things about the same refusal.
+func rollbackExit(status int, reason, code string) int {
+	if reason == "no_team" || code == "no_team" {
 		return exitGeneric // 1 — the cause, not the status family
 	}
 	switch {

@@ -281,6 +281,11 @@ func TestRunCloudRollbackForbiddenNoTeam(t *testing.T) {
 	}{
 		{"pre-flip 422", 422, `{"error":"no_team"}`},
 		{"post-flip 403", 403, `{"error":"forbidden","reason":"no_team","scope":"team"}`},
+		// The third shape the flip could land in: the cause AS the code at the new
+		// status. Added at review — the message keyed on `re.Code` while the exit
+		// keyed only on `re.Reason`, so this body printed "run `bp team use`" and
+		// exited 3 (re-authenticate) in the same breath.
+		{"post-flip 403, cause as code", 403, `{"error":"no_team"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			newRollbackServer(t, tc.status, tc.body)
