@@ -18,7 +18,18 @@
 # at that head. This script does not replace it, wrap it, or edit it. Two things
 # genuinely did not exist anywhere in the tree, and they are all this adds:
 #   1. an absence that carries a DATE and a CLASS, so "how long" and "why" are
-#      answerable without a human reading the Actions tab;
+#      answerable without a human reading the Actions tab. The classes, and the
+#      DIFFERENT remedy each one implies:
+#        ZOMBIED         queued, attempt 1, jobs.total_count 0 — GitHub created
+#                        the run and never dispatched it. Re-dispatch.
+#        RERUN_DELETED   attempt >= 2 with no rendered check run. Re-run.
+#        NAME_NOT_IN_RUN the producing run COMPLETED and rendered no check run
+#                        under this name — a head predating the context, a
+#                        renamed job, a pruned aggregator. Rebase, or edit the
+#                        spec. Never re-dispatch; there is nothing to dispatch.
+#        NO_RUN          no run of the producing workflow on this head at all.
+#        UNCLASSIFIED(…) the census does not know, and says so rather than
+#                        picking the nearest label;
 #   2. a repo-wide queued-run enumeration that is PAGINATED and
 #      SERVER-FILTERED, so it can report a queue older than the last page.
 #
@@ -213,8 +224,16 @@ read_jobs_count() { # <run id>
     f="$(fixture "jobs-$id.json")" || { echo "-1"; return 0; }
     jq -r '.total_count // -1' "$f"
   else
-    out="$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq '.total_count' 2>&1)" \
-      && printf '%s\n' "$out" || echo "-1"
+    out="$(gh api "repos/$REPO/actions/runs/$id/jobs" --jq '.total_count' 2>&1)" || out=""
+    # A NON-NUMERIC answer is unreadable, not zero and not "some". `--jq
+    # .total_count` on a payload without the key prints `null`, and letting
+    # `null` fall through would classify a run whose job count nobody read as
+    # DISPATCHED_PENDING — the calm end of the scale, off a value that does not
+    # exist. -1 sends it to UNCLASSIFIED(jobs-unreadable) instead.
+    case "$out" in
+      ''|*[!0-9]*) echo "-1" ;;
+      *) printf '%s\n' "$out" ;;
+    esac
   fi
 }
 
@@ -329,6 +348,18 @@ census_head() { # <sha> <label>
               class="DISPATCHED_PENDING"
             fi
             ;;
+          # The producing run RAN TO COMPLETION on this head and still rendered
+          # no check run under this name. Review fix: this used to read
+          # UNCLASSIFIED(status=completed), which is the class the census emits
+          # when it does not know — and it does know. It is the dominant live
+          # class (3 of the 10 rows the first real run found), so leaving it
+          # unnamed made the census's own headline illegible, which is the
+          # disease and not the cure. It means the job did not exist under this
+          # name in that run: a head that predates a required context, a renamed
+          # job, or an aggregator pruned out of the graph. Every one of those is
+          # a real deadlock whose remedy is a rebase or a spec edit, never a
+          # re-dispatch — which is exactly why it must not wear ZOMBIED's name.
+          completed) class="NAME_NOT_IN_RUN" ;;
           *) class="UNCLASSIFIED(status=$status)" ;;
         esac
       fi
@@ -425,7 +456,13 @@ say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_RO
   exit 3
 }
 if [ "$ABSENT_ROWS" -gt 0 ] || [ "$STALE_ROWS" -gt 0 ]; then
-  warn "SCREAM: $ABSENT_ROWS required context(s) render nowhere, and $STALE_ROWS queued run(s) are older than ${STALE_QUEUE_HOURS}h. Neither shows up as a red check anywhere, which is why this exits non-zero."
+  # Only the limbs that actually fired. A verdict that recites "and 0 queued
+  # run(s)" beside a real finding reads like a template, and a template is what
+  # a human learns to stop reading.
+  FOUND=""
+  [ "$ABSENT_ROWS" -gt 0 ] && FOUND="$ABSENT_ROWS required context(s) render nowhere on an open head"
+  [ "$STALE_ROWS" -gt 0 ] && FOUND="${FOUND:+$FOUND, and }$STALE_ROWS queued run(s) older than ${STALE_QUEUE_HOURS}h"
+  warn "SCREAM: $FOUND. None of it shows up as a red check anywhere, which is why this exits non-zero."
   exit 1
 fi
 if [ "$UNKNOWN_ROWS" -gt 0 ]; then

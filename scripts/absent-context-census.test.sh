@@ -239,15 +239,58 @@ else
   bad "2.2 expected class NO_RUN at exit 1; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
-# The three classes must be genuinely different verdicts on inputs that differ
-# by ONE field, or the classifier is a label generator.
+# Review fix. THE DOMINANT LIVE CLASS, and it used to have no name. The first
+# real run of this census found ten absent contexts and three of them were a
+# producing run that RAN TO COMPLETION on the head and still rendered no check
+# run under that name — heads from July that predate a required context. They
+# came out `UNCLASSIFIED(status=completed)`, i.e. the census reporting that it
+# did not know, about the thing it knew most about. Different remedy from
+# ZOMBIED (rebase or edit the spec, never re-dispatch), so a different name.
+D2C="$(derive name-not-in-run)"
+drop_victim_checkrun "$D2C"
+OUT="$(run_census "$D2C")"; RC=$?
+if [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$' <<<"$OUT"; then
+  ok "2.4 a COMPLETED producing run that rendered no check run of that name ⇒ NAME_NOT_IN_RUN (exit 1)"
+else
+  bad "2.4 expected class NAME_NOT_IN_RUN at exit 1; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+# …and it must not be reachable from a status the census has NOT ruled on: the
+# named class is the `completed` arm alone, never a catch-all wearing a name.
+D2D="$(derive unnamed-status)"
+drop_victim_checkrun "$D2D"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "some_future_status" else . end]}' \
+  "$D2D/runs-$SHA.json" > "$D2D/.tmp" && mv "$D2D/.tmp" "$D2D/runs-$SHA.json"
+OUT="$(run_census "$D2D")"; RC=$?
+if grep -qE '^ +class +UNCLASSIFIED\(status=some_future_status\)$' <<<"$OUT"; then
+  ok "2.5 …and a status the census has never ruled on stays UNCLASSIFIED — the new name did not become a catch-all"
+else
+  bad "2.5 an unruled status was absorbed by a named class"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# A run whose job count cannot be read must NOT land in the calm class. Same
+# ZOMBIED tuple as 1.3, one thing removed: the jobs feed.
+D2E="$(derive jobs-unreadable)"
+drop_victim_checkrun "$D2E"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "queued" else . end]}' \
+  "$D2E/runs-$SHA.json" > "$D2E/.tmp" && mv "$D2E/.tmp" "$D2E/runs-$SHA.json"
+rm -f "$D2E/jobs-$VICTIM_RUN.json"
+OUT="$(run_census "$D2E")"; RC=$?
+if [ "$RC" = "1" ] && grep -qE '^ +class +UNCLASSIFIED\(jobs-unreadable\)$' <<<"$OUT"; then
+  ok "2.6 a queued run whose jobs feed cannot be read is UNCLASSIFIED(jobs-unreadable), never DISPATCHED_PENDING"
+else
+  bad "2.6 an unreadable jobs feed did not fail closed; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# The classes must be genuinely different verdicts on inputs that differ by ONE
+# field, or the classifier is a label generator.
 Z="$(run_census "$D1" | grep -E '^ +class ' | head -1)"
 R="$(run_census "$D2" | grep -E '^ +class ' | head -1)"
 N="$(run_census "$D3" | grep -E '^ +class ' | head -1)"
-if [ "$Z" != "$R" ] && [ "$R" != "$N" ] && [ "$Z" != "$N" ]; then
-  ok "2.3 the three classes are pairwise DISTINCT on inputs differing by one field:$(printf ' [%s]' "${Z//class/}" "${R//class/}" "${N//class/}" | tr -s ' ')"
+C="$(run_census "$D2C" | grep -E '^ +class ' | head -1)"
+if [ "$(printf '%s\n%s\n%s\n%s\n' "$Z" "$R" "$N" "$C" | sort -u | grep -c .)" = "4" ]; then
+  ok "2.3 the four classes are pairwise DISTINCT on inputs differing by one field:$(printf ' [%s]' "${Z//class/}" "${R//class/}" "${N//class/}" "${C//class/}" | tr -s ' ')"
 else
-  bad "2.3 two classes collapsed: [$Z] [$R] [$N]"
+  bad "2.3 two classes collapsed: [$Z] [$R] [$N] [$C]"
 fi
 
 # ═══ 3. MUTATION, DIRECTION TWO — a rendered PENDING check is NOT absent ═════
