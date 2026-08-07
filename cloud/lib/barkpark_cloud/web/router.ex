@@ -7159,8 +7159,17 @@ defmodule BarkparkCloud.Web.Router do
 
             case Webhooks.InboundSignature.verify(raw, sig, [secret]) do
               :ok ->
+                # THE PUBLISH INSTANT (deploy-reliability D162). Stamped HERE, before
+                # the enqueue, because the enqueue's own clock is ≥60s late (D44) and
+                # is ABSENT entirely when the rebuild coalesces. This row is the only
+                # record of a publish that mints no deployment. Best-effort by
+                # construction: `record_content_publish/2` swallows everything, so
+                # the 202 below is byte-identical whether or not it landed.
+                publish = record_content_publish(site, raw)
+
                 # Debounced (charter D44): N publishes in the window = ONE rebuild.
-                _ = Sites.AutoDeployWorker.enqueue(site.id)
+                enqueue_result = Sites.AutoDeployWorker.enqueue(site.id)
+                _ = Registry.ContentPublish.mark_enqueued(publish, enqueue_result)
                 json(conn, 202, %{ok: true, trigger: "content-auto"})
 
               {:error, _reason} ->
@@ -12311,6 +12320,58 @@ defmodule BarkparkCloud.Web.Router do
         end
     end
   end
+
+  # The publish-instant recorder for the verified arm of the content-publish
+  # receiver (deploy-reliability D162). Returns the row, or nil when the write did
+  # not land — the CALLER MUST NOT CARE, and the 202 must not: a telemetry row that
+  # can fail a delivery is worse than no row, because the box would then retry a
+  # publish the control plane in fact accepted.
+  #
+  # Registry.ContentPublish.record/3 is itself total (it rescues), so this is a
+  # `case` over values rather than a second try/rescue — one guard, in the module
+  # that owns the write, is easier to reason about than two half-guards. It logs at
+  # warning: the row going missing is a real hole in the fleet's only publish clock,
+  # just not one worth failing a webhook over.
+  #
+  # `doc_type` is ECHOED from the delivery payload's `type` (the box's
+  # Webhooks.Dispatcher.build_payload/6 shape) and is nil for any body that does not
+  # carry a string there — an unparseable or type-less delivery records an unknown
+  # doc type, never an invented one.
+  defp record_content_publish(site, raw_body) do
+    case Registry.ContentPublish.record(site.id, DateTime.utc_now(), %{
+           doc_type: payload_doc_type(raw_body)
+         }) do
+      {:ok, publish} ->
+        publish
+
+      {:error, reason} ->
+        Logger.warning(
+          "content_publish record failed site=#{site.id} reason=#{inspect(reason)} " <>
+            "(delivery still accepted)"
+        )
+
+        nil
+    end
+  end
+
+  # An over-long `type` must cost the DOC TYPE, never the INSTANT. The changeset's
+  # `validate_length(:doc_type, max: 255)` rejects the whole row, so a payload with
+  # an absurd type would silently delete the one thing this table exists to record.
+  # Refuse the field here instead: an unknown doc type reads as unknown (NULL),
+  # which is the module's own doctrine, and the publish clock still gets its row.
+  @doc_type_max 255
+
+  defp payload_doc_type(raw_body) when is_binary(raw_body) do
+    case Jason.decode(raw_body) do
+      {:ok, %{"type" => type}} when is_binary(type) ->
+        if String.length(type) <= @doc_type_max, do: type, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp payload_doc_type(_raw_body), do: nil
 
   # The verified-push branch of POST /v1/webhooks/github/:site_id. By this point
   # the HMAC has passed; we still 200 (not 4xx) on non-push events and ignored
