@@ -2192,6 +2192,18 @@ export const SCENARIOS = {
     deepLink: "#overview",
     data: { me: me("Ada's Lab"), barkparks: [], subscription: trialSub, sites: [], audit: [] },
   },
+  "overview-member-empty-fleet": {
+    label: "A plain member on a ZERO-instance team — the welcome runway refuses UP-FRONT instead of selling a launch the server 403s",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Ada's Lab", {}, "member", "usr_rex"),
+      barkparks: [],
+      subscription: trialSub,
+      sites: [],
+      audit: [],
+    },
+  },
   "mixed-fleet": {
     label: "A real estate — live, provisioning, failed, suspended + sites & activity",
     authed: true,
@@ -2355,6 +2367,25 @@ export const SCENARIOS = {
     deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteDeploys, blogSite],
+      audit: [],
+      deployments: rollbackDeployments,
+    },
+  },
+  // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before
+  // this key existed: all twelve `#site/` scenarios carried the default owner
+  // actor, so no instrument had ever rendered the site layer for a member —
+  // every member-fence claim about this screen was a claim about a screen the
+  // corpus could not paint. Same fixtures as `rollback` (no new data), one
+  // moved axis: role.
+  "site-member": {
+    label: "Site detail as a plain member — the deploy history and its member-legal controls, on the one screen no member fixture had ever entered",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member", "usr_rex"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [webSiteDeploys, blogSite],
@@ -3791,6 +3822,22 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
       providers: connectedProviders,
       capabilities: settingsProviderCapabilities,
+      // cch-w48-s6 — A CONSOLE-SIDE FIXTURE, and it is NOT "the state the
+      // server sends". This is the knowing EXCEPTION to cch-w43-s1's rule that
+      // the corpus mints the envelope the server mints, and it is cited here
+      // rather than left implicit: the live control plane CANNOT mint
+      // connected:true. `record_installation/2` has one caller and that caller
+      // 503s without GitHub App credentials, and the running control plane
+      // carries ZERO ^GITHUB env — so on the deployed system this endpoint
+      // answers the not-configured arm, always. The shape below is read off
+      // app.js's own reader (`renderGithub`: connected / account_login /
+      // configured / install_url — no secret), which is the contract this
+      // fixture is FOR: arm 1 of renderGithub had never been painted by ANY
+      // instrument, so every claim about what a member sees on the GitHub card
+      // was a claim about markup nothing rendered. It rides the EXISTING
+      // providers-member scenario, not a new key, so it moves zero typed
+      // integers — nothing in the census counts fixture keys.
+      github: { connected: true, account_login: "acme-engineering", configured: true },
     },
   },
   // ── G-04 notifications: the crown, states-complete ─────────────────────────
@@ -4854,6 +4901,21 @@ export function route(name, method, path, state) {
       return d.operatorDeliveries ? { status: 200, body: { deliveries: d.operatorDeliveries } } : forbidden;
     }
     return forbidden;
+  }
+
+  // cch-w48-s6 GITHUB — placed ABOVE the catch-all below on purpose: the
+  // catch-all answers `{}`, which renderGithub reads as the not-configured arm,
+  // and that is why arm 1 (connected) had never been painted. GATED ON THE
+  // FIXTURE so no scenario without a `github` fixture changes behaviour by one
+  // byte — the catch-all keeps serving them exactly what it served before.
+  // CONSOLE-SIDE, NOT SERVER TRUTH: see the fixture's own comment on
+  // `providers-member` — the deployed control plane has no GitHub App
+  // credentials and cannot answer connected:true. The DELETE arm exists so the
+  // Disconnect affordance has a wire to reach, not because a member may use it
+  // (cch-w48-s3 owns that fence).
+  if (p === "/v1/github/installation" && d.github) {
+    if (method === "DELETE") return { status: 200, body: { connected: false } };
+    if (method === "GET") return { status: 200, body: d.github };
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never

@@ -863,6 +863,52 @@ const EXPECTATIONS = {
     includes: ["runway-hero", "Launch your first Barkpark", "runway-sub"],
     excludes: ['class="fleet-row"'],
   },
+  // cch-w48-s6: the frame this epic's crown is named for, rendered for the first
+  // time. A member on a ZERO-instance team gets the welcome runway, and until
+  // cch-w47-s1 that runway was a full launch form — a name field, two provider
+  // tabs and a submit — against `go_live`, which answers a plain member 403
+  // {required:"admin"} BEFORE it ever reaches the entitlement check. This is the
+  // corpus proof of that fix: the refusal card is what renders, and the form is
+  // GONE rather than merely disabled (a disabled submit leaves three live
+  // controls still selling the refusal).
+  "overview-member-empty-fleet": {
+    what: "a member with no instances is REFUSED up front, in the server's own words — the launch form is withheld, not disabled",
+    container: "overview-body",
+    includes: [
+      "empty-state",
+      "You can&#39;t launch for this team",
+      "Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role.",
+    ],
+    // The whole form, named control by control — the name field, the provider
+    // seg-buttons and the submit. `launch-form` alone would go green on a form
+    // that lost only its wrapper class.
+    excludes: [
+      "launch-form",
+      "launch-flow-name-",
+      "seg-btn",
+      'type="submit"',
+      "Create your first Barkpark",
+    ],
+  },
+  // cch-w48-s6: the site layer, entered by a MEMBER for the first time. This is
+  // the PAIRED POSITIVE CONTROL — it asserts what a member legitimately keeps,
+  // so the fences cch-w48-s2/s3 draw around this screen cannot be satisfied by
+  // an empty page. It deliberately says NOTHING about `#site-github`: s2 omits
+  // that control for a member, and an expectation pinning today's unfenced
+  // render would freeze the defect into the baseline.
+  "site-member": {
+    what: "a member on the site screen keeps every member-legal control — deploy, rollback, promote rows, env",
+    container: "site-body",
+    includes: [
+      'id="site-deploy"',
+      'id="site-rollback"',
+      'data-kind="redeploy"',
+      'data-kind="rollback"',
+      ">Roll back to this<",
+      'id="site-env-edit"',
+      "dep-current",
+    ],
+  },
   "loggedout-invited": {
     what: "the sign-in banner announcing the parked invitation",
     check(reg) {
@@ -2293,6 +2339,18 @@ const EXPECTATIONS = {
       assert.ok(!connect.includes("set-section"), "the connect region is empty for a member");
       const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
       assert.ok(matrix.includes("cap-matrix"), "the honest matrix still renders read-only for a member");
+      // cch-w48-s6: the GitHub card, arm 1. Before this fixture every scenario
+      // fell through to the /v1/ catch-all's `{}`, which renderGithub reads as
+      // the NOT-CONFIGURED arm — so the connected arm had never been painted by
+      // any instrument and nothing could be asserted about it, true or false.
+      // WHAT IS DELIBERATELY NOT ASSERTED: `#github-disconnect`. That control is
+      // cch-w48-s3's fence, and pinning its presence here would freeze today's
+      // unfenced render into the baseline and force a second edit to delete it.
+      const gh = (reg.get("github-card") || {}).innerHTML || "";
+      assert.ok(gh.includes("acme-engineering"), "the connected account is named — the card reports WHICH GitHub account, never a bare 'connected'");
+      assert.ok(gh.includes("Connected"), "the connected arm renders at all (arm 1 of renderGithub)");
+      assert.ok(!gh.includes("Loading GitHub"), "an ANSWERED /v1/github/installation is not a loading state");
+      assert.ok(!gh.includes("aren&#39;t configured"), "the fixture answers connected — the not-configured arm must NOT be what renders");
     },
   },
   // ── G-04 notifications (the crown): the settings-anatomy page ───────────────
