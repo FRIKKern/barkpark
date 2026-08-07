@@ -119,16 +119,20 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
 
   # One advance-notice alert. Rides the notifications system; `:trial_expiring`
   # is on the always-send allowlist (it still honours a team's global mute).
+  #
+  # cch-w42-s6: this used to compose the whole sentence here, as `:detail`, and
+  # it ended "Upgrade to keep your instance running" — an instruction only the
+  # team OWNER can follow, sent to every member, since the alert fan-out has no
+  # role predicate (by design: the teardown warning's reach must be maximal).
+  # A string authored HERE is authored per-TEAM, before any recipient exists, so
+  # no recipient-aware renderer could ever soften it. The payload now carries the
+  # FACTS — the day count and the team name — and both renderers compose their own
+  # body from them: `EventEmail` per recipient (owner keeps the imperative,
+  # everyone else gets the consequence plus who can act) and `Render` for chat,
+  # which has built the window from `:days` and prescribed nothing since
+  # cch-w32-s1.
   defp notify(team, _sub, days) do
-    detail =
-      "Your Barkpark free trial ends in #{days} #{if(days == 1, do: "day", else: "days")}. " <>
-        "Upgrade to keep your instance running — it's torn down automatically when the trial ends."
-
-    Notifications.dispatch_event(team, :trial_expiring, %{
-      days: days,
-      name: team.name,
-      detail: detail
-    })
+    Notifications.dispatch_event(team, :trial_expiring, %{days: days, name: team.name})
   end
 
   # Enqueue a deprovision through the EXISTING path for each of the team's boxes.

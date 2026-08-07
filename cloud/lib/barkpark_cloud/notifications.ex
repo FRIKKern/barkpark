@@ -464,8 +464,18 @@ defmodule BarkparkCloud.Notifications do
       # withhold row here has no recipient by construction — and charter D362
       # forbids inventing one (a synthetic address is a row claiming a person
       # was involved who was not). There is nobody the alert was withheld FROM.
+
+      # cch-w42-s6: the ROLE rides alongside the address so the body can name who
+      # may act. The recipient LIST is untouched — every member is still mailed.
+      roles = team_member_roles(settings.team_id)
+
       for recipient <- team_member_emails(settings.team_id) do
-        email = EventEmail.build(settings, event, payload, recipient)
+        email =
+          EventEmail.build(settings, event, payload, %{
+            email: recipient,
+            role: Map.get(roles, recipient)
+          })
+
         result = deliver_alert(settings, email)
         record_delivery(settings.team_id, recipient, Atom.to_string(event), "alert", result)
       end
@@ -1240,6 +1250,21 @@ defmodule BarkparkCloud.Notifications do
   # Recipients are ALWAYS the team's members — the exfiltration guard. Reads
   # through Accounts so the membership join stays in the identity context.
   defp team_member_emails(team_id), do: Accounts.list_team_member_emails(team_id)
+
+  # cch-w42-s6: what each of those addresses may DO on the team, as
+  # `%{email => role}`. Deliberately a SEPARATE read from the recipient list
+  # above: the audience is still exactly `list_team_member_emails/1` with no role
+  # predicate, so nothing here can narrow who is told. It only lets the renderer
+  # stop prescribing an owner-only remedy to someone the door would refuse.
+  #
+  # `Accounts.list_team_members/1` already selects the role — no new query shape,
+  # no migration. An address missing from this map (impossible today; both reads
+  # are the same join) renders as NOT an owner, which is the honest direction.
+  defp team_member_roles(team_id) do
+    team_id
+    |> Accounts.list_team_members()
+    |> Map.new(fn %{user: user, role: role} -> {user.email, role} end)
+  end
 
   ## ── Helpers ──────────────────────────────────────────────────────────────
 
