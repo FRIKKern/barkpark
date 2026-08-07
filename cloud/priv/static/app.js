@@ -3986,7 +3986,12 @@
     // the server caps an unproven actor at read, so that is what would be minted.
     var note = failed
       ? "Your role didn't load, so we can't show which abilities you may pick. Retry in a moment — a token created now would be read-only."
-      : "Your role hasn't loaded yet. Reopen this in a moment to pick abilities — a token created now would be read-only.";
+      // REVIEW (cch-w39-s1-r): this arm used to say "Reopen this in a moment",
+      // which was the only exit the sheet had. This slice gives it a Retry, so
+      // that instruction now points past the control sitting directly below it.
+      // Re-pointed at the mechanism that exists — the failed arm's shipped verb,
+      // not a newly authored next step (charter D438).
+      : "Your role hasn't loaded yet. Retry in a moment to pick abilities — a token created now would be read-only.";
     return '<div class="field"><span class="label">Abilities</span>' +
       '<div class="set-check-list">' +
         '<div class="set-check set-check--scope" id="token-scope-unknown" data-me-state="' + esc(state) + '">' +
