@@ -303,12 +303,38 @@ emit("agg_needs", ",".join(agg.get("needs", [])))
 coe = [n for n, j in jobs.items() if j.get("continue-on-error") is True]
 emit("coe_jobs", ",".join(sorted(coe)))
 emit("coe_in_needs", ",".join(sorted(set(coe) & set(agg.get("needs", [])))))
+# THE POST-VERDICT CATEGORY. Exactly one shape of blocking job legitimately
+# cannot live in `needs`: a reporter that runs AFTER the aggregator concluded,
+# to carry main's own red to a human. Wiring it in is not a trade-off, it is a
+# CYCLE (cloud-gate -> reporter -> cloud-gate) and GitHub refuses to load it.
+# A job is post-verdict iff ALL THREE hold:
+#   (1) needs == ["cloud-gate"] EXACTLY — so `needs` really is the cycle, not a
+#       choice somebody declined to make;
+#   (2) its `if:` starts with an ANCHORED failure(). The loose \bfailure\(\)
+#       admits `success() || failure()` — a job that runs on EVERY GREEN
+#       wearing post-verdict clothes. The anchor is load-bearing;
+#   (3) it is NOT continue-on-error, so it keeps its own exit-1. That retained
+#       can-lose property is what the exemption is granted in exchange for; a
+#       muted reporter is named by post_verdict_muted below, never exempted.
+POST_VERDICT_IF = re.compile(r"^failure\(\)(\s|&|$)")
+def post_verdict_shape(j):
+    return (list(j.get("needs") or []) == ["cloud-gate"]
+            and bool(POST_VERDICT_IF.match(str(j.get("if", "")).strip())))
+post_verdict = {n for n, j in jobs.items()
+                if post_verdict_shape(j) and j.get("continue-on-error") is not True}
+post_verdict_muted = {n for n, j in jobs.items()
+                      if post_verdict_shape(j) and j.get("continue-on-error") is True}
+emit("post_verdict_jobs", ",".join(sorted(post_verdict)))
+emit("post_verdict_muted", ",".join(sorted(post_verdict_muted)))
 # …and the mirror hazard, which the allow-set cannot see: a BLOCKING job added
 # to cloud.yml but never wired into `needs`. The aggregator cannot judge a job
-# nobody told it about, so it would green while that job is red.
+# nobody told it about, so it would green while that job is red. Post-verdict
+# jobs are subtracted — they are judged by the pinned roster instead, which is
+# STRICTER than this set difference, not laxer.
 blocking = {n for n, j in jobs.items()
             if j.get("continue-on-error") is not True and n != "cloud-gate"}
-emit("blocking_not_in_needs", ",".join(sorted(blocking - set(agg.get("needs", [])))))
+emit("blocking_not_in_needs",
+     ",".join(sorted(blocking - set(agg.get("needs", [])) - post_verdict)))
 # D36 — THE OTHER HALF OF THAT GUARD. Reaching `needs` alone changes nothing:
 # `needs.<job>.result` is only consulted if the job is bound to a step env var
 # AND that var is passed to `decide`. So walk the whole chain per job —
@@ -373,6 +399,43 @@ PY
   assert_fact coe_jobs ""
   assert_fact coe_in_needs ""
   assert_fact blocking_not_in_needs ""
+  # THE POST-VERDICT ROSTER IS AN EXACT PIN, AND THAT DELIBERATELY DIVERGES
+  # FROM `assert_fact_min`'s "a lower bound, never an equality" convention two
+  # helpers up. Do NOT "fix" this into a _min bound: a lower bound is a blanket
+  # hole in BOTH directions. It passes a SMUGGLED second post-verdict-shaped
+  # job (a job that reaches `if: failure()` and is then exempt from every other
+  # structural check here), and it passes the reporter being DELETED (">= 1"
+  # cannot tell an empty roster from a full one once the bound is 0). Nothing
+  # else in this harness catches either — both are proven below. Adding a
+  # second post-verdict job is supposed to cost a human naming it right here.
+  #
+  # TRANSITIONAL: "" is in the roster only because PR #10155, which adds
+  # report-main-failure, has not merged yet. The PR that merges it must drop
+  # the "" alternative, at which point deleting the reporter reds the ratchet
+  # directly instead of only in the mutation matrix below.
+  #
+  # ONE ENCODING OF THE ROSTER, consulted by the live assertion below AND by the
+  # mutation matrix's pin_reds. It used to be written twice, and the second copy
+  # drifted immediately: the matrix printed "the exact pin REDS it" for the
+  # DELETED mutant while the shipped pin, carrying the transitional "", happily
+  # accepted it. A ratchet that reports catching what it does not catch is the
+  # exact lie this harness exists to refuse, so the roster is a function and
+  # there is nothing left to keep in sync.
+  post_verdict_roster_ok() {
+    case "$1" in
+      "" | "report-main-failure") return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  if post_verdict_roster_ok "$(fact post_verdict_jobs)"; then
+    ok "post_verdict_jobs = '$(fact post_verdict_jobs)' (inside the pinned roster)"
+  else
+    no "post_verdict_jobs = '$(fact post_verdict_jobs)' — outside the pinned roster {report-main-failure}"
+  fi
+  # A post-verdict job that mutes its own exit-1 has spent the exemption's
+  # price without paying it. Named as its own fact so it cannot hide inside
+  # `coe_jobs` if that assertion is ever relaxed.
+  assert_fact post_verdict_muted ""
   assert_fact needs_without_decide ""
   assert_fact_min needs_count 4
   assert_fact_min needs_results_count 4
@@ -451,6 +514,117 @@ PY
     ok "  mutation[paths]: a restored workflow-level paths filter is DETECTED"
   else
     no "  mutation[paths]: the workflow_paths fact does not fire — it proves nothing"
+  fi
+
+  # ── post-verdict mutation matrix ──────────────────────────────────────────
+  # The exemption above is worth exactly as much as its ability to REFUSE. Nine
+  # copies of the REAL cloud.yml, one per way a job can wear post-verdict
+  # clothes without being one.
+  PVMUT="$TMPROOT/mutate-cloud-postverdict.py"
+  cat >"$PVMUT" <<'PY'
+import sys, yaml
+src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+wf = yaml.safe_load(open(src))
+jobs = wf["jobs"]
+assert mode in ("clean", "reporter", "coe", "always", "loose", "extra-needs",
+                "ordinary", "smuggled", "deleted"), mode   # a typo'd mode is not a pass
+def reporter():
+    # PR #10155's job, reproduced in shape: needs the aggregator, anchored
+    # failure(), main-only, no continue-on-error.
+    return {"name": "Report main-push failure to a human",
+            "needs": ["cloud-gate"],
+            "if": "failure() && github.ref == 'refs/heads/main'",
+            "runs-on": "ubuntu-latest",
+            "steps": [{"run": "bash scripts/file-ci-failure-issue.sh"}]}
+# Every mutant starts from the SAME base — the real cloud.yml with any reporter
+# removed — so these expectations hold whether or not #10155 has merged. The
+# matrix must not change meaning the day the tree it reads gains the job.
+jobs.pop("report-main-failure", None)
+if mode not in ("clean", "deleted"):
+    jobs["report-main-failure"] = reporter()
+r = jobs.get("report-main-failure")
+if mode == "coe":
+    r["continue-on-error"] = True                       # mutes its own exit-1
+elif mode == "always":
+    r["if"] = "always() && github.ref == 'refs/heads/main'"
+elif mode == "loose":
+    r["if"] = "(success() || failure()) && github.ref == 'refs/heads/main'"
+elif mode == "extra-needs":
+    r["needs"] = ["cloud-gate", "changes"]              # no longer a pure cycle
+elif mode == "ordinary":
+    jobs["ordinary-lint"] = {"runs-on": "ubuntu-latest",
+                             "steps": [{"run": "exit 1"}]}
+elif mode == "smuggled":
+    jobs["sneaky-lint"] = reporter()                    # a second post-verdict shape
+# `deleted` is the #10155 shape with the reporter taken back out — byte-identical
+# to `clean`, which is exactly the point: nothing in the FILE distinguishes "no
+# reporter yet" from "the reporter was removed", so only the pinned roster can.
+yaml.safe_dump(wf, open(dst, "w"))
+PY
+  # pv <mode> <post_verdict_jobs> <post_verdict_muted> <blocking_not_in_needs>
+  pv() {
+    local mode="$1" f="$TMPROOT/pv-$1.yml" ff="$TMPROOT/pv-$1.facts" key want got
+    python3 "$PVMUT" "$WF" "$f" "$mode"
+    python3 "$EMIT" "$f" "$ff"
+    for key in post_verdict_jobs post_verdict_muted blocking_not_in_needs; do
+      case "$key" in
+        post_verdict_jobs) want="$2" ;;
+        post_verdict_muted) want="$3" ;;
+        *) want="$4" ;;
+      esac
+      got="$(sed -n "s|^$key=||p" "$ff")"
+      if [ "$got" = "$want" ]; then
+        ok "  post-verdict[$mode]: $key = '$got'"
+      else
+        no "  post-verdict[$mode]: $key = '$got', wanted '$want'"
+      fi
+    done
+  }
+  pv clean       ""                    ""                    ""
+  pv reporter    "report-main-failure" ""                    ""
+  pv coe         ""                    "report-main-failure" ""
+  pv always      ""                    ""                    "report-main-failure"
+  pv loose       ""                    ""                    "report-main-failure"
+  pv extra-needs ""                    ""                    "report-main-failure"
+  pv ordinary    "report-main-failure" ""                    "ordinary-lint"
+  pv smuggled    "report-main-failure,sneaky-lint" ""        ""
+  pv deleted     ""                    ""                    ""
+  # The muted reporter reds TWICE: post_verdict_muted names it, and so does the
+  # `coe_jobs = ""` assertion above. Both, so relaxing either one alone leaves
+  # the escape closed.
+  if [ "$(sed -n 's|^coe_jobs=||p' "$TMPROOT/pv-coe.facts")" = "report-main-failure" ]; then
+    ok "  post-verdict[coe]: coe_jobs = report-main-failure — the SECOND red"
+  else
+    no "  post-verdict[coe]: coe_jobs did not name the muted reporter"
+  fi
+  # And the exactness of the pin, proven in both directions. A `_min`-style
+  # lower bound of 1 would PASS both of these — the smuggled job only adds a
+  # name, the deleted reporter only removes one — so only equality against the
+  # named roster reds them.
+  # pin_reds runs the mutant's fact through post_verdict_roster_ok — the SHIPPED
+  # roster, not a second copy of it — so it reports what this ratchet actually
+  # does on that tree, and cannot drift away from the assertion it describes.
+  pin_reds() {
+    local got
+    got="$(sed -n 's|^post_verdict_jobs=||p' "$TMPROOT/pv-$1.facts")"
+    if post_verdict_roster_ok "$got"; then
+      no "  post-verdict[$1]: the pin does NOT red it — post_verdict_jobs = '$got'"
+    else
+      ok "  post-verdict[$1]: the shipped roster REDS it (post_verdict_jobs = '$got')"
+    fi
+  }
+  pin_reds smuggled
+  # …and the DELETED mutant, which the shipped roster does NOT red today, because
+  # the transitional "" alternative is still in it. That is a real, currently-open
+  # hole and it is asserted as such rather than papered over: this harness used to
+  # claim it caught this case. It does not. The assertion is written so it FLIPS
+  # the day "" is dropped — at which point delete this block and add `pin_reds
+  # deleted` beside the smuggled one. Tracked as
+  # cch-w46-s4-followup-drop-empty-post-verdict-alternative.
+  if post_verdict_roster_ok "$(sed -n 's|^post_verdict_jobs=||p' "$TMPROOT/pv-deleted.facts")"; then
+    ok "  post-verdict[deleted]: KNOWN GAP — the transitional '' alternative accepts a deleted reporter (not a red)"
+  else
+    no "  post-verdict[deleted]: the roster now reds a deleted reporter — drop this block and use pin_reds deleted"
   fi
 fi
 echo
