@@ -285,7 +285,33 @@
       var proved = forbiddenEvidenceCopy(data);
       if (proved) return proved;
     }
-    if (key && ERRORS[key]) return ERRORS[key];
+    // cch-w37-s1 — THE EXACT ANSWER BEATS THE CURATED GENERIC.
+    //
+    // Two ERRORS keys carry no information: `invalid` ("That didn't work —
+    // check your input.") and `validation_failed` ("Please check the form and
+    // try again."). The router computes a per-field map and sends it as
+    // `details` on exactly those two slugs — and the curated map used to win
+    // first, so the client threw the answer away. 32 real details payloads
+    // built from the emitters' own changesets render as ONE distinct string
+    // today; there is no WORSE class, because nothing can lose information
+    // against a sentence that carries none.
+    //
+    // The fence is keyed on the SLUG SET by name, NEVER on an HTTP status —
+    // friendly() takes no status argument, and a status-422 rival was measured
+    // dead three times (charter D412). It fires ONLY when details is a
+    // non-empty object, so a bare `{error: "invalid"}` — which is what any
+    // un-upgraded emitter sends — still resolves to ERRORS.invalid
+    // byte-identically, and every other slug never reaches this branch.
+    // Neither key is deleted from ERRORS: the no-details path IS their path.
+    // An ARRAY details is excluded: Object.keys() on one yields "0", so the
+    // ladder below would render "0 has already been taken" — a worse sentence
+    // than the curated generic it unseated. Under main an array could only
+    // reach the ladder on an UNREGISTERED slug, so excluding it here keeps the
+    // fence from inventing that string on the two keys it newly routes.
+    var generic = (key === "invalid" || key === "validation_failed");
+    var hasDetails = !!data.details && typeof data.details === "object" &&
+      !Array.isArray(data.details) && Object.keys(data.details).length > 0;
+    if (key && ERRORS[key] && !(generic && hasDetails)) return ERRORS[key];
     if (data.details && typeof data.details === "object") {
       var first = Object.keys(data.details)[0];
       if (first) {
@@ -8369,6 +8395,23 @@
     return body;
   }
 
+  // cch-w37-s1 — Pure: the create-site error line. The router answers a failed
+  // create with `%{error: "invalid", details: <per-field map>}`, and this branch
+  // used to render `r.data.error` RAW — so the person reads the literal token
+  // `invalid` while the server holds the exact field that failed. friendly()
+  // now prefers those details, and the `known_templates` hint (the one thing
+  // the payload carries that friendly() cannot know) is kept as the suffix.
+  function siteCreateFailureCopy(r) {
+    var data = r && r.data;
+    // The caller's designed fallback keeps the old second choice: a payload
+    // that carries only a `message` still renders that message, and only a
+    // payload that says nothing at all falls to the status line.
+    var fallback = (data && typeof data.message === "string" && data.message) ||
+      ("create failed (" + ((r && r.status) || 0) + ")");
+    var known = data && data.known_templates;
+    return String(friendly(data, fallback)) + (known ? " \u2014 templates: " + known.join(", ") : "");
+  }
+
   function siteTemplateLabel(t) {
     if (t === "") return "Auto (framework default)";
     if (t === "search-starter") return "\u2605 Search Starter \u2014 flagship: live search + corpus graph + PortableDoc";
@@ -8455,9 +8498,7 @@
             loadInstanceSites(bp);
           }
         } else {
-          var msg = (r.data && (r.data.error || r.data.message)) || ("create failed (" + r.status + ")");
-          var known = r.data && r.data.known_templates;
-          errBox.textContent = String(msg) + (known ? " \u2014 templates: " + known.join(", ") : "");
+          errBox.textContent = siteCreateFailureCopy(r);
           errBox.hidden = false;
         }
       });
@@ -20363,6 +20404,8 @@
       // search-template W2 (D8): create-site modal pure helpers.
       siteKindFor: siteKindFor, siteTemplateOptions: siteTemplateOptions,
       siteCreateBody: siteCreateBody,
+      // cch-w37-s1 — the create-site error line (was a RAW `r.data.error` render).
+      siteCreateFailureCopy: siteCreateFailureCopy,
       // search-template W8: site theme-edit pure helpers.
       siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
       // cch-w10 — the OAuth landing gate. The fragment now carries a ONE-TIME

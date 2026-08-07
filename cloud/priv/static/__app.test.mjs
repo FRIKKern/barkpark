@@ -15378,6 +15378,90 @@ test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
+//
+// friendly() resolved the curated ERRORS map BEFORE it ever read data.details.
+// Two of those keys carry no information — `invalid` and `validation_failed` —
+// and they are precisely the two the router sends WITH a per-field map. So a
+// person who typed a taken slug read "That didn't work — check your input."
+// while the answer ("slug has already been taken") sat unread in the payload.
+//
+// THIS BLOCK IS THE POSITIVE CONTROL, and it exists because the rest of the
+// gate is BLIND to the fix: it scores 914/914 identical before and after. The
+// only shipped details assertion uses the UNREGISTERED slug "x", so it pins the
+// FALL-THROUGH and never the overwrite. Every assertion in the first test below
+// fails against unmodified main.
+//
+// The fence must be able to LOSE — the second test is the one that reds if it
+// widens: no details, empty details, and every non-generic slug keep main's
+// byte-identical copy.
+
+test("cch-w37-s1: a generic slug WITH details renders the field the server named", () => {
+  // The exact shape POST /v1/sites answers with (router.ex:6181).
+  assert.equal(hooks.friendly({ error: "invalid", details: { slug: ["has already been taken"] } }),
+    "slug has already been taken");
+  assert.equal(hooks.friendly({ error: "validation_failed", details: { name: ["can't be blank"] } }),
+    "name can't be blank");
+  // A caller fallback does NOT outrank the server's own answer.
+  assert.equal(hooks.friendly({ error: "invalid", details: { framework: ["is invalid"] } }, "Check the form and try again."),
+    "framework is invalid");
+  // Underscored field names are humanized by the details ladder, unchanged.
+  assert.equal(hooks.friendly({ error: "invalid", details: { doc_type: ["is invalid"] } }),
+    "doc type is invalid");
+  // A bare string value (not a changeset list) renders too.
+  assert.equal(hooks.friendly({ error: "invalid", details: { name: "is required" } }),
+    "name is required");
+});
+
+test("cch-w37-s1 THE FENCE CAN LOSE: no details, empty details, and non-generic slugs keep main's copy", () => {
+  const INVALID = "That didn't work — check your input.";
+  const VALIDATION = "Please check the form and try again.";
+  // The no-details path IS these two keys' path — neither is deleted from ERRORS.
+  assert.equal(hooks.friendly({ error: "invalid" }), INVALID);
+  assert.equal(hooks.friendly({ error: "validation_failed" }), VALIDATION);
+  assert.equal(hooks.friendly({ error: "invalid" }, "a caller fallback"), INVALID);
+  // details present but carrying nothing → the curated sentence, never "".
+  for (const empty of [{}, null, undefined, "not an object", 7, true]) {
+    assert.equal(hooks.friendly({ error: "invalid", details: empty }), INVALID,
+      "an empty or non-object details must not unseat the curated copy: " + JSON.stringify(empty));
+  }
+  // REVIEW (cch-w37 review): an ARRAY details keys to "0", so the ladder would
+  // render "0 has already been taken". It must not unseat the curated copy.
+  assert.equal(hooks.friendly({ error: "invalid", details: ["has already been taken"] }), INVALID,
+    "an array details must not unseat the curated copy — Object.keys() yields \"0\"");
+  // D412's three exclusions, rendered byte-identically WITH details attached.
+  assert.equal(hooks.friendly({ error: "password_invalid", details: { password: ["is too short"] } }),
+    "Password is too short (12+ characters).");
+  assert.equal(hooks.friendly({ error: "email_invalid", details: { email: ["is invalid"] } }),
+    "Enter a valid email address.");
+  assert.equal(hooks.inviteFailureCopy({ error: "already_invited", details: { email: ["has already been taken"] } }, 409),
+    "There's already a pending invitation for that address — revoke it first to re-send.");
+  // The fence is keyed on the SLUG SET by name, never on a status — no status
+  // reaches friendly() at all, and every other registered slug keeps its copy
+  // even when details rides along.
+  assert.equal(hooks.friendly.length, 2, "friendly() takes (data, fallback) — no status argument");
+  assert.equal(hooks.friendly({ error: "server_error", details: { name: ["can't be blank"] } }),
+    "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.");
+  assert.equal(hooks.friendly({ error: "forbidden", details: { name: ["can't be blank"] } }), FORBIDDEN_BILLING);
+});
+
+test("cch-w37-s1: creating a site stops rendering the bare token `invalid`", () => {
+  const f = hooks.siteCreateFailureCopy;
+  const taken = { ok: false, status: 422, data: { error: "invalid", details: { slug: ["has already been taken"] } } };
+  // The worst string in the epic: the person read the literal slug.
+  assert.equal(f(taken), "slug has already been taken");
+  assert.ok(f(taken).indexOf("invalid") === -1, "the raw token never reaches the error box");
+  // The known_templates hint is the one thing friendly() cannot know — kept.
+  assert.equal(f({ ok: false, status: 422, data: { error: "invalid", details: { template: ["is invalid"] }, known_templates: ["next-starter", "astro-starter"] } }),
+    "template is invalid — templates: next-starter, astro-starter");
+  // Unchanged shapes: a curated slug, a message-only body, and a silent failure.
+  assert.equal(f({ ok: false, status: 402, data: { error: "no_active_subscription" } }),
+    "You need an active subscription to launch.");
+  assert.equal(f({ ok: false, status: 500, data: { message: "upstream exploded" } }), "upstream exploded");
+  assert.equal(f({ ok: false, status: 502, data: null }), "create failed (502)");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // cch-w35-s4 — THE 403 STOPS BEING A BILLING SENTENCE.
 //
 // friendly() resolves `forbidden` out of ONE global map, and that map's entry is
