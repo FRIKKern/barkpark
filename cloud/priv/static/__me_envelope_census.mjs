@@ -49,15 +49,46 @@
 // served by the operator scenarios and by no others, and that is correct — a
 // per-scenario intersection would demand every fixture be an operator.
 //
-// ── OPAQUE NODES ────────────────────────────────────────────────────────────
+// ── OPAQUE NODES, AND THE ONE KIND THAT IS NOT ALLOWED TO BE ────────────────
 //
 // The server side is a tree, and a node has children only where router.ex spells
-// a map literal (`%{...}`) for it. `onboarding:` is `onboarding_json(...)` — a
-// call, so its shape lives in another module and this census does not claim to
-// know it. Such nodes are censused as PRESENT and their subtree is not compared
-// in either direction. Claiming otherwise would red the corpus's whole
-// onboarding envelope as "invented" on day one, which is the census being wrong
-// rather than the corpus being wrong.
+// a map literal (`%{...}`) for it. A value with no `%{` in it — `user.email`,
+// `Accounts.two_factor_enabled?(user)` — states a scalar this census cannot see
+// through, so it is censused as PRESENT and its subtree is not compared in
+// either direction.
+//
+// `onboarding:` used to be counted in that bucket and it did not belong there.
+// `onboarding: team && onboarding_json(Accounts.onboarding_status(team))` hides
+// a five-key MAP, and `onboarding_json/1` is a `defp` in THIS file — the shape
+// is right there. Treating it as opaque cost SEVEN key paths compared in
+// NEITHER direction (MISSING vacuous because no sub-path was ever derived,
+// INVENTED suppressed outright by `underOpaque`) while the report printed a
+// clean `ok  onboarding` line and the gate printed PASS. That is the exact lie
+// this instrument exists to make reddable, told by the instrument itself.
+//
+// So a BARE lowercase call — `foo_json(...)`, an unqualified local function of
+// this module — is RESOLVED: its single clause is found in the same file, its
+// map literal is walked by the same walkMap, and its keys join the census under
+// the calling key's prefix. Refusal, never degradation: a bare local name that
+// cannot be resolved to a one-clause helper opening on `%{` exits 2 naming the
+// symbol and the file searched.
+//
+// The discriminator is SYNTACTIC and narrow, and it has to be. Five /v1/me
+// values are legitimate scalar-returning REMOTE calls (`Accounts.*`, `Authz.*`,
+// `Notifications.*`); "any unresolved call dies" would refuse on unmodified
+// main. A DOTTED call is excluded BY CONSTRUCTION — not by an allowlist that
+// would rot — because this census can only read one file and a remote callee
+// lives in another. Bare Kernel calls (`is_nil/1`) are the one thing that looks
+// local and is not, so KERNEL_BARE names them; that list is load-bearing, not
+// decoration (drop `is_nil` and the census refuses on unmodified main at
+// `user.confirmed`).
+//
+// HONEST RESIDUAL: moving `onboarding_json/1` into another module — making the
+// call DOTTED — restores the blindness and greens. This census reads ONE file,
+// so a remote helper is genuinely beyond it. The refuse rule is therefore
+// dodgeable by relocating the helper, and nothing reds when it is. Filed:
+// cch-w44-bl-me-census-module-file-map — give this census a module→file map,
+// the shape __binding_census.mjs's CONTEXT_SOURCES already carries.
 //
 // ── NO COUNT LITERAL, EITHER SIDE ───────────────────────────────────────────
 //
@@ -159,6 +190,114 @@ function topLevelSplit(text) {
   return parts;
 }
 
+// Bare lowercase calls that are Kernel, not local — they LOOK like a local
+// helper (no module qualifier) and are not one, so the resolver would hunt a
+// `defp` that will never exist and refuse. Every entry is a scalar-returning
+// Kernel function: none of them can hide a map, so skipping them claims
+// nothing. This list is LOAD-BEARING, not decoration — `is_nil` is spelled in
+// the /v1/me map today (`confirmed: not is_nil(user.confirmed_at)`) and
+// removing it makes this census exit 2 on unmodified main. The others are here
+// because they are the plausible next scalar Kernel call in a JSON map; a bare
+// name that is neither Kernel nor resolvable REFUSES, which is the safe way to
+// be wrong about this list.
+const KERNEL_BARE = new Set(["is_nil", "length", "map_size", "byte_size"]);
+
+// The bare lowercase calls inside a value — `foo_json(` — i.e. unqualified
+// functions of THIS module. A DOTTED call (`Accounts.onboarding_status(`) is
+// excluded BY CONSTRUCTION: the preceding `.` fails the boundary class. That
+// exclusion is the whole reason this rule does not refuse on unmodified main,
+// where five /v1/me values are legitimate scalar-returning remote calls.
+function bareLocalCalls(value) {
+  const names = [];
+  const re = /(^|[^\w.])([a-z_][A-Za-z0-9_]*[?!]?)\s*\(/g;
+  let m;
+  while ((m = re.exec(value)) !== null) {
+    const name = m[2];
+    if (KERNEL_BARE.has(name)) continue;
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+// Names currently being resolved, so a helper that (directly or through another
+// helper) calls itself refuses instead of recursing forever.
+const RESOLVING = new Set();
+
+// Resolve a bare local call to the map literal its single clause returns.
+// Refuses — never degrades back to "opaque" — because this census is on the
+// hook for the subtree the moment it can see the helper at all.
+function localHelperMap(blanked, name, self) {
+  const searched = `${path.relative(process.cwd(), ROUTER)} (searched for \`defp ${name}(\`)`;
+  if (RESOLVING.has(name)) {
+    die2([
+      `FAIL(2): \`${name}/1\`, reached from \`${self}\`, resolves through itself — this census cannot`,
+      `         state a shape for a recursive builder.`,
+      `         ${searched}`,
+    ]);
+  }
+  // Two shapes count as a clause head, and BOTH must, or the count is a lie:
+  // the paren'd form `defp foo(args)` (the only one we can walk) and the
+  // paren-LESS form `defp foo, do: …` / `defp foo do`. Counting only the first
+  // means a helper with one paren'd clause and one paren-less clause looks
+  // SINGLE-clause, and this census would walk one of two and call it the shape
+  // — the confident wrong answer its own header forbids. Paren-less heads are
+  // counted for the arity check and are never walked: with >1 clause we refuse,
+  // and with a lone paren-less clause `clauses` is empty and the "no clause"
+  // arm below refuses too.
+  const paren = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*\\(`, "g");
+  const bare = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*(,|do\\b)`, "g");
+  const clauses = [];
+  let m;
+  while ((m = paren.exec(blanked)) !== null) clauses.push(m.index + m[0].length - 1); // index of `(`
+  let bareClauses = 0;
+  while (bare.exec(blanked) !== null) bareClauses++;
+  if (clauses.length + bareClauses > 1) {
+    die2([
+      `FAIL(2): \`${name}/…\` has ${clauses.length + bareClauses} clause heads in ${searched} and \`${self}\` could take`,
+      `         any of them. This census will not pick one and call it the shape.`,
+    ]);
+  }
+  if (!clauses.length) {
+    die2([
+      `FAIL(2): \`${self}\` is built by the bare local call \`${name}(...)\` and no walkable clause of it`,
+      `         exists in ${searched}`,
+      bareClauses
+        ? `         (its only clause head takes no parens, so this census cannot read its arguments).`
+        : `         .`,
+      `         A bare (unqualified) call is a function of this module by construction, so it is`,
+      `         resolvable in principle — reporting the subtree as opaque here would hide however`,
+      `         many key paths it states behind a clean line.`,
+    ]);
+  }
+  const open = clauses[0];
+  let depth = 0, close = -1;
+  for (let i = open; i < blanked.length; i++) {
+    if (blanked[i] === "(") depth++;
+    else if (blanked[i] === ")") { depth--; if (depth === 0) { close = i; break; } }
+  }
+  if (close === -1) die2([`FAIL(2): the head of \`${name}\` in ${searched} has unbalanced parens.`]);
+  const nl = blanked.indexOf("\n", close);
+  const headerTail = nl === -1 ? blanked.slice(close + 1) : blanked.slice(close + 1, nl);
+  if (!/\bdo\s*$/.test(headerTail)) {
+    die2([
+      `FAIL(2): \`${name}\` in ${searched} is not a plain \`… do\`-block helper (its head continues past`,
+      `         the clause line), so \`${self}\`'s shape cannot be read off it.`,
+      `         The head, verbatim: ${headerTail.trim().slice(0, 120)}`,
+    ]);
+  }
+  let i = nl + 1;
+  while (i < blanked.length && /\s/.test(blanked[i])) i++;
+  if (blanked.slice(i, i + 2) !== "%{") {
+    die2([
+      `FAIL(2): \`${name}\` in ${searched} does not open on a \`%{\` map literal, so this census cannot`,
+      `         say what key paths \`${self}\` carries. It states the subtree or it states nothing.`,
+    ]);
+  }
+  const nested = balanced(blanked, i + 1);
+  if (!nested) die2([`FAIL(2): the map returned by \`${name}\` in ${searched} is unbalanced — refusing to guess its keys.`]);
+  return nested;
+}
+
 // Walk a map body into key paths. `blanked` drives the structure, `raw` is read
 // for nothing but nicer failure messages.
 function walkMap(blanked, region, prefix, out, trail) {
@@ -184,7 +323,25 @@ function walkMap(blanked, region, prefix, out, trail) {
     const isList = /\bEnum\.map\s*\(/.test(value);
     // Absolute offset of the first `%{` inside this value, if any.
     const rel = value.indexOf("%{");
-    if (rel === -1) continue; // opaque: a call, a variable, a scalar — no claim
+    if (rel === -1) {
+      // No literal here — but a BARE local call can still hide a whole map
+      // (`onboarding: team && onboarding_json(...)`). Resolve it in this file
+      // rather than answering "opaque" to a question this census can answer.
+      const local = bareLocalCalls(value);
+      if (!local.length) continue; // genuinely opaque: a remote call, a variable, a scalar
+      if (local.length > 1) {
+        die2([
+          `FAIL(2): \`${self}\` is built by ${local.length} bare local calls (${local.join(", ")}) and this census`,
+          `         cannot say which one states its shape.`,
+        ]);
+      }
+      const name = local[0];
+      const nested = localHelperMap(blanked, name, self);
+      RESOLVING.add(name);
+      walkMap(blanked, nested, self + (isList ? "[]." : "."), out, self);
+      RESOLVING.delete(name);
+      continue;
+    }
     const absValueStart = region.start + segment.at + (seg.length - value.length);
     const nested = balanced(blanked, absValueStart + rel + 1);
     if (!nested) die2([`FAIL(2): the nested map under \`${self}\` is unbalanced — refusing to guess its keys.`]);
