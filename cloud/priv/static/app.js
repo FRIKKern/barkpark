@@ -18808,8 +18808,10 @@
 
   // Change role: PATCH /v1/teams/:id/members/:user_id {role}.
   function openRoleModal(ctx, userId, email, currentRole) {
-    var roles = assignableRoles(ctx.role);
-    if (!roles.length) return;
+    // The actor-tier gate stays here (a member can assign nothing, so the
+    // dialog must not open at all); the OPTION LIST is roleModalOptionsHtml's,
+    // which owns the no-match placeholder.
+    if (!assignableRoles(ctx.role).length) return;
     var opts = roleModalOptionsHtml(ctx.role, currentRole);
     openModal(
       '<h2 class="modal-title" id="modal-title">Change role</h2>' +

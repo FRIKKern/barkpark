@@ -7550,7 +7550,7 @@ test("C10: membersFailureCopy — network / forbidden / generic each get honest 
   assert.match(hooks.membersFailureCopy(500), /couldn't load|Retry/i);
 });
 
-test("C10: memberRowHtml — manage controls are role-gated and self-hidden", () => {
+test("C10: memberRowHtml — manage controls are role-gated, and the self row is per-verb", () => {
   const m = { user_id: "u2", email: "teammate@x.io", role: "member", joined_at: "2026-06-01T00:00:00Z" };
   const admin = hooks.memberRowHtml(m, { role: "admin", userId: "u1" });
   assert.match(admin, /data-member-role="u2"/);   // change role
@@ -7559,10 +7559,16 @@ test("C10: memberRowHtml — manage controls are role-gated and self-hidden", ()
   const member = hooks.memberRowHtml(m, { role: "member", userId: "u1" });
   assert.ok(!member.includes("data-member-role"));
   assert.ok(!member.includes("data-member-remove"));
-  // You can't demote/remove yourself: self row is tagged "(you)", controls hidden.
+  // cch-w42-s3: this test used to be named "self-hidden" and assert only the
+  // Remove half, which is how it stayed green through an authority rewrite that
+  // changed the other half. The self row is TWO answers now: Remove withheld
+  // (console ruling, D492 variant B), Change role RENDERED — update_member_role_as/4's
+  // self? branch bypasses the rank arm, so self-demotion is server-legal. Both
+  // halves are asserted here so neither can move in silence.
   const self = hooks.memberRowHtml(m, { role: "admin", userId: "u2" });
   assert.match(self, /\(you\)/);
-  assert.ok(!self.includes("data-member-remove"));
+  assert.ok(!self.includes("data-member-remove"), "Remove stays withheld on your own row");
+  assert.match(self, /data-member-role="u2"/, "Change role is offered on your own row");
 });
 
 // ── cch-w42-s3: THE MEMBERS ROW READS THE TARGET'S RANK, PER VERB ───────────
