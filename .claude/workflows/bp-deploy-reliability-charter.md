@@ -4393,3 +4393,68 @@ the count drifted 230→227 inside one session). A rate names its window or it i
 population reads 25.56% over the full post-boundary window and 1.27% on 2026-08-07, and the OLD convention
 reads 74.52% post-boundary against 77.81% pre, i.e. it is structurally blind to the entire repair). And a
 human-facing CLI paragraph is read with `-o table` or it is not read at all (D220).
+
+### Wave 2026-08-07 (wave 14) — REVIEWED · Paper `deploy-reliability-wave-14-2026-08-07` · grade **A−**
+
+**All four round-1 slices built, reviewed, gate-green on their final state, PUSHED and PR'd. Nothing merged — the lead merges.**
+Slices 5 and 6 are round 2 and were not built this run BY DESIGN (sequenced-rounds law).
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The CLI names its window, reads the columns, stops promising a re-queue | `dr-w13-s5-cli-reads-columns-and-names-its-window` | `…reads-the-colum-0-r` | [#10350](https://github.com/FRIKKern/barkpark/pull/10350) | go build/vet ok · `./internal/cli/...` + `./internal/cloudclient/...` ok · gofmt clean |
+| The publish clock gets a per-site caller | `dr-w13-s6-publish-clock-first-caller` | `…per-site-caller-1-r` | [#10351](https://github.com/FRIKKern/barkpark/pull/10351) | 31 tests, 0 failures · regression 146/0 · warnings-as-errors clean |
+| The gauge sees a wrong NAME, the POLL phase gets anchored | `dr-w14-s3-gauge-sees-a-wrong-name` | `…and-the-poll-2` (unchanged) | [#10352](https://github.com/FRIKKern/barkpark/pull/10352) | 130 tests, 0 failures |
+| The owner's own read gets a guard that can lose | `task-75c2447b6b1eccb9` | `…guard-that-c-3` (unchanged) | [#10353](https://github.com/FRIKKern/barkpark/pull/10353) | 177 tests, 0 failures |
+
+**Cross-slice integration, run once at review**: the three Elixir slices octopus-merged onto `77cf2060c` and
+the FULL `cloud` suite run — **3,111 tests, 0 failures**. That is the run that matters, because S4's member and
+PAT probes hit the very route S6 grew a `publish_clock` node on.
+
+**What landed.** This is the first wave in the epic that puts a number in a non-admin hand. S5 turns the one
+deploy surface a site owner can reach into one that cannot flatter: it reads the deferral chain from the
+COLUMNS (with the prose fallback kept, because the columns are on 6.0% of rows behind a hard step boundary and
+a column-only reader loses a pre-boundary window WHOLE, not partially), it names the window it read with a
+denominator beside every count, and D213's unconditional `(a rebuild is already re-queued)` — false for 47 of
+523 chains on site `search` — becomes a conditional clause whose false arm names a blind spot rather than
+claiming a loss (D212). S6 gives `PublishClock` its FIRST production caller after three waves of being the
+ruled vital with zero readers, and kills the observed fabrication where one site's zero was printed against the
+FLEET's live-deploy count. S3 graduates the taxonomy's honesty gauge from a partition test to a NAMING test and
+is honest about being a rot-guard: main's own 50-test file stays GREEN while wave 13's 503 repair is destroyed
+by one label edit. S4 puts the first assertion in history on the auth tier of the two routes that carry every
+owner-facing deploy number.
+
+**What did NOT land.** Nothing is merged, so no production number moved. The deferral-wait median (D214)
+was deliberately NOT shipped — no Go test enforces percentile discipline today, so it would have shipped with a
+guard unable to lose; filed instead. S6's live 401 probe against the deployed control plane is still owed (the
+builder refused to restamp the survey's run as its own); the suite-level half is now proven in S4. And S6's
+node has no route-level test at all, because `router_sites_test.exs` belonged to S4's fence this wave.
+
+**Review fixes made in place.** Two branches got an `-r`. On S5: the window census counted
+deferred/live/failed/waiting only, so a `cancelled` row landed in NO bucket and a reader who subtracted the
+printed counts from the denominator got an unexplained remainder with no name — the same defect one layer up
+from the one the slice exists to fix. Added `cancelled` + a named `other` residue, emitted at zero in JSON so
+the identity `deferred+live+failed+waiting+cancelled+other == attempts_read` is machine-assertable, and
+mutation-proved (dropping the cancelled arm reds it naming the loss). On S6: `mix format --check-formatted` was
+RED and is now clean; plus two guards — the clock is computed on page ONE only (`census/3` defaults
+`verify_seek_bound: true`, a filtered count over the whole deployments table, and a deep keyset walk paid one
+seq scan per page for an identical answer), and a raised census now degrades to a node that NAMES the failure
+instead of 500ing the array — this route is the read `bp cloud site status` itself performs, so S5's entire
+surface hangs off it answering 200. S3 and S4 needed no fix; their branches are pushed unchanged.
+
+**Independent re-derivations the reviewer ran** (not re-reads of builder reasoning): S4's tenancy judgment
+re-derived from source — `with_team_site/2` → `:session` → `Auth.require_user` (auth.ex:48, which
+`unauthorized/1`s anything that is not a session token) → `current_team` nil-check → `Registry.get_team_site`,
+with no role or ability call anywhere on the path; the judgment holds. S3's flagship mutation reproduced
+independently: setting `BOX_DEPLOY_DISABLED_503`'s label to the collapse sentence gives 60 tests, 1 failure,
+and the failure is ASSERTION A alone. S5's `siteRequeueVisible` positive arm confirmed structurally unreachable
+through `runCloudSiteStatus` (`newest = page.Deployments[0]`), which is the honest finding, not a defect.
+
+**What the next wave should take.** Round 2 in dependency order the moment its deps merge: `dr-w14-s5`
+(#10129's fleet deploy arm, thirteen rungs, the router window PINNED) after #10352 and #10351; then
+`dr-w13-s7` (census residue + per-site blindness) after `dr-w14-s5`. Then the three residues this wave
+surfaced and refused to swallow: `dr-w14-rv-publish-clock-route-pin` (S6's node and the two review guards have
+no route-level assertion), `dr-w14-rv-session-tier-route-scan` (S4's session census is hand-listed and so
+carries the exact blindness its own comment warns about — derive it from `router.ex` the way
+`scan_read_gated/1` does), and `dr-w14-rv-status-cell-wraps` (the honest deferred status sentence is now ~200
+characters and `renderKV` does not wrap — a renderer fix, never a copy edit). The D214 median and the D225
+54-row ledger sweep both remain lead/next-wave acts.
