@@ -13950,7 +13950,9 @@
   // pins x-barkpark-team on every authed request INCLUDING /v1/me, and the team
   // switcher does a full reload — so meCache.role IS the role on the team the
   // write will be judged against. DO NOT extend this predicate to the members
-  // band: there the agreement is a coincidence held by one line (app.js:17915).
+  // band: there the agreement is a coincidence held by one line inside
+  // membersContext() — re-derive it with:
+  //   grep -n 'function membersContext' cloud/priv/static/app.js
   //
   // @canonical capability:console-authority-predicate aka:role,canManage,isOwner,isAdmin,meCache.role
   function instanceAdminAuthority() {
