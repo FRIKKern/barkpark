@@ -15507,6 +15507,187 @@ test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// cch-w38-s1 — THE INSTANCE RAIL STOPS SELLING WHAT THE SERVER WILL REFUSE,
+// AND STOPS DEMOTING AN OWNER IT COULD NOT CHECK.
+//
+// Measured on origin/main ef77af274 with a real browser (chrome-devtools against
+// __preview__/serve.mjs), stamped in ONE evaluated object so the reading cannot
+// be attributed to a hijacked page:
+//
+//     {"port":"4187","meRole":"member","decommission":{"disabled":false,
+//      "visible":true},"totalDisabled":0}
+//
+// A plain MEMBER — who reaches the instance-detail screen legitimately, because
+// there is no GET /v1/barkparks/:id and the screen is built from the
+// member-legal LIST — was offered a live, destroy-tier Decommission. One click
+// later the server answers 403, and at three of the seven elevated sites the
+// console called that permanent refusal transient: updateInstance and
+// rollbackInstance rendered "Please try again in a moment.", and
+// rollbackRefusalTerminal("forbidden") was FALSE, so the confirm modal wired a
+// live "Try again" that re-POSTs into the same 403 forever.
+//
+// WHY THIS BLOCK EXISTS AT ALL (D430). #9920's binding census cannot see this
+// fix: mutation-proven, adding a predicate leaves it rc 0 still printing "18
+// UNPREDICATED", and DELETING a shipped predicate is ALSO rc 0. So the guard is
+// here, and it is proven able to LOSE below. Note what it does NOT do: the
+// shipped assertion at :11858 matches `data-life-verb="decommission"[^>]*>` —
+// that [^>]* window SWALLOWS an added `disabled`, so a permanently-dead
+// Decommission passes it. These assertions name the attribute the mount binds
+// on, and the sentence rendered, not a permissive window around them.
+
+const W38_BP = { provider: "hetzner", host: "h", name: "web" };
+const W38_ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
+
+test("cch-w38-s1: the authority answer is THREE-VALUED and reads /v1/me's state, never meCache's falsiness", async () => {
+  assert.equal(typeof hooks.instanceAdminAuthority, "function", "the predicate must be hookable at all");
+
+  hooks.clearMe();
+  assert.equal(hooks.instanceAdminAuthority(), "unknown", "cold boot: we have not asked, so we do not know");
+
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.meState(), "failed");
+  assert.equal(hooks.instanceAdminAuthority(), "unknown",
+    "a FAILED /v1/me is not evidence of membership — an owner whose read blipped is not demoted");
+
+  await driveMe(200, ME_MEMBER);
+  assert.equal(hooks.instanceAdminAuthority(), "refuse");
+  await driveMe(200, ME_OWNER);
+  assert.equal(hooks.instanceAdminAuthority(), "grant");
+  await driveMe(200, { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "sam@acme.com" } });
+  assert.equal(hooks.instanceAdminAuthority(), "grant", "admin is the gate's own minimum, not owner");
+  hooks.clearMe();
+});
+
+test("cch-w38-s1: THE RAIL RENDERS ALL THREE — refused carries the SERVER's sentence, unknown carries none", () => {
+  const refused = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse"));
+  // The remedy: a DISABLED control that is still THERE, plus the one sentence
+  // that repairs it — FORBIDDEN_ROLE_COPY.admin, byte-identical to what the
+  // server's own 403 renders through friendly(). No new copy is minted here.
+  assert.match(refused, /inst-life-disabled/);
+  assert.ok(refused.includes('<button class="btn btn-sm" type="button" disabled title="' + W38_ADMIN_SENTENCE + '">Decommission</button>'),
+    "the refused verb is a disabled control, titled with the server's sentence");
+  assert.ok(refused.includes('<span class="inst-life-reason">' + W38_ADMIN_SENTENCE + "</span>"),
+    "…and the sentence is VISIBLE in the shipped reason span, not hover-only");
+  // THE PART THE [^>]* ASSERTION AT :11858 CANNOT SEE: no click hook, no
+  // destroy-tier styling, no typed-confirm ellipsis promising a modal.
+  assert.ok(refused.indexOf('data-life-verb="decommission"') === -1,
+    "a verb the server will refuse gets NO click hook — paintLifecycleActions binds on this attribute");
+  assert.ok(refused.indexOf("btn-danger") === -1, "and no destroy-tier styling");
+  assert.ok(refused.indexOf("Decommission&hellip;") === -1, "and no ellipsis promising a confirm modal");
+  assert.ok(refused.includes("Manage this instance via the bp CLI"), "the rail is never HIDDEN from a member (D428)");
+  assert.ok(refused.indexOf("Checking capabilities") === -1, "an ANSWERED /v1/me is not a checking state");
+
+  // UNKNOWN IS NOT REFUSE. While /v1/me is in flight or failed we say we are
+  // still checking — reusing the row's shipped loading grammar verbatim — and
+  // we accuse nobody of anything.
+  const unknown = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "unknown"));
+  assert.match(unknown, /inst-life-note">Checking capabilities&hellip;</,
+    "unknown states the truth: we are still checking");
+  assert.ok(unknown.indexOf(W38_ADMIN_SENTENCE) === -1,
+    "a role we do not know is NOT a role of member — no refusal sentence on an unanswered read");
+  assert.ok(unknown.indexOf('data-life-verb="decommission"') === -1,
+    "…and the destroy verb is not live while the answer is outstanding");
+  assert.match(unknown, /inst-life-disabled/);
+
+  // GRANT IS BYTE-IDENTICAL TO THE SHIPPED 2-ARG CALL — the default arm is what
+  // keeps this an ADD, and it is proven here rather than asserted in prose.
+  const twoArg = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP));
+  const granted = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "grant"));
+  assert.equal(granted, twoArg, "an omitted authority defaults to grant, byte for byte");
+  assert.match(granted, /data-life-verb="decommission"[^>]*>Decommission&hellip;</, "…and an admin's rail is untouched");
+
+  // The three states are genuinely distinct bytes — a fix that collapsed two of
+  // them into one would pass every individual assertion above.
+  assert.equal(new Set([refused, unknown, granted]).size, 3, "three states, three renders");
+});
+
+test("cch-w38-s1: the loading and unavailable frames carry the authority too — no frame offers a refused verb", () => {
+  // Frame 1 (capabilities not asked yet) and the conduit-failed frame both
+  // shipped decommission LIVE unconditionally. They are the frames a member
+  // actually sees first, so they are the frames most able to lie.
+  const frame1 = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(undefined, W38_BP, "refuse"));
+  assert.ok(frame1.indexOf('data-life-verb="decommission"') === -1, "frame 1 does not offer a refused verb");
+  assert.ok(frame1.includes(W38_ADMIN_SENTENCE), "…and it explains why, from frame 1");
+
+  const unavailable = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(null, W38_BP, "refuse"));
+  assert.ok(unavailable.indexOf('data-life-verb="decommission"') === -1, "nor does the conduit-failed frame");
+  assert.match(unavailable, /data-life-retry/, "…and that frame keeps its own Retry — the authority note never eats a recovery");
+
+  // The model carries the decision so the DOM mount cannot fork it.
+  assert.equal(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse").authority, "refuse");
+  assert.equal(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP).authority, "grant");
+});
+
+test("cch-w38-s1: THE POST-CLICK ARMS AGREE WITH THE RAIL — a permanent refusal is never sold as transient", () => {
+  // (a) updateInstance: a flat gate 403/422 used to land in the default arm's
+  // "Please try again in a moment." — copy for a TRANSIENT fault.
+  const forbidden = { error: "forbidden", required: "admin", scope: "primary_team" };
+  const c = hooks.updateConflict(forbidden);
+  assert.equal(c.kind, "other");
+  assert.equal(c.code, "forbidden");
+  // THE RETURN SHAPE IS UNCHANGED — updateConflictCopy's SIGNATURE grew, not
+  // updateConflict's object (test 598 deepEquals the whole thing).
+  assert.deepEqual(Object.keys(oauthPlain(c)).sort(), ["code", "kind", "pin"]);
+
+  const copy = hooks.updateConflictCopy(c, forbidden);
+  assert.equal(copy.body, W38_ADMIN_SENTENCE, "the update refusal renders the SERVER's own sentence");
+  assert.equal(copy.forceLabel, null, "…and offers no force override for an authority refusal");
+  assert.ok(hooks.updateConflictCopy(c, forbidden).body.indexOf("Please try again in a moment.") === -1);
+  const teamless = hooks.updateConflict({ error: "no_team" });
+  assert.ok(hooks.updateConflictCopy(teamless, { error: "no_team" }).body.indexOf("Please try again in a moment.") === -1,
+    "a teamless caller is told about the team, not asked to retry forever");
+  // The one-argument call still answers exactly as it always did.
+  assert.equal(hooks.updateConflictCopy({ kind: "already_running" }).title, "An update is already running");
+  assert.equal(hooks.updateConflictCopy({ kind: "other" }).body, "Please try again in a moment.",
+    "an UNCLASSIFIED failure keeps the transient sentence — this arm is narrow on purpose");
+
+  // (b)+(c) rollback: the copy, and the terminality that stops the retry loop.
+  assert.equal(hooks.rollbackConflictCopy("forbidden", forbidden).body, W38_ADMIN_SENTENCE);
+  assert.ok(hooks.rollbackConflictCopy("no_team", { error: "no_team" }).body.length > 0);
+  assert.equal(hooks.rollbackRefusalTerminal("forbidden"), true,
+    "a refusal decided by your ROLE cannot be repaired by Try again");
+  assert.equal(hooks.rollbackRefusalTerminal("no_team"), true);
+  assert.equal(hooks.rollbackRefusalTerminal("instance_unreachable"), false,
+    "…while a genuinely transient fault still offers the retry that can work");
+  assert.equal(hooks.rollbackRefusalTerminal("already_running"), false);
+  assert.equal(hooks.rollbackConflictCopy("instance_unreachable", {}).title, "Couldn't reach the instance",
+    "and every shipped refusal arm is untouched");
+});
+
+test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (its first assertion in this harness)", async () => {
+  // attachDomain had ZERO assertions across 15k lines. Its 422 arm sat ABOVE
+  // the friendly() fallthrough, so `422 {error:"no_team"}` — what
+  // require_primary_team_admin answers a caller with no team — was reported as
+  // "Only <name>.barkpark.cloud domains are supported for now."
+  const drive = async (status, payload) => {
+    const saved = { fetch: sandbox.fetch, document: sandbox.document };
+    const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+    dom.els["domain-input"].value = "shop.barkpark.cloud";
+    dom.els["domain-error"].hidden = true;
+    dom.els["domain-error"].textContent = "";
+    sandbox.fetch = fetchStub(status, payload);
+    sandbox.document = dom.document;
+    try {
+      hooks.attachDomain({ id: "bp1", name: "Production" });
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+    return dom.els["domain-error"];
+  };
+
+  const teamless = await drive(422, { error: "no_team" });
+  assert.equal(teamless.hidden, false, "the inline error still shows");
+  assert.ok(teamless.textContent.indexOf("Only <name>.barkpark.cloud domains are supported") === -1,
+    "a teamless caller's DOMAIN was never judged — do not tell them its syntax is wrong");
+  assert.match(teamless.textContent, /team/i, "the sentence names the real obstacle");
+
+  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps its sentence.
+  const badSyntax = await drive(422, { error: "invalid_domain" });
+  assert.equal(badSyntax.textContent, "Only <name>.barkpark.cloud domains are supported for now.",
+    "a real syntax refusal is unchanged — the fence is one code wide");
+  const taken = await drive(409, { error: "taken" });
+  assert.equal(taken.textContent, "That domain is already in use.");
+});
+
 // cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
 //
 // friendly() resolved the curated ERRORS map BEFORE it ever read data.details.
