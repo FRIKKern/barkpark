@@ -1248,7 +1248,28 @@ defmodule BarkparkCloud.Sites.Deploy do
               Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
                 status: "deferred",
                 failure_reason: detail,
-                detail: short_detail(detail)
+                detail: short_detail(detail),
+                # THE CHAIN STOPS BEING PROSE (deploy-reliability W12, S6). The
+                # SAME three facts the sentence above states in English, written
+                # as data in the SAME write — one transition, one truth, so the
+                # columns can never disagree with the sentence beside them.
+                #
+                # The sentence is NOT replaced. Vercel keeps `readyStateReason`
+                # beside its `readyState` enum for the same reason: the prose is
+                # the operator's (it explains that the counter is a zero-progress
+                # guard, which no integer can), the columns are the aggregate's.
+                # Before this, "how deep do capacity chains get" was a regex over
+                # a sentence — `internal/cli/cloud_site_cmd.go`'s
+                # `siteDeferralChainRe` reads the depth back out of English, and
+                # one reworded clause would silently zero every such count.
+                #
+                # NOTHING READS THESE YET, on purpose: `DeployLedger` still
+                # classifies off the reason string this wave. Write first, read
+                # next wave — a reader flipped in the same change as its producer
+                # cannot be proven to have been broken before.
+                deferral_depth: prior + 1,
+                deferral_bound: bound,
+                deferral_cause: cause
               })
 
             Logger.info(

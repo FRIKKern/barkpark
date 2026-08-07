@@ -84,6 +84,8 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # headroom; the [:available, :scheduled] state filter is what actually gates.
   @unique [keys: [:site_id], states: [:available, :scheduled], period: 300]
 
+  import Ecto.Query, only: [from: 2]
+
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
   alias BarkparkCloud.Repo
@@ -304,6 +306,14 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   defp defer_behind_running_build(site, %Deployment{} = in_flight) do
     case enqueue(site.id) do
       {:ok, _job} ->
+        # THE ATTEMPT THAT MINTS NO ROW NOW SPEAKS (deploy-reliability W12, S6).
+        # Everything above this line stays true — no fake `deferred` row is
+        # minted, and the real build in flight is not relabelled — but the
+        # attempt is no longer INVISIBLE: it is counted on the row it coalesced
+        # ONTO, which is the only truthful home for it. This attempt did not
+        # produce a build; it joined one.
+        record_coalesced_attempt(in_flight)
+
         Logger.info(
           "auto-deploy deferred for site #{site.id}: deployment #{in_flight.id} is already #{in_flight.status} — rebuild re-queued"
         )
@@ -317,5 +327,46 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
 
         {:error, reason}
     end
+  end
+
+  # HOW MANY PUBLISHES THIS BUILD IS ANSWERING FOR — the count of attempts that
+  # minted no row of their own, hung on the in-flight row they coalesced onto.
+  #
+  # WHY IT MATTERS EVEN THOUGH IT IS QUIET TODAY, measured from Oban rather than
+  # guessed: in the twelve hours 2026-08-06 08:00-20:00Z there were 2,256
+  # `AutoDeployWorker` jobs against 1,052 deployment rows — 1,204 ATTEMPTS THAT
+  # MINTED NO ROW against 277 counted deferrals (4.35:1). Since 22:00Z the same
+  # ratio is 0.086:1 and zero per minute. That is DORMANT, not fixed: the gap is
+  # a function of publish load against build duration, so it returns precisely
+  # when the number is worth having.
+  #
+  # "Attempts that minted no row", never "uncounted deferrals": the
+  # `{:duplicate, %{status: "queued"}}` re-drive arm above has the same shape and
+  # the two are indistinguishable once written down, so the honest name is the
+  # one that describes what was observed rather than what it is assumed to mean.
+  #
+  # ATOMIC `UPDATE`, never a changeset: N publishes can race one build from N
+  # processes, and a read-modify-write would drop every attempt but the last —
+  # which is the whole count. `COALESCE` because the 30,633 rows that predate the
+  # column are NULL (honestly unknown), and `NULL + 1` is NULL.
+  #
+  # Best-effort telemetry: the return value is discarded and a row that vanished
+  # between the coalesce and this write updates zero rows without raising. The
+  # DEFERRAL is the contract; the count is the record of it.
+  defp record_coalesced_attempt(%Deployment{id: id}) do
+    now = DateTime.utc_now()
+
+    from(d in Deployment,
+      where: d.id == ^id,
+      update: [
+        set: [
+          coalesced_attempts: fragment("COALESCE(?, 0) + 1", d.coalesced_attempts),
+          coalesced_last_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
   end
 end

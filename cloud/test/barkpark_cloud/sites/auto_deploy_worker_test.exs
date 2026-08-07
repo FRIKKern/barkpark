@@ -387,6 +387,66 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       refute fresh.build_id == in_flight.build_id
     end
 
+    # dr-w12 S6. THE ATTEMPT THAT MINTS NO ROW. The test above proves the
+    # publish is not LOST; it says nothing about whether it is COUNTED — and it
+    # was not. `defer_behind_running_build/2` wrote a Logger line and nothing
+    # else, correctly refusing to mint a fake `deferred` row (the
+    # active-deployment index refused one, and the row in flight is a real build
+    # that must not be relabelled) — which left the attempt invisible to every
+    # aggregate over the deployment stream.
+    #
+    # Measured, not assumed: in the twelve hours 2026-08-06 08:00-20:00Z there
+    # were 2,256 AutoDeployWorker jobs against 1,052 deployment rows — 1,204
+    # ATTEMPTS THAT MINTED NO ROW against 277 counted deferrals (4.35:1). Since
+    # 22:00Z the ratio is 0.086:1 and zero per minute: DORMANT, not fixed, and it
+    # returns as a function of load, i.e. when the number matters most.
+    #
+    # IT CAN LOSE: delete the `record_coalesced_attempt(in_flight)` call and the
+    # count assertions red, while "NO PUBLISH LOST" above stays green.
+    test "AN ATTEMPT THAT MINTS NO ROW IS STILL COUNTED — on the in-flight build it coalesced onto" do
+      {bp, site} = setup_site()
+
+      {:ok, in_flight} = Deploy.enqueue(site, bp, true, "content-auto")
+      {:ok, in_flight} = Registry.claim_deployment(in_flight.id, "worker-1")
+      assert in_flight.status == "building"
+
+      # A build in flight starts having answered for nobody but itself.
+      assert Registry.get_deployment(in_flight.id).coalesced_attempts == 0
+      before_rows = length(Registry.list_deployments(site, 50))
+
+      # Three publishes land mid-build. Each coalesces onto the running row.
+      for _ <- 1..3 do
+        assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+      end
+
+      # NO ROW WAS MINTED — that is the whole reason the count had nowhere to go,
+      # and the fix must not have quietly changed it. The in-flight build is also
+      # still a BUILD: it was not relabelled a deferral.
+      assert length(Registry.list_deployments(site, 50)) == before_rows
+
+      reloaded = Registry.get_deployment(in_flight.id)
+      assert reloaded.status == "building"
+
+      # …and yet all three attempts are on the record, against the build that is
+      # actually answering for them.
+      assert reloaded.coalesced_attempts == 3
+      assert reloaded.coalesced_last_at
+
+      # The count belongs to THIS build, not to the site: the trailing rebuild
+      # that eventually carries the coalesced content starts from zero.
+      {:ok, _} =
+        Registry.transition_deployment(reloaded, %{status: "pushing"})
+
+      {:ok, _} =
+        Registry.transition_deployment(Registry.get_deployment(in_flight.id), %{status: "live"})
+
+      assert [trailing] = pending_jobs(site.id)
+      assert :ok = perform_job(AutoDeployWorker, trailing.args)
+
+      assert [fresh] = content_autos(site) |> Enum.reject(&(&1.id == in_flight.id))
+      assert fresh.coalesced_attempts == 0
+    end
+
     test "RETRY ACCOUNTING: six consecutive busy boxes never DISCARD the rebuild" do
       {_bp, site} = setup_site()
 
