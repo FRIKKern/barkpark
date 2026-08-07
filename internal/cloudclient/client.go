@@ -1563,6 +1563,25 @@ type SiteDeployment struct {
 	//     server-side), for when FailureReason is the humanizer's generic arm.
 	FailureClass     string `json:"failure_class,omitempty"`
 	FailureReasonRaw string `json:"failure_reason_raw,omitempty"`
+	// deploy-reliability W13: the deferral chain AS DATA, which this struct did
+	// not declare — so the only way a Go client could recover the depth of a
+	// wait was siteDeferralChainRe, a regex over the English in FailureReason.
+	// Same silent-drop shape as the pair above: json.Unmarshal discards an
+	// unmodelled key, so the control plane could ship these for a whole wave
+	// and no decoder would notice.
+	//
+	// POINTERS, deliberately. nil means "this row records no chain" — a
+	// non-deferred row, or any deferral written before migration
+	// 20260807150000 landed on 2026-08-07 (most of them today). A plain int
+	// would decode that absence to 0 and read as "deferred zero times", which
+	// is a claim the payload never made.
+	//
+	// DeferralCause is the LEDGER CLASS (e.g. "BOX_AT_CAPACITY_DEFERRED"),
+	// frozen at defer time by DeployLedger.classify/1 — not a raw box code, and
+	// not re-derived if the taxonomy is later repaired.
+	DeferralDepth *int    `json:"deferral_depth"`
+	DeferralBound *int    `json:"deferral_bound"`
+	DeferralCause *string `json:"deferral_cause"`
 	// gh-6 identity: "production" | "preview", and the branch a preview was built
 	// from. Declared for the same drops-unknown-keys reason as the pair above.
 	Environment  string `json:"environment,omitempty"`

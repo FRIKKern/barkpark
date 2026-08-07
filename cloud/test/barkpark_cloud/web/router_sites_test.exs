@@ -475,6 +475,55 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       full = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
       assert length(json_body(full)["deployments"]) == 3
     end
+
+    # deploy-reliability W13 S3. W12 shipped the deferral WRITER
+    # (`Sites.Deploy.defer/3` fills deferral_depth/bound/cause) and no reader:
+    # this payload did not mention the columns, so the only route to a wait's
+    # depth was a regex over the English in `failure_reason`. These keys are the
+    # reader.
+    #
+    # IT CAN LOSE: delete the three `deferral_*` lines from
+    # `deployment_json/1` and the presence assertions red; coerce a nil to 0 and
+    # the non-deferred assertions red.
+    test "the deferral chain reaches the wire, and a row with no chain says nil rather than 0" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+
+      {:ok, deferred} = Registry.create_deployment(site, %{git_ref: "a"})
+
+      {:ok, _} =
+        Registry.transition_deployment(deferred, %{
+          status: "deferred",
+          deferral_depth: 3,
+          deferral_bound: 12,
+          deferral_cause: "BOX_AT_CAPACITY_DEFERRED"
+        })
+
+      {:ok, clean} = Registry.create_deployment(site, %{git_ref: "b"})
+      token = login_token(user)
+
+      conn = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
+      assert conn.status == 200
+      rows = Map.new(json_body(conn)["deployments"], &{&1["id"], &1})
+
+      chain = rows[deferred.id]
+      assert chain["deferral_depth"] == 3
+      assert chain["deferral_bound"] == 12
+      # THE LEDGER CLASS, frozen at defer time — not a raw box code.
+      assert chain["deferral_cause"] == "BOX_AT_CAPACITY_DEFERRED"
+
+      # A row that never deferred carries NO chain, and the honest answer is
+      # nil: a 0 here would read as "deferred zero times", which is a different
+      # sentence from "nobody recorded a chain" — and it is the sentence 98.75%
+      # of prod's deferred rows (every one written before migration
+      # 20260807150000) would falsely tell.
+      none = rows[clean.id]
+      assert Map.has_key?(none, "deferral_depth")
+      assert none["deferral_depth"] == nil
+      assert none["deferral_bound"] == nil
+      assert none["deferral_cause"] == nil
+    end
   end
 
   ## POST /v1/sites/:id/env — encrypted env round-trip
