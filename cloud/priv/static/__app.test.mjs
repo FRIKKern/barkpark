@@ -15335,6 +15335,88 @@ test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass ag
   hooks.clearMe();
 });
 
+// ── cch-w41-s3 · THE ADMIN LIMB IS A LIMB, AND DROPPING IT MUST RED ────────
+// Four predicates answer the same question — "may this actor write here?" —
+// each as `role === "owner" || role === "admin"`: providerCanWrite (app.js),
+// notifCanManage, canMintAnyAbility and canManageOnboarding. Measured on the
+// shipped bytes before this block: rewriting ANY of them — or all four at
+// once — to OWNER-ONLY shipped 919/919 app tests + 104/104 smoke scenarios,
+// rc 0. A unification slice could therefore silently DELETE the admin limb and
+// show a perfect board. That green is not general vacuity: the INVERSE
+// mutation (admin-only, dropping the owner limb) reds three of the four by
+// name in smoke. The mechanism is censused — scenarios.mjs:952 defines
+// me(team, onb, role) with `role || "owner"`, and across ~100 me() call sites
+// the third argument is "member" 7x, "owner" 3x and "admin" ZERO times, so no
+// fixture in the whole preview corpus has ever been an admin.
+//
+// canManageOnboarding was worse still: it survived EVERY mutation — owner-only,
+// admin-only, always-false and fail-open ALWAYS-TRUE — fully green. No smoke
+// scenario reaches it (the six plain-member scenarios are all settings pages;
+// there is no onboarding member scenario and no Dismiss assertion anywhere).
+//
+// D439 binds these four to a BOOLEAN return: three-valuedness belongs in NEW
+// siblings (see meState/meFlags above), never by widening one of these to
+// "unknown" — that ships green and makes `if (privileged)` TRUE, the fail-open
+// GR9 forbids. So the domain pinned here is the full one: owner and admin say
+// true, member says false, and BOTH not-a-role states — never loaded, and a
+// /v1/me read that FAILED — say false, fail-closed.
+
+const ME_ADMIN = { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" } };
+
+test("cch-w41-s3: all four owner|admin predicates hold owner+admin true, member false, and fail CLOSED on both not-a-role states", async () => {
+  const predicates = ["providerCanWrite", "notifCanManage", "canMintAnyAbility", "canManageOnboarding"];
+  for (const name of predicates) {
+    assert.equal(typeof hooks[name], "function", name + " must be node-pinned — three of these four were exported nowhere");
+  }
+
+  // THE ADMIN LIMB. Every one of these four assertions passes on origin/main
+  // AND passes with the admin limb deleted, which is precisely the hole: no
+  // fixture anywhere else in the harness is ever an admin.
+  hooks.clearMe();
+  await driveMe(200, ME_ADMIN);
+  for (const name of predicates) {
+    assert.equal(hooks[name](), true, name + "(): an ADMIN may write — dropping the `|| admin` limb must red HERE");
+  }
+
+  // The owner limb, so an admin-only rewrite cannot pass either.
+  await driveMe(200, ME_OWNER);
+  for (const name of predicates) {
+    assert.equal(hooks[name](), true, name + "(): an OWNER may write");
+  }
+
+  // The negative control — without it ALWAYS-TRUE ships green, which is exactly
+  // how canManageOnboarding shipped with zero coverage.
+  await driveMe(200, ME_MEMBER);
+  for (const name of predicates) {
+    assert.equal(hooks[name](), false, name + "(): a plain MEMBER may not write — an always-true body must red HERE");
+  }
+
+  // FAIL-CLOSED ARM 1 — never loaded. /v1/me has not answered yet; nothing is
+  // known, so nothing is granted.
+  hooks.clearMe();
+  for (const name of predicates) {
+    assert.equal(hooks[name](), false, name + "(): a role we have not read is not a role that may write");
+  }
+
+  // FAIL-CLOSED ARM 2 — the read FAILED. An unproven actor is not an admin;
+  // the honest-state copy for that case lives in the cch-w36-s3 siblings above,
+  // but the WRITE gate itself stays shut.
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+  for (const name of predicates) {
+    assert.equal(hooks[name](), false, name + "(): a FAILED /v1/me read grants nothing — the gate fails closed");
+  }
+
+  // D439: two-valued, still. A widened "unknown" would satisfy the trues above
+  // and make every `if (privileged)` branch TRUE — the fail-open GR9 forbids.
+  hooks.clearMe();
+  await driveMe(200, ME_ADMIN);
+  for (const name of predicates) {
+    assert.equal(typeof hooks[name](), "boolean", name + "(): stays BOOLEAN — three-valuedness lives in NEW siblings");
+  }
+  hooks.clearMe();
+});
+
 // ── loadMembers / loadEnvVars: a transport failure is not "No team yet" ────
 
 async function driveMeGatedLoader(run, id, status, payload) {
