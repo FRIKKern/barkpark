@@ -18704,3 +18704,59 @@ test("cch-w49-s1: the launch plan grid states no price — on the GRANT arm and 
   assert.ok(blocked.includes("Only the team owner can start a paid plan"),
     "…and the one sentence naming who can");
 });
+
+// ── cch-w50-s3 · THE CANCEL COPY IS PINNED TO WHAT THE PLANE ACTUALLY DOES ───
+// Both cancel surfaces (renderBillingCancel's section blurb and
+// openCancelPlanModal's modal-sub) used to promise two things the control plane
+// did not do:
+//
+//   * "then they're stopped" — nothing stops. Suspension is a control-plane flag:
+//     Registry.verify_agent_token/1 has no suspended predicate so the box's agent
+//     token STILL verifies, and no `poweroff` caller exists on the suspension
+//     path. Its one real effect is dropping the box out of checkable_scope/1 —
+//     we stop WATCHING it, we do not stop it.
+//   * "Everything comes back if you resubscribe" — unbacked until this slice
+//     added Registry.resume_team_barkparks/1 to do_activate_from_session's insert
+//     branch, and even now it is BOUNDED: a resubscribe onto a smaller plan
+//     leaves the overflow suspended as "quota_exceeded" by design
+//     (Billing.reconcile_plan_limit/1), so the ABSOLUTE sentence can never be
+//     literally true and must not come back.
+//
+// This surface carried ZERO assertions before this test, so any rewrite would
+// have landed green by default. Both strings are pinned over source bytes
+// because neither function is reachable through __bpTestHook.
+test("cch-w50-s3: the cancel copy promises a BOUNDED restore and no stop it cannot execute", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const blurbStart = src.indexOf("function renderBillingCancel");
+  const modalStart = src.indexOf("function openCancelPlanModal");
+  assert.ok(blurbStart !== -1 && modalStart > blurbStart, "both cancel surfaces were located");
+  const blurb = src.slice(blurbStart, modalStart);
+  const modal = src.slice(modalStart, modalStart + 4000);
+
+  for (const [where, text] of [["blurb", blurb], ["modal", modal]]) {
+    // THE UNBOUNDED PROMISE IS GONE. "Everything comes back" cannot survive a
+    // downgrade — reconcile_plan_limit re-suspends the overflow on the way in.
+    assert.ok(!/Everything comes back/.test(text),
+      where + ": the absolute restore promise is false on a downgrade and must not return");
+    // …AND THE BOUND IS PRESENT, named as the thing that governs it (the plan's
+    // instance limit — Billing.barkpark_limit/1's ceiling), not vague hedging.
+    assert.match(text, /Resubscribing brings them back, up to your new plan&rsquo;s instance limit\./,
+      where + ": the restore is stated, bounded by the plan limit that actually governs it");
+    // THE STOP CLAIM IS GONE. No wording may tell an owner their instances are
+    // stopped/shut down/powered off — nothing on the suspension path does that.
+    assert.ok(!/(they&rsquo;re|they're|then)\s+stopped/.test(text),
+      where + ": nothing on the suspension path stops a box; the sentence had no executor");
+    assert.ok(!/(shut down|shuts them down|powered off|poweroff|turned off)/i.test(text),
+      where + ": no invented stop mechanism either");
+    // What DOES happen is still stated, and the reassurance that is TRUE stays.
+    assert.match(text, /instances are suspended/, where + ": the real effect is named");
+    assert.match(text, /not deleted/, where + ": the true reassurance survives — cancel retains data");
+  }
+
+  // THE PAST-DUE SIBLING IS UNTOUCHED AND MUST STAY. suspendedCardBannerHtml's
+  // absolute promise IS backed: past_due → invoice.paid → recover_subscription →
+  // Registry.resume_team_barkparks/1, with no plan change and so no ceiling to
+  // clip it. Sweeping it up with its cancel cousin would delete a true sentence.
+  assert.ok(src.includes("Everything comes back exactly as it was the moment payment succeeds."),
+    "the past-due banner's promise is backed by recover_subscription and must not be swept up");
+});
