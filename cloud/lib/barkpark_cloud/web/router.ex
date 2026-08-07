@@ -1457,8 +1457,19 @@ defmodule BarkparkCloud.Web.Router do
         # load-bearing against a require_ability("write") 403. Membership is
         # the whole scope.
         #
-        # Both booleans come from Authz — the SAME module require_team_admin
-        # calls — so the wire cannot disagree with the gate.
+        # Both booleans come from Authz — the same module the SEVENTEEN
+        # `require_team_admin` routes call (auth.ex `&Authz.team_admin?/2`), so
+        # against THOSE the wire and the gate are one read. They are NOT the
+        # only admin gate: the SEVEN `require_primary_team_admin` routes (1591,
+        # 2020, 2059, 3081, 3218, 3342, 3638) go through `Accounts.team_admin?/2`
+        # -> `TeamMembership.admin?/1`, a RANK THRESHOLD over `@ranks`, while
+        # this boolean is SET MEMBERSHIP over `Authz.@admin_roles` — two
+        # hand-maintained tables in two modules. They agree today by
+        # coincidence, not by construction, so agreement is ENFORCED rather than
+        # assumed: `test/barkpark_cloud/accounts/role_agreement_census_test.exs`
+        # ARM C walks a domain DERIVED from both ladders
+        # (`TeamMembership.ranked_roles/0` + `Authz.admin_roles/0`), so adding a
+        # role to either ladder alone reds by name instead of shipping green.
         team_authority:
           team &&
             %{
