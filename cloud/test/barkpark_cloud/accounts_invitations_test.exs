@@ -382,6 +382,37 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
       assert {:ok, %TeamMembership{role: "member"}} =
                Accounts.update_member_role_as(admin, team, admin, "member")
     end
+
+    test "owner on THEMSELVES: BOTH verbs allow it — the cell the console knowingly under-offers" do
+      # The console withholds `Remove` on the self row (charter D492 variant B)
+      # because the pure authority mirror reds the merge-blocking members smoke,
+      # whose 3-row roster has the actor at row 0. That withholding is a CONSOLE
+      # RULING that contradicts the server, filed as
+      # cch-w44-bl-self-row-underoffers-three-server-legal-cells — and an
+      # under-offer, not this epic's offered-but-refused class.
+      #
+      # It is pinned HERE so the contradiction stays a decision rather than
+      # decaying into a belief. If this test ever reds, the server moved TOWARD
+      # the console and the withholding stopped being an under-offer — at which
+      # point the console's matrix cell and the backlog task must be revisited
+      # together, not silently.
+      {owner1, team} = owned_team()
+      owner2 = user_fixture()
+      {:ok, _} = Accounts.add_member(team, owner2, "owner")
+
+      # Two owners, so `last_owner` (a 409 STATE refusal) is not in play and the
+      # answer below is purely about AUTHORITY.
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(owner1, team, owner1, "admin")
+
+      {owner3, team2} = owned_team()
+      owner4 = user_fixture()
+      {:ok, _} = Accounts.add_member(team2, owner4, "owner")
+      # remove_member_as/3 has no `self?` branch, so the OWNER ESCAPE HATCH at
+      # accounts.ex:1722 answers for the self row too: an owner may remove
+      # themselves. The console does not offer it.
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team2, owner3)
+    end
   end
 
   describe "invite_member/4 — expired re-invite (M5)" do
