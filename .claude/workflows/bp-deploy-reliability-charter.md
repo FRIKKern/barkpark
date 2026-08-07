@@ -2388,3 +2388,245 @@ blocks every PR in the repo — including PRs that touch no console asset at all
 shapes and the counter-argument stated: the fix is **not** "make refusals green", which is how a browser gate
 quietly stops gating. Not re-run by the reviewer — a `gh run rerun --failed` has previously *deleted* a
 required context on this repo, and that is the lead's call, not a reviewer's.
+
+## Wave 8 decisions — NAME THE CAUSE, PUT THE NUMBER IN FRONT OF A HUMAN, LET BOTH SURFACES REFUSE (2026-08-07)
+
+Paper `deploy-reliability-wave-8-2026-08-07`. Epic task `task-fb4fb869490b4213`.
+Every number below was re-derived tonight against live `cloud-db-1` (178.105.92.191) and guerrilla
+(157.180.90.121) and against `origin/main` at `9e39c60c0` — **not** quoted from the handoff, which was
+already stale on three separate facts by the time Decide ran.
+
+- **D107 — THE RATE, RE-DERIVED, AND THE DENOMINATOR IS PART OF THE NUMBER.** Live 24 h at
+  2026-08-07 03:00Z: **802 failed / 610 live / 820 deferred over 2,233 attempted rows** — 35.9% of all
+  rows, **56.8% of TERMINAL outcomes (n=1,412)**. The census route emits exactly ONE rate key
+  (`failure_rate`, denominated on `volume` = attempted, deferrals INCLUDED), measured at 37.55% on the
+  pinned 00:30Z window. *Why this matters:* **D34 mandated printing BOTH conventions and that mandate
+  has never existed in code.** It was discharged in PROSE by `dr-w6-s3` (11/12 criteria met, all in a
+  `tooling/grip/ledger` doc). Wave 8 puts it in the payload: an additive `live` count, a `basis` label on
+  every rate node, and a second `terminal_failure_rate`. Proven free: adding all three reds NOTHING
+  (2,965 tests → 2,965 tests, 0 failures, byte-identical). Proven guarded: repointing the EXISTING
+  `failure_rate` at the terminal basis reds exactly ONE assertion (`deploy_ledger_test.exs:552`,
+  `failure_rate.sample == 20` → got 6) — that single assertion is the only thing standing between this
+  epic and a silently redefined headline, and it MUST NOT be loosened.
+
+- **D108 — THE NUMBER-ONE FAILURE CLASS IS BOTH SILENT AND MIS-REPORTED, AND THE PRODUCER ALREADY
+  WROTE THE CAUSE.** `deploy_ledger.ex:240` matches `"bp-doc-id marker is empty"` in the HEALTH arm and
+  throws away the upstream status that sits in the SAME string, after it. Live 24 h: 250 doc-id rows,
+  **249 carrying `: graph <status>:` and 1 carrying nothing** (500=131, 0=62, 503=56). Mutation-proven in
+  BOTH directions on a clean worktree: the before-state assertion (`classify("HEALTH", g500) ==
+  "DOC_ID_EMPTY"`) is green on main and RED once the arm is status-aware — the two runs cannot both pass,
+  so neither is vacuous. Whole cloud suite: 2,969 tests, the ONLY failure is the intentional before-state
+  test. *Why:* the epic's own taxonomy is the mis-report the wish names.
+
+- **D109 — THE `graph 403` GOES TO THE NAME THAT ALREADY EXISTS.** A fourth marker status exists
+  all-time — 403, 8 rows, minted in the public-read-token window 2026-08-05 20:53–21:10. The existing
+  `FORBIDDEN_403` already carries the label "the build could not read its content (403)" — the identical
+  cause. **RULED: the HEALTH-stage 403 classifies as `FORBIDDEN_403`.** The new `CONTENT_API_*` family
+  covers ONLY the statuses that had no name (500 / 503 / 0-unreachable). *Why:* splitting one cause across
+  two class names is exactly the defect this wave exists to close; D8's "an unnamed thing goes UP" governs
+  the UNNAMED, and 403 is named.
+
+- **D110 — THE TEN BUILD-STAGE GRAPH ROWS STAY `BUILD_FAILED`. DECIDED, NOT OVERLOOKED.** Of 261
+  graph-status rows over 48 h, 251 sit in the DOC_ID_EMPTY/HEALTH arm and **10 sit outside it** —
+  `stage=BUILD`, `BUILD failed (exit 12): … Caught error rendering /graph.json: Error: graph 500`.
+  The build genuinely did fail. Editing only the HEALTH arm leaves those ten where they are, and that is
+  a ruling a builder must be able to point at rather than a gap a reviewer discovers.
+
+- **D111 — A CLASS COUNT CARRIES ITS PINNED WINDOW OR IT IS FALSE.** 24 h: NAMED 249 / CAUSELESS 1.
+  **7 d: NAMED 259 / CAUSELESS 2,594** — pre-contract history that can never acquire a cause
+  retroactively. Any wave-8 sentence of the form "DOC_ID_EMPTY falls to 1" is true only at ≤2 days.
+  This is D3 applied to a class count instead of a rate.
+
+- **D112 — `DOC_ID_EMPTY` CHANGES MEANING, AND IT SILENTLY BECOMES THE STATIC-ENGINE BUCKET.** The one
+  causeless row is site `astro-search`, `framework=astro`, `kind=static`. `deploy/site-deploy.sh` contains
+  **ZERO** references to `bp-corpus-status`; only `deploy/site-deploy-node.sh:492` reads it. So after the
+  split, `DOC_ID_EMPTY` means "the cause went unrecorded" and structurally collects the whole static
+  fleet. Its label is reworded to say so, and the producer-side residue is filed
+  (`dr-bl-map-landing-empty-marker` already exists; wave 8 files the static half beside it).
+
+- **D113 — `feature_not_configured` IS NOT AN ENV HOLE. IT IS A 5,000 ms `GenServer.call` DEFAULT
+  WEARING A CONFIG ACCUSATION.** The serving BEAM carried `BARKPARK_SITE_DEPLOY_APPLY=1` for 75 minutes
+  before a `feature_not_configured` row landed. Measured on origin/main code, both halves:
+  (a) with `enabled?() == true` and a Runner slower than the call budget, the wire returns **503
+  `feature_not_configured` at 5,039 ms** with the byte-identical "set BARKPARK_SITE_DEPLOY_APPLY=1"
+  message; (b) **the deploy still PROCEEDS** — marker file at +6,050 ms, `DeployRunner.status/1` =
+  `:done`. `safe_call/2` (`deploy_runner.ex:411-425`) calls `GenServer.call/2` with no timeout (5,000 ms
+  default) and converts ANY `:exit` — including a call timeout — into `{:error, :disabled}`. The row is
+  wrong twice over: wrong cause AND wrong outcome. 24 h volume: **207 rows, 24.5% of the numerator.**
+  *Consequence:* the direction's "S2 relabels the flag" is REJECTED — a CP-side relabel would be a NEW
+  false accusation. The honest fix starts at the API producer.
+
+- **D114 — A WIRE-CODE RENAME AND THE CP'S TRANSIENT ALLOWLIST CO-MERGE, OR NEITHER SHIPS.**
+  `sites/deploy.ex:1390` hard-codes `"internal_error"` as the only named code earning retry/grace.
+  MUTATION (rename the fake box's code, change nothing else): **3 of 61 tests fail** — poll grace dies
+  (`{:ok, :live}` → `{:ok, :failed}`), the start retry dies (`{:ok, :deferred}` → `{:ok, :failed}`, i.e.
+  the rename directly INCREASES this epic's own numerator), and the graced-refusal note goes silent.
+  REMEDY proven in 2 lines: widen `transient_refusal?/1` → 61/61 green. **Any slice that changes a wire
+  code the CP graces MUST carry the allowlist arm in the same PR.** `dr-bl-w5-500-carries-its-own-name`
+  is OPEN, priority 1, and its four criteria say nothing about this — it is an armed, unlabelled landmine
+  and wave 8 re-labels it.
+
+- **D115 — THE 500 STAYS 500.** Moving the pool-blip crash to 503 costs the CP nothing at the retry layer
+  (`transient_refusal?/1` never sees the status — 61/61 green with the envelope at 503) but `DeployLedger`
+  keys its refusal class on the STATUS alone, so a 503 refiles those rows into `BOX_UNAVAILABLE_503` —
+  **the exact class wave 8 is emptying of `feature_not_configured`.** Keep the status, name the code, and
+  make the ledger's refusal arm code-aware (filed, not built this wave).
+
+- **D116 — S3 IS A DELETION, NOT A BOUND. THE GRAPH ROUTE PAYS ~1,300 SERIAL DB ROUND TRIPS FOR A
+  BOOLEAN IT THROWS AWAY.** Three bounds already ship (per-type 1000, node budget 2000, concurrency 4 +
+  ETS slots) — so the direction's "bound `derive_graph_corpus/2`" is stale. What actually costs:
+  `edges.ex:293` sets `dangling = not resolve_target_existence(…)` per reference-value per document,
+  un-batched and un-memoized; `derive_graph_corpus/2` then maps `raw_edges` to
+  `%{from_id,to_id,kind,weight,plugin_source}` and **`dangling` is never read in the corpus path**
+  (`grep -n dangling` over `tasks_controller.ex` hits only the separate `/v1/graph/dangling` route).
+  Measured `xact_commit` delta around one call: **+1,484 / +1,318 / +2,332** against a no-call baseline of
+  +86…+140. n=30 with the REAL site deploy token: p50 5.958 s, **p95 23.426 s**, 8/30 over 15 s, **4/30
+  HTTP 500** clustered at 16.1–17.4 s — right at the `DBConnection` 15,000 ms ceiling. Reproduced on
+  demand: request `GMlf-hDV0Jp80lcAAB5S`, `Sent 500 in 18863ms`, then `DBConnection.ConnectionError`.
+  A time bound leaves 1,300 round trips and just fails faster.
+
+- **D117 — D17's HUMAN GATE DOES NOT REACH `edges.ex`. RULED HERE SO NO BUILDER RULES IT AT BUILD TIME.**
+  D17 (charter line 134) fences `public_read.ex` **and the graph admission path**, and this charter already
+  self-rules at line 366 that "D17's fence is literal and narrow." `resolve_target_existence/4` is in
+  `api/lib/barkpark/content/edges.ex`; the admission path is `graph_corpus/2`'s ETS slot acquire and
+  `visible_schemas/2`. **A cost fix confined to `edges.ex` plus the call from `derive_graph_corpus/2`
+  needs NO human gate. Any edit to `visible_schemas/2`, the slot cap, `public_read.ex`, or the router
+  allowlist is INSIDE D17 and is human-gated with a NAMED reviewer.** The slice may not cross that line.
+
+- **D118 — THE MEMORY STORY IS REAL, AND `MemorySwapMax` ON THE SERVING SLOT IS FORBIDDEN.** Guerrilla is
+  NOT quiet: swap 1,799/2,047 MB (87.9%), load 6.98 on 2 cores, **58.2% of the serving BEAM paged out**
+  (SwapPss 701 MB of 1,206 MB), 71.8 MB/min swapping IN at ~97 major faults/s. Postgres is NOT starved —
+  12 of 100 connections, ONE active, longest active query 2.30 s while the 15 s checkout timeout fires,
+  so the pool timeout is a **BEAM-side stall**, not SQL contention. But the serving BEAM was **globally
+  OOM-killed twice in 24 h** (`constraint=CONSTRAINT_NONE … global_oom … task=beam.smp`, anon-rss 1,230 MB
+  and 2,449 MB), with `MemoryMax=infinity` on every unit. **The API is the designated OOM victim.**
+  Capping the slot makes it die sooner at a cgroup boundary. If a memory lever is ever taken it belongs on
+  the per-build transient units (`bp-site-build-<site>-<hash>-<epoch>.service`), never on the slot. Sell
+  D116 as removing cold-memory exposure — never as fixing a slow query.
+
+- **D119 — THE GRAPH CLASS'S "ONSET" IS THE PRODUCER FIX, NOT AN INCIDENT, AND BUILD WINDOWS ARE
+  ANTI-CORRELATED.** Per-hour, doc-id rows split with/without a trailing status show a hard crossover at
+  2026-08-05 21: before it, ZERO rows carry a status; after it, every row does — while guerrilla's journal
+  already threw 121/hr and then 703/hr `derive_graph_corpus` errors. **08-05 21:40 is the minute wave-1
+  slice-5 started telling the truth.** Rows before it are unrecoverable and any backfill must refuse below
+  that timestamp rather than classify them forever-UNCLASSIFIED. Separately: only 13 of 261 graph failures
+  (5.0%) land inside a site-build window against an 11.8% wall-clock baseline — **relative risk 0.42.**
+  The peak build hours (08-05 18–20, 37/41/44 builds/hr) had ZERO graph failures. Also: the episode ENDED
+  with **zero commits on origin/main** between 08-06 19:00 and 08-07 01:30 while deploy volume hit its 30 h
+  maximum. Any wave-8 "we fixed it" measured tonight is vacuous green — prove by MUTATION against stored
+  rows, never by watching the live rate.
+
+- **D120 — DR OWNS `console-harness.yml` FOR THIS FAULT CLASS, BY THIS CHARTER'S OWN D101.** The Digest's
+  claim that "D101 does not exist in the DR charter at all" is **REFUTED**: `D101` is at charter line 2195
+  and reads "AN INSTRUMENT THAT CALLS A DEAD BROWSER A CSS DEFECT IS THIS EPIC'S OWN THESIS, LIVE, ON A
+  REQUIRED BLOCKING GATE," carrying an explicit FENCE clause excluding cch's `app.js`, notifications tree
+  and path-escape scripts. No carve-out, no hand-off, and no new decision is needed — the instrument is
+  already claimed with a fence, and wave 8 stays inside it.
+
+- **D121 — A FAILED JOB'S `outputs:` DO REACH `needs.<job>.outputs`. PROVEN ON LIVE GITHUB, AND
+  `continue-on-error` STAYS BANNED.** Throwaway probe (run `31136979488`, scratch branch since deleted):
+  `A.result=[failure] A.verdict=[REFUSED_ENV]` (output written in the same step that then `exit 1`),
+  `B.result=[failure] B.verdict=[REFUSED_LATER]`, `C.result=[success] C.verdict=[MEASURED_OK]`. So the
+  refusing job keeps exiting non-zero — `needs.X.result` stays `failure`, fail-closed preserved — **and**
+  the aggregator can additionally read a `verdict` output and name an ENVIRONMENT fault instead of
+  accusing a stylesheet. `continue-on-error` would launder `result` to `success` and is refused (D19).
+
+- **D122 — THE CHROME REFUSAL IS PER-VM AND STOCHASTIC, SO A RETRY IS THE CORRECT INSTRUMENT — AND IT
+  MUST ALLOCATE A FRESH PROFILE AND CAPTURE STDERR OR IT SHIPS A FIX NOBODY CAN AUDIT.** Base rate over
+  85 real browser-job attempts: 74 success / 11 failure, 10 of the 11 DevToolsActivePort refusals →
+  **p ≈ 11.8% per attempt**, ≈31% per run at three browser jobs. Capacity is REFUTED four ways: same run,
+  same second, same sha — `Billing tier floor` success at 00:15:17 while `Overflow guard` refused at
+  00:15:17; the one all-3-fail run spanned three Azure regions and two runner images; a same-instant,
+  same-region, same-image control succeeded. `#9960` fixed the `.mjs` classifier and changed **nothing**
+  in the workflow — its diff for `.github/workflows/console-harness.yml` is EMPTY, and all exit-2 arms
+  (lines 438-439 / 516-517 / 591-592) still end in `exit 1`. Captured live on main at 01:03:02Z after
+  #9960 merged: the honest banner prints, then `Process completed with exit code 1`, then `Console gate …
+  RED on purpose`. **The banner exists; the exit code is the defect.** The profile dir is `mkdtemp`'d ONCE
+  before the bring-up loop (`cssom-parity.mjs:565`) and `spawn(…, {stdio:"ignore"})` throws Chrome's
+  stderr away in all four instruments — a retry that keeps either is a hidden fix.
+
+- **D123 — `Oban.Plugins.Lifeline` IS SAFE, AND THE PREMISE "5 SILENTLY DROPPED PUBLISHES" IS REFUTED.**
+  `cloud/config/config.exs:232` configures Pruner + Cron and nothing else; Pruner never touches
+  `:executing`, so 8 jobs (5 `AutoDeployWorker`, oldest 2026-07-28) sit `executing` forever, each orphaned
+  by a dead BEAM node. **The double-run danger is structurally impossible**: `perform/1` enqueues and spawns
+  a supervised driver and returns — over **13,287 completed AutoDeployWorker jobs, p50 0.329 s, p99 5.771 s,
+  max 15.017 s, ZERO over 30 s.** But every zombie's trigger was carried by the next job within
+  **62–156 seconds** (job 285013 minted deployment `fe6ab31c` at +91 s; the site reached `live` at 15:02:52).
+  **So the cost is a REPORTING lie — 5 rows claiming to be running for up to 10 days — not a lost publish,
+  and the wave must say it that way.** The 15.017 s max is exactly Oban's unset `shutdown_grace_period`
+  default: the distribution is CLIPPED at the grace boundary, which is why `rescue_after` must be ≥60 s
+  (ruled: 5 minutes, 20× the observed max). Adopting Lifeline immediately re-performs the 5 zombies with
+  `force: true` — 5 redundant builds. That is the stated one-time price, and the lead discards the rows.
+
+- **D124 — THE RAW-LOG PIPE IS BACKWARDS ON A LIVE SECRET BOUNDARY, AND THE TEST PINS THE LEAK INSTEAD
+  OF FAILING ON IT.** `router.ex:10693` ships `failure_reason_raw` as `scrub() |> strip_ansi()`. Measured on
+  origin/main: 2,000 fresh colourised `api_key=<24-char>` values → **2,000/2,000 leak under the shipped
+  order, 0/2,000 under the flipped one.** Proven end-to-end through the real `GET /v1/sites/:id/deployments`
+  route: the JSON field came back `"…403 api_key=Qp9vR4tZ7wN1cB6yH3sD5fG0"` — ANSI stripped, **secret
+  intact**, which is what makes it dangerous. Flipping the one line turns it into `api_key=[redacted]`.
+  Three things the epic did not know: (a) **the suite is INDIFFERENT** — 142 tests green with the pipe
+  either way, and the one boundary test uses a `Bearer sk-live-…` shape that redacts under BOTH orders, so
+  it is structurally incapable of catching this; (b) `humanize/1`'s passthrough arm leaks the same way and
+  the safe fix is `classify() |> strip_ansi() |> scrub()` (proven: LEAKS=false, 142/142 green) — the filed
+  task's "leave humanize/1 alone" is WRONG; (c) `stage_caption/2` and `event_email.ex:105/141` call bare
+  `scrub` with no strip at all, so they leak the secret AND raw `0x1B` into a customer's inbox. The figure
+  is length-conditional (2/2,000 at 32-48 chars) and must be quoted as "sub-32-char colourised `api_key=`."
+
+- **D125 — THE ROUTER'S ONE LINE IS TAKEN, DESPITE THE ROUTER FENCE.** `cloud/.../web/router.ex` carries
+  four open PRs and is on this wave's WILL-NOT-TOUCH list. **Narrow carve-out: line 10693 only**, changed
+  to a single call into a new `FailureCopy.raw/1`. It is a live secret boundary, the edit is one line
+  ~10,000 lines from any contending hunk, and the alternative is shipping a wave that knows about a leak and
+  leaves it. Nothing else in `router.ex` may be touched.
+
+- **D126 — DEFERRAL HONESTY HOLDS; THE PLAN-REWRITER DID NOT FIRE.** 319 chains started in 24 h: **209 end
+  failed, 107 end live, 4 open — and all four are the live head of a live site, aged 33–47 s against a 60 s
+  debounce**, each with a scheduled Oban job waiting. Longest chain 9. **The 12-cap has fired ZERO times**
+  (0 of 208 chain-terminal failures carry the cap's own phrase "rebuilds in a row"). Do NOT open a cap
+  slice: the cap guards a condition that does not occur, and what terminates chains is an ordinary failure
+  of the kind the rest of this wave is about.
+
+- **D127 — MERGE ORDER IS A RULE, NEVER AN ENUMERATED LIST.** #9888, #9960 and #9922 all merged inside
+  **14 seconds** at 00:51Z — after the Digest's own 00:50Z re-derivation. `origin/main` moved twice more
+  during Decide. Any charter sentence naming PR numbers has a shelf life measured in minutes. The rule:
+  **merge everything CLEAN, then re-query.** Two mechanical corrections that cost real time this wave:
+  `git merge-base --is-ancestor <headRefOid> origin/main` returns rc=1 for a MERGED **squash** PR — ask
+  `.mergeCommit.oid`; and `gh pr view --json mergeStateStatus` returns `UNKNOWN` on the first query after a
+  fetch and must be re-asked. #9887 is blocked by an **ABSENT** required context, not a red one (its
+  console-harness run sat `queued` with ZERO jobs for 8 h 18 m) — and per D102 a re-run DELETES the check,
+  so the only safe unblock is a fresh head sha.
+
+- **D128 — SIXTEEN MERGED TASKS ARE UNSTAMPED, AND THAT IS THIS EPIC MIS-REPORTING ITSELF.** The epic has
+  123 children: 107 open, 12 done, 2 in_progress, 2 cancelled. **16 of the open rows have a MERGED PR and
+  31 unstamped criteria between them; nine are exactly ONE criterion short**, and in the three audited the
+  sole unmet criterion is a pure merge-gate satisfiable by `gh pr view --json statusCheckRollup` plus
+  `.mergeCommit.oid` ancestry. Two of three audited are free closes; the third (`dr-w3-s5`) smuggles "AFTER
+  an independent second review of the door-vs-unit race" into the same criterion and `gh pr view 9827
+  --json reviews` returns ZERO reviews — so it needs the human, not a stamp. **A bulk-stamp script is
+  BANNED**: the obvious extractor (`doc['acceptance_criteria']`) prints NOTHING because criteria live under
+  `doc.content`, so it reads every task as fully met and stamps blind; and a check-runs-only verifier misses
+  `PR references an active task` entirely, because that is a commit-status. Use `criteria_progress` plus a
+  per-task text read.
+
+- **D129 — EVERY SLICE THIS WAVE IS OPUS.** Fable is unavailable fleet-wide. S3 and S5 would otherwise be
+  fable on the difficulty axis (blast radius across `/v1/graph/dangling` + EdgeProjector; a required
+  blocking gate). They are flagged HIGH-FLIP-RISK instead, and the lead is owed an independent second
+  reviewer on both before merge.
+
+### Wave 8 plan — 7 slices, all round 1, file sets disjoint
+
+| # | Slice | task | Surface | Size | Model |
+|---|---|---|---|---|---|
+| 1 | The ledger names the cause AND names its denominator | `dr-w8-s1-ledger-names-cause-and-denominator` | `cloud/**` + `deploy/**` | large | opus |
+| 2 | A runner that did not answer stops blaming a flag that is set | `dr-w8-s2-runner-timeout-stops-blaming-the-flag` | `api/**` + `cloud/**` | medium | opus |
+| 3 | `/v1/graph` stops paying ~1,300 round trips for a discarded boolean | `dr-w8-s3-graph-stops-paying-for-a-discarded-boolean` | `api/**` | medium | opus |
+| 4 | The census reaches a human, and refuses out loud | `dr-w8-s4-census-reaches-a-human` | `internal/**` | medium | opus |
+| 5 | A refusal is not an accusation (exit-2 verdict + Chrome retry) | `dr-w8-s5-refusal-is-not-an-accusation` | CI + `cloud/priv/static/__preview__/**` | medium | opus |
+| 6 | The raw capture stops leaking a colourised secret | `dr-w8-s6-raw-capture-stops-leaking` | `cloud/**` | medium | opus |
+| 7 | Orphaned jobs stop claiming to be running | `dr-w8-s7-orphaned-jobs-stop-claiming-to-run` | `cloud/**` | small | opus |
+
+HIGH-FLIP-RISK (D129, independent second reviewer owed before merge): **S3** — whether the `dangling`
+deletion is invisible to `/v1/graph/dangling`, `EdgeProjector` and `corpus_edges/3`, and whether the edit
+stays outside D17's fence. **S5** — whether the aggregator's refusal arm can ever green an unmeasured gate.
+
+Coverage: every survey and verify agent reported; there is no coverage deficit this wave.
+
