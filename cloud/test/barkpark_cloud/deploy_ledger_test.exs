@@ -46,6 +46,19 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @r409_bare "the instance refused the deploy (HTTP 409)"
   @r500 "the instance refused the deploy (HTTP 500)"
   @r503 "the instance refused the deploy (HTTP 503): feature_not_configured"
+  # 265 rows — EVERY BOX_UNAVAILABLE_503 row on cloud-db-1, all-time (first
+  # 2026-07-30 14:24:47Z, last 2026-08-07 03:19:21Z). Byte-verbatim from the
+  # column: the box named its own code word and said what it meant.
+  @r503_disabled "the instance refused the deploy (HTTP 503): feature_not_configured — site deploys are not enabled on this instance (set BARKPARK_SITE_DEPLOY_APPLY=1)"
+  # The SECOND cause on the same status (dr-w8-s2 / #10015): a wedged runner,
+  # with the box's request-id stamped INSIDE the first ` — ` segment exactly as
+  # `Sites.Deploy.box_refusal/3` writes it, plus the grace note the failing beat
+  # appends. Opposite operator instruction to the one above.
+  @r503_runner "the instance refused the deploy (HTTP 503): deploy_runner_unavailable — the deploy runner did not answer in time [box request_id: F9tPXq2A] (after tolerating 3 transient box 5xx; the last was: the deploy runner did not answer in time)"
+  # A 503 whose code word this ledger has never named, and a 503 whose detail is
+  # bare prose. Neither may be promoted to a named cause.
+  @r503_unknown "the instance refused the deploy (HTTP 503): shard_draining — the region is being drained"
+  @r503_prose "the instance refused the deploy (HTTP 503): everything is on fire right now"
   @r429 "the instance refused the deploy (HTTP 429): rate_limited — try again shortly"
   # An HTTP status the ledger has never named: 2 rows. Must be UNCLASSIFIED.
   @r404 "the instance refused the deploy (HTTP 404)"
@@ -429,7 +442,11 @@ defmodule BarkparkCloud.DeployLedgerTest do
     test "the box-refusal statuses each get their own name; an unnamed one does not" do
       assert DeployLedger.classify("BUILD", @r500) == "BOX_500"
       assert DeployLedger.classify("HEALTH", @r500) == "BOX_500"
-      assert DeployLedger.classify("PLAN", @r503) == "BOX_UNAVAILABLE_503"
+      # WAS `BOX_UNAVAILABLE_503`, and that assertion is what pinned the lie: the
+      # box that sent this was UP — it named the code word `feature_not_configured`
+      # in the same breath. The 503 now reads that word (see the 503 describe
+      # below), so a code-carrying 503 gets the cause's name, not the status'.
+      assert DeployLedger.classify("PLAN", @r503) == "BOX_DEPLOY_DISABLED_503"
       assert DeployLedger.classify("BUILD", @r429) == "BOX_RATE_LIMITED_429"
       # An unnamed refusal status is UNCLASSIFIED, not a catch-all BOX_REFUSED.
       assert DeployLedger.classify("PLAN", @r404) == "UNCLASSIFIED"
@@ -623,6 +640,105 @@ defmodule BarkparkCloud.DeployLedgerTest do
       refute "GITHUB_PUSH_UNBUILDABLE" in DeployLedger.classes()
       assert DeployLedger.not_attempted?("GITHUB_PUSH_UNBUILDABLE")
       refute DeployLedger.not_attempted?("BOX_BUSY_409")
+    end
+  end
+
+  ## ── 1b. The 503 reads the box's own code word ─────────────────────────────
+  #
+  # `BOX_UNAVAILABLE_503` was labelled "the box was unavailable (HTTP 503)" and
+  # had EXACTLY ONE distinct failure_reason all-time on cloud-db-1 — 265 rows,
+  # every one `feature_not_configured`, every one written by a box that was UP
+  # (in the 2026-08-06 13:00Z hour, 15 deploys went LIVE on that same box while
+  # 44 were refused as "not enabled", a live deploy and a refusal four seconds
+  # apart). The label was not mostly wrong, it was wrong of every row it named.
+  #
+  # And dr-w8-s2 put a SECOND cause on the same status deliberately — a wedged
+  # runner — so the class became a union with opposite operator instructions
+  # behind one name that fits neither. The status alone cannot say which; the
+  # box's own code word can, and the 409 arm already reads it.
+  describe "classify/2 — the 503 splits on the box's code word" do
+    test "the 265-row prod string names the CONFIG cause, not the box's health" do
+      # Byte-verbatim from the column — not a paraphrase of it.
+      assert DeployLedger.classify("PLAN", @r503_disabled) == "BOX_DEPLOY_DISABLED_503"
+      # …and the code-only shape, with no message after the word, is the same cause.
+      assert DeployLedger.classify("PLAN", @r503) == "BOX_DEPLOY_DISABLED_503"
+
+      # The name is registered, labelled, and a real failure in the numerator.
+      assert "BOX_DEPLOY_DISABLED_503" in DeployLedger.classes()
+      refute DeployLedger.label("BOX_DEPLOY_DISABLED_503") == "BOX_DEPLOY_DISABLED_503"
+      refute DeployLedger.deferred?("BOX_DEPLOY_DISABLED_503")
+      refute DeployLedger.not_attempted?("BOX_DEPLOY_DISABLED_503")
+
+      # THE POINT: neither new label may repeat the false claim the old one made.
+      refute DeployLedger.label("BOX_DEPLOY_DISABLED_503") =~ "unavailable"
+      refute DeployLedger.label("BOX_RUNNER_UNAVAILABLE_503") =~ "the box was unavailable"
+    end
+
+    test "a wedged runner is a DIFFERENT cause on the same status" do
+      assert DeployLedger.classify("PLAN", @r503_runner) == "BOX_RUNNER_UNAVAILABLE_503"
+
+      # The split must survive into the UI: two names that render the same
+      # sentence are not a split.
+      refute DeployLedger.label("BOX_RUNNER_UNAVAILABLE_503") ==
+               DeployLedger.label("BOX_DEPLOY_DISABLED_503")
+
+      assert "BOX_RUNNER_UNAVAILABLE_503" in DeployLedger.classes()
+      refute DeployLedger.label("BOX_RUNNER_UNAVAILABLE_503") == "BOX_RUNNER_UNAVAILABLE_503"
+
+      # The request-id stamp lands INSIDE the first ` — ` segment on this shape,
+      # and the grace note lands after it. Neither is part of the box's word.
+      assert @r503_runner =~ "[box request_id: F9tPXq2A]"
+      assert @r503_runner =~ "after tolerating 3 transient box 5xx"
+    end
+
+    test "MUTATION — the arm can REFUSE: an unnamed 503 is not promoted" do
+      # A code word this ledger has never named stays on the status-only name.
+      assert DeployLedger.classify("PLAN", @r503_unknown) == "BOX_UNAVAILABLE_503"
+      # Bare prose after the colon is not a code word either.
+      assert DeployLedger.classify("PLAN", @r503_prose) == "BOX_UNAVAILABLE_503"
+      # And a 503 with no detail at all — the shape that predates any code word.
+      assert DeployLedger.classify("PLAN", "the instance refused the deploy (HTTP 503)") ==
+               "BOX_UNAVAILABLE_503"
+
+      # The fixtures really do carry what they claim to, so this is not three
+      # assertions passing on three strings that lost the thing under test.
+      assert @r503_unknown =~ "shard_draining"
+      assert @r503_prose =~ "everything is on fire"
+    end
+
+    test "MUTATION — widening the code reader's status capture moves NO 409 row" do
+      # `deferral_code/1`'s prefix was hard-pinned to 409; the 503 arm reads
+      # through the SAME parser, so the capture had to widen to any status. If
+      # that widening were wrong — a literal `\\d{3}`, a dropped `(?:HTTP )?`, a
+      # lost anchor — these 409 rows would move, and they are the fleet's two
+      # largest classes. BOTH 409 shapes, coded and bare:
+      assert DeployLedger.classify("PLAN", @r409_coded) == "BOX_BUSY_409"
+      assert DeployLedger.classify("PLAN", @r409_bare) == "BOX_BUSY_409"
+
+      # …and the two arms that actually CALL the reader on a 409: the abandoned
+      # split (which keys on the code word) and the deferred split.
+      assert DeployLedger.classify("PLAN", @a_capacity) == "ABANDONED_AT_CAPACITY"
+      assert DeployLedger.classify("PLAN", @a_busy) == "ABANDONED_BOX_STUCK"
+
+      assert DeployLedger.classify(%{
+               status: "deferred",
+               stage: "PLAN",
+               failure_reason: @d_capacity
+             }) == "BOX_AT_CAPACITY_DEFERRED"
+
+      assert DeployLedger.classify(%{
+               status: "deferred",
+               stage: "PLAN",
+               failure_reason: @d_busy_bare
+             }) == "BOX_BUSY_DEFERRED"
+
+      # The BUSY-side near miss stays where it was: a 409 code the ledger has
+      # never named must still rise in the deferred tail, not inherit a 503 arm.
+      assert DeployLedger.classify(%{
+               status: "deferred",
+               stage: "PLAN",
+               failure_reason: @d_unknown_code
+             }) == "DEFERRED_UNCLASSIFIED"
     end
   end
 
