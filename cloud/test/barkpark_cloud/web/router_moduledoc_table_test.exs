@@ -34,7 +34,10 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   """
   use ExUnit.Case, async: true
 
-  @router_source Path.expand("../../../lib/barkpark_cloud/web/router.ex", __DIR__)
+  # The route-to-tier resolver lives in `test/support/router_tier_lens.ex` (dr-w18-s4)
+  # so the deploy-signal audience census can share THIS resolver rather than
+  # re-implement it. Everything below consumes it; nothing here re-derives a guard.
+  alias BarkparkCloud.RouterTierLens, as: Lens
 
   # A route declaration: `get "/path" do`, `post("/path", do: ...)`, etc.
   # `[\s(]` after the verb matches both the space form and the parenthesized form.
@@ -45,7 +48,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   # body. The `*` catch-all row is documentation-only and excluded from the diff.
   @row_re ~r/^\s{4,}(GET|POST|PUT|PATCH|DELETE)\s+(\S+)/
 
-  defp source, do: File.read!(@router_source)
+  defp source, do: Lens.source()
 
   defp declared_routes do
     source()
@@ -123,39 +126,10 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   # tripwire would stay green. This re-derives the tier explicitly.
   @tier_row_re ~r/^\s{4,}(GET|POST|PUT|PATCH|DELETE)\s+(\S+)\s+(\S+)/
 
-  # The tier vocabulary the table actually uses. `—` / `—*` rows are public and
-  # carry no tier, so they are not part of this population. `user*` (ticket-or-
-  # Bearer) and `user(s)` (session-or-PAT) are `user` with a footnote; `admin(d)`
-  # (session team-admin OR a PAT carrying the `deploy` ability) is a tier of its
-  # OWN — deliberately NOT folded into `admin` by normalize_tier/1, because a
-  # deploy-PAT holder needs no role at all and telling them "admin" is its own lie.
-  @tier_tokens ~w[user user* user(s) admin admin(d) owner worker operator agent]
-
-  # Every guard idiom the router uses, mapped to the tier column it justifies. A
-  # guard MISSING from this map is treated as UNRESOLVED, never as a pass — a new
-  # guard therefore reds instead of quietly widening the census's blind spot.
-  @guard_tier %{
-    "require_user" => "user",
-    "require_user_or_pat" => "user",
-    "require_ability" => "user",
-    "require_team_role" => "user",
-    "require_team_admin" => "admin",
-    "require_primary_team_admin" => "admin",
-    "require_primary_team_owner" => "owner",
-    "require_platform_operator" => "operator",
-    "require_worker" => "worker",
-    "require_agent" => "agent",
-    "with_team_role:member" => "user",
-    "with_team_role:admin" => "admin",
-    "with_team_role:owner" => "owner",
-
-    # POST-GUARD ELEVATIONS. Seven routes call a permissive `Auth.require_*` and
-    # then refuse a plain member from a `cond` BELOW it (see `elevate/2`). The
-    # outer guard is not the tier those routes enforce, so the composed key —
-    # base guard + the elevation the body performs — is what gets mapped here.
-    "require_user+forbidden:admin" => "admin",
-    "require_user_or_pat+ability:deploy+forbidden:admin" => "admin(d)"
-  }
+  # The tier vocabulary and the guard->tier map moved to `RouterTierLens`
+  # (dr-w18-s4). They are read from there, never re-declared here.
+  defp tier_tokens, do: Lens.tier_tokens()
+  defp guard_tier, do: Lens.guard_tier()
 
   # Routes whose post-guard `Auth.forbidden(required: …)` is NOT a tier and must
   # not be read as one — a NAMED consent list, exactly like @unresolved_consent,
@@ -185,84 +159,12 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
   # the same commit as the routes you removed, or not at all.
   @resolved_floor 161
 
-  @decl_re ~r/^\s*(get|post|put|patch|delete)[\s(]+"([^"]+)"/
-  @def_re ~r/^\s*defp?\s+(\w+)\(/
-  @block_end_re ~r/^  end\s*$/
-  # `post("/v1/launch", do: go_live(conn))` — a one-line body, no `end` of its own.
-  @inline_body_re ~r/\bdo:/
-
-  # ONE pass over the source that slices it into blocks: route bodies keyed by
-  # {METHOD, path}, and function bodies keyed by name (the helpers a route body
-  # delegates its gate to). Cached per test process — the file is re-read once,
-  # not once per row.
-  defp blocks do
-    case Process.get(:router_blocks) do
-      nil ->
-        result =
-          source()
-          |> String.split("\n")
-          |> Enum.reduce({nil, [], %{}, %{}}, &scan_line/2)
-          |> then(fn {_open, _acc, routes, defs} -> {routes, defs} end)
-
-        Process.put(:router_blocks, result)
-        result
-
-      cached ->
-        cached
-    end
-  end
-
-  defp scan_line(line, {open, acc, routes, defs}) do
-    cond do
-      open != nil and Regex.match?(@block_end_re, line) ->
-        {routes, defs} = close_block(open, Enum.reverse([line | acc]), routes, defs)
-        {nil, [], routes, defs}
-
-      open != nil ->
-        {open, [line | acc], routes, defs}
-
-      match = Regex.run(@decl_re, line) ->
-        [_, verb, path] = match
-        open_block({:route, {String.upcase(verb), path}}, line, routes, defs)
-
-      match = Regex.run(@def_re, line) ->
-        [_, name] = match
-        open_block({:def, name}, line, routes, defs)
-
-      true ->
-        {nil, [], routes, defs}
-    end
-  end
-
-  # A one-line `..., do: expr` block closes immediately; anything else stays open
-  # until the module-level `  end` that closes it.
-  defp open_block(key, line, routes, defs) do
-    if Regex.match?(@inline_body_re, line) do
-      {routes, defs} = close_block(key, [line], routes, defs)
-      {nil, [], routes, defs}
-    else
-      {key, [line], routes, defs}
-    end
-  end
-
-  defp close_block({:route, key}, lines, routes, defs),
-    do: {Map.put_new(routes, key, Enum.join(lines, "\n")), defs}
-
-  # ALL clauses of a multi-clause helper are joined, never just the first: a
-  # `defp with_team_site(conn, nil, _fun), do: …` head would otherwise shadow the
-  # clause that actually carries the gate, and every route delegating to it would
-  # silently fall out of the census.
-  defp close_block({:def, name}, lines, routes, defs),
-    do:
-      {routes,
-       Map.update(defs, name, Enum.join(lines, "\n"), &(&1 <> "\n" <> Enum.join(lines, "\n")))}
-
   defp documented_tier(method, path) do
     moduledoc_block()
     |> String.split("\n")
     |> Enum.find_value(fn line ->
       case Regex.run(@tier_row_re, line) do
-        [_, ^method, ^path, tier] -> if tier in @tier_tokens, do: tier, else: nil
+        [_, ^method, ^path, tier] -> if tier in tier_tokens(), do: tier, else: nil
         _ -> nil
       end
     end)
@@ -275,7 +177,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     |> Enum.flat_map(fn line ->
       case Regex.run(@tier_row_re, line) do
         [_, method, path, tier] when tier != nil ->
-          if tier in @tier_tokens, do: [{method, path, tier}], else: []
+          if tier in tier_tokens(), do: [{method, path, tier}], else: []
 
         _ ->
           []
@@ -283,25 +185,13 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     end)
   end
 
-  # `user*` (ticket-or-Bearer) and `user(s)` (session-or-PAT) are footnoted `user`.
-  defp normalize_tier("user" <> _), do: "user"
-  defp normalize_tier(tier), do: tier
+  defp normalize_tier(tier), do: Lens.normalize_tier(tier)
 
-  # The guard a route body invokes, read from source. THE WHOLE POINT: the naive
-  # "Auth.require_* on the next line" regex resolves barely two thirds of the
-  # table — the rest gate through `with_team_role/3` (e.g. /v1/teams/:id/members)
-  # or through a helper the body delegates the whole conn to (e.g. `with_team_site`,
-  # `go_live`, `proxy_instance_webhook`). A resolver that saw only the first idiom
-  # would be vacuously green over that remainder, so it walks all three.
-  # The guard as the body literally composes it, elevations included.
-  defp raw_route_guard(method, path) do
-    {routes, defs} = blocks()
+  defp raw_route_guard(method, path), do: Lens.raw_route_guard(method, path)
 
-    case Map.fetch(routes, {method, path}) do
-      {:ok, body} -> guard_in(body, defs, 0)
-      :error -> nil
-    end
-  end
+  defp base_guard(guard), do: Lens.base_guard(guard)
+
+  defp guard_in(body, defs, depth), do: Lens.guard_in(body, defs, depth)
 
   # The guard the row is censused against: the raw guard, minus any elevation the
   # consent list has ruled is not a tier (see @elevation_consent).
@@ -309,67 +199,6 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     guard = raw_route_guard(method, path)
 
     if Map.has_key?(@elevation_consent, {method, path}), do: base_guard(guard), else: guard
-  end
-
-  defp base_guard(nil), do: nil
-  defp base_guard(guard), do: guard |> String.split("+") |> hd()
-
-  defp guard_in(body, defs, depth) do
-    cond do
-      match = Regex.run(~r/Auth\.(require_\w+)/, body) ->
-        elevate(Enum.at(match, 1), body)
-
-      match = Regex.run(~r/with_team_role\(conn,\s*"(\w+)"/, body) ->
-        "with_team_role:" <> Enum.at(match, 1)
-
-      depth < 2 ->
-        ~r/(?<![\w.])(\w+)\(conn\b/
-        |> Regex.scan(body)
-        |> Enum.find_value(fn [_, name] ->
-          case Map.fetch(defs, name) do
-            {:ok, helper_body} -> guard_in(helper_body, defs, depth + 1)
-            :error -> nil
-          end
-        end)
-
-      true ->
-        nil
-    end
-  end
-
-  # ── The refusal lens ───────────────────────────────────────────────────────
-  #
-  # `guard_in/3` returns the FIRST `Auth.require_*` hit and stops, which is right
-  # for the ~155 routes whose gate IS that call — and wrong for seven whose gate
-  # continues in a `cond` BELOW it. POST /v1/env-vars calls `Auth.require_user`
-  # and then 403s any non-team-admin two branches later; read by the outer guard
-  # alone it censuses as `user`, and the table's `user` cell agreed with it — two
-  # wrongs making a green.
-  #
-  # THE SIGNAL IS A REFUSAL, NOT A MENTION, and the difference is measurable:
-  # `GET /v1/notifications/deliveries` calls `Accounts.team_admin?/2` too, but the
-  # boolean SCOPES a query (`recipient: if(admin?, do: nil, else: user.email)`) —
-  # it narrows what you see, it never refuses you. A "the body mentions
-  # team_admin?" lens flags it and would push a truthful `user` cell to a false
-  # `admin`. So the lens keys on the REFUSAL: an `Auth.forbidden/2` carrying a
-  # `required:` tier, which is only ever emitted from a branch that halts with a
-  # 403. (The fixture pair below pins exactly this discrimination on frozen bytes.)
-  #
-  # `+ability:deploy` is load-bearing, not decoration: the four `require_user_or_pat`
-  # routes are a DISJUNCTION — a PAT needs only the `deploy` ability, a session
-  # needs team-admin — so they resolve to `admin(d)`, never to `admin`.
-  defp elevate(base, body) do
-    case Regex.run(~r/Auth\.forbidden\(conn,\s*required:\s*"(\w+)"/, body) do
-      [_, required] -> base <> ability_suffix(body) <> "+forbidden:" <> required
-      nil -> base
-    end
-  end
-
-  defp ability_suffix(body) do
-    case Regex.run(~r/Auth\.require_ability\(conn,\s*"(\w+)"\)/, body) do
-      [_, ability] -> "+ability:" <> ability
-      nil -> ""
-    end
   end
 
   # {resolved, unresolved} — resolved carries {method, path, documented, enforced},
@@ -381,7 +210,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
           {ok, [{method, path, tier, :no_guard_found} | no]}
 
         guard ->
-          case Map.fetch(@guard_tier, guard) do
+          case Map.fetch(guard_tier(), guard) do
             {:ok, enforced} -> {[{method, path, normalize_tier(tier), enforced} | ok], no}
             :error -> {ok, [{method, path, tier, {:unmapped_guard, guard}} | no]}
           end
@@ -556,7 +385,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
              "must not be read as a tier (that would push a truthful `user` cell to " <>
              "a false `admin`)"
 
-    assert @guard_tier[guard_in(@fixture_clear, %{}, 0)] == "user"
+    assert guard_tier()[guard_in(@fixture_clear, %{}, 0)] == "user"
 
     # The must-FLAG control. Same outer guard as the CLEAR fixture — so the only
     # thing the lens can be keying on is the refusal.
@@ -564,13 +393,13 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
            "the must-FLAG fixture did not elevate: a post-guard cond that 403s a " <>
              "plain member is the tier, not the outer Auth.require_user"
 
-    assert @guard_tier[guard_in(@fixture_flag, %{}, 0)] == "admin"
+    assert guard_tier()[guard_in(@fixture_flag, %{}, 0)] == "admin"
 
     # The disjunction. `admin` here would be a NEW lie, so it must be `admin(d)`.
     assert guard_in(@fixture_flag_deploy, %{}, 0) ==
              "require_user_or_pat+ability:deploy+forbidden:admin"
 
-    assert @guard_tier[guard_in(@fixture_flag_deploy, %{}, 0)] == "admin(d)",
+    assert guard_tier()[guard_in(@fixture_flag_deploy, %{}, 0)] == "admin(d)",
            "the deploy DISJUNCTION must resolve to admin(d), never to admin"
 
     # …and `admin(d)` must survive normalization as its own tier.
