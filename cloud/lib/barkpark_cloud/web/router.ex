@@ -10756,6 +10756,33 @@ defmodule BarkparkCloud.Web.Router do
       #     17,395 failed rows carry real 0x1B bytes from the build PTY.
       failure_class: DeployLedger.classify(d),
       failure_reason_raw: d.failure_reason |> FailureCopy.scrub() |> FailureCopy.strip_ansi(),
+      # deploy-reliability W13 S3: the WAIT, as data. W12 shipped the writer
+      # (`Sites.Deploy.defer/3`) and no reader at all — these three columns
+      # populated into a serializer that did not mention them, so the only way
+      # any client could recover a deferral's depth was
+      # `internal/cli/cloud_site_cmd.go`'s `siteDeferralChainRe`, a regex over
+      # the English in `failure_reason` ("refusal 3 of 12"). One reworded clause
+      # silently zeroes every count taken that way.
+      #
+      #   * `deferral_depth` — how many times IN A ROW this site has been
+      #     refused for this cause; `deferral_bound` is that CAUSE's own budget
+      #     (12 for capacity, 6 for a busy box), so a client never hardcodes
+      #     either.
+      #   * `deferral_cause` — the LEDGER CLASS, frozen at defer time:
+      #     `Deploy.deferral_cause/2` computes it through
+      #     `DeployLedger.classify/1`, so this is a classification and not the
+      #     raw box code. A later taxonomy repair does NOT retroactively apply
+      #     to a row already written.
+      #
+      # `nil` on every non-deferred row AND on every deferral written before
+      # the 20260807150000 migration landed — which is most of them today (23
+      # of 1,841 prod deferrals carry columns, the oldest 2026-08-07 10:12:35Z).
+      # That nil is the TRUTHFUL answer and is never coerced to 0: a zero depth
+      # would claim "this row deferred zero times", which is a different and
+      # false sentence from "nobody recorded it".
+      deferral_depth: d.deferral_depth,
+      deferral_bound: d.deferral_bound,
+      deferral_cause: d.deferral_cause,
       became_live_at: d.became_live_at,
       # gh-6: branch-preview identity. `environment` is "production"|"preview";
       # for a preview, `branch` + `preview_host` + `preview_url` describe the

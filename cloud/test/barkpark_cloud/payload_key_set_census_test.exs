@@ -586,8 +586,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # the extractor die unnoticed. A legitimate key change RAISES them in the same
   # commit — and the divergence assertions below red on that change anyway, so
   # the floor can never be the only thing a change has to satisfy.
-  @emitted_floor 100
-  @go_tag_floor 197
+  #
+  # W13 S3: 100 -> 103 emitted, because `deployment_json/1` (which
+  # `site_deployment_json/3` pipes through, so the walker follows it) now emits
+  # the three deferral columns. The go-tag floor moves 197 -> 218: +3 for this
+  # slice's decoder fields, and the other 18 are DRIFT — tags landed in
+  # `internal/cloudclient` across earlier waves without the floor following
+  # them, which is precisely the slack this comment forbids. Restored to
+  # equality, measured, not guessed.
+  @emitted_floor 103
+  @go_tag_floor 218
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 56 keys with the :when unwrap, 42 without.
