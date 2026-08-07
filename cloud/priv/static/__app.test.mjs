@@ -17363,8 +17363,10 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
     forbidden: FORBIDDEN_GENERIC,
-    // cch-w50-s2 — moved with app.js:231 in the same commit (see the twin pin
-    // in "cch-w37-s1 THE FENCE CAN LOSE").
+    // cch-w50-s2 — moved with the ERRORS map's own server_error entry in the
+    // same commit (re-derive it with grep -n 'server_error:' app.js, inside the
+    // `var ERRORS = {` block; see the twin pin in "cch-w37-s1 THE FENCE CAN
+    // LOSE").
     server_error: "Something broke on our side — not your input. Try again in a moment.",
     malformed_body: "We couldn't read that request — reload the page and try again.",
     malformed_request: "We couldn't read that request — reload the page and try again.",
@@ -17420,8 +17422,9 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
   // VERBATIM. This closes that contradiction on the JS side; the Elixir twin is
   // cloud/test/barkpark_cloud/failure_copy_support_channel_test.exs.
   //
-  // LOSABLE: re-add "; if it keeps happening, contact support." to app.js:231
-  // and this assertion names the slug that carries it.
+  // LOSABLE: re-add "; if it keeps happening, contact support." to the ERRORS
+  // map's server_error entry (grep -n 'server_error:' app.js, inside the
+  // `var ERRORS = {` block) and this assertion names the slug that carries it.
   for (const slug of PINNED_SLUGS) {
     const copy = hooks.friendly({ error: slug }, "a caller fallback");
     // HONEST LIMIT: this list is a copy of the pin's key set, so a slug added to
