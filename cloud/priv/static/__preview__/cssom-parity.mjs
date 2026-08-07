@@ -167,6 +167,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CSS = path.resolve(HERE, "..", "app.css");
@@ -562,7 +563,11 @@ async function main() {
   const REFUSED = Symbol("cssom-parity refused to measure");
   const bringUpFailure = (message) => Object.assign(new Error(message), { [REFUSED]: true });
 
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "cssom-parity-"));
+  // The profile dir is allocated PER BRING-UP ATTEMPT (bringup-retry.mjs), not
+  // once here: a retry into the dead attempt's directory would re-race the same
+  // DevToolsActivePort path. This holds whichever attempt's dir is live, so
+  // teardown removes the right one.
+  let profile = null;
   const t0 = Date.now();
   let chrome = null;
   let cdp = null;
@@ -591,7 +596,7 @@ async function main() {
         }
       }
     }
-    try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
     teardownMs = Date.now() - td0;
   };
 
@@ -613,44 +618,83 @@ async function main() {
     // platform and errno: the try/catch takes the synchronous throw, and the
     // 'error' listener takes the asynchronous emit (which, with no listener,
     // would be an uncaughtException — also exit 1, also a lie).
-    let spawnError = null;
-    try {
-      chrome = spawn(
-        chromeBin,
-        [
-          "--headless=new",
-          "--disable-gpu",
-          "--no-sandbox",
-          "--disable-dev-shm-usage",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--disable-extensions",
-          "--disable-background-networking",
-          `--user-data-dir=${profile}`,
-          "--remote-debugging-port=0",
-          "about:blank",
-        ],
-        { stdio: "ignore" },
-      );
-      chrome.on("error", (e) => { spawnError = e; });
-    } catch (err) {
-      throw bringUpFailure(`Chrome could not be executed (${err.code || err.message}): ${chromeBin}`);
-    }
-
-    const portFile = path.join(profile, "DevToolsActivePort");
-    let devPort = null;
-    for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-      if (spawnError) break; // no point waiting DEVTOOLS_CAP on a process that never execed
-      try {
-        const raw = fs.readFileSync(portFile, "utf8").split("\n");
-        if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-      } catch { /* not written yet */ }
-      await sleep(100);
-    }
-    if (spawnError) {
-      throw bringUpFailure(`Chrome could not be executed (${spawnError.code || spawnError.message}): ${chromeBin}`);
-    }
-    if (!devPort) throw bringUpFailure("Chrome never wrote DevToolsActivePort — it did not start");
+    // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, fresh profile
+    // per attempt, every failed attempt's Chrome stderr printed — see
+    // bringup-retry.mjs for the measurement that justified it and for the line
+    // this retry must never cross: cch-w19-bl-gr115's "do not paper over the
+    // race" governs exit-1 MEASURED intermittency (the stylesheet WAS parsed
+    // and the instrument disagreed with itself). This retries only the exit-2
+    // case where Chrome never came up, so no parity claim exists to hide.
+    // Everything after `devPort` is a claim about app.css and is never retried.
+    let attemptSpawnError = null;
+    const brought = await bringUpChrome({
+      label: "cssom-parity",
+      attempts: BRINGUP_ATTEMPTS,
+      newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "cssom-parity-")),
+      launch: (dir) => {
+        attemptSpawnError = null;
+        let child;
+        try {
+          child = spawn(
+            chromeBin,
+            [
+              "--headless=new",
+              "--disable-gpu",
+              "--no-sandbox",
+              "--disable-dev-shm-usage",
+              "--no-first-run",
+              "--no-default-browser-check",
+              "--disable-extensions",
+              "--disable-background-networking",
+              `--user-data-dir=${dir}`,
+              "--remote-debugging-port=0",
+              "about:blank",
+            ],
+            // stderr is a PIPE, never "ignore": a refusal whose cause Chrome
+            // already explained, thrown away by the instrument, is a refusal
+            // nobody can audit.
+            { stdio: ["ignore", "ignore", "pipe"] },
+          );
+        } catch (err) {
+          // See the REVIEW ADDITION note above: node delivers exec faults
+          // (ENOEXEC, EACCES, ETXTBSY) either synchronously here or
+          // asynchronously on 'error'. Both shapes are covered.
+          throw new Error(`Chrome could not be executed (${err.code || err.message}): ${chromeBin}`);
+        }
+        child.on("error", (e) => { attemptSpawnError = e; });
+        return { child, readStderr: captureStderr(child) };
+      },
+      awaitDevToolsPort: async ({ profile: dir }) => {
+        const portFile = path.join(dir, "DevToolsActivePort");
+        for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+          if (attemptSpawnError) break; // no point waiting DEVTOOLS_CAP on a process that never execed
+          try {
+            const raw = fs.readFileSync(portFile, "utf8").split("\n");
+            if (raw[0] && Number(raw[0])) return Number(raw[0]);
+          } catch { /* not written yet */ }
+          await sleep(100);
+        }
+        if (attemptSpawnError) {
+          throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+        }
+        return null;
+      },
+      abandon: async ({ profile: dir, child }) => {
+        if (child && child.pid != null) {
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        }
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      },
+      log: (s) => process.stderr.write(s),
+    }).catch((err) => {
+      // Every bounded attempt refused. Re-tag onto THIS file's refusal class so
+      // the classifier below still reaches exit 2 — a refusal is not a defect.
+      if (err && err.refused) throw bringUpFailure(err.message);
+      throw err;
+    });
+    chrome = brought.child;
+    profile = brought.profile;
+    const devPort = brought.devPort;
 
     let version;
     try {

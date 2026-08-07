@@ -221,6 +221,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
@@ -1275,24 +1276,60 @@ async function withBrowser(fn) {
   }
   out(`>> serve      :${PORT} — served bytes == disk bytes (${rel(ROOT)})\n`);
 
-  profile = fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-"));
-  chrome = spawn(chromeBin, [
-    "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
-    "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-    "--disable-background-networking", "--hide-scrollbars",
-    `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank",
-  ], { stdio: "ignore" });
+  // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, a FRESH profile
+  // dir per attempt (it used to be mkdtemp'd once, so a retry would re-race the
+  // same DevToolsActivePort path), and every failed attempt's Chrome stderr is
+  // printed — `stdio: "ignore"` discarded exactly the line that says why.
+  //
+  // THE LINE THIS RETRY MUST NOT CROSS. cch-w19-bl-gr115's "do not paper over
+  // the race" ruling governs exit-1 MEASURED intermittency — the browser came
+  // up, the sweep measured, and it disagreed with itself between runs. This
+  // retries only the exit-2 case where Chrome never came up: no width was
+  // rendered, so there is no claim for a retry to hide. Everything after
+  // `devPort` is a measurement and is never retried.
+  let attemptSpawnError = null;
+  const brought = await bringUpChrome({
+    label: "breakpoint-sweep",
+    attempts: BRINGUP_ATTEMPTS,
+    newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-")),
+    launch: (dir) => {
+      attemptSpawnError = null;
+      const child = spawn(chromeBin, [
+        "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+        "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+        "--disable-background-networking", "--hide-scrollbars",
+        `--user-data-dir=${dir}`, "--remote-debugging-port=0", "about:blank",
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      child.on("error", (e) => { attemptSpawnError = e; });
+      return { child, readStderr: captureStderr(child) };
+    },
+    awaitDevToolsPort: async ({ profile: dir }) => {
+      const portFile = path.join(dir, "DevToolsActivePort");
+      for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+        if (attemptSpawnError) break;
+        try {
+          const raw = fs.readFileSync(portFile, "utf8").split("\n");
+          if (raw[0] && Number(raw[0])) return Number(raw[0]);
+        } catch { /* not written yet */ }
+        await sleep(100);
+      }
+      if (attemptSpawnError) {
+        throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+      }
+      return null;
+    },
+    abandon: async ({ profile: dir, child }) => {
+      await reap(child);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    },
+    log: (s) => process.stderr.write(s),
+  }).catch((err) => (err && err.refused ? { refusal: err } : Promise.reject(err)));
 
-  const portFile = path.join(profile, "DevToolsActivePort");
-  let devPort = null;
-  for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-    try {
-      const raw = fs.readFileSync(portFile, "utf8").split("\n");
-      if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-    } catch { /* not written yet */ }
-    await sleep(100);
-  }
-  if (!devPort) return die("Chrome never wrote DevToolsActivePort — it did not start");
+  // exit 2, `die`'s default: the browser never started on any bounded attempt.
+  if (brought.refusal) return die(brought.refusal.message);
+  chrome = brought.child;
+  profile = brought.profile;
+  const devPort = brought.devPort;
 
   let version;
   try {

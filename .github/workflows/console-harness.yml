@@ -362,6 +362,24 @@ jobs:
       - name: Responsive sweep unit tests
         run: node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs
 
+      # THE BRING-UP RETRY'S OWN TESTS (deploy-reliability wave 8).
+      #
+      # Wired HERE, in the browserless job, for the reason the comment above
+      # gives about the sweep: bringup-retry.mjs is the code that decides
+      # whether a Chrome that did not start becomes a retry or a refusal, and
+      # it is shared by all four browser instruments — so it must not join the
+      # class of code nothing runs. Its whole subject is the failure path, which
+      # a green browser job by definition never exercises: on a healthy runner
+      # every instrument comes up first try and this module's retry, its
+      # stderr capture and its refusal are all UNVISITED. This step is the only
+      # thing in CI that visits them.
+      #
+      # The load-bearing assertion in it is the fail-closed one: N consecutive
+      # refusals still REFUSE. If that ever regressed, a required Console gate
+      # could go green over a run that measured nothing.
+      - name: Bring-up retry unit tests (the refusal path a green run never visits)
+        run: node --test cloud/priv/static/__preview__/bringup-retry.test.mjs
+
       # The SPA's design contract, machine-checked (charter GR5): dead classes,
       # undefined tokens, WCAG contrast across every theme identity, offline-purity,
       # and the living styleguide's class/token drift. Exits non-zero on any E1-E8
@@ -423,6 +441,27 @@ jobs:
     needs: changes
     if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
+    # ── THE VERDICT CHANNEL (deploy-reliability wave 8) ────────────────────
+    # The instrument already distinguishes 2 (REFUSED TO MEASURE) from 1 (a
+    # measured defect), and the wrapper below already prints an honest banner
+    # for each. But `needs.<job>.result` carries ONE word — `failure` — for
+    # both, so the AGGREGATOR, which is the required context a reviewer reads
+    # at the merge button, could only ever say "a job failed". A refusal
+    # therefore arrived looking exactly like a CSS defect.
+    #
+    # PROVEN ON LIVE GITHUB (run 31136979488): a job's `outputs:` DO survive
+    # `exit 1` and reach `needs.<job>.outputs`, both when the output is written
+    # by the same step that exits 1 and when a later step fails. So the verdict
+    # rides this channel while the EXIT CODE stays untouched.
+    #
+    # THIS CHANNEL CAN NEVER GREEN AN UNMEASURED GATE. It is not consulted by
+    # anything that computes pass/fail: the job still exits non-zero, its
+    # `result` is still `failure`, and console-gate's `bad=1` is set from
+    # `result` ALONE. `continue-on-error` is banned (D19) precisely because it
+    # would launder `result`; this output changes only the SENTENCE A HUMAN
+    # READS.
+    outputs:
+      verdict: ${{ steps.cssom.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -451,25 +490,41 @@ jobs:
       # `success` even when it failed, which would launder the lie straight into
       # `Console gate`.
       - name: CSSOM parity gate
+        id: cssom
         env:
           CHROME: /usr/bin/google-chrome
         run: |
           set -uo pipefail
+          # The verdict is published BEFORE the exit, in the same step that
+          # exits — the shape proven to survive on run 31136979488.
+          #
+          # `${GITHUB_OUTPUT:-}` and the guard are NOT belt-and-braces:
+          # scripts/console-path-escape-check.test.sh extracts this exact step
+          # body and executes it under `env -i`, so an unguarded write would
+          # kill the step under `set -u` before the case block could classify
+          # the exit code — turning a REFUSED banner into a crash. Publishing
+          # the verdict may never be able to break the classification it
+          # describes.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
           rc=0
           node cloud/priv/static/__preview__/cssom-parity.mjs || rc=$?
           case "$rc" in
             0)
+              verdict OK
               echo "CSSOM parity: authored CSS and the browser agree."
               ;;
             2)
-              echo "::error title=CSSOM parity REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT fault, not a stylesheet defect. app.css was never parsed and NO parity claim is being made about it. Do not go looking for a CSS bug: fix the environment (Chrome binary, Node 22, the cssom-heads.baseline sidecar) named in the log above."
+              verdict REFUSED
+              echo "::error title=CSSOM parity REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT fault, not a stylesheet defect. app.css was never parsed and NO parity claim is being made about it. Do not go looking for a CSS bug: fix the environment (Chrome binary, Node 22, the cssom-heads.baseline sidecar) named in the log above. The bring-up is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
               exit 1
               ;;
             1)
+              verdict MEASURED_DEFECT
               echo "::error title=CSSOM parity DEFECT::The browser's CSSOM disagrees with the authored stylesheet (exit 1). This is a REAL CSS defect in cloud/priv/static/app.css — rules the browser dropped or rewrote. See the diff above."
               exit 1
               ;;
             *)
+              verdict UNINTERPRETABLE
               echo "::error title=CSSOM parity UNINTERPRETABLE::cssom-parity.mjs exited ${rc}, which is outside its vocabulary (0 pass / 1 defect / 2 refusal). Cannot tell, therefore red."
               exit 1
               ;;
@@ -520,6 +575,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
+    # See the verdict-channel note on `cssom-parity` — same contract, same
+    # fail-closed guarantee: this output NAMES the fault, it never grades it.
+    outputs:
+      verdict: ${{ steps.tier.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -529,25 +588,32 @@ jobs:
           node-version: 22
 
       - name: Tier floor — render the billing screen at 901px
+        id: tier
         env:
           CHROME: /usr/bin/google-chrome
         run: |
           set -uo pipefail
+          # Guarded exactly as in `cssom-parity` above, for the same reason.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
           rc=0
           node cloud/priv/static/__preview__/breakpoint-sweep.mjs --render --widths 901 --cell billing-trial || rc=$?
           case "$rc" in
             0)
+              verdict OK
               echo "Tier floor: the billing tier grid renders at 901px with no clipped control."
               ;;
             2)
-              echo "::error title=Tier floor render REFUSED::The sweep refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about the tier grid. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the sweep's port, or a cell/breakpoint the sweep has no coverage for."
+              verdict REFUSED
+              echo "::error title=Tier floor render REFUSED::The sweep refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about the tier grid. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the sweep's port, or a cell/breakpoint the sweep has no coverage for. A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
               exit 1
               ;;
             1)
+              verdict MEASURED_DEFECT
               echo "::error title=Tier floor render DEFECT::A measured defect on the billing tier screen at 901px (exit 1) — most likely the .tier-grid track floor was lowered below ~185px, which re-admits five auto-fit tracks and CLIPS the Free tier's CTA label. See the Q1/Q2/Q3 lines above for the element, its scrollWidth/clientWidth and its text."
               exit 1
               ;;
             *)
+              verdict UNINTERPRETABLE
               echo "::error title=Tier floor render UNINTERPRETABLE::breakpoint-sweep.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
               exit 1
               ;;
@@ -590,6 +656,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
+    # See the verdict-channel note on `cssom-parity` — same contract, same
+    # fail-closed guarantee: this output NAMES the fault, it never grades it.
+    outputs:
+      verdict: ${{ steps.overflow.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -604,25 +674,32 @@ jobs:
       # this epic keeps curing. The guard prints its own leg roster on every
       # run; read that, not this line.
       - name: Overflow guard — every defect leg in one browser run
+        id: overflow
         env:
           CHROME: /usr/bin/google-chrome
         run: |
           set -uo pipefail
+          # Guarded exactly as in `cssom-parity` above, for the same reason.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
           rc=0
           node cloud/priv/static/__preview__/overflow-guard.mjs || rc=$?
           case "$rc" in
             0)
+              verdict OK
               echo "Overflow guard: every leg it declared measured clean in a real browser (the roster is printed above)."
               ;;
             2)
-              echo "::error title=Overflow guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about any screen: nothing here says the console is clean and nothing here says it is broken. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the guard's port, a bring-up that outran SERVER_CAP, or a defect id the guard has no coverage for."
+              verdict REFUSED
+              echo "::error title=Overflow guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about any screen: nothing here says the console is clean and nothing here says it is broken. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the guard's port, a bring-up that outran SERVER_CAP, or a defect id the guard has no coverage for. A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
               exit 1
               ;;
             1)
+              verdict MEASURED_DEFECT
               echo "::error title=Overflow guard DEFECT::A measured geometry defect in a real browser (exit 1) — an element whose scrollWidth exceeds its clientWidth, a truncated money message, a page scrolling sideways, or a dead rule that lost the cascade. See the ✗ lines above for the leg, the scenario/theme/width cell, the selector and its measured numbers."
               exit 1
               ;;
             *)
+              verdict UNINTERPRETABLE
               echo "::error title=Overflow guard UNINTERPRETABLE::overflow-guard.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
               exit 1
               ;;
@@ -671,6 +748,16 @@ jobs:
           R_OVERFLOW: ${{ needs.overflow-guard.result }}
           R_ESCAPE: ${{ needs.path-escape.result }}
           O_CONSOLE: ${{ needs.changes.outputs.console }}
+          # ── THE VERDICT CHANNEL (deploy-reliability wave 8) ──────────────
+          # Second, INDEPENDENT axis: `result` answers "did it fail", these
+          # answer "what KIND of failure". Read ONLY to choose the sentence a
+          # human reads; `bad` is computed from `result` alone, so no value or
+          # absence of a value here can ever green this context. A job that was
+          # skipped or never ran interpolates to the empty string, which the
+          # decide() below reports as "no verdict published" — never as OK.
+          V_CSSOM: ${{ needs.cssom-parity.outputs.verdict }}
+          V_TIER: ${{ needs.tier-floor-render.outputs.verdict }}
+          V_OVERFLOW: ${{ needs.overflow-guard.outputs.verdict }}
         run: |
           set -euo pipefail
 
@@ -689,12 +776,26 @@ jobs:
           dispatched=0
           not_dispatched=""
 
-          # decide <job-name> <result> <gate-value>
+          # ── D101 wave 8: WHAT KIND of failure, alongside WHETHER ──────────
+          # A browser instrument that could not START Chrome and a browser
+          # instrument that MEASURED a broken layout both land here as
+          # `failure`, and until now this step could only say "a job failed" —
+          # so a runner whose Chrome never came up read, at the merge button,
+          # exactly like a CSS bug. These two collect the distinction for the
+          # closing sentence. They never touch `bad`.
+          refusals=""
+          measured=""
+
+          # decide <job-name> <result> <gate-value> [verdict]
           #   gate-value is the dispatcher output that gated the job, or the
           #   literal string NEVER for jobs that must always run. A skip is
           #   accepted only against a gate-value of exactly 'false'.
+          #   verdict is OPTIONAL and ADVISORY: jobs that publish one (the three
+          #   browser instruments) get their failure NAMED; jobs that do not
+          #   pass nothing and are judged exactly as before. It is read on the
+          #   failure path ONLY, and cannot reach `bad` from there either.
           decide() {
-            local job="$1" result="$2" gate="$3"
+            local job="$1" result="$2" gate="$3" verdict="${4:-}"
             case "$result" in
               success)
                 echo "  ok      ${job}: success"
@@ -712,7 +813,38 @@ jobs:
                 ;;
               failure | cancelled)
                 echo "  FAIL    ${job}: ${result}"
+                # `bad=1` FIRST and unconditionally, so no reading of the
+                # verdict below can be mistaken for a place where red is
+                # decided. Everything after this line only chooses words.
                 bad=1
+                case "$verdict" in
+                  '')
+                    : # this job publishes no verdict (or never ran to publish one) — judged on result alone, as before
+                    ;;
+                  OK)
+                    echo "          verdict='OK' but the job FAILED — the instrument said clean and the job"
+                    echo "          still died (a later step, a cancellation, a runner fault). Cannot tell,"
+                    echo "          therefore red. Read the job log."
+                    ;;
+                  REFUSED)
+                    echo "          verdict=REFUSED — this instrument REFUSED TO MEASURE (exit 2). The browser"
+                    echo "          never came up, so NOT ONE rule or element was measured and NOTHING here"
+                    echo "          accuses cloud/priv/static. The bring-up was already retried a bounded"
+                    echo "          number of times in a fresh profile; each attempt's Chrome stderr is in"
+                    echo "          that job's log. Fix the ENVIRONMENT, not the CSS."
+                    echo "          This context is still RED: a refusal is not a pass."
+                    refusals="${refusals} ${job}"
+                    ;;
+                  MEASURED_DEFECT)
+                    echo "          verdict=MEASURED_DEFECT — the browser came up and the instrument measured"
+                    echo "          a REAL defect (exit 1). This one IS about the console's own bytes."
+                    measured="${measured} ${job}"
+                    ;;
+                  *)
+                    echo "          verdict='${verdict}' — outside the published vocabulary"
+                    echo "          (OK / REFUSED / MEASURED_DEFECT). Cannot tell, therefore red."
+                    ;;
+                esac
                 ;;
               '')
                 echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
@@ -753,13 +885,28 @@ jobs:
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
           decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"
-          decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"
-          decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"
-          decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}"
+          # `:-` on the VERDICT arguments ONLY, never on an `R_*`: an unbound
+          # R_* must keep dying under `set -u` (that LOUD death is how D209's
+          # missing-`env:` wiring mistake is caught). A verdict is advisory, and
+          # scripts/console-path-escape-check.test.sh extracts and executes this
+          # very step body supplying only the R_*/O_* environment GitHub had
+          # before this channel existed — so an unset verdict must mean "none
+          # published", not a crash.
+          decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"   "${V_CSSOM:-}"
+          decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"   "${V_TIER:-}"
+          decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}" "${V_OVERFLOW:-}"
 
           echo
           if [ "$bad" -ne 0 ]; then
-            echo "::error::Console gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
+            # ONE `exit 1`, reached from every red path — the sentence differs,
+            # the verdict never does. `refusals` and `measured` are read AFTER
+            # `bad` has already decided; there is deliberately no arm here in
+            # which a REFUSED verdict can reach `exit 0`.
+            if [ -n "${refusals}" ]; then
+              echo "::error title=Console gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AENVIRONMENT REFUSAL (exit 2), NOT a console defect:${refusals}%0AThose instruments could not bring headless Chrome up, after a bounded retry in a fresh profile, so they parsed no stylesheet and measured no element — nothing in this run accuses cloud/priv/static. Each failed attempt's Chrome stderr is printed in that job's log; fix the environment, not the CSS.%0AMeasured defects (exit 1) in this run:${measured:- none}%0AThis context is RED on purpose: a refusal is not a pass, and re-running is the only thing that can turn it green."
+            else
+              echo "::error::Console gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
+            fi
             exit 1
           fi
 
