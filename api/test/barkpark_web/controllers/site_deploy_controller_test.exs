@@ -6,7 +6,8 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
   401 (no token) and 403 (non-admin) come for free from RequireToken +
   RequireAdmin — proving that here is proving there is no new auth surface.
   Then the status contract: 503 fail-closed, 400 on anything that would reach
-  argv or the child's env unvalidated, 409 per-slug single-flight, 202 started,
+  argv or the child's env unvalidated, 409 per-slug single-flight, 409
+  `box_at_capacity` when the box's one fleet build slot is taken, 202 started,
   500 runner_start_failed — and a GET that walks the six stages.
   """
   # async: false — mutates the DeployRunner singleton + Application env.
@@ -329,6 +330,10 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert body["prebuilt"] == true
       assert body["artifact_sha256"] == sha
       assert body["status"]["slug"] == "pb-site"
+
+      # The box builds ONE site at a time, so a fire-and-forget run would refuse
+      # the NEXT test's deploy with `box_at_capacity`. Leave the slot free.
+      await_done("pb-site")
     end
 
     test "a BOX BUILD omits both keys — an absent field, never a bare prebuilt:false", %{
@@ -345,6 +350,8 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert body["ok"] == true
       refute Map.has_key?(body, "prebuilt")
       refute Map.has_key?(body, "artifact_sha256")
+
+      await_done("box-built")
     end
 
     test "400 invalid_artifact_digest — artifact_b64 alone is REFUSED, never silently dropped",
@@ -407,14 +414,59 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
 
       assert message =~ "busy"
 
-      # A second SITE is unaffected — this is the whole reason for a per-slug slot.
+      # A SECOND SITE draws a DIFFERENT typed 409: its own single-flight slot is
+      # free (it is still `idle`), but the box builds one site at a time, so the
+      # deploy is refused AT THE DOOR rather than queueing inside its own unit
+      # for 900s where an operator reads the queue as a hang. `code` is exactly
+      # "box_at_capacity" and the message is NON-EMPTY: the control plane
+      # renders a refusal as "<code> — <message>" and classifies on the head of
+      # that split, so an empty message lands the deferral unclassified.
+      assert %{"error" => %{"code" => "box_at_capacity", "message" => busy_message}} =
+               conn
+               |> admin_conn()
+               |> post("/v1/admin/site-deploy", body("not-busy"))
+               |> json_response(409)
+
+      assert String.trim(busy_message) != ""
+      assert busy_message =~ "1 of 1"
+
+      assert %{"state" => "idle"} =
+               conn
+               |> admin_conn()
+               |> get("/v1/admin/site-deploy", %{"slug" => "not-busy"})
+               |> json_response(200)
+
+      await_done("busy")
+
+      # The slot frees itself with the build — no operator action, no lock to
+      # clear — and the refused site deploys on a plain retry.
       assert conn
              |> admin_conn()
              |> post("/v1/admin/site-deploy", body("not-busy"))
              |> json_response(202)
 
-      await_done("busy")
       await_done("not-busy")
+    end
+
+    test "a ROLLBACK is never refused by the box door — it takes no build slot", %{conn: conn} do
+      put_runner_cfg(
+        enabled: true,
+        command: stub("sleep 0.6; exit 0"),
+        rollback_command: stub("exit 0")
+      )
+
+      assert conn
+             |> admin_conn()
+             |> post("/v1/admin/site-deploy", body("gate-busy"))
+             |> json_response(202)
+
+      assert conn
+             |> admin_conn()
+             |> post("/v1/admin/site-deploy", %{"slug" => "gate-rb", "mode" => "rollback"})
+             |> json_response(202)
+
+      await_done("gate-rb")
+      await_done("gate-busy")
     end
   end
 
