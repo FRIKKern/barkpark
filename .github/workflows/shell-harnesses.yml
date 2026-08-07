@@ -33,6 +33,19 @@ name: Shell harnesses
 # deliberately NOT wired here. Note this workflow is NOT one of main's required
 # contexts (those are exactly: Elixir gate, PR references an active task, Cloud
 # gate, Console gate) — wiring the census makes it RUN, not BLOCK.
+#
+# Fifth tenant: scripts/webhook-fanout-watch.test.sh, the mutation matrix for
+# scripts/webhook-fanout-watch.sh — the LEVEL check over live `site-autodeploy-*`
+# webhook rows. `Registry.content_webhook_types/1` fails OPEN (a blank doc_type
+# yields `[]`, the box's match-everything sentinel), so a single edit re-arms the
+# fan-out the 2026-08-07 repair closed and nothing re-asserts it. Only the
+# HERMETIC half rides here: fixtures through the classifier, no `bp`, no network,
+# so it cannot rot into a skip. The LIVE verdict is a runbook command plus a
+# named open human gate (a control-plane read token, unarmed) — wiring a
+# scheduled live job today would exit 3 on every run forever, which is a watch
+# that can only lose. NOT a Cloud tenant: the script is deliberately absent from
+# cloud-path-escape-check.sh's CLOUD_PATHS (see that file, lines 115-127, on why
+# widening the set publishes green contexts over jobs that never ran).
 
 on:
   pull_request:
@@ -45,6 +58,8 @@ on:
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
       - "scripts/epic-zero-criteria-census.sh"
+      - "scripts/webhook-fanout-watch.sh"
+      - "scripts/webhook-fanout-watch.test.sh"
       - ".github/workflows/shell-harnesses.yml"
   push:
     branches: [main]
@@ -57,6 +72,8 @@ on:
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
       - "scripts/epic-zero-criteria-census.sh"
+      - "scripts/webhook-fanout-watch.sh"
+      - "scripts/webhook-fanout-watch.test.sh"
       - ".github/workflows/shell-harnesses.yml"
 
 permissions:
@@ -143,3 +160,34 @@ jobs:
         # that can only lose is not a gate. The token-free ratchet port is
         # tracked separately.
         run: bash scripts/epic-zero-criteria-census.sh --self-test
+
+  webhook-fanout-guard:
+    name: webhook-fanout-watch.sh mutation matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: jq is present (the row parser is jq; absence would be exit 3)
+        # The watch turns a missing jq into exit 3 CONFIGURATION FAULT — correctly
+        # red, but illegibly so. ubuntu-latest ships jq; this step makes the
+        # dependency fail BY NAME if an image change ever removes it.
+        run: |
+          command -v jq >/dev/null || {
+            echo "jq missing on the runner image — the webhook row parser needs it" >&2
+            exit 1
+          }
+          jq --version
+      - name: webhook-fanout-watch.sh syntax check
+        run: bash -n scripts/webhook-fanout-watch.sh
+      - name: webhook-fanout-watch.test.sh syntax check
+        run: bash -n scripts/webhook-fanout-watch.test.sh
+      - name: live-row guard mutation matrix (hermetic fixtures, no bp/network)
+        # NO `continue-on-error` here or anywhere in this file. It launders a red
+        # into a green JOB conclusion — the thing branch protection and the fleet
+        # actually read — leaving only an X nobody scrolls to. A deploy guard that
+        # cannot lose is the disease this epic exists to cure.
+        #
+        # ONLY the hermetic half. The LIVE verdict needs `bp` plus a control-plane
+        # read credential; neither is on runners, so a scheduled live job would
+        # exit 3 forever. It is a runbook command + the named open human gate
+        # dr-w19-hg-cloud-control-plane-read-token (see the script's header).
+        run: bash scripts/webhook-fanout-watch.test.sh
