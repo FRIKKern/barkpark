@@ -91,6 +91,10 @@ defmodule BarkparkCloud.DeployLedger do
     "BOX_BUSY_409",
     "ABANDONED_AT_CAPACITY",
     "ABANDONED_BOX_STUCK",
+    "CONTENT_API_500",
+    "CONTENT_API_503",
+    "CONTENT_API_UNREACHABLE",
+    "CONTENT_API_403",
     "DOC_ID_EMPTY",
     "BOX_500",
     "FORBIDDEN_403",
@@ -145,7 +149,21 @@ defmodule BarkparkCloud.DeployLedger do
     "ABANDONED_AT_CAPACITY" =>
       "the box stayed at its concurrent-build cap and the publish was given up on",
     "ABANDONED_BOX_STUCK" => "the box kept refusing this site and the publish was given up on",
-    "DOC_ID_EMPTY" => "HEALTH gate: the bp-doc-id marker was empty",
+    "CONTENT_API_500" =>
+      "the content API faulted (graph 500) — the build could not read its corpus",
+    "CONTENT_API_503" =>
+      "the content API was overloaded or shut (graph 503) — the build could not read its corpus",
+    "CONTENT_API_UNREACHABLE" =>
+      "the content API gave no HTTP answer at all (graph 0) — DNS, TLS or a refused connection",
+    "CONTENT_API_403" =>
+      "the content API judged the read forbidden (graph 403) — the token could not see the corpus",
+    # D112. Once the coded rows LEAVE this class, what is left is not "the marker
+    # was empty" — every failure in this family has an empty marker — it is "the
+    # marker was empty and nothing recorded WHY". Structurally that is the
+    # static-engine fleet: `deploy/site-deploy.sh` has zero `bp-corpus-status`
+    # readers, only `deploy/site-deploy-node.sh` does.
+    "DOC_ID_EMPTY" =>
+      "HEALTH gate: the bp-doc-id marker was empty and the cause went unrecorded (no bp-corpus-status marker — the static deploy path emits none)",
     "BOX_500" => "the box errored on the deploy (HTTP 500)",
     "FORBIDDEN_403" => "the build could not read its content (403)",
     "BUILD_FAILED" => "the site build exited non-zero",
@@ -214,6 +232,92 @@ defmodule BarkparkCloud.DeployLedger do
   @spec deferred?(class() | nil) :: boolean()
   def deferred?(class), do: class in @deferred_classes
 
+  # THE AGENCY MAP (charter D148/D242). WHO a failure class accuses, derived from
+  # `classify/2`'s CLOSED class enum by this pure map — NEVER by a substring
+  # regex over `failure_reason`. That technique was measured and lost: 52.6%
+  # recall (structurally blind to every `feature_not_configured` row), 4.1%
+  # contaminated by BUILD-stage rows, and forbidden verbatim by `classify/2`'s
+  # own comment ("never from a substring search over the whole capture").
+  #
+  # It is EXHAUSTIVE over `classes/0 ++ not_attempted_classes/0`, and the
+  # assertion that proves it is keyed off THOSE ENUMS rather than a hand-listed
+  # set: a hand-list is a second place to forget, so a class added upstream would
+  # land with no agency and a GREEN suite — the exact shape that let an 18-class
+  # taxonomy and a 17-key map merge past each other unnoticed.
+  #
+  # An unknown class is `:ambiguous`, NEVER `:site` — failing to `:site` would
+  # silently SHRINK any box numerator built on this map, which is the comforting
+  # direction and therefore the forbidden one. And where a class genuinely does
+  # not name an owner it is `:ambiguous` ON PURPOSE rather than guessed: an
+  # honest third bucket is worth more than a confident wrong one.
+  @agency %{
+    # THE BOX ANSWERED, AND SAID NO — its own words off its own door, plus the
+    # two abandonment terminals of a refusal chain.
+    "BOX_BUSY_409" => :box,
+    "BOX_500" => :box,
+    "BOX_UNAVAILABLE_503" => :box,
+    "BOX_DEPLOY_DISABLED_503" => :box,
+    "BOX_RUNNER_UNAVAILABLE_503" => :box,
+    "BOX_RATE_LIMITED_429" => :box,
+    "ABANDONED_AT_CAPACITY" => :box,
+    "ABANDONED_BOX_STUCK" => :box,
+    # THE BOX DID NOT ANSWER, or answered with a broken switch. The builder lease
+    # is the box driver's own bookkeeping, not the site's.
+    "BOX_UNREACHABLE" => :box,
+    "HEALTH_GATE_FAILED" => :box,
+    "STALE_LEASE" => :box,
+    # THE CONTENT API — the Barkpark instance the site reads its corpus from,
+    # which the box serves. A 500, a 503 and no-answer-at-all are all conditions
+    # on that side of the wire, not on the site's build.
+    "CONTENT_API_500" => :box,
+    "CONTENT_API_503" => :box,
+    "CONTENT_API_UNREACHABLE" => :box,
+    # THE SITE'S OWN BUILD. Both `build_class/1` outputs: a non-zero build exit,
+    # and the corpus 403 a site's own read token earned.
+    "BUILD_FAILED" => :site,
+    "FORBIDDEN_403" => :site,
+    # NEITHER, HONESTLY.
+    #
+    # `CONTENT_API_403` looks like `FORBIDDEN_403`'s twin and is not: its eleven
+    # rows span three sites and two templates inside one 20-minute window, two
+    # sites' first rows 0.25s apart — that is an API-side visibility condition
+    # the fleet met at once, not eleven misconfigured tokens. Calling it `:site`
+    # would be D148's error pointed the other way; calling it `:box` would accuse
+    # a box for a decision `public_read.ex` made. It is genuinely ambiguous until
+    # the API side is instrumented, and it says so.
+    "CONTENT_API_403" => :ambiguous,
+    # `DOC_ID_EMPTY` means, after the split, "the marker was empty and NOTHING
+    # RECORDED WHY" (D112). A class whose definition is the absence of a cause
+    # cannot name an owner. (This is a deliberate divergence from the unmerged
+    # #10129, which mapped it `:box` back when the class still meant "the box's
+    # SSR served an empty marker" — the split is what changed its meaning.)
+    "DOC_ID_EMPTY" => :ambiguous,
+    # A timeout can be a swapping box or a build that genuinely got bigger;
+    # unfetchable inputs can be an empty artifact url or a box that cannot reach
+    # storage; a died process names no owner at all; and UNCLASSIFIED is by
+    # construction a statement about this classifier.
+    "DEPLOY_TIMEOUT" => :ambiguous,
+    "SOURCE_UNFETCHABLE" => :ambiguous,
+    "PROCESS_DIED" => :ambiguous,
+    "UNCLASSIFIED" => :ambiguous,
+    # Never in a numerator at all (D19), but mapped so the exhaustiveness
+    # assertion covers every value `classify/2` can return.
+    "GITHUB_PUSH_UNBUILDABLE" => :ambiguous
+  }
+
+  @doc """
+  Who a failure class ACCUSES: `:box`, `:site`, or `:ambiguous`.
+
+  A class this map does not know is `:ambiguous` — never `:site`, which would
+  quietly shrink any box-caused numerator built on it (charter D148).
+  """
+  @spec agency(class() | nil) :: :box | :site | :ambiguous
+  def agency(class), do: Map.get(@agency, class, :ambiguous)
+
+  @doc "The full class → agency map, so a test can prove it EXHAUSTIVE over the class enums."
+  @spec agency_map() :: %{class() => :box | :site | :ambiguous}
+  def agency_map, do: @agency
+
   @doc """
   The failure class of a deployment row, or `nil` when the row did not fail.
 
@@ -260,13 +364,21 @@ defmodule BarkparkCloud.DeployLedger do
       code = refusal_code(reason) ->
         refusal_class(code, reason)
 
+      # THE CAUSE WAS ALREADY IN THE STRING, IN BOTH DIALECTS (D108/D238). The
+      # row that says "the bp-doc-id marker is empty" also carries the upstream
+      # condition the SSR recorded — "… could not read a content document:
+      # graph 503: …" — and matching the symptom first threw it away. Read the
+      # code the producer already wrote, before the symptom arm sees it.
+      code = graph_code(stage, reason) ->
+        content_api_class(code)
+
       stage == "HEALTH" and String.contains?(reason, "bp-doc-id marker is empty") ->
         "DOC_ID_EMPTY"
 
       stage == "HEALTH" and health_gate?(reason) ->
         "HEALTH_GATE_FAILED"
 
-      stage == "BUILD" and String.starts_with?(reason, "BUILD failed (exit") ->
+      stage == "BUILD" and build_failure?(reason) ->
         build_class(reason)
 
       source_unfetchable?(reason) ->
@@ -562,7 +674,89 @@ defmodule BarkparkCloud.DeployLedger do
   # story: the site's build fetched its corpus from the Barkpark API and got a
   # 403. Matched as `fetch failed: 403`, not as a bare "403", because the rest of
   # the capture is an Astro stack trace full of numbers.
+  #
+  # LEFT BYTE-IDENTICAL BY D239, deliberately. This regex matches ZERO of the
+  # eleven `graph 403` rows while matching 1,095 of 1,575 exit-12 rows, so
+  # widening it to cover an eleven-row fix would re-key a 1,095-row class's
+  # meaning by implication — the shape D224 names. The `graph 403` rows get their
+  # own class instead; this one keeps exactly the rows it always had.
   @corpus_403 ~r/fetch failed:\s*403\b/
+
+  # THE TWO DIALECTS OF ONE CAUSE (D238). Both flagship templates read the same
+  # `GET /v1/graph` and write the same `graph <status>: <message>` sentence, but
+  # they FAIL differently, so the sentence arrives at the ledger in two shapes:
+  #
+  #   HEALTH — `templates/search-starter` (Next) DEGRADES: `fetchCorpusGraph`
+  #   catches, the landing renders empty, and the cause rides the SSR's
+  #   `bp-corpus-status` marker. `deploy/site-deploy-node.sh:492` reads that
+  #   marker back and writes `… could not read a content document: graph 503: …`
+  #   — a HEALTH-stage exit 14.
+  #
+  #   BUILD — `templates/astro-search-starter` (Astro) THROWS (`src/lib/bp.ts:94`,
+  #   "a static build with no corpus is a failed build, not a degraded page"), so
+  #   the sentence arrives inside an ANSI-escaped Astro stack trace as
+  #   `… Caught error rendering /graph.json: Error: graph 500: …` — a BUILD-stage
+  #   exit 12.
+  #
+  # A HEALTH-only split would therefore leave the ENTIRE astro/static fleet's
+  # corpus failures wearing `BUILD_FAILED` (13 live rows: 500/BUILD 10,
+  # 403/BUILD 3). Same cause, same class, both arms.
+  #
+  # Each anchor is the PRODUCER's own phrase, never a loose "graph 500" substring
+  # — a build log that merely prints those bytes somewhere else is not a content
+  # API failure. `site-deploy-node.sh --self-test` asserts the HEALTH bytes still
+  # match, so a reflow of that English reds on the shell side rather than
+  # silently degrading every row back to `DOC_ID_EMPTY`.
+  @health_graph_code ~r/could not read a content document: graph (\d+):/
+  @build_graph_code ~r/\bError: graph (\d+):/
+
+  defp graph_code("HEALTH", reason), do: capture(@health_graph_code, reason)
+
+  # Stage-gated AND prefix-gated: the astro sentence only counts inside a capture
+  # the build driver itself declared failed.
+  defp graph_code("BUILD", reason) do
+    if build_failure?(reason), do: capture(@build_graph_code, reason)
+  end
+
+  defp graph_code(_stage, _reason), do: nil
+
+  defp capture(re, reason) do
+    case Regex.run(re, reason) do
+      [_, code] -> code
+      nil -> nil
+    end
+  end
+
+  defp content_api_class("500"), do: "CONTENT_API_500"
+  defp content_api_class("503"), do: "CONTENT_API_503"
+  # Status 0 is NOT a mis-stamped 503. `graph.ts:246` stamps 0 when the fetch
+  # threw before any HTTP answer existed — DNS, TLS, connection refused — and
+  # that is a different thing to check than a box that answered 503.
+  defp content_api_class("0"), do: "CONTENT_API_UNREACHABLE"
+  # ITS OWN CLASS, not `FORBIDDEN_403` (D239, superseding D109 on this point).
+  # The eleven rows span three sites and two templates inside one 20-minute
+  # window, two sites' first rows 0.25s apart — a fleet-wide API-side visibility
+  # condition (`public_read.ex:134`), not a per-site token. Folding them into
+  # `FORBIDDEN_403`, whose 1,095 rows ARE per-site build tokens, would put a
+  # fleet condition and a site condition under one name and one owner.
+  defp content_api_class("403"), do: "CONTENT_API_403"
+  # Any other graph status is UNCLASSIFIED, never a catch-all CONTENT_API_OTHER
+  # (D8): a taxonomy that absorbs a new shape keeps looking complete while
+  # telling nobody the shape appeared. `graph 200` ("corpus read OK but carried
+  # 0 node(s)") is the live example — zero rows all-time, and it rises here
+  # rather than being named on speculation.
+  defp content_api_class(_other), do: "UNCLASSIFIED"
+
+  # The build driver writes TWO prefixes and the ledger only read one. Eight
+  # thousand rows say `BUILD failed (exit N)`; two say `BUILD failed — …`, and
+  # those two sat in `UNCLASSIFIED` with a readable cause in the string (they are
+  # the em-dash pair the moduledoc's tail names). Zero-population as a class
+  # change, tripwire-grade as a reader: the day the em-dash shape becomes common,
+  # its rows are already split by cause instead of piling into the tail.
+  defp build_failure?(reason) do
+    String.starts_with?(reason, "BUILD failed (exit") or
+      String.starts_with?(reason, "BUILD failed — ")
+  end
 
   defp build_class(reason) do
     if Regex.match?(@corpus_403, reason), do: "FORBIDDEN_403", else: "BUILD_FAILED"
