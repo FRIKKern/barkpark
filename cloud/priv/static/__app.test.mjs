@@ -17585,3 +17585,415 @@ test("cch-w39-s1: loadMe repaints providers and notifications on BOTH arms", () 
     assert.ok(failure.includes(kept), "the shipped failure-arm seam " + kept + " is untouched");
   assert.ok(!/function repaintForMe/.test(src), "no dispatcher was introduced");
 });
+
+// ── cch-w47-s1 · THE CONSOLE STOPS SELLING LAUNCH TO A MEMBER THE SERVER ────
+// ── ALWAYS REFUSES, ON THE SCREEN EVERY MEMBER REACHES FIRST ───────────────
+//
+// THE DEFECT, browser-measured on origin/main: for a plain member on a
+// zero-instance team, #overview-body's only child is a full launch FORM — name
+// field, two provider tabs, Connect Hetzner Cloud, and a submit reading "Create
+// your first Barkpark" — and its innerHTML is CHARACTER-FOR-CHARACTER identical
+// to the owner's. go_live/1 answers that member Auth.forbidden(required:
+// "admin", scope:"team") BEFORE the entitlement check, so the reward for
+// filling it in is a 403, never a 402 upgrade. The honest sentence for that
+// refusal already exists (newLaunchRefusalToast) and was reachable ONLY after
+// the form was filled — this slice hoists it in front of the form.
+//
+// These tests DRIVE the real render (launchFlow against a recording container),
+// never a re-implementation of its markup: an assertion over a copy of the
+// template would have stayed green through the entire defect, which is exactly
+// how the identical-bytes render shipped in the first place.
+
+const W47_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" }, team_authority: { team_id: "t1", role: "owner", admin: true, owner: true } };
+const W47_ADMIN = { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "sam@acme.com" }, team_authority: { team_id: "t1", role: "admin", admin: true, owner: false } };
+const W47_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" }, team_authority: { team_id: "t1", role: "member", admin: false, owner: false } };
+const W47_SELL = "Ready when you are — launch your first Barkpark.";
+
+// A launch container that can actually LOSE two ways: it resolves the retry
+// control the unknown arm wires, and it models refreshRunwaySubline's rewrite
+// over any node the render gave the class `.runway-sub`. If the refusal card
+// ever adopts that class, the SSE tick's rewrite lands on it here and the
+// survival assertion below goes red — which is the whole point (a sentinel
+// written into .runway-sub was clobbered back to the trial line in ~700ms on
+// the live console).
+function launchContainer() {
+  const clicks = { retry: 0 };
+  const el = {
+    _html: "",
+    isConnected: true,
+    get innerHTML() { return this._html; },
+    // The retry control is minted ONCE per render, not once per lookup: a fresh
+    // object per querySelector would collect the listener wireMeRetry binds and
+    // then hand the click a different node, so the exit would look wired and be
+    // decoration — the exact failure this test exists to catch.
+    set innerHTML(v) {
+      this._html = String(v);
+      this.controls = {};
+      if (this._html.indexOf("data-me-retry") !== -1) {
+        this.controls["[data-me-retry]"] = {
+          disabled: false,
+          _h: [],
+          addEventListener(_t, fn) { this._h.push(fn); },
+          click() { clicks.retry++; this._h.forEach((fn) => fn()); },
+        };
+      }
+    },
+    controls: {},
+    addEventListener() {},
+    getAttribute() { return null; },
+    querySelector(sel) { return this.controls[sel] || null; },
+    querySelectorAll(sel) {
+      if (sel !== ".runway-sub") return [];
+      const out = [];
+      const re = /<p class="runway-sub">([^<]*)<\/p>/g;
+      let m;
+      while ((m = re.exec(this._html))) {
+        const whole = m[0];
+        out.push({
+          get textContent() { return whole; },
+          set textContent(v) { el._html = el._html.replace(whole, '<p class="runway-sub">' + v + "</p>"); },
+        });
+      }
+      return out;
+    },
+  };
+  return { el, clicks };
+}
+
+// A document stub carrying the head + the two header launch buttons, so the
+// offer sites are asserted on what they actually emit.
+function launchDom() {
+  const mkBtn = () => ({ hidden: false, addEventListener() {} });
+  const mkText = () => ({ textContent: "", innerHTML: "", hidden: false, addEventListener() {} });
+  const nodes = {
+    "#overview-sub": mkText(),
+    "#overview-greeting": mkText(),
+    "#overview-chips": mkText(),
+    "#overview-launch": mkBtn(),
+    "#fleet-launch": mkBtn(),
+    "#scope-menu": mkText(),
+  };
+  const byId = (id) => nodes["#" + id] || null;
+  return {
+    nodes,
+    document: {
+      querySelector(sel) { return nodes[String(sel)] || null; },
+      querySelectorAll() { return []; },
+      getElementById(id) { return byId(String(id)); },
+      createElement: () => ({ ...inertEl }),
+      addEventListener() {},
+      body: { ...inertEl, appendChild() {} },
+      documentElement: { ...inertEl, getAttribute: () => null },
+    },
+  };
+}
+
+test("cch-w47-s1: launchAuthority is a FOUR-valued NEW sibling — and no shipped boolean was widened", async () => {
+  assert.equal(typeof hooks.launchAuthority, "function", "the band must be hookable");
+
+  hooks.clearMe();
+  assert.equal(hooks.launchAuthority(), "loading", "never asked is not a refusal, and not a grant either");
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.launchAuthority(), "failed", "a fault is its own band — not 'loading', not 'refuse'");
+  await driveMe(200, W47_OWNER);
+  assert.equal(hooks.launchAuthority(), "grant");
+  await driveMe(200, W47_ADMIN);
+  assert.equal(hooks.launchAuthority(), "grant", "go_live requires ADMIN, so an admin launches");
+  await driveMe(200, W47_MEMBER);
+  assert.equal(hooks.launchAuthority(), "refuse");
+
+  // THE SIBLING PROOF. instanceAdminAuthority is the predicate a lazy fix would
+  // have widened; it still answers its OWN three values, and the fourth
+  // ("failed") exists only on the new band.
+  hooks.clearMe();
+  assert.equal(hooks.instanceAdminAuthority(), "unknown");
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.instanceAdminAuthority(), "unknown",
+    "the shipped predicate is UNCHANGED — widening it to 'failed' is what D439 mutation-proved ships green");
+
+  // launchCheckoutAuthority (the PLAN step) fails OPEN by shipped design and is
+  // deliberately NOT touched: an unknown answer there costs a wasted click,
+  // here it costs a full form fill, a provider detour and then a 403.
+  assert.equal(hooks.launchCheckoutAuthority(null), "unknown");
+  assert.equal(hooks.launchCheckoutAuthority({ role: "member" }), "blocked");
+  hooks.clearMe();
+});
+
+test("cch-w47-s1: THE FORM IS WITHHELD from a refused member — not disabled, WITHHELD", async () => {
+  const saved = sandbox.document;
+  const dom = launchDom();
+  const c = launchContainer();
+  try {
+    sandbox.document = dom.document;
+    await driveMe(200, W47_MEMBER);
+    hooks.launchFlow(c.el, { runway: true });
+    const html = c.el.innerHTML;
+
+    // THE ASSERTION THAT IS RED ON MAIN: on main this render is the owner's,
+    // character for character.
+    assert.ok(html.indexOf("<form") === -1, "no form: the whole thing is withheld");
+    assert.ok(html.indexOf("launch-form") === -1);
+    assert.ok(html.indexOf("form-input") === -1, "no name field");
+    assert.ok(html.indexOf("seg-btn") === -1, "no provider tabs — a disabled submit leaves these three standing");
+    assert.ok(html.indexOf("launch-connect-provider") === -1, "no Connect detour");
+    assert.ok(html.indexOf('type="submit"') === -1, "no submit");
+    assert.ok(html.indexOf("Create your first Barkpark") === -1, "…and none of its copy");
+    assert.ok(html.indexOf("disabled") === -1, "the fix is absence, not a greyed-out promise");
+
+    // …and what IS there is the server's own refusal, hoisted in front of the
+    // form instead of arriving after it.
+    assert.match(html, /You can&#39;t launch for this team|You can't launch for this team/);
+    assert.match(html, /admin role on this team/);
+    assert.doesNotMatch(html, /owner/i, "launching does not need the owner — saying so is the second lie");
+
+    // The GRANTED render is untouched: renderLaunchName still owns it.
+    await driveMe(200, W47_OWNER);
+    const owner = launchContainer();
+    hooks.launchFlow(owner.el, { modal: true, name: "" });
+    assert.match(owner.el.innerHTML, /class="launch-form"/, "an owner still gets the shipped form");
+    assert.match(owner.el.innerHTML, /type="submit"/);
+  } finally {
+    sandbox.document = saved;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1: the refusal card survives refreshRunwaySubline — .runway-sub is a rewrite target, not a slot", async () => {
+  const saved = sandbox.document;
+  const dom = launchDom();
+  const c = launchContainer();
+  try {
+    sandbox.document = dom.document;
+    await driveMe(200, W47_MEMBER);
+    hooks.launchFlow(c.el, { runway: true });
+    const painted = c.el.innerHTML;
+    assert.ok(painted.indexOf("runway-sub") === -1, "the card must not carry the class the subline rewriter owns");
+
+    // DRIVE the rewriter (launchFlow calls it, and so does the SSE
+    // subscription tick every time a subscription event lands).
+    hooks.refreshRunwaySubline(c.el);
+    assert.equal(c.el.innerHTML, painted, "the refusal is byte-stable under the rewrite");
+    assert.match(c.el.innerHTML, /admin role on this team/, "…and the sentence is still on screen");
+    assert.ok(c.el.innerHTML.indexOf("Free trial — no card required.") === -1,
+      "a card written into .runway-sub would read as the trial invitation within a second — measured live");
+
+    // THE CONTAINER CAN LOSE: given a node with that class, the rewriter really
+    // does replace its text here. (Without this the assertion above is vacuous.)
+    const control = launchContainer();
+    control.el.innerHTML = '<div class="card"><p class="runway-sub">SENTINEL</p></div>';
+    hooks.refreshRunwaySubline(control.el);
+    assert.ok(control.el.innerHTML.indexOf("SENTINEL") === -1,
+      "positive control: .runway-sub IS clobbered, so the survival above is a real fact");
+  } finally {
+    sandbox.document = saved;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1: an UNANSWERED /v1/me withholds the form too, and carries the epic's ONE exit", async () => {
+  const saved = sandbox.document;
+  const dom = launchDom();
+  try {
+    sandbox.document = dom.document;
+    const exit = hooks.meRetryHtml();
+
+    hooks.clearMe();
+    const inflight = launchContainer();
+    hooks.launchFlow(inflight.el, { runway: true });
+    assert.ok(inflight.el.innerHTML.indexOf("launch-form") === -1, "fail CLOSED: no form while the answer is out");
+    assert.ok(inflight.el.innerHTML.includes(exit), "…and the shipped exit, verbatim — a spinner with no way out is the same lie");
+    assert.equal(inflight.el.innerHTML.split("data-me-retry").length - 1, 1, "exactly ONE of it");
+    assert.match(inflight.el.innerHTML, /Checking your account/, "in flight, it says what it is doing");
+    // Captured BEFORE the read answers: the repaint seam owns this very mount
+    // and rewrites it the moment /v1/me lands, which is the point of the seam.
+    const inflightHtml = inflight.el.innerHTML;
+
+    await driveMe(500, { error: "server_error" });
+    const failed = launchContainer();
+    hooks.launchFlow(failed.el, { runway: true });
+    assert.notEqual(failed.el.innerHTML, inflightHtml,
+      "a FAILED read must not render as an in-flight one");
+    assert.ok(failed.el.innerHTML.includes(hooks.esc(hooks.meFailureCopy())), "…it carries the fault's own sentence");
+    assert.ok(failed.el.innerHTML.includes(exit), "…and the same one exit");
+    assert.ok(failed.el.innerHTML.indexOf("launch-form") === -1);
+
+    // A determinate refusal offers NO retry: re-reading an answer we have is
+    // the transient-refusal lie.
+    await driveMe(200, W47_MEMBER);
+    const refused = launchContainer();
+    hooks.launchFlow(refused.el, { runway: true });
+    assert.ok(refused.el.innerHTML.indexOf("data-me-retry") === -1);
+
+    // THE EXIT WORKS: the click re-drives /v1/me and the answer paints.
+    hooks.clearMe();
+    const live = launchContainer();
+    hooks.launchFlow(live.el, { runway: true });
+    const btn = live.el.querySelector("[data-me-retry]");
+    assert.ok(btn, "the exit is a control the mount can find");
+    const savedFetch = sandbox.fetch;
+    sandbox.fetch = fetchStub(200, W47_MEMBER);
+    btn.click();
+    await settle();
+    sandbox.fetch = savedFetch;
+    assert.match(live.el.innerHTML, /admin role on this team/, "one click, one answer, painted without a reload");
+  } finally {
+    sandbox.document = saved;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1: the refusal SENTENCE has one owner — no second copy was written", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const sentence = "Launching needs the ";
+  assert.equal(src.split(sentence).length - 1, 1,
+    "the wording lives in newLaunchRefusalToast alone; a second literal is a second thing to keep true");
+  // …and the card really does read it from there, rather than re-stating it.
+  assert.equal(hooks.launchRefusalCopy().body, hooks.newLaunchRefusalToast({ error: "forbidden" }).body);
+  assert.ok(hooks.launchRefusalHtml({ runway: true }).includes(hooks.esc(hooks.launchRefusalCopy().body)));
+});
+
+test("cch-w47-s1: the head stops telling a refused member to launch", async () => {
+  const saved = sandbox.document;
+  const dom = launchDom();
+  try {
+    sandbox.document = dom.document;
+
+    await driveMe(200, W47_OWNER);
+    hooks.paintOverviewHead([]);
+    assert.equal(dom.nodes["#overview-sub"].textContent, W47_SELL, "an owner keeps the shipped invitation");
+
+    hooks.clearMe();
+    hooks.paintOverviewHead([]);
+    assert.equal(dom.nodes["#overview-sub"].textContent, W47_SELL,
+      "…and so does an unanswered read: the runway below states the checking truth");
+
+    await driveMe(200, W47_MEMBER);
+    hooks.paintOverviewHead([]);
+    assert.notEqual(dom.nodes["#overview-sub"].textContent, W47_SELL,
+      "#overview-sub is a SIBLING of #overview-body, so the card below never reaches it — this is the second lie");
+    assert.equal(dom.nodes["#overview-sub"].textContent, hooks.launchRefusalCopy().title);
+  } finally {
+    sandbox.document = saved;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1: all FOUR named offer sites are omitted for a refused member — and kept for everyone else", async () => {
+  const saved = sandbox.document;
+  const dom = launchDom();
+  try {
+    sandbox.document = dom.document;
+
+    // (1)+(2) the two header buttons. The emptiness fence is UNCHANGED; the
+    // authority answer is an OR on top of it.
+    await driveMe(200, W47_OWNER);
+    hooks.setHeaderLaunchHidden("overview-launch", false);
+    hooks.setHeaderLaunchHidden("fleet-launch", false);
+    assert.equal(dom.nodes["#overview-launch"].hidden, false, "an owner with a fleet keeps the button");
+    assert.equal(dom.nodes["#fleet-launch"].hidden, false);
+    hooks.setHeaderLaunchHidden("overview-launch", true);
+    assert.equal(dom.nodes["#overview-launch"].hidden, true, "…and the emptiness fence still hides it");
+
+    await driveMe(200, W47_MEMBER);
+    hooks.setHeaderLaunchHidden("overview-launch", false);
+    hooks.setHeaderLaunchHidden("fleet-launch", false);
+    assert.equal(dom.nodes["#overview-launch"].hidden, true, "a refused member is offered nothing, fleet or no fleet");
+    assert.equal(dom.nodes["#fleet-launch"].hidden, true);
+
+    // (3) #scope-launch — emitted UNCONDITIONALLY on every authed screen, so it
+    // outlives the emptiness fence the two buttons ride.
+    hooks.renderScopeMenu();
+    assert.ok(dom.nodes["#scope-menu"].innerHTML.indexOf("scope-launch") === -1,
+      "the scope menu's footer offer is the door that survives an empty fleet");
+    assert.match(dom.nodes["#scope-menu"].innerHTML, /View fleet/, "…the rest of the menu is untouched");
+
+    // (4) the ⌘K palette row.
+    assert.ok(!hooks.paletteActionItems().some((i) => i.id === "act-launch"),
+      "the palette is the fourth door");
+    assert.ok(hooks.paletteActionItems().some((i) => i.id === "act-account"),
+      "…and only that row goes: the palette is not emptied");
+
+    // NEVER on loading/failed — deleting an owner's controls because /v1/me is
+    // slow is the opposite failure, and it is silent.
+    for (const arm of ["loading", "failed"]) {
+      if (arm === "loading") hooks.clearMe();
+      else await driveMe(500, { error: "server_error" });
+      assert.equal(hooks.launchAuthority(), arm);
+      hooks.setHeaderLaunchHidden("overview-launch", false);
+      assert.equal(dom.nodes["#overview-launch"].hidden, false, arm + ": the control stays");
+      hooks.renderScopeMenu();
+      assert.match(dom.nodes["#scope-menu"].innerHTML, /scope-launch/, arm + ": the scope row stays");
+      assert.ok(hooks.paletteActionItems().some((i) => i.id === "act-launch"), arm + ": the palette row stays");
+    }
+  } finally {
+    sandbox.document = saved;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1: a /v1/me that lands LATE repaints the runway, the head AND the header offers", async () => {
+  const saved = { document: sandbox.document, hash: sandbox.location.hash, fetch: sandbox.fetch };
+  const dom = launchDom();
+  const c = launchContainer();
+  try {
+    sandbox.document = dom.document;
+    sandbox.location.hash = "#overview";
+
+    // The strand's starting point: the runway painted while the answer was out,
+    // exactly as a cold boot into #overview does — with the fleet already
+    // landed, which is the ONLY state whose head this repaint owns.
+    hooks.overviewData.list = [];
+    hooks.clearMe();
+    hooks.launchFlow(c.el, { runway: true });
+    hooks.paintOverviewHead([]);
+    const before = c.el.innerHTML;
+    assert.match(before, /data-me-retry/, "…checking, with a way out");
+    assert.equal(dom.nodes["#overview-sub"].textContent, W47_SELL);
+    dom.nodes["#overview-launch"].hidden = false;
+    dom.nodes["#fleet-launch"].hidden = false;
+
+    // THE LATE ANSWER.
+    await driveMe(200, W47_MEMBER);
+
+    assert.notEqual(c.el.innerHTML, before,
+      "without the repaint the runway is stranded on 'checking' forever — that is cch-w46-rv on this screen");
+    assert.match(c.el.innerHTML, /admin role on this team/, "the runway states the refusal");
+    assert.ok(c.el.innerHTML.indexOf("data-me-retry") === -1, "…and the exit retires with the question it answered");
+    assert.notEqual(dom.nodes["#overview-sub"].textContent, W47_SELL, "the head moves with it");
+    assert.equal(dom.nodes["#overview-launch"].hidden, true, "…and so do the header offers");
+    assert.equal(dom.nodes["#fleet-launch"].hidden, true);
+
+    // A GRANTED late answer paints the form rather than deleting it.
+    const owner = launchContainer();
+    hooks.clearMe();
+    hooks.launchFlow(owner.el, { runway: true });
+    await driveMe(200, W47_OWNER);
+    assert.match(owner.el.innerHTML, /class="launch-form"/, "the owner's form comes alive without a reload");
+    assert.equal(dom.nodes["#overview-sub"].textContent, W47_SELL, "…and the head goes back to the invitation");
+
+    // cch-w47-rv — AND THE HEAD IS NOT REPAINTED FROM A FLEET NOBODY HAS READ.
+    // /v1/me is the cheaper read and normally lands while GET /v1/barkparks is
+    // still in flight; a repaint from a null list states "launch your first
+    // Barkpark" over an owner's loading dashboard. The loader owns that paint.
+    hooks.overviewData.list = null;
+    dom.nodes["#overview-sub"].textContent = "Your fleet at a glance — and what needs you.";
+    await driveMe(200, W47_MEMBER);
+    assert.equal(dom.nodes["#overview-sub"].textContent, "Your fleet at a glance — and what needs you.",
+      "an unread fleet has no head to correct — writing one is a fresh lie inside the fix");
+  } finally {
+    Object.assign(sandbox, { document: saved.document, fetch: saved.fetch });
+    sandbox.location.hash = saved.hash;
+    hooks.overviewData.list = null;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1: BOTH loadMe arms repaint the launch surface — a failed read is terminal", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "function loadMe(", "// =========================================================== SUBSCRIPTION");
+  const cut = region.indexOf("} else {");
+  for (const [armName, arm] of [["success", region.slice(0, cut)], ["failure", region.slice(cut)]]) {
+    assert.ok(arm.includes("repaintLaunchAuthority()"),
+      "the " + armName + " arm must repaint the launch surface — nothing re-reads /v1/me after it answers");
+  }
+});

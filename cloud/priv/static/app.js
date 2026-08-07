@@ -5395,11 +5395,19 @@
         '<span class="scope-dot" style="background:' + ctxDotColor(classifyBp(bp)) + '"></span>' +
         '<span class="scope-name">' + esc(bp.name || bp.slug || bp.id) + "</span></a>";
     }).join("");
+    // cch-w47-s1 — the THIRD launch door, and the one that is on every authed
+    // screen: this footer row is emitted unconditionally, so it outlives the
+    // header buttons' emptiness fence. A determinate refusal omits it; a
+    // "loading"/"failed" answer keeps it, because deleting an owner's control
+    // over a slow /v1/me is the opposite failure. The menu is re-rendered on
+    // every open, so it re-asks the predicate itself and needs no repaint seam.
+    var launchRow = launchAuthority() === "refuse" ? "" :
+      '<button type="button" class="scope-item scope-foot" id="scope-launch">+ Launch instance</button>';
     menu.innerHTML =
       '<div class="scope-eyebrow">Instances</div>' +
       (rows || '<div class="scope-empty">No instances yet</div>') +
       '<a class="scope-item scope-foot" href="#fleet">View fleet</a>' +
-      '<button type="button" class="scope-item scope-foot" id="scope-launch">+ Launch instance</button>';
+      launchRow;
     var launch = $("#scope-launch");
     if (launch) launch.addEventListener("click", function () { toggleScopeMenu(false); openLaunchModal(); });
   }
@@ -5921,7 +5929,11 @@
   // soon as the fleet has rows (or the load failed and the runway isn't shown).
   function setHeaderLaunchHidden(btnId, hidden) {
     var b = document.getElementById(btnId);
-    if (b) b.hidden = !!hidden;
+    // cch-w47-s1 — the first two launch doors (#overview-launch, #fleet-launch).
+    // The emptiness fence above is unchanged; the OR is the authority answer.
+    // Only a determinate "refuse" hides the button — never "loading"/"failed",
+    // which would silently delete an owner's control while /v1/me is in flight.
+    if (b) b.hidden = !!hidden || launchAuthority() === "refuse";
   }
 
   // The Fleet list. An optional bucket filter (from #fleet/<bucket>, charter
@@ -6501,7 +6513,16 @@
     setText($("#overview-greeting"), teamName ? g + teamName : g.replace(/,\s*$/, ""));
     var chips = $("#overview-chips");
     if (!list.length) {
-      setText($("#overview-sub"), "Ready when you are — launch your first Barkpark.");
+      // cch-w47-s1 — THE SECOND LIE ON THIS SCREEN. #overview-sub is a SIBLING
+      // of #overview-body, so the runway's own refusal card (launchFlow, below)
+      // never reaches it: the head kept instructing a member to do the one
+      // thing go_live answers 403 for. On a determinate refusal it states the
+      // refusal's own title, from the ONE owner of that copy; "loading" and
+      // "failed" keep the shipped line, and the runway underneath carries the
+      // checking/failed truth plus the one Retry.
+      setText($("#overview-sub"), launchAuthority() === "refuse"
+        ? launchRefusalCopy().title
+        : "Ready when you are — launch your first Barkpark.");
       if (chips) { chips.innerHTML = ""; chips.hidden = true; }
       return;
     }
@@ -13368,9 +13389,68 @@
 
   // Mount the launch component into `container`. opts: { runway } for the inline
   // empty-fleet welcome, or { modal, name } for the focus-trapped header modal.
+  // cch-w47-s1 — THE PRE-HOC REFUSAL, and its wording has exactly ONE owner.
+  // newLaunchRefusalToast already turns go_live's 403 into an honest sentence
+  // that names the role the server asked for; today that sentence is reachable
+  // ONLY after a full form fill plus a provider detour returns 403. There is no
+  // server answer to read yet (that is the point of asking early), so the bare
+  // slug is passed and its default names go_live's actual requirement, `admin`.
+  function launchRefusalCopy() { return newLaunchRefusalToast({ error: "forbidden" }); }
+
+  // The refusal card. MARKUP CONSTRAINT, measured live: it must NOT carry the
+  // class `.runway-sub` — refreshRunwaySubline rewrites every node with that
+  // class, driven both from launchFlow itself and from the SSE subscription
+  // tick, so a refusal written there is clobbered back to "Free trial — no card
+  // required." within a second. No new class is introduced either: this is the
+  // shipped `.empty-state` grammar, the same block meUnknownHtml renders.
+  function launchRefusalHtml(opts) {
+    var copy = launchRefusalCopy();
+    return launchFlowShell(
+      '<div class="empty-state">' +
+        "<h2>" + esc(copy.title) + "</h2>" +
+        "<p>" + esc(copy.body) + "</p>" +
+      "</div>", opts);
+  }
+
+  // The unanswered arm. It reuses the epic's ONE unknown block (headline +
+  // meFailureCopy on the failed arm + a per-surface consequence + the single
+  // shared Retry) rather than minting a second "Checking…" with no way out —
+  // a spinner without an exit is the same lie in a politer register.
+  function launchUnknownHtml(state, opts) {
+    return launchFlowShell(
+      meUnknownHtml(state, "We can't offer Launch until we know your role on this team."), opts);
+  }
+
+  // cch-w47-s1 — WHAT THE LAUNCH MOUNT IS CURRENTLY MADE OF, so a /v1/me that
+  // lands AFTER the paint can be re-asked without re-entering the loader that
+  // painted it. Mirrors `lifecycleRail` (grep -n 'var lifecycleRail').
+  var launchMount = null;
+
   function launchFlow(container, opts) {
     opts = opts || {};
     if (!container) return;
+    // cch-w47-s1 — THE OFFER IS PREDICATED BEFORE IT IS RENDERED. go_live
+    // answers a plain member 403 {required:"admin"} BEFORE it ever reaches the
+    // entitlement check, so the form below is a promise the server has already
+    // decided not to keep — and on a zero-instance team this form IS the first
+    // screen. The branch sits HERE, not inside renderLaunchName, so the form
+    // renderer is untouched. It WITHHOLDS the whole form rather than disabling
+    // the submit: a disabled submit leaves the name field and both provider
+    // tabs enabled, i.e. three live controls still selling the refusal.
+    // FAIL CLOSED on loading/failed — the cost of a false offer here is a full
+    // form fill plus a provider detour and THEN a 403 (unlike the PLAN step's
+    // launchCheckoutAuthority, which fails OPEN by shipped design).
+    var authority = launchAuthority();
+    launchMount = { container: container, opts: opts, band: authority };
+    if (authority !== "grant") {
+      if (authority === "refuse") {
+        container.innerHTML = launchRefusalHtml(opts);
+        return; // a determinate answer has no question left to retry
+      }
+      container.innerHTML = launchUnknownHtml(authority, opts);
+      wireMeRetry(container, function () { launchFlow(container, opts); });
+      return;
+    }
     renderLaunchName(container, opts);
     // Resolve the trial subline from server truth (runway only) WITHOUT gating the
     // form — the server decides entitlement on submit (a 402 folds the plan step).
@@ -13378,6 +13458,53 @@
       if (subLoaded || subError) refreshRunwaySubline(container);
       else loadSubscription().then(function () { refreshRunwaySubline(container); });
     }
+  }
+
+  // cch-w47-s1 — THE REPAINT, and it covers more than the mount it repaints.
+  // cch-w46-rv-authority-repaint-covers-the-rail-only is a live row precisely
+  // because repaintLifecycleAuthority repaints ONE box; a launch answer that
+  // lands late decides FOUR offers and a headline, and every one of them was
+  // painted while the answer was still unknown. Called from BOTH loadMe arms:
+  // a FAILED read is terminal (nothing re-reads it), so without the failed arm
+  // the runway keeps saying "checking" about a read that already answered.
+  function repaintLaunchAuthority() {
+    refreshLaunchOffers();
+    var m = launchMount;
+    if (!m || !m.container) return;
+    // A container that left the document belongs to a screen that is gone.
+    if (m.container.isConnected === false) { launchMount = null; return; }
+    // Only a MOVED answer repaints: re-rendering a granted form under a name
+    // the operator has already typed would destroy it to say nothing new.
+    if (launchAuthority() !== m.band) launchFlow(m.container, m.opts);
+    // The head's sentence was decided from the same unknown answer — but the
+    // fleet it describes has to be KNOWN first. cch-w47-rv: /v1/me is the
+    // cheaper read and usually lands while GET /v1/barkparks is still in
+    // flight, so repainting from a null list wrote "Ready when you are — launch
+    // your first Barkpark." over an owner's twelve-instance dashboard for as
+    // long as the fleet took to arrive — a fresh lie inside the honesty fix.
+    // The loader paints the head itself the moment the list lands (:6406), so
+    // skipping here strands nothing.
+    if (currentView() === "overview" && overviewData && overviewData.list) {
+      paintOverviewHead(overviewData.list);
+    }
+  }
+
+  // The two header offers are painted once per fleet load, from a path a late
+  // /v1/me never re-enters. The scope menu and the ⌘K palette re-emit on every
+  // open, so they re-ask the predicate themselves and need nothing here.
+  function refreshLaunchOffers() {
+    // A determinate refusal is answered whether or not the fleet has landed.
+    if (launchAuthority() === "refuse") {
+      setHeaderLaunchHidden("overview-launch", true);
+      setHeaderLaunchHidden("fleet-launch", true);
+      return;
+    }
+    // Otherwise the emptiness fence decides, re-read from the SAME cache it was
+    // painted from — and never un-hidden from a fleet we have not read yet: the
+    // loader that lands it calls the fence itself.
+    if (!fleetCache) return;
+    setHeaderLaunchHidden("overview-launch", !fleetCache.length);
+    setHeaderLaunchHidden("fleet-launch", !fleetCache.length);
   }
 
   function refreshRunwaySubline(container) {
@@ -14535,6 +14662,30 @@
     return (meCache.role === "owner" || meCache.role === "admin") ? "grant" : "refuse";
   }
 
+  // cch-w47-s1 — THE LAUNCH BAND, and it is a NEW sibling on purpose. Widening
+  // instanceAdminAuthority() (or any shipped boolean) to carry a fourth value
+  // ships green and makes `if (predicate)` true for "failed"/"loading" at every
+  // caller that never heard about the change — D439 mutation-proved exactly
+  // that. Callers branch on the band by name:
+  //
+  //   "loading" · /v1/me never asked, or still in flight
+  //   "failed"  · the read answered with a fault — NOT the same as a refusal
+  //   "grant"   · the server will accept POST /v1/launch on this team
+  //   "refuse"  · it will not, and a role grant is the remedy
+  //
+  // It FAILS CLOSED: loading/failed withhold the form. That is deliberately the
+  // opposite of launchCheckoutAuthority (the PLAN step), which fails OPEN by
+  // shipped design and stays that way — there an unknown answer costs a wasted
+  // click, here it costs a full form fill, a provider detour and then a 403.
+  // The role read mirrors instanceAdminAuthority's exactly, and is correct for
+  // this route for the same reason: api() pins x-barkpark-team on every authed
+  // request including /v1/me, so meCache.role IS the role go_live will judge.
+  function launchAuthority() {
+    var state = meState();
+    if (state !== "loaded") return state === "failed" ? "failed" : "loading";
+    return (meCache.role === "owner" || meCache.role === "admin") ? "grant" : "refuse";
+  }
+
   // Honest copy for the failed read, classified from the retained fault the
   // same way the subscription retry card classifies its own.
   function meFailureCopy() {
@@ -14673,6 +14824,10 @@
         // reloadInstanceView() — that call fixes Overview and leaves the usage
         // and webhooks tabs, which it hard-returns on, stranded.
         repaintLifecycleAuthority();
+        // cch-w47-s1 — THE SEVENTH TWIN, on the screen every member reaches
+        // first. The empty-fleet runway, the head's subline and the two header
+        // launch buttons were all decided while this answer was out.
+        repaintLaunchAuthority();
       } else {
         // cch-w36-s3 — THE MISSING ELSE, and it was the whole defect. api()
         // ends in a .catch returning {ok:false,status:0,…}, so this promise
@@ -14718,6 +14873,10 @@
         // about a read that already answered; repainting swaps that for the
         // fault's own sentence plus the one Retry that can move it.
         repaintLifecycleAuthority();
+        // cch-w47-s1 — the mirror. A failed read is terminal, so without this
+        // the runway keeps saying "Checking your account…" about a read that
+        // already answered, with no exit on the screen it strands.
+        repaintLaunchAuthority();
       }
     });
   }
@@ -20087,7 +20246,7 @@
   // launch/account actions open their own modal (openModal replaces the palette body
   // in place); the theme toggle has no modal, so it closes the palette itself.
   function paletteActionItems() {
-    return [
+    var items = [
       { id: "act-launch", label: "Launch a new instance", group: "Actions", hint: "New", kind: "action",
         run: function () { openLaunchModal(); } },
       { id: "act-theme", label: "Toggle light / dark theme", group: "Actions", kind: "action",
@@ -20095,6 +20254,13 @@
       { id: "act-account", label: "Account & sessions", group: "Actions", kind: "action",
         run: function () { openAccountModal(); } },
     ];
+    // cch-w47-s1 — the FOURTH launch door. The palette rebuilds its rows on
+    // every open, so it re-asks the predicate itself. A determinate refusal
+    // omits the row; "loading"/"failed" keep it — deleting an owner's action
+    // because /v1/me is slow is the opposite failure.
+    return items.filter(function (it) {
+      return it.id !== "act-launch" || launchAuthority() !== "refuse";
+    });
   }
 
   // Pure: instance rows from the fleet list — label = display name, hint = the ONE
@@ -21702,6 +21868,19 @@
       // not a re-implementation of it).
       launchCheckoutAuthority: launchCheckoutAuthority,
       launchPlanGridHtml: launchPlanGridHtml,
+      // cch-w47-s1 — the PRE-hoc launch band and the seam that renders it.
+      // launchFlow is impure (it paints, and on the granted arm it fetches), so
+      // it is driven against a recording container exactly like the lifecycle
+      // rail: the whole defect is that the REFUSED render was byte-identical to
+      // the owner's, which no pure-helper assertion could have seen. The four
+      // offer sites ride along so their omission is asserted on what they
+      // actually emit, not on source text.
+      launchAuthority: launchAuthority, launchFlow: launchFlow,
+      launchRefusalCopy: launchRefusalCopy, launchRefusalHtml: launchRefusalHtml,
+      refreshRunwaySubline: refreshRunwaySubline,
+      repaintLaunchAuthority: repaintLaunchAuthority,
+      paintOverviewHead: paintOverviewHead, renderScopeMenu: renderScopeMenu,
+      setHeaderLaunchHidden: setHeaderLaunchHidden,
       newLaunchRefusalToast: newLaunchRefusalToast,
       renderLaunchPlan: renderLaunchPlan, renderNewPricing: renderNewPricing,
       launchOwnerOnlyCopy: LAUNCH_OWNER_ONLY_COPY,
