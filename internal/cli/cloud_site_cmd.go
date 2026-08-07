@@ -1660,15 +1660,28 @@ func siteTimeToWeb(d cloudclient.SiteDeployment) (time.Duration, bool) {
 	return gap, true
 }
 
-// siteDeployWaiting reports a row that is STILL IN FLIGHT — not terminal (live,
-// failed, cancelled) and not deferred, which is settled-but-re-queued and owns its
-// own vocabulary. These are the rows that can be "still waiting".
+// siteDeployWaiting reports a row whose CONTENT has not reached the web and is
+// not going to stop trying: anything the transition table has not settled as live,
+// failed or cancelled.
+//
+// DEFERRED COUNTS, and this predicate used to say the opposite (`&& !siteDeployDeferred(s)`,
+// dr-w7). A deferred row is settled as a ROW and unsettled as a PUBLISH: the box
+// refused the round and the control plane re-queued a rebuild carrying the same
+// content, so nothing has reached visitors and nothing has been given up on. That
+// is the definition of a wait — and it is the ONE shape that is genuinely
+// unbounded, since a refusal can be followed by a refusal forever. Excluding it
+// meant siteWaitingSince structurally could not see the very case it exists to
+// bound, while deferrals grew to 53.6% of attempts.
+//
+// A deferred row is still not a FAILURE, and nothing here changes that vocabulary:
+// the failure arms in spawnSiteStatusMap key off siteDeployFailed and never off
+// this predicate.
 func siteDeployWaiting(status string) bool {
 	s := strings.TrimSpace(status)
 	if s == "" {
 		return false
 	}
-	return !cloudclient.SiteDeploymentTerminal(s) && !siteDeployDeferred(s)
+	return !cloudclient.SiteDeploymentTerminal(s)
 }
 
 // siteWaitingSince is the RIGHT-CENSORED bound for a revision that has not reached
@@ -1681,13 +1694,82 @@ func siteDeployWaiting(status string) bool {
 // two-day-old sibling behind a fresh re-queue. This function takes the maximum,
 // so it is order-independent, and it refuses any row whose inserted_at will not
 // parse rather than guessing a start.
+//
+// THAT MAXIMUM IS ALSO WHAT MEASURES A DEFERRAL CHAIN FROM ITS START. A chain is
+// n separate rows — refusal 1, refusal 2, … — each with its own inserted_at, and
+// the newest one is the SHORTEST wait in the chain. Now that siteDeployWaiting
+// admits deferred rows, every round of the chain is a candidate and the maximum
+// lands on the FIRST refused attempt, which is when the operator actually started
+// waiting. Rows at or below the live pointer are still excluded, so a chain that a
+// successful deploy already broke does not leak back in — the same reset rule the
+// control plane's consecutive_deferrals/2 applies.
+//
+// It stays a LOWER bound in one more way with deferrals in scope: the page is
+// siteStatusLedgerPage rows, so a chain whose start has fallen off the page is
+// measured from the oldest round still visible. "At least" is the only claim this
+// function ever makes.
 func siteWaitingSince(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) (time.Duration, string, bool) {
+	waited, row, ok := siteWaitingWorst(dep, ledger)
+	if !ok {
+		return 0, "", false
+	}
+	return waited, strings.TrimSpace(row.ID), true
+}
+
+// siteWaitingWorst is siteWaitingSince's measurement, returning the ROW rather
+// than its id — the renderers need the row itself to say WHY it is waiting (a
+// refused round reads differently from a slow build), and re-finding it by id in
+// the caller would be a second scan that could disagree with this one.
+func siteWaitingWorst(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) (time.Duration, cloudclient.SiteDeployment, bool) {
 	now := siteClock()
 	var (
-		worst   time.Duration
-		worstID string
-		found   bool
+		worst    time.Duration
+		worstRow cloudclient.SiteDeployment
+		found    bool
 	)
+	for _, r := range sitePendingRows(dep, ledger) {
+		ins, ok := siteParseStamp(r.InsertedAt)
+		if !ok {
+			continue
+		}
+		waited := now.Sub(ins)
+		if waited <= 0 {
+			continue
+		}
+		if !found || waited > worst {
+			worst, worstRow, found = waited, r, true
+		}
+	}
+	return worst, worstRow, found
+}
+
+// siteWaitingChainHead is the NEWEST refused round among the pending rows — the
+// one whose sentence carries the chain's CURRENT depth.
+//
+// The clock and the depth deliberately come off different rows, because they are
+// different facts: the wait started at the first refusal (the oldest row), while
+// "how deep am I now" is only true on the latest one. Reading the depth off the
+// row the clock was measured from would print "refusal 1 of 12" over a chain four
+// rounds deep — an understatement produced by the fix itself.
+func siteWaitingChainHead(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) (cloudclient.SiteDeployment, bool) {
+	// Newest-first, so the first deferred row in the pending set is the head.
+	for _, r := range sitePendingRows(dep, ledger) {
+		if siteDeployDeferred(r.Status) {
+			return r, true
+		}
+	}
+	return cloudclient.SiteDeployment{}, false
+}
+
+// sitePendingRows is the shared scoping rule behind every waiting question: the
+// rows on this page that have not reached the web and are NEWER than what is being
+// served, in the page's own newest-first order.
+//
+// It is one function rather than a rule copied per caller on purpose — the clock
+// and the chain-depth reader must agree on which rows are "pending", or the header
+// can measure one chain and quote another's depth.
+func sitePendingRows(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) []cloudclient.SiteDeployment {
+	out := make([]cloudclient.SiteDeployment, 0, len(ledger))
 	liveIdx := -1
 	if dep != nil {
 		for i, r := range ledger {
@@ -1724,19 +1806,9 @@ func siteWaitingSince(dep *cloudclient.SiteDeployment, ledger []cloudclient.Site
 				}
 			}
 		}
-		ins, ok := siteParseStamp(r.InsertedAt)
-		if !ok {
-			continue
-		}
-		waited := now.Sub(ins)
-		if waited <= 0 {
-			continue
-		}
-		if !found || waited > worst {
-			worst, worstID, found = waited, strings.TrimSpace(r.ID), true
-		}
+		out = append(out, r)
 	}
-	return worst, worstID, found
+	return out
 }
 
 // siteTimeToWebLine is the sentence this epic was founded on — how long it took
@@ -1759,14 +1831,51 @@ func siteTimeToWebLine(dep *cloudclient.SiteDeployment, ledger []cloudclient.Sit
 			line = fmt.Sprintf("the build you are being served went live %s after the control plane picked it up (publishes are debounced up to 60s)", siteShortDur(ttw))
 		}
 	}
-	if waited, _, ok := siteWaitingSince(dep, ledger); ok {
-		clause := fmt.Sprintf("a newer revision is still waiting — at least %s so far", siteShortDur(waited))
+	if waited, row, ok := siteWaitingWorst(dep, ledger); ok {
+		clause := fmt.Sprintf(
+			"a newer revision is still waiting — at least %s so far, measured from the control plane's inserted_at on the OLDEST pending row (not from your publish, which it can understate by up to 60s of debounce)",
+			siteShortDur(waited),
+		)
+		if note := siteWaitingDeferralNote(row, dep, ledger); note != "" {
+			clause += " — " + note
+		}
 		if line == "" {
 			return clause
 		}
 		line += " (" + clause + ")"
 	}
 	return line
+}
+
+// siteWaitingDeferralNote is what the censored wait owes the reader when the row it
+// was measured from is a REFUSED round rather than a queued one: the wait is not
+// one attempt taking a long time, it is a chain of attempts being turned away.
+//
+// It leads with the CLOCK, never with the depth, and the ordering is the finding
+// rather than taste: the chain is bounded and small (24h p50 depth 3, max 11, wall
+// p50 121.6s) while the wait it produces is not, so a header that opened with "3"
+// would name the least alarming number on the row. Depth arrives afterwards, as a
+// detail, and only ever through siteDeferralLine — which prints it as depth-of-
+// fence with what is actually being counted, and which degrades honestly to "this
+// control plane does not report how deep the refusal chain is" against a pre-D99
+// box. That degraded arm is deliberately kept: a reader that cannot lose cannot be
+// believed when it says it has not lost.
+//
+// No rate is computed here and none may be (charter D174/D142): chains carry no
+// key, they are reconstructible only positionally, and the resulting closed-live
+// rate is era-unstable (48.4% over 7d vs 28.3% over 24h).
+func siteWaitingDeferralNote(measured cloudclient.SiteDeployment, dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) string {
+	// Only when the wait we just PRINTED is itself a refusal chain. A stranded
+	// queued row that happens to share the page with a deferral is a different
+	// wait, and describing it as refused would be a lie about the louder number.
+	if !siteDeployDeferred(measured.Status) {
+		return ""
+	}
+	head, ok := siteWaitingChainHead(dep, ledger)
+	if !ok {
+		head = measured
+	}
+	return "the box REFUSED that round and re-queued a rebuild, so this clock runs from the FIRST refused attempt, not the newest: " + siteDeferralLine(head)
 }
 
 // siteFailureClass is the named failure class to show in a status header: the
@@ -1809,9 +1918,27 @@ func siteStalenessMap(dep, newest *cloudclient.SiteDeployment, ledger []cloudcli
 	// bound on a wait that has not ended. It is the OLDEST waiting row's, so
 	// alerting on it cannot be fooled by a fresh re-queue in front of a stranded
 	// sibling.
-	if waited, id, ok := siteWaitingSince(dep, ledger); ok {
+	if waited, row, ok := siteWaitingWorst(dep, ledger); ok {
+		id := strings.TrimSpace(row.ID)
 		m["latest_waiting_seconds_at_least"] = int64(waited.Seconds())
 		m["latest_waiting_censored"] = true
+		// WHY it is waiting, for the half of the wait that is now a refusal chain
+		// rather than a slow build. The flag is written only on a deferred row —
+		// never a `false` on the others, which would read as a measurement the CLI
+		// did not make — and the depth pair rides the control plane's own sentence
+		// (absent against a pre-D99 box, exactly as in siteDeploymentMap). No rate,
+		// no percentage: chains have no key (charter D174/D142).
+		if siteDeployDeferred(row.Status) {
+			m["latest_waiting_deferred"] = true
+			head, hok := siteWaitingChainHead(dep, ledger)
+			if !hok {
+				head = row
+			}
+			if depth, bound, dok := siteDeferralChain(head); dok {
+				m["latest_waiting_deferral_depth"] = depth
+				m["latest_waiting_deferral_bound"] = bound
+			}
+		}
 		// AS-OF, because a censored bound without one is undated arithmetic: the
 		// same pinned window was measured returning 3 → 2 → 0 waiters in five
 		// minutes (charter D163), so a captured JSON blob carrying only a duration

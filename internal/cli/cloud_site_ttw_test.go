@@ -195,15 +195,32 @@ func TestSiteTimeToWebLineReportsTheOldestWaiter(t *testing.T) {
 		}
 	}
 	// Rows OLDER than the live pointer are not "still waiting for the web" — they
-	// are behind it — and settled rows (failed/cancelled/deferred) never are.
+	// are behind it — and a DROPPED row (failed/cancelled) never is: nothing is
+	// still trying.
+	//
+	// dr-w12 S7 CHANGED THIS FIXTURE, and the change is the finding: `deferred`
+	// used to be listed here as a settled non-waiter, which is what made the
+	// waiting clock structurally blind to a refusal chain — the one shape whose
+	// wait is genuinely unbounded. A deferred row is settled as a ROW and unsettled
+	// as a PUBLISH, so it waits. See TestSiteWaitingSinceMeasuresADeferralChain…
+	// in cloud_site_cmd_test.go for the chain-start proof.
 	settled := []cloudclient.SiteDeployment{
+		{ID: "dep-f", Status: "failed", InsertedAt: ttwStamp(2 * time.Hour)},
+		*dep,
+		{ID: "dep-old", Status: "queued", InsertedAt: ttwStamp(30 * time.Hour)},
+	}
+	if line := siteTimeToWebLine(dep, settled); strings.Contains(line, "still waiting") {
+		t.Fatalf("dropped rows and rows behind the live pointer are not waiters: %q", line)
+	}
+	// …and the deferred row that used to sit in that fixture IS a waiter now.
+	withDeferral := []cloudclient.SiteDeployment{
 		{ID: "dep-f", Status: "failed", InsertedAt: ttwStamp(2 * time.Hour)},
 		{ID: "dep-d", Status: "deferred", InsertedAt: ttwStamp(90 * time.Minute)},
 		*dep,
 		{ID: "dep-old", Status: "queued", InsertedAt: ttwStamp(30 * time.Hour)},
 	}
-	if line := siteTimeToWebLine(dep, settled); strings.Contains(line, "still waiting") {
-		t.Fatalf("settled rows and rows behind the live pointer are not waiters: %q", line)
+	if line := siteTimeToWebLine(dep, withDeferral); !strings.Contains(line, "at least 1h30m so far") {
+		t.Fatalf("a refused round newer than the live pointer must be counted as a wait: %q", line)
 	}
 }
 
