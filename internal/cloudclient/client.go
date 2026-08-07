@@ -1969,9 +1969,31 @@ type DeployCensusWindow struct {
 	To   string `json:"to"`
 }
 
-// DeployCensus is GET /v1/operator/deploy-ledger/census — the cross-site deploy
+// DeployCensusScope is the `scope` node the TEAM census route emits on every
+// 200: which population the numbers above were taken over, by NAME.
+//
+// It exists because the same census body is honest arithmetic over a population
+// the reader never chose — a rate over "the caller's own sites" and a rate over
+// "the whole fleet" are different claims that render identically. Team is the
+// team SLUG (the route holds the whole team and a UUID cannot render "team
+// guerrilla").
+//
+// RegisteredSites is deliberately NOT len(Sites): it counts sites REGISTERED to
+// the team and inside this request's scope, which is larger than the set that
+// actually deployed in the window (a site that has never deployed is counted
+// here and absent from `sites`). RegisteredSitesPopulation is the route's own
+// sentence saying exactly that, so a reader printing the count can print what it
+// counts rather than inventing a label.
+type DeployCensusScope struct {
+	Team                      string   `json:"team"`
+	SiteIDs                   []string `json:"site_ids"`
+	RegisteredSites           int      `json:"registered_sites"`
+	RegisteredSitesPopulation string   `json:"registered_sites_population"`
+}
+
+// DeployCensus is GET /v1/deploy-ledger/census — the cross-site deploy
 // ledger folded into counts per failure class, counts per site, and the failure
-// rate WITH its denominator.
+// rate WITH its denominator, scoped to the caller's own team sites.
 //
 // Live and TerminalFailureRate are the dr-w8-s1 additions (the second D34
 // convention: failures over TERMINAL rows rather than over attempted rows). Both
@@ -2013,7 +2035,14 @@ type DeployCensus struct {
 	// control plane does not measure delivery yet" must not decode to "delivery
 	// took zero seconds".
 	Delivery *DeployDelivery `json:"delivery"`
-	Raw      []byte          `json:"-"`
+	// Scope is the dr-w18-s1 addition: the population these numbers were taken
+	// over, NAMED. A POINTER because the operator route (and any control plane
+	// predating the team route) sends no `scope` key at all, and an absent key
+	// decoding into a zero-valued struct would render as a census of team "" —
+	// an unnamed population dressed as a named one. Nil MUST render as "the
+	// population was NOT NAMED", never as an empty team.
+	Scope *DeployCensusScope `json:"scope"`
+	Raw   []byte             `json:"-"`
 }
 
 // DeployDeliveryWindow is the delivery census's PINNED window WITH its width —
@@ -2109,15 +2138,22 @@ type DeployDelivery struct {
 // DeployCensusError is a census the control plane REFUSED to answer, with the
 // status and the refusal's own evidence kept intact — because the whole point of
 // this reader is that a human can tell "the fleet is healthy" from "I could not
-// look". Three shapes reach it:
+// look". Four shapes reach it from the TEAM route this client reads:
 //
-//   - 401 {"error":"unauthorized"} — no session token, or a dead one.
-//   - 403 {"error":"forbidden","scope":"platform","required":"platform_operator"} —
-//     authenticated, not on the operator allowlist. It names the AUTHORITY but
-//     structurally CANNOT say whether the allowlist is EMPTY: the gate's single
-//     cond arm serves both "nobody is configured" and "you are not on the list".
+//   - 401 {"error":"unauthorized"} — no credential, or a dead one.
+//   - 403 {"error":"forbidden","scope":"token","required":"read"} — authenticated,
+//     but the credential does not carry ability "read" (require_ability/2). It
+//     names the AUTHORITY that was missing, and that authority is a TOKEN
+//     ability, not membership of an operator allowlist — a reader that pins the
+//     old operator-route sentence here would send a team owner to edit
+//     PLATFORM_ADMIN_EMAILS, a remedy that cannot change this refusal.
+//   - 422 {"error":"no_team"} — the credential resolves to no team, so there is
+//     no population to take a census over. This is a DIFFERENT refusal from the
+//     window one below and shares only its status: no window can fix it.
 //   - 422 {"error":"invalid_window","detail":"…"} — the window did not parse, or
 //     was not pinned at all.
+//
+// The two 422s are why a caller must branch on Code and not on HTTPStatus alone.
 //
 // A caller must branch on this error BEFORE it reads any count, since the refusal
 // body and the census body share zero keys and a nil-coalescing read of the
@@ -2142,20 +2178,29 @@ func (e *DeployCensusError) Error() string {
 	return msg
 }
 
-// FleetDeployCensus reads the cross-site deploy census over a PINNED window via
-// GET /v1/operator/deploy-ledger/census?from=&to= (Bearer — the same user
-// session token the platform-operator gate resolves).
+// FleetDeployCensus reads the deploy census over a PINNED window via
+// GET /v1/deploy-ledger/census?from=&to= (Bearer — a user session or a PAT
+// carrying ability "read"), scoped to the caller's own team sites.
 //
-// from/to are REQUIRED by the route and are sent as RFC3339 UTC instants; the
-// caller owns the window and there is no client-side default here either, so
-// nothing can quote a rate over a window nobody chose. Every non-2xx becomes a
-// *DeployCensusError carrying the status and the refusal's evidence — never a
-// zero-valued census.
+// IT READS THE TEAM ROUTE, NOT THE OPERATOR ONE (dr-w18-s1). The operator route
+// /v1/operator/deploy-ledger/census is gated by require_platform_operator and
+// PLATFORM_ADMIN_EMAILS is unset in production, so that route answers 403
+// {"scope":"platform","required":"platform_operator"} to every real account —
+// an empty-by-construction population. Sixteen waves computed a correct number
+// no human could read. The team route answers 200 to the same credential and
+// carries a `scope` node naming the population, which is why DeployCensus.Scope
+// exists.
+//
+// from/to are REQUIRED by the route (it 422s invalid_window without them) and
+// are sent as RFC3339 UTC instants; the caller owns the window and there is no
+// client-side default here either, so nothing can quote a rate over a window
+// nobody chose. Every non-2xx becomes a *DeployCensusError carrying the status
+// and the refusal's evidence — never a zero-valued census.
 func (c *Client) FleetDeployCensus(ctx context.Context, from, to time.Time) (DeployCensus, error) {
 	q := url.Values{}
 	q.Set("from", from.UTC().Format(time.RFC3339))
 	q.Set("to", to.UTC().Format(time.RFC3339))
-	status, body, err := c.do(ctx, "GET", "/v1/operator/deploy-ledger/census?"+q.Encode(), true, nil)
+	status, body, err := c.do(ctx, "GET", "/v1/deploy-ledger/census?"+q.Encode(), true, nil)
 	if err != nil {
 		return DeployCensus{}, err
 	}

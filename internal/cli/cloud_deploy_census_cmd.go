@@ -1,7 +1,8 @@
 package cli
 
 // cloud_deploy_census_cmd.go is `bp cloud deployments` — the FIRST human reader
-// of the fleet deploy census (GET /v1/operator/deploy-ledger/census). Seven
+// of the deploy census (GET /v1/deploy-ledger/census, the TEAM-scoped read; the
+// operator route it used to call is empty by construction in production). Seven
 // waves of the deploy-reliability epic built a ledger that computes a failure
 // rate WITH its denominator, and until this file no surface anywhere — CLI, SDK,
 // console — read a number out of it. Five surfaces show deployments today (bp
@@ -21,10 +22,13 @@ package cli
 // ZERO if a reader coalesces nils instead of branching:
 //
 //   - 401 unauthorized — no session, or a dead one.
-//   - 403 forbidden — authenticated, not a platform operator. It names the
-//     authority (scope=platform, required=platform_operator) and structurally
-//     CANNOT say whether the operator allowlist is empty, so this reader does not
-//     claim to know which it was; it says both are possible.
+//   - 403 forbidden — authenticated, but the credential does not carry ability
+//     "read" on this team. It names whatever authority the body reports, and
+//     does NOT tell the reader to edit PLATFORM_ADMIN_EMAILS: on the team route
+//     the operator allowlist has nothing to do with the refusal.
+//   - 422 no_team — the credential belongs to no team, so there is no
+//     population to take a census over. Widening the window cannot fix it, so
+//     this is a DIFFERENT sentence from the window refusal below.
 //   - 422 invalid_window — the window did not parse, or was not pinned.
 //   - the IN-BAND refusal inside a 200: failure_rate.refused, because the sample
 //     is below min_sample. The counts are real; the PERCENTAGE is refused, and
@@ -68,8 +72,8 @@ var deployCensusNow = func() time.Time { return time.Now().UTC() }
 
 // runCloudDeployments is `bp cloud deployments [--from X --to Y | --days N]
 // [--sites N]`: read the fleet deploy census over a pinned window and render the
-// rate WITH its denominator — or the refusal, named. Requires `bp login` AND a
-// platform-operator account.
+// rate WITH its denominator — or the refusal, named. Requires `bp login` and a
+// credential carrying ability "read" on a team; no operator grant is involved.
 func runCloudDeployments(out *writer, g globals, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -274,10 +278,20 @@ func deployCensusMessage(from, to time.Time, ce *cloudclient.DeployCensusError) 
 			" — the control plane did not recognise this session (401 unauthorized). Nothing was read: this is NOT a fleet with zero failures. Run `bp login` and try again."
 	case ce.HTTPStatus == 403:
 		authority := deployCensusAuthority(ce)
-		return "could not read the fleet deploy census for " + window +
-			" — the control plane refused this account (403 forbidden" + authority + "). Nothing was read: this is NOT a fleet with zero failures. " +
-			"The gate cannot tell you which of the two it is: either PLATFORM_ADMIN_EMAILS names nobody, or it does not name you. " +
-			"Ask a platform operator to add your account's email to PLATFORM_ADMIN_EMAILS on the SERVING control-plane container and redeploy."
+		return "could not read the deploy census for " + window +
+			" — the control plane refused this credential (403 forbidden" + authority + "). Nothing was read: this is NOT a fleet with zero failures. " +
+			"This read needs a token carrying ability \"read\" on your team; an operator allowlist is not involved. " +
+			"Run `bp login` again, or ask a team owner for a token with read access."
+	// THE 422s ARE TWO DIFFERENT REFUSALS AND MUST NOT SHARE A SENTENCE. This
+	// arm discriminates on the control plane's error CODE, never on the status
+	// family: `no_team` says the credential has no population at all, and
+	// telling that caller to widen the window sends them round a loop that
+	// cannot terminate.
+	case ce.HTTPStatus == 422 && ce.Code == "no_team":
+		return "could not read the deploy census for " + window +
+			" — this credential belongs to no team (422 no_team), so there is no population to take a census over. " +
+			"Nothing was read: this is NOT a fleet with zero failures, and no window can fix it. " +
+			"Join or create a team, then run `bp login` again."
 	case ce.HTTPStatus == 422:
 		detail := ce.Detail
 		if detail == "" {
@@ -311,12 +325,40 @@ func deployCensusAuthority(ce *cloudclient.DeployCensusError) string {
 	return " — " + strings.Join(parts, ", ")
 }
 
+// deployCensusScopeLine names the POPULATION the census was taken over, on
+// every human render, directly under the window.
+//
+// A window without a population is half a claim: "37.5% failed over seven days"
+// reads identically whether it covers the whole fleet or one team's thirteen
+// sites, and those are different sentences. The team route sends a `scope` node
+// for exactly this reason.
+//
+// A NIL SCOPE SAYS SO OUT LOUD. An older control plane (and the operator route)
+// sends no scope key at all, and DeployCensus.Scope is a pointer so that case
+// arrives as nil rather than as team "". This prints "population NOT NAMED" —
+// never a silent omission (a reader cannot notice a line that is not there) and
+// never an empty team slug dressed as an answer.
+//
+// THE COUNT IS LABELLED. registered_sites counts sites REGISTERED to the team
+// and in scope, which deliberately EXCEEDS len(sites) — a site that has never
+// deployed is registered and absent from the sites table below. Printing a bare
+// "13" beside twelve site rows is the first thing an operator would have to
+// explain away, so the label travels with the number.
+func deployCensusScopeLine(scope *cloudclient.DeployCensusScope) string {
+	if scope == nil || strings.TrimSpace(scope.Team) == "" {
+		return "  scope: population NOT NAMED — this control plane sent no scope node, so which sites these numbers cover is unknown. The numbers are real; the population is not stated."
+	}
+	return fmt.Sprintf("  scope: team %s · %d sites registered to this team and in scope (not the number that deployed in the window — a site that never deployed is counted here and absent below)",
+		sanitizeCell(scope.Team), scope.RegisteredSites)
+}
+
 // renderDeployCensus is the human view: the window, the headline rate line (rate
 // + volume + denominator, on ONE line, always), then the failure classes, the
 // deferrals and the worst sites.
 func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.DeployCensus, siteLimit int) {
 	out.outf("fleet deploy census · %s", deployCensusWindowPhrase(from, to))
 	out.outf("  the window is pinned by this command, not defaulted by the server — every number below is about THIS population.")
+	out.outf("%s", deployCensusScopeLine(census.Scope))
 	out.outf("")
 	out.outf("%s", deployCensusHeadline(census))
 	out.outf("  basis: %s", deployCensusBasis(census.FailureRate.Basis))
@@ -755,18 +797,19 @@ on purpose: daily deploy volume moved by a factor of eight in six days, so an
 unpinned window compares two different populations and reports a volume collapse
 as a repair.
 
+THE POPULATION IS ALWAYS NAMED. Under the window every render prints a scope
+line — "team <slug> · N sites registered to this team and in scope". A control
+plane that sends no scope node prints "population NOT NAMED" instead: a rate
+whose population is unstated says so, rather than looking fleet-wide.
+
 IT REFUSES OUT LOUD. A census this command could not read NEVER renders as a
-fleet with zero failures — a 401, a 403 (you are not a platform operator, or
-nobody is), a 422 (bad window) and the control plane's own below-min_sample
-refusal each print as a named refusal instead of a number.
+fleet with zero failures — a 401, a 403 (your token lacks ability "read"), a 422
+no_team (this credential belongs to no team), a 422 invalid_window (bad window)
+and the control plane's own below-min_sample refusal each print as a named
+refusal instead of a number.
 
-NEEDS 'bp login' AND a platform-operator account (PLATFORM_ADMIN_EMAILS on the
-control plane must name your account's email).
-
-  FLAGGED, NOT YET TRUE: read that paragraph as "this VERB needs one", not as
-  "only a platform operator can see these numbers". dr-w16-s6 ships a
-  TEAM-scoped census over the identical population; this verb still reads the
-  operator route and has not been repointed at it. Until it is, a 403 here means
-  this route refused you — not that the census is unavailable to you.`
+NEEDS 'bp login' and a credential carrying ability "read" on a team. It reads
+GET /v1/deploy-ledger/census — the team-scoped census — so no operator grant is
+involved and PLATFORM_ADMIN_EMAILS has no bearing on whether you can look.`
 	out.outf("%s", help)
 }

@@ -78,6 +78,32 @@ const censusS1Envelope = `{
   "min_sample": 200
 }`
 
+// censusTeamScopedEnvelope is what the TEAM route sends (dr-w16-s6): the same
+// census body PLUS a `scope` node naming the population. registered_sites (13)
+// deliberately exceeds the two rows in `sites` — a registered site that has
+// never deployed is counted there and absent here.
+const censusTeamScopedEnvelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2216,
+  "failed": 832,
+  "failure_rate": {"sample": 2216, "pct": 37.55, "numerator": 832, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [
+    {"site_id": "site-alpha", "volume": 1200, "failed": 500, "deferred": 400,
+     "failure_rate": {"sample": 1200, "pct": 41.67, "numerator": 500, "min_sample": 200, "refused": false, "reason": null},
+     "top_class": "BOX_BUSY_409"}
+  ],
+  "min_sample": 200,
+  "scope": {
+    "team": "guerrilla",
+    "site_ids": ["site-alpha", "site-beta"],
+    "registered_sites": 13,
+    "registered_sites_population": "sites registered to this team and inside this request's scope"
+  }
+}`
+
 // censusThinEnvelope is a 200 whose RATE is refused: a real window, real counts,
 // and no percentage — the in-band refusal (the fourth state).
 const censusThinEnvelope = `{
@@ -164,8 +190,15 @@ func TestCloudDeploymentsTodayPayload(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
-	if *method != "GET" || *path != "/v1/operator/deploy-ledger/census" {
-		t.Fatalf("hit %s %s, want GET /v1/operator/deploy-ledger/census", *method, *path)
+	// THE STRUCTURAL PIN (D281 shape), WIDENED — never loosened. It was an exact
+	// equality against /v1/operator/deploy-ledger/census, the route that is
+	// empty by construction in production; dr-w18-s1 re-points the reader at the
+	// TEAM route and this pin moves WITH it, still as an exact equality. It is
+	// deliberately not a substring, an OR, or a regex: this assertion is the only
+	// thing in the tree that can catch a future silent re-point, and any of those
+	// three would let the operator path back in unnoticed.
+	if *method != "GET" || *path != "/v1/deploy-ledger/census" {
+		t.Fatalf("hit %s %s, want GET /v1/deploy-ledger/census", *method, *path)
 	}
 	if *auth != "Bearer sess-abc" {
 		t.Fatalf("auth = %q, want the cloud session bearer", *auth)
@@ -233,7 +266,72 @@ func TestCloudDeploymentsInBandRefusal(t *testing.T) {
 	}
 }
 
-// TestCloudDeploymentsRefusals walks the three HTTP refusal states. Each must
+// TestCloudDeploymentsScopeIsNamed: the TABLE render names the population the
+// numbers were taken over, and says so when the control plane did not.
+//
+// IT ASSERTS THE TABLE ARM ON PURPOSE. emitDeployCensusRaw prints census.Raw
+// verbatim, so `-o json` already carries the whole scope node whether or not any
+// Go field models it — a json assertion here would pass on a URL-only edit and
+// prove nothing. And the writer defaults to json when piped, so `-o table` is
+// passed explicitly rather than assumed.
+func TestCloudDeploymentsScopeIsNamed(t *testing.T) {
+	t.Run("scope node present names the team and labels the count", func(t *testing.T) {
+		newCensusServer(t, 200, censusTeamScopedEnvelope)
+		pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+		stdout, stderr, code := runDeployments(t, "table")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+		}
+		scope := censusLineContaining(t, stdout, "scope:")
+		for _, want := range []string{"team guerrilla", "13 sites registered", "not the number that deployed in the window"} {
+			if !strings.Contains(scope, want) {
+				t.Fatalf("scope line %q missing %q — the count must travel with what it counts", scope, want)
+			}
+		}
+	})
+
+	t.Run("no scope node renders NOT NAMED, never an empty team", func(t *testing.T) {
+		// censusTodayEnvelope carries no `scope` key at all — the operator route
+		// and any control plane predating dr-w16-s6. The pointer field decodes
+		// that to nil, and nil must SAY the population is unnamed.
+		newCensusServer(t, 200, censusTodayEnvelope)
+		pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+		stdout, stderr, code := runDeployments(t, "table")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+		}
+		scope := censusLineContaining(t, stdout, "scope:")
+		if !strings.Contains(scope, "population NOT NAMED") {
+			t.Fatalf("scope line %q must say the population is NOT NAMED", scope)
+		}
+		if strings.Contains(scope, "team ") {
+			t.Fatalf("an absent scope node must never render a team at all, got %q", scope)
+		}
+	})
+}
+
+// TestCloudDeploymentsScopeDecodesAsPointer proves the FIELD, not the render:
+// an absent `scope` key decodes to nil rather than to a zero-valued struct whose
+// team is "".
+func TestCloudDeploymentsScopeDecodesAsPointer(t *testing.T) {
+	var with, without cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(censusTeamScopedEnvelope), &with); err != nil {
+		t.Fatalf("decode scoped envelope: %v", err)
+	}
+	if err := json.Unmarshal([]byte(censusTodayEnvelope), &without); err != nil {
+		t.Fatalf("decode unscoped envelope: %v", err)
+	}
+	if with.Scope == nil || with.Scope.Team != "guerrilla" || with.Scope.RegisteredSites != 13 {
+		t.Fatalf("scope node did not decode: %#v", with.Scope)
+	}
+	if without.Scope != nil {
+		t.Fatalf("an absent scope key must decode to nil, got %#v", without.Scope)
+	}
+}
+
+// TestCloudDeploymentsRefusals walks the HTTP refusal states. Each must
 // exit on the ladder, name what refused, and print NO count — a refusal that
 // renders as "0 failed" is the exact defect this verb exists to prevent.
 func TestCloudDeploymentsRefusals(t *testing.T) {
@@ -243,6 +341,10 @@ func TestCloudDeploymentsRefusals(t *testing.T) {
 		body     string
 		wantExit int
 		wantIn   []string
+		// wantOut is the FORBIDDEN vocabulary: a remedy that cannot work for
+		// this refusal. A refusal sentence is only honest if it also stops
+		// saying the wrong thing.
+		wantOut []string
 	}{
 		{
 			name:     "401 unauthorized",
@@ -260,9 +362,25 @@ func TestCloudDeploymentsRefusals(t *testing.T) {
 				"403 forbidden",
 				"scope=platform",
 				"required=platform_operator",
-				"PLATFORM_ADMIN_EMAILS",
-				"cannot tell you which of the two it is",
+				`ability "read"`,
 			},
+			wantOut: []string{
+				// On the TEAM route the operator allowlist has nothing to do
+				// with the refusal, so sending a team owner to edit it is a
+				// remedy that cannot work.
+				"PLATFORM_ADMIN_EMAILS",
+			},
+		},
+		{
+			// The two 422s are DIFFERENT refusals and must not share a sentence:
+			// a teamless caller told to widen the window is sent round a loop
+			// that cannot terminate.
+			name:     "422 no_team",
+			status:   422,
+			body:     `{"error":"no_team"}`,
+			wantExit: exitValidation,
+			wantIn:   []string{"422 no_team", "belongs to no team", "no window can fix it"},
+			wantOut:  []string{"--from/--to", "widen it with --days"},
 		},
 		{
 			name:     "422 invalid_window",
@@ -285,6 +403,11 @@ func TestCloudDeploymentsRefusals(t *testing.T) {
 			for _, want := range tc.wantIn {
 				if !strings.Contains(all, want) {
 					t.Fatalf("refusal missing %q:\n%s", want, all)
+				}
+			}
+			for _, unwanted := range tc.wantOut {
+				if strings.Contains(all, unwanted) {
+					t.Fatalf("refusal offers a remedy that cannot work (%q):\n%s", unwanted, all)
 				}
 			}
 			if pctRe.MatchString(all) {
