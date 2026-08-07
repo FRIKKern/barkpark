@@ -219,15 +219,24 @@ defmodule Barkpark.Webhooks.Dispatcher do
   # Write one fan-out record: telemetry (for a scraper), a key=value log line
   # (for journald), and an optional operator/test sink. NEVER raises — a
   # counter that can fail the publish it counts is worse than no counter.
+  # NOTE the OUTER `safely/1`: `record/3` runs INLINE in the publishing process on
+  # the `:selected` arm, so every statement here — including building `metadata`
+  # itself — has to be inside the guard, not merely the three sinks. Reviewed
+  # 2026-08-07 (W12 review): with the body unguarded, a `record/3` that raises
+  # before the first `safely` took the whole dispatch down with it (proved by
+  # mutation: 27 of 46 dispatcher fixtures failed). The guard is now structural
+  # rather than argued from "ctx is always a literal map at the call sites".
   defp record(phase, measurements, ctx) do
-    metadata = Map.put(ctx, :phase, phase)
-
     safely(fn ->
-      :telemetry.execute([:barkpark, :webhooks, :fan_out, phase], measurements, metadata)
-    end)
+      metadata = Map.put(ctx, :phase, phase)
 
-    safely(fn -> log_fan_out(phase, measurements, metadata) end)
-    safely(fn -> call_sink(%{phase: phase, measurements: measurements, metadata: metadata}) end)
+      safely(fn ->
+        :telemetry.execute([:barkpark, :webhooks, :fan_out, phase], measurements, metadata)
+      end)
+
+      safely(fn -> log_fan_out(phase, measurements, metadata) end)
+      safely(fn -> call_sink(%{phase: phase, measurements: measurements, metadata: metadata}) end)
+    end)
 
     :ok
   end
