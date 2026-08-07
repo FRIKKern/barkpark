@@ -1527,6 +1527,59 @@ else
   bad "the one-sided version did not produce the false alarms (exit $OS_RC): $(grep -E '^#' <<<"$OS_OUT" | head -4)"
 fi
 
+# ═══ AND A CANDIDATE THAT PROPOSES NOTHING NEW EXAMINES NOTHING (wave 39) ════
+#
+# THE SIBLING OF THE ALL-SKIP CASE ABOVE, and until this block nothing in this
+# file pinned it. Measured on 2026-08-07 against merge base 9e39c60c: running
+# the sweep with a candidate equal to `main`'s COMMITTED spec exits 0 after TWO
+# lines, having made zero `gh` calls — `grep -c 'PARTIAL COVERAGE\|evaluated'`
+# on that output was 0, because the identity short-circuit fires BEFORE the
+# counters exist. That is the run a human produces by executing the flip
+# packet's steps out of order: sweeping AFTER the spec PR merged, when candidate
+# and baseline are the same file. The exit code cannot tell it apart from a full
+# sweep that found no casualty.
+#
+# THE FIXTURE IS THE BASELINE ITSELF, passed as the candidate — the identity
+# case in its purest form, and it needs no PR feed precisely because the script
+# never reaches one.
+ID_OUT="$(bash "$SWEEP" --spec "$TMP/sweep-ref.json" --ref-file "$TMP/sweep-ref.json" \
+           --fixture-dir "$SWF" --prs "$TMP/sweep-prs-safe.json" 2>&1)" && ID_RC=0 || ID_RC=$?
+if [ "$ID_RC" -eq 0 ] && grep -q "^NO COVERAGE: this run listed no pull request" <<<"$ID_OUT"; then
+  ok "a candidate that proposes no new context still exits 0 — a bare sweep on a spec-untouching branch stays passable — but now NAMES what it did not examine"
+else
+  bad "the identity candidate printed no NO COVERAGE line (exit $ID_RC): $(tail -2 <<<"$ID_OUT")"
+fi
+# THE COPY FENCE (D386/D438): the line STATES the absence and stops. Advice
+# bolted onto a diagnosis nobody asked for is what gets skimmed past, so the
+# assertion is that no imperative follows.
+ID_LINE="$(grep '^NO COVERAGE:' <<<"$ID_OUT")"
+if ! grep -Eqi '(re-?run|re-?order|pass +--|sweep the|you should|make sure|instead,)' <<<"$ID_LINE"; then
+  ok "…and that line carries no instruction about what to do next — it reports the absence, it does not coach"
+else
+  bad "the NO COVERAGE line appended advice (D386/D438): $ID_LINE"
+fi
+# AND THE FLAG THE FLIP-AUTHORIZING CALLER PASSES TURNS IT INTO A REFUSAL,
+# through the same fail() the UNKNOWN and all-skip cases already use.
+IDF_OUT="$(bash "$SWEEP" --spec "$TMP/sweep-ref.json" --ref-file "$TMP/sweep-ref.json" \
+            --require-new-context --fixture-dir "$SWF" --prs "$TMP/sweep-prs-safe.json" 2>&1)" && IDF_RC=0 || IDF_RC=$?
+if [ "$IDF_RC" -eq 2 ] && grep -q "Under --require-new-context that is exit 2" <<<"$IDF_OUT"; then
+  ok "…and under --require-new-context the same candidate REFUSES (exit 2) — sweeping a spec that already merged is not evidence for the flip it was meant to authorize"
+else
+  bad "--require-new-context did not refuse the identity candidate (exit $IDF_RC): $(tail -2 <<<"$IDF_OUT")"
+fi
+# MUTATION: remove the identity refusal and the flagged run goes green on the
+# same fixture — the assertion above is shown able to lose, not merely asserted.
+NOID="$TMP/sweep-noidentity.sh"
+sed 's/^    if \[ "\$REQUIRE_NEW_CONTEXT" -eq 1 \]; then$/    if false; then # IDENTITY REFUSAL REMOVED/' "$SWEEP" > "$NOID"
+NI_OUT="$(RC_REPO_ROOT="$REPO_ROOT" bash "$NOID" --spec "$TMP/sweep-ref.json" \
+           --ref-file "$TMP/sweep-ref.json" --require-new-context \
+           --fixture-dir "$SWF" --prs "$TMP/sweep-prs-safe.json" 2>&1)" && NI_RC=0 || NI_RC=$?
+if grep -q 'IDENTITY REFUSAL REMOVED' "$NOID" && [ "$NI_RC" -eq 0 ]; then
+  ok "…and a copy with that refusal removed exits 0 on the identical fixture (fail-before proven, not asserted)"
+else
+  bad "the identity mutation did not reproduce the vacuous green (applied=$(grep -c 'IDENTITY REFUSAL REMOVED' "$NOID"), exit $NI_RC): $(tail -2 <<<"$NI_OUT")"
+fi
+
 section "17. S7 holds \`Security gate\` OUT once it goes GREEN — the stage that held it is gone, the hold is not"
 
 # WHY THIS SECTION EXISTS, and it is not hypothetical (wave 11 REVIEW).

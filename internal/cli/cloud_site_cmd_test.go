@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1216,11 +1217,15 @@ func TestRunCloudSiteStatusFlagsFailedNewestDeployment(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0\n%s", code, stderr)
 	}
-	// The bound really went on the wire — one row is all this read needs.
+	// The bound really went on the wire, and it is still ONE call. W11 raised the
+	// page from 1 to siteStatusLedgerPage (20) inside that same call so the
+	// censored "still waiting" bound can be taken from the OLDEST pending row
+	// instead of the newest (= shortest) one; row [0] is still the newest, so this
+	// test's subject is unchanged.
 	if cp.listHits != 1 {
 		t.Fatalf("status must read the deployments list exactly once, got %d hits", cp.listHits)
 	}
-	if !strings.Contains(cp.listQuery, "limit=1") {
+	if !strings.Contains(cp.listQuery, fmt.Sprintf("limit=%d", siteStatusLedgerPage)) {
 		t.Fatalf("status must bound the newest-deployment read, query=%q", cp.listQuery)
 	}
 	// The header no longer says a bare "live" and nothing else.
@@ -2123,5 +2128,164 @@ func TestRunCloudHelpListsSiteVerb(t *testing.T) {
 	}
 	if !strings.Contains(out, "--prebuilt") {
 		t.Fatalf("bp cloud -h must point at the prebuilt lane:\n%s", out)
+	}
+}
+
+// TestRunCloudSiteStatusShowsDeferralChainDepth is the CONSUMER half of dr-w7 S1
+// (deploy-reliability charter D99, PR #9905). Before it, `git grep -n 'deferred'
+// internal/cli/cloud_site_cmd.go` returned NOTHING: a settled `deferred` row —
+// the box refusing a build round while a rebuild is already re-queued — had no
+// dedicated render at all, so an operator saw a bare status word and could not
+// tell a first blip from a chain eight rounds deep. On the production ledger 63
+// capacity-deferred rows across five sites all carried the SAME sentence.
+func TestRunCloudSiteStatusShowsDeferralChainDepth(t *testing.T) {
+	const deferredReason = "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — deferred: refusal 8 of 12 in this site's current chain — a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","url":"https://acme.barkpark.cloud/sites/blog/",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"deferred","stage":"PLAN",` +
+		`"failure_reason":` + mustJSONString(deferredReason) + `,"failure_class":"BOX_AT_CAPACITY_DEFERRED","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// THE ROW THAT DID NOT EXIST: the chain gets its own legible element, with
+	// the depth, the CAUSE's own bound, and what is actually being counted — a
+	// bare "8 of 12" would read as a countdown to a drop a merely-slow box may
+	// never reach (one site deferred 75 times in 12h and never came within 4).
+	for _, want := range []string{
+		"deferral",
+		"refusal 8 of 12 consecutive",
+		"SAME cause",
+		"any successful deploy resets it to 0",
+		"zero-progress guard, not a countdown",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("status must render the deferral chain %q:\n%s", want, stdout)
+		}
+	}
+	// A deferral is NOT a failure, and the header must not borrow the vocabulary:
+	// the rebuild is re-queued, not lost.
+	if strings.Contains(stdout, "NEWEST deploy FAILED") {
+		t.Fatalf("a deferred newest row must not be reported as FAILED:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "DEFERRED") || !strings.Contains(stdout, "re-queued") {
+		t.Fatalf("status must say the newest deploy was deferred and re-queued:\n%s", stdout)
+	}
+	// The live pointer is still named — that older build IS what visitors see.
+	if !strings.Contains(stdout, "dep-1") || !strings.Contains(stdout, "dep-9") {
+		t.Fatalf("status must name both the live and the deferred row:\n%s", stdout)
+	}
+
+	// …and the machine envelope carries the pair as NUMBERS, so a script can
+	// threshold on depth instead of grepping a sentence.
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Latest struct {
+			Status string `json:"status"`
+			Depth  *int   `json:"deferral_depth"`
+			Bound  *int   `json:"deferral_bound"`
+		} `json:"latest_deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Latest.Status != "deferred" {
+		t.Fatalf("latest_deployment must stay the deferred row: %+v\n%s", env.Latest, jstdout)
+	}
+	if env.Latest.Depth == nil || *env.Latest.Depth != 8 {
+		t.Fatalf("latest_deployment.deferral_depth must be 8: %+v\n%s", env.Latest, jstdout)
+	}
+	if env.Latest.Bound == nil || *env.Latest.Bound != 12 {
+		t.Fatalf("latest_deployment.deferral_bound must be 12: %+v\n%s", env.Latest, jstdout)
+	}
+}
+
+// TestRunCloudSiteStatusDeferralPreD99 is the fail-honest arm: a control plane
+// that predates D99 writes a deferral sentence with NO depth in it, and the CLI
+// must say the chain depth is unavailable rather than print a zero — a "refusal
+// 0 of 0" would read as "no chain", which is the exact inversion of the truth.
+func TestRunCloudSiteStatusDeferralPreD99(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"deferred","stage":"PLAN",` +
+		`"failure_reason":"the instance refused the deploy (HTTP 409): box_at_capacity - deferred: a rebuild carrying this content has been re-queued",` +
+		`"failure_class":"BOX_AT_CAPACITY_DEFERRED","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "does not report how deep the refusal chain is") {
+		t.Fatalf("a pre-D99 deferral must say the depth is unavailable:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "refusal 0") {
+		t.Fatalf("an unparseable chain must never print a zero depth:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	if strings.Contains(jstdout, "deferral_depth") {
+		t.Fatalf("json must omit deferral_depth entirely when the CP did not say it:\n%s", jstdout)
+	}
+}
+
+// TestSiteDeferralChainNotOnFailedRows keeps the two vocabularies apart: the
+// numeric keys ride ONLY a deferred row. A failed row whose reason happens to
+// quote a chain (the terminal round does) is a drop, not a deferral, and giving
+// it deferral keys would let a dashboard count a lost publish as a re-queued one.
+func TestSiteDeferralChainNotOnFailedRows(t *testing.T) {
+	failed := cloudclient.SiteDeployment{
+		ID:            "dep-x",
+		Status:        "failed",
+		FailureReason: "…and it has now refused 12 rebuilds in a row for this site (refusal 12 of 12)",
+	}
+	m := siteDeploymentMap(failed)
+	if _, ok := m["deferral_depth"]; ok {
+		t.Fatalf("a failed row must not carry deferral_depth: %+v", m)
+	}
+	if siteDeployDeferred(failed.Status) {
+		t.Fatalf("siteDeployDeferred must not match a failed row")
+	}
+}
+
+// TestRunCloudSiteStatusFailedNewestBeatsDeferredLivePointer pins the ORDER of
+// the two half-truth arms the status header now carries. Both write `reason`,
+// and the deferral arm runs second — so before the dr-w7 review fix, a header
+// whose newest row FAILED while the live pointer was itself a deferred row said
+// "the NEWEST deploy FAILED" and then printed the OLDER deferral's sentence
+// underneath, describing a different row than the status line named. A drop is
+// the louder truth: it wins, and no deferral row is printed at all.
+func TestRunCloudSiteStatusFailedNewestBeatsDeferredLivePointer(t *testing.T) {
+	const deferredReason = "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued"
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"deferred","stage":"PLAN","failure_reason":` + mustJSONString(deferredReason) + `}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"failed","stage":"BUILD",` +
+		`"failure_reason":"the build exited 1: astro could not resolve @layouts/Base.astro","failure_class":"BUILD_EXIT_NONZERO","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "NEWEST deploy FAILED") {
+		t.Fatalf("a failed newest row must still be reported as failed:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "astro could not resolve") {
+		t.Fatalf("the reason row must describe the FAILED newest row, not the deferred pointer:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "refusal 3 of 12") || strings.Contains(stdout, "deferral ") {
+		t.Fatalf("no deferral section may be printed when the newest row is a drop:\n%s", stdout)
 	}
 }

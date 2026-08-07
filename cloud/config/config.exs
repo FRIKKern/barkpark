@@ -225,7 +225,37 @@ config :barkpark_cloud, Oban,
     # queue via `use Oban.Worker, queue: :site_deploy`.
     site_deploy: 1
   ],
+  # dr-w8-s7: how long the BEAM waits for :executing jobs to finish before it
+  # tears the queues down. Oban's UNSET default is 15_000ms — and the all-time
+  # MAX completed AutoDeployWorker duration measured on prod (13,287 jobs) is
+  # 15.017s, i.e. the observed distribution is CLIPPED exactly at that boundary:
+  # the healthy tail beyond it is unobservable from completed rows alone, because
+  # anything longer was killed, not completed. 60s gives the real tail room and
+  # PREVENTS most orphans in the first place — a blue/green container replacement
+  # that used to strand an :executing row now usually lets it finish.
+  shutdown_grace_period: :timer.seconds(60),
   plugins: [
+    # dr-w8-s7: rescue jobs orphaned by a dead node. Without this, an :executing
+    # row whose BEAM died is stranded FOREVER — Pruner only reaps
+    # completed/cancelled/discarded, so it never touches :executing — and the
+    # ledger goes on claiming the job has been running for ten days. Eight rows
+    # sat that way (five AutoDeployWorker, oldest 2026-07-28), each attempted_by
+    # a different, now-dead node: blue/green container replacements.
+    #
+    # 5 minutes is deliberately FAR above the healthy runtime, not near it:
+    # AutoDeployWorker.perform/1 only enqueues + SPAWNS the supervised driver and
+    # returns (the 2-4 minute build runs outside the job), measured p50 0.329s /
+    # p99 5.771s / max 15.017s over 13,287 completed jobs, ZERO over 30s. It is
+    # also comfortably above the 60s AUTODEPLOY_DEBOUNCE_S window. Never set this
+    # below 60s: see the clipping note on shutdown_grace_period above — the max
+    # is an artifact of the old grace boundary, so the true tail is unknown.
+    #
+    # Rescue vs discard is Engine.rescue_jobs/3's split, pinned by a test in
+    # test/barkpark_cloud/sites/auto_deploy_worker_test.exs: attempt <
+    # max_attempts → back to "available" (re-runs), attempt >= max_attempts →
+    # "discarded" (never re-runs). Leader-gated (Peer.leader?/1), so only one
+    # node rescues during a blue/green overlap.
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(5)},
     # Reap finished/discarded job rows after 7 days so oban_jobs never grows
     # unbounded (same retention api/ uses — control-plane volume is far lower, so
     # 7 days is harmless and keeps a useful audit window).

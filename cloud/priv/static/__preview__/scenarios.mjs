@@ -725,13 +725,20 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
 // onto the stage line at :1062) is this one, verbatim. It reaches the rail as
 // `BPSTAGE name=BUILD status=failed detail="…"`.
 //
-// It classifies: `unauthorized` → "The hosting provider rejected our
-// credentials. We're on it — try again shortly." — which is what the settled
-// row has always shown, and what the rail showed NOTHING of before this slice.
+// It classifies: `unauthorized` → "A credential was rejected. This capture
+// doesn't say whose credential it was — the raw error line names it." — which
+// is what the settled row shows, and what the rail showed NOTHING of before
+// this slice.
+//
+// The copy is deliberately vague about WHOSE credential (wave 40 S6): the
+// credential this very line reports is the USER'S OWN site read token, and the
+// sentence that used to sit here ("The hosting provider rejected our
+// credentials. We're on it — try again shortly.") named a party, an owner and
+// a remedy that `humanize/1` — arity 1, a substring test — cannot see.
 //
 // RE-DERIVE THE WHOLE STRING:
 //   grep -n 'FATAL: 401 Unauthorized' deploy/site-deploy.sh
-//   grep -n "String.contains?(down, \"unauthorized\")" cloud/lib/barkpark_cloud/failure_copy.ex
+//   grep -n '@credential_rejected' cloud/lib/barkpark_cloud/failure_copy.ex
 // `sites_deploy_stage_caption_test.exs` reads BOTH ends and reds when either
 // moves — that test, not this comment, is what keeps the fixture honest.
 //
@@ -2167,6 +2174,28 @@ export const SCENARIOS = {
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      capabilities: lifecycleCapabilities,
+      domainStatus: dnsPendingDomain,
+    },
+  },
+  // ── Instance Overview as a plain MEMBER (cch-w38-s1) ──────────────────────
+  // Byte-identical to `panel-overview` except the /v1/me envelope carries
+  // role:"member" — the first plain-member scenario OUTSIDE GR33's settings
+  // scope, and the fixture that makes the instance band's authority answer
+  // observable at all. On origin/main this screen offered a member a live
+  // Decommission (browser-measured: {"port":"4187","meRole":"member",
+  // "decommission":{"disabled":false,"visible":true},"totalDisabled":0}); the
+  // expectation in smoke.mjs pins the disable-and-explain remedy (D428).
+  "panel-overview-member": {
+    label: "Instance Overview as a plain member — the lifecycle rail refuses up-front, with the server's own sentence",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],

@@ -99,7 +99,8 @@ defmodule BarkparkCloud.FailureCopyTest do
   end
 
   test "auth/token jargon → human credentials copy" do
-    auth = "The hosting provider rejected our credentials. We're on it — try again shortly."
+    auth =
+      "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
     assert FailureCopy.humanize("hcloud: unauthorized (401)") == auth
     assert FailureCopy.humanize("provider returned invalid token") == auth
@@ -295,7 +296,7 @@ defmodule BarkparkCloud.FailureCopyTest do
     canned = [
       "A capacity or quota limit was reached at the hosting provider",
       "A network step timed out",
-      "The hosting provider rejected our credentials",
+      "A credential was rejected.",
       "Securing the domain failed"
     ]
 
@@ -421,7 +422,7 @@ defmodule BarkparkCloud.FailureCopyTest do
   @capacity "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
   @dns_copy "Securing the domain failed on the provider side."
   @network "A network step timed out. Retry usually fixes this."
-  @auth "The hosting provider rejected our credentials. We're on it — try again shortly."
+  @auth "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
   # internal/cli/cloud/provider.go:543-552 — HetznerCandidates' resilience
   # ladder: base plus four fallbacks, deduped.
@@ -1164,5 +1165,118 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
     deployment_row(site, %{status: "queued", detail: nil})
 
     assert [%{"detail" => nil}] = rendered(site, token)
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## THE CREDENTIAL ARM NAMES NO PARTY (wave 40 S6)
+  ## ---------------------------------------------------------------------------
+  ##
+  ## The auth arm was the capacity arm's untreated twin: a bare two-token
+  ## substring test whose copy named a provider ("the hosting provider"), whose
+  ## credential it was ("our credentials"), and an agent working the problem
+  ## ("We're on it — try again shortly"). `humanize/1` is arity 1; none of the
+  ## three is derivable from the string.
+  ##
+  ## This corpus is the guard that can lose. Three captures MUST NOT reach a
+  ## sentence that names a party, asserts an agent or prescribes a retry; the
+  ## fourth is the must-CLEAR control — the NARROWED Azure RBAC clause, which
+  ## already discriminates and must keep classifying exactly as it did.
+
+  # deploy/site-deploy.sh:968 (READ-ONLY) — the build's own FATAL line. The
+  # rejected credential is the USER'S site read token; no hosting provider is
+  # anywhere in this story.
+  @probe_site_token "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid"
+
+  # A DISK-FULL build whose only crime is a framework error-page path. The word
+  # `unauthorized` is a PATH SEGMENT — the same self-satisfaction shape wave 25
+  # narrowed out of the DNS clause, and `typed_refusal?/1` does not cover it
+  # (no `E_*` code, no box-refusal prefix).
+  @probe_disk_full "BUILD failed (exit 1): copying dist/errors/unauthorized/index.html failed: no space left on device"
+
+  # A private npm registry rejecting the user's own npm token.
+  @probe_npm "npm ERR! 401 Unauthorized - GET https://registry.npmjs.org/@acme/private"
+
+  # THE MUST-CLEAR CONTROL: the narrowed Azure clause (failure_copy.ex, checked
+  # before the credential arm) owns this one and names the exact portal fix.
+  @probe_azure "az: AuthorizationFailed - invalid token for subscription"
+
+  # Added at review of cch-w40-s6. The path guard originally excluded ANY
+  # trailing dot, so a producer that simply ended a SENTENCE fell out of the
+  # class and passed through unclassified — a narrowing nobody asked for, in a
+  # shape at least as common as the path it was aimed at. These two must-FLAG
+  # beside the disk-full must-CLEAR: a dot before whitespace or end-of-capture is
+  # punctuation, a dot before a non-space is a filename.
+  @probe_sentence_dot "deploy step failed: the registry said Unauthorized."
+  @probe_mid_sentence_dot "release refused: unauthorized. re-run after rotating the token"
+
+  describe "humanize/1 — the credential arm names no party" do
+    test "the Azure RBAC control still classifies to its own copy" do
+      assert FailureCopy.humanize(@probe_azure) ==
+               "Your Azure service principal is missing a role. In the Azure Portal → Subscriptions → your subscription → Access control (IAM) → Add role assignment, grant it the Contributor role, then reconnect."
+    end
+
+    test "a rejected credential is reported WITHOUT naming a party, an agent or a retry" do
+      for probe <- [@probe_site_token, @probe_npm] do
+        out = FailureCopy.humanize(probe)
+
+        # It still classifies — the arm is narrowed, not deleted.
+        refute out == FailureCopy.scrub(probe), "#{probe} stopped classifying"
+        assert out =~ "credential", "#{probe} lost the credential class: #{out}"
+
+        # NO PARTY.
+        refute out =~ ~r/hosting provider/i, "names a party: #{out}"
+        refute out =~ ~r/\bHetzner\b/i, "names a party: #{out}"
+        refute out =~ ~r/\bAzure\b/i, "names a party: #{out}"
+
+        # NO AGENT — nobody in this seam is "on it".
+        refute out =~ ~r/we're on it/i, "asserts an agent: #{out}"
+        refute out =~ ~r/\bour credentials\b/i, "asserts whose credential: #{out}"
+
+        # NO REMEDY IT NEVER DETERMINED — a rejected token is not cleared by
+        # waiting, and this predicate cannot know whether a retry can work.
+        refute out =~ ~r/try again/i, "prescribes a retry: #{out}"
+        refute out =~ ~r/\bshortly\b/i, "prescribes a retry: #{out}"
+      end
+    end
+
+    test "a disk-full build is NOT a credential rejection because a PATH says unauthorized" do
+      out = FailureCopy.humanize(@probe_disk_full)
+
+      refute out =~ "credential", "a path slug satisfied the credential predicate: #{out}"
+
+      refute out =~ ~r/hosting provider/i,
+             "a path slug satisfied the credential predicate: #{out}"
+
+      # It lands where an unclassifiable capture belongs: through, verbatim.
+      assert out == FailureCopy.scrub(@probe_disk_full)
+      assert out =~ "no space left on device"
+    end
+
+    test "a sentence-final dot is punctuation, not a path segment" do
+      for probe <- [@probe_sentence_dot, @probe_mid_sentence_dot] do
+        out = FailureCopy.humanize(probe)
+
+        assert out =~ "credential",
+               "a producer that ended a sentence lost the credential class: #{out}"
+
+        refute out == FailureCopy.scrub(probe), "#{probe} stopped classifying"
+      end
+
+      # …and the guard it relaxes still holds: a dot followed by a NON-space is
+      # still a filename, and still not a credential rejection.
+      assert FailureCopy.humanize(
+               "BUILD failed: writing unauthorized.html failed: no space left on device"
+             ) ==
+               FailureCopy.scrub(
+                 "BUILD failed: writing unauthorized.html failed: no space left on device"
+               )
+    end
+
+    test "the classified copy is idempotent under a second pass" do
+      for probe <- [@probe_site_token, @probe_npm] do
+        once = FailureCopy.humanize(probe)
+        assert FailureCopy.humanize(once) == once, "second pass reclassified: #{once}"
+      end
+    end
   end
 end

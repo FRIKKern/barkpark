@@ -200,11 +200,27 @@
     // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
-    // GR36: billing writes are owner-only (require_primary_team_owner). A residual
-    // 403 on the portal/cancel POSTs is an authority answer, NOT a transient
-    // failure — this honest copy keeps it from reading as "try again in a moment"
-    // (absorbs gr-backlog-portal-retry-sentence).
-    forbidden: "Only the team owner can manage billing.",
+    // cch-w40-s1 (charter D447) — THE DEFAULT NOW STATES ONLY WHAT A BARE 403
+    // PROVES. This key used to read "Only the team owner can manage billing."
+    // (GR36, written when the billing writes were the only refusals that reached
+    // it). Three waves of fences moved the ground under it: the billing gate
+    // itself (Auth.require_primary_team_owner) sends `required: "owner"`, so
+    // forbiddenEvidenceCopy wins there and this string is now STRUCTURALLY
+    // UNREACHABLE from every billing screen — it could only ever render where it
+    // was FALSE. Measured on origin/main: friendly({error:"forbidden",
+    // reason:"outranked"}) — a plain team ADMIN clicking Remove on a peer admin —
+    // returned the billing sentence (D448).
+    //
+    // THE KEY IS REPLACED, NEVER REMOVED (D447(a)). Deleting it puts the raw slug
+    // "forbidden" in a toast and turns a permanent authority determination into
+    // "Please try again." inside a destroy-confirm modal — strictly worse.
+    //
+    // The sentence names NO role and offers NO remedy, because a bare 403 proves
+    // neither: it is the answer for an un-upgraded route, an edge proxy, or an
+    // arm the server deliberately left bare (router.ex:4394's cross-tenant env-var
+    // refusal, where the caller IS an admin — any role sentence there is a new
+    // lie). GR36's own property survives: it still never reads as transient.
+    forbidden: "You don't have permission to do that, and the refusal didn't say which role would allow it.",
     // cch-w30-s5 — the CRASH slugs the router's Plug.ErrorHandler now sends.
     // These MUST be registered here: friendly()'s precedence is curated ERRORS →
     // details → the caller's fallback, so an unregistered slug silently loses to
@@ -228,10 +244,33 @@
     owner: "You need the owner role on this team — only the team owner can grant it.",
     platform_operator: "That's limited to platform operators — no team role grants it."
   };
-  // The one non-role arm: gate_role() answers a user who holds NO team with
-  // reason "no_team" and no `required`, because no role grant could repair it.
+  // THE NON-ROLE ARMS — refusals whose cause is real but whose authority label
+  // would be a lie. Each is MAPPED through a written sentence, NEVER echoed: the
+  // payload carries a slug ("outranked"), and a human must never read one.
+  //
+  //   no_team                    — gate_role() (auth.ex:496) answers a user who
+  //                                holds NO team, with no `required`, because no
+  //                                role grant could repair it.
+  //   outranked                  — cch-w40-s1 (charter D419(c), D448). router.ex
+  //   cannot_grant_higher_role     :4958 (PATCH member role) and :4997 (DELETE
+  //                                member) send these with NO `required`, on
+  //                                purpose: the caller is ALREADY inside
+  //                                with_team_role(conn, "admin"), so any static
+  //                                authority label would be a fresh lie — the SAME
+  //                                admin refused on a peer admin succeeds on a
+  //                                plain member. The refusal is RANK-RELATIVE, so
+  //                                the copy states the relation and stops.
+  //
+  // NEITHER SENTENCE INVENTS A REMEDY. `outranked` is reachable by an OWNER acting
+  // on a peer owner (TeamMembership.outranks?/2 is strict `>`), where no higher
+  // role exists to appeal to; "ask an owner" would be the same confidently-wrong
+  // remedy this epic keeps deleting. Until these arms landed, both slugs fell
+  // through forbiddenEvidenceCopy to the curated `forbidden` entry — which is how
+  // an admin on the members screen came to be told about billing (D448).
   var FORBIDDEN_REASON_COPY = {
-    no_team: "Your account isn't on a team yet, so no role can allow this — ask a team owner to invite you."
+    no_team: "Your account isn't on a team yet, so no role can allow this — ask a team owner to invite you.",
+    outranked: "You can only act on members whose role is below your own, and this member's is not.",
+    cannot_grant_higher_role: "You can't grant a role above your own — that has to come from someone who already holds it on this team."
   };
   // A slug the server invented that we have no sentence for is still renderable
   // as evidence, but ONLY if it looks like a label (an unbounded echo of a
@@ -270,14 +309,20 @@
   // slug beat the fallback, so a per-call fallback never rendered.)
   //
   // cch-w35-s4 — ONE fenced exception, ahead of the curated map: a `forbidden`
-  // that CARRIES SERVER EVIDENCE renders that evidence. ERRORS.forbidden is copy
-  // for the five owner-gated billing writes (GR36), and it used to win at all 55
-  // friendly() sites — so a member refused by the admin-gated /v1/audit read
-  // "Only the team owner can manage billing." on the Activity screen: wrong
-  // subject, wrong remedy, and confident. The fence is narrow on purpose. A bare
-  // `{error: "forbidden"}` (which is all the billing gate's own refusal renders
-  // through, and all any un-upgraded route sends) still resolves to ERRORS.forbidden
-  // byte-identically, and every other slug never reaches this branch at all.
+  // that CARRIES SERVER EVIDENCE renders that evidence. ERRORS.forbidden used to
+  // be billing copy and won at all 55 friendly() sites — so a member refused by
+  // the admin-gated /v1/audit read "Only the team owner can manage billing." on
+  // the Activity screen: wrong subject, wrong remedy, and confident. The fence is
+  // narrow on purpose: every other slug never reaches this branch at all.
+  //
+  // cch-w40-s1 — THE STALE HALF OF THIS COMMENT, CORRECTED. It used to say a bare
+  // `{error: "forbidden"}` "is all the billing gate's own refusal renders through".
+  // That is FALSE on main and was false when it was written: Auth.require_primary_
+  // team_owner (auth.ex:459) sends `required: "owner", scope: "team"`, so all three
+  // billing routes (router.ex:5202/5243/5278) take the EVIDENCE arm and the curated
+  // entry is unreachable from every billing screen. A bare forbidden is what an
+  // un-upgraded route, an edge proxy, or a deliberately-bare arm sends — and it now
+  // resolves to a generic that claims no role and no remedy (D447).
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
@@ -285,7 +330,33 @@
       var proved = forbiddenEvidenceCopy(data);
       if (proved) return proved;
     }
-    if (key && ERRORS[key]) return ERRORS[key];
+    // cch-w37-s1 — THE EXACT ANSWER BEATS THE CURATED GENERIC.
+    //
+    // Two ERRORS keys carry no information: `invalid` ("That didn't work —
+    // check your input.") and `validation_failed` ("Please check the form and
+    // try again."). The router computes a per-field map and sends it as
+    // `details` on exactly those two slugs — and the curated map used to win
+    // first, so the client threw the answer away. 32 real details payloads
+    // built from the emitters' own changesets render as ONE distinct string
+    // today; there is no WORSE class, because nothing can lose information
+    // against a sentence that carries none.
+    //
+    // The fence is keyed on the SLUG SET by name, NEVER on an HTTP status —
+    // friendly() takes no status argument, and a status-422 rival was measured
+    // dead three times (charter D412). It fires ONLY when details is a
+    // non-empty object, so a bare `{error: "invalid"}` — which is what any
+    // un-upgraded emitter sends — still resolves to ERRORS.invalid
+    // byte-identically, and every other slug never reaches this branch.
+    // Neither key is deleted from ERRORS: the no-details path IS their path.
+    // An ARRAY details is excluded: Object.keys() on one yields "0", so the
+    // ladder below would render "0 has already been taken" — a worse sentence
+    // than the curated generic it unseated. Under main an array could only
+    // reach the ladder on an UNREGISTERED slug, so excluding it here keeps the
+    // fence from inventing that string on the two keys it newly routes.
+    var generic = (key === "invalid" || key === "validation_failed");
+    var hasDetails = !!data.details && typeof data.details === "object" &&
+      !Array.isArray(data.details) && Object.keys(data.details).length > 0;
+    if (key && ERRORS[key] && !(generic && hasDetails)) return ERRORS[key];
     if (data.details && typeof data.details === "object") {
       var first = Object.keys(data.details)[0];
       if (first) {
@@ -338,12 +409,15 @@
 
   // cch-w34-s1 — THE COPY FOR A READ THAT FAILED, and why it is not bare
   // friendly()/faultCopy(). The shared ERRORS map keys the GENERIC `forbidden`
-  // slug to "Only the team owner can manage billing." (grep -n 'forbidden:' in
-  // the ERRORS object above friendly()) — copy written for
-  // the billing writes, which is the only place that slug used to surface. But
-  // friendly()'s precedence is curated ERRORS → details → the caller's fallback,
-  // so a 403 on a READ (the sites list, the token list) renders a sentence about
-  // a screen the person is not even on, and no caller-supplied fallback can win.
+  // slug to a curated sentence (grep -n 'forbidden:' in the ERRORS object above
+  // friendly()) — when this fence was written that sentence was "Only the team
+  // owner can manage billing.", copy for the billing writes, the only place the
+  // slug used to surface. (cch-w40-s1/D447 has since inverted it to a generic
+  // that names no role; the STRUCTURE below is unchanged, and is still what lets
+  // a caller say WHICH list was refused.) friendly()'s precedence is curated
+  // ERRORS → details → the caller's fallback, so a 403 on a READ (the sites
+  // list, the token list) renders a sentence about a screen the person is not
+  // even on, and no caller-supplied fallback can win.
   // An authority answer on a read gets a READ-SCOPED sentence; every other
   // status keeps faultCopy's honest classification (5xx = our fault, status 0 =
   // the named transport class, 4xx = the caller's designed fallback).
@@ -1602,7 +1676,24 @@
   // The always-live decommission action: it drives the console's own deprovision
   // (the existing Remove/DELETE path) and predates the capability conduit, so it
   // stays wired even when the payload is missing or claims decommission=false.
-  function decommissionAction(bp) {
+  // cch-w38-s1 — and it is the band's ONE console-executed write (D428 names it
+  // first of the seven elevated verbs), so it is the affordance the authority
+  // answer decides. grant → live, exactly as before. refuse → the shipped
+  // disable-and-explain arm carrying the SERVER'S OWN sentence (the same bytes
+  // its 403 renders through friendly()), never hidden — this rail is a
+  // discoverable product capability, not a settings section, and GR33's
+  // never-a-disabled-ghost law is scoped to the latter (D428). unknown → the
+  // control is not offered and NOTHING is claimed: no reason, and the card
+  // states "Checking capabilities…" beside it.
+  function decommissionAction(bp, authority) {
+    if (authority === "refuse") {
+      return { verb: "decommission", label: "Decommission", mode: "disabled",
+        reason: FORBIDDEN_ROLE_COPY.admin, resourceName: lifecycleCliName(bp) };
+    }
+    if (authority === "unknown") {
+      return { verb: "decommission", label: "Decommission", mode: "disabled",
+        reason: "", resourceName: lifecycleCliName(bp) };
+    }
     return { verb: "decommission", label: "Decommission", mode: "live", resourceName: lifecycleCliName(bp) };
   }
 
@@ -1615,15 +1706,22 @@
   // A wired provider yields one action per verb: capability true → CLI affordance,
   // capability false → disabled with the SERVER-OWNED gap reason (never invented;
   // the server emits no default_gap, so an absent per-verb gap shows no reason).
-  function lifecycleActionsModel(capPayload, bp) {
+  // cch-w38-s1 — THE THIRD ARGUMENT IS THE AUTHORITY ANSWER, and it is the
+  // MODEL's business, not the DOM mount's: paintLifecycleActions and all seven
+  // write functions have zero __bpTestHook reach, so a rail predicated at the
+  // mount could not be represented in the harness at all. Absent (every one of
+  // the existing 2-arg call sites) it defaults to "grant" — byte-identical
+  // behaviour to the shipped model, which is what keeps this an ADD.
+  function lifecycleActionsModel(capPayload, bp, authority) {
     bp = bp || {};
+    authority = authority || "grant";
     var kind = bp.provider || "hetzner";
     var pill = lifecyclePill(bp);
-    var decommission = decommissionAction(bp);
+    var decommission = decommissionAction(bp, authority);
 
     if (capPayload === undefined) {
       return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
-        loading: true, retry: false, devTier: false, actions: [decommission] };
+        loading: true, retry: false, devTier: false, authority: authority, actions: [decommission] };
     }
 
     var providers = capPayload && typeof capPayload === "object" ? capPayload.providers : null;
@@ -1632,7 +1730,7 @@
 
     if (!entry || devTier) {
       return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
-        loading: false, retry: !devTier, devTier: devTier, actions: [decommission] };
+        loading: false, retry: !devTier, devTier: devTier, authority: authority, actions: [decommission] };
     }
 
     var caps = entry.capabilities || {};
@@ -1647,7 +1745,7 @@
       return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
     });
     return { kind: kind, provider: bp.provider || null, pill: pill, available: true,
-      loading: false, retry: false, devTier: false, actions: actions };
+      loading: false, retry: false, devTier: false, authority: authority, actions: actions };
   }
 
   // Pure optimistic-transition reducer for the live decommission: applies the
@@ -1710,9 +1808,15 @@
       '<span class="inst-life-dot" aria-hidden="true"></span>' +
       '<span class="inst-life-label">' + esc(model.pill.label) + "</span></span>";
 
+    // cch-w38-s1 — an UNKNOWN authority reuses the shipped checking grammar
+    // verbatim (no new copy, no new CSS): while /v1/me is in flight or failed
+    // we say we are still checking, which is true, instead of rendering a
+    // refusal we cannot prove. It is appended rather than substituted so a
+    // "Capabilities unavailable." + Retry state never loses its recovery.
+    var checking = '<span class="inst-life-note">Checking capabilities&hellip;</span>';
     var status = "";
     if (model.loading) {
-      status = '<span class="inst-life-note">Checking capabilities&hellip;</span>';
+      status = checking;
     } else if (!model.available) {
       status = '<span class="inst-life-note' + (model.retry ? " inst-life-note--warn" : "") + '">' +
         esc(model.devTier
@@ -1720,6 +1824,7 @@
           : "Capabilities unavailable.") + "</span>" +
         (model.retry ? '<button class="btn btn-ghost btn-sm" type="button" data-life-retry>Retry</button>' : "");
     }
+    if (!model.loading && model.authority === "unknown") status += checking;
 
     var actions = model.actions || [];
     // The disabled PAUSE verb moves to the foot as the server's own sentence
@@ -1730,7 +1835,11 @@
     var live = null;
     var gridRows = actions.filter(function (a) {
       if (!a) return false;
-      if (a.mode === "live") { live = a; return false; }
+      // cch-w38-s1: the destroy-tier slot is DECOMMISSION'S, whichever of the
+      // three states it is in — a refused or still-checking rail keeps the same
+      // anatomy (foot control + its sentence) instead of shuffling the verb up
+      // into the command grid when the answer changes.
+      if (a.mode === "live" || a.verb === "decommission") { live = a; return false; }
       if (a.verb === "pause" && a.mode === "disabled") { pausedGap = a; return false; }
       return true;
     }).map(lifecycleActionHtml).join("");
@@ -3159,7 +3268,24 @@
 
   // The honest degrade when the deliveries route is absent (older control plane) or
   // errors — the log is ABOUT the send record, not served by it, so it never spins.
-  function notifDeliveriesErrorHtml() {
+  //
+  // cch-w40-s1 (charter D419(d)) — A 403 IS A DETERMINATION, NOT A HICCUP. This was
+  // arity-0 and status-BLIND, so it told everyone "it may be momentarily unavailable.
+  // Try again shortly." — including the two people GET /v1/notifications/deliveries
+  // refuses permanently (router.ex:4704, a user on no team; :4725, a non-admin with
+  // no self-scopable address). Retrying does nothing for either, and the sentence
+  // asserted transience the console had never read. It now takes the status and the
+  // body it already had in scope at the call site, and the 403 arm consults the
+  // evidence seam rather than inventing an authority — both emitters are deliberately
+  // BARE (charter D396(5): admin is sufficient but NOT necessary here, so
+  // `required: "admin"` would misdescribe the gate), so the fallback names the access
+  // fact and no role. Every other status keeps the original line byte-identically.
+  function notifDeliveriesErrorHtml(status, data) {
+    if (status === 403) {
+      return '<div class="wh-del-empty dim">' +
+        esc(forbiddenEvidenceCopy(data) || "You don't have access to this team's delivery log.") +
+        "</div>";
+    }
     return '<div class="wh-del-empty dim">Couldn\'t load the delivery log &mdash; it may be momentarily unavailable. Try again shortly.</div>';
   }
 
@@ -3623,7 +3749,9 @@
     api("GET", notifDeliveriesQuery(null)).then(function (r) {
       if (!(r.ok && r.data && Array.isArray(r.data.deliveries))) {
         notifDeliveryRows = null;
-        box.innerHTML = notifDeliveriesErrorHtml();
+        // cch-w40-s1: the status and body were always here — the copy just never
+        // asked for them, so a permanent 403 read as a momentary blip.
+        box.innerHTML = notifDeliveriesErrorHtml(r.status, r.data);
         toggleNotifDeliveryMore(false);
         return;
       }
@@ -6100,7 +6228,17 @@
     return "";
   }
 
+  // cch-w42-s1: the onboarding write gate now READS the authority the server
+  // states (teamAuthorityState) instead of re-deriving it from role literals.
+  // Still boolean — "grant" is the only true, so loading/failed/stale all fail
+  // closed exactly as the old meCache-falsy read did.
   function canManageOnboarding() {
+    var band = teamAuthorityState();
+    if (band !== "refuse") return band === "grant";
+    // A control plane that does not yet send team_authority answers "refuse"
+    // for every account, teamless or not, so the pre-wave-42 role read stays as
+    // the compatibility floor — never as an override of a stated refusal.
+    if (meCache && meCache.team_authority) return false;
     return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
   }
   function firstStudioInstance(list) {
@@ -6787,13 +6925,17 @@
     if (!box) return;
     // Frame 1: decommission is live from the first paint (it predates the
     // conduit), with a "checking capabilities" note — teardown is never absent.
-    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp));
+    // cch-w38-s1: the authority answer is read at PAINT time, both frames. At
+    // frame 1 /v1/me is usually already in (loadMe fires at shell boot, long
+    // before this route's capability read) — but when it is not, the rail says
+    // "checking", never "refused".
+    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp, instanceAdminAuthority()));
     api("GET", "/v1/providers/capabilities").then(function (r) {
       if (!box.isConnected && box.isConnected !== undefined) return; // navigated away
       // 404 (conduit not deployed yet) / 5xx / network → null → the honest
       // "capabilities unavailable" + Retry state, decommission still live.
       var payload = r && r.ok && r.data ? r.data : null;
-      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp));
+      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp, instanceAdminAuthority()));
     });
   }
 
@@ -6923,7 +7065,9 @@
       if (btn) { btn.disabled = false; btn.textContent = opts.force ? "Update anyway" : "Update"; }
       // Errors arrive as {error: {code}} — NOT the flat string friendly() reads.
       var c = updateConflict(r.data);
-      var copy = updateConflictCopy(c);
+      // cch-w38-s1: the raw envelope rides along so a gate refusal renders the
+      // SERVER's authority sentence instead of "Please try again in a moment."
+      var copy = updateConflictCopy(c, r.data);
       // Pin honesty: a pin conflict on a NON-forced call keeps the operator in a
       // modal that names the pin and offers the explicit force re-trigger.
       if (c.kind === "pinned" && !opts.force) {
@@ -7053,7 +7197,11 @@
         ? "That domain is already in use."
         : code === "already_attaching"
           ? "An attach is already running."
-          : r.status === 422
+          // cch-w38-s1: the 422 arm is about the DOMAIN, and `no_team` is not —
+          // require_primary_team_admin answers a teamless caller 422 {no_team},
+          // which used to be reported as bad domain syntax. It falls through to
+          // friendly(), which owns the sentence that actually repairs it.
+          : (r.status === 422 && code !== "no_team")
             ? "Only <name>.barkpark.cloud domains are supported for now."
             : friendly(r.data, "Something went wrong — please try again.");
       // textContent, not innerHTML — the literal "<name>" (and any echoed input)
@@ -7530,8 +7678,22 @@
   // a force re-trigger (forceLabel non-null); it always names the pin and carries
   // the charter's honest pin caveat. already_running/not_enabled/not_live are
   // terminal — no force.
-  function updateConflictCopy(c) {
+  // cch-w38-s1 — `data` is the OPTIONAL raw envelope, and it is a SIGNATURE
+  // growth on purpose: updateConflict's RETURN SHAPE must not gain a field
+  // (__app.test.mjs round-trips it through plain() and deepEquals the whole
+  // object — one extra key reds test 598). A gate refusal (403 forbidden / 422
+  // no_team) used to fall to the default arm's "Please try again in a moment.",
+  // which is a lie about a permanent refusal; friendly() on the identical bytes
+  // renders the server's own authority sentence.
+  function updateConflictCopy(c, data) {
     c = c || {};
+    if (c.kind === "other" && (c.code === "forbidden" || c.code === "no_team")) {
+      return {
+        title: "You can't update this instance",
+        body: friendly(data, c.code === "no_team" ? FORBIDDEN_REASON_COPY.no_team : FORBIDDEN_ROLE_COPY.admin),
+        forceLabel: null,
+      };
+    }
     if (c.kind === "pinned") {
       var at = c.pin ? " at " + vRel(c.pin) : "";
       return {
@@ -7576,19 +7738,33 @@
   // its config changes, so the modal's single recovery is Close. Transient ones
   // (already_running, instance_unreachable, instance_error, unknown) offer Try
   // again — for the unknown default, retrying is the honest safe bet. Pure.
+  // cch-w38-s1: a REFUSAL A RETRY CAN NEVER FIX IS TERMINAL. `forbidden` and
+  // `no_team` are decided by the caller's role, which no amount of Try again
+  // changes — offering one re-POSTs into a permanent 403 forever.
   function rollbackRefusalTerminal(code) {
     return code === "no_previous_slot" || code === "not_supported" ||
-      code === "not_enabled" || code === "feature_not_configured" || code === "not_live";
+      code === "not_enabled" || code === "feature_not_configured" || code === "not_live" ||
+      code === "forbidden" || code === "no_team";
   }
 
   // isu-w6: typed, honest copy for a rollback refusal. PURE — maps the charter's
-  // W6 refusal vocabulary (D23) to operator-facing title+body. Static strings only
-  // (no server free-text embedded), so nothing here can carry markup; `body` is the
-  // raw envelope, accepted for signature parity + future enrichment. NO force
+  // W6 refusal vocabulary (D23) to operator-facing title+body. Static strings only,
+  // with ONE cch-w38-s1 exception: the two AUTHORITY arms below run the envelope
+  // through friendly(), whose forbidden branch is length-bounded by
+  // FORBIDDEN_LABEL_RE — and the single consumer (ctl.fail → setText) writes
+  // textContent, never innerHTML, so nothing here can become markup either way.
+  // `body` was already the raw envelope, accepted for signature parity. NO force
   // affordance: unlike a pin conflict, a rollback refusal is always terminal.
   function rollbackConflictCopy(code, body) {
     body = body || {};
     switch (code) {
+      // cch-w38-s1: the two AUTHORITY refusals — the one place this mapper
+      // renders the envelope rather than a static string, because the sentence
+      // that repairs it (which role, or no team at all) is the server's own.
+      case "forbidden":
+        return { title: "You can't roll back this instance", body: friendly(body, FORBIDDEN_ROLE_COPY.admin) };
+      case "no_team":
+        return { title: "You can't roll back this instance", body: friendly(body, FORBIDDEN_REASON_COPY.no_team) };
       case "no_previous_slot":
         return {
           title: "Nothing to roll back to",
@@ -8453,6 +8629,23 @@
     return body;
   }
 
+  // cch-w37-s1 — Pure: the create-site error line. The router answers a failed
+  // create with `%{error: "invalid", details: <per-field map>}`, and this branch
+  // used to render `r.data.error` RAW — so the person reads the literal token
+  // `invalid` while the server holds the exact field that failed. friendly()
+  // now prefers those details, and the `known_templates` hint (the one thing
+  // the payload carries that friendly() cannot know) is kept as the suffix.
+  function siteCreateFailureCopy(r) {
+    var data = r && r.data;
+    // The caller's designed fallback keeps the old second choice: a payload
+    // that carries only a `message` still renders that message, and only a
+    // payload that says nothing at all falls to the status line.
+    var fallback = (data && typeof data.message === "string" && data.message) ||
+      ("create failed (" + ((r && r.status) || 0) + ")");
+    var known = data && data.known_templates;
+    return String(friendly(data, fallback)) + (known ? " \u2014 templates: " + known.join(", ") : "");
+  }
+
   function siteTemplateLabel(t) {
     if (t === "") return "Auto (framework default)";
     if (t === "search-starter") return "\u2605 Search Starter \u2014 flagship: live search + corpus graph + PortableDoc";
@@ -8539,9 +8732,7 @@
             loadInstanceSites(bp);
           }
         } else {
-          var msg = (r.data && (r.data.error || r.data.message)) || ("create failed (" + r.status + ")");
-          var known = r.data && r.data.known_templates;
-          errBox.textContent = String(msg) + (known ? " \u2014 templates: " + known.join(", ") : "");
+          errBox.textContent = siteCreateFailureCopy(r);
           errBox.hidden = false;
         }
       });
@@ -13982,6 +14173,13 @@
   var meLoaded = false;
   var meError = false;
   var meErrorFault = null;
+  // The team pin that was LIVE when the cached answer was absorbed. api() reads
+  // localStorage("bp.active-team") on EVERY request (:116) but the switcher's
+  // location.reload() only refreshes ITS OWN tab — nothing listens for the
+  // `storage` event, and loadMe() is never called on a route change. So a second
+  // tab keeps serving an answer the server would no longer give, for its whole
+  // page life. Captured here, compared live in teamAuthorityState().
+  var meTeamPin = null;
 
   // The ONE place a /v1/me answer becomes cached state — success OR failure, so
   // no caller can absorb the happy half and silently drop the other (which is
@@ -13993,6 +14191,7 @@
       meLoaded = true;
       meError = false;
       meErrorFault = null; // cleared in lockstep — a stale fault must never outlive its flag
+      meTeamPin = localStorage.getItem("bp.active-team"); // same lockstep: the pin the answer was fetched under
       return true;
     }
     meError = true;
@@ -14008,6 +14207,7 @@
     meLoaded = false;
     meError = false;
     meErrorFault = null;
+    meTeamPin = null; // a capture that outlives its cache is the same stale-fact bug
   }
 
   // "loading" (never asked, or in flight) · "failed" (the answer did not
@@ -14017,6 +14217,72 @@
     if (meCache) return "loaded";
     if (meError) return "failed";
     return "loading";
+  }
+
+  // The team authority the SERVER states, as a five-valued band — never a
+  // boolean. /v1/me now carries `team_authority` {team_id, role, admin, owner},
+  // resolved server-side from Authz and nil exactly when the account is
+  // teamless; until this function existed the console re-derived all of it from
+  // `meCache.role` string literals, i.e. it invented the answer it was already
+  // being told.
+  //
+  //   "loading" · never asked, or in flight      "failed"  · the read did not arrive
+  //   "stale"   · the pin moved under the answer "refuse"  · a determinate NO
+  //   "grant"   · the server says admin
+  //
+  // A NEW sibling on purpose: widening an existing boolean predicate to a
+  // string ships green AND makes `if (predicate)` true for "failed"/"loading",
+  // which is the fail-open the honest-states rule forbids. Callers must branch
+  // on the band by name.
+  function teamAuthorityState() {
+    var state = meState();
+    if (state !== "loaded") return state === "failed" ? "failed" : "loading";
+    var ta = meCache && meCache.team_authority;
+    // Teamless is a determinate NO, and the server sends nil for exactly that.
+    if (!ta) return "refuse";
+    // THE SEAM. Not team_authority.team_id vs meCache.team.id — /v1/me builds
+    // both keys from ONE binding in one map literal, so that comparison is true
+    // (or both-nil) on every answer the server can give: a tautology no fixture
+    // can falsify. Not the live pin vs team_authority.team_id either, because
+    // resolve_team/2 DEGRADES to the primary team when the pin names a team the
+    // caller doesn't belong to, so a bare mismatch cries wolf. The falsifiable
+    // fact is the pin the answer was fetched under vs the pin live NOW.
+    if (localStorage.getItem("bp.active-team") !== meTeamPin) return "stale";
+    return ta.admin ? "grant" : "refuse";
+  }
+
+  // cch-w38-s1 — THE ONE AUTHORITY ANSWER THE INSTANCE BAND ASKS, AND IT IS
+  // THREE-VALUED. "grant" (the server will accept an admin-gated write on this
+  // team) · "refuse" (it will not, and a role grant is the remedy) · "unknown"
+  // (/v1/me has not answered, or FAILED — we have no business claiming either
+  // of the other two). Built on meState(), never on meCache's falsiness: a
+  // two-valued read of a three-valued fact is precisely the lie this wave
+  // exists to kill, and predicating seven click paths on one would have minted
+  // seven fresh copies of it.
+  //
+  // THE SERVER HAS TWO TEAM AXES AND THEY DIVERGE — read this before reusing
+  // the predicate anywhere else:
+  //   * /v1/teams/:id/*  (members, invitations) → Auth.require_team_role/3
+  //     gates the PATH team and IGNORES x-barkpark-team (auth.ex:365-393,
+  //     router.ex:10812-10815). Proven by a live probe: an admin pinned on team
+  //     A writing team B gets 403 {scope:"team"}; a member pinned on B writing
+  //     A gets 200.
+  //   * everything else → Auth.require_primary_team_admin/owner reads
+  //     :current_team, which resolve_team/2 fills FROM x-barkpark-team
+  //     (auth.ex:122-130, :405-421). Its NAME lies ("primary"); its BEHAVIOUR
+  //     agrees with meCache.
+  // Answering from meCache.role is correct for THIS band's routes because api()
+  // pins x-barkpark-team on every authed request INCLUDING /v1/me, and the team
+  // switcher does a full reload — so meCache.role IS the role on the team the
+  // write will be judged against. DO NOT extend this predicate to the members
+  // band: there the agreement is a coincidence held by one line inside
+  // membersContext() — re-derive it with:
+  //   grep -n 'function membersContext' cloud/priv/static/app.js
+  //
+  // @canonical capability:console-authority-predicate aka:role,canManage,isOwner,isAdmin,meCache.role
+  function instanceAdminAuthority() {
+    if (meState() !== "loaded") return "unknown";
+    return (meCache.role === "owner" || meCache.role === "admin") ? "grant" : "refuse";
   }
 
   // Honest copy for the failed read, classified from the retained fault the
@@ -18155,12 +18421,22 @@
 
   // The current team + the actor's role, read from the /v1/me cache the account
   // chip already loads. null when teamless (the panel shows a "no team" state).
+  // cch-w42-s1: the band gates the context. loading / failed / stale are NOT
+  // "you have no team" — they are "we cannot say", and null is the answer all
+  // five callers already handle (each paints its own honest state around it).
+  // Only grant/refuse are determinate, and on those the role comes from the
+  // server's team_authority rather than from the envelope's role string.
   function membersContext() {
     var me = meCache;
-    if (me && me.team && me.team.id) {
-      return { teamId: me.team.id, role: me.role || "member", userId: me.user && me.user.id };
-    }
-    return null;
+    var band = teamAuthorityState();
+    if (band !== "grant" && band !== "refuse") return null;
+    if (!(me && me.team && me.team.id)) return null;
+    var ta = me.team_authority;
+    return {
+      teamId: me.team.id,
+      role: (ta && ta.role) || me.role || "member", // ta.role is authoritative; the fallback is the pre-wave-42 wire
+      userId: me.user && me.user.id,
+    };
   }
 
   // Pure: honest human copy for a failed members/invitations fetch.
@@ -18553,7 +18829,20 @@
     if (status === 409 && data && data.error === "write_once") {
       return "A write-once variable with that key already exists. Delete it first, then create it again.";
     }
-    if (status === 403) return "Only team owners and admins can change environment variables.";
+    // cch-w40-s1 — THE 403 CONSULTS WHAT THE SERVER PROVED. This arm used to
+    // return "Only team owners and admins can change environment variables." and
+    // it returned BEFORE faultCopy/friendly, structurally shadowing
+    // forbiddenEvidenceCopy — so the console's own authored guess outranked the
+    // server's evidence on every 403 this seam sees. TWO of them reach here and
+    // the sentence was wrong on both counts:
+    //   • router.ex:4355/4417 send `required: "admin", scope: "team"`. The old
+    //     sentence was roughly true and threw the evidence away anyway.
+    //   • router.ex:4394 is the CROSS-TENANT arm, left bare on purpose (D396(5)):
+    //     an admin of team A writing team B's barkpark_id. The caller IS an
+    //     owner-or-admin, so the old sentence was FLATLY FALSE and unfixable by
+    //     the person reading it — no role grant repairs a wrong-team id.
+    // Evidence first, then the curated generic, which now claims no role at all.
+    if (status === 403) return forbiddenEvidenceCopy(data) || ERRORS.forbidden;
     if (status === 422 && data && data.error === "key_required") return "Enter a key.";
     return faultCopy(status, data, "Check the values and try again.");
   }
@@ -20550,6 +20839,8 @@
       // search-template W2 (D8): create-site modal pure helpers.
       siteKindFor: siteKindFor, siteTemplateOptions: siteTemplateOptions,
       siteCreateBody: siteCreateBody,
+      // cch-w37-s1 — the create-site error line (was a RAW `r.data.error` render).
+      siteCreateFailureCopy: siteCreateFailureCopy,
       // search-template W8: site theme-edit pure helpers.
       siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
       // cch-w10 — the OAuth landing gate. The fragment now carries a ONE-TIME
@@ -20678,6 +20969,16 @@
       lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,
+      // cch-w38-s1: the ONE canonical three-valued authority read, exported
+      // because the rail's mount and all seven elevated write functions have
+      // zero hook reach — a positive control written against the other exports
+      // cannot represent a member at all.
+      instanceAdminAuthority: instanceAdminAuthority,
+      // cch-w38-s1: attachDomain had ZERO assertions in the harness, and its
+      // 422 arm was telling a TEAMLESS caller their domain syntax was wrong.
+      // Impure (it fetches and paints its inline error), driven the same way
+      // loadMembers/loadEnvVars are.
+      attachDomain: attachDomain,
       lifecycleOptimistic: lifecycleOptimistic, lifecycleVerbs: LIFECYCLE_VERBS.map(function (v) { return v.verb; }),
       // isu-w5 console operator update panel: the per-instance update-truth
       // derivations + the 409 pin-force flow + the fleet rollout banner. All pure
@@ -20900,6 +21201,10 @@
       usageHistorySeries: usageHistorySeries, usageHistoryValues: usageHistoryValues,
       usageTabShellHtml: usageTabShellHtml, usageFailureCopy: usageFailureCopy,
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
+      // cch-w42-s1: membersContext was one of only two authority predicates
+      // pinned by NOTHING — which is exactly why it drifted into inventing the
+      // role. teamAuthorityState is the five-valued band it now reads.
+      membersContext: membersContext, teamAuthorityState: teamAuthorityState,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
       removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,
@@ -21065,6 +21370,16 @@
       // section mounts (renderBillingManage/renderBillingCancel/openCancelPlanModal)
       // are smoke+browser-verified.
       billingCanManage: billingCanManage,
+      // cch-w41-s3 — the other three owner|admin authority predicates, exported
+      // for the SAME reason billingCanManage is: until now they were pinned by
+      // nothing. Measured on the shipped bytes: rewriting providerCanWrite /
+      // notifCanManage / canManageOnboarding to OWNER-ONLY (dropping the admin
+      // limb) shipped 919/919 + 104/104 green, and canManageOnboarding survived
+      // even ALWAYS-TRUE — a fail-open GR9 forbids. Pure role reads; the render
+      // policy they gate stays smoke+browser-verified.
+      providerCanWrite: providerCanWrite,
+      notifCanManage: notifCanManage,
+      canManageOnboarding: canManageOnboarding,
       billingHasPaidPlan: billingHasPaidPlan,
       readOnlyPlanCardHtml: readOnlyPlanCardHtml,
       dunningDates: dunningDates,

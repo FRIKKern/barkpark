@@ -673,3 +673,334 @@ func TestWebhookUsageErrors(t *testing.T) {
 		t.Fatalf("usage errors hit the network: %+v", rec.all())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// reconcile — the doc-type filter, re-assertable
+// ---------------------------------------------------------------------------
+
+// The site ids the reconcile fixtures use as their site-autodeploy suffixes.
+const (
+	reconcileSiteA = "aaaaaaaa-1111-2222-3333-444444444444"
+	reconcileSiteB = "bbbbbbbb-1111-2222-3333-444444444444"
+	reconcileSiteC = "cccccccc-1111-2222-3333-444444444444"
+)
+
+// reconcileListEnvelope builds a webhook-list envelope: two site-autodeploy rows
+// carrying `types`, plus one hand-made endpoint reconcile must never touch.
+func reconcileListEnvelope(typesA, typesB string) string {
+	return `{"ok":true,"resource":"webhook","data":{"webhooks":[` +
+		`{"id":"wh_a","name":"site-autodeploy-` + reconcileSiteA + `","url":"https://cp.test/a","active":true,"events":["publish"],"types":` + typesA + `,"consecutive_failures":0,"disable_reason":null},` +
+		`{"id":"wh_b","name":"site-autodeploy-` + reconcileSiteB + `","url":"https://cp.test/b","active":true,"events":["publish"],"types":` + typesB + `,"consecutive_failures":0,"disable_reason":null},` +
+		`{"id":"wh_hand","name":"my-own-hook","url":"https://x.test/h","active":true,"events":["publish"],"types":[],"consecutive_failures":0,"disable_reason":null}` +
+		`]}}`
+}
+
+// newReconcileProxy stands up a fake control plane that answers BOTH the webhook
+// proxy (list + PUT) and GET /v1/sites/:id, so reconcile's doc-type lookup is
+// exercised for real. docTypes maps a site id to the doc_type its row carries; a
+// site absent from the map 404s (the "cannot determine" branch).
+func newReconcileProxy(t *testing.T, list string, docTypes map[string]string) *proxyRecorder {
+	t.Helper()
+	return newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/sites/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/sites/")
+			dt, ok := docTypes[id]
+			if !ok {
+				writeEnvelope(w, 404, `{"error":"not_found"}`)
+				return
+			}
+			writeEnvelope(w, 200, `{"site":{"id":"`+id+`","name":"s","doc_type":"`+dt+`"}}`)
+		case r.Method == "PUT":
+			writeEnvelope(w, 200, `{"ok":true,"resource":"webhook","data":{"webhook":{"id":"wh","types":["paper"]}}}`)
+		default:
+			writeEnvelope(w, 200, list)
+		}
+	})
+}
+
+// TestWebhookReconcileRepairsDriftedRows: an empty filter ({} = MATCH EVERYTHING
+// on the box) is PUT back to the site's own doc_type through the partial-PUT
+// path — types ONLY, so nothing else on the row is disturbed — and the hand-made
+// endpoint is left alone.
+func TestWebhookReconcileRepairsDriftedRows(t *testing.T) {
+	rec := newReconcileProxy(t, reconcileListEnvelope("[]", "[]"), map[string]string{
+		reconcileSiteA: "paper",
+		reconcileSiteB: "article",
+	})
+	stdout, _, code := runWebhook(t, "table", false, "reconcile", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if n := rec.count("PUT", "/wh_a"); n != 1 {
+		t.Fatalf("PUTs to wh_a = %d, want 1", n)
+	}
+	if n := rec.count("PUT", "/wh_b"); n != 1 {
+		t.Fatalf("PUTs to wh_b = %d, want 1", n)
+	}
+	if n := rec.count("PUT", "/wh_hand"); n != 0 {
+		t.Fatalf("reconcile wrote to a hand-made webhook (%d PUTs) — it owns only the site-autodeploy rows", n)
+	}
+	for _, r := range rec.all() {
+		if r.method != "PUT" {
+			continue
+		}
+		var body map[string]any
+		if err := json.Unmarshal([]byte(r.body), &body); err != nil {
+			t.Fatalf("PUT body not json: %q", r.body)
+		}
+		if len(body) != 1 {
+			t.Fatalf("PUT body = %v, want ONLY the types key (a partial update)", body)
+		}
+		ty, _ := body["types"].([]any)
+		if len(ty) != 1 {
+			t.Fatalf("PUT types = %v, want exactly one doc type", body["types"])
+		}
+	}
+	if !strings.Contains(stdout, "UPDATED") || !strings.Contains(stdout, "[paper]") || !strings.Contains(stdout, "[article]") {
+		t.Fatalf("report did not name the before/after:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "match everything") {
+		t.Fatalf("an empty filter must be labelled as MATCH EVERYTHING:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "2 updated") || !strings.Contains(stdout, "1 other webhook(s) left untouched") {
+		t.Fatalf("summary wrong:\n%s", stdout)
+	}
+}
+
+// runWebhookArgv drives a FULL command line — `bp cloud webhook …` — through
+// parseGlobals exactly as Execute does, then into the dispatcher. This is the
+// only faithful harness for a GLOBAL flag: parseGlobals lifts `--dry-run` out of
+// the line before the verb's own parser runs, so a test that calls runCloudWebhook
+// directly with globals{} proves nothing about the real binary's dry run (it
+// passed green here while the shipped binary WROTE to production).
+func runWebhookArgv(t *testing.T, output string, argv ...string) (string, string, int) {
+	t.Helper()
+	g, rest, err := parseGlobals(argv)
+	if err != nil {
+		t.Fatalf("parseGlobals(%v): %v", argv, err)
+	}
+	if len(rest) < 2 || rest[0] != "cloud" || rest[1] != "webhook" {
+		t.Fatalf("argv did not start with `cloud webhook`: %v", rest)
+	}
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.output = output
+	code := runCloudWebhook(w, g, rest[2:])
+	return sout.String(), serr.String(), code
+}
+
+// TestWebhookReconcileDryRunWritesNothing: --dry-run reports the exact intended
+// change for every drifted row and issues ZERO writes — driven through the real
+// global-flag path (see runWebhookArgv).
+func TestWebhookReconcileDryRunWritesNothing(t *testing.T) {
+	rec := newReconcileProxy(t, reconcileListEnvelope("[]", "[]"), map[string]string{
+		reconcileSiteA: "paper",
+		reconcileSiteB: "paper",
+	})
+	stdout, _, code := runWebhookArgv(t, "table", "cloud", "webhook", "reconcile", testInstanceID, "--dry-run")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	for _, r := range rec.all() {
+		if r.method != "GET" {
+			t.Fatalf("--dry-run issued a %s %s — it must write NOTHING", r.method, r.path)
+		}
+	}
+	if !strings.Contains(stdout, "DRY RUN") || !strings.Contains(stdout, "(would update)") {
+		t.Fatalf("dry run did not print the intended change:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "2 would update") {
+		t.Fatalf("dry-run summary wrong:\n%s", stdout)
+	}
+	// …and the verb-local flag holds the same line, so a future de-globalisation
+	// of --dry-run cannot silently turn a preview back into a write.
+	rec2 := newReconcileProxy(t, reconcileListEnvelope("[]", "[]"), map[string]string{
+		reconcileSiteA: "paper",
+		reconcileSiteB: "paper",
+	})
+	if _, _, code := runWebhook(t, "table", false, "reconcile", testInstanceID, "--dry-run"); code != exitOK {
+		t.Fatalf("verb-local --dry-run exit = %d", code)
+	}
+	for _, r := range rec2.all() {
+		if r.method != "GET" {
+			t.Fatalf("verb-local --dry-run issued a %s %s", r.method, r.path)
+		}
+	}
+}
+
+// TestWebhookReconcileGlobalDryRunReachesTheVerb pins the trap directly:
+// parseGlobals STRIPS --dry-run from the command line, so the flag arrives only
+// on globals. If the verb ever stops reading it there, this fails.
+func TestWebhookReconcileGlobalDryRunReachesTheVerb(t *testing.T) {
+	g, rest, err := parseGlobals([]string{"cloud", "webhook", "reconcile", testInstanceID, "--dry-run"})
+	if err != nil {
+		t.Fatalf("parseGlobals: %v", err)
+	}
+	if !g.dryRun {
+		t.Fatalf("--dry-run did not land on globals")
+	}
+	for _, tok := range rest {
+		if tok == "--dry-run" {
+			t.Fatalf("--dry-run reached the verb args — the global parser is expected to strip it: %v", rest)
+		}
+	}
+	rec := newReconcileProxy(t, reconcileListEnvelope("[]", "[]"), map[string]string{
+		reconcileSiteA: "paper",
+		reconcileSiteB: "paper",
+	})
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.output = "table"
+	if code := runCloudWebhook(w, g, rest[2:]); code != exitOK {
+		t.Fatalf("exit = %d\n%s%s", code, sout.String(), serr.String())
+	}
+	for _, r := range rec.all() {
+		if r.method != "GET" {
+			t.Fatalf("a global --dry-run issued a %s %s — the verb ignored globals.dryRun", r.method, r.path)
+		}
+	}
+	if !strings.Contains(sout.String(), "DRY RUN") {
+		t.Fatalf("global --dry-run did not announce itself:\n%s", sout.String())
+	}
+}
+
+// TestWebhookReconcileIsIdempotent: run it against rows that are ALREADY correct
+// and it reports "already correct" and issues no writes — the second run of the
+// pair, so a repair is safe to re-assert by hand or on a schedule.
+func TestWebhookReconcileIsIdempotent(t *testing.T) {
+	rec := newReconcileProxy(t, reconcileListEnvelope(`["paper"]`, `["paper"]`), map[string]string{
+		reconcileSiteA: "paper",
+		reconcileSiteB: "paper",
+	})
+	stdout, _, code := runWebhook(t, "table", false, "reconcile", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	for _, r := range rec.all() {
+		if r.method != "GET" {
+			t.Fatalf("a no-op run issued a %s %s", r.method, r.path)
+		}
+	}
+	if !strings.Contains(stdout, "already correct") || !strings.Contains(stdout, "2 already correct") {
+		t.Fatalf("idempotent run did not report already-correct rows:\n%s", stdout)
+	}
+}
+
+// TestWebhookReconcileSkipsUndeterminableDocType is the FAIL-CLOSED proof, by
+// MUTATION of the fixture: site A carries an EMPTY doc_type and site B does not
+// resolve at all. Neither is guessed — both are reported and skipped, no write is
+// issued for them, and the run exits non-zero so a script cannot read the repair
+// as complete. The one determinable row is still repaired.
+func TestWebhookReconcileSkipsUndeterminableDocType(t *testing.T) {
+	list := `{"ok":true,"resource":"webhook","data":{"webhooks":[` +
+		`{"id":"wh_a","name":"site-autodeploy-` + reconcileSiteA + `","url":"https://cp.test/a","active":true,"types":[],"consecutive_failures":0,"disable_reason":null},` +
+		`{"id":"wh_b","name":"site-autodeploy-` + reconcileSiteB + `","url":"https://cp.test/b","active":true,"types":[],"consecutive_failures":0,"disable_reason":null},` +
+		`{"id":"wh_c","name":"site-autodeploy-` + reconcileSiteC + `","url":"https://cp.test/c","active":true,"types":[],"consecutive_failures":0,"disable_reason":null}` +
+		`]}}`
+	// site A: a row predating the doc_type column. site C: determinable, still
+	// repaired. site B: absent from the map → the control plane 404s it.
+	rec := newReconcileProxy(t, list, map[string]string{
+		reconcileSiteA: "",
+		reconcileSiteC: "paper",
+	})
+	stdout, stderr, code := runWebhook(t, "table", false, "reconcile", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d — an unrepaired row must be loud", code, exitGeneric)
+	}
+	if n := rec.count("PUT", "/wh_a"); n != 0 {
+		t.Fatalf("a site with no doc_type was WRITTEN (%d PUTs) — it must be skipped, never guessed", n)
+	}
+	if n := rec.count("PUT", "/wh_b"); n != 0 {
+		t.Fatalf("an unreadable site was WRITTEN (%d PUTs) — it must be skipped", n)
+	}
+	if n := rec.count("PUT", "/wh_c"); n != 1 {
+		t.Fatalf("the determinable row was not repaired (%d PUTs, want 1)", n)
+	}
+	if !strings.Contains(stdout, "SKIPPED — site "+reconcileSiteA+" has no doc_type") {
+		t.Fatalf("the empty doc_type was not reported:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "SKIPPED — control plane could not read site "+reconcileSiteB) {
+		t.Fatalf("the unreadable site was not reported:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "skipped site-autodeploy-"+reconcileSiteA) {
+		t.Fatalf("a skip must also reach stderr, got:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "2 skipped") || !strings.Contains(stdout, "exiting non-zero") {
+		t.Fatalf("summary did not carry the skips:\n%s", stdout)
+	}
+}
+
+// TestWebhookReconcileJSONReport: -o json emits the machine report — one element
+// per site-autodeploy row with its action — and the exit still carries the
+// non-zero verdict a skip earns.
+func TestWebhookReconcileJSONReport(t *testing.T) {
+	newReconcileProxy(t, reconcileListEnvelope("[]", "[]"), map[string]string{
+		reconcileSiteA: "paper",
+	})
+	stdout, _, code := runWebhook(t, "json", false, "reconcile", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	var report struct {
+		DryRun   bool `json:"dry_run"`
+		Webhooks []struct {
+			ID           string   `json:"id"`
+			SiteID       string   `json:"site_id"`
+			CurrentTypes []string `json:"current_types"`
+			DesiredTypes []string `json:"desired_types"`
+			Action       string   `json:"action"`
+			Detail       string   `json:"detail"`
+		} `json:"webhooks"`
+		OtherRows int            `json:"other_rows"`
+		Summary   map[string]int `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("-o json is not parseable: %v\n%s", err, stdout)
+	}
+	if len(report.Webhooks) != 2 || report.OtherRows != 1 {
+		t.Fatalf("report shape = %+v", report)
+	}
+	if report.Webhooks[0].Action != "updated" || len(report.Webhooks[0].DesiredTypes) != 1 || report.Webhooks[0].DesiredTypes[0] != "paper" {
+		t.Fatalf("row 0 = %+v, want an updated paper row", report.Webhooks[0])
+	}
+	if report.Webhooks[1].Action != "skipped" || report.Webhooks[1].Detail == "" {
+		t.Fatalf("row 1 = %+v, want a skip carrying its reason", report.Webhooks[1])
+	}
+	if report.Summary["updated"] != 1 || report.Summary["skipped"] != 1 {
+		t.Fatalf("summary = %v", report.Summary)
+	}
+}
+
+// TestWebhookReconcileUnreadableListWritesNothing: "I could not look" never
+// authorizes a repair — a failed list degrades honestly and issues no PUT.
+func TestWebhookReconcileUnreadableListWritesNothing(t *testing.T) {
+	rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, `{"ok":false,"resource":"webhook","error":{"code":"instance_unreachable"}}`)
+	})
+	_, stderr, code := runWebhook(t, "table", false, "reconcile", testInstanceID)
+	if code == exitOK {
+		t.Fatalf("an unreadable list exited 0")
+	}
+	if !strings.Contains(stderr, "instance unreachable") {
+		t.Fatalf("stderr = %q, want the honest degradation line", stderr)
+	}
+	if n := rec.count("PUT", ""); n != 0 {
+		t.Fatalf("a failed list issued %d writes", n)
+	}
+}
+
+// TestWebhookReconcileEmptyFleet: an instance with no site-autodeploy rows says
+// so plainly and exits 0.
+func TestWebhookReconcileEmptyFleet(t *testing.T) {
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, listEnvelope) // three hand-made rows, no site-autodeploy
+	})
+	stdout, _, code := runWebhook(t, "table", false, "reconcile", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "nothing to reconcile") || !strings.Contains(stdout, "3 other webhook(s)") {
+		t.Fatalf("empty report:\n%s", stdout)
+	}
+}

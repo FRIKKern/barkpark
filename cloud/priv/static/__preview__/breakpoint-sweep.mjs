@@ -221,6 +221,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
@@ -365,7 +366,7 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 79
 // name-keyed entries below, which is what makes a 105th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 21 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
+  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 9 vary binding/verify content inside the same .detail-grid. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 7 are member-role and empty-state variants of those same panels.",
@@ -402,6 +403,10 @@ export const RESIDUE_FAMILY_REASONS = {
 // failed` is the 102nd scenario and the 77th residue entry, and this sweep
 // exited 2 with `UNLISTED scenario "site-deploy-rail-failed" (family
 // hash:#site)` until the entry below was written.
+// cch-w38-s1 moved it a fifth time: `panel-overview-member` is the 104th
+// scenario and the 79th residue entry — residue for the same reason its owner
+// twin `panel-overview` is a CELL: it varies the CONTENT of a panel the four
+// instance cells already walk at all 15 widths, not its geometry.
 // cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` is the
 // 103rd scenario and the 78th residue entry — residue, not a cell, the same
 // home its sibling `overview-attention` has, so it is rendered and asserted by
@@ -425,8 +430,9 @@ export const RESIDUE_FAMILY_REASONS = {
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 21
+  // hash:#instance — 22
   "sites-on-instance": "hash:#instance",
+  "panel-overview-member": "hash:#instance",
   "provisioning": "hash:#instance",
   "usage-quota": "hash:#instance",
   "failed": "hash:#instance",
@@ -1276,24 +1282,60 @@ async function withBrowser(fn) {
   }
   out(`>> serve      :${PORT} — served bytes == disk bytes (${rel(ROOT)})\n`);
 
-  profile = fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-"));
-  chrome = spawn(chromeBin, [
-    "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
-    "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-    "--disable-background-networking", "--hide-scrollbars",
-    `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank",
-  ], { stdio: "ignore" });
+  // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, a FRESH profile
+  // dir per attempt (it used to be mkdtemp'd once, so a retry would re-race the
+  // same DevToolsActivePort path), and every failed attempt's Chrome stderr is
+  // printed — `stdio: "ignore"` discarded exactly the line that says why.
+  //
+  // THE LINE THIS RETRY MUST NOT CROSS. cch-w19-bl-gr115's "do not paper over
+  // the race" ruling governs exit-1 MEASURED intermittency — the browser came
+  // up, the sweep measured, and it disagreed with itself between runs. This
+  // retries only the exit-2 case where Chrome never came up: no width was
+  // rendered, so there is no claim for a retry to hide. Everything after
+  // `devPort` is a measurement and is never retried.
+  let attemptSpawnError = null;
+  const brought = await bringUpChrome({
+    label: "breakpoint-sweep",
+    attempts: BRINGUP_ATTEMPTS,
+    newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-")),
+    launch: (dir) => {
+      attemptSpawnError = null;
+      const child = spawn(chromeBin, [
+        "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+        "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+        "--disable-background-networking", "--hide-scrollbars",
+        `--user-data-dir=${dir}`, "--remote-debugging-port=0", "about:blank",
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      child.on("error", (e) => { attemptSpawnError = e; });
+      return { child, readStderr: captureStderr(child) };
+    },
+    awaitDevToolsPort: async ({ profile: dir }) => {
+      const portFile = path.join(dir, "DevToolsActivePort");
+      for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+        if (attemptSpawnError) break;
+        try {
+          const raw = fs.readFileSync(portFile, "utf8").split("\n");
+          if (raw[0] && Number(raw[0])) return Number(raw[0]);
+        } catch { /* not written yet */ }
+        await sleep(100);
+      }
+      if (attemptSpawnError) {
+        throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+      }
+      return null;
+    },
+    abandon: async ({ profile: dir, child }) => {
+      await reap(child);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    },
+    log: (s) => process.stderr.write(s),
+  }).catch((err) => (err && err.refused ? { refusal: err } : Promise.reject(err)));
 
-  const portFile = path.join(profile, "DevToolsActivePort");
-  let devPort = null;
-  for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-    try {
-      const raw = fs.readFileSync(portFile, "utf8").split("\n");
-      if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-    } catch { /* not written yet */ }
-    await sleep(100);
-  }
-  if (!devPort) return die("Chrome never wrote DevToolsActivePort — it did not start");
+  // exit 2, `die`'s default: the browser never started on any bounded attempt.
+  if (brought.refusal) return die(brought.refusal.message);
+  chrome = brought.child;
+  profile = brought.profile;
+  const devPort = brought.devPort;
 
   let version;
   try {
