@@ -298,7 +298,13 @@ const PIN = [
   { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
 
   // ── github (team-level installation)
-  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. #github-disconnect is wired whenever an installation exists" },
+  // cch-w48-s3, re-pinned here in review: the old note ("wired whenever an
+  // installation exists") stopped being true the moment s3 landed —
+  // githubCardHtml(g, canWrite) emits #github-disconnect only when
+  // providerCanWrite() is true, and OMITS it otherwise. NOT fence-pinned:
+  // providerCanWrite is a boolean, not a three-valued band, so (2i-3)'s
+  // vocabulary derivation has nothing to read. LIMIT 1, and honest about it.
+  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
 
   // ── notifications — every write is wired behind notifCanManage()
   { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
@@ -359,8 +365,14 @@ const PIN = [
   { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
-  { fn: "submitSiteGithub", verb: "POST", route: "/v1/sites/:*/github/connect", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  // cch-w48-s2, pinned here in review: BOTH of these routes are reached ONLY
+  // through #site-github, and siteDetailHtml now emits that control only on the
+  // literal "grant". The fence is pinned rather than merely noted because arm
+  // (2i-4) below FOUND it — loadSite's new instanceAdminAuthority() read was an
+  // orphan the moment s2 landed, which is precisely the FIX direction (2g) was
+  // blind to. MERGE ORDER: this pin requires cch-w48-s2 in the tree first.
+  { fn: "submitSiteGithub", verb: "POST", route: "/v1/sites/:*/github/connect", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadSite", "siteDetailHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s2: #site-github is emitted only on \"grant\"; a member gets a non-interactive chip (connected) or nothing (unconnected)" },
+  { fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadSite", "siteDetailHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s2: same door, same fence — disconnect is reached only from the connected arm of #site-github" },
 
   { fn: "submitInviteAccept", verb: "POST", route: "/v1/invitations/accept", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the invitation token is the authority" },
   { fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
@@ -377,7 +389,13 @@ const PIN = [
 
   // ── the /new flow (a second, parallel console surface)
   { fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
-  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED; second call site on the same route as :13129" },
+  // cch-w48-s1, re-pinned here in review. This row was DELIBERATELY left
+  // unflipped when s4 was written — /new had its own renderer and it never
+  // called launchAuthority(). s1 changed exactly that: renderNewLaunch now
+  // takes launchAuthority()'s band through newLaunchOffer, which emits
+  // #new-launch-btn only on "grant". NOT fence-pinned: the launch band's read
+  // accounting is not done (cch-w48-bl-fence-pins-for-the-other-eight-bands).
+  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit" },
   { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
   { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
   { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
@@ -732,7 +750,21 @@ if (unresolved.length) {
 // move (79 rows, 40 elevated); five rows changed column because the console
 // changed, and the pin had gone on describing the older tree. That decay is
 // what arm (2i) below exists to make expensive.
-const EXPECT = { total: 79, elevated: 40, predicated: 29, unpredicated: 11 };
+//
+// AND THEN WAVE 48'S OWN REVIEW MOVED IT ONCE MORE: 29 → 33, 11 → 7. These four
+// are NOT re-pins of an older tree; they are THIS WAVE's three fences, which
+// were built in sibling worktrees and so could not be seen from here when the
+// row above was written. newLaunch (cch-w48-s1), disconnectGithub
+// (cch-w48-s3), and submitSiteGithub + disconnectSiteGithub (cch-w48-s2).
+// Leaving them at "UNPREDICATED" would have shipped the exact defect this epic
+// is about — a scoreboard telling a reader something the console no longer
+// supports — inside the slice that exists to stop that. The two site rows are
+// FENCE-pinned; arm (2i-4) found them itself, going red on loadSite's new
+// orphaned read, which is the first time this instrument has lost in the FIX
+// direction on a fence it did not already know about. MERGE ORDER, therefore:
+// cch-w48-s2 must be in the tree before this file, or (2i-2) reds on a
+// loadSite that does not yet call the band.
+const EXPECT = { total: 79, elevated: 40, predicated: 33, unpredicated: 7 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
