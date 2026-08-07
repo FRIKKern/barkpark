@@ -304,6 +304,7 @@ func TestStatusJSONCarriesTheCensoredPair(t *testing.T) {
 			WaitingAtLeast int64  `json:"latest_waiting_seconds_at_least"`
 			Censored       bool   `json:"latest_waiting_censored"`
 			WaitingID      string `json:"latest_waiting_deployment_id"`
+			WaitingAsOf    string `json:"latest_waiting_as_of"`
 		} `json:"staleness"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
@@ -320,6 +321,12 @@ func TestStatusJSONCarriesTheCensoredPair(t *testing.T) {
 	}
 	if env.Staleness.WaitingID != "dep-old" {
 		t.Fatalf("the bound must name the row it came from, got %q", env.Staleness.WaitingID)
+	}
+	// A censored bound with no as-of is undated arithmetic (charter D163): the same
+	// pinned window measured 3 → 2 → 0 waiters in five minutes, so a captured
+	// envelope must say WHEN the bound was taken.
+	if _, err := time.Parse(time.RFC3339, env.Staleness.WaitingAsOf); err != nil {
+		t.Fatalf("the censored bound must carry a parseable as-of, got %q (%v)", env.Staleness.WaitingAsOf, err)
 	}
 	// And the sentence itself never reaches the JSON envelope's status keys.
 	if strings.Contains(stdout, "after you made it") {

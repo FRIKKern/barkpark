@@ -1812,6 +1812,11 @@ func siteStalenessMap(dep, newest *cloudclient.SiteDeployment, ledger []cloudcli
 	if waited, id, ok := siteWaitingSince(dep, ledger); ok {
 		m["latest_waiting_seconds_at_least"] = int64(waited.Seconds())
 		m["latest_waiting_censored"] = true
+		// AS-OF, because a censored bound without one is undated arithmetic: the
+		// same pinned window was measured returning 3 → 2 → 0 waiters in five
+		// minutes (charter D163), so a captured JSON blob carrying only a duration
+		// cannot say whether it describes now or an hour ago.
+		m["latest_waiting_as_of"] = siteClock().Format(time.RFC3339)
 		if id != "" {
 			m["latest_waiting_deployment_id"] = id
 		}
