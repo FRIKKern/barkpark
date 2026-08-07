@@ -626,15 +626,47 @@ defmodule BarkparkCloud.DeployLedger do
       %{sample: 18_541, pct: 85.19, min_sample: 200, refused: false, reason: nil}
       %{sample: 74,     pct: nil,   min_sample: 200, refused: true,
         reason: "sample 74 below min_sample 200"}
+
+  ## Scoping the population: `:site_ids` (dr-w16-s6)
+
+  `:site_ids` narrows the census to a list of site ids — how the team-scoped
+  route (`GET /v1/deploy-ledger/census`) asks this same function for the caller's
+  OWN number. Omit it (or pass `nil`) and the population is the whole fleet,
+  which is what the operator route has always asked for.
+
+  THE PREDICATE LIVES HERE, IN THE QUERY, and a post-filter over the rendered
+  `sites` node is not the same thing — it is wrong twice. `site_rows/2` sorts by
+  volume and takes `site_limit` BEFORE anything downstream could filter, so a
+  quiet caller's own site falls off the end of the list entirely; and every
+  fleet-wide total above it (`volume`, `failed`, `live`, both rates) would keep
+  counting rows the caller may not see. Scoping the SOURCE is the only place the
+  narrowing is total.
+
+  `[]` is a legitimate value and means EMPTY, not "everything": a caller who owns
+  no site — or who named only sites they do not own — gets `volume: 0`, which is
+  the fail-closed answer. That collapse is why the caller must hand this option
+  an INTERSECTION it computed itself, never a client-supplied list.
+
+  The ids are interpolated into `d.site_id in ^site_ids`, a `binary_id` column,
+  so every element must already be a well-formed UUID — a junk string raises
+  `Ecto.Query.CastError` (a 500). The router therefore intersects the request's
+  ids with the team's own site ids IN ELIXIR, which drops junk before it can
+  reach this query at all.
   """
   @spec census(DateTime.t(), DateTime.t(), keyword()) :: map()
   def census(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
     site_limit = Keyword.get(opts, :site_limit, 50)
+    site_ids = Keyword.get(opts, :site_ids)
+
+    scoped =
+      from(d in Deployment,
+        where: d.inserted_at >= ^from and d.inserted_at < ^to
+      )
+      |> scope_to_sites(site_ids)
 
     groups =
       Repo.all(
-        from(d in Deployment,
-          where: d.inserted_at >= ^from and d.inserted_at < ^to,
+        from(d in scoped,
           group_by: [d.site_id, d.stage, d.status, d.failure_reason],
           select: %{
             site_id: d.site_id,
@@ -695,6 +727,15 @@ defmodule BarkparkCloud.DeployLedger do
       min_sample: @min_sample
     }
   end
+
+  # The `:site_ids` narrowing, as a clause on the SOURCE query. `nil` is
+  # "unscoped" (the fleet census) and an empty list is "no sites" — those are
+  # different facts and must not collapse into each other, which is why the
+  # absent case is matched on `nil` and never on `[]`.
+  defp scope_to_sites(query, nil), do: query
+
+  defp scope_to_sites(query, site_ids) when is_list(site_ids),
+    do: from(d in query, where: d.site_id in ^site_ids)
 
   @doc """
   Parse the census window from raw query params.
