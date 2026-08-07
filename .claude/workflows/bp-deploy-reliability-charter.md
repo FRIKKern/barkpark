@@ -2105,3 +2105,286 @@ attemptable: its single unblock condition is `git merge-base --is-ancestor ef77a
 CAP_PRESENT on guerrilla — i.e. the box's pull, not another merge. **Stratify any failure-rate measurement
 taken across that merge boundary** — deferrals sit inside volume and outside the numerator, so the cap will
 step the rate BY DESIGN, and reading that as repair would be the exact error Part A §3 exists to prevent.
+## Wave 7 decisions — THE READ HALF, AND THE INSTRUMENT THAT LIES ABOUT ITS OWN FAILURE (2026-08-07)
+
+*Paper `deploy-reliability-wave-7-2026-08-07`. Wave 6's verdict was "three waves built the seeing and never
+turned it on." Wave 7's is one level down, and it is worse: **for the disk axis, the seeing was never
+CONNECTED — the read half of `space` has never appeared in a charter ruling in any wave, and it exists today
+only as two open rail rows that specify it INCOMPATIBLY.** The direction's thesis (reach is the wall) held,
+but three of its load-bearing premises fell under verification, and every correction made the wave smaller.*
+
+- **D96 — THE SPACE READ HALF WAS NEVER CHARTERED, TWO ROWS SPECIFY IT INCOMPATIBLY, AND THE RULING IS: FOLD
+  INTO `/metrics`, WITH THE SECOND QUERY AT THE ROUTER.** *Why:* a runtime BEAM abstract-code scan over every
+  module compiled from #9889's tree printed `COMPILED MODULES REFERENCING normalize_space:
+  [BarkparkCloud.Telemetry]` — **one module, the one that defines it, zero callers.** The same probe printed
+  `METRICS ENVELOPE TOP-LEVEL KEYS: [:ok, :instance, :latest, :points, :beat, :collected_at, :series,
+  :service_health]` / `HAS :space KEY? false`. Live: `POST /v1/agent/space` → **404** while the sibling
+  `/v1/agent/report` → 401, so the agent's 15-minute space post is discarded on every box right now. And
+  #9889 does not merely fail to add a read — it **actively closes the door**, swapping
+  `Registry.recent_events(bp, points)` for `recent_events_of_type(bp, "health", points)` at `router.ex:7784`,
+  which makes a space row unreachable from `/metrics` **by construction**. Two open rows own the missing half
+  with two designs: `dr-w6-s4` criterion 5 ("the control plane folds space into `/metrics`") versus
+  `dr-w5-s3-followup-render-the-space-payload` criterion 1 ("a team-scoped read serves the newest `space`
+  event … the SAME no-existence-leak 404 as the sibling `/telemetry` route"). Dispatch both and the wave ships
+  two read surfaces for one payload — the dedup failure this epic's doctrine exists to prevent. **RULING: fold
+  into `/metrics`.** The CLI already reads exactly that one route (`cloud_instance_top_cmd_test.go:69` asserts
+  `GET /v1/barkparks/<id>/metrics`), and `storageLines` is already the three-honest-states renderer.
+  `dr-w5-s3-followup` is CLOSED as superseded. **THE COST NOBODY WROTE DOWN, and it is the single most likely
+  way this ships green and shows nothing:** because #9889 type-filters the fetch, the fold needs a SECOND
+  query (`recent_events_of_type(bp, "space", 1)`) issued **at the router and passed in** — `Metrics.build/3`
+  is documented PURE and TOTAL over a passed-in window, so a builder who folds inside `build/3` either breaks
+  its purity contract or renders `nil` forever.
+
+- **D97 — S1 SPLITS: THE READ PATH SHIPS FIRST-CLASS, THE PROBE FOLLOWS IT.** *Why:* `dr-w6-s4` as written
+  carries 13 criteria spanning `internal/agent` (the `-kx` unit change), `cmd/barkpark-agent`, `cloud/lib`
+  (the fold), `internal/cli` (the render) AND `.github/deploy.yml` — four fences and a deploy-config edit in
+  one PR. The producer-plus-consumer-in-one-slice principle is right; this row is where it stops being
+  affordable. The split is not symmetric: **the CP+CLI half must be the one that ships first-class, because a
+  fifth wave of producer-only is the indictment.** `dr-w6-s4` is re-briefed DOWN to the fold plus the render
+  (two fences); the agent multi-root/unit work becomes its own row, sequenced AFTER the read path so its bytes
+  land somewhere instead of in a drawer.
+
+- **D98 — THE RESIDUAL LINE IS RULED, WITH FOUR GUARDS AND A CLAMP, OR IT IS NOT BUILT.** *Why:* the residual
+  is the right idea and its arithmetic does **not** survive its hazards unguarded — measured, all four live.
+  (1) **`du -h` rounds UP**, up to **+1 GiB per root** and **systematically positive** (jarl: `du -kx -d1
+  /var` = 30 007 316 KiB = 28.62 GiB while `du -hx` prints `29G`), so a multi-root residual is systematically
+  **negative**; with 4-8 roots that is up to −8 GiB of phantom on a 39 GiB box, dwarfing every other hazard.
+  (2) **Mount boundaries go negative TODAY:** jarl carries a docker overlay whose path `du -x` refuses to
+  cross into (2 020 KiB) but happily traverses when rooted at it (1 505 656 KiB) — listing it as a fifth root
+  takes the residual to **−1.29 GiB**. (3) **pg double-counts 3.37 GiB** — `du -x -k -s /var/lib/postgresql`
+  = 3 615 160 KiB against `sum(pg_database_size)` = 3 528 933 KiB, **97.6% of the same bytes** — on a box
+  whose entire used is 26.9 GiB. (4) **`df` capacity ≠ `df` used:** capacity is `ceil(used/(used+avail))` and
+  excludes root-reserved blocks, so jarl reads 96% capacity against 91.09% used-of-total — a residual built
+  from `disk_used_percent` **invents 1.83 GiB** there (the prior "~2.4 GB" estimate was ~22% high).
+  **RULING:** (i) the denominator is `RootUsedBytes` (`report.go:186-187`, set from `df -P -k` at `:779`),
+  never `disk_used_percent`; (ii) roots must be disjoint AND each verified same-`st_dev` as `/`, and a root
+  failing that test is **EXCLUDED AND NAMED**, never summed; (iii) pg is a `du` root **or** `PGSizeBytes`,
+  never both, and the payload says which; (iv) exact units end to end (`du -x -B1`, or `-k` with an explicit
+  unit parameter), never `-h`. **And CLAMP: a residual that computes negative prints "roots overlap or cross
+  a mount — residual undefined", never a negative gigabyte.** Filed, not taken — it needs the probe and the
+  read path first.
+
+- **D99 — THE DEFERRAL CHAIN HAS A DEPTH, THE CODE COMPUTES IT, AND IT REACHES NO EYE. THAT IS THIS WAVE'S
+  BEST SLICE.** *Why:* the cap is live and working — **63 `box_at_capacity` rows across 5 sites**, all
+  inserted 2026-08-06 22:29:27→22:52:18Z, and **every chain RECOVERED** (longest consecutive run **8**,
+  against a cap of 12; site `7c2025a5` deferred at 22:29:27 / 22:30:28 / 22:31:28 then went `building` at
+  22:32:29). But `consecutive_deferrals/2` (`deploy.ex:1296`) computes the depth, uses it for the threshold,
+  interpolates it into a `Logger.info`, **and discards it**: `git grep -rn "consecutive_deferrals\|in a row"
+  origin/main -- cloud/lib internal/` returns hits **only** in `deploy.ex` — zero in `internal/`, zero in the
+  console. The operator-visible `detail` is **byte-identical on deferral 1 and deferral 11**
+  (`box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) …`). Two facts make this
+  urgent rather than cosmetic. **The terminal arm is not theoretical — it has fired in production**: exactly
+  one row in the whole ledger carries the terminal wording (site `7c2025a5`, `failed`, 2026-08-05 22:57:53,
+  "*it has now refused 6 rebuilds in a row for this site*"), the sibling `BOX_BUSY` cause at its lower cap of
+  6, and that publish is terminally `failed` with nothing to re-drive it. **And the 12-cap is a ZERO-PROGRESS
+  guard, not a timer** — `Enum.drop_while(...) |> Enum.take_while(deferred and same cause)` means one `live`
+  row resets the counter, so a merely-slow box can defer indefinitely without ever tripping it (site
+  `d8e9c2c7` took 75 deferrals in 12h and never came within 4 of the cap). `cloud/lib/barkpark_cloud/sites/
+  deploy.ex` is touched by **zero** open PRs. Dependency-free, uncontested, auto-deploys on merge, needs no
+  agent release to reach any box, and proves itself against a production ledger that already holds the rows.
+
+- **D100 — THE CAP IS LIVE; D91 IS DEAD; AND `_build/prod` IS A TRAP THAT NEARLY PRODUCED THE OPPOSITE
+  VERDICT.** *Why:* `/opt/barkpark` HEAD on guerrilla is **exactly** `ef77af274`; `barkpark-slot@blue` (green
+  `inactive`) entered active at 22:24:16Z from an `Elixir.Barkpark.Sites.DeployRunner.beam` compiled
+  22:22:22Z — 114 s earlier — and `grep -c box_at_capacity` on the live source returns 6. D91's "structurally
+  deferred behind a deploy" premise is retired. **THE TRAP, recorded so it does not recur:** `api/_build/prod`
+  on that box is a **dead 2026-07-20 directory** whose DeployRunner beam contains zero `box_at_capacity`;
+  blue/green builds into `_build_blue` / `_build_green`, so reading `_build/prod` yields a confident, wrong
+  "the cap is not deployed."
+
+- **D101 — AN INSTRUMENT THAT CALLS A DEAD BROWSER A CSS DEFECT IS THIS EPIC'S OWN THESIS, LIVE, ON A REQUIRED
+  BLOCKING GATE.** *Why:* re-measured at `origin/main` in a clean worktree with an executable Chrome stub that
+  starts and immediately exits — the exact CI condition, since the binary *exists* and so the preflight's
+  not-executable check does not catch it: **`cssom-parity.mjs` exits 1, `overflow-guard.mjs` exits 2 on the
+  identical fault.** `console-harness.yml`'s `1)` arm then prints "*The browser's CSSOM disagrees with the
+  authored stylesheet (exit 1). This is a REAL CSS defect in `cloud/priv/static/app.css` — rules the browser
+  dropped or rewrote.*" while its own stderr reads "*Chrome never wrote DevToolsActivePort — it did not
+  start*". That banner **fired in CI** (job 92711949228). The workflow's case block is correct; the instrument
+  lies to it. Root cause is one clause: `const envFailure = err instanceof ReferenceError` (`cssom-parity.mjs:
+  646`) while the bring-up throws a plain `Error` at `:603` — the ReferenceError arm is documented as a
+  *second* line of defence for a missing global, so the fix **adds** the bring-up class rather than replacing
+  it. **FENCE:** no open PR touches `cssom-parity.mjs`; cch wave 37 owns `app.js`, the notifications tree and
+  the path-escape scripts, none of which this slice touches.
+
+- **D102 — RE-CLAIMING THE EPIC TASK CLEARS THE TASK GATE; A RE-RUN IS A COIN FLIP THAT DELETES THE CHECK
+  FIRST; NEVER RELEASE THE CLAIM.** *Why:* three things were witnessed, not inferred. (1) Claiming
+  `task-fb4fb869490b4213` moved it out of `open` entirely — the gate's `in_progress` arm passes on
+  `worker != "."` alone and `EXPECTED_WORKER` is empty — and a plain `gh run rerun --failed` then re-fired the
+  required context **green on both #9876 and #9905 with no push**, refuting "only a PUSH re-fires a sticky
+  verdict" *for* `pr-task-gate.yml`. (2) **Requesting a re-run DELETES that workflow's check-runs**: main's
+  head went 36 → 29 → 36 check-runs, the required `Console gate` read **ABSENT (not red)** and combined status
+  read `pending`; #9887 sat in that hole **50+ minutes** with `attempt=1 queued` and `attempts/2/jobs` → 404.
+  A red required check was thereby converted into a missing one. (3) The Chrome re-run is **1 clear / 1 repeat
+  at n=2** — main's run flipped `failure → success`, #9889's attempt 2 completed `failure` on the identical
+  refusal. "Re-run and merge" is a loop with an unmeasured trip count, not a step. **And DO NOT RELEASE the
+  claim:** the `open` arm reds `released_ge_expired` unconditionally, so a voluntary release is strictly worse
+  than letting the 2700 s lease lapse (the reap stamps `expired_at` *after* both PRs' `created_at`, so the
+  ordering clause still passes). Two stale premises corrected while measuring: **which** Chrome job refuses is
+  not stable (on main's attempt 1 `Overflow guard` PASSED while `Billing tier floor` and `CSSOM parity`
+  refused), and a third red class exists that is not Chrome at all — `Failed to resolve action download info.
+  Error: Service Unavailable`.
+
+- **D103 — 5xx CANNOT BE RENDERED HONESTLY CLI-ONLY; IT IS A DETAIL LINE WITH ITS VOLUME, AND THE FIX IS FOUR
+  LINES OF CONTROL PLANE.** *Why:* 23 samples at 15 s against live guerrilla put `n = req_per_s × 60` at
+  **min 58 / median 90 / max 647**, and only **6 of 23 clear the epic's own `@min_sample 200`**
+  (`deploy_ledger.ex:164`, where `rate/2` refuses below it and prints the refusal). Worse, **n is strongly
+  ANTI-correlated with p95** — n=647 ↔ 121 ms, n=68 ↔ 1518 ms — because `req_per_s` counts *completed*
+  requests, so the denominator collapses exactly when the box is sick and any share **inflates precisely when
+  it is least trustworthy**: D75's 0.22 5xx/s is **14.4% at median n and 2.0% at max n**, a 7× severity spread
+  from one unchanged number. **RULING: a DETAIL LINE, never a rung** (a fence on a bare rate is indefensible;
+  a fence on the share needs a denominator not on the wire; `err_5xx_per_s` will be nil on 5 of 6 boxes for
+  the foreseeable future, so a rung would be fleet vocabulary that can only ever fire on one box) — **print
+  the observation WITH its volume and refuse the share below 200**, reusing `DeployLedger.rate/2`'s refusal
+  node so no caller can print a percentage without the volume that produced it. One arithmetic gift:
+  `err_5xx_per_s / req_per_s` is **exactly** errors/count (`compute/4` divides both by the identical
+  `elapsed_ms`), so the share adds zero estimation error — only sample size is at issue. **Therefore
+  `req_per_s`/`p95_ms` MUST join the pressure block**: absent from `merge_pressure` on main AND on #9888, but
+  **already in the stored beat jsonb** (`/telemetry` serves guerrilla `req_per_s: 1.83, p95_ms: 2149` today
+  off the same health payload) — two keys in `@unmetered_pressure`, two lines in `merge_pressure`, two fields
+  on `cloudclient.Pressure`, **no agent change and no box deploy**. `dr-w6-s5` criterion 10's file ban must
+  therefore WIDEN to permit `internal/cloudclient/` and `router.ex`, keeping `cloud/priv/static/` ceded — or
+  the slice ships the exact denominator-free rate it exists to prevent.
+
+- **D104 — THE CHARTER'S OWN DECISIONS ARE UNCITABLE, AND 86/87/89/90 ALREADY MEAN SOMETHING ELSE.** *Why:*
+  `origin/main`'s charter ends at **D66**; D67-D77 live only on #9876 and D78-D95 only on #9905, and the
+  working copy carrying D1-D95 is **untracked**. Meanwhile `git grep D86 origin/main -- api/lib cloud/lib`
+  hits `deploy_request.ex`, `deploy_runner.ex` (×3) and `prebuilt_artifact.ex` — *site-spawner* D86/D87, about
+  prebuilt artifacts — plus `billing.ex` and `registry.ex` (×5) for a third namespace, `PDF-D86`. A builder
+  told to "follow D86/D87" finds four confident, shipped, wrong answers. **RULING: every wave-7 task body
+  cites `deploy-reliability charter D<n> (PR #9905)`, never a bare `D<n>`, and inlines the rule text.** And
+  the **DANGEROUS PARTIAL**: `origin/main`'s D59 clause (3) mandates "*Any non-zero exit must DISCARD and
+  report unmeasured, never partially land*" — the exact rule the unmerged D86 reverses — so a builder who
+  `git show`s main for the discard rule derives the **opposite** behaviour from a correctly-cited decision.
+  Any probe brief must say so in its own words.
+
+- **D105 — CI IS THE CONSTRAINT: THIS WAVE CUTS TWO PRs, AND SAYS WHAT IT IS NOT CUTTING.** *Why:* Actions was
+  in declared `major_outage`; a re-run deletes a required check for an unbounded window (50+ min, measured);
+  main's own Console gate sat starved with zero dispatched jobs for ~6.4 h before going green. Fifteen PRs are
+  open and every one of them merges CLEAN against `ef77af274` — all 105 head-to-head pairs are clean and a
+  15-deep stack merges clean in **both** directions, so **there is no merge-order constraint among the open
+  PRs at all**. The constraint is GitHub, not the tree. Two round-1 slices, both fence-disjoint from all 15
+  open PRs and from cch wave 37, both provable on a local gate; everything else is a deferral with a complete
+  brief. **The fence is disjoint at PR level and NOT at slice level, which is the finding:** #9887 rewrites
+  `internal/cli/cloud_status_cmd.go` bands `17-135` and `460-471` of a 489-line file, and `attentionDetail`
+  sits at `:123` — **inside** that rewrite — so the `degraded`-arm and release-pin slices cannot branch off
+  main beside it and are sequenced behind its merge. `internal/agent/report.go` is the opposite: #9888 stops
+  at line 550 and the space probe lives at 762-1051, a 211-line gap, so the probe is safe to build
+  concurrently once it has somewhere to land.
+
+### Wave 7 plan — 3 slices, 2 in round 1, 2 new PRs
+
+| # | slice | round | surface | model | gate |
+|---|---|---|---|---|---|
+| 1 | `dr-w7-s1-deferral-chain-names-its-depth` | 1 | `cloud/lib/.../sites/deploy.ex` + `internal/cli/cloud_site_cmd.go` | opus | `mix test test/barkpark_cloud/sites_deploy_test.exs` + `go test ./internal/cli/` |
+| 2 | `dr-w7-s2-parity-instrument-refuses-instead-of-accusing` | 1 | `cloud/priv/static/__preview__/cssom-parity.mjs` | opus | dead-Chrome stub ⇒ exit 2; real Chrome ⇒ exit 0 |
+| 3 | `dr-w6-s4-space-reaches-eyes` (re-briefed) | 2 | `cloud/lib/.../metrics.ex` + `web/router.ex` + `internal/cli/cloud_instance_top_cmd.go` | fable | `mix test test/barkpark_cloud/metrics_test.exs` + `go test ./internal/cli/` |
+
+**HIGH-FLIP-RISK, slice 3:** the `/metrics`-fold-versus-new-route ruling (D96) and the purity constraint on
+`Metrics.build/3`. An independent second reviewer is warranted before merge; this workflow spawns one
+reviewer, so that dispatch is a manual lead step.
+
+**D66 applies to slice 2** (pure `cloud/priv/static/__preview__` — the Console gate DOES assert on it, so this
+is the one slice this wave whose required context is a real signal rather than a skip).
+
+**What this wave does NOT take, and says so.** The residual line (D98) is filed, not built — it needs the
+probe and the read path first, and unguarded it manufactures negative gigabytes. The agent multi-root probe is
+filed and sequenced behind the read path so it does not become a fifth producer-in-a-drawer. Cutting and
+blessing `v0.2.26` remains a named human gate and is now **strictly ordered**: #9890 must merge and
+`BARKPARK_SELF_UPDATE_APPLY=1` must be set on the four frozen boxes FIRST, because
+`autoupdate_rollout_worker.ex:135-141` maps a `503` to `Registry.pause_autoupdate(bp)` and **only a human
+`bp cloud autoupdate resume` clears it** — all six boxes read `autoupdate_paused: false` today and five of
+them will 503, so blessing first would permanently pause five of six boxes, one per tick. Nothing is deleted
+from any disk: jarl's 25 GB — `/var/lib/containerd` 13.80 GiB plus `/var/lib/barkpark-builder` 11.30 GiB — is
+a **known, filed, unbuilt** platform gap (`cp-ops.yml:99-104` says so verbatim: "*the jarl box hit 100% of 38G
+this way and took the instance down*") whose fix, `jpf-runtime-image-pruning`, has sat unclaimed since
+2026-08-01. It becomes VISIBLE and NAMED, never smaller.
+
+### Wave 2026-08-07 (wave 7) — REVIEWED · Paper `deploy-reliability-wave-7-2026-08-07` · grade **B+**
+
+**Two of three slices built, reviewed, fixed in place, re-gated, PUSHED and PR'd. Nothing merged — the lead
+merges.** The third (`dr-w6-s4-space-reaches-eyes`) is round 2, deferred by the sequenced-rounds law behind
+#9889, which is not merged. That is not a stall; it *is* the wave's honest headline, see below.
+
+| Slice | Task | Final branch | PR | Gate on the FINAL state |
+|---|---|---|---|---|
+| A deferred site names how deep its refusal chain is (D99) | `dr-w7-s1-deferral-chain-names-its-depth` | `…names-how-deep-its-refus-0-r` | [#9959](https://github.com/FRIKKern/barkpark/pull/9959) | 64 tests, 0 failures (cloud) · `go build`+`vet`+`test ./internal/cli` ok · gofmt clean |
+| The parity instrument refuses to measure instead of accusing (D101) | `dr-w7-s2-parity-instrument-refuses-instead-of-accusing` | `…refuses-to-measure-1-r` | [#9960](https://github.com/FRIKKern/barkpark/pull/9960) | ENOEXEC binary → 2 · dead-chrome stub → 2 · real Chrome → 0 (1305/1305 heads, MISSES 0) · `proof.sh` clean=0 swallowed=1 · dropped-rule sheet → 1 (MISSES 1) |
+
+**What landed.** S1 is the wish-bearing slice and the wave's strongest work. `defer/3` computed the chain
+depth, spent it on the terminal threshold and one `Logger` line, and **discarded** it — so on the production
+ledger 63 capacity-deferred rows across five sites carried a byte-identical sentence and refusal 8 read
+exactly like a first blip. The depth, the *cause's own* bound (12 for capacity, 6 for a busy box, read from
+`max_consecutive_deferrals/1`, never a literal) and the fact that the counter is a **zero-progress guard, not
+a countdown** now ride the existing `failure_reason`/`detail` columns — no migration. The consumer shipped in
+the SAME PR, per this epic's standing shape-fix after three waves of producers landing in drawers:
+`git grep 'deferred' internal/cli/cloud_site_cmd.go` returned nothing before, and `bp cloud site status` now
+prints a dedicated `deferral` row plus `deferral_depth`/`deferral_bound` as numbers in `-o json`. A pre-D99
+control plane says the depth is *unavailable* rather than printing a zero that would read as "no chain".
+S2 closed a gate that accused the stylesheet for the environment's fault, and held the anti-vacuity line that
+was the whole point of the slice: the refusal class rides the error **object**, never its message, and
+everything the browser reports once it IS up still exits 1 (independently re-derived on both defect paths).
+
+**What did NOT land, and must be said plainly.** The wish names three things; this wave moved one of them,
+partly. *"See what is taking up space"* — jarl's 25 GB, the concrete thing the owner asked about — advanced by
+**zero merged code**, for the second consecutive wave, because the read half is sequenced behind an unmerged
+PR both times. *"See a struggling box as struggling"* advanced by nothing. The cap exists and fires, and S1
+makes its refusals legible, which is real progress on the third clause's operator surface — but half the
+wave's built output (S2) is CI hygiene on a console-stylesheet gate and serves the wish only by analogy.
+
+**Review fixes made in place** (three commits on the two `-r` branches, each proved by mutation, not reading):
+
+1. **S1** — the deferral arm and the failed-staleness arm both write `reason`, and the deferral arm runs
+   SECOND. With a failed NEWEST row and a deferred live pointer the header said "the NEWEST deploy FAILED" and
+   then printed the OLDER deferral's sentence beneath it, describing a different row than the status line
+   named. The drop is the louder truth and now wins; reverting the guard makes the new test FAIL.
+2. **S1** — the depth clause sits ahead of the re-queue promise *because* `short_detail/1` clamps `detail` to
+   varchar(255), but every assertion ran on a SHORT reason where the clamp never fires, so the ordering was
+   unpinned. A new test forces the clamp with a 180-char box message and pins that the depth survives it.
+   (This was the builder's own named gap #3 — the self-review was honest and worth its length.)
+3. **S2** — D101 tagged three bring-up steps and **missed the fourth: the spawn itself.** `findChrome()`'s
+   `X_OK` preflight cannot see exec-time faults (ENOEXEC — the arm64/amd64 runner-image mismatch class —
+   EACCES, ETXTBSY). Measured on the review host (node v22.22.0, darwin): `spawn` throws ENOEXEC
+   **synchronously**, so an unexecutable Chrome reached the classifier untagged and printed
+   `!! PARITY ERROR: spawn ENOEXEC` at exit 1 — i.e. `console-harness.yml`'s "This is a REAL CSS defect in
+   app.css". The slice shipped with its own bug class still live inside it. Both delivery shapes now covered.
+
+**Ledger audit: clean.** Both builders claimed before working, stamped evidence as they went (S1 8/9, S2 6/7),
+left lifecycle `in_progress`, and left the merge-gated "PR is merged" criterion OPEN for the lead. The unbuilt
+round-2 slice reads open / 0-of-9 / unclaimed. No task outside this wave was touched. One staleness fix: both
+now-lines still said "Not pushed", so a flat `review_verdict` was added to each task naming the final branch,
+the PR, the fixes on top, and the gate re-run — patched, re-published, read back.
+
+**What the next wave should take.** Dispatch order: merge round 1 (#9959 first — it carries the wish — then
+#9960); `dr-w6-s4-space-reaches-eyes` becomes dispatchable only once #9889 merges, and it is HIGH-FLIP-RISK on
+two judgments (the `/metrics`-fold-versus-new-route ruling D96, and the `Metrics.build/3` purity constraint)
+so an independent second reviewer is owed before merge. Then, in priority order:
+**(a)** point the wave at clause 1 and stop deferring it — if #9889 will not merge, re-cut the read half
+against what IS on `main` rather than sequencing behind it a third time;
+**(b)** take `dr-w7-followup-deploy-follow-spins-on-deferred` (filed this wave, five criteria, unclaimed) —
+`cloudclient.SiteDeploymentTerminal` omits `deferred`, so `bp cloud site deploy --follow` polls a SETTLED
+deferred row for its full ~10-minute budget against the box that just said it was at capacity and then prints
+"deploy in progress" and exits 0. Leaving it open means `status` tells the truth about a deferred row while
+`--follow` lies about the same row;
+**(c)** two structural debts, both named by their builders and neither taken: S1's producer sentence and the
+CLI's `refusal (\d+) of (\d+)` regex are ONE contract across two languages with no shared constant; and
+`cssom-parity.mjs` classifies errors in one place at the bottom of a catch block, where two waves have now
+added a class and the second one MISSED a step — a `die()`-style helper that picks a class *at the throw site*
+(the shape `overflow-guard.mjs` already has) would have made the ENOEXEC hole unwritable.
+
+**ADDENDUM, same day, before the lead touches either PR.** Both wave-7 PRs are RED on `Console gate` — one of
+the four required blocking contexts — and **neither red is caused by either PR.** The hosted runner's headless
+Chrome is intermittently failing to start:
+
+- #9959, *Overflow guard (rendered)*: `!! OVERFLOW GUARD: Chrome never wrote DevToolsActivePort — it did not start`
+- #9960, *Billing tier floor (rendered)*: `!! BREAKPOINT SWEEP (exit 2): Chrome never wrote DevToolsActivePort — it did not start`
+
+`CSSOM parity` **passed** in the same #9960 run, so the fault is intermittent bring-up, not a missing binary.
+Every affected probe refused correctly at exit 2 and said in plain words that no claim was being made — the
+discipline this epic built is working, and this is the exact fault class wave 7's own D101 slice extends to
+`cssom-parity`. What is wrong is the last step: `console-harness.yml`'s `2)` arm converts a REFUSAL into
+`exit 1`, so at gate level a refusal is indistinguishable from a defect, and a runner that cannot start Chrome
+blocks every PR in the repo — including PRs that touch no console asset at all. Filed as
+`dr-bl-w7-runner-chrome-refusal-blocks-every-pr` (published, 5 criteria, unclaimed) with three candidate
+shapes and the counter-argument stated: the fix is **not** "make refusals green", which is how a browser gate
+quietly stops gating. Not re-run by the reviewer — a `gh run rerun --failed` has previously *deleted* a
+required context on this repo, and that is the lead's call, not a reviewer's.
