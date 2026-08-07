@@ -367,8 +367,8 @@ export function familyOf(scen) {
 // name-keyed entries below, which is what makes a 105th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
   "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
-  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 10 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
-  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 9 vary binding/verify content inside the same .detail-grid. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
+  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
+  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 10 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 9 are member-role, ACTOR-IDENTITY and empty-state variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner.",
@@ -393,8 +393,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 21-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 108 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 83 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 110 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 85 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -425,8 +425,19 @@ export const RESIDUE_FAMILY_REASONS = {
 // scenario "members-admin-actor" (family hash:#settings)` (and the twin) until
 // the entries below were written; the four numbers here were then RE-READ from
 // `scenarioReport`, never carried from the brief.
-// `familyOf` over all 108 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 83 is the RESIDUE, not the census.
+// cch-w48-s6 moved it an EIGHTH time, by TWO, and deliberately in ONE commit:
+// `overview-member-empty-fleet` (the first fixture combining a member actor with
+// a zero-instance fleet — the exact frame launchFlow's pre-hoc refusal exists
+// for) and `site-member` (the first member to enter the site layer at all) are
+// the 109th and 110th scenarios and the 84th and 85th residue entries. ONE
+// owner, ONE merge window, on purpose: main is strict:false, so two green PRs
+// each bumping this literal by one merge without conflict and red main on the
+// second (the 104->105 precedent). The sweep exited 2 with `UNLISTED scenario
+// "overview-member-empty-fleet" (family hash:#overview)` and the twin until the
+// entries below were written, and all five numerals were then RE-READ from
+// `scenarioReport`, never carried from the brief.
+// `familyOf` over all 110 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 85 is the RESIDUE, not the census.
 //
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
 // "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
@@ -434,7 +445,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
 // that reads these bytes. Every numeral in this block is now named by the arm
 // that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 108 / 26 / 25 / 83 / 13 — "the census reconciles: …", whose TITLE is now
+//   * 110 / 26 / 25 / 85 / 13 — "the census reconciles: …", whose TITLE is now
 //     built from `scenarioReport` by template literal rather than typed, so the
 //     printed line has no second copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
@@ -480,7 +491,7 @@ export const SCENARIO_RESIDUE = {
   "offload-working": "hash:#instance",
   "offload-done": "hash:#instance",
   "offload-blocked": "hash:#instance",
-  // hash:#overview — 10
+  // hash:#overview — 11
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
   "fleet-usage": "hash:#overview",
@@ -491,7 +502,8 @@ export const SCENARIO_RESIDUE = {
   "overview-trial-runway": "hash:#overview",
   "overview-attention": "hash:#overview",
   "overview-never-reported": "hash:#overview",
-  // hash:#site — 9
+  "overview-member-empty-fleet": "hash:#overview",
+  // hash:#site — 10
   "promote-failure": "hash:#site",
   "promote-in-flight": "hash:#site",
   "promote-retry": "hash:#site",
@@ -501,6 +513,7 @@ export const SCENARIO_RESIDUE = {
   "site-binding-bound": "hash:#site",
   "site-binding-unknown": "hash:#site",
   "site-binding-mismatch": "hash:#site",
+  "site-member": "hash:#site",
   // hash:#settings — 9
   "members-admin-actor": "hash:#settings",
   "members-peer-owner": "hash:#settings",
