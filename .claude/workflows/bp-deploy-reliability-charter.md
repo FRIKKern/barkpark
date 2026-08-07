@@ -2389,6 +2389,79 @@ shapes and the counter-argument stated: the fix is **not** "make refusals green"
 quietly stops gating. Not re-run by the reviewer — a `gh run rerun --failed` has previously *deleted* a
 required context on this repo, and that is the lead's call, not a reviewer's.
 
+### Wave 2026-08-07 (wave 10) — REVIEWED · Paper `deploy-reliability-wave-10-2026-08-07` · grade **A**
+
+**Both round-1 slices built, reviewed, fixed in place, re-gated, PUSHED and PR'd. Nothing merged — the lead
+merges.** The other two slices (`dr-w9-s6`, `dr-w10-s4`) are round 2, deferred by the sequenced-rounds law
+behind S1's merge. That is the law working, not a stall: all three edit `deploy_ledger.ex` and `client.go`,
+and this epic already paid once for dispatching them beside each other (#10014, still CONFLICTING).
+
+| Slice | Task | Final branch | PR | Gate on the FINAL state |
+|---|---|---|---|---|
+| The verdict reads the deploy rate (D148/D149/D150) | `dr-w10-s1-verdict-reads-the-deploy-rate` | `…the-deploy-rate-and-ca-0-r` | [#10129](https://github.com/FRIKKern/barkpark/pull/10129) | 50 tests, 0 failures · full cloud suite 3001/0 · `go build`+`vet`+`test ./internal/cli` ok · gofmt + mix format clean |
+| An absent required context is dateable (D154/D155) | `dr-w10-s3-absent-required-context-is-dateable` | `…context-becomes-a-dat-1-r` | [#10130](https://github.com/FRIKKern/barkpark/pull/10130) | 35 passed / 0 failed · `required-checks.test.sh --hermetic` 128/0 · LIVE rc 1: absent=10, stale-queued=1 |
+
+**What landed — the wave's headline, in one line each.** The fleet verdict stopped guessing. `bp cloud status`
+printed `ok` for a box failing **46.28% of its 1,290 terminal deploys in 24 h**, from a bare `default:` arm
+that read no vital at all, while the number sat one JOIN away in the same database with `barkpark_id`
+appearing **zero** times in `deploy_ledger.ex`. `box_rates/3` closes that in ONE grouped query (proved single
+by a telemetry counter, not by reading the code), the ladder RENUMBERS to ten rungs across all three surfaces
+that assert it, and the deploy tail is an explicit tri-state whose unmatched arm fails **closed** to
+`unmetered` — never to `ok`. And the second silence: PR #9887 sat unmergeable for twelve hours with **zero red
+checks** because a required context's producing run was created and never dispatched. The census now dates
+that absence and classifies it, and its first live run found the specimen at 13.1 h plus a `pr-task-gate` run
+queued since 2026-07-23 at attempt 9 — **358 hours**.
+
+**Both slices were high-flip-risk (D160) and both judgments were independently re-derived, not re-read.**
+SUSTAINED, both. (a) A **raw** box rate is defensible as the BOX verdict: the rung is named `deploys_failing`,
+which is true regardless of agency; `box_caused` rides beside it as a mandatory companion; and the box-caused
+subset is measurably the *more* shoppable numerator (LOO span 1.730x vs raw's 1.343x). (b) The absence split
+is a genuine total tri-state, not a fallthrough by a new route — `deployMeasured` is explicitly cased and the
+surviving `default:` is the fail-closed arm. (c) ABSENT/PENDING disjointness beside honest-gates D76 is
+**structural**, not conventional: GitHub renders a check run as soon as a job is created, so a pending check
+is always in `names` and always skipped; D76's subject never arises. **An independent second reviewer is still
+owed on both before merge** — this workflow spawns one reviewer, so that dispatch is the lead's step.
+
+**Review fixes made in place** (two commits on the `-r` branches):
+1. **S1 — absorption was denominated on EVERY row**, putting NOT-ATTEMPTED rows (D19 tombstones) into a rate
+   denominator against `not_attempted_classes/0`'s own written contract, and in the comforting direction:
+   absorption is the companion that stops a falling terminal rate from reading as a repair, and it was being
+   diluted. It also made the box node and `census/3` answer two different questions under one word. Now
+   denominated on ATTEMPTED, with a probe that asserts the box node's absorption equals `census/3`'s deferred
+   share on the same rows. Mutation-proved: tombstones back in and it reads 750 instead of 500, suite 50/1.
+2. **S3 — the census's second-largest live class had no name.** Three of the ten rows the first real run found
+   came out `UNCLASSIFIED(status=completed)`: the instrument reporting that it did not know, about the case it
+   knew most about. An instrument built to end illegible reporting cannot ship its own headline illegible.
+   Named `NAME_NOT_IN_RUN` (remedy: rebase or edit the spec — never re-dispatch), with a probe pinning that it
+   did not become a catch-all. Also: `read_jobs_count` now fails closed on any non-numeric answer (a `null`
+   `total_count` used to fall through to the calm class), and the SCREAM line recites only the limbs that fired.
+
+**What the wave did NOT do, said plainly.** Nothing is merged, so the AFTER number does not exist — this wave
+shipped the instruments, not the proof that anything improved. `box_rates/3` is proved to be ONE query, not a
+CHEAP one, on a box whose known pathology is swap thrashing. Neither instrument has ever run in CI: the census
+workflow is schedule-only and cannot fire until it is on `main`, and the deploy vital has never been served by
+the real router to a real `bp cloud status`. And the census's first scheduled run will land **RED for reasons
+unrelated to today's defect** — nine of its ten live rows are three ancient PRs (#2907, #6057, #6086) that are
+genuinely unmergeable and were genuinely unreported, which is the wish, but a permanently red 6-hourly watch is
+one people mute, and then the actionable 13-hour row at the top is invisible for the old reason wearing new
+clothes. Filed, with three named options and a recommendation, as `dr-w10-r2-three-ancient-prs-keep-the-census-red`.
+
+**Ledger.** Both slice tasks sit `in_progress` with the merge-gated criterion correctly left open for the lead
+— **the lead closes `dr-w10-s1` criterion 12 and `dr-w10-s3` criterion 10 on merge.** No lies found: every
+stamp carried real run output and real mutation runs, and the two deferred round-2 tasks were untouched. A
+`review` field was added to each slice task naming the `-r` branch, the PR, the fixes and the criteria whose
+evidence the fixes made stale (S1's absorption wording and 49→50 tests; S3's 32→35 probes). Two follow-ups
+filed beyond the builders' own: `dr-w10-r1-unmetered-is-permanent-for-a-small-box` (a small box can never reach
+`min_sample` in 24 h, so it wears a permanent attention row — the fix is a longer horizon for the *unmetered
+determination*, not a bucket change, and the obligation filed is a measurement plus a ruling) and
+`dr-w10-r2-three-ancient-prs-keep-the-census-red`.
+
+**Next wave takes the dispatch order, and it is not negotiable.** Merge round 1 (#10129 then #10130 — they are
+file-disjoint, so either order), then `dr-w9-s6-the-rate-names-its-absorption` once #10129 is on `main`, then
+`dr-w10-s4-payload-key-set-guard` once BOTH are. Then the thing this epic has still never done: watch the two
+instruments run for real — the census's first scheduled tick under `GITHUB_TOKEN`, and the deploy vital served
+by the live router — because a proof taken from a shell is not a proof taken from CI.
+
 ## Wave 8 decisions — NAME THE CAUSE, PUT THE NUMBER IN FRONT OF A HUMAN, LET BOTH SURFACES REFUSE (2026-08-07)
 
 Paper `deploy-reliability-wave-8-2026-08-07`. Epic task `task-fb4fb869490b4213`.
