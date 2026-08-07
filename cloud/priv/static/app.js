@@ -13476,8 +13476,17 @@
     // Only a MOVED answer repaints: re-rendering a granted form under a name
     // the operator has already typed would destroy it to say nothing new.
     if (launchAuthority() !== m.band) launchFlow(m.container, m.opts);
-    // The head's sentence was decided from the same unknown answer.
-    if (currentView() === "overview") paintOverviewHead((overviewData && overviewData.list) || []);
+    // The head's sentence was decided from the same unknown answer — but the
+    // fleet it describes has to be KNOWN first. cch-w47-rv: /v1/me is the
+    // cheaper read and usually lands while GET /v1/barkparks is still in
+    // flight, so repainting from a null list wrote "Ready when you are — launch
+    // your first Barkpark." over an owner's twelve-instance dashboard for as
+    // long as the fleet took to arrive — a fresh lie inside the honesty fix.
+    // The loader paints the head itself the moment the list lands (:6406), so
+    // skipping here strands nothing.
+    if (currentView() === "overview" && overviewData && overviewData.list) {
+      paintOverviewHead(overviewData.list);
+    }
   }
 
   // The two header offers are painted once per fleet load, from a path a late

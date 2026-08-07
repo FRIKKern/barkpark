@@ -17940,7 +17940,9 @@ test("cch-w47-s1: a /v1/me that lands LATE repaints the runway, the head AND the
     sandbox.location.hash = "#overview";
 
     // The strand's starting point: the runway painted while the answer was out,
-    // exactly as a cold boot into #overview does.
+    // exactly as a cold boot into #overview does — with the fleet already
+    // landed, which is the ONLY state whose head this repaint owns.
+    hooks.overviewData.list = [];
     hooks.clearMe();
     hooks.launchFlow(c.el, { runway: true });
     hooks.paintOverviewHead([]);
@@ -17968,9 +17970,20 @@ test("cch-w47-s1: a /v1/me that lands LATE repaints the runway, the head AND the
     await driveMe(200, W47_OWNER);
     assert.match(owner.el.innerHTML, /class="launch-form"/, "the owner's form comes alive without a reload");
     assert.equal(dom.nodes["#overview-sub"].textContent, W47_SELL, "…and the head goes back to the invitation");
+
+    // cch-w47-rv — AND THE HEAD IS NOT REPAINTED FROM A FLEET NOBODY HAS READ.
+    // /v1/me is the cheaper read and normally lands while GET /v1/barkparks is
+    // still in flight; a repaint from a null list states "launch your first
+    // Barkpark" over an owner's loading dashboard. The loader owns that paint.
+    hooks.overviewData.list = null;
+    dom.nodes["#overview-sub"].textContent = "Your fleet at a glance — and what needs you.";
+    await driveMe(200, W47_MEMBER);
+    assert.equal(dom.nodes["#overview-sub"].textContent, "Your fleet at a glance — and what needs you.",
+      "an unread fleet has no head to correct — writing one is a fresh lie inside the fix");
   } finally {
     Object.assign(sandbox, { document: saved.document, fetch: saved.fetch });
     sandbox.location.hash = saved.hash;
+    hooks.overviewData.list = null;
     hooks.clearMe();
   }
 });
