@@ -49,12 +49,22 @@
 # sweep that found nothing — and the UNKNOWN case is not hypothetical: the first
 # live run of this script hit nine of nine.
 #
+# AND AN ALL-SKIPPED SWEEP IS THE SAME FAILURE WEARING A DIFFERENT STATE (D422).
+# Measured 2026-08-06 against this repo, twice, six minutes apart, byte-identical:
+# thirteen open PRs, THIRTEEN `skip` rows, `casualties: 0`, `NO CASUALTY`, exit 0
+# — side (B) was never asked about a single head. Eight of the thirteen were
+# MERGEABLE/BLOCKED, which is not a rare alignment: BLOCKED is the state every
+# open PR passes through while any required check is in flight. So the verdict is
+# now REPORTED WITH ITS COVERAGE, and an evaluated set of zero is exit 2.
+#
 # EXIT CODES
-#   0  no casualty — every unblocked, mergeable PR renders every newly proposed
-#      context (or the candidate proposes nothing new)
+#   0  no casualty — every unblocked, mergeable PR this sweep could EVALUATE
+#      renders every newly proposed context (or the candidate proposes nothing
+#      new). When some PRs were skipped, the verdict says so on its own line.
 #   1  at least one casualty — registering now would newly deadlock a PR that
 #      GitHub would merge today
-#   2  the sweep could not be evaluated
+#   2  the sweep could not be evaluated — including the case where every open PR
+#      was skipped, so the "no casualty" finding rests on no evidence at all
 #
 # USAGE
 #   scripts/registration-deadlock-sweep.sh
@@ -188,10 +198,18 @@ main() {
       | .number] | join(" ")' <<<"$prs")"
   [ -z "$unresolved" ] || fail "mergeability is UNKNOWN for PR(s) $unresolved — that is 'GitHub has not computed it yet', never 'not affected'. Classifying it as a skip is how this sweep returns a green that means 'I could not see'. Re-run in a minute."
 
-  printf '%-7s %-11s %-14s %-9s %s\n' "PR" "MERGEABLE" "STATE" "VERDICT" "DETAIL"
-  printf '%-7s %-11s %-14s %-9s %s\n' "-------" "-----------" "--------------" "---------" "------"
+  printf '%-7s %-11s %-14s %-13s %s\n' "PR" "MERGEABLE" "STATE" "VERDICT" "DETAIL"
+  printf '%-7s %-11s %-14s %-13s %s\n' "-------" "-----------" "--------------" "-------------" "------"
 
-  local casualties=0 swept=0 n head mergeable state draft rows rc missing ctx verdict detail
+  local casualties=0 swept=0 evaluated=0 skipped=0 n head mergeable state draft rows rc missing ctx verdict detail
+  # THE SKIP REASONS ARE NOT ONE REASON, AND REPORTING THEM AS ONE IS HOW THE
+  # ALL-SKIP GREEN STAYED INVISIBLE. Every row above used to read "not currently
+  # mergeable-and-unblocked", so a DRAFT (#8465 — will not merge until a human
+  # marks it ready; nothing about it changes if we wait) and a PR held by a check
+  # still running (#9827 — TRANSIENT; the same sweep run twenty minutes later
+  # evaluates it) printed the same sentence. They are different findings: the
+  # first is a stable exclusion, the second is a measurement taken too early.
+  local skip_draft=0 skip_dirty=0 skip_blocked=0 skip_other=0 reason
   while IFS=$'\t' read -r n head mergeable state draft; do
     [ -n "$n" ] || continue
     swept=$((swept + 1))
@@ -209,10 +227,28 @@ main() {
     fi
 
     if [ "$unblocked" -eq 0 ]; then
-      printf '%-7s %-11s %-14s %-9s %s\n' "#$n" "$mergeable" "$state" "skip" \
-        "not currently mergeable-and-unblocked — the flip cannot newly deadlock it"
+      skipped=$((skipped + 1))
+      if [ "$draft" = "true" ]; then
+        reason="skip:draft"
+        skip_draft=$((skip_draft + 1))
+        detail="DRAFT — GitHub will not merge it until a human marks it ready; a STABLE exclusion, re-running later does not change it"
+      elif [ "$mergeable" != "MERGEABLE" ]; then
+        reason="skip:conflicting"
+        skip_dirty=$((skip_dirty + 1))
+        detail="$mergeable/$state — already deadlocked on its own base; the rebase that unsticks it is also what makes every new context render"
+      elif [ "$state" = "BLOCKED" ]; then
+        reason="skip:blocked"
+        skip_blocked=$((skip_blocked + 1))
+        detail="BLOCKED by an existing required check or review — often TRANSIENT (a required run still in flight parks every open PR here), so this row is a measurement taken early, not a finding"
+      else
+        reason="skip:other"
+        skip_other=$((skip_other + 1))
+        detail="$mergeable/$state — not currently mergeable-and-unblocked; the flip cannot newly deadlock it"
+      fi
+      printf '%-7s %-11s %-14s %-13s %s\n' "#$n" "$mergeable" "$state" "$reason" "$detail"
       continue
     fi
+    evaluated=$((evaluated + 1))
 
     # ── side (B): do the NEW contexts actually render on its head? ──
     rc=0
@@ -233,13 +269,35 @@ EOF
     else
       verdict="ok"; detail="head ${head:0:9} renders every newly proposed context"
     fi
-    printf '%-7s %-11s %-14s %-9s %s\n' "#$n" "$mergeable" "$state" "$verdict" "$detail"
+    printf '%-7s %-11s %-14s %-13s %s\n' "#$n" "$mergeable" "$state" "$verdict" "$detail"
   done <<EOF
 $(jq -r '.[] | [ (.number|tostring), .headRefOid, (.mergeable // "UNKNOWN"), (.mergeStateStatus // "UNKNOWN"), (.isDraft|tostring) ] | @tsv' <<<"$prs")
 EOF
 
   echo
-  echo "swept $swept open PR(s); casualties: $casualties"
+  echo "swept $swept open PR(s); evaluated $evaluated, skipped $skipped (draft $skip_draft, conflicting $skip_dirty, already-blocked $skip_blocked, other $skip_other); casualties: $casualties"
+
+  # ── THE COVERAGE REFUSAL, AND WHY IT IS ARGUED ON COVERAGE AND NOT ON A COUNT ──
+  #
+  # The cheap version of this guard is `[ "$evaluated" -gt 0 ]`. It is not enough,
+  # and the measurement says so: on 2026-08-06 this repo had thirteen open PRs and
+  # the live sweep evaluated ZERO. A count check goes green the moment ONE PR is
+  # non-draft, mergeable and unblocked — one head examined, twelve unexamined, and
+  # the footer would still say `NO CASUALTY` in the voice of a full sweep. The
+  # thing that authorizes a required-context flip is COVERAGE, so coverage is what
+  # this script reports on every run: evaluated/skipped/swept, broken out by
+  # reason, next to the verdict, so `NO CASUALTY` can never again be read as
+  # "every open PR was checked" when it means "the one PR I could see was fine".
+  #
+  # Exit 2 is therefore the floor case — evaluated NOTHING — not the whole story.
+  # A partial sweep still exits 0, because refusing every partial sweep would make
+  # the guard unpassable (BLOCKED is the normal state of a PR with a check in
+  # flight) and an unpassable guard gets bypassed. It says PARTIAL out loud
+  # instead, and the operator carries that sentence into the flip decision.
+  if [ "$evaluated" -eq 0 ]; then
+    fail "this sweep evaluated 0 of $swept open PR(s) — every row was skipped (draft $skip_draft, conflicting $skip_dirty, already-blocked $skip_blocked, other $skip_other), so side (B) — does this head render the newly proposed context? — was never asked about a single head. 'casualties: 0' here is not a finding, it is an empty set: a green that means 'I could not see' is the exact failure this whole epic is about. Re-run when at least one PR is out of the blocked/draft state, or authorize the flip on per-head check-run evidence gathered by hand and say in writing that this sweep did NOT support it."
+  fi
+
   if [ "$casualties" -gt 0 ]; then
     echo
     echo "REFUSING THE FLIP. Each REFUSE row above is a PR GitHub would merge today and that" >&2
@@ -248,7 +306,12 @@ EOF
     echo "heads until the new contexts render, then sweep again." >&2
     exit 1
   fi
-  echo "NO CASUALTY: every mergeable, currently-unblocked PR already renders every newly proposed context."
+  if [ "$skipped" -gt 0 ]; then
+    echo "NO CASUALTY among the $evaluated of $swept open PR(s) this sweep could evaluate: each renders every newly proposed context."
+    echo "PARTIAL COVERAGE: $skipped PR(s) were skipped and say nothing either way. Quote this line, not just the verdict, wherever the flip is authorized."
+  else
+    echo "NO CASUALTY: every mergeable, currently-unblocked PR already renders every newly proposed context."
+  fi
   exit 0
 }
 

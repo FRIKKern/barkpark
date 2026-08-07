@@ -18,6 +18,8 @@ defmodule Barkpark.Sites.DeployRunnerTest do
   # async: false — mutates the singleton Runner + Application/OS env.
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.DeployRunner
   alias Barkpark.Sites.Provisioner
@@ -178,16 +180,25 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert %{state: :done, exit_code: 0} = await_done("same-slug")
     end
 
-    test "two different slugs run concurrently — neither blocks the other" do
+    test "a different slug is refused by the BOX's build slot, not by this slug's — and its own slot stays free" do
+      # The per-slug slot is still per-slug: `site-bravo` has NOT started, so
+      # its own single-flight slot is untouched (`:idle`, not `:running`). What
+      # refuses it is the box-wide build slot the ENGINE serializes on, and the
+      # refusal is its own typed code — never `already_running`, which would
+      # send an operator hunting for a run of a site that never started.
       put_cfg(enabled: true, command: stub("sleep 0.4; exit 0"))
 
       assert DeployRunner.trigger(req("site-alpha")) == {:ok, :started}
-      assert DeployRunner.trigger(req("site-bravo")) == {:ok, :started}
+      assert DeployRunner.trigger(req("site-bravo")) == {:error, :box_at_capacity}
 
       assert %{state: :running} = DeployRunner.status("site-alpha")
-      assert %{state: :running} = DeployRunner.status("site-bravo")
+      assert %{state: :idle} = DeployRunner.status("site-bravo")
 
       assert %{state: :done, exit_code: 0} = await_done("site-alpha")
+
+      # The build ended, so the box's slot is free again — no operator action,
+      # no lock to clear.
+      assert DeployRunner.trigger(req("site-bravo")) == {:ok, :started}
       assert %{state: :done, exit_code: 0} = await_done("site-bravo")
     end
 
@@ -229,6 +240,242 @@ defmodule Barkpark.Sites.DeployRunnerTest do
         :ok
     end
   end
+
+  # ── the box's build-slot door (deploy-reliability wave 4) ───────────────
+  #
+  # The engine runs ONE build at a time box-wide (`BUILD_GATE_SLOTS=1`). Before
+  # this door existed the box answered 202 and the SECOND build discovered the
+  # gate from inside its own unit, where it sat parked in `flock -w 900`
+  # burning its 30-minute deadline — a queue an operator reads as a hang.
+
+  describe "the box's build-slot door" do
+    test "two triggers RACING from separate processes: exactly one is admitted" do
+      # The census lives in the same serialized GenServer critical section as
+      # start_run, so there is no window in which both callers see a free slot.
+      put_cfg(enabled: true, command: stub("sleep 0.4; exit 0"))
+
+      replies =
+        ["race-one", "race-two"]
+        |> Enum.map(fn slug -> Task.async(fn -> DeployRunner.trigger(req(slug)) end) end)
+        |> Task.await_many(10_000)
+
+      assert Enum.count(replies, &(&1 == {:ok, :started})) == 1
+      assert Enum.count(replies, &(&1 == {:error, :box_at_capacity})) == 1
+
+      admitted = Enum.find(~w(race-one race-two), &(DeployRunner.status(&1).state == :running))
+      assert admitted
+      assert %{state: :done, exit_code: 0} = await_done(admitted)
+    end
+
+    test "a deploy refused at the door never unpacks the caller's artifact (D86/D87)" do
+      # The check sits BEFORE start_run/2, whose first act is ingest_prebuilt/1.
+      # A refusal that had already extracted a tarball to disk would have made
+      # the box pay for the deploy it declined.
+      dir = run_dir()
+      {b64, sha} = prebuilt_artifact()
+
+      put_cfg(enabled: true, run_state_dir: dir, command: stub("sleep 0.4; exit 0"))
+
+      assert DeployRunner.trigger(req("door-holder")) == {:ok, :started}
+
+      assert DeployRunner.trigger(req("door-prebuilt", artifact_b64: b64, artifact_sha256: sha)) ==
+               {:error, :box_at_capacity}
+
+      refute File.exists?(Path.join(dir, "door-prebuilt.prebuilt"))
+      assert %{state: :idle} = DeployRunner.status("door-prebuilt")
+
+      assert %{state: :done, exit_code: 0} = await_done("door-holder")
+    end
+
+    test "a rollback and a teardown are NEVER refused — they take no build slot" do
+      put_cfg(
+        enabled: true,
+        command: stub("sleep 0.5; exit 0"),
+        rollback_command: stub("echo ROLLED; exit 0"),
+        teardown_command: stub("echo TORN_DOWN=1; exit 0")
+      )
+
+      assert DeployRunner.trigger(req("door-busy")) == {:ok, :started}
+
+      assert DeployRunner.trigger(req("door-rb", mode: "rollback")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("door-rb")
+
+      assert DeployRunner.trigger(req("door-td", mode: "teardown")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("door-td")
+
+      assert %{state: :done, exit_code: 0} = await_done("door-busy")
+    end
+
+    test "the SECOND OPINION refuses a FOREIGN holder — matched on MAJ:MIN:INO, never on a PID" do
+      # The census's blind spot is a build this BEAM did not launch (a human
+      # running site-deploy.sh by hand, or a unit that outlived a restart).
+      # /proc/locks covers it with a READ — the pid below does not exist, and
+      # the door must not care: one live probe named a pid `ps` could not find,
+      # because the lock's fd had been inherited by a child.
+      lock = tmp_lock_file()
+      {:ok, triple} = DeployRunner.lock_triple(lock)
+      assert triple =~ ~r/\A[0-9a-f]{2,}:[0-9a-f]{2,}:\d+\z/
+
+      locks =
+        fake_proc_locks("""
+        1: POSIX  ADVISORY  WRITE 1 00:14:9999 0 EOF
+        2: FLOCK  ADVISORY  WRITE 999999999 #{triple} 0 EOF
+        """)
+
+      put_cfg(
+        enabled: true,
+        command: stub("exit 0"),
+        build_gate_lock: lock,
+        proc_locks_path: locks
+      )
+
+      assert DeployRunner.trigger(req("foreign-held")) == {:error, :box_at_capacity}
+      assert %{state: :idle} = DeployRunner.status("foreign-held")
+    end
+
+    test "an entry for another file, or a POSIX lock on ours, does NOT refuse" do
+      lock = tmp_lock_file()
+      {:ok, triple} = DeployRunner.lock_triple(lock)
+
+      locks =
+        fake_proc_locks("""
+        1: POSIX  ADVISORY  WRITE 4020570 #{triple} 0 EOF
+        2: FLOCK  ADVISORY  WRITE 4020571 00:99:424242 0 EOF
+        """)
+
+      put_cfg(
+        enabled: true,
+        command: stub("exit 0"),
+        build_gate_lock: lock,
+        proc_locks_path: locks
+      )
+
+      assert DeployRunner.trigger(req("not-our-lock")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("not-our-lock")
+    end
+
+    test "the door FAILS OPEN — an unreadable lock read ADMITS, with a warning, and never refuses" do
+      # build_gate_acquire itself fails open in three cases (no flock(1), an
+      # undeletable lock dir, an unopenable lock file) and writes nothing to
+      # /proc/locks in any of them — so the door can never be the barrier. When
+      # the door cannot see, the build goes through and the engine's own 900s
+      # flock decides.
+      unreadable =
+        Path.join(System.tmp_dir!(), "bp-dr-locks-dir-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(unreadable)
+      on_exit(fn -> File.rm_rf(unreadable) end)
+
+      put_cfg(
+        enabled: true,
+        command: stub("exit 0"),
+        build_gate_lock: tmp_lock_file(),
+        # A DIRECTORY where /proc/locks should be: File.read/1 fails :eisdir.
+        proc_locks_path: unreadable
+      )
+
+      log =
+        capture_log(fn ->
+          assert DeployRunner.trigger(req("door-fail-open")) == {:ok, :started}
+          assert %{state: :done, exit_code: 0} = await_done("door-fail-open")
+        end)
+
+      assert log =~ "ADMITTING"
+
+      # And the same when the path is simply absent (no procfs at all).
+      put_cfg(proc_locks_path: Path.join(unreadable, "nope/locks"))
+      assert DeployRunner.trigger(req("door-no-procfs")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("door-no-procfs")
+    end
+
+    test "the lock path mirrors site-deploy-common.sh: env override, /var/lock, ${TMPDIR:-/tmp} — never /run/lock" do
+      prior_lock = System.get_env("BARKPARK_BUILD_GATE_LOCK")
+      prior_tmp = System.get_env("TMPDIR")
+
+      on_exit(fn ->
+        restore_env("BARKPARK_BUILD_GATE_LOCK", prior_lock)
+        restore_env("TMPDIR", prior_tmp)
+      end)
+
+      put_cfg(enabled: true, build_gate_lock: nil)
+      System.delete_env("BARKPARK_BUILD_GATE_LOCK")
+      System.put_env("TMPDIR", "/tmpish")
+
+      candidates = DeployRunner.build_gate_lock_candidates()
+
+      assert candidates == [
+               "/var/lock/barkpark-site-build.lock",
+               "/tmpish/barkpark-site-build.lock"
+             ]
+
+      refute Enum.any?(candidates, &String.starts_with?(&1, "/run/lock"))
+
+      # $BARKPARK_BUILD_GATE_LOCK wins, and the tmp fallback is STILL read —
+      # the engine picks it when the lock dir cannot be created, and a door
+      # that read only one path would miss exactly that box.
+      System.put_env("BARKPARK_BUILD_GATE_LOCK", "/custom/build.lock")
+
+      assert DeployRunner.build_gate_lock_candidates() == [
+               "/custom/build.lock",
+               "/tmpish/barkpark-site-build.lock"
+             ]
+    end
+
+    test "the probe NEVER shells out to flock — a read cannot steal the box's slot" do
+      # `flock -n` was measured and refused: on a FREE lock it ACQUIRES (and
+      # flock wakeups are unordered, so it can take the slot from a unit
+      # already queued in `flock -w 900`), and it leaks fd 7 by inheritance —
+      # a live build showed three holders of it (bash, npm, tee). This is the
+      # tripwire for that decision.
+      source = File.read!("lib/barkpark/sites/deploy_runner.ex")
+
+      refute source =~ ~s("flock")
+      refute source =~ "flock -n 7"
+    end
+
+    test "a 409 renders code EXACTLY box_at_capacity and a NON-EMPTY message" do
+      # The control plane renders a box refusal as "<code> — <message>" and
+      # classifies on the head of that split. A code with an EMPTY message
+      # collides with the request-id the relay appends, and the deferral lands
+      # unclassified — so both halves are the contract.
+      put_cfg(enabled: true, command: stub("sleep 0.4; exit 0"))
+
+      assert DeployRunner.trigger(req("door-409-holder")) == {:ok, :started}
+
+      conn =
+        BarkparkWeb.SiteDeployController.trigger(
+          Phoenix.ConnTest.build_conn(),
+          %{"slug" => "door-409-other", "build_id" => "b1", "mode" => "deploy"}
+        )
+
+      assert conn.status == 409
+      assert %{"error" => %{"code" => code, "message" => message}} = Jason.decode!(conn.resp_body)
+      assert code == "box_at_capacity"
+      assert is_binary(message) and String.trim(message) != ""
+      assert message =~ "1 of 1"
+
+      assert %{state: :done, exit_code: 0} = await_done("door-409-holder")
+    end
+  end
+
+  # A world-readable stand-in for the box's fleet build lock.
+  defp tmp_lock_file do
+    path = Path.join(System.tmp_dir!(), "bp-dr-gate-#{System.unique_integer([:positive])}.lock")
+    File.write!(path, "")
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  # A file in the exact shape the kernel prints /proc/locks in.
+  defp fake_proc_locks(body) do
+    path = Path.join(System.tmp_dir!(), "bp-dr-locks-#{System.unique_integer([:positive])}")
+    File.write!(path, body)
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  defp restore_env(name, nil), do: System.delete_env(name)
+  defp restore_env(name, value), do: System.put_env(name, value)
 
   # ── the child's environment (charter D24) ───────────────────────────────
 
@@ -344,7 +591,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
         runner_mode: :systemd,
         run_state_dir: dir,
         systemd_run_command: {fake_systemd_run(argv_dump), []},
-        is_active_cmd: {echo_script("active"), []},
+        is_active_cmd: {active_only_for("pb-unit"), []},
         command: stub("exit 0")
       )
 
@@ -608,7 +855,9 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       for {code, fragment, slug} <- [
             {13, "STAGE failed", "exit-13"},
             {14, "HEALTH gate failed", "exit-14"},
-            {15, "gave up waiting for the deploy lock", "exit-15"},
+            # Exit 15 has TWO producers — the box's fleet build gate and the
+            # site's own deploy lock — and the label may not name just one.
+            {15, "gave up waiting for a deploy lock", "exit-15"},
             {16, "SWITCH failed", "exit-16"},
             {21, "rollback: no previous release", "exit-21"},
             {22, "rollback: not supported", "exit-22"},
@@ -1053,6 +1302,21 @@ defmodule Barkpark.Sites.DeployRunnerTest do
   end
 
   defp echo_script(word), do: write_script("#!/usr/bin/env bash\necho #{word}\n")
+
+  # `systemctl is-active <unit>` that answers "active" for ONE slug's units and
+  # "inactive" for everything else. An always-active stub lies about every OTHER
+  # slug's unit too — and the box's build-slot door reads exactly that, so on
+  # the singleton Runner a unit some earlier test left tracked would refuse this
+  # test's deploy with `box_at_capacity`.
+  defp active_only_for(slug) do
+    write_script("""
+    #!/usr/bin/env bash
+    case "$1" in
+      bp-site-build-#{slug}-*) echo active ;;
+      *) echo inactive ;;
+    esac
+    """)
+  end
 
   # A control-plane stub that HANGS for `secs` before echoing `word` and exiting
   # 0 — stands in for a wedged `systemd-run` / `systemctl` (a stuck D-Bus, a
@@ -1755,7 +2019,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
     test "a log whose unit is STILL RUNNING is never evicted" do
       dir = run_dir()
-      recorder_cfg(dir, is_active_cmd: {echo_script("active"), []}, max_build_logs: 0)
+      recorder_cfg(dir, is_active_cmd: {active_only_for("liverun"), []}, max_build_logs: 0)
 
       assert DeployRunner.trigger(req("liverun", build_id: "l1")) == {:ok, :started}
       assert %{state: :running} = DeployRunner.status("liverun")

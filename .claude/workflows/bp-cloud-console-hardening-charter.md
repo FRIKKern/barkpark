@@ -714,9 +714,84 @@ fake it, or file work that depends on it being lit. Same disposition for the QR 
 | D424 | **THE OPERATOR CONSOLE TELLS A REAL OPERATOR IT IS "Checking operator access…" FOREVER AFTER `/v1/me` FAILS — AND D408's CENSUS WRONGLY CLEARED IT** | Reproduced by driving the SHIPPED `app.js` inside `smoke.mjs`'s own DOM shim with `#operator` deep-linked, an authed operator session and `/v1/me` forced to 500 and to 502. Both land: `meState() == "failed"`, the fault is retained, `meFailureCopy()` **already returns** *"Something broke on our side — not your input."* — and `#operator-body` sits on `<div class="loading">Checking operator access&hellip;</div>` with **1** `/v1/me` call, **0** operator reads and no toast. The 200 control paints four cards with 4 operator reads; the non-operator control bounces with the D411 toast. **It is TERMINAL for the session:** `loadOperator` has two callers and `loadMe` has two, and every `render()` site is a sign-out/sign-in/reset/invite transition, so navigating away and back repaints the same spinner — only a reload or re-auth clears it. **`cch-w36-bl-mecache-unknown-arms-remaining` does NOT cover this — it CONTRADICTS it:** D408's census names `loadOperator`'s *"Checking operator access…"* as one of the two sites that ALREADY carry an unknown arm and excludes it from the eleven. Post-`cch-w36-s3`, having a LOADING arm no longer implies distinguishing FAILED from LOADING, so D408's classification is wrong and the row is genuinely unclaimed. **Two honest counterweights, and the slice must be sold with them:** this is a WAIT, not a false grant (`applyOperatorGate` re-runs, the sidebar stays hidden, zero operator routes are called — a truthfulness defect, not a security one), and with `PLATFORM_ADMIN_EMAILS` unset on prod the reachable population is operators-during-a-5xx. **AND NO COMMITTED FIXTURE CAN REACH IT:** all five `me: null` scenarios are `loggedout*`, and `scenarios.mjs:4161` can answer `/v1/me` only 200-or-401 — and 401 signs the person OUT. So the guard cannot lose unless the fixture ships in the SAME commit: a `meFault` override, a new `operator-me-unreadable` scenario, a `smoke.mjs` expectation, a sweep residue entry and the census literal `103 → 104`. **AND D411's FENCE (3) MUST MOVE:** `__app.test.mjs:2471-2476` pins the `!meCache` arm as literal source text; the fence's INTENT (an unloaded `/v1/me` WAITS rather than accusing a real operator) survives — *"we couldn't check your account"* is not an accusation — but its LETTER does not, and that carve-out belongs in the task, not in a builder's head. |
 | D425 | **THE ROSTER'S FEARED 12-14 PHANTOM ROWS MEASURE AT THREE, LIVE IS 143 NOT 144, AND THE SILENT-SEAL FEAR IS STALE** | Denominator read twice identically: **434 children, 7 `drafts.*` shadow twins, 427 published**; done 249 / open 142 / cancelled 35 / considering 1 → **LIVE = 143**. The two rows briefed as *"in_progress, epoch N"* are **already `done`** (`cch-w35-s4` closed 14:55:37Z 14/14; `cch-w36-s2` closed 14:56:07Z 12/13, and its one unmet criterion is now over-satisfied at 119 passed / 0 failed). Three backlog rows are CLOSABLE, each with a mutation red run in a clone and reverted: `cch-w36-bl-confirm-brake-billing-sentence` (shipped `app.js:8118-8123`), `cch-w35-bl-newlaunch-hardcodes-plan-limit-on-any-403` (fixed by `cch-w36-s1`, `newLaunchRefusalToast` branches on the SLUG), `cch-w35-bl-operator-403-vanishes-without-naming-authority` (all four criteria ship; two independent mutations red one and four tests). Two rows are genuinely STILL-OPEN but each has a half that quietly landed and must be struck from any brief: `cch-w33-bl-set-deployment-detail`'s criterion 2 is MET (the `@doc` no longer lies), and `cch-w34-bl-merge-truth-blind-outside-workflows` carries **SIX criteria, not the empty list the brief alleged** — its criterion 1 is unfixed (`required-checks-verify.sh:378` still scans `-maxdepth 1 -name '*.yml'`) and its criterion 4 survives verbatim (`docs/ops/merge-gates.md:343` still says *"one of the two required contexts"* while the live set is FOUR; §18 censuses *"unprotected"* claims, not wrong COUNTS, so the two instruments do not overlap). **And the "a `considering` row would seal SILENTLY" fear is REFUTED** — that was D83's finding and **D90 already closed it**: `seal-predicate.mjs:248` sets `PENDING_STATUSES = ['considering']` and `:1287-1288` puts those rows into `residue` alongside live and prints them by name, with the `terminal-one-considering-row.json` fixture passing inside a 75/75 run. |
 | D426 | **MAIN'S CONSOLE GATE IS GREEN AND THE REPORTED 68/75 SEAL-PREDICATE RED WAS AN EXTRACTION ARTEFACT — THE EPIC'S OWN DISEASE, ONE LAYER UP, IN THE EPIC'S OWN INSTRUMENTATION** | `seal-predicate.test.mjs` computes `REPO = resolve(HERE, '../../../..')` and spawns the predicate with `--repo REPO`; a `git archive` extraction has no `.github/workflows/cloud.yml`, so the predicate **fail-closes with exit 2 and a NAMED infra code** — `VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT … code=UNREADABLE-REPO-ROOT`, printing *"This is NOT a verdict… the whole point of a third exit code is that this can never be read as NO SEAL"* — and all 68 failures are the identical `2 !== 1`. **The third exit code exists precisely so this can never be read as NO SEAL, and the survey read it as one anyway.** In a full clone at `bf97452bb`: seal-predicate **75/75** under the workflow's own recording `curl` shim with a 0-byte log (hermetic), `__app.test.mjs` **914/914**, smoke 103, sweep rc 0 + 51/51, `__css_check` 0 errors, path-escape 172/0. Live cross-check on that sha: `Console gate` **completed/success**, and across all 34 check-runs there is not one `failure`. **No slice inherits a red.** **AND THE MEASUREMENT SURFACE IS ITSELF A HAZARD:** `git merge-base --is-ancestor origin/main HEAD` FAILS in the primary checkout — local `main` has **DIVERGED**, not merely fallen behind (`app.js` 18689 lines vs main's 20959; `__app.test.mjs` 721 tests vs 914) — so every anchor read from it is wrong by construction, which alone explains this epic's recurring anchor churn. Every builder brief this wave reads anchors with `git show origin/main:<path>` and runs gates in a worktree cut from `origin/main`. **Two green-is-narrower-than-it-reads caveats stand:** the sweep prints *"heights … VACUOUSLY GREEN"* and *"themes … COVERAGE, NOT YIELD"*, and `__css_check` carries 277 raw-px font-size lines as report-only. |
+| D427 | **NUMBERING: THIS WAVE STARTS AT D427 BECAUSE D415-D426 EXIST ONLY ON UNMERGED #9857** | origin/main's ledger tops at **D414** (`grep -c 'D416'` = 0, `grep -c 'D421'` = 0 on `git show origin/main:` — both re-derived this phase, and `__binding_census.mjs` on #9920 already ships a dangling citation to the phantom D421). Wave 37's rows live on the charter PR alone. Wave 38 therefore numbers from D427 so the two ledgers cannot collide on merge, and **cites PRs, never D-numbers, for anything not on main**. The rule has now bitten four waves running: git-show the number before you lean on it. |
+| D428 | **GR33's "NEVER A DISABLED GHOST" IS A SETTINGS-SECTION LAW AND STAYS ONE; THE LIFECYCLE RAIL GETS DISABLE-AND-EXPLAIN AS AN ADD THIS CHARTER AUTHORIZES, NOT AS A READING OF GR33** | Verified on origin/main `ef77af274`: the string *"disabled ghost"* occurs **exactly once** across both charters (`bp-cloud-gui-remake-charter.md:49`; **zero** in this one), inside GR33's *settings-page anatomy contract*, whose grammatical subject is *"a read-only **section**"*, whose primitives are `.set-*`, and whose enumerated population is the five settings pages. **D414 already ruled it "6/6 SATISFIED FOR THE PAGES IT SCOPES"** and that extending it is *"a widening this charter authorizes here, not one GR33 already required — SAY SO RATHER THAN BORROW ITS AUTHORITY."* This row says so. **SCOPE, EXHAUSTIVELY:** disable-and-explain is authorized ONLY for a DISCOVERABLE PRODUCT CAPABILITY on a NON-SETTINGS surface with no truthful lesser substitute — concretely and only, the instance-detail lifecycle rail's seven elevated verbs: `runDecommission`, `retryInstance`, `removeInstance`, `updateInstance`, `rollbackInstance`, `attachDomain`, `patchAutoupdate`. It is **NOT** authorized for, and expressly does not reopen, the five settings omit-sites (`providerCanWrite`, `notifCanManage`, `canMintAnyAbility`, `billingIsOwner`, env-vars write) nor `canManageOnboarding`'s runway Dismiss — all six stay OMIT. **THE FENCE IS MECHANICAL AND WAS PROVEN ABLE TO LOSE:** each of the six plain-member smoke expectations asserts ABSENCE, and a *disabled* ghost trips them exactly like an enabled one — mutation-proven this phase (`FAIL env-member — a member sees no Delete affordance` after rendering `<button disabled>Delete</button>` in the member arm; `FAIL providers-member — a member roster has NO Disconnect affordance` after `providerCanWrite()→true`), against a clean 914/914 + 103/103 baseline. Moving any member-scenario absence assertion requires its own D-row. **AUTHORITY FOR THE DUTY IS GR34, NOT GR33:** GR34's text is *"the picker renders that truth up-front, never via a post-click 403 toast"* — a disclosure duty silent on hide-vs-disable. The *"never render an unpickable option"* phrasing is an `app.js:3966` SOURCE comment about a multi-select's options, **not charter text**, and does not generalize to product capabilities. The sentence rendered is `FORBIDDEN_ROLE_COPY.admin` (`app.js:227`), byte-identical to the server's own 403 through `friendly()` — no new copy, `ERRORS.forbidden` untouched. |
+| D429 | **THE REMEDY'S ANATOMY SHIPS ON MAIN BUT HAS NEVER RENDERED — ARGUE IT AS DEAD-CODE ACTIVATION, NOT AS ESTABLISHED PRACTICE** | `lifecycleActionHtml`'s capability-gap arm (`app.js:1689-1692`) already emits `.inst-life-disabled` + a disabled `.btn` + a visible `.inst-life-reason`, and all four CSS rules exist (`app.css:546`, `:1645`, `:1646`, `:5738`) — so **S1 needs ZERO CSS and `cssom-heads.baseline` (1305) is untouched, measured not read** (`cssom-parity.mjs` → `authored rule heads 1305 (baseline 1305) · MISSES 0 · PARITY PASS`). **But nothing renders that arm today.** `app.js:1733` filters the only capability-false verb (`pause`) out of the grid and re-emits its reason as a plain `.inst-life-footnote` (`:1738`); a browser drive of the member instance-detail screen returned `instLifeReasonSpans: 0, totalDisabledButtons: 0`, and `grep inst-life-disabled` over `__app.test.mjs` + `smoke.mjs` = **0 hits**. So the honest sentence is *"we activate a shipped-but-unreached grammar"*, not *"we extend a shipped pattern"* — and Review will find the difference if the brief does not state it. |
+| D430 | **THE CENSUS CANNOT SEE A PREDICATE — CHOICE (c) IS REFUTED AND S1 SHIPS ITS OWN GUARD** | #9920's `__binding_census.mjs` treats `elevated` and `predicate` as **PINNED JUDGEMENTS**, never derived from `app.js` (its own LIMIT 1). Mutation-proven both ways this phase: S1's real fix shape (`if (retry && instanceAdminAuthority() === "grant") …`) leaves the census at **rc 0**, still printing *"18 UNPREDICATED"*; and **DELETING** a shipped predicate (`renderProviderPage(list, providerCanWrite())` → `(list, true)`) is also **rc 0**, still printing *"22 PREDICATED"*. So *"its REMOVE arm makes deleting a predicate a red forever"* is FALSE — that is the DRIFT arm, filed and blocked (`cch-w37-bl-binding-census-drift-arm`). **CONSEQUENCE, HARD:** S1's guard is its own `__app.test.mjs` case over the three-valued rail model, proven able to lose by mutation, required in BOTH merge orders. The census flip is **documentation duty, not a gate**. **THREE CENSUS LANDMINES, all mutation-proven, all written into the brief:** (1) flipping one row without moving `EXPECT` in the SAME commit → `FAIL(2)`; the seven-row rail flip is `{79, 40, 29, 11}`, `total` and `elevated` never move. (2) Arm 1 keys on `fn|VERB route`, so a **generic** `lifecycleApi(verb, path)` helper makes the write VANISH — measured `pinned (79) · live (78)`, 1 REMOVE, **zero** ADD; a builder who "fixes" that by deleting rows permanently uncensuses seven elevated writes. A shared `api()` wrapper in the rail band is FORBIDDEN by name. (3) Check (2d) hard-requires `submitProviderCred` stay UNPREDICATED forever — fixing that real defect reds the guard even with `EXPECT` moved correctly, so S1 is fenced OUT of it. **AND: if #9920 merges AFTER S1, nothing reds — the census lands green while documenting a tree that no longer exists.** The follow-up flip is a named criterion, not a hope. |
+| D431 | **S1 OWNS THE THREE POST-CLICK ARMS, OR ITS OWN HEADLINE IS FALSE ONE CLICK LATER** | Executed against the shipped hooks this phase: `updateInstance` and `rollbackInstance` **never call `friendly()` at all** — the gate's flat 403 lands in a `kind:"other"` default rendering *"Please try again in a moment."*, while `friendly()` on the identical bytes returns the exact authority sentence. Worse, `rollbackRefusalTerminal("forbidden") === false`, so the modal offers **Try again** and re-POSTs into a permanent 403 forever. `attachDomain`'s `r.status===422` arm sits ABOVE the friendly fallthrough and tells a teamless user their **domain syntax** is bad. The minimum correct diff is **12 insertions / 4 deletions across 4 hunks**, measured at **914/914, zero disturbed assertions**. **THE MUTATION LANDMINE, VERBATIM INTO THE BRIEF:** extend `updateConflictCopy`'s **SIGNATURE** (optional 2nd arg), **NEVER** `updateConflict`'s **RETURN SHAPE** — `__app.test.mjs:7652`'s `plain()` JSON round-trips and `:9788-9792` deepEqual the full object, so adding one field reds test 598 (`not ok 598 — isu-w5: updateConflict classifies …`). **AND S1 MUST NOT CLAIM IT CLOSES `cch-w36-bl-non-friendly-wrong-sentence-sites`:** that row's own re-derivation grep is scoped to `*FailureCopy\|*ErrorCopy` and structurally cannot match `*ConflictCopy`; its nine sites are a disjoint, unpaid population. S1 absorbs this THIRD population in-fence and stamps it — filing a new row would net the roster positive and break Law 0. |
+| D432 | **THE BROWSER LIMIT IS DEAD, AND THE MEMBER FIXTURE COSTS 4 FILES / +40−5 WITH ZERO CSS** | Ten waves of *"nobody has driven a browser"* ended this phase: chrome-devtools MCP against `__preview__/serve.mjs` rendered a plain MEMBER on the instance-detail screen with `{"port":"4187","meRole":"member","decommission":{"disabled":false,"visible":true},"totalDisabled":0}` — the BEFORE frame, in three tool calls, no backend. Committing `panel-overview-member` costs `scenarios.mjs +17`, `breakpoint-sweep.mjs +2/−1`, `breakpoint-sweep.test.mjs +9/−4`, `smoke.mjs +12`; census moves `total 103→104`, `residue 78→79`, `hash:#instance 21→22`, **families stays 13** and `cssom-heads.baseline` is absent from the diff. All three guards refuse first, by name (`UNLISTED scenario "panel-overview-member"` exit 2; `CENSUS: 1 committed scenario(s) have NO expectation` exit 1; four sweep-test failures). **THREE MECHANICS:** the expectation must read `reg.get("inst-lifecycle-actions")`, NOT `instance-body`; the sweep's census is encoded in the **test's own title string**, so a builder who moves only the four integers leaves a test whose name lies; and **the BEFORE pin and the FIX must ride the SAME commit**, or the second PR reds on the first's negative assertion. **GR33's overlooked POSITIVE mandate argues FOR the fixture at zero permission cost:** *"every admin-gated page ships an explicit plain-member scenario"* — `panel-overview-member` is the seventh and first outside GR33's settings scope. Only the disable-and-explain REMEDY needed D428; the fixture needed nothing. **EVIDENCE HYGIENE:** the fleet's chrome-devtools "selected page" is shared and was observed being hijacked mid-run — **every browser reading must stamp `location.port` and `me.role` inside the same evaluated object**, or it is not evidence. |
+| D433 | **S2 IS GATE-SCOPED (auth.ex:414 AND :441 ONLY), ARGUED AS AN ADD OVER WAVE 37's RECORDED REFUSAL — ROUTER-SCOPED IS REFUSED ON RUN EVIDENCE** | The two `require_primary_team_*` gates answer a missing GRANT with a bad-BODY status: `422 {error:"no_team"}` where `gate_role/4` (`auth.ex:484`) already answers `403 {forbidden, reason:"no_team", scope:"team"}`. Flipping both arms to `forbidden(conn, reason: "no_team", scope: "primary_team")` reds **nothing**: the full cloud suite is **2951 tests, 0 failures**, byte-identical to baseline — which cuts both ways, so **S2 MUST ADD the fail-before pin it lacks**. The payoff is not the one the direction named: `app.js:6971`'s bare `r.status === 422` arm means **a teamless user attaching a domain is told their DOMAIN SYNTAX is wrong**; after the flip that arm is syntax-only and the case falls to `friendly()` for free. Secondary: billing checkout/portal/cancel, onboarding, audit and DELETE barkpark move from remedy-less `ERRORS.no_team` to the remedy sentence. **ROUTER-SCOPED IS REFUSED, THREE PROOFS:** flipping all 15 inline router sites leaves `go test ./internal/cli/...` fully **green** (the Go suite stubs the control plane with its own fiction); mutating only that stub exhibits the break verbatim — exit **3** instead of 1, and *"a session needs team-admin, a PAT needs the deploy ability"* handed to a user who has NO TEAM; and `app.js:18298`'s `envVarsFailureCopy` depends on an INLINE 422 meaning no_team. **NAMED CONSEQUENCES:** `scope: "primary_team"` stays (exact-map pinned at `router_ability_matrix_test.exs:380-393/396-409`; its rename has an owner); fifteen router comments and both `@doc` blocks assert "422 `no_team`" and must move in the same commit; `bp cloud rollback` for a teamless caller silently changes exit class **1 → 3** (defensible, unpinned, invisible to every gate here) and belongs in the brief, not in a user's day. **PRIOR ART OVERTURNED IN WRITING:** wave 37 refused this exact flip on the record (#9857's D420 / `cch-w37-bl-primary-team-gate-twins-are-one-gate`, GH #9894) because *"no repo-local guard can see an external integrator"*. That refusal missed `attachDomain`; this row is the ADD, and it re-frames `cch-w37-bl-deliveries-403-is-a-no-team-status-bug`, which converges the SAME condition the OPPOSITE way. |
+| D434 | **THE ROSTER'S OPEN COUNT IS THE EPIC'S OWN UNTESTED CLAIM — 157 IS THE DENOMINATOR AND AT LEAST FOUR ROWS ARE PROVABLY FALSE-OPEN** | Re-derived: **442 published children — 249 done / 157 open / 35 cancelled / 1 considering**; 170 open including `drafts.*`, and **six of the extra thirteen are exact-title duplicate pairs filed by wave 37's Decide**. Provably paid on origin/main and closable with a receipt, no code: `cch-w23-bl-pat-deploy-grant-survives-demotion` (P1 — `accounts.ex:1844` derives `demoted?` by rank and `:1863` runs `revoke_team_pats_exceeding_role` **inside the transaction**, using the mint fence itself as the predicate); `cch-cloud-app-has-no-plug-errorhandler` (`use Plug.ErrorHandler` at `router.ex:242`, `handle_errors/2` at `:7931` — and `cch-w32-bl-roster-false-open-sweep` **already named this row as fully paid**, so that sweep's own closes never landed); `cch-w11-s1-flip-behind-a-generator-that-cannot-lose` (**P0**, #8394 an ancestor, live protection = the exact four contexts); `cch-w28-s1-empty-roster-control-asserts-clause-a` (**P0**, #9356 merged). Two P0s shipped a week ago and the epic has been quoting them as open. `cch-w36-s5` and `cch-w36-s6` are SUPERSEDED by #9920 and #9917 respectively (#9917's body names the slug) — dispose, never re-cut. **Law 0 this wave is satisfiable at −15 with ZERO filings**, and −4 of it needs no code at all. |
+| D435 | **THE SPEC-GATE PACKET IS PREPARED, COSTED AND WAITS ON #9921 — AND ITS AUTHORIZING SENTENCE QUOTES "2 of 22", NEVER "rc=0"** | Every command in the packet passes from an `origin/main` worktree: suite **119/0 hermetic, 123/0 live**, `Required-check spec gate` green on main HEAD, sweep **rc 0 / casualties 0**, floor correctly **rc 2** without `--acknowledge-growth`, verify correctly **rc 1** (the announced advisory drift between spec-merge and PUT). Blocker #8222 is **CLOSED with `mergedAt: null`** — its documented re-evaluation trigger can never fire. The existing `gh` token already reaches the admin-only protection endpoint; **no new PAT is needed** (do not confuse this with `hg-breakglass-token-fine-grained`). **BUT THE SWEEP EVALUATED 2 OF 22 PRs** — 20 were skipped as already-BLOCKED, which is a measurement of today's Actions outage, not of the repo; main's script cannot even report `evaluated/skipped`, and #9921 is exactly the fix that prints `PARTIAL COVERAGE …` and exits 2 on zero-evaluated. **So the packet is REFUSED until #9921 merges** — `cch-w37-bl-register-spec-gate-human-gate`'s own criterion 1 ("a zero-evaluated green is REFUSED as authorization") is unsatisfiable with main's current script. **ORDERING TRAP:** the sweep must run BEFORE the spec PR merges; after it, the run short-circuits to *"proposes no context that origin/main does not already require"* — a vacuous green indistinguishable from a real authorization. **AND THE FLIP INCIDENTALLY CURES A LIVE REGENERATION LIE:** wave 36 hand-corrected the exclusion reason in `.github/required-checks.json`, but `scripts/required-checks-generate.sh:146` still carries the dead-#8222 text, so the next regeneration silently reverts the correction; because `EXCLUDED_BY_DECISION_NAMES`/`_REASONS` are index-parallel, registering the context STRUCTURALLY forces that line's deletion. |
 
 
 ## Roadmap
+
+### Wave 38 — the authority answer becomes three-valued, and stops being sold before it is asked (build in flight)
+
+**The frame.** Waves 34-37 climbed one ladder: the console asserts a STATE it never received, then a
+CAUSE it never determined, then an AUTHORITY it never checked. Wave 38 takes the last rung and adds
+the rung above it: the console must answer the authority question the **same way in both moments** —
+before the click and after it — and it must be able to say **"I don't know yet"**, because it
+frequently doesn't.
+
+**Finished feels like this.** A member opens an instance they do not administer. The lifecycle rail is
+still THERE — a control that disappears is indistinguishable from a missing feature — but
+Decommission / Roll back / Self-update / Attach domain are **disabled**, with one muted line beneath:
+*"You need the admin role on this team — an admin on this team can grant it."* That is not new copy;
+it is `FORBIDDEN_ROLE_COPY.admin`, the exact string the server's own 403 already produces through
+`friendly()`. And while `/v1/me` is in flight or failed, the rail says **CHECKING** — never refused.
+
+**THE CONDITION THAT SHAPED THE CUT.** GitHub Actions is in a major outage; 22 PRs are open and 15 are
+finished wave work on queued checks, including all six wave-37 slices (#9917-#9922) and charter #9857.
+Nothing is blocked on design or build capacity. So: **three slices, two new code PRs, zero pushes to
+any branch whose gate is queued** — a push cancels the queued run and re-queues a full matrix, which
+is the single most expensive thing this wave could do. Depth was bought only where it is free
+(criteria, mutations, verify-fleet re-derivation).
+
+**THE THREE SLICES.**
+
+| # | Slice | Task | PR? | Model | Round |
+|---|---|---|---|---|---|
+| S1 | The lifecycle rail stops selling what the server will refuse — and stops demoting an owner it could not check | `cch-w38-s1-lifecycle-rail-authority-is-three-valued` | new | opus | 1 |
+| S2 | One condition, one answer: the two primary-team gates stop calling a missing grant a bad body | `cch-w38-s2-no-team-stops-being-a-422` | new | opus | 1 |
+| S3 | The spec-gate packet, prepared and costed — and the roster stops lying about its own size | `cch-w38-s3-spec-gate-packet-and-roster-disposition` | none | opus | 1 |
+
+**S1 is the crown**, and D428/D429/D430/D431/D432 are its whole design: a single three-valued
+`instanceAdminAuthority()` (grant / refuse / unknown) built on `meState()`, threaded **into**
+`lifecycleActionsModel` as an explicit argument so the harness can see it at all (D430 — the census
+structurally cannot), rendering the shipped-but-never-reached `.inst-life-disabled` grammar, plus the
+three post-click arms without which the promise is undone one click later. The unknown arm is a HARD
+criterion, not a nicety: predicating seven sites two-valued would manufacture seven fresh instances of
+the exact lie the wave exists to kill.
+
+**WHAT S1 DELIBERATELY DOES NOT TAKE, and why it is round 2 rather than scope.** The five remaining
+two-valued hand-rolls (`providerCanWrite`, `notifCanManage`, `canMintAnyAbility`,
+`canManageOnboarding`, `billingIsOwner`) and the two missing `loadMe` repaint seams
+(providers, notifications — **SUCCESS arm only**, because #9922 already edits the failure-arm block)
+are filed as `cch-w38-bl-adopt-canonical-authority-predicate` and take the predicate S1 defines. They
+are a second app.js PR in a jammed queue for no additional user-visible truth this week. Their
+evidence is already in hand and quoted on the row: a browser drive proved an OWNER is stranded on the
+member providers surface permanently (`connectLen 0 → 0` at t=7002 where the baseline is 2411), and
+that on a failed `/v1/me` a real owner is told, as flat fact, *"Only the team owner can manage
+billing."* with zero buttons and no mention that anything failed.
+
+**S2 is gate-scoped by run evidence, not by caution** (D433). Two lines in `auth.ex`. Zero `#9918`
+surface, zero consumers outside `cloud/`, and one confidently-wrong sentence deleted for free.
+
+**S3 spends no CI at all**: it prepares the human packet (which now REFUSES until #9921 lands, D435),
+disposes the two superseded wave-36 rows, and closes four provably false-open rows including two P0s
+(D434).
+
+**HIGH-FLIP-RISK, NAMED FOR REVIEW.** S1's authority judgment: `meCache.role` is the role on the
+CURRENTLY SELECTED team, and the members/invite routes gate the **PATH** team through a resolver that
+ignores the `x-barkpark-team` pin. Verification proved the agreement is structural for every route S1
+touches (same header, same `resolve_team/2`, same request; the switcher does a full reload) — but it
+survives in two smaller forms (TEMPORAL: `meCache` is filled once; PERMISSIVE: the members routes
+agree only because `app.js:17915` sources `teamId` from `meCache`). S1 must state that contract in a
+comment at the predicate and must NOT extend it to the members band. An independent second reviewer is
+owed on this judgment before merge.
+
 
 ### Wave 36 — authority is answered, not guessed (build in flight)
 
@@ -1751,6 +1826,105 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+
+### 2026-08-07 — wave 38 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The lifecycle rail answers authority three-valued | `cch-w38-s1-lifecycle-rail-authority-is-three-valued` | `…rail-stops-sellin-0-r` | [#9955](https://github.com/FRIKKern/barkpark/pull/9955) | the new smoke expectation had been inserted between the `gr-p3 D-04` section header and the entry that header labels — header restored, block given its own |
+| The two primary-team gates stop calling a missing grant a bad body | `cch-w38-s2-no-team-stops-being-a-422` | `…the-two-primary-1-r` | [#9956](https://github.com/FRIKKern/barkpark/pull/9956) | the owner gate's `@doc` still opened "preserving the same … contract" for a contract it had just changed; and `router.ex:5120/:5162`'s unreachable `422 no_team` clause annotated so it is not miscounted as a live route contract |
+| The spec-gate packet is costed and refused | `cch-w38-s3-spec-gate-packet-and-roster-disposition` | `…is-costed-and-refus-2` | [#9957](https://github.com/FRIKKern/barkpark/pull/9957) | none — the builder's commit stands unchanged |
+
+**WHAT LANDED.** The wave's own headline is now true at the surface AND one click later. `app.js`
+gains ONE canonical three-valued `instanceAdminAuthority()` (`@canonical
+capability:console-authority-predicate`), threaded INTO `lifecycleActionsModel` as an explicit third
+argument so the MODEL decides and the harness can see it at all — `paintLifecycleActions` and the
+seven elevated write functions have zero `__bpTestHook` reach. `refuse` renders the shipped
+disable-and-explain arm carrying `FORBIDDEN_ROLE_COPY.admin` VERBATIM; `unknown` reuses the row's own
+"Checking capabilities…" grammar; `grant` is proven byte-identical to the shipped 2-arg call **by
+assertion, not prose**. Zero CSS — `cssom-parity` 1305 (baseline 1305), MISSES 0, baseline absent from
+the diff. Alongside it the three post-click arms stop selling a permanent refusal as transient:
+`rollbackRefusalTerminal` now ORs in `forbidden`/`no_team` so the confirm modal stops offering **Try
+again** into a 403 forever, and `attachDomain`'s 422 arm excludes `no_team` so a teamless caller is no
+longer told their DOMAIN SYNTAX is wrong. Server-side, `auth.ex`'s two `require_primary_team_*` gates
+answer a missing grant `403 {forbidden, reason: "no_team", scope: "primary_team"}` instead of a 422 —
+two code lines whose real deliverable is the fail-before pin these arms had never had.
+
+**THE GUARDS CAN LOSE, RE-PROVEN AT REVIEW, NOT READ.** S1: replacing
+`instanceAdminAuthority()`'s body with `return "grant"` reds `__app.test.mjs` (918/1) **and**
+`smoke.mjs` (rc 1, 2 FAILs) — two independent instruments, not one. S2: the fail-before proof was
+re-run against `origin/main`'s `auth.ex` bytes fetched with `git show ef77af274:` rather than the
+index — **28 tests, 2 failures**, both `left: 422 / right: 403`. Beyond the slice gates, review
+independently ran the FULL cloud suite on the S2 branch: **2953 tests, 0 failures**, which the builder
+had (correctly) declined to quote from a host under wave load.
+
+**THE FLIP-RISK JUDGMENT, INDEPENDENTLY RE-DERIVED.** S1's authority read (`meCache.role` against the
+server's two divergent team axes) was re-derived at review from `auth.ex:122-130 / :365-393 /
+:405-421` and `router.ex:10812-10815` — not by re-reading the builder's reasoning. It holds for THIS
+band's routes because `api()` pins `x-barkpark-team` on every authed request including `/v1/me`, and
+the "do not extend to the members band" fence in the predicate's comment is exactly the right size. A
+genuinely independent SECOND reviewer is still owed before merge; this workflow spawns one reviewer,
+so that dispatch is a manual lead step.
+
+**WHAT DID NOT LAND, NAMED RATHER THAN CLAIMED.** Only ONE of D428's seven elevated verbs
+(`runDecommission`) is rendered by `lifecycleActionsModel`; `retryInstance`, `removeInstance` and
+`patchAutoupdate` live in `instanceActionsHtml`/`updatePanelHtml` and are STILL offered live to a
+member. S1 stamped its criterion 2 a MISS rather than flipping it, and filed
+`cch-w38-bl-three-elevated-verbs-still-unpredicated`. Review found and filed one more:
+`cch-w38-bl-unknown-authority-has-no-recovery-seam` — a PERMANENTLY failed `/v1/me` leaves the rail on
+"Checking capabilities…" forever with a dead Decommission and no recovery seam (`data-life-retry`
+exists only when the CAPABILITIES read failed). The console already ships the honest shape one screen
+over (`app.js:3969` renders `meFailureCopy()` for exactly this state), so the fix is a fourth arm, not
+a redesign. The 15 INLINE `422 no_team` emitters stay at 422 by design — filed as
+`cch-w38-bl-inline-no-team-emitters-now-diverge-from-the-gates`, whose first two criteria are BUILD
+THE GUARD FIRST.
+
+**LEDGER.** Three slice tasks, all claimed, all stamped AS THE WORK HAPPENED, all left `in_progress`
+with the merge-gated criteria open for the lead (S1 [14], S2 [9]). No lifecycle lie found and no `bp`
+correction was needed — the first wave in this epic's log where review changed nothing on the board
+except to ADD a finding. S3's own roster pass is the reason: children 464 — done 253 / open 161 /
+cancelled 46, open fell exactly 13 with the arithmetic closing, both-open duplicate pairs 6 → 0, and
+two P0s that shipped a week ago stopped being quoted as open. Note for the lead: S3 sits at **11/11
+met, `in_progress`, with no merge-gated criterion by design** — close it when #9957 merges.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** Dispatch order is merge round 1 first — #9957 (docs-only, zero
+conflict), then #9956 (`auth.ex`, expect ~4 prose conflict hunks against #9919), then #9955 (`app.js`,
+which #9920's census content-matches). Then the obvious crown: **finish the seven verbs**. S1 built
+the predicate and the vocabulary; three of D428's seven are still live affordances a member can click,
+and `cch-w38-bl-three-elevated-verbs-still-unpredicated` + the recovery-seam row are a coherent,
+already-costed slice pair over one file. Pair it with the `#9921`-gated spec-gate packet the moment
+that PR merges — S3 has already costed every command in it, and the ORDERING TRAP (sweep BEFORE the
+spec PR merges) is written down.
+
+
+### 2026-08-07 — wave 38 DECIDE (build in flight)
+
+Cut under a GitHub Actions outage with 15 finished PRs queued: **three slices, two new code PRs**,
+and depth bought only where it costs no runner. Two rivals lost cleanly and both were absorbed rather
+than deferred — *depth-not-breadth* lost on the mechanical fact that every way of hardening the six
+built-and-waiting slices requires a push to a branch whose gate is queued (its re-derivations became
+verify-fleet assignments instead, at zero CI cost); *unify the server's refusal contract* lost on
+conflict exposure and on being invisible to a user, and its best half became S2.
+
+**Verification overturned the direction in five places, and the wave is better for each.** (1) The
+direction's own remedy was forbidden by ratified law as written — GR33 bans *"a disabled ghost"* — so
+D428 argues the carve-out as an ADD scoped to seven named verbs, with the six settings absence-pins
+proven able to catch a too-wide reading by mutation. (2) Choice (c) rested on a guard property that
+does not exist: #9920's census is **rc 0 both when a predicate arrives and when one is deleted**, so
+S1 ships its own guard (D430). (3) *"the same sentence before and after the click"* was FALSE at three
+of seven sites, and rollback offered **Try again** into a permanent 403 — D431 puts those arms inside
+S1 and names the deepEqual mutation trap that would otherwise stall the builder. (4) The ten-wave
+browser limit is **dead**: an agent drove chrome-devtools against `__preview__/serve.mjs` and captured
+a plain member looking at an enabled Decommission, `totalDisabled: 0` (D432). (5) S2's exposure was
+described half wrong in both directions — #9918 never touches `auth.ex`, but #9919 rewrites the very
+`@doc` sentences S2 must change (D433).
+
+**The roster is not what the epic has been quoting.** 442 published children, **157 open** — and at
+least four rows are provably paid on origin/main, two of them **P0**, one of them named as paid by an
+earlier sweep whose own closes never landed (D434). Law 0 is satisfiable at −15 this wave with **zero
+new filings**; −4 of that needs no code.
+
+Paper: `cch-wave-38-2026-08-07`. Charter PR carries D427-D435 and this run's grip ledger rows.
 
 ### 2026-08-06 — wave 37 DECIDED (six round-1 slices, "name the authority, or claim none")
 
