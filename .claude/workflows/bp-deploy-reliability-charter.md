@@ -4010,3 +4010,52 @@ refusing the invariant the PR itself created. #10133 and #10173 need `task-fb4fb
 PUSH (a re-run cannot clear a lease-lapse verdict), and #10173 additionally rebases its charter half over
 #10208. #10019 rebases last, over #10200's `render.ex`. Then close the 31 satisfied merge-gated children per
 D204 — claim, then close on the NEW epoch, one row at a time.
+
+### Wave 2026-08-07 (wave 13) — REVIEWED · Paper `deploy-reliability-wave-13-2026-08-07` · grade **A−**
+
+**All four round-1 slices built, reviewed, gate-green on their final state, PUSHED and PR'd. Nothing merged — the lead merges.**
+Slices 5–7 are round 2 and were not built this run BY DESIGN (sequenced-rounds law).
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| `CLOUD_PATHS` declares the node engine | `dr-w13-s1-cloud-paths-declares-node-engine` | `…node-engine-so--0-r` | [#10299](https://github.com/FRIKKern/barkpark/pull/10299) | escape rc=0 (6 reads) · harness 124 passed / 0 failed |
+| The 503 names the box's own code word | `dr-w13-s2-503-names-its-code-word` | `…own-code-word-so-1` (unchanged) | [#10300](https://github.com/FRIKKern/barkpark/pull/10300) | 119 tests, 0 failures |
+| The deferral columns reach the wire | `dr-w13-s3-deferral-columns-reach-the-wire` | `…reach-the-wire-with-2` (unchanged) | [#10301](https://github.com/FRIKKern/barkpark/pull/10301) | 176 tests, 0 failures · go build/vet/test ok |
+| The runner-503 honesty test stops flaking | `dr-w13-s4-runner-503-test-stops-flaking` | `…test-stops-losing-3` (unchanged) | [#10302](https://github.com/FRIKKern/barkpark/pull/10302) | 30 tests, 0 failures · 15 further seeds, 0 failures |
+
+**What landed.** The wave is squarely on the wish's two live clauses — *still mis-reported* and *make the
+reporting able to lose*. S2 retires the epic's largest surviving lie: `BOX_UNAVAILABLE_503` had exactly ONE
+distinct `failure_reason` in its whole life (265 rows, all `feature_not_configured`, all written by a box that
+was demonstrably UP), and it now splits on the box's own code word into `BOX_DEPLOY_DISABLED_503` /
+`BOX_RUNNER_UNAVAILABLE_503`, with an unnamed 503 deliberately NOT promoted. S3 gives the wave-12 deferral
+writer its first reader — the three columns reach the wire from the sole base serializer AND land in
+`cloudclient.SiteDeployment` as pointers, so a wait becomes data instead of English a regex must guess at, and
+`nil` stays `nil` rather than becoming a false "deferred zero times". S4 removes a guard that lost AT RANDOM
+inside a required gate: the 1ms-budget race against the real Runner is replaced by a door that cannot answer,
+so the assertion can only fail for the right reason. S1 unblocks #10014's Cloud gate with the one line the
+ratchet itself named.
+
+**What did NOT land.** Nothing is merged, so no AFTER number moved this wave — and S2's class is DORMANT
+(zero rows since 2026-08-07 03:19:21Z), which the PR body states rather than dressing the traffic drop as the
+fix. The CLI still parses English for a deferral's depth until S5 lands. And the reviewer's own mutation
+confirmed S1's declaration is currently UNEXERCISED by the census half of the ratchet on `main` (the read that
+demands it lives on #10014) — the proof is #10014's gate after the rebase, not this branch.
+
+**Review fixes made in place.** One, on S1's `-r` branch: case 1 of `cloud-path-escape-check.test.sh` asserted
+`-ge 4` with the parenthetical "measured population is 4" while `CLOUD_ESCAPE_MIN` has been 6 — a
+weaker-than-the-floor assertion carrying a stale number. Re-pinned to the measured 6. S2, S3 and S4 needed no
+fix; their branches are pushed unchanged.
+
+**Independent re-derivations the reviewer ran** (not re-reads of builder reasoning): renaming S3's Go tag REDS
+the payload census with "new phantom … deferral_depth_MUT", proving the census genuinely walks
+`site_deployment_json/3 → deployment_json/1` and that both halves must ship together; probing `@go_tag_floor`
+reports **218** tags, so the new floor is measured equality, not slack; and commenting out S4's interceptor
+REDS with a 202, proving both that the door is load-bearing and that this box wins the race the old test bet
+on losing.
+
+**What the next wave should take.** Round 2, in dependency order as each dep merges: S5 (`dr-w13-s5`) and S6
+(`dr-w13-s6`) once S3 (#10301) is in; S7 (`dr-w13-s7`) once S2 (#10300) and #10014 are in. Then the residue
+this wave surfaced and refused to swallow: `dr-w13-followup-poll-phase-refusal-unclassified` — POLL-phase box
+refusals write "refused the build poll", which matches NEITHER anchor, so an entire producer phase classifies
+UNCLASSIFIED at both 409 and 503. That is the wish's "still silent" in its purest form and it is now the
+largest known blind spot in the taxonomy.
