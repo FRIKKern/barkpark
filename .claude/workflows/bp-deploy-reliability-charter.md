@@ -4786,3 +4786,56 @@ origin/main and `cloud/lib/barkpark_cloud/deploy_ledger.ex` DOES NOT EXIST in it
 epic must name `origin/main`, and a bare-worktree grep will report a real file as absent. And a rate over a
 pinned window is structurally blind to an incident: by the time it is bad the incident is over, by the time it
 is good it is washed out — which is the wave's thesis surviving even though its detector did not.
+
+### Wave 2026-08-07 (wave 15) — REVIEWED · Paper `deploy-reliability-wave-15-2026-08-07` · grade **A−**
+
+**Four of six slices built, reviewed, gate-green on the reviewed state, PUSHED and PR'd. Nothing merged — the
+lead merges.** S5 and S6 were round-2 by design (sequenced-rounds law), not stalls: both wait on round-1 merges.
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| The instance answers "can I deploy sites" | `dr-w15-s1-instance-answers-can-i-deploy` | `…can-i-deploy-sites--0` (unchanged) | [#10399](https://github.com/FRIKKern/barkpark/pull/10399) | 39 tests, 0 failures · format clean |
+| The content API's own status stops being thrown away | `dr-w15-s2-graph-code-split-and-agency` | `…own-status-stops-being-1` (unchanged) | [#10400](https://github.com/FRIKKern/barkpark/pull/10400) | 145 tests, 0 failures · format clean |
+| Two built readers stop being unreachable | `dr-w15-s3-emit-the-two-corpses` | `…stop-being-unreachable-2` (unchanged) | [#10401](https://github.com/FRIKKern/barkpark/pull/10401) | 71 Elixir + Go `TestCloudDeployments` ok · format/gofmt clean |
+| The failure alert says WHICH deployment | `dr-w15-s4-alert-carries-deployment-identity` | `…says-which-deployment--3` (unchanged) | [#10402](https://github.com/FRIKKern/barkpark/pull/10402) | 125 tests, 0 failures · JS 972/0 · **full cloud suite 3,118/0** |
+
+**What landed.** The wave hits all three clauses of the wish on the same day.
+SILENT → REPORTED: an instance can now answer "can I deploy sites?" over one authed GET without spending a
+deploy (D235), and none of its four fields makes a `GenServer.call`, so the instrument survives the exact wedge
+it exists to report. MIS-REPORTED → NAMED: 277 rows carrying a fully readable content-API status stop wearing
+`DOC_ID_EMPTY` / `BUILD_FAILED` and get their own four classes in BOTH template dialects (D238) — the astro arm
+is what stops the ledger blaming a site owner for an instance-side condition. UNREACHABLE → REACHED: two built
+readers (`delivery/3`, `refusal_phase/1`) had zero callers in `cloud/lib`, so `bp cloud deployments` had printed
+"NOT MEASURED" to every operator forever off the only arm it ever executed; the census route now emits both.
+AND THE ALERT GREW A SUBJECT: `deployment_failed` names the deployment id, the stage and one real code identity
+on all three producer paths and both rails (D248) — no link, no fabricated duration, no invented column.
+
+**The reporting can lose, and that was checked, not accepted.** The reviewer re-ran three independent
+mutations rather than re-reading the builders' pasted ones: dropping one `@agency` key reds S2 by name (75/2);
+replacing S3's `Map.put(:delivery, …)` reds the payload census as a Go phantom (11/2); both restore green. S1's
+budget pins are the wave's sharpest guard — `trigger_call_timeout_ms/0` is public *so the default can be
+observed without an override*, which is precisely the hole through which a 5,000 ms regression once shipped
+green and produced 265 wrong `feature_not_configured` rows.
+
+**What did NOT land.** Nothing is merged, so the AFTER number does not exist yet — again. `refusal_phase` is
+emitted and read by nobody (`bp cloud site status` still cannot show it); the follow-up is filed. The reaper's
+alert names the id only, because its four sweep `select:` clauses are `{d.id, d.site_id}`; filed as
+`dr-w15-bl-reaper-alert-identity-is-id-only`. `runner_queue_len` sees a BACKED-UP runner, not one whose single
+in-flight `systemctl` is slow with an empty mailbox — the moduledoc says so rather than overclaiming. And
+`build_slots` is capacity, not free slots, which is the field an operator would actually want.
+
+**The one judgement a second reviewer is owed before merge (D239, S2).** `CONTENT_API_403` is mapped
+`:ambiguous` per the ruling. Re-derived independently: 11 rows across 3 sites and 2 templates inside one
+20-minute window, two sites' first rows 0.25 s apart, is a *correlated fleet event* whose correlating variable
+is the API side's own visibility policy — which is the same ground on which 500/503/0 are mapped `:box`.
+`:ambiguous` is the direction that keeps those rows OUT of a box numerator. Eleven rows, no rate moves, one
+line either way — but the direction is doctrine, so it should be a human's call, not a builder's.
+
+**What the next wave takes.** Merge round 1 in dependency order, then dispatch the two deferred slices as their
+deps land: `dr-w15-s5-capability-reaches-bp-cloud-status` after #10399 **and** #10401 (it probes S1's route and
+both edit `payload_key_set_census_test.exs`), and `dr-w15-s6-live-per-attempt-headline` after #10400 **and**
+#10401 (both write `deploy_ledger.ex` / move the census floors). Then D252 is the epic's next real frontier:
+72.63% of 2026-08-07's attempts settled DEFERRED against 18 failed, so the failure rate can approach zero while
+three quarters of attempts produce no live site — and the alert rail is blind to it BY CONSTRUCTION because it
+shadows `failed` 1:1 (D232). S6 is the first instrument that can see it; the wave after should make that
+cohort's VOLUME, not just its rate, something a person is told about.
