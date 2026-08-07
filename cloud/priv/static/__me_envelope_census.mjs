@@ -235,23 +235,38 @@ function localHelperMap(blanked, name, self) {
       `         ${searched}`,
     ]);
   }
-  const re = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*\\(`, "g");
+  // Two shapes count as a clause head, and BOTH must, or the count is a lie:
+  // the paren'd form `defp foo(args)` (the only one we can walk) and the
+  // paren-LESS form `defp foo, do: …` / `defp foo do`. Counting only the first
+  // means a helper with one paren'd clause and one paren-less clause looks
+  // SINGLE-clause, and this census would walk one of two and call it the shape
+  // — the confident wrong answer its own header forbids. Paren-less heads are
+  // counted for the arity check and are never walked: with >1 clause we refuse,
+  // and with a lone paren-less clause `clauses` is empty and the "no clause"
+  // arm below refuses too.
+  const paren = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*\\(`, "g");
+  const bare = new RegExp(`(^|\\n)\\s*defp?\\s+${name}\\s*(,|do\\b)`, "g");
   const clauses = [];
   let m;
-  while ((m = re.exec(blanked)) !== null) clauses.push(m.index + m[0].length - 1); // index of `(`
+  while ((m = paren.exec(blanked)) !== null) clauses.push(m.index + m[0].length - 1); // index of `(`
+  let bareClauses = 0;
+  while (bare.exec(blanked) !== null) bareClauses++;
+  if (clauses.length + bareClauses > 1) {
+    die2([
+      `FAIL(2): \`${name}/…\` has ${clauses.length + bareClauses} clause heads in ${searched} and \`${self}\` could take`,
+      `         any of them. This census will not pick one and call it the shape.`,
+    ]);
+  }
   if (!clauses.length) {
     die2([
-      `FAIL(2): \`${self}\` is built by the bare local call \`${name}(...)\` and no clause of it exists in`,
-      `         ${searched}.`,
+      `FAIL(2): \`${self}\` is built by the bare local call \`${name}(...)\` and no walkable clause of it`,
+      `         exists in ${searched}`,
+      bareClauses
+        ? `         (its only clause head takes no parens, so this census cannot read its arguments).`
+        : `         .`,
       `         A bare (unqualified) call is a function of this module by construction, so it is`,
       `         resolvable in principle — reporting the subtree as opaque here would hide however`,
       `         many key paths it states behind a clean line.`,
-    ]);
-  }
-  if (clauses.length > 1) {
-    die2([
-      `FAIL(2): \`${name}/…\` has ${clauses.length} clauses in ${searched} and \`${self}\` could take any of`,
-      `         them. This census will not pick one and call it the shape.`,
     ]);
   }
   const open = clauses[0];
