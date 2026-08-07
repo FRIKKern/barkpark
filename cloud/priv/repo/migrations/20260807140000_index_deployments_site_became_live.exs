@@ -39,6 +39,28 @@ defmodule BarkparkCloud.Repo.Migrations.IndexDeploymentsSiteBecameLive do
   live table at 40.8 ms for 424 kB, so the ACCESS EXCLUSIVE lock is shorter than
   a normal statement. Revisit above ~1M rows, where a plain `CREATE INDEX` would
   hold the table long enough to matter.
+
+  ## Actually EXECUTED, not just parsed (wave-11 review)
+
+  This slice's gate is `Code.string_to_quoted!/1` — a PARSER. It proves the file
+  is valid Elixir and nothing else: not that the migration applies, not that
+  `drop_if_exists index(..., name:)` resolves the right object, not that Ecto
+  emits the partial predicate this index is worthless without. So it was run
+  against a real Postgres (`barkpark_cloud_test`) before merge, and the object
+  Postgres reported back is verbatim:
+
+      CREATE INDEX deployments_site_became_live_index ON public.deployments
+        USING btree (site_id, became_live_at) WHERE (became_live_at IS NOT NULL)
+
+  — identical columns and identical predicate to the hand-made `tmp_dep_site_live`
+  on cloud-db-1. `up` → `down` → `up` was cycled: the rollback leaves zero rows in
+  `pg_indexes` for that name, and the re-apply restores it. The `DROP INDEX IF
+  EXISTS tmp_dep_site_live` is a logged no-op on any database without the drift
+  ("index does not exist, skipping"), which is every fresh cloud DB and CI.
+
+  Still unproven and still the lead's: the apply on cloud-db-1 itself, where the
+  DROP-then-CREATE opens a brief window with no index under ACCESS EXCLUSIVE
+  (measured build 40.8 ms, but it queues behind any long lock on `deployments`).
   """
 
   use Ecto.Migration
