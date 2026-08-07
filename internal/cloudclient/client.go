@@ -1952,17 +1952,33 @@ type DeployCensusWindow struct {
 // Raw is the envelope bytes verbatim so `-o json` re-emits the contract instead
 // of a second, drifting definition of it.
 type DeployCensus struct {
-	Window              DeployCensusWindow  `json:"window"`
-	Volume              int                 `json:"volume"`
-	Failed              int                 `json:"failed"`
-	Live                *int                `json:"live"`
-	FailureRate         DeployRate          `json:"failure_rate"`
-	TerminalFailureRate *DeployRate         `json:"terminal_failure_rate"`
-	Classes             []DeployCensusClass `json:"classes"`
-	Deferred            []DeployCensusClass `json:"deferred"`
-	NotAttempted        []DeployCensusClass `json:"not_attempted"`
-	Sites               []DeployCensusSite  `json:"sites"`
-	MinSample           int                 `json:"min_sample"`
+	Window              DeployCensusWindow `json:"window"`
+	Volume              int                `json:"volume"`
+	Failed              int                `json:"failed"`
+	Live                *int               `json:"live"`
+	FailureRate         DeployRate         `json:"failure_rate"`
+	TerminalFailureRate *DeployRate        `json:"terminal_failure_rate"`
+	// LivePerAttempt, InFlight, Cancelled and Residual are the dr-w16-s2
+	// additions: the census now names EVERY state an attempt can end in, so
+	// success stops being the unnamed part of Volume.
+	//
+	// All four are POINTERS for the same reason Live is: a control plane that
+	// predates this slice sends none of them, and "this CP does not name
+	// in-flight rows" must not decode to "nothing is building right now".
+	//
+	// Residual is the honest tail — attempted rows whose status the census does
+	// not name. It is expected to be 0 and must be able to RISE; a reader that
+	// treats a non-zero residual as noise has re-created the unnamed remainder
+	// this slice deleted.
+	LivePerAttempt *DeployRate         `json:"live_rate"`
+	InFlight       *int                `json:"in_flight"`
+	Cancelled      *int                `json:"cancelled"`
+	Residual       *int                `json:"residual"`
+	Classes        []DeployCensusClass `json:"classes"`
+	Deferred       []DeployCensusClass `json:"deferred"`
+	NotAttempted   []DeployCensusClass `json:"not_attempted"`
+	Sites          []DeployCensusSite  `json:"sites"`
+	MinSample      int                 `json:"min_sample"`
 	// Delivery is the dr-w11-s4 addition: the time-to-web census. A POINTER
 	// because today's control plane sends no `delivery` key at all, and "the
 	// control plane does not measure delivery yet" must not decode to "delivery

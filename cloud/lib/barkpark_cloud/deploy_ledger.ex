@@ -167,6 +167,12 @@ defmodule BarkparkCloud.DeployLedger do
     "DEFERRED_UNCLASSIFIED" => "deferred for a cause the ledger has not named"
   }
 
+  # The statuses of a row that is attempted but NOT settled — the same literal
+  # the partial unique index `deployments_active_site_env_index` is built on
+  # (migration 20260805190000), so "in flight" means the same thing to the census
+  # as it does to the database that refuses a second one.
+  @in_flight_statuses ~w(queued building pushing)
+
   # Below this many ATTEMPTED rows a percentage is noise, not a measurement: at
   # the 2026-08-05 daily volume (n=332, and n≈70 in a 24h slice of the quiet
   # sites) a single row moves the rate more than a percentage point.
@@ -179,6 +185,10 @@ defmodule BarkparkCloud.DeployLedger do
   @doc "Classes that were never a deploy ATTEMPT and never enter a rate denominator."
   @spec not_attempted_classes() :: [class()]
   def not_attempted_classes, do: @not_attempted_classes
+
+  @doc "Statuses that mean ATTEMPTED BUT NOT SETTLED — the census's `in_flight` cohort."
+  @spec in_flight_statuses() :: [String.t()]
+  def in_flight_statuses, do: @in_flight_statuses
 
   @doc "The minimum ATTEMPTED sample below which a rate is refused rather than reported."
   @spec min_sample() :: pos_integer()
@@ -571,6 +581,33 @@ defmodule BarkparkCloud.DeployLedger do
   `volume`, outside the numerator, reported on its own line), and
   `not_attempted` (never a deploy at all, outside both).
 
+  ## Every attempt lands in a NAMED state (D256)
+
+  `volume` used to be the only place a deploy that WORKED appeared, and it shared
+  that residue with every row still in flight and every row somebody cancelled.
+  A census whose success count is "the part we did not name" cannot be checked by
+  anyone, so the census now names the whole population:
+
+    * `live` — the deploy switched. Counted POSITIVELY, off `status == "live"`
+      over the SETTLED cohort, never as `volume` minus the failures (D257). A
+      subtractive success count reports a repair every time a row changes status
+      for an unrelated reason, and cannot ever be wrong out loud.
+    * `in_flight` — `queued` / `building` / `pushing`: attempted, not settled.
+      Its own cohort because "not failed yet" is not "succeeded".
+    * `cancelled` — somebody stopped it. Neither a failure nor a success.
+    * `residual` — attempted rows whose `status` this census does not name.
+      `deployments.status` is a CHECK-less varchar, so the honest answer to a
+      status nobody has taught the census about is a number that GOES UP —
+      the D8 discipline applied to statuses instead of to failure reasons.
+
+  `live_rate` is `live / volume` through the same `rate/2` node as
+  `failure_rate`, with the same `@min_sample` refusal: a success percentage off
+  n=10 is exactly as dishonest as a failure percentage off n=10.
+
+  `failure_rate` and `volume` are UNCHANGED by all of this (D43): the new keys
+  are read off the same `attempted`/`settled` split that already existed, and no
+  row moves cohorts.
+
   Both bounds are required and explicit — a floating "now minus 24h" cannot be
   compared against itself a week later, and comparing two unpinned windows is
   how a volume collapse is read as a repair (D3). The window is half-open:
@@ -620,11 +657,33 @@ defmodule BarkparkCloud.DeployLedger do
     volume = total(attempted)
     failed = total(failed_rows)
 
+    # THE SUCCESS COUNT, READ POSITIVELY (D257). A FILTER over `settled`, never a
+    # fourth `Enum.split_with` over `attempted`: the partition shape would move
+    # rows out of `failed_rows`' source cohort and change `failure_rate`, which
+    # D43 forbids. Read off `status` and not off the classifier, because
+    # `classify/1` answers `nil` for a live row and for a queued row alike and
+    # those are not the same fact.
+    live = total(Enum.filter(settled, &(&1.status == "live")))
+    in_flight = total(Enum.filter(settled, &(&1.status in @in_flight_statuses)))
+    cancelled = total(Enum.filter(settled, &(&1.status == "cancelled")))
+
+    # What is left when every named state has taken its rows. Zero on a corpus
+    # the census fully names — and it must be able to RISE, because
+    # `deployments.status` carries no CHECK constraint and a status nobody has
+    # taught this census about must surface as an unnamed remainder rather than
+    # be absorbed by `live`.
+    residual = volume - (failed + total(deferred) + live + in_flight + cancelled)
+
     %{
       window: %{from: from, to: to},
       volume: volume,
       failed: failed,
+      live: live,
+      in_flight: in_flight,
+      cancelled: cancelled,
+      residual: residual,
       failure_rate: rate(failed, volume),
+      live_rate: rate(live, volume),
       classes: class_rows(failed_rows, failed),
       deferred: class_rows(deferred, volume),
       not_attempted: class_rows(not_attempted, total(not_attempted)),

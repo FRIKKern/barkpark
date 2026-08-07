@@ -1233,6 +1233,144 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert census.failure_rate.numerator == 150
       assert census.volume == 250
       assert census.failed == 150
+
+      # D43, AS AN ASSERTION AND NOT A PROMISE. Naming the success cohort must
+      # not move the numbers that already existed: `live` is a FILTER over the
+      # SAME `settled` cohort `failed_rows` comes from, so no row changes side.
+      # A fourth `Enum.split_with` over `attempted` would have — and this is the
+      # window that would have caught it.
+      assert census.live == 100
+      assert census.live_rate.pct == 40.0
+      assert census.live_rate.sample == 250
+      assert census.live_rate.numerator == 100
+      refute census.live_rate.refused
+
+      # …and the whole population is named: 150 failed + 100 live, nothing left
+      # over and nothing in flight.
+      assert census.in_flight == 0
+      assert census.cancelled == 0
+      assert census.residual == 0
+    end
+
+    # THE SUCCESS COUNT IS POSITIVE, PROVEN BY MUTATION (charter D257/D258).
+    #
+    # An arithmetic proof is worthless here: a fixture whose cohorts sum
+    # correctly passes against a SUBTRACTIVE `live` (volume minus everything
+    # else) just as happily as against a positive one — and the subtractive
+    # definition is the bug, because every row that enters the window in a state
+    # the census does not name would be reported as a deploy that WORKED.
+    #
+    # So this test mutates instead: it inserts a row in each of the four states
+    # that are neither failed nor live and asserts `live` DOES NOT MOVE. Under a
+    # subtractive definition every one of those four inserts raises `live`.
+    test "MUTATION: a queued/building/pushing/cancelled row does NOT raise `live`", %{
+      team: team,
+      site: site
+    } do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for i <- 1..4 do
+        deployment!(site, %{
+          stage: "PLAN",
+          failure_reason: @r409_bare,
+          inserted_at: DateTime.add(from, i, :second)
+        })
+      end
+
+      for i <- 1..6 do
+        deployment!(site, %{
+          status: "live",
+          stage: "SWITCH",
+          failure_reason: nil,
+          inserted_at: DateTime.add(from, 100 + i, :second)
+        })
+      end
+
+      before = DeployLedger.census(from, to)
+      assert before.volume == 10
+      assert before.failed == 4
+      assert before.live == 6
+      # EVERY attempt is in a named state: this fixture has no residue at all.
+      assert before.residual == 0
+
+      # One row per unnamed-until-now state. Each gets its OWN site: the partial
+      # unique index `deployments_active_site_env_index` permits exactly one
+      # in-flight production row per (site, environment), so a fixture that
+      # stacked them on one site would raise Ecto.ConstraintError and this proof
+      # would never run.
+      for {status, i} <- Enum.with_index(~w(queued building pushing cancelled)) do
+        deployment!(site_fixture(team), %{
+          status: status,
+          stage: "PLAN",
+          failure_reason: nil,
+          inserted_at: DateTime.add(from, 200 + i, :second)
+        })
+      end
+
+      census = DeployLedger.census(from, to)
+
+      # THE ASSERTION THE WHOLE TEST EXISTS FOR. Four more attempted rows, and
+      # not one of them is a deploy that worked.
+      assert census.live == 6
+      assert census.live_rate.numerator == 6
+
+      # They ARE counted — they were real attempts — and each lands in the state
+      # it is actually in.
+      assert census.volume == 14
+      assert census.failed == 4
+      assert census.in_flight == 3
+      assert census.cancelled == 1
+      assert census.residual == 0
+    end
+
+    # THE RESIDUE CAN GO UP — the D8 discipline applied to statuses.
+    # `deployments.status` is a CHECK-less varchar (pg_constraint contype='c'
+    # returns zero rows for this table), so a producer can invent a status
+    # tomorrow. The honest answer is a number that RISES and says "the census
+    # does not name this", never a success count that quietly absorbs it.
+    test "an UNKNOWN status is residue, loudly — it is not folded into `live`", %{site: site} do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for i <- 1..4 do
+        deployment!(site, %{
+          stage: "PLAN",
+          failure_reason: @r409_bare,
+          inserted_at: DateTime.add(from, i, :second)
+        })
+      end
+
+      for i <- 1..6 do
+        deployment!(site, %{
+          status: "live",
+          stage: "SWITCH",
+          failure_reason: nil,
+          inserted_at: DateTime.add(from, 100 + i, :second)
+        })
+      end
+
+      # A status no arm of this census has ever been taught.
+      for i <- 1..3 do
+        deployment!(site, %{
+          status: "quarantined",
+          stage: "SWITCH",
+          failure_reason: nil,
+          inserted_at: DateTime.add(from, 200 + i, :second)
+        })
+      end
+
+      census = DeployLedger.census(from, to)
+
+      assert census.volume == 13
+      assert census.failed == 4
+      assert census.live == 6
+      assert census.residual == 3
+
+      # And the residue does not leak into the failure rate either: an unnamed
+      # status is not a failure any more than it is a success.
+      assert census.failure_rate.numerator == 4
+      assert census.failure_rate.sample == 13
     end
 
     test "the window is PINNED — rows outside the bound are not counted", %{site: site} do
