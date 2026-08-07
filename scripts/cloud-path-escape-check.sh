@@ -114,6 +114,7 @@ set -euo pipefail
 CLOUD_PATHS='cloud/**
 .github/workflows/cloud.yml
 deploy/site-deploy.sh
+deploy/site-deploy-node.sh
 internal/cli/cloud/providers_capabilities.json
 internal/cloudclient/**
 js/packages/create-barkpark-app/templates/**

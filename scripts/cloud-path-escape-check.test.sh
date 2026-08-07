@@ -91,8 +91,8 @@ fi
 # The count is the anti-vacuity signal: a run that says "0 reads" is a broken
 # scanner, and this case would notice it even if the floor were removed.
 n="$(printf '%s' "$out" | sed -n 's/^cloud-path-escape-check: \([0-9]*\) distinct.*/\1/p')"
-if [ "${n:-0}" -ge 4 ]; then
-  ok "resolved $n repo-root reads (measured population is 4)"
+if [ "${n:-0}" -ge 6 ]; then
+  ok "resolved $n repo-root reads (measured population is 6, == CLOUD_ESCAPE_MIN)"
 else
   no "resolved only ${n:-0} repo-root reads — scanner is under-matching"
 fi
