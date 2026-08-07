@@ -1441,6 +1441,73 @@ else
   bad "the UNKNOWN specimen did not fail closed (exit $SW_UNK_RC): $(tail -2 <<<"$SW_UNK")"
 fi
 
+# ═══ AN ALL-SKIPPED SWEEP IS EVIDENCE OF NOTHING (wave 37, D422) ═════════════
+#
+# NOT HYPOTHETICAL, AND NOT THE UNKNOWN CASE ABOVE. Measured against this repo
+# on 2026-08-06 — twice, six minutes apart, byte-identical — with a candidate
+# adding `Required-check spec gate`: thirteen open PRs, THIRTEEN `skip` rows,
+# `casualties: 0`, `NO CASUALTY`, exit 0. Every mergeability was COMPUTED (so the
+# UNKNOWN refusal never fires) and side (B) was still never asked about a single
+# head: eight were MERGEABLE/BLOCKED, four CONFLICTING/DIRTY, one a DRAFT. That
+# green would have authorized registering a fifth required context on `main`
+# under `enforce_admins: true`, on zero evaluated PRs.
+#
+# THE FIXTURE IS ALL-SKIP BY THREE DIFFERENT ROUTES on purpose, because the
+# refusal must not be reachable only through the one state a lazy fixture picks.
+cat > "$SWF/checkruns-sweepDRAFT.json" <<'JSON'
+{ "check_runs": [ { "name": "Some other check", "conclusion": "success", "status": "completed", "started_at": "2026-07-30T01:00:00Z" } ] }
+JSON
+cat > "$TMP/sweep-prs-allskip.json" <<'JSON'
+[
+ {"number":11,"headRefOid":"sweepDRAFT","mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","isDraft":true,"title":"a draft — a STABLE exclusion"},
+ {"number":12,"headRefOid":"sweepBLOCKED","mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","isDraft":false,"title":"a required check still in flight — TRANSIENT"},
+ {"number":13,"headRefOid":"sweepDIRTY","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","isDraft":false,"title":"already conflicting"}
+]
+JSON
+SW_ALL="$(sweep "$TMP/sweep-prs-allskip.json")" && SW_ALL_RC=0 || SW_ALL_RC=$?
+if [ "$SW_ALL_RC" -eq 2 ] && grep -q "evaluated 0 of 3 open PR(s)" <<<"$SW_ALL"; then
+  ok "a sweep that skipped EVERY open PR exits 2 and names the empty evaluated set — 'casualties: 0' on zero evidence is not a finding"
+else
+  bad "the all-skip sweep did not fail closed (exit $SW_ALL_RC): $(tail -2 <<<"$SW_ALL")"
+fi
+# COVERAGE IS REPORTED ON EVERY RUN, not only on the refusal — that line is what
+# stops a PARTIAL sweep (exit 0, and it must stay exit 0 or the guard becomes
+# unpassable and gets bypassed) from being quoted as a full one.
+if grep -q "evaluated 1, skipped 2" <<<"$SW_SAFE" && grep -q "PARTIAL COVERAGE: 2 PR(s) were skipped" <<<"$SW_SAFE"; then
+  ok "…and a sweep that evaluated 1 of 3 says PARTIAL COVERAGE out loud rather than reporting a bare NO CASUALTY"
+else
+  bad "the partial-coverage sweep did not report its coverage: $(tail -3 <<<"$SW_SAFE")"
+fi
+# THE TWO SKIP REASONS ARE NOT ONE REASON. A DRAFT is a stable exclusion; a PR
+# BLOCKED by a run still in flight is a measurement taken early. Before wave 37
+# both printed the identical "not currently mergeable-and-unblocked", which is
+# how thirteen rows of nothing read as thirteen rows of clearance.
+if grep -q "^#11 .*skip:draft" <<<"$SW_ALL" && grep -q "^#12 .*skip:blocked" <<<"$SW_ALL" \
+   && grep -q "^#13 .*skip:conflicting" <<<"$SW_ALL" \
+   && grep -q "TRANSIENT" <<<"$SW_ALL" && grep -q "STABLE exclusion" <<<"$SW_ALL"; then
+  ok "a DRAFT, a transiently-BLOCKED PR and a CONFLICTING PR are three DIFFERENT skip rows, not one sentence three times"
+else
+  bad "the skip reasons are still reported identically: $(grep -E '^#1[123]' <<<"$SW_ALL")"
+fi
+# MUTATION: remove the coverage refusal and the same fixture goes GREEN on zero
+# evidence — the exact byte-identical failure measured on main. This is the guard
+# shown able to lose.
+NOCOV="$TMP/sweep-nocoverage.sh"
+sed 's/^  if \[ "\$evaluated" -eq 0 \]; then$/  if false; then # COVERAGE REFUSAL REMOVED/' "$SWEEP" > "$NOCOV"
+if grep -q 'COVERAGE REFUSAL REMOVED' "$NOCOV"; then
+  ok "the coverage mutation applies: a copy of the sweep no longer refuses an empty evaluated set"
+else
+  bad "the coverage mutation did not apply — the refusal moved, so the proof below is vacuous"
+fi
+NC_OUT="$(RC_REPO_ROOT="$REPO_ROOT" bash "$NOCOV" --spec "$TMP/sweep-candidate.json" \
+           --ref-file "$TMP/sweep-ref.json" \
+           --fixture-dir "$SWF" --prs "$TMP/sweep-prs-allskip.json" 2>&1)" && NC_RC=0 || NC_RC=$?
+if [ "$NC_RC" -eq 0 ] && grep -q "NO CASUALTY" <<<"$NC_OUT"; then
+  ok "…and without it the all-skip fixture exits 0 with NO CASUALTY on zero evaluated PRs (fail-before proven, not asserted)"
+else
+  bad "the unguarded copy did not reproduce the vacuous green (exit $NC_RC): $(tail -2 <<<"$NC_OUT")"
+fi
+
 # MUTATION: drop side (A) and the sweep becomes the one-sided test — it must now
 # refuse on the specimens it correctly ignored, which is what would veto the flip
 # forever.
@@ -1601,7 +1668,9 @@ section "18. no UNPINNED in-repo text still claims this repo's \`main\` is unpro
 #
 # The remedy was NOT to paste eleven pins. Eight of the eleven were pattern
 # quoting, so the QUOTED-PATTERN FENCE below retires them as a CLASS (41 raw
-# rows -> 33; UNPINNED 11 -> 4), taking the pinned charter row `965d722b53f6`
+# rows -> 33 AS MEASURED AT WAVE 36's COMMIT — it is 42 -> 33 today, and the
+# fence's own comment carries the re-derivation; UNPINNED 11 -> 4), taking the
+# pinned charter row `965d722b53f6`
 # with it — which is why THREE stale pins were dropped in that commit
 # (`ce745c039e38`, `562eb5d348c9`, `965d722b53f6`) and not the two this comment
 # used to predict. The four survivors were READ and classified by hand: two
@@ -1660,14 +1729,31 @@ PROTECTION_SCAN=(.claude/workflows .github docs scripts tooling/grip/ledger CLAU
 # regex ASSIGNMENT (`RE='…'`, `CLAIM_PATTERN="…"`). Those are not claims about
 # this repo at all — they are the census's own search string, quoted so a human
 # can re-run it. Wave 35 proved this the expensive way: eight of the forty-one
-# census rows on main today are documentation OF THIS GUARD, and the guard
-# reddened on all eight. A required check that fails because someone wrote down
-# how it works is a guard that punishes its own audit trail.
+# census rows on main AT THAT COMMIT were documentation OF THIS GUARD, and the
+# guard reddened on all eight. A required check that fails because someone wrote
+# down how it works is a guard that punishes its own audit trail.
 #
-# MEASURED at this commit, over the same scan set: 41 raw rows -> 33 fenced,
-# removing exactly 8 — charter D106 (which quotes `grep -c "…"`) and the seven
-# wave-35 grip-ledger lines that quote `grep -rn`, `git grep -nIE`,
-# `git grep --untracked -lIE` or the `RE='…'` assignment. UNPINNED 11 -> 4.
+# MEASURED at main ef77af274 (wave 37, re-derived — see the recipe below, and
+# RUN IT rather than trusting this line): 42 raw rows -> 33 fenced, removing 9 —
+# 7 by the search-argument fence (charter D106, which quotes `grep -c "…"`, plus
+# the wave-35 grip-ledger lines quoting `grep -rn`, `git grep -nIE` or
+# `git grep --untracked -lIE`) and 2 by the regex-assignment fence (`RE='…'`).
+#
+# THE FIGURES ABOVE DRIFTED ONCE ALREADY, which is why the recipe is here. Wave
+# 36 wrote "41 raw -> 33, removing exactly 8"; one new raw row arrived after
+# #9849 and the search-argument fence ate it, so the removal count moved to 9
+# while the FENCED total stayed 33 — the section stayed green while its own
+# reproduction recipe misled the next reader. Re-derive, do not quote:
+#
+#   RE='(no|No|NO|zero|Zero) branch protection|main is NOT PROTECTED|no CI check in this repo can block a merge'
+#   raw() { git grep --untracked -lE "$RE" -- .claude/workflows .github docs scripts \
+#             tooling/grip/ledger CLAUDE.md ':!scripts/required-checks.test.sh' \
+#           | tr '\n' '\0' | xargs -0 grep -nHE "$RE"; }
+#   raw | wc -l                                        # raw rows        -> 42
+#   raw | grep -vE "$ARG_RE" | grep -vE "$ASSIGN_RE" | wc -l   # fenced  -> 33
+#
+# (ARG_RE/ASSIGN_RE are the two variables assigned immediately below; the counts
+# are of ROWS, and the fenced total is what the pin list is a set-equality over.)
 #
 # WHY NOT THE CHEAP ALTERNATIVE — SCOPING `tooling/grip/ledger` OUT, the shape
 # §13 uses and this section's own comment offered as the fallback. REFUSED, and
