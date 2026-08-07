@@ -189,7 +189,8 @@ defmodule BarkparkCloud.SoldCapabilityManifestTest do
   defp resolve({:cron, worker}, _ctx) do
     cond do
       not MapSet.member?(cron_workers(), worker) ->
-        {:error, "no crontab row schedules #{inspect(worker)} in the app's configured Oban plugins"}
+        {:error,
+         "no crontab row schedules #{inspect(worker)} in the app's configured Oban plugins"}
 
       not Code.ensure_loaded?(worker) ->
         {:error, "#{inspect(worker)} is scheduled but the module does not load"}
@@ -285,9 +286,7 @@ defmodule BarkparkCloud.SoldCapabilityManifestTest do
           :ok
 
         {:error, why} ->
-          flunk(
-            "signal #{inspect(signal)} backing #{inspect(bullet)} does NOT resolve: #{why}"
-          )
+          flunk("signal #{inspect(signal)} backing #{inspect(bullet)} does NOT resolve: #{why}")
       end
     end
   end
