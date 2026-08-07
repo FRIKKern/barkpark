@@ -10417,13 +10417,69 @@ test("cch-w45-s5: the answer reaches BOTH verbs through the one render seam (ins
   const refused = hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {}, "refuse");
   assert.doesNotMatch(refused, /id="inst-domain"/);
   assert.doesNotMatch(refused, /data-rollback/);
-  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 4, // 2 verbs × (title + reason span)
-    "both refused verbs carry the server's sentence on the same screen");
+  // cch-w47-s2: 5, not 4 — the two disable-and-explain verbs still carry it
+  // TWICE each (title attribute + reason span), and the support card's
+  // empty-state now carries it ONCE more: its add affordance is OMITTED (D514),
+  // so there is no disabled button to hang a title on, only the sentence. Still
+  // the SERVER's own bytes in every one of the five places — nothing fresh.
+  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 5,
+    "every refused affordance on the screen carries the server's sentence");
   // The default is the shipped screen, unchanged.
   const plainGrant = hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {});
   assert.equal(plainGrant, hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {}, "grant"));
   assert.match(plainGrant, /id="inst-domain"/);
   assert.match(plainGrant, /data-rollback="1"/);
+});
+
+// ── cch-w47-s2: the FOUR autoupdate policy buttons are decided at OFFER time
+// too ────────────────────────────────────────────────────────────────────────
+// `patch "/v1/barkparks/:id/autoupdate"` (web/router.ex) opens with
+// Auth.require_primary_team_admin — the same tier as the Rollback button four
+// lines below it in the SAME button strip — yet the four `data-au` toggles were
+// appended with no authority argument at all. Same remedy, same grammar: the
+// live mount hook (`data-au=`) exists on the grant arm ONLY.
+const CCH_W47_S2_POLICY_BOX = {
+  id: "b-1", name: "Gyldendal", host: "5.75.169.183", url: "https://g.barkpark.cloud",
+  health_status: "up", agent_status: "online", version: "0.2.25",
+  provision_status: "succeeded", update_state: "current", provider: "hetzner",
+  // the CP's real policy block, at the migrations' column defaults
+  autoupdate_enabled: true, autoupdate_paused: false, channel: "prod", pinned_release: null,
+};
+
+test("cch-w47-s2: the autoupdate policy toggles are authority-gated — grant keeps every data-au hook, refuse and unknown wire none", () => {
+  const grant = hooks.updatePanelHtml(CCH_W47_S2_POLICY_BOX, "grant");
+  assert.match(grant, /data-au="pause"/);
+  assert.match(grant, /data-au="pin"/);
+  assert.doesNotMatch(grant, /inst-life-disabled/);
+  // Absent authority is the shipped panel, byte for byte — this stays an ADD.
+  assert.equal(hooks.updatePanelHtml(CCH_W47_S2_POLICY_BOX), grant);
+
+  const refuse = hooks.updatePanelHtml(CCH_W47_S2_POLICY_BOX, "refuse");
+  assert.match(refuse, /Pause autoupdate/);                // never hidden (D428)
+  assert.match(refuse, /Pin version/);
+  assert.doesNotMatch(refuse, /data-au=/);                 // no hook for a refused click
+  assert.equal(cchW45S5Reason(refuse), CCH_W45_S5_ADMIN_SENTENCE);
+  // One wrapper PER control: pause + pin + the rollback four lines below.
+  assert.equal(refuse.split('<div class="inst-life-disabled">').length - 1, 3);
+
+  const unknown = hooks.updatePanelHtml(CCH_W47_S2_POLICY_BOX, "unknown");
+  assert.doesNotMatch(unknown, /data-au=/);
+  assert.equal(cchW45S5Reason(unknown), null);             // nothing claimed
+  assert.match(unknown, /Checking capabilities/);
+
+  // The OTHER pair of toggles (a paused, pinned box) is gated the same way —
+  // the guard rides adminWriteControlHtml, not the individual verb.
+  const frozen = hooks.updatePanelHtml(
+    Object.assign({}, CCH_W47_S2_POLICY_BOX, { autoupdate_paused: true, pinned_release: "v0.4.0" }), "refuse");
+  assert.match(frozen, /Resume autoupdate/);
+  assert.match(frozen, /Unpin/);
+  assert.doesNotMatch(frozen, /data-au=/);
+
+  // And an OLDER CP that sends no policy block still offers no toggles at all —
+  // the degrade path is untouched by the guard.
+  const legacy = hooks.updatePanelHtml({ id: "b-2", host: "h", update_state: "current" }, "grant");
+  assert.doesNotMatch(legacy, /data-au=/);
+  assert.doesNotMatch(legacy, /Pause autoupdate/);
 });
 
 test("isu-w5: fleetRolloutBanner — halted → warn+Resume, live → base+Halt, absent → null", () => {
@@ -14598,6 +14654,39 @@ test("fleet card empty state: the CTA on a live main; the honest hint (no CTA) p
     { id: "m2", name: "Fresh", host: null, provision_status: null }, [], Date.now());
   assert.match(proving, /Available once this server is live/);
   assert.ok(!/fleet-add-support/.test(proving), "no add affordance before the main is live");
+});
+
+// cch-w47-s2: POST /v1/fleet/supports refuses a session member with
+// Auth.forbidden(required: "admin", scope: "team"), but this card's only fence
+// was `mainLive` — liveness, never authority. D514: the add affordances are
+// OMITTED for a refused member. D530(i): and the empty-state SENTENCE must not
+// borrow the pre-live hint, which would tell a member that a LIVE server isn't
+// live yet.
+test("cch-w47-s2: the add-support affordances take authority — omitted on refuse/unknown, and the empty state stops reusing the pre-live hint", () => {
+  const grant = hooks.fleetSupportCardHtml(FLEET_MAIN, [], Date.now(), "grant");
+  assert.match(grant, /id="fleet-add-support"/);
+  assert.match(grant, /id="fleet-add-support-cta"/);
+  // Absent authority is the shipped card, byte for byte — this stays an ADD.
+  assert.equal(hooks.fleetSupportCardHtml(FLEET_MAIN, [], Date.now()), grant);
+
+  const refuse = hooks.fleetSupportCardHtml(FLEET_MAIN, [], Date.now(), "refuse");
+  assert.ok(!/fleet-add-support/.test(refuse), "no add affordance the server would answer 403");
+  assert.match(refuse, /You need the admin role on this team/);   // the SERVER's sentence
+  assert.ok(!/Available once this server is live/.test(refuse),
+    "a LIVE main never explains a ROLE refusal with the pre-live hint");
+  assert.match(refuse, /fleet-support-card/);                     // the card itself is never hidden
+
+  const unknown = hooks.fleetSupportCardHtml(FLEET_MAIN, [], Date.now(), "unknown");
+  assert.ok(!/fleet-add-support/.test(unknown));
+  assert.ok(!/You need the admin role/.test(unknown), "an unanswered /v1/me claims no refusal");
+  assert.ok(!/Available once this server is live/.test(unknown));
+  assert.match(unknown, /Checking capabilities/);
+
+  // The PRE-LIVE hint keeps its own meaning on a main that truly isn't live.
+  const proving = hooks.fleetSupportCardHtml(
+    { id: "m2", name: "Fresh", host: null, provision_status: null }, [], Date.now(), "grant");
+  assert.match(proving, /Available once this server is live/);
+  assert.ok(!/You need the admin role/.test(proving));
 });
 
 test("fleet card with supports: one nested row each, deep-linked, never a second card", () => {

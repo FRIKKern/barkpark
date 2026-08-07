@@ -1703,8 +1703,18 @@ const EXPECTATIONS = {
         "no click hook is wired for the rollback the server will refuse");
       assert.ok(body.includes("You need the admin role on this team — an admin on this team can grant it."),
         "both refusals speak the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
-      assert.equal(countMatches(body, '<div class="inst-life-disabled">'), 2,
-        "exactly the two member-reachable writes render through the disable-and-explain arm");
+      // cch-w47-s2: FOUR now, not two — the same screen was also offering this
+      // member the autoupdate policy toggles (patch /v1/barkparks/:id/autoupdate,
+      // require_primary_team_admin). With bpBase carrying the CP's real policy
+      // block, `autoupdateActions` offers Pause + Pin on this row, and
+      // adminWriteControlHtml emits ONE wrapper PER control: domain + rollback +
+      // pause + pin = 4. Add Support takes the OMIT arm (D514) and adds none.
+      assert.equal(countMatches(body, '<div class="inst-life-disabled">'), 4,
+        "exactly the four member-reachable writes render through the disable-and-explain arm");
+      assert.ok(!body.includes('data-au='),
+        "no click hook is wired for the autoupdate policy writes the server will refuse");
+      assert.ok(!body.includes("fleet-add-support"),
+        "and the add-support affordance is omitted outright for a member (D514)");
       assert.ok(!body.includes("Checking capabilities"),
         "an ANSWERED /v1/me is not a checking state on the body either");
       assert.ok(!body.includes("data-me-retry"),

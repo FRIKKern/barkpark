@@ -7008,7 +7008,7 @@
           // MVP-0 (PDF-D92): the fleet card — this main's support servers.
           // Renders "" for a support row (a support never gets its own card);
           // supports come from the SAME fleet payload loadInstance cached.
-          fleetSupportCardHtml(bp, supportsOf(fleetCache, bp.id), Date.now()) +
+          fleetSupportCardHtml(bp, supportsOf(fleetCache, bp.id), Date.now(), authority) +
         "</div>" +
         // GR24 (D-03): the identity/runtime rail — every value a REAL fleet
         // field (S6 stamps provider/region/server_type; blank-tolerant "—").
@@ -7598,21 +7598,48 @@
   // The card itself. Renders ONLY on a MAIN row — a support never gets its own
   // card (it appears as a nested row under its parent). The add CTA is live
   // once the main is; before that the honest hint explains why.
-  function fleetSupportCardHtml(bp, supports, now) {
+  // cch-w47-s2: `authority` is instanceAdminAuthority()'s three-valued answer,
+  // threaded from the ONE render site (instanceDetailHtml) — never read here, so
+  // one render can never carry two disagreeing authorities. Absent it defaults
+  // to "grant", byte-identical to the shipped card (this epic's twice-shipped
+  // convention: instanceDetailHtml, instanceHeaderHtml, updatePanelHtml).
+  //
+  // POST /v1/fleet/supports refuses a session member with
+  // Auth.forbidden(required: "admin", scope: "team"), while this card's only
+  // fence was `mainLive` — LIVENESS, never authority. D514 rules the button:
+  // both add affordances are OMITTED for a refused member (this is a
+  // discretionary group-management add, not one of the two named
+  // disable-and-explain verbs on the rail). D530(i) rules the SENTENCE beside
+  // it: the pre-live hint must not be reused as the role refusal, or a live
+  // server tells a member it isn't live yet.
+  function fleetSupportCardHtml(bp, supports, now, authority) {
     if (isSupportBp(bp)) return "";
     now = (typeof now === "number") ? now : Date.now();
     supports = supports || [];
+    authority = authority || "grant";
     var mainLive = instanceLifecycle(bp).live;
-    var addBtn = mainLive
+    var mayAdd = mainLive && authority === "grant";
+    var addBtn = mayAdd
       ? '<button class="btn btn-ghost btn-sm" id="fleet-add-support" type="button">+ Add support</button>'
       : "";
     var body;
     if (!supports.length) {
+      // Three distinct sentences for three distinct truths: the live+allowed
+      // CTA, the ROLE refusal in the server's own words, and the PRE-LIVE hint.
+      // "unknown" claims neither — /v1/me has not answered.
+      var emptyTail;
+      if (mayAdd) {
+        emptyTail = '<button class="btn btn-primary btn-sm" id="fleet-add-support-cta" type="button">Add a support server</button>';
+      } else if (!mainLive) {
+        emptyTail = '<p class="dim">Available once this server is live.</p>';
+      } else if (authority === "refuse") {
+        emptyTail = '<p class="dim">' + esc(FORBIDDEN_ROLE_COPY.admin) + "</p>";
+      } else {
+        emptyTail = '<p class="dim">Checking capabilities&hellip;</p>';
+      }
       body = '<div class="fleet-support-empty">' +
         '<p>No support servers yet. A support is a worker box attached to this Barkpark &mdash; it listens on your task ledger and takes heavy work off your machine.</p>' +
-        (mainLive
-          ? '<button class="btn btn-primary btn-sm" id="fleet-add-support-cta" type="button">Add a support server</button>'
-          : '<p class="dim">Available once this server is live.</p>') +
+        emptyTail +
       "</div>";
     } else {
       body = supports.map(function (s) { return supportRowHtml(s, now); }).join("");
@@ -8063,10 +8090,16 @@
 
     var buttons = "";
     if (acts.policy) {
-      if (acts.showPause) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="pause">Pause autoupdate</button>';
-      if (acts.showResume) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="resume">Resume autoupdate</button>';
-      if (acts.showPin) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>';
-      if (acts.showUnpin) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="unpin">Unpin</button>';
+      // cch-w47-s2: the four policy toggles are the SAME tier as Rollback four
+      // lines below — `patch "/v1/barkparks/:id/autoupdate"` opens with
+      // Auth.require_primary_team_admin — and they were appended with no
+      // authority argument at all, so a plain member was offered four writes the
+      // server answers 403. Same seam, same grammar: the live `data-au` mount
+      // hook exists on the grant arm only (D428/D439).
+      if (acts.showPause) buttons += adminWriteControlHtml(authority, "Pause autoupdate", 'data-au="pause"', "");
+      if (acts.showResume) buttons += adminWriteControlHtml(authority, "Resume autoupdate", 'data-au="resume"', "");
+      if (acts.showPin) buttons += adminWriteControlHtml(authority, "Pin version", 'data-au="pin"', "");
+      if (acts.showUnpin) buttons += adminWriteControlHtml(authority, "Unpin", 'data-au="unpin"', "");
     }
     // isu-w6: Rollback is offered for every hosted box (this panel only renders
     // when the box has a host). It's a DISTINCT affordance from the policy toggles
