@@ -1407,6 +1407,89 @@ FAKENPM
     check "the re-gate ran no npm (it re-gated the STAGED bytes)" [ ! -s "$DPSRC/.npm-calls" ]
     check "every BPSTAGE name+status on the wire is still whitelisted" \
       sh -c "! grep '^BPSTAGE ' '$E2E/dp.out' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
+
+    # -----------------------------------------------------------------------
+    # ROUTE ARMING CAN REPORT FAILURE (engine-D77 applied to the arm direction).
+    # Every case above runs with BARKPARK_CADDYFILE pointed at a file that does
+    # not exist, so arm_caddy_site_route returns 0 out of its first guard and the
+    # arm path has NEVER been exercised here. These two runs are the same site,
+    # same bytes, differing ONLY in whether `caddy validate` accepts:
+    #   accepting -> route armed, sign-off NAMES https://<host>/sites/<slug>/
+    #   rejecting -> Caddyfile reverted, ROUTE failed on the machine channel, and
+    #                the sign-off claims NO URL — still exit 0 (charter-D327).
+    # On origin/main the rejecting run is indistinguishable from the accepting
+    # one: `|| true` swallowed a return the function never made non-zero anyway.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: a REJECTED route arm reports ROUTE failed and stops advertising the URL (engine-D77)"
+    RF="$E2E/routefail"; RFSRC="$RF/src"
+    mkdir -p "$RF/okbin" "$RF/nobin" "$RFSRC"
+    printf '{"name":"selftest-routefail","private":true}\n' > "$RFSRC/package.json"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$RF/okbin/caddy"
+    printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$RF/nobin/caddy"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$RF/okbin/systemctl"
+    cp "$RF/okbin/systemctl" "$RF/nobin/systemctl"
+    chmod +x "$RF/okbin/"* "$RF/nobin/"*
+    rf_caddyfile() { # <path> — a live FQDN block with the slot anchor, no marker
+      { printf 'example.com {\n'
+        printf '\treverse_proxy localhost:4000\n'
+        printf '}\n'; } > "$1"
+    }
+    rf_deploy() { # <bindir> <build_id> <caddyfile> <outfile> -> exit code
+      env PATH="$1:$FAKEBIN:$PATH" \
+        SITE_SLUG=routefail BUILD_ID="$2" CONTENT_REV=rev-1 SITE_SRC="$RFSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$3" \
+        BARKPARK_SITE_DEPLOY_LOCK="$RF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$RF/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$4" 2> "$4.err"
+      echo $?
+    }
+    # (a) the CONTROL: caddy accepts, so the route really is armed.
+    rf_caddyfile "$RF/Caddyfile.ok"
+    rc="$(rf_deploy "$RF/okbin" rf1 "$RF/Caddyfile.ok" "$RF/ok.out")"
+    check "armed run exits 0"                            [ "$rc" = 0 ]
+    check "armed run really wrote the marker into the Caddyfile" \
+      grep -q 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.ok"
+    check "armed run emits NO ROUTE failure"             absent '^BPSTAGE name=ROUTE ' "$RF/ok.out"
+    check "armed run DOES advertise the public URL" \
+      grep -q "HEALTHY — 'routefail' live at build rf1 (https://sites.example.com/sites/routefail/)" "$RF/ok.out"
+    # (b) THE CASE: same engine, same bytes, a caddy that rejects. The marker
+    #     guard makes arming a FIRST-deploy-only step, so this needs a fresh
+    #     Caddyfile — which is exactly the real shape (a first deploy into a
+    #     Caddyfile another writer left invalid).
+    rf_caddyfile "$RF/Caddyfile.bad"
+    cp "$RF/Caddyfile.bad" "$RF/Caddyfile.bad.orig"
+    rc="$(rf_deploy "$RF/nobin" rf2 "$RF/Caddyfile.bad" "$RF/bad.out")"
+    check "rejected arm STILL exits 0 (charter-D327: report, do not fail a healthy build)" \
+      [ "$rc" = 0 ]
+    check "rejected arm left the Caddyfile byte-identical (reverted)" \
+      cmp -s "$RF/Caddyfile.bad" "$RF/Caddyfile.bad.orig"
+    check "rejected arm speaks a ROUTE failure on the machine channel" \
+      grep -q '^BPSTAGE name=ROUTE status=failed build_id=rf2 detail="' "$RF/bad.out"
+    check "the ROUTE failure ALSO rides the plain human log (dual-channel)" \
+      grep -q '\[site-deploy .*ROUTE: the caddy /sites/routefail route is NOT ARMED' "$RF/bad.out"
+    check "it names the URL that would 404 and the file to fix" \
+      grep -q 'https://sites.example.com/sites/routefail/ will 404' "$RF/bad.out"
+    check "rejected arm STOPS advertising the public URL in the sign-off" \
+      absent "live at build rf2 (https://" "$RF/bad.out"
+    check "the sign-off says the bytes are live on disk but the route is not armed" \
+      grep -q "HEALTHY ON DISK — 'routefail' build rf2 is the current release, but its public route is NOT ARMED" "$RF/bad.out"
+    check "the release still went live on disk (the flip is independent of Caddy)" \
+      [ "$(readlink "$E2E/sites/routefail/current" 2>/dev/null)" = releases/rf2 ]
+    check "SWITCH still ok"                              grep -q '^BPSTAGE name=SWITCH status=ok build_id=rf2' "$RF/bad.out"
+    # The ROUTE line is deliberately OUTSIDE DeployRunner's @stage_names
+    # whitelist (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE): parse_stage_line/2 skips
+    # it, so it can never reach stage_exit_code/1 and flip a green run to -1.
+    # That is what keeps this a REPORT and not a verdict change.
+    RUNNER_EX="$(cd "$(dirname "$SELF")/.." && pwd)/api/lib/barkpark/sites/deploy_runner.ex"
+    if [ -f "$RUNNER_EX" ]; then
+      check "DeployRunner's @stage_names still has no ROUTE arm (the report cannot flip a verdict)" \
+        sh -c "! grep -q '^  @stage_names .*ROUTE' '$RUNNER_EX'"
+      check "…and that whitelist is still the six this engine folds" \
+        grep -q '^  @stage_names ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)' "$RUNNER_EX"
+    fi
+    check "every OTHER BPSTAGE name+status on the wire is still whitelisted" \
+      sh -c "! grep '^BPSTAGE ' '$RF/bad.out' | grep -v '^BPSTAGE name=ROUTE ' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
   fi
 
   # -------------------------------------------------------------------------
@@ -2126,6 +2209,17 @@ setup_caddy_lock
 # `grep -q` below is a time-of-check read, and re-arming a route another writer
 # just added — or rewriting the file from a snapshot taken before their write —
 # is exactly the lost update.
+# RETURNS: 0 the route is armed (or was already armed / there is no caddy on this
+# box / this Caddyfile has no slot site to hang it in), 2 this run TRIED to arm it,
+# the change was rejected or the file was unwritable, and the Caddyfile was
+# REVERTED — so the route is NOT armed and this run OBSERVED that. The caller MUST
+# branch on it (engine-D77, which taught the disarm direction exactly this and left
+# the arm direction untouched): a revert used to be the function's LAST `mv`, i.e.
+# exit status 0, so "the route is not armed" was not representable at the function
+# boundary and the run's final line advertised https://<host>/sites/<slug>/ over it.
+# 2 and NOT 1 on purpose, mirroring disarm_caddy_site_route: `with_caddy_lock`
+# returns 1 out of its OWN guards when the lock cannot be taken, and that is a
+# different fact — the Caddyfile was never even read.
 arm_caddy_site_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG route"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping /sites/$SITE_SLUG route"; return 0; }
@@ -2156,20 +2250,53 @@ SITEROUTE
     BEGIN { blk=ENVIRON["BP_BLOCK"] }
     !ins && $0 ~ /reverse_proxy[[:blank:]]+localhost:(4000|4001)([[:blank:]]|$)/ { print blk; ins=1 }
     { print }
-  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE" || {
+    log "could not rewrite $CADDYFILE for the /sites/$SITE_SLUG arm — restoring the backup, Caddy untouched"
+    rm -f "$tmp"; mv "$bak" "$CADDYFILE"; return 2
+  }
   chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
   chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
   if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
     if systemctl reload caddy 2>/dev/null; then log "armed caddy /sites/$SITE_SLUG route -> $ROOT/current"; else log "caddy reload failed (config valid) — /sites/$SITE_SLUG live on next reload"; fi
     rm -f "$bak"
+    return 0
   else
     log "caddy validate rejected the /sites/$SITE_SLUG route — reverting, Caddy untouched"
     mv "$bak" "$CADDYFILE"
+    return 2
   fi
 }
 # Non-fatal by contract: a Caddy hiccup (or a lock we could not take) must never
 # fail a healthy build — the release goes live on the symlink flip either way.
-with_caddy_lock arm_caddy_site_route || true
+# But non-fatal is NOT the same as unreported, and `|| true` made them the same:
+# the run then walked SWITCH ok / RETIRE ok and signed off "live at
+# https://<host>/sites/<slug>/" over a URL that 404s, at exit 0.  So branch, and
+# carry ROUTE_ARMED into the final line.
+# The verdict deliberately STAYS exit 0 (charter-D327).  Turning a today-green
+# path red converts succeeding FIRST deploys into hard failures and RAISES this
+# epic's own failure numerator — the dr-w8-s2 trap.  Report first; move the
+# verdict in a later wave, with the incidence measured.
+# `emit ROUTE failed` is safe on the machine channel: DeployRunner's
+# @stage_names whitelist is PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE, so
+# parse_stage_line/2 SKIPS a ROUTE line — it never enters `stages` and cannot
+# reach stage_exit_code/1.  It still rides the durable log tail the operator reads.
+ROUTE_ARMED=1
+arm_rc=0
+with_caddy_lock arm_caddy_site_route || arm_rc=$?
+if [ "$arm_rc" != 0 ]; then
+  ROUTE_ARMED=0
+  # TWO different failures, and they are NOT the same claim (same split the
+  # teardown makes): 2 = the arm ran, was rejected, and the Caddyfile was
+  # reverted. 1 = with_caddy_lock's own guard fired, so nothing read the
+  # Caddyfile and the route's state is UNKNOWN to this run.
+  if [ "$arm_rc" = 1 ]; then
+    ROUTE_DETAIL="the caddy /sites/$SITE_SLUG route was NEVER CHECKED — the shared Caddyfile lock could not be taken, so whether this site is publicly routed is UNKNOWN to this run; the release still goes live on disk. Re-run the deploy once the lock is free"
+  else
+    ROUTE_DETAIL="the caddy /sites/$SITE_SLUG route is NOT ARMED — this run tried to add it, the change was rejected, and the Caddyfile was reverted to the serving config; the release still goes live on disk but https://$HEALTH_HOST/sites/$SITE_SLUG/ will 404. Fix $CADDYFILE (caddy validate names the error) and re-run the deploy"
+  fi
+  log "ROUTE: $ROUTE_DETAIL"
+  emit ROUTE failed "$ROUTE_DETAIL"
+fi
 
 # ---- SWITCH (D11) — atomic symlink flip, no Caddy reload -------------------
 emit SWITCH started
@@ -2189,5 +2316,13 @@ emit RETIRE started
 do_retire
 emit RETIRE ok "removed $RETIRED old release(s), keeping the newest $RETAIN"
 
-log "HEALTHY — '$SITE_SLUG' live at build $BUILD_ID (https://$HEALTH_HOST/sites/$SITE_SLUG/)"
+# The sign-off only names the public URL when THIS run has a reason to believe it
+# resolves. HEALTH proves the BYTES (it gates them over a throwaway loopback
+# server), never the public path — so with the route unarmed the old
+# unconditional line was the engine's own advertisement for a 404.
+if [ "${ROUTE_ARMED:-1}" = 1 ]; then
+  log "HEALTHY — '$SITE_SLUG' live at build $BUILD_ID (https://$HEALTH_HOST/sites/$SITE_SLUG/)"
+else
+  log "HEALTHY ON DISK — '$SITE_SLUG' build $BUILD_ID is the current release, but its public route is NOT ARMED, so no URL is claimed for it: $ROUTE_DETAIL"
+fi
 exit 0
