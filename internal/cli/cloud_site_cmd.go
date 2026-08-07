@@ -1499,7 +1499,8 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	// THE STALENESS ARM. The live pointer and the newest ledger row disagree, and
 	// the newest one failed — so "live" alone is a half-truth: it names a build the
 	// box is still serving BECAUSE the next one never got switched in. Say both.
-	if newest != nil && siteDeployFailed(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
+	newestFailedStale := newest != nil && siteDeployFailed(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID))
+	if newestFailedStale {
 		if dep != nil {
 			m["status"] = "live — but the NEWEST deploy FAILED (visitors still see this older build)"
 		} else {
@@ -1525,7 +1526,15 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	// from a chain eight rounds deep. The chain gets its own row rather than a
 	// sentence buried in prose, because "how deep am I" is the whole question a
 	// deferral raises.
-	if dd := siteDeferredRow(dep, newest); dd != nil {
+	//
+	// REVIEW FIX (dr-w7): gated on `!newestFailedStale`. The two arms both write
+	// `reason`, and this one runs SECOND — so when the newest row FAILED while the
+	// live pointer happened to be a deferred row, the header said "the NEWEST
+	// deploy FAILED" and then printed the older deferral's sentence underneath it,
+	// describing a different row than the status line names. The failure is the
+	// louder truth and it wins; the live pointer is only ever written on a `live`
+	// transition today, so this is a defensive ordering guard, not a live bug.
+	if dd := siteDeferredRow(dep, newest); dd != nil && !newestFailedStale {
 		if newest != nil && siteDeployDeferred(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
 			// Same shape as the staleness arm above, for the sibling half-truth:
 			// "live" alone names a build the box is still serving BECAUSE the next

@@ -2252,3 +2252,35 @@ func TestSiteDeferralChainNotOnFailedRows(t *testing.T) {
 		t.Fatalf("siteDeployDeferred must not match a failed row")
 	}
 }
+
+// TestRunCloudSiteStatusFailedNewestBeatsDeferredLivePointer pins the ORDER of
+// the two half-truth arms the status header now carries. Both write `reason`,
+// and the deferral arm runs second — so before the dr-w7 review fix, a header
+// whose newest row FAILED while the live pointer was itself a deferred row said
+// "the NEWEST deploy FAILED" and then printed the OLDER deferral's sentence
+// underneath, describing a different row than the status line named. A drop is
+// the louder truth: it wins, and no deferral row is printed at all.
+func TestRunCloudSiteStatusFailedNewestBeatsDeferredLivePointer(t *testing.T) {
+	const deferredReason = "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued"
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"deferred","stage":"PLAN","failure_reason":` + mustJSONString(deferredReason) + `}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"failed","stage":"BUILD",` +
+		`"failure_reason":"the build exited 1: astro could not resolve @layouts/Base.astro","failure_class":"BUILD_EXIT_NONZERO","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "NEWEST deploy FAILED") {
+		t.Fatalf("a failed newest row must still be reported as failed:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "astro could not resolve") {
+		t.Fatalf("the reason row must describe the FAILED newest row, not the deferred pointer:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "refusal 3 of 12") || strings.Contains(stdout, "deferral ") {
+		t.Fatalf("no deferral section may be printed when the newest row is a drop:\n%s", stdout)
+	}
+}

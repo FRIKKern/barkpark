@@ -933,6 +933,43 @@ defmodule BarkparkCloud.SitesDeployTest do
       refute busy_reason =~ "of 12"
     end
 
+    # REVIEW GUARD (dr-w7 S1 review). The depth clause was placed AHEAD of the
+    # re-queue promise precisely because `detail` is `short_detail/1`'s
+    # varchar(255) clamp, so whatever is appended LAST is what the operator-visible
+    # caption loses. Nothing pinned that ordering against a LONG box message,
+    # which is the only case where the budget actually bites — so a future clause
+    # appended in defer/3 could push the depth out of the caption and every
+    # existing assertion (all on short reasons) would stay green. This is that
+    # missing guard: the box says 180 characters about itself, the caption is
+    # forced to clamp, and the DEPTH still survives it.
+    test "the clamped caption keeps the chain depth even when the box's own message is long" do
+      {bp, site} = setup_site()
+
+      long_message =
+        "all 1 of 1 build slots on this instance are in use by site astro-search " <>
+          "(build 0f3c9a12, started 4m ago, stage BUILD) and the queue is not draining"
+
+      FakeBoxRelay.program(
+        start: {:ok, 409, %{"error" => %{"code" => "box_at_capacity", "message" => long_message}}}
+      )
+
+      {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(d.id)
+      row = Repo.get(Deployment, d.id)
+
+      # The clamp genuinely fired — otherwise this test proves nothing.
+      assert String.length(row.failure_reason) > 255
+      assert String.length(row.detail) <= 255
+      assert String.ends_with?(row.detail, "…")
+
+      # …and the depth is still in the part that survived.
+      assert row.detail =~ "refusal 1 of 12"
+
+      # The whole story is never lost: `failure_reason` is uncapped, and it is
+      # what the CLI's deferral render reads first.
+      assert row.failure_reason =~ "zero-progress guard, not a countdown"
+    end
+
     # THE FIRST TEST THIS BRANCH HAS EVER HAD. `git grep 'could NOT be
     # re-queued' -- cloud/test` returned zero before dr-w3 S3: the arm that
     # decides whether a LOST publish is counted had never been exercised, and it
