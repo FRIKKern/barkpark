@@ -4839,3 +4839,338 @@ both edit `payload_key_set_census_test.exs`), and `dr-w15-s6-live-per-attempt-he
 three quarters of attempts produce no live site — and the alert rail is blind to it BY CONSTRUCTION because it
 shadows `failed` 1:1 (D232). S6 is the first instrument that can see it; the wave after should make that
 cohort's VOLUME, not just its rate, something a person is told about.
+
+## Wave 16 — the ledger cannot see a success, and it already miscounts by subtraction (2026-08-07)
+
+The wish: *find the failures that are still silent or still mis-reported, fix them, and make the reporting able
+to lose*. Wave 16 is built on one code fact a reviewer can check in ten seconds and one arithmetic fact that
+is true on production right now. `DeployLedger.census/3` (`deploy_ledger.ex:590`) returns exactly nine keys —
+`window`, `volume`, `failed`, `failure_rate`, `classes`, `deferred`, `not_attempted`, `sites`, `min_sample`.
+After fifteen waves the instrument can name eighteen ways a deploy failed, three ways it was deferred and one
+way it was never a deploy, and **has no word for a deploy that worked**. Success is an unnamed residue inside
+`volume`, sharing that residue with `queued`, `building`, `pushing` and `cancelled`.
+
+Everything below was re-derived this session on `origin/main` `fc27f0d7`, on the LIVE prod release, or by a run
+whose output is quoted. Where verification contradicted the wave's own direction, the evidence won.
+
+### Decisions
+
+- **D256 — THE SUCCESS COUNT IS ABSENT, AND SUBTRACTION IS NOT A DEFINITION.** Re-derived at L1 through the
+  running release, not a local rebuild: `census/3` on 2026-08-06 returns
+  `KEYS: [:classes, :deferred, :failed, :failure_rate, :min_sample, :not_attempted, :sites, :volume, :window]`
+  with `volume=2205 failed=866 deferred_total=773 live=:ABSENT`, and psql agrees to the row
+  (`deferred|773 failed|866 live|566`). But `volume − failed − deferred` is NOT `live`: on the live trailing
+  24h window it is **593 against an actual live of 592** — a subtractive definition scores an unsettled row as
+  a success TODAY. **`live` is defined POSITIVELY (`status == "live"`), never as a residue.**
+
+- **D257 — THE D43 INVARIANT HOLDS, AND HOLDS ONLY BECAUSE `live` IS A FILTER.** Proven by run, not read: a
+  `live` cohort computed as `Enum.filter(settled, &(&1.status == "live"))` leaves the pinned window
+  byte-identical — `W16-D43 volume=250 failed=150 failure_rate.pct=60.0 live=100`, and `60.0` is exactly what
+  the pre-existing pin at `deploy_ledger_test.exs:1205` already asserts; whole file **62 tests, 0 failures**
+  with the probe emitter in place. A builder who instead adds a fourth `Enum.split_with` on `attempted` breaks
+  it. The invariant is an acceptance criterion with a mutation proof: `volume` and `failure_rate` byte-identical
+  before and after, on a pinned window.
+
+- **D258 — FOUR NAMED COHORTS PLUS A RESIDUAL THAT MUST BE ZERO.** `classify(%{status: _other}), do: nil`
+  (`:221`) is a catch-all over a CHECK-less varchar — `pg_constraint … contype='c'` on `deployments` returns
+  **0 rows** on prod, confirmed independently twice. Today the hole is empty: `select distinct status` returns
+  exactly `deferred | failed | live`, zero non-terminal, zero `cancelled`, all-time over 31,070 rows. So "four
+  numbers that SUM" is honest *today* — and latent forever. In-flight is bounded and self-healing (sweep-line
+  peak **19** over 7 days of real `[inserted_at, updated_at)` intervals, Little's Law **0.678** over the
+  trailing 24h, 22 live samples never above 1, ceilinged by
+  `@default_deployment_stale_after_seconds 15 * 60` and by the partial unique index
+  `deployments_active_site_env_index`, hit live as a real `Ecto.ConstraintError`). **`cancelled` is the real
+  danger**: it is TERMINAL, it has two live producers (`auto_deploy_worker.refuse/1` at `:171`, tested at
+  `auto_deploy_worker_test.exs:248`, and `Registry.cancel_preview/2` at `registry.ex:5750`), and a subtractive
+  `live` would score a deliberate refusal to deploy as a SUCCESS, permanently. **RULING: emit `live`,
+  `in_flight` and `cancelled` as named cohorts and a `residual` a test asserts is zero — proven by MUTATION
+  (insert a row in each of `queued`/`building`/`pushing`/`cancelled` and assert `live` does NOT move), never by
+  arithmetic on a fixture that happens to balance.** Name `cancelled` even before `in_flight`: in-flight
+  justifies the shape, cancelled justifies the urgency.
+
+- **D259 — DELETE ONE PHANTOM ROW, NOT THREE. THE STANDING INSTRUCTION IS WRONG AND IS ALREADY IN A FILED
+  TASK.** The guard is bidirectional and was run in all four states: emitter + row `:548` present → RED
+  (`no longer phantom (allowlisted but now emitted — DELETE the allowlist row): live`); emitter + `:548`
+  deleted → **11 tests, 0 failures**; `:548` deleted without the emitter → RED
+  (`new phantom (declared by Go, emitted by nobody): live`). But a live-only emitter with **all three** rows
+  deleted also REDs — `new phantom … terminal_failure_rate` — because `terminal_failure_rate` and
+  `basis` have no emitter in this wave's scope. **A leg-1 builder deletes `:548` (`live`) ONLY.**
+  `dr-w13-s7`'s committed brief carries the three-row instruction verbatim and is corrected in this wave's
+  filing. All three rows still say *"PR #10014 (the lead's) carries the emitter — do NOT re-cut it"*; #10014
+  is CLOSED with `mergedAt: null`, so that reason string is a stale instruction that will make a correct
+  builder stand down. Rewrite the surviving two reasons in the same commit.
+
+- **D260 — A CENSUS KEY NAMED `in_flight` SHIPS DECODED-BY-NOBODY WITH A GREEN SUITE.** Measured: emitting
+  `live, in_flight, residual, residual_statuses, live_rate` flags
+  `newly unread (emitted, decoded by NOBODY): live_rate, residual, residual_statuses` — **`in_flight` is NOT
+  flagged**, because the UNREAD arm compares against `Go.all_tags(source)`, which is FILE-GLOBAL, and
+  `RolloutState.InFlight` at `client.go:2726` already declares `json:"in_flight"` for the unrelated autoupdate
+  halt/resume feature. This is a new instance of D245's disease found *inside the guard meant to prevent it*.
+  The slice declares the `DeployCensus` tag explicitly and does not trust that green; the per-struct fix to
+  `all_tags` is filed as backlog. Corollary: `DeployCensus` has `Live *int` but **no `live_rate` tag**, so the
+  fleet *count* is emitter-only while the fleet *rate* needs a Go field in the same PR.
+
+- **D261 — THE PER-SITE REGION IS STRUCTURALLY UNGATED, AND THE FIX IS SIX LINES OF ELIXIR.** Mutation-proved
+  by a matched pair: `bogus_verifier_key_w16` added inside `site_rows/2`'s map literal leaves the payload
+  census at **11 tests, 0 failures**; the identical key one level up in `census/3`'s own literal REDs the
+  UNREAD arm by name. Both natural `@pairs` shapes are non-viable — `nested: "sites"` extracts ZERO keys
+  (all six Go tags red as phantom) and `entry: {:site_rows, 2}` hits four `pipe step is not a call` refusals,
+  because the extractor's one-level bound handles LOCAL calls only and `Enum.map(fn … end)` is a hard stop.
+  **THE FIX, proven end to end: extract `defp site_row(site_id, rows)` as a named producer and pair on
+  `{:site_row, 2}`** — GREEN at 11/0 with ZERO new allowlist rows, `@emitted_floor 103` still satisfied, the
+  ledger's own 60 DB-backed tests unchanged, and it CAN LOSE (re-adding the bogus key then REDs by name). No
+  extractor change. Per-site `live` lands only after that pair, and because the census asserts SET EQUALITY the
+  Elixir key and the `DeployCensusSite.Live` Go tag **cannot be split across PRs**.
+
+- **D262 — D211(d) IS CONFIRMED AT L1 AND ANSWERED BY RELOCATION, NOT BY OVERRULE.** `PLATFORM_ADMIN_EMAILS`
+  is absent from `/opt/barkpark/cloud/.env` AND from the running `cloud-control_plane_blue-1` environment; live
+  rpc returns `{:config, []}` and `{:resolved, []}`; `config/config.exs:370` defaults to `[]`;
+  `Auth.require_platform_operator/2` (`auth.ex:338`) gates on `email in platform_admin_emails()`, so `x in []`
+  is false for every user. The route is live, not missing: anonymous → **HTTP 401**, control-plane token →
+  **HTTP 403** `{"error":"forbidden","scope":"platform","required":"platform_operator"}`, `/v1/me` →
+  `platform_operator: false`. This re-derives D165 on the BLUE slot (D165 measured GREEN), so the crown has
+  stayed dark across a blue/green flip. **The operator population on prod is ZERO BY CONSTRUCTION and D211(d)
+  stands unrefuted.** Three consequences.
+  **(a) It does not bite the fleet EMITTER.** The renderer D211(d) declined is ALREADY MERGED — `#10017` /
+  `16d47c7bf`, `internal/cli/cloud_deploy_census_cmd.go`, registered at `hetzner_cmd.go:120`, already rendering
+  `"%d live"` at `:388` — and built from `origin/main` it refuses HONESTLY (RC=3, *"Nothing was read: this is
+  NOT a fleet with zero failures. The gate cannot tell you which of the two it is"*). Leg 1 adds the
+  **emitter**, which is what makes the number exist; that is a precondition, not a reader.
+  **(b) THE THIRD ROAD, and it is decisive.** 100% of all 31,070 deployment rows belong to ONE team —
+  `506f035e-…|guerrilla|31070`, 13 sites; 27 teams exist and 26 own zero sites — and the reachable session is
+  that team's OWNER. **A team-scoped census filtered to the caller's sites is the SAME POPULATION as the
+  "fleet" census, to the row**, so it delivers byte-identical numbers to a **live 200** with no prod env change
+  and no overrule. `dr-w10-bl-team-scoped-box-rate` (#10119) already prescribes it verbatim — *"reading the
+  SAME function the operator census reads so the two cannot diverge. Do not build a second computation"* —
+  with acceptance *"proved by a live 200"* and *"PLATFORM_ADMIN_EMAILS is untouched"*. **Wave 16 builds it,
+  and its live 200 is this wave's operator proof.** It MUST print its scope on every render
+  (`team guerrilla · 13 sites`), because the two populations diverge the day a second team provisions a site —
+  i.e. the day the product succeeds.
+  **(c) Setting `PLATFORM_ADMIN_EMAILS` is a prod mutation and a HUMAN GATE.** Filed, not built.
+
+- **D263 — D245's REACHABILITY RULE IS CHARTER LAW AND IT DOES NOT WORK. AMENDED HERE.** D245 says *"rename
+  the new public function, `MIX_ENV=dev mix compile`, and the compile MUST FAIL."* Measured, on both trees:
+  the briefed command returns **RC=1 on `origin/main`**, where it should return 0 — a FALSE RED, because
+  `sed 's/def refusal_phase/…/'` renames the `def` but not the `@spec` two lines above it and compilation
+  aborts inside `deploy_ledger.ex` itself (`error: spec for undefined function refusal_phase/1`, `:316`) —
+  and **RC=1 on #10401's head** for the byte-identical wrong reason, never reaching `router.ex`. The witness
+  carries ZERO bits about reachability. With the `@spec` renamed too so the module compiles, the head branch —
+  which HAS two live callers at `router.ex:9382` and `:10920` — passes **RC=0 with WARNINGS ONLY**, because
+  `cloud/mix.exs` declares no `warnings_as_errors` and in Elixir a cross-module undefined call is a warning,
+  never an error. **THE CORRECTED WITNESS: rename BOTH the `def` and its `@spec`, then
+  `MIX_ENV=dev mix compile --force --warnings-as-errors`.** Proven to discriminate: pristine main **0**,
+  main + rename with 0 callers **0**, head + rename with 2 callers **1**, naming both call sites. Zero new
+  tooling — CI already runs that flag (`cloud.yml:209`, `:268`, `elixir.yml:402`). `MIX_ENV=dev` is
+  load-bearing: it excludes `test/`, and 10 `delivery` plus 8 `refusal_phase` test call sites do not make
+  either reachable by an operator. **Run the pristine control BEFORE the mutation, every time** — the witness
+  is only usable while the tree is warning-clean, and an unrelated warning turns it into a false red. And
+  state the limit plainly: it proves a CALLER exists in `cloud/lib`. It does not prove a route returns 200.
+  That is D262's job.
+
+- **D264 — THE UNREACHABLE SURFACE IS FIVE, NOT TWO.** Renamed individually (`def` + `@spec`) under the
+  corrected witness on `origin/main`, all RC=0 — the whole control plane builds without them:
+  `classes/0` (`:177`, 0 lib callers, **9 test references** — the D245 disease verbatim, ExUnit keeping a
+  function "used" that no operator path reaches), `not_attempted_classes/0` (`:181`, 0 lib callers and **0**
+  test references — pure dead code), `deferred_classes/0` (`:197`). Over-public but genuinely internal, proven
+  by a batch rename that errored inside `census/3`: `rate/2`, `label/1`, `encode_cursor/1`, `decode_cursor/1`,
+  `deferred?/1` (`:617`), `not_attempted?/1` (`:611`). Genuinely reachable: `census/3`, `classify`,
+  `list_page`, `min_sample`, `parse_window`. **METHOD WARNING, a fresh instance of "bespoke checks lie":** a
+  grep sweep scored `deferred?` and `not_attempted?` at zero callers because in `grep -E "$n\("` the `?` is a
+  REGEX QUANTIFIER. Any caller census over Elixir names ending `?` or `!` must quote the name (`grep -F`) or it
+  silently under-counts. The mutation caught what the grep could not.
+
+- **D265 — THE CONTINUITY GAUGE AS FILED CANNOT LOSE, AND THE DENOMINATOR IS THE ENTIRE FIX.**
+  `dr-w12-bl-cause-class-continuity-check` keys on *"a class's count goes to zero while its cohort total
+  holds"* and demands SILENCE *"when the cohort itself drains"*. Across the 08-05 boundary the failed cohort
+  fell 1,933 → 866 (−55% absolute, 84.6% → 39.3% of attempts) — it DRAINED — so **the filed gauge is silent
+  on D229, the exact defect it was filed for.** Proven on a two-adjacent-window fixture built from prod's own
+  daily shape (08-01 2,217/284/1,933/0 and 08-06 2,205/566/866/773, matching `cloud-db-1` exactly; whole file
+  **65 tests, 0 failures**): the filed predicate is silent under BOTH honest readings of "holds", while the
+  corrected one FIRES — `class BOX_BUSY_409, share_before 76.68% of attempts, share_after 0.0,
+  absorbed_elsewhere 35.06%, verdict :renamed`. The silence is not vacuous: loosening ONLY the cohort tolerance
+  to 1.0 makes the filed gauge fire on the same fixture with the same class. **THE CONTRACT:**
+  (i) denominator is `census.volume` (attempts) for EVERY class in EVERY cohort — mutating to cohort-relative
+  denominators reports the same event as 87.95% "of failures" instead of 76.68% "of attempts" and makes a
+  failed-cohort death and a deferred-cohort birth non-commensurable, which is exactly what the
+  `:renamed`-vs-`:repaired` judgement needs to compare;
+  (ii) **NO volume tolerance at all** — of the six adjacent-day pairs since 08-01 (2217, 2042, 1050, 527, 878,
+  2205, 1638) exactly ONE survives a ±10% gate, so any "volume holds" clause is unusable on this corpus;
+  (iii) the only floor is the existing `@min_sample 200` applied to BOTH windows, returning the module's own
+  refusal shape (below it the corrected gauge refuses with `attempts 150/150 below min_sample 200` while the
+  filed one happily alarms off n=150);
+  (iv) basis is the immediately-prior EQUAL-LENGTH window, self-derived by `census/3` — no store, no committed
+  baseline, nothing that can go stale;
+  (v) iterate the UNION of classes PRESENT in the two censuses, never `@classes`/`deferred_classes()` — reading
+  the code's list makes every minted-but-unseen class a 0 → 0 death forever and turns adding a class NAME into
+  an alarm generator;
+  (vi) `:renamed` iff a material death (≥1% of attempts) has ≥75% of its lost share absorbed elsewhere, else
+  `:repaired` — that is what lets the gauge LOSE, because a genuine repair must print `:repaired`;
+  (vii) a birth is `:new_cause`, never "renamed", so an operator is not told a brand-new cause was a relabel;
+  (viii) a class absent from BOTH windows is SILENT;
+  (ix) deaths and births are PAIRED by absorbed share and the unpaired remainder is reported on BOTH sides —
+  the probe suppressed all births whenever any death existed, and that hole must not be copied.
+
+- **D266 — TWO REAL SPECIMENS EXIST, AND ONE PREMISE ABOUT THEM IS REFUTED.** *"BOX_BUSY_DEFERRED has ZERO
+  prod rows"* is FALSE. `cloud-db-1` holds **698** deferred rows carrying `already_running`, and all 698 carry
+  the anchored `the instance refused the deploy (HTTP 409)` prefix that `classify_deferred/2` maps to
+  `BOX_BUSY_DEFERRED`, spanning `2026-08-05 21:27:11.41321` → `2026-08-07 08:16:29`. It is not a phantom; it is
+  a class that LIVED AND DIED inside one 40-hour span, which makes it the gauge's specimen rather than its edge
+  case. Hourly across the 2026-08-06 22:xx boundary: `already_running` 28 → 0 / 0 / 0 / 0 / 0 while
+  `box_at_capacity` 0 → 63 → 137 → 154 → 171 → 144, with the deferred cohort QUADRUPLING — the intra-cohort
+  rename `failed`-keyed predicates cannot see at all. The second specimen is #10400's 277-row `CONTENT_API`
+  partition, which is real production rows and is in flight.
+
+- **D267 — THE VOCABULARY BOUNDARY IS DERIVABLE FROM DATA, NOT FROM `schema_migrations`.** `publish_clock`'s
+  `@recorder_since_sql` pattern CANNOT be reused for 08-05: there is no migration. D229 itself attributes the
+  change to commit `2154e695f` (#9615), a code change, and the bracketing migrations are unrelated
+  (`20260805190000` index rekey applied 21:22:58, `20260805210000` last_error backfill applied 21:53:53). The
+  sound derivation is `select min(inserted_at) from deployments where status='deferred'` →
+  **`2026-08-05 21:27:11.41321`**, byte-identical to the constant D229 hardcodes in prose, at **0.214 ms** via
+  an Index Only Scan on `deployments_status_inserted_at_index` with **Heap Fetches 0**. The census carries the
+  instant WITH its derivation METHOD (`first-observation:status=deferred` vs `migration:<version>`) so a reader
+  can tell a data fact from a schema fact. **GENERALISE ONLY OVER RETAINED STATUSES:** `min(inserted_at)` for a
+  transient status is "the oldest row that happens to be in that state right now" — proven live, the census saw
+  `building | 1 | min 2026-08-07 16:16:05` and the group was GONE 19 s later and again 90 s later, while
+  `deferred`'s min never moved. A derived-axis instrument over all statuses would replace a constant no gate
+  can invalidate with a variable no gate can pin. COST: the second equal-length window is ~1× the first —
+  trailing 24h 83 groups / 6.97 ms, prior 24h 128 groups / 18.03 ms cold and 7.5 ms warm, so **+8 ms on the
+  default path**; the all-time window is 1,491 groups / 50.7 ms, which is why the prior window must be
+  EQUAL-LENGTH and the gauge must not attach to an unbounded window.
+  **The 2026-08-07 10:02:23Z `deferral_cause` boundary IS the `@recorder_since_sql` shape** — migration
+  `20260807150000` inserted at exactly `10:02:23`, last unstamped deferred row `10:01:54.507774`, first stamped
+  `10:12:35.033826`, no leakage either way, and the NULL count FROZEN at **1,818** while the deferred total grew
+  to 2,067. **But `deferral_cause` is not in `census/3`'s `group_by` and nothing in `deploy_ledger.ex` reads
+  it** (`router.ex:10900` and `sites/deploy.ex` only), so it is a CHAIN-surface axis, not a census one — do not
+  declare it in the census envelope. `dr-w15-bl-deferral-cause-null-audit` is **SETTLED: residue, not a
+  producer bug.** In the trailing 24h 1,259 of 1,510 deferrals (83.4%) are still unstamped, so any cause
+  breakdown printed today must name the uncaused remainder as its own cohort and must never renormalise over
+  the caused subset.
+
+- **D268 — #10014 DIED TO MERGE MECHANICS, NOT TO A RULING, AND ITS CENSUS HUNKS ARE LEG 1's MATERIAL.** The
+  branch still resolves on origin at `92f96f7ba`; content vs merge-base is 3 files / +402 −17;
+  `git merge-tree --write-tree origin/main <branch>` returns a single tree oid with RC=0 — **textually clean
+  against today's main, 61 commits later**. It was closed by FRIKKern at `2026-08-07T12:21:18Z` with
+  `mergedAt: null` and **ZERO comments**, inside a 26-second merge sweep and **one second after #10299** —
+  *"fix(ci): declare deploy/site-deploy-node.sh in CLOUD_PATHS … That was the whole red on #10014's Cloud
+  gate"* — merged at `12:21:17Z`. No ruling orders the closure; **D198 forbids it by name** (*"#10014 IS NOT
+  SUPERSEDED … Closing #10014 as superseded costs 162 failures a day their cause"*), the only later mention
+  (`:4065`) is status prose with no D-number, and `dr-w8-s1` is still OPEN at 8/10 with a claim note saying the
+  work was *"committed … unpushed, merge-gated criterion 9 left for the LEAD"*. Its classifier half is
+  SUPERSEDED by #10400's different and better design (`CONTENT_API_403` as its own `:ambiguous` class, both
+  template dialects) — **take the CENSUS hunks only**. And thread `basis` as a real argument: #10014 ships
+  `def rate(numerator, denominator, basis \\ @basis_attempted)`, exactly the default-arg shape **D199** calls
+  a TRIPLE red. The stranded diff already wrote down this wave's residue finding in its own moduledoc: the
+  four cohorts do NOT partition `volume` because in-flight rows sit inside `volume` and outside all four.
+
+- **D269 — THE VENDOR BAR IS BACKWARDS, AND THE HONEST FRAMING IS STRONGER THAN THE ONE WE STARTED WITH.**
+  Neither Vercel nor Sevalla prints a succeeded count or a success rate on its deployments view. Kinsta's
+  static-site docs **301 to `docs.sevalla.com`**, so any "Kinsta bar" quoted from memory cites a product that
+  moved. Vercel's deployments view is a filterable reverse-chronological list of individual attempts whose only
+  documented controls are Branch / Date Range / Environments / Status; its ONLY success aggregate lives on the
+  **Usage (billing)** page as a two-cohort ratio, *"Builds: Completed vs errored builds"*. What both vendors DO
+  have is a status taxonomy with **no unnamed remainder** — Vercel's enum is seven values, `BLOCKED`,
+  `BUILDING`, `CANCELED`, `ERROR`, `INITIALIZING`, `QUEUED`, `READY`, so not-yet-started and refused are
+  first-class states with their own filter position. **RULING: do not justify `live` as catching up to a
+  vendor's succeeded count — that claim does not survive a verifier with a browser. Justify it the way the
+  vendors' own model does: every attempt lands in exactly one NAMED state.** Barkpark names 18 failure classes,
+  3 deferrals and 1 not-a-deploy and leaves success in an unnamed residue; Vercel has no unnamed remainder
+  anywhere. Corollary: the four-numbers-that-SUM goal is MORE than either vendor ships, not parity — own it as
+  an advance. And where Vercel does aggregate it prints two named cohorts against each other, never a lone
+  rate, which is exactly leg 1's shape.
+
+- **D270 — #10400's UNBLOCK IS EXACTLY TWO LINES IN `CLOUD_PATHS`, AND THE STANDING ORDER TO RAISE THE FLOOR
+  IS A TRAP.** Reproduced end to end. With #10400's two files overlaid the ratchet reds on exactly two
+  uncovered repo-root reads — `templates/astro-search-starter/src/lib/bp.ts` and
+  `templates/search-starter/lib/markers.corpus-status.test.ts`, both read from `deploy_ledger_test.exs` — and
+  the selftest is **154 passed, 2 failed**, byte-matching CI run 31193577231. Declaring the two paths gives
+  scan RC=0 and **158 passed, 0 failed**. **158, NOT 156**: case 6 of the harness SELF-DERIVES its probe list
+  from `--print-set cloud` (`test.sh:251`), so every declared path adds exactly one assertion and no fixed
+  total is durable — an acceptance criterion that says 156 would read a correct green as a defect.
+  **RAISING `CLOUD_ESCAPE_MIN` REDS THE HARNESS**: its synthetic fixture emits only FIVE covered reads, so
+  `CLOUD_ESCAPE_MIN=7` gives *"155 passed, 3 failed"* and `=9` gives the same. The wave-13 plan prose at
+  `:3372-3373` and the script's own comments at `:139-157` both order the raise in the same commit; **both are
+  wrong for any path added after the fixture's ceiling, and this ruling supersedes them.** Fix the STRINGS —
+  the ok-line *"(measured population is 6, == CLOUD_ESCAPE_MIN)"* and the floor comment both become false —
+  never the CONSTANT. Use the **EXACT-FILE** variant, not the glob: the test reads exactly two files
+  (`deploy_ledger_test.exs:733-734`), `CLOUD_PATHS` already uses exact paths for producer files
+  (`deploy/site-deploy.sh`, `deploy/site-deploy-node.sh`, `providers_capabilities.json`), and the glob newly
+  subjects **38 of 39** template commits in the last 60 days (~19 PRs/month) to the Postgres-backed Cloud test
+  job against **6 of 7** for the exact files. There is no second copy of the set: `cloud.yml` consumes it once
+  at `:150` and its header at `:29` forbids hand-writing a list. #10400's Cloud compile AND Cloud test both
+  PASS on its current head; the ratchet is its only red.
+
+- **D271 — THE CO-EQUAL HEADLINE COSTS ZERO GO TEST EDITS IF IT IS ADDITIVE.** The Go test never asserts a
+  literal headline: `censusLineContaining` returns the FIRST line containing `"of 2216 attempted"` and the
+  want-lists are `strings.Contains` over five substrings. Measured both reshapes. DISPLACING the parenthetical
+  cohort breaks exactly ONE test on two assertions; PREPENDING the live rate node is fully GREEN — the rendered
+  line is `26.7% of 2216 attempted went LIVE · 37.5% of 2216 attempted (832 failed · 793 deferred · 591 live) ·
+  58.5% of 1423 terminal`. So co-equality and the existing pins are not in conflict; only displacement is.
+  A new `LivePerAttempt *DeployRate` field IS required — `Live *int` is a bare count and cannot express
+  sample / pct / min_sample / refused, which is literally what "the SAME rate-node shape with the SAME
+  `@min_sample` refusal" means. **No released `bp` can break on it**: `FleetDeployCensus` uses plain
+  `json.Unmarshal` and there is no `DisallowUnknownFields` anywhere in `internal/cloudclient` (the repo's only
+  three are in `internal/manifest`, `internal/template` and the census test's own probe), and `-o json`
+  re-emits `census.Raw` verbatim — this is NOT the D234 `/v1/capabilities` hazard. FREE WIN: the existing
+  `pctRe` guard at `:233` ALREADY catches a live node that does not honour `min_sample` (a non-refusing node on
+  the 12-row thin envelope fails with `25.0% of 12 attempted went LIVE · NO RATE — …`; flipping it to
+  `refused: true` greens the package), so D252's refusal clause is enforceable by a test that already exists.
+  `printCloudDeploymentsHelp:633` carries a hand-written sample headline no test asserts — update it in the
+  same commit or it advertises a shape the command no longer prints.
+
+- **D272 — THERE IS NO CCH WAVE 48, AND D389's CLAIM ON `deploy_ledger.ex` IS DISCHARGED.** The highest CCH
+  branch on origin is `cloud-console-hardening-w47-…`; the CCH charter contains no `w48` string; `bp task ready`
+  has no `cch-w48` row; and `bp search "cch-w48"` returns exactly ONE document — this wave's own Paper. Wave 47
+  merged today as #10393–#10397 touching **eight files, all under `cloud/priv/static/`** — zero `router.ex`,
+  zero `registry.ex`, zero `deploy_ledger.ex`. Of all open PRs exactly two touch `deploy_ledger.ex` and both
+  are this epic's own (#10400, #10129); no open PR's `router.ex` hunks reach the census region
+  (`:3519-3560` / `:6599-6700` / `:10858-10890`). D389's keyset slice is MERGED as **#9741** (2026-08-06) and
+  its mandated spelling is live at `deploy_ledger.ex:1097`; **its cited line `:552` is stale** — that line is
+  `@corpus_403`, and the cursor region is `:1010-:1128`, ~420 lines BELOW `census/3`. CCH cedes `registry.ex`
+  vitals, `bp cloud status`, `attentionStatus()`, `deploy/` and `internal/agent/**` to this epic in writing
+  three times (`:1096`, `:1163`, `:1288`). ONE LIVE COUPLING: `cch-w47-s5` made `__binding_census.mjs` DERIVE
+  seven `router.ex` line numbers, so a wave-16 router edit is absorbed silently by design rather than red.
+  SHELF LIFE: CCH waves 40–47 all landed on 2026-08-07 at ~2-hour intervals — re-run the branch/PR check
+  immediately before dispatching, not hours later.
+
+- **D273 — WHAT WAVE 16 DELIBERATELY DOES NOT BUILD, WITH REASONS.** (a) **An episode detector** — D231 and
+  D253(a), unchanged; the window IS the regime and `@min_sample` silences it hourly. (b) **Alert suppression of
+  any kind** — D232, fenced twice. (c) **A `/v1/capabilities` capability key** — D234, it bricks every released
+  `bp` via `DisallowUnknownFields`. (d) **A per-box ledger join** — D247; `deployments` has one FK and no box
+  column. (e) **Raising `@build_slot_capacity`** — D180/D252. (f) **An 841st email producer** — D14; every
+  instrument this wave ships is a READ. (g) **Setting `PLATFORM_ADMIN_EMAILS`** — a prod mutation and a human
+  gate; D262(c), filed. (h) **A per-struct fix to the UNREAD arm's file-global `all_tags`** — D260; filed as
+  backlog, and the wave declares its Go tags explicitly instead of relying on a guard that cannot see the
+  difference. (i) **A deferral-cause breakdown on the census envelope** — D267; the column is a chain-surface
+  axis and 83.4% of the trailing window is unstamped residue.
+
+### Wave 16 plan — 7 slices, 3 in round 1, file sets disjoint within a round
+
+| # | Round | Slice | task | Surface | Size | Model |
+|---|---|---|---|---|---|---|
+| S1 | 1 | `CLOUD_PATHS` declares the census's two producer files, and the floor does NOT move | `dr-w16-s1-cloud-paths-declares-census-producers` | `scripts/cloud-path-escape-check.sh` | small | opus |
+| S2 | 1 | The census names every state a deploy can end in, and success stops being a residue | `dr-w16-s2-census-names-every-state` | `deploy_ledger.ex` census map · `client.go` `DeployCensus` · payload census · ledger tests | large | opus |
+| S3 | 1 | The ledger's public surface declares its own reachability, and the declaration can lose | `dr-w16-s3-ledger-publics-declare-reachability` | new `deploy_ledger_reachability_test.exs` | medium | opus |
+| S4 | 2 | The per-site row becomes a named producer, and per-site `live` ships GATED | `dr-w16-s4-per-site-row-named-producer` | `deploy_ledger.ex` `site_rows/2` · `@pairs` · `DeployCensusSite` | medium | opus |
+| S5 | 2 | Live-per-attempt becomes a co-equal headline, additively | `dr-w16-s5-live-per-attempt-co-equal-headline` | `internal/cli/cloud_deploy_census_cmd.go` + test | medium | opus |
+| S6 | 2 | A team-scoped census returns a live 200 to a real operator | `dr-w16-s6-team-scoped-census-returns-200` | `deploy_ledger.ex` query region · `router.ex` (new route) · router tests | large | opus |
+| S7 | 3 | The census declares its vocabulary boundary and flags a rename it can lose on | `dr-w16-s7-boundary-and-continuity-gauge` | `deploy_ledger.ex` (new fns + window node) · `client.go` · payload census · ledger tests | large | opus |
+
+ROUNDS ARE LAW. S1/S2/S3 are dependency-free and build this run; their file sets are disjoint (a shell script,
+the census region + Go structs, and a brand-new test file). S4, S5 and S6 each require **S2 merged** — S4 and
+S7 need its census map and Go structs on main, S5 needs its `LivePerAttempt` field, S6 needs its cohorts to
+have anything worth returning a 200 about. S7 additionally requires **S4 merged**, because both write `@pairs`
+and the census key set. Within round 2 the three slices share `deploy_ledger.ex` but not its regions and the
+briefs fence them explicitly: S4 owns `site_rows/2` (`:723-750`) and must not touch the query or the return
+map; S6 owns the QUERY region (`:590-600`, an additive `site_ids:` opt) and must not touch the return map,
+`site_rows`, `@pairs` or the classifier; S5 touches no Elixir at all.
+
+HIGH-FLIP-RISK, named for the reviewer: **S6** (reachability and tenancy — whether a team-scoped route is
+correctly scoped to the caller's sites and cannot be widened, and whether the 200 it proves is the same
+computation the operator route runs) and **S3** (reachability — whether the corrected witness discriminates for
+the right reason on a tree the builder has changed). Both warrant a genuinely independent second re-derivation
+before merge, not a re-read of the builder's reasoning.
+
+MERGE ORDER FOR THE LEAD: #10399 is CLEAN with zero failing checks — merge it, nothing is owed. Then S1, which
+turns #10400's only red green; #10400's Cloud compile and Cloud test already pass. Then #10401 (its sole red is
+`go vet + test`, a NON-required context failing on three 3.00 s deadline assertions in `internal/agent`, a
+package it does not touch — re-fire it, then merge). Then S2, then round 2.
