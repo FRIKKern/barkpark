@@ -255,6 +255,18 @@ jobs:
         with:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
+      # cch-w49-s3: the cross-layer mirror guard
+      # (cloud/test/barkpark_cloud/billing_client_mirror_test.exs) reads the
+      # CONSOLE's own plan catalog by RUNNING it — System.cmd("node", …) over
+      # priv/static/__preview__/__plan_catalog_dump.mjs — and it ASSERTS on a
+      # missing node rather than skipping. So node is a hard dependency of this
+      # job, pinned here rather than inherited from whatever the runner image
+      # happens to ship (the same discipline every other node-running workflow
+      # in this repo already follows). ~5s.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: Cache deps
         uses: actions/cache@v4
         with:
