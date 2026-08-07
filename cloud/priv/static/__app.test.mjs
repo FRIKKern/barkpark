@@ -15369,7 +15369,7 @@ test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed 
 
 const FORBIDDEN_BILLING = "Only the team owner can manage billing.";
 const ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
-const AUDIT_403 = { error: "forbidden", required: "admin", scope: "primary_team" };
+const AUDIT_403 = { error: "forbidden", required: "admin", scope: "team" };
 
 test("cch-w35-s4 POSITIVE CONTROL (RED under M1): a bare forbidden STILL reads the billing sentence", () => {
   // The billing gate (require_primary_team_owner) sends `required: "owner"` on a
@@ -15391,13 +15391,13 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   // ERRORS.forbidden verbatim, "because the owner gate's evidence is
   // billing-scoped or absent". It is neither: Auth.require_primary_team_owner
   // (cloud/lib/barkpark_cloud/web/auth.ex, the `forbidden(conn, required:
-  // "owner", scope: "primary_team")` arm) ships evidence, so the fence DOES fire
+  // "owner", scope: "team")` arm) ships evidence, so the fence DOES fire
   // on POST /v1/billing/{checkout,portal,cancel} and they now read the owner
   // ROLE sentence instead of the owner BILLING sentence. Both are true on that
   // screen; the role sentence is additionally true on the OTHER owner gate
   // (Auth.require_team_owner → team deletion), where "manage billing" would be a
   // second confidently-wrong sentence. That is why the arm is not special-cased.
-  const portal403 = { error: "forbidden", required: "owner", scope: "primary_team" };
+  const portal403 = { error: "forbidden", required: "owner", scope: "team" };
   assert.equal(hooks.friendly(portal403, "Please try again in a moment."),
     "You need the owner role on this team — only the team owner can grant it.");
   // It never reads as transient — the GR36 property that entry exists to hold.
@@ -15409,6 +15409,15 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
 
 test("cch-w35-s4 THE EXHIBIT, BOTH DIRECTIONS: an evidence-carrying 403 names the authority, not billing", () => {
   const copy = hooks.friendly(AUDIT_403);
+  // `scope` is NEVER interpolated. cch-w37-s3 renamed the shipped label to
+  // "team" (the gate reads the SELECTED team, not the primary one), which makes
+  // a negative assert on the shipped value vacuous — the sentence legitimately
+  // contains "team". So this probe carries a scope value nothing else can
+  // produce, and it runs FIRST so it is the arm that speaks when scope leaks.
+  assert.ok(
+    hooks.friendly({ error: "forbidden", required: "admin", scope: "zz_probe_scope" })
+      .indexOf("zz_probe_scope") === -1,
+    "scope is evidence for a log, never copy — the sentence says 'this team'");
   // PRESENT: the authority the gate actually wanted.
   assert.equal(copy, ADMIN_SENTENCE);
   assert.match(copy, /admin on this team/);
@@ -15416,17 +15425,16 @@ test("cch-w35-s4 THE EXHIBIT, BOTH DIRECTIONS: an evidence-carrying 403 names th
   // — revert the fence in friendly() and it fails.
   assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1, "the audit log is not the billing screen");
   assert.ok(copy.indexOf("billing") === -1);
-  // `scope` is NEVER interpolated (it says primary_team even when the team
-  // switcher made a SECOND team refuse you), and `reason` is never echoed raw.
+  // …and `reason` is never echoed raw, nor does the retired label resurface.
   assert.ok(copy.indexOf("primary_team") === -1 && copy.indexOf("primary team") === -1,
-    "scope is a misnomer under the team switcher — the sentence says 'this team'");
+    "the retired label must never appear in copy");
   // This is verbatim what loadActivity's empty state renders: it interpolates
   // esc(friendly(r.data)) under <h2>Couldn't load activity</h2>.
   assert.equal(hooks.esc(copy).indexOf(FORBIDDEN_BILLING), -1);
   assert.match(hooks.esc(copy), /admin on this team/);
   // The owner gate's own evidence names the OWNER role — the fence never
   // fabricates an admin for a refusal that wanted an owner.
-  assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "primary_team" }),
+  assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "team" }),
     "You need the owner role on this team — only the team owner can grant it.");
 });
 
@@ -15484,7 +15492,7 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     // …and the evidence keys are INERT on every slug but `forbidden`. (`required`
     // and `reason` are never sent together — gate_role() picks one arm — so the
     // sweep uses the shape the server actually emits.)
-    const withEvidence = { error: slug, required: "admin", scope: "primary_team" };
+    const withEvidence = { error: slug, required: "admin", scope: "team" };
     assert.equal(hooks.friendly(withEvidence, "a caller fallback"),
       slug === "forbidden" ? ADMIN_SENTENCE : copy,
       slug + " must ignore evidence it was not sent for");

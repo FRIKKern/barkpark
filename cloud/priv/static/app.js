@@ -243,12 +243,13 @@
   // Returns a sentence ONLY when the 403 carried evidence; otherwise null, so
   // every caller falls through to exactly what it renders today. Deliberately
   // NOT composed from two other keys the payload also carries:
-  //   • `scope` is NEVER interpolated. require_primary_team_admin reads
-  //     conn.assigns[:current_team], which resolve_team fills from the
-  //     x-barkpark-team header — so an owner of their primary team who is
-  //     refused on a SECOND team is still answered scope: "primary_team",
-  //     naming a team where they ARE the owner as the team that refused them.
-  //     "this team" is true under the team switcher; "your primary team" is not.
+  //   • `scope` is NEVER interpolated. It is evidence for a log, not copy.
+  //     require_primary_team_admin reads conn.assigns[:current_team], which
+  //     resolve_team fills from the x-barkpark-team header — so the label used
+  //     to say "primary_team" even when a SECOND team refused an owner of their
+  //     primary team. cch-w37-s3 renamed it to `scope: "team"`, which is what
+  //     the gate actually consulted; "this team" is what the sentence says
+  //     either way, and it stays true under the team switcher.
   //   • `reason` is a SLUG ("no_team"). It is MAPPED through a written arm,
   //     never echoed — echoing it renders the literal string "no team" at a
   //     human.
