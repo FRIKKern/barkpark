@@ -742,6 +742,433 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
   end
 
+  ## ── 1b. The label gauge: a class wears the cause its rows earn ───────────
+  #
+  # THIS IS A ROT GUARD, NOT A DETECTOR. Both assertions below are GREEN on the
+  # tree that ships them: #10300 really did split the 503 and the taxonomy is
+  # label-consistent today. What is NOT true is that anything guarded it. Set
+  # `BOX_DEPLOY_DISABLED_503`'s entry in `@labels` to the collapse sentence the
+  # unnamed bucket wears — "the box refused with a 503 it did not name a cause
+  # for" — and run the pre-gauge version of THIS file: 50 tests, 0 failures.
+  # GREEN. The class names still differ, the classifier arms still fire, the
+  # three hand-written `refute label(...) =~ "unavailable"` lines still pass, and
+  # an operator now reads the same causeless sentence for a switched-OFF deploy
+  # flag as for a 503 nobody could name. The 265-row disease was never "the class
+  # name was wrong"; it was "the SENTENCE was wrong", and nothing but three
+  # `refute`s pinning one word stood between the repair and its silent undoing.
+  #
+  # FOUR DESIGN FACTS, each of which cost a red or a false positive:
+  #
+  #   (a) THE VOCABULARY DOES NOT COME FROM THE CLASSIFIER. Scraping the
+  #       `{:code, "…"}` literals out of `deploy_ledger.ex` is vacuous BY
+  #       CONSTRUCTION — a mutation that deletes an arm deletes its literal, so
+  #       the gauge goes green on the exact change it exists to catch. The
+  #       vocabulary is scraped from the PRODUCER's own test file instead, which
+  #       is the box's proven wire vocabulary and which no classifier edit can
+  #       shrink.
+  #   (b) ONLY PRODUCER-WRITABLE (phase, status) SHAPES ARE PROBED.
+  #       `Sites.Deploy` DEFERS every 409 (`defer/3` on `box_refusal(409, …)`),
+  #       so a TERMINAL plain 409 is a row that cannot exist; probing one
+  #       manufactures a finding against `BOX_BUSY_409` no operator will ever
+  #       see. A 409 is therefore probed only in the two shapes the producer
+  #       does write: chain-terminal (through the PUBLIC producer, never a
+  #       literal) and deferred.
+  #   (c) WHOLE TOKENS, NEVER SUBSTRINGS. A first run red on a false positive:
+  #       `BOX_500`'s "the box errored on the deploy" was read as claiming
+  #       `internal_error`, because "errored" contains "error".
+  #   (d) "GENERIC" IS DERIVED, NEVER LISTED. A token carried by two labels whose
+  #       causes are DISJOINT cannot be pointing at a cause ("box", "deploy",
+  #       "instance"). That set is computed from `@labels` at runtime — a
+  #       hand-list would be a third place someone must remember to edit — and a
+  #       fixture pins that "unavailable" is NOT in it today, because the whole
+  #       historical red depends on that word still carrying a claim.
+
+  # WORDS THE BOX SAYS THAT THE LEDGER DELIBERATELY DOES NOT NAME, with the
+  # reason written down. Both were found by RUNNING the gauge with this map
+  # empty; neither was a decision anyone had made out loud. Emptying it reds
+  # assertion A naming both, which is the point: the day the box learns a new
+  # code word, someone must either give it a class or write down why not.
+  @deliberately_unnamed %{
+    "internal_error" =>
+      "the AUTHORLESS crash constant. `Barkpark.Content.Errors` collapses ANY unhandled fault to it (Sites.Deploy's own grace arm keys on that), so it names a fault nobody chose and BOX_500's status-only label is the honest report of it.",
+    "runner_start_failed" =>
+      "a cause the box DID author (its runner would not spawn), but it arrives on a 500 at the poll phase and folds into BOX_500 with the authorless crash. Naming it in that label would put a specific accusation on rows that mostly are not it. Silent, not wrong — and now written down rather than accidental."
+  }
+
+  # What it takes for a LABEL to name a cause: the code word itself, or a
+  # declared synonym. A synonym list is not a loophole — it is the only way a
+  # sentence a human reads ("site deploys are switched off on this instance") can
+  # be checked against a wire word (`feature_not_configured`) at all. Every word
+  # the producer scrape finds must appear here or the scrape test reds.
+  @code_claims %{
+    "already_running" => ~w(running busy deploying),
+    "box_at_capacity" => ~w(capacity cap slots),
+    "feature_not_configured" => ~w(configured switched disabled enabled off),
+    "deploy_runner_unavailable" => ~w(runner unavailable),
+    # NOT "error"/"errored" — see (c). "internal" is the discriminating token.
+    "internal_error" => ~w(internal),
+    # NOT "runner" — that word belongs to the wedged-runner cause, and letting it
+    # count here would make BOX_RUNNER_UNAVAILABLE_503 "claim" a cause it is
+    # never fed, which is a red the gauge would have deserved to be deleted for.
+    "runner_start_failed" => ~w(spawn start)
+  }
+
+  # The producer's own test file, read at runtime. See (a).
+  @producer_test "test/barkpark_cloud/sites_deploy_test.exs"
+  # `Sites.Deploy.refusal_detail/1` only ever emits a bare snake_case token as a
+  # code (`@code_token` in the classifier), so `E_NO_INDEX` — which the producer
+  # test also programs — is a MESSAGE-shaped envelope code, not a cause word the
+  # taxonomy can key on. The shape is what excludes it, not a skip list.
+  @producer_code ~r/"code" => "([a-z][a-z0-9_]*)"/
+
+  # The (phase, status) shapes the producer can actually write. See (b).
+  @probe_matrix [
+    {:start, 503},
+    {:start, 500},
+    {:start, 429},
+    {:start, 404},
+    {:poll, 500},
+    {:poll, 503},
+    {:abandoned, 409},
+    {:deferred, 409}
+  ]
+
+  describe "the label gauge — a class must wear a name its rows earn" do
+    test "the wire vocabulary is scraped from the PRODUCER, never from the classifier" do
+      words = producer_vocabulary()
+
+      # The six words the box is proven to send. Scraping the classifier's own
+      # `{:code, "…"}` literals would find FOUR — and would find zero after a
+      # mutation that deleted the arms, which is (a) in one sentence.
+      for word <- ~w(already_running box_at_capacity feature_not_configured
+                     deploy_runner_unavailable runner_start_failed internal_error) do
+        assert word in words, "the producer scrape lost #{word} — the gauge is measuring nothing"
+      end
+
+      # FAIL CLOSED: the corpus must not be able to go silent. If the producer
+      # test is moved or its envelope shape changes, this reds instead of the
+      # gauge quietly passing over an empty vocabulary.
+      assert MapSet.size(words) >= 6
+
+      # Every word the box says must be a word the gauge knows how to check.
+      for word <- words do
+        assert Map.has_key?(@code_claims, word),
+               "the box learned a new code word (#{word}) — decide what naming it looks like"
+      end
+
+      # The shape excludes the message-shaped envelope code, and the producer
+      # really does program one, so this is not a filter passing over nothing.
+      refute "E_NO_INDEX" in words
+      assert File.read!(@producer_test) =~ ~s|"code" => "E_NO_INDEX"|
+    end
+
+    test "ASSERTION A — a cause with a class to itself is NAMED there, or its silence is declared" do
+      assert naming_violations(probe_vocabulary(), &DeployLedger.label/1, @deliberately_unnamed) ==
+               []
+    end
+
+    test "ASSERTION B — a class fed two or more causes names NONE of them" do
+      assert collapse_violations(probe_vocabulary(), &DeployLedger.label/1) == []
+    end
+
+    # THE GAUGE CAN LOSE. Both assertions are replayed against the pre-#10300
+    # taxonomy, reconstructed here as data: the status-only 503 arm (every 503
+    # cause landing in ONE class) wearing the label that class carried for its
+    # entire 265-row life. This is the shipped half of the proof; the PR body
+    # carries the same red produced by mutating the real module.
+    test "the gauge can LOSE: the pre-#10300 503 reds under BOTH assertions" do
+      {vocab, label_fun} = pre_10300_taxonomy()
+
+      [collapse] = collapse_violations(vocab, label_fun)
+      assert collapse =~ ~s|BOX_UNAVAILABLE_503 ("the box was unavailable (HTTP 503)")|
+      assert collapse =~ ~s|claims "unavailable"|
+      assert collapse =~ "deploy_runner_unavailable"
+      assert collapse =~ "feature_not_configured"
+
+      # …and A loses too, from the other side: the two causes no longer have a
+      # class that can report them at all.
+      naming = naming_violations(vocab, label_fun, @deliberately_unnamed)
+      assert Enum.any?(naming, &(&1 =~ "feature_not_configured"))
+      assert Enum.any?(naming, &(&1 =~ "deploy_runner_unavailable"))
+
+      # And the reconstruction is honest: on the REAL taxonomy the same inputs
+      # are clean, so the red above is the historical label, not the harness.
+      assert collapse_violations(probe_vocabulary(), &DeployLedger.label/1) == []
+    end
+
+    test "whole TOKENS, never substrings — and generic filler is DERIVED, never listed" do
+      vocab = probe_vocabulary()
+      generic = generic_tokens(vocab, &DeployLedger.label/1)
+
+      # (c) BOX_500's label contains "errored". A substring reader calls that a
+      # claim on `internal_error`; a token reader does not.
+      label500 = DeployLedger.label("BOX_500")
+      assert String.contains?(label500, "error")
+      assert "errored" in tokens(label500)
+      refute "error" in tokens(label500)
+      refute "internal_error" in claimed_words(label500, generic)
+
+      # (d) Filler is derived from the labels themselves…
+      assert "box" in generic
+      assert "the" in generic
+      # …and the word the whole historical red hangs on is NOT filler today. If a
+      # future label makes it filler, the red above stops firing — silently,
+      # unless this line reds first.
+      refute "unavailable" in generic
+      runner_label = DeployLedger.label("BOX_RUNNER_UNAVAILABLE_503")
+      assert "deploy_runner_unavailable" in claimed_words(runner_label, generic)
+      # …and the gauge can say WHICH word did the claiming, which is what an
+      # operator reads off the screen.
+      assert claim_token(runner_label, generic, "deploy_runner_unavailable") == "runner"
+    end
+
+    test "@deliberately_unnamed carries a REASON per entry, and emptying it reds A" do
+      assert Map.keys(@deliberately_unnamed) |> Enum.sort() ==
+               ["internal_error", "runner_start_failed"]
+
+      for {word, reason} <- @deliberately_unnamed do
+        assert is_binary(reason) and String.length(reason) > 40,
+               "#{word} is declared unnamed with no reason — that is not a decision"
+      end
+
+      # The declaration is LOAD-BEARING: without it, A reds on both words.
+      undeclared = naming_violations(probe_vocabulary(), &DeployLedger.label/1, %{})
+      assert Enum.any?(undeclared, &(&1 =~ "internal_error"))
+      assert Enum.any?(undeclared, &(&1 =~ "runner_start_failed"))
+      # …and the two words are the ONLY silences on this tree — a count would
+      # also red for any OTHER violation, which is not what this test is about,
+      # so it names them instead.
+      assert Enum.all?(
+               undeclared,
+               &(&1 =~ "internal_error" or &1 =~ "runner_start_failed" or
+                   &1 =~ "feature_not_configured" or &1 =~ "deploy_runner_unavailable")
+             )
+    end
+  end
+
+  # ── The gauge itself ──────────────────────────────────────────────────────
+
+  # The box's proven wire vocabulary, from the producer's own test file.
+  defp producer_vocabulary do
+    @producer_test
+    |> File.read!()
+    |> then(&Regex.scan(@producer_code, &1))
+    |> Enum.map(fn [_, word] -> word end)
+    |> MapSet.new()
+  end
+
+  # class => the set of code words the PRODUCER can drive into it.
+  defp probe_vocabulary do
+    words = producer_vocabulary()
+
+    for {phase, status} <- @probe_matrix, word <- words, reduce: %{} do
+      acc ->
+        Map.update(acc, class_of(phase, status, word), MapSet.new([word]), &MapSet.put(&1, word))
+    end
+  end
+
+  # A chain-terminal 409, built through the PUBLIC producer with the cause the
+  # driver itself derives — never a literal, so a reworded verdict reds here.
+  defp class_of(:abandoned, 409, word) do
+    line = refusal_line("deploy", 409, word)
+    cause = DeployLedger.classify(%{status: "deferred", stage: "PLAN", failure_reason: line})
+    DeployLedger.classify("PLAN", Deploy.abandonment_reason(line, 12, cause))
+  end
+
+  defp class_of(:deferred, 409, word) do
+    DeployLedger.classify(%{
+      status: "deferred",
+      stage: "PLAN",
+      failure_reason: refusal_line("deploy", 409, word)
+    })
+  end
+
+  defp class_of(:start, status, word),
+    do: DeployLedger.classify("PLAN", refusal_line("deploy", status, word))
+
+  defp class_of(:poll, status, word),
+    do: DeployLedger.classify("BUILD", refusal_line("build poll", status, word))
+
+  # `Sites.Deploy.box_refusal/3`'s own shape, both phases.
+  defp refusal_line(noun, status, nil), do: "the instance refused the #{noun} (HTTP #{status})"
+
+  defp refusal_line(noun, status, word),
+    do: refusal_line(noun, status, nil) <> ": #{word} — the box said so"
+
+  defp tokens(label) do
+    label |> String.downcase() |> String.split(~r/[^a-z0-9_]+/, trim: true) |> MapSet.new()
+  end
+
+  # Which causes a label CLAIMS: a declared word or synonym, as a whole token,
+  # that is not generic filler.
+  defp claimed_words(label, generic) do
+    said = MapSet.difference(tokens(label), generic)
+
+    for {word, synonyms} <- @code_claims,
+        Enum.any?([word | synonyms], &MapSet.member?(said, &1)),
+        into: MapSet.new(),
+        do: word
+  end
+
+  # Which word in the label did the claiming — the declared code word itself, or
+  # the synonym that stood in for it.
+  defp claim_token(label, generic, word) do
+    said = MapSet.difference(tokens(label), generic)
+    Enum.find([word | Map.fetch!(@code_claims, word)], &MapSet.member?(said, &1))
+  end
+
+  # (d): a token two DISJOINT-cause labels share cannot be pointing at a cause.
+  # Only labels of classes the producer actually reaches take part — a label no
+  # probe can produce makes no claim about any row.
+  defp generic_tokens(vocab, label_fun) do
+    labelled =
+      for {class, words} <- vocab, MapSet.size(words) > 0, do: {tokens(label_fun.(class)), words}
+
+    for {t1, w1} <- labelled,
+        {t2, w2} <- labelled,
+        MapSet.disjoint?(w1, w2),
+        reduce: MapSet.new() do
+      acc -> MapSet.union(acc, MapSet.intersection(t1, t2))
+    end
+  end
+
+  # ASSERTION A. Every code word either has a class that holds it ALONE and a
+  # label there that names it, or is a declared silence.
+  defp naming_violations(vocab, label_fun, unnamed) do
+    generic = generic_tokens(vocab, label_fun)
+    words = vocab |> Map.values() |> Enum.reduce(MapSet.new(), &MapSet.union/2)
+
+    for word <- Enum.sort(words), not Map.has_key?(unnamed, word), reduce: [] do
+      acc ->
+        sole = for {class, held} <- vocab, MapSet.equal?(held, MapSet.new([word])), do: class
+
+        cond do
+          sole == [] ->
+            shared = for {class, held} <- vocab, MapSet.member?(held, word), do: class
+
+            [
+              ~s|#{word} never gets a class to itself — it is always folded in with other causes | <>
+                ~s|#{inspect(Enum.sort(shared))}, so no label can report it. Give it a class, or | <>
+                ~s|declare it in @deliberately_unnamed with a reason.|
+              | acc
+            ]
+
+          Enum.any?(sole, &MapSet.member?(claimed_words(label_fun.(&1), generic), word)) ->
+            acc
+
+          true ->
+            [
+              ~s|#{word} is the ONLY cause of #{inspect(Enum.sort(sole))}, but no label there names | <>
+                ~s|it: #{inspect(Enum.map(Enum.sort(sole), label_fun))}|
+              | acc
+            ]
+        end
+    end
+  end
+
+  # ASSERTION B. A class fed two or more causes may not name one of them — that
+  # is the 265-row lie in the other direction, and it is what stops someone
+  # "fixing" A by renaming a label and then quietly widening its class.
+  defp collapse_violations(vocab, label_fun) do
+    generic = generic_tokens(vocab, label_fun)
+
+    for {class, held} <- vocab,
+        MapSet.size(held) >= 2,
+        claimed = MapSet.intersection(claimed_words(label_fun.(class), generic), held),
+        MapSet.size(claimed) > 0 do
+      word = claimed |> Enum.sort() |> hd()
+      others = held |> MapSet.delete(word) |> Enum.sort()
+
+      # The offending TOKEN, not just the cause it stands for: "unavailable" is
+      # what an operator actually reads off the screen.
+      ~s|#{class} ("#{label_fun.(class)}") claims "#{claim_token(label_fun.(class), generic, word)}" | <>
+        ~s|(the label's word for #{word}) — but also holds | <>
+        ~s|#{Enum.join(others, ", ")} and #{length(others)} other cause(s)|
+    end
+  end
+
+  # The pre-#10300 taxonomy as DATA: the 503 arm keyed on the status alone, so
+  # every 503 cause landed in one class wearing the label it carried for all 265
+  # of its rows. `git show f89140090^:cloud/lib/barkpark_cloud/deploy_ledger.ex`
+  # is where both come from.
+  defp pre_10300_taxonomy do
+    {split, rest} =
+      Map.split(probe_vocabulary(), ["BOX_DEPLOY_DISABLED_503", "BOX_RUNNER_UNAVAILABLE_503"])
+
+    collapsed =
+      split
+      |> Map.values()
+      |> Enum.reduce(Map.get(rest, "BOX_UNAVAILABLE_503", MapSet.new()), &MapSet.union/2)
+
+    vocab = Map.put(rest, "BOX_UNAVAILABLE_503", collapsed)
+
+    label_fun = fn
+      "BOX_UNAVAILABLE_503" -> "the box was unavailable (HTTP 503)"
+      class -> DeployLedger.label(class)
+    end
+
+    {vocab, label_fun}
+  end
+
+  ## ── 1c. The POLL phase writes prose the anchors can read (D218) ──────────
+  #
+  # `Sites.Deploy.box_refusal/3` writes TWO captions from one helper. The
+  # classifier's two anchors read only the START one, so a poll refusal matched
+  # NEITHER — doubly blind — and landed in UNCLASSIFIED with its status and its
+  # code word sitting unread in the string. That path is live: an untyped 5xx
+  # that never clears burns `site_deploy_poll_grace` and falls out of the graced
+  # arm wearing this caption (`sites_deploy_test.exs` drives it end to end and
+  # asserts the class from the row the driver wrote).
+  #
+  # ZERO poll rows exist on cloud-db-1 all-time, against 14,753 start-phase
+  # refusals. This is a TRIPWIRE for the first one, not a claim that any row is
+  # mis-reported today. And no poll-409 arm is added, because a poll 409 cannot
+  # happen: `poll/4` has no 409 arm and no `defer/3` call anywhere in the loop,
+  # and the producer's `SiteDeployController.status/2` answers only 200/400/404
+  # (both `put_status(:conflict)` sites live in `trigger/2`).
+
+  # Byte-verbatim from a run: an untyped poll 500 that outlived the grace.
+  @poll500 "the instance refused the build poll (HTTP 500): internal_error — unknown error [box request_id: PB-1] (after tolerating 3 transient box 5xx; the last was: the instance refused the build poll (HTTP 500): internal_error — unknown error [box request_id: PB-1])"
+  @poll503_runner "the instance refused the build poll (HTTP 503): deploy_runner_unavailable — the deploy runner did not answer in time [box request_id: F9-poll]"
+  @poll404 "the instance refused the build poll (HTTP 404)"
+
+  describe "classify/2 — the POLL phase is read, not lost" do
+    test "a poll refusal classifies by the same status and code word as a start refusal" do
+      assert DeployLedger.classify("BUILD", @poll500) == "BOX_500"
+      assert DeployLedger.classify("BUILD", @poll503_runner) == "BOX_RUNNER_UNAVAILABLE_503"
+
+      # The same rows through the arm the census actually folds over.
+      assert DeployLedger.classify(%{
+               status: "failed",
+               stage: "BUILD",
+               failure_reason: @poll500
+             }) == "BOX_500"
+    end
+
+    test "D8 holds on the poll caption too — an unnamed poll status is not absorbed" do
+      assert DeployLedger.classify("BUILD", @poll404) == "UNCLASSIFIED"
+    end
+
+    test "the PHASE stays readable — the taxonomy does not split on it, so something must" do
+      assert DeployLedger.refusal_phase(@poll500) == :poll
+      assert DeployLedger.refusal_phase(@r503_runner) == :start
+      assert DeployLedger.refusal_phase(@r409_bare) == :start
+      # Not a refusal at all, and not a guess.
+      assert DeployLedger.refusal_phase("BUILD failed (exit 12): boom") == nil
+      assert DeployLedger.refusal_phase(nil) == nil
+    end
+
+    test "the anchor is still ANCHORED — a build log that QUOTES the poll caption is not one" do
+      quoted = "BUILD failed (exit 12): the instance refused the build poll (HTTP 500)"
+      assert DeployLedger.classify("BUILD", quoted) == "BUILD_FAILED"
+      # …and the start-phase mass does not move, which is what widening risks.
+      assert DeployLedger.classify("PLAN", @r409_coded) == "BOX_BUSY_409"
+      assert DeployLedger.classify("PLAN", @r409_bare) == "BOX_BUSY_409"
+      assert DeployLedger.classify("PLAN", @r503_disabled) == "BOX_DEPLOY_DISABLED_503"
+      assert DeployLedger.classify("PLAN", @a_capacity) == "ABANDONED_AT_CAPACITY"
+    end
+  end
+
   ## ── 2. The census: rate with volume, over a pinned window ────────────────
 
   describe "census/3 — the rate always carries its denominator" do
