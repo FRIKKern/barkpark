@@ -1486,6 +1486,23 @@ WHAT IT DOES
   drives the Barkpark Cloud control plane's hosted-site surface — a site is a
   website running co-located with a Barkpark instance. Requires 'bp login'.
 
+WHAT 'bp sites' PRINTS
+  the table (NAME · DOMAINS · STATUS · LAST DEPLOY), then the SITE-OUTCOME
+  COHORT — the fleet counted by SITE, in ONE request read at ONE instant:
+
+    site outcomes (one snapshot of 13 sites): 12 settled — 10 live, 2 failed; 0 in flight; 1 never deployed
+
+  counts, never a rate, at any n: the cohort is an instant of a moving system
+  (the same call minutes apart disagrees), and 'deferred'/'building' are
+  IN-FLIGHT COST, never outcomes. A site that has never deployed to production
+  gets its own bucket rather than being dropped, so the buckets always sum to
+  the site count.
+
+  -o json carries the same buckets under 'cohort' (with 'rate': null, on
+  purpose). NOTE: each site's 'last_deployment' in the LIST view is the
+  server's four-key embed — status/trigger/inserted_at/updated_at. It no longer
+  carries 'id' or 'image_tag'; 'bp sites show -o json' still does.
+
   'bp sites env set' REPLACES the whole env blob (the blob is stored encrypted
   and never echoed back, so there is no per-key merge); list every key you
   want to ship. The env is injected on the NEXT deploy, in both places that
