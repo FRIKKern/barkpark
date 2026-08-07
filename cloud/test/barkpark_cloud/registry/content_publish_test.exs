@@ -204,9 +204,9 @@ defmodule BarkparkCloud.Registry.ContentPublishTest do
   end
 
   describe "the record CANNOT cost the 202 (mutation proof)" do
-    test "record FAILS (invalid doc_type) and the receiver still answers a byte-identical 202" do
+    test "an ABSURD doc type costs the doc type, never the instant — the row still lands" do
       {ok_site, ok_secret} = bound_site()
-      {bad_site, bad_secret} = bound_site()
+      {long_site, long_secret} = bound_site()
 
       # Baseline: the recording-SUCCEEDS path.
       ok_conn = publish(ok_site, ok_secret)
@@ -214,22 +214,35 @@ defmodule BarkparkCloud.Registry.ContentPublishTest do
       assert ok_conn.resp_body == @accepted_body
       assert [_] = publishes_for(ok_site)
 
-      # The recording-FAILS path. A real failure, not a stub: doc_type is capped
-      # at the column's 255 chars, so this delivery's changeset is invalid and
-      # record/3 returns {:error, changeset}. If the router's `case` guard is
-      # removed, mark_enqueued/2 gets the {:error, _} tuple and raises
-      # FunctionClauseError — a 500 on a delivery the fleet actually accepted.
-      bad_conn = publish(bad_site, bad_secret, %{"type" => String.duplicate("x", 300)})
+      # A type longer than the column. The changeset would reject the WHOLE row,
+      # which would silently delete the one thing this table exists to record, so
+      # the receiver refuses the FIELD instead (router.ex `payload_doc_type/1`).
+      long_conn = publish(long_site, long_secret, %{"type" => String.duplicate("x", 300)})
 
-      assert bad_conn.status == ok_conn.status
-      assert bad_conn.resp_body == ok_conn.resp_body
-      assert bad_conn.resp_body == @accepted_body
+      assert long_conn.status == ok_conn.status
+      assert long_conn.resp_body == ok_conn.resp_body
+      assert long_conn.resp_body == @accepted_body
 
-      # The row genuinely did not land — the 202 is not hiding a silent success.
-      assert [] = publishes_for(bad_site)
+      # THE POINT: the instant survived; only the unknown type is NULL.
+      assert [row] = publishes_for(long_site)
+      assert is_nil(row.doc_type)
+      refute is_nil(row.received_at)
 
       # And the delivery still did its real job: the rebuild is queued.
-      assert_enqueued(worker: AutoDeployWorker, args: %{site_id: bad_site.id})
+      assert_enqueued(worker: AutoDeployWorker, args: %{site_id: long_site.id})
+    end
+
+    test "record/3 itself still REFUSES an over-length doc_type, as a value" do
+      # The receiver never hands it one (see above), but the module's own guard
+      # must stay: a second caller must get {:error, changeset}, never a raise.
+      {site, _secret} = bound_site()
+
+      assert {:error, %Ecto.Changeset{valid?: false} = cs} =
+               ContentPublish.record(site.id, DateTime.utc_now(), %{
+                 doc_type: String.duplicate("x", 300)
+               })
+
+      assert Keyword.has_key?(cs.errors, :doc_type)
     end
 
     test "the whole TABLE is gone and the receiver still answers a byte-identical 202" do

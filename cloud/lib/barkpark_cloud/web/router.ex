@@ -12354,10 +12354,20 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # An over-long `type` must cost the DOC TYPE, never the INSTANT. The changeset's
+  # `validate_length(:doc_type, max: 255)` rejects the whole row, so a payload with
+  # an absurd type would silently delete the one thing this table exists to record.
+  # Refuse the field here instead: an unknown doc type reads as unknown (NULL),
+  # which is the module's own doctrine, and the publish clock still gets its row.
+  @doc_type_max 255
+
   defp payload_doc_type(raw_body) when is_binary(raw_body) do
     case Jason.decode(raw_body) do
-      {:ok, %{"type" => type}} when is_binary(type) -> type
-      _ -> nil
+      {:ok, %{"type" => type}} when is_binary(type) ->
+        if String.length(type) <= @doc_type_max, do: type, else: nil
+
+      _ ->
+        nil
     end
   end
 
