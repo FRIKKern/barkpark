@@ -16013,6 +16013,167 @@ test("cch-w37-s6: loadOperator's unloaded arm is THREE-valued — failed reports
   assert.match(failedArm, /loadMe\(\)\.then\(/, "the retry re-reads /v1/me rather than faking a recheck");
 });
 
+// ── cch-w42-s1 · THE CONSOLE CONSUMES THE AUTHORITY THE SERVER STATES ──────
+// Wave 41 put `team_authority` {team_id, role, admin, owner} on /v1/me — nil
+// exactly when the account is teamless, so a consumer fails closed. Until this
+// group existed `grep -c team_authority app.js` was ZERO: the server stated the
+// authority and the console re-derived it from role strings anyway.
+//
+// teamAuthorityState() is a NEW five-valued sibling, never a widened boolean —
+// D439: widening one of the existing predicates to a string ships green AND
+// makes `if (privileged)` true for "failed"/"loading", the fail-open GR9
+// forbids. The bands: loading · failed · stale · refuse · grant.
+//
+// THE STALENESS ARM IS THE POINT. It compares the pin that was LIVE when the
+// answer was absorbed against the pin live NOW. It deliberately does NOT
+// compare team_authority.team_id to meCache.team.id: /v1/me builds both keys
+// from ONE binding in one map literal (router.ex:1431 / :1462), so that form is
+// true-or-both-nil on every answer the server can give — a tautology at the
+// source that no fixture and no mutation can falsify. And not the live pin
+// against team_authority.team_id either: resolve_team/2 DEGRADES to the primary
+// team when the pin names a non-member team, so a bare mismatch cries wolf.
+
+const ME_TA = {
+  role: "owner",
+  team: { id: "t1", name: "Acme Inc" },
+  user: { id: "u1", email: "ada@acme.com" },
+  team_authority: { team_id: "t1", role: "owner", admin: true, owner: true },
+};
+const ME_TA_MEMBER = {
+  role: "member",
+  team: { id: "t1", name: "Acme Inc" },
+  user: { id: "u4", email: "kim@acme.com" },
+  team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+};
+
+// Drive /v1/me with a REAL localStorage behind it, so the pin the absorb
+// captured is an actual stored value rather than the inert always-null stub.
+async function withTeamPin(run) {
+  const saved = sandbox.localStorage;
+  const store = memStore();
+  sandbox.localStorage = store;
+  try { hooks.clearMe(); await run(store); } finally { sandbox.localStorage = saved; hooks.clearMe(); }
+}
+
+test("cch-w42-s1: the team-authority band is a NEW five-valued sibling — the boolean predicates stay boolean", async () => {
+  assert.equal(typeof hooks.teamAuthorityState, "function", "the band must be node-pinned");
+  assert.equal(typeof hooks.membersContext, "function",
+    "membersContext was pinned by NOTHING, which is how it drifted into inventing the role");
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(typeof hooks.teamAuthorityState(), "string", "the band is a STRING — that is why it is a sibling");
+  // D439: widening an existing predicate instead would ship green here AND make
+  // every `if (predicate)` branch true. The old ones must still be two-valued.
+  for (const name of ["canManageOnboarding", "notifCanManage", "providerCanWrite", "canMintAnyAbility"])
+    assert.equal(typeof hooks[name](), "boolean", name + "() must NOT have been widened to the band");
+  hooks.clearMe();
+});
+
+test("cch-w42-s1: the two not-a-role states stay DISTINCT — loading is not failed, and neither grants", async () => {
+  hooks.clearMe();
+  assert.equal(hooks.teamAuthorityState(), "loading", "never asked: we do not know, and we say so");
+  assert.equal(hooks.membersContext(), null, "an unknown authority is not a team context");
+  assert.equal(hooks.canManageOnboarding(), false, "and it grants nothing");
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.teamAuthorityState(), "failed", "a FAILED read is a different fact from a pending one");
+  assert.equal(hooks.membersContext(), null, "a 500 is not 'you have no team'");
+  assert.equal(hooks.canManageOnboarding(), false, "an unproven actor is not an admin");
+  hooks.clearMe();
+});
+
+test("cch-w42-s1: grant/refuse come from team_authority.admin — an always-grant body must red HERE", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.teamAuthorityState(), "grant", "the server said admin:true");
+  assert.equal(hooks.canManageOnboarding(), true, "so the onboarding write gate opens");
+  // THE NEGATIVE CONTROL. Same team, same wire shape, admin:false — without
+  // this an unconditional "grant" ships green.
+  hooks.clearMe();
+  await driveMe(200, ME_TA_MEMBER);
+  assert.equal(hooks.teamAuthorityState(), "refuse", "admin:false is a DETERMINATE no, not a maybe");
+  assert.equal(hooks.canManageOnboarding(), false, "and the gate stays shut");
+  // Teamless: the server sends nil for exactly this, so absence is refusal —
+  // never a grant, and never an 'unknown' that some caller reads as truthy.
+  hooks.clearMe();
+  await driveMe(200, { role: "owner", user: { id: "u9", email: "solo@acme.com" } });
+  assert.equal(hooks.teamAuthorityState(), "refuse", "no team_authority on the wire is a determinate NO");
+  assert.equal(hooks.membersContext(), null, "and there is no team context to hand a caller");
+  hooks.clearMe();
+});
+
+test("cch-w42-s1: THE STALENESS ARM — the pin moving under a cached answer reads as stale, not as authority", async () => {
+  await withTeamPin(async (store) => {
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.teamAuthorityState(), "grant", "fetched under t1, answered for t1");
+
+    // THE CROSS-TAB RACE, verbatim: another tab writes the pin and reloads
+    // ITSELF. Nothing here listens for `storage` (grep: zero listeners) and
+    // loadMe() is not called on a route change, so this tab would otherwise
+    // keep serving t1's authority for the rest of its page life while api()
+    // (:116) re-reads the pin and sends t2 on EVERY request.
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.teamAuthorityState(), "stale",
+      "MUTATION TARGET: delete the pin comparison and this line is the red");
+    assert.equal(hooks.canManageOnboarding(), false, "a stale authority grants nothing");
+    assert.equal(hooks.membersContext(), null, "and hands out no team context — the callers paint their own state");
+
+    // Putting it back is not a re-fetch, but it does restore the fact the
+    // capture asserts: this answer WAS fetched under the pin that is live now.
+    store.setItem("bp.active-team", "t1");
+    assert.equal(hooks.teamAuthorityState(), "grant", "back under its own pin, the cached answer is current again");
+  });
+});
+
+test("cch-w42-s1: absorbMe RE-TAKES the pin, so a switch that reloads is current and a never-switched console is never stale", async () => {
+  await withTeamPin(async (store) => {
+    // Never-switched: no pin at absorb, no pin now. Null-vs-null is exactly the
+    // cold case, and it must NOT read as stale — a band that cries wolf on
+    // every fresh boot is a band nobody can act on.
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.teamAuthorityState(), "grant", "a console that never switched teams is never stale");
+
+    // The switcher's own tab: it writes the pin and reloads, so the next answer
+    // is absorbed UNDER the new pin. That is current, not stale.
+    hooks.clearMe();
+    store.setItem("bp.active-team", "t7");
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.teamAuthorityState(), "grant", "a re-absorb under the new pin is current, not instantly stale");
+  });
+  // HONEST SCOPE, measured: clearMe() also drops the capture, and that clear is
+  // NOT observable from here — the band short-circuits to loading/failed while
+  // the cache is empty, and the only way back to the staleness arm is through
+  // absorbMe, which overwrites the capture first. Deleting the clearMe line
+  // keeps this file at 931/931. It stays because a capture outliving its cache
+  // is the exact stale-fact class the meError/meErrorFault lockstep above was
+  // built to end — hygiene on the file's own convention, claimed as hygiene and
+  // not as a guard.
+});
+
+test("cch-w42-s1: membersContext sources the role from the SERVER's team_authority, not from the envelope's role string", async () => {
+  hooks.clearMe();
+  // The wire disagrees with itself on purpose: envelope role says owner, the
+  // resolved authority says member. The authority is the one that decides, so
+  // assignableRoles() (the actual control gate) sees an empty list.
+  await driveMe(200, {
+    role: "owner",
+    team: { id: "t1", name: "Acme Inc" },
+    user: { id: "u5", email: "sam@acme.com" },
+    team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+  });
+  const ctx = hooks.membersContext();
+  // Field-wise, not deepEqual: the object is minted inside the vm realm, so a
+  // STRICT deep compare would red on the prototype rather than on the contract.
+  assert.deepEqual({ teamId: ctx.teamId, role: ctx.role, userId: ctx.userId },
+    { teamId: "t1", role: "member", userId: "u5" },
+    "the shape its five callers already handle, with the role the server resolved");
+  assert.equal(Object.keys(ctx).length, 3, "and no key more than the shape its callers destructure");
+  assert.equal(hooks.assignableRoles(ctx.role).length, 0,
+    "so the roster's manage controls stay hidden — the envelope's 'owner' does not open them");
+  hooks.clearMe();
+});
+
 test("cch-w37-s6: the failed-me body REPORTS, and never accuses", async () => {
   const html = hooks.operatorMeFailedHtml();
   assert.match(html, /We couldn't check your account/, "it names what actually happened");

@@ -6109,7 +6109,17 @@
     return "";
   }
 
+  // cch-w42-s1: the onboarding write gate now READS the authority the server
+  // states (teamAuthorityState) instead of re-deriving it from role literals.
+  // Still boolean — "grant" is the only true, so loading/failed/stale all fail
+  // closed exactly as the old meCache-falsy read did.
   function canManageOnboarding() {
+    var band = teamAuthorityState();
+    if (band !== "refuse") return band === "grant";
+    // A control plane that does not yet send team_authority answers "refuse"
+    // for every account, teamless or not, so the pre-wave-42 role read stays as
+    // the compatibility floor — never as an override of a stated refusal.
+    if (meCache && meCache.team_authority) return false;
     return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
   }
   function firstStudioInstance(list) {
@@ -13972,6 +13982,13 @@
   var meLoaded = false;
   var meError = false;
   var meErrorFault = null;
+  // The team pin that was LIVE when the cached answer was absorbed. api() reads
+  // localStorage("bp.active-team") on EVERY request (:116) but the switcher's
+  // location.reload() only refreshes ITS OWN tab — nothing listens for the
+  // `storage` event, and loadMe() is never called on a route change. So a second
+  // tab keeps serving an answer the server would no longer give, for its whole
+  // page life. Captured here, compared live in teamAuthorityState().
+  var meTeamPin = null;
 
   // The ONE place a /v1/me answer becomes cached state — success OR failure, so
   // no caller can absorb the happy half and silently drop the other (which is
@@ -13983,6 +14000,7 @@
       meLoaded = true;
       meError = false;
       meErrorFault = null; // cleared in lockstep — a stale fault must never outlive its flag
+      meTeamPin = localStorage.getItem("bp.active-team"); // same lockstep: the pin the answer was fetched under
       return true;
     }
     meError = true;
@@ -13998,6 +14016,7 @@
     meLoaded = false;
     meError = false;
     meErrorFault = null;
+    meTeamPin = null; // a capture that outlives its cache is the same stale-fact bug
   }
 
   // "loading" (never asked, or in flight) · "failed" (the answer did not
@@ -14007,6 +14026,38 @@
     if (meCache) return "loaded";
     if (meError) return "failed";
     return "loading";
+  }
+
+  // The team authority the SERVER states, as a five-valued band — never a
+  // boolean. /v1/me now carries `team_authority` {team_id, role, admin, owner},
+  // resolved server-side from Authz and nil exactly when the account is
+  // teamless; until this function existed the console re-derived all of it from
+  // `meCache.role` string literals, i.e. it invented the answer it was already
+  // being told.
+  //
+  //   "loading" · never asked, or in flight      "failed"  · the read did not arrive
+  //   "stale"   · the pin moved under the answer "refuse"  · a determinate NO
+  //   "grant"   · the server says admin
+  //
+  // A NEW sibling on purpose: widening an existing boolean predicate to a
+  // string ships green AND makes `if (predicate)` true for "failed"/"loading",
+  // which is the fail-open the honest-states rule forbids. Callers must branch
+  // on the band by name.
+  function teamAuthorityState() {
+    var state = meState();
+    if (state !== "loaded") return state === "failed" ? "failed" : "loading";
+    var ta = meCache && meCache.team_authority;
+    // Teamless is a determinate NO, and the server sends nil for exactly that.
+    if (!ta) return "refuse";
+    // THE SEAM. Not team_authority.team_id vs meCache.team.id — /v1/me builds
+    // both keys from ONE binding in one map literal, so that comparison is true
+    // (or both-nil) on every answer the server can give: a tautology no fixture
+    // can falsify. Not the live pin vs team_authority.team_id either, because
+    // resolve_team/2 DEGRADES to the primary team when the pin names a team the
+    // caller doesn't belong to, so a bare mismatch cries wolf. The falsifiable
+    // fact is the pin the answer was fetched under vs the pin live NOW.
+    if (localStorage.getItem("bp.active-team") !== meTeamPin) return "stale";
+    return ta.admin ? "grant" : "refuse";
   }
 
   // Honest copy for the failed read, classified from the retained fault the
@@ -18076,12 +18127,22 @@
 
   // The current team + the actor's role, read from the /v1/me cache the account
   // chip already loads. null when teamless (the panel shows a "no team" state).
+  // cch-w42-s1: the band gates the context. loading / failed / stale are NOT
+  // "you have no team" — they are "we cannot say", and null is the answer all
+  // five callers already handle (each paints its own honest state around it).
+  // Only grant/refuse are determinate, and on those the role comes from the
+  // server's team_authority rather than from the envelope's role string.
   function membersContext() {
     var me = meCache;
-    if (me && me.team && me.team.id) {
-      return { teamId: me.team.id, role: me.role || "member", userId: me.user && me.user.id };
-    }
-    return null;
+    var band = teamAuthorityState();
+    if (band !== "grant" && band !== "refuse") return null;
+    if (!(me && me.team && me.team.id)) return null;
+    var ta = me.team_authority;
+    return {
+      teamId: me.team.id,
+      role: (ta && ta.role) || me.role || "member", // ta.role is authoritative; the fallback is the pre-wave-42 wire
+      userId: me.user && me.user.id,
+    };
   }
 
   // Pure: honest human copy for a failed members/invitations fetch.
@@ -20835,6 +20896,10 @@
       usageHistorySeries: usageHistorySeries, usageHistoryValues: usageHistoryValues,
       usageTabShellHtml: usageTabShellHtml, usageFailureCopy: usageFailureCopy,
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
+      // cch-w42-s1: membersContext was one of only two authority predicates
+      // pinned by NOTHING — which is exactly why it drifted into inventing the
+      // role. teamAuthorityState is the five-valued band it now reads.
+      membersContext: membersContext, teamAuthorityState: teamAuthorityState,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
       removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,
