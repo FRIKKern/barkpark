@@ -526,7 +526,12 @@ async function assertLateMeRepaintsTheRail() {
     process.exit(1);
   }
 }
-await assertLateMeRepaintsTheRail();
+// cch-w46-s7 — THIS CALL MOVED INTO main(). It used to fire at module top level,
+// which made `import("./smoke.mjs")` boot a scenario and leak its verdict line to
+// stdout (measured: 117 bytes). A module that runs a corpus on import cannot be a
+// host for another instrument, so the two top-level awaits (this one and the
+// billing guard below main()) now run as main()'s FIRST two steps — same order,
+// same output, same exit codes, but only when smoke.mjs is the entry point.
 
 // ── EXPECTATIONS: the per-scenario view skeleton (edit HERE when markup moves) ─
 const EXPECTATIONS = {
@@ -3560,9 +3565,14 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
     process.exit(1);
   }
 }
-await assertBillingStatesNoNumeralItCannotSupport();
+// cch-w46-s7 — this call moved into main() too (see the note at the late-/v1/me
+// guard). Both harness-capability guards keep their original ORDER relative to
+// each other and to the corpus: late-/v1/me, then billing-numerals, then the
+// census guard and the scenarios.
 
 async function main() {
+  await assertLateMeRepaintsTheRail();
+  await assertBillingStatesNoNumeralItCannotSupport();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);
@@ -3588,4 +3598,21 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-main();
+// ── the module boundary (cch-w46-s7) ─────────────────────────────────────────
+// smoke.mjs is now BOTH an entry point and a HOST: member-authority-sweep.mjs
+// imports bootScenario/flush to read the rendered bytes of the same corpus
+// instead of re-implementing a second DOM shim that could drift from this one.
+// Two properties are load-bearing and both are asserted by the sweep's own
+// import-silence probe:
+//   1. `node smoke.mjs` behaves EXACTLY as before — same lines, same order,
+//      same exit code.
+//   2. `import("./smoke.mjs")` runs NOTHING and writes ZERO bytes. That is not
+//      the guard below alone: the two harness guards above had to move inside
+//      main(), because a top-level `await` executes at import time no matter
+//      what guards the tail call.
+export { bootScenario, makeDom, flush };
+
+// Importable (the sweep imports the boot half) — only run when executed.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

@@ -768,6 +768,37 @@ export function parseViewIds(html) {
   return ids;
 }
 
+// cch-w46-s7 — THE STATIC SHELL'S OWN CONTROLS, for an instrument that cannot
+// otherwise see them.
+//
+// WHY THIS LIVES HERE AND NOT IN THE SWEEP: it is a pure regex over the SAME
+// artifact parseViewIds above already reads, in the same shape, and this file
+// is the one place in the harness that owns "what index.html statically
+// declares". The member-authority sweep imports it.
+//
+// WHY IT IS NEEDED AT ALL: smoke.mjs NEVER reads index.html — its only
+// readFileSync targets ../app.js and makeDom() synthesizes an EMPTY document.
+// So every control the shell authors statically (#overview-launch,
+// #fleet-launch) is invisible to a registry-bytes sweep: it has no mount whose
+// innerHTML carries it. This reader is the only door to them.
+//
+// SCOPE, deliberately narrow and stated: id-bearing control tags only. A
+// control the shell authors WITHOUT an id is not returned — it has no stable
+// identity to account for, and inventing an ordinal one over a hand-authored
+// file would red on any reflow. That omission is named in the sweep's header
+// as a blind spot rather than hidden here.
+const STATIC_CONTROL_TAGS = "button|a|input|select|textarea|summary";
+export function parseStaticControlIds(html) {
+  const ids = [];
+  const re = new RegExp("<(" + STATIC_CONTROL_TAGS + ")\\b([^>]*)>", "gi");
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const id = /\bid="([^"]+)"/.exec(m[2] || "");
+    if (id) ids.push(id[1]);
+  }
+  return ids;
+}
+
 // The THEME axis, derived from the two artifacts and NOTHING else.
 //
 // SCOPED TO `data-theme` EXPLICITLY, AND THAT SCOPE IS LOAD-BEARING. The console

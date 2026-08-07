@@ -236,6 +236,29 @@ jobs:
       - name: Run preview smoke harness
         run: node cloud/priv/static/__preview__/smoke.mjs
 
+      # ── THE MEMBER-ACTOR RENDERED-STATE AUTHORITY SWEEP (cch-w46-s7) ────────
+      #
+      # The smoke harness above asserts that each scenario DREW what it should.
+      # This one asks the orthogonal question the epic had no instrument for:
+      # across every scenario whose own GET /v1/me answers role="member", what
+      # is the console actually OFFERING? It boots them through smoke.mjs's shim
+      # (which is why smoke.mjs is now importable and silent on import — the
+      # sweep's first guard measures exactly that, in a child process) and reads
+      # the RENDERED BYTES, accounting for every control against a hook table
+      # and failing closed on anything unaccounted for.
+      #
+      # WHY IT CAN LOSE, measured, not asserted: revert cch-w48-s2's site-screen
+      # fence (`var githubControl = authority === "grant"` → `= true`) and this
+      # step reds naming #site-github — while the smoke harness above stays at
+      # "all 110 scenarios rendered", because the rendered corpus has no
+      # expectation on that control. It is the first corpus-level instrument in
+      # this epic that can lose on that fence.
+      #
+      # Same shape as the standalone censuses below: node builtins only, no
+      # Chrome, no network.
+      - name: Member-actor rendered-state authority sweep
+        run: node cloud/priv/static/__preview__/member-authority-sweep.mjs
+
       # The seal predicate's OWN TESTS — never a live seal run. `seal-predicate.mjs`
       # decides clause (b) with `git merge-base --is-ancestor`, and under
       # actions/checkout@v4's depth-1 default (what both jobs here use) that exits
