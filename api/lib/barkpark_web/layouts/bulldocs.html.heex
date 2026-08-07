@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <%!-- data-bp-theme (ts-w4e) — the paper's workspace THEME IDENTITY, stamped
       server-side so the reader skin paints on the first byte. It is orthogonal
-      to light/dark mode: the reader ALWAYS mode-swaps via prefers-color-scheme
-      (no data-theme here — reader-dark-parity stays green), and this attribute
+      to light/dark mode: the reader defaults to prefers-color-scheme, and the
+      pre-paint script below stamps data-theme (persisted choice from the
+      dark/light pill, or the OS scheme) — the @media blocks stay complete as
+      the no-JS fallback, so reader-dark-parity stays green. This attribute
       only selects WHICH theme. Omitted for the default (evergreen) theme, so a
       default paper is byte-identical to before this feature. --%>
 <html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
@@ -10,6 +12,32 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
+  <%!-- Pre-paint mode stamp: synchronous so data-theme is set before first
+        paint (no flash of the wrong mode) — the same sanctioned Golden Rule 4
+        exception root.html.heex carries: a few lines that set one <html>
+        attribute, never a fetched script. Default follows the OS scheme until
+        the user clicks the dark/light pill (end of <body>); the choice then
+        persists in localStorage under `barkpark_theme` — the SAME key Studio
+        uses, so one choice carries across surfaces. While no choice is
+        stored, OS scheme changes are mirrored live. The generated
+        html[data-theme] companion blocks key off this stamp; the
+        prefers-color-scheme blocks remain the no-JS / first-paint fallback. --%>
+  <script nonce={assigns[:csp_nonce]}>
+    (function () {
+      var KEY = "barkpark_theme";
+      function osTheme() {
+        return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      var stored = null;
+      try { stored = localStorage.getItem(KEY); } catch (e) {}
+      document.documentElement.dataset.theme = stored || osTheme();
+      // Follow OS live ONLY while the user has made no explicit choice.
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
+        try { if (localStorage.getItem(KEY)) return; } catch (err) {}
+        document.documentElement.dataset.theme = e.matches ? "dark" : "light";
+      });
+    })();
+  </script>
   <%!-- A7: the reader is a LiveView — <.live_title> keeps the browser tab in
         sync when :page_title changes (the static ternary never updated live).
         The default carries NO site name: live_title appends the suffix to the
@@ -82,14 +110,16 @@
        `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline
        `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on
        the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,
-       etc.). Dark-mode note: the shared source keys dark on
-       `html[data-theme="dark"]`, which the reader NEVER stamps — so the shared
-       dark tokens never match here, and the `prefers-color-scheme: dark` block
-       below (also carried onto <main>) is what owns reader dark mode, flipping
-       the palette to cool bp-dark with light ink so the inline `var(--paper-*)`
-       HTML stays readable. Without the <main>-scoped override the shared light
-       fallback would paint dark ink on the browser's dark theme — the
-       visibility bug. */
+       etc.). Dark-mode note: the reader stamps `html[data-theme]` only via
+       its pre-paint toggle script (localStorage `barkpark_theme`, shared
+       with Studio); before that script runs — and with JS off — the
+       `prefers-color-scheme: dark` block below (also carried onto <main>)
+       owns reader dark mode, flipping the palette to cool bp-dark with
+       light ink so the inline `var(--paper-*)` HTML stays readable. The
+       `html[data-theme]` companions further down repeat both palettes so an
+       explicit toggle beats the OS scheme. Without the <main>-scoped
+       override the shared light fallback would paint dark ink on the
+       browser's dark theme — the visibility bug. */
     body:has(.bp-paper-article),
     body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
       --paper-bg:         #f6faf9;
@@ -126,13 +156,14 @@
         --paper-reading-accent: #d98a6a; /* S7 stub — S8 consumes */
         /* Callout TONE tokens + faint ink + chrome — the SAME reason as the
            --paper-* above: paper-surface.css keys their DARK values on
-           `html[data-theme="dark"]`, which the reader NEVER stamps, so an
-           OS-dark reader (prefers-color-scheme, no toggle) was left with the
-           LIGHT callout tones (#eff6ff on a #131d19 page — a light box on the
-           dark article). Re-skin them here, byte-mirroring the dark values in
-           paper-surface.css's `html[data-theme="dark"] .bp-paper-surface` block.
-           Edit surfaces stamp data-theme and get those directly; this is the
-           reader's prefers-color-scheme companion. */
+           `html[data-theme="dark"]`, which the reader stamps only after its
+           pre-paint toggle script runs, so an OS-dark reader (no JS / first
+           paint) was left with the LIGHT callout tones (#eff6ff on a #131d19
+           page — a light box on the dark article). Re-skin them here,
+           byte-mirroring the dark values in paper-surface.css's
+           `html[data-theme="dark"] .bp-paper-surface` block. Edit surfaces
+           stamp data-theme and get those directly; this is the reader's
+           prefers-color-scheme companion. */
         --paper-ink-faint:    #6c7a74;
         --paper-chrome-bg:    #131d19;
         --paper-chrome-border: rgba(231, 237, 233, 0.13);
@@ -158,6 +189,65 @@
         --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
         --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
       }
+    }
+    /* Explicit mode stamp — html[data-theme] companions to the light
+       fallback + prefers-color-scheme pair above. The reader's pre-paint
+       <head> script stamps data-theme from localStorage `barkpark_theme`
+       (shared with Studio) or the OS scheme, and the dark/light toggle
+       pill rewrites it — one attribute of extra specificity, so a toggled
+       choice beats the @media blocks in BOTH directions. The @media pair
+       stays byte-complete as the no-JS / first-paint fallback (it is also
+       what the reader-dark-parity guard scans for coverage). */
+    html[data-theme="light"] body:has(.bp-paper-article),
+    html[data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg:         #f6faf9;
+      --paper-bg-deep:    #eaf1ee;
+      --paper-ink:        #15211d;
+      --paper-ink-soft:   #55635e;
+      --paper-rule:       #dde7e2;
+      --paper-accent:     #1e5347;
+      --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
+      /* Light re-declarations for every token the @media dark block above
+         re-skins — its selector outranks the bare paper-surface light
+         fallbacks, so WITHOUT these a forced-light reader under an OS-dark
+         scheme keeps dark callout tones / faint ink / chrome (the mirror
+         image of the #1217 bug). Values match the un-stamped light path. */
+      --paper-ink-faint:    #82918b;
+      --paper-chrome-bg:    #f6faf9;
+      --paper-chrome-border: rgba(21, 33, 29, 0.12);
+      --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
+      --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
+      --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
+      --bp-tone-danger-bg:  #f7e9e6; --bp-tone-danger-fg:  #a63a2e;
+      --bp-tone-neutral-bg: #edf0ee; --bp-tone-neutral-fg: #4a544f;
+    }
+    html[data-theme="dark"] body:has(.bp-paper-article),
+    html[data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg:         #0e1614;
+      --paper-bg-deep:    #131d19;
+      --paper-ink:        #e7ede9;
+      --paper-ink-soft:   #9aaaa3;
+      --paper-rule:       rgba(231, 237, 233, 0.13);
+      --paper-accent:     #45b394;
+      --paper-accent-soft: rgba(70, 179, 148, 0.16);
+      --paper-reading-accent: #d98a6a; /* S7 stub — S8 consumes */
+      --paper-ink-faint:    #6c7a74;
+      --paper-chrome-bg:    #131d19;
+      --paper-chrome-border: rgba(231, 237, 233, 0.13);
+      --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
+      --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
+      --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
+      --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;
+      --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
+    }
+    html[data-theme="light"] #bp-mailapp {
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+    }
+    html[data-theme="dark"] #bp-mailapp {
+      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+      --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
     }
     /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
     html[data-bp-theme="evergreen"] body:has(.bp-paper-article),
@@ -202,6 +292,52 @@
         --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
       }
     }
+    html[data-bp-theme="evergreen"][data-theme="light"] body:has(.bp-paper-article),
+    html[data-bp-theme="evergreen"][data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #f6faf9;
+      --paper-bg-deep: #eaf1ee;
+      --paper-ink: #15211d;
+      --paper-ink-soft: #55635e;
+      --paper-rule: #dde7e2;
+      --paper-accent: #1e5347;
+      --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-reading-accent: #a23925;
+      --paper-ink-faint: #82918b;
+      --paper-chrome-bg: #f6faf9;
+      --paper-chrome-border: rgba(21, 33, 29, 0.12);
+      --bp-tone-info-bg: #e9eff7; --bp-tone-info-fg: #2d5e8f;
+      --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
+      --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
+      --bp-tone-danger-bg: #f7e9e6; --bp-tone-danger-fg: #a63a2e;
+      --bp-tone-neutral-bg: #edf0ee; --bp-tone-neutral-fg: #4a544f;
+    }
+    html[data-bp-theme="evergreen"][data-theme="dark"] body:has(.bp-paper-article),
+    html[data-bp-theme="evergreen"][data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #0e1614;
+      --paper-bg-deep: #131d19;
+      --paper-ink: #e7ede9;
+      --paper-ink-soft: #9aaaa3;
+      --paper-rule: rgba(231, 237, 233, 0.13);
+      --paper-accent: #45b394;
+      --paper-accent-soft: rgba(70, 179, 148, 0.16);
+      --paper-reading-accent: #d98a6a;
+      --paper-ink-faint: #6c7a74;
+      --paper-chrome-bg: #131d19;
+      --paper-chrome-border: rgba(231, 237, 233, 0.13);
+      --bp-tone-info-bg: #172032; --bp-tone-info-fg: #9db8ff;
+      --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
+      --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
+      --bp-tone-danger-bg: #2a1614; --bp-tone-danger-fg: #f08a80;
+      --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
+    }
+    html[data-bp-theme="evergreen"][data-theme="light"] #bp-mailapp {
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+    }
+    html[data-bp-theme="evergreen"][data-theme="dark"] #bp-mailapp {
+      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+      --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
+    }
     html[data-bp-theme="charple"] body:has(.bp-paper-article),
     html[data-bp-theme="charple"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
       --paper-bg: #fcf9fd;
@@ -243,6 +379,52 @@
         --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #363337;
         --mail-ink: #e1dde3; --mail-soft: #a29da4; --mail-accent: #c78ae0;
       }
+    }
+    html[data-bp-theme="charple"][data-theme="light"] body:has(.bp-paper-article),
+    html[data-bp-theme="charple"][data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #fcf9fd;
+      --paper-bg-deep: #f0ecf3;
+      --paper-ink: #241e27;
+      --paper-ink-soft: #565059;
+      --paper-rule: #e0dde1;
+      --paper-accent: #7b3a96;
+      --paper-accent-soft: rgba(123, 58, 150, 0.10);
+      --paper-reading-accent: #302ba5;
+      --paper-ink-faint: #7e7a81;
+      --paper-chrome-bg: #fcf9fd;
+      --paper-chrome-border: rgba(36, 30, 39, 0.12);
+      --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3a538a;
+      --bp-tone-success-bg: #def6e2; --bp-tone-success-fg: #276438;
+      --bp-tone-warning-bg: #feecd4; --bp-tone-warning-fg: #734c00;
+      --bp-tone-danger-bg: #ffe9e6; --bp-tone-danger-fg: #823e38;
+      --bp-tone-neutral-bg: #efeef0; --bp-tone-neutral-fg: #565457;
+    }
+    html[data-bp-theme="charple"][data-theme="dark"] body:has(.bp-paper-article),
+    html[data-bp-theme="charple"][data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #0b080c;
+      --paper-bg-deep: #151117;
+      --paper-ink: #e1dde3;
+      --paper-ink-soft: #a29da4;
+      --paper-rule: rgba(225, 221, 227, 0.13);
+      --paper-accent: #c78ae0;
+      --paper-accent-soft: rgba(199, 138, 224, 0.16);
+      --paper-reading-accent: #8480ea;
+      --paper-ink-faint: #6f6b70;
+      --paper-chrome-bg: #151117;
+      --paper-chrome-border: rgba(225, 221, 227, 0.13);
+      --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8beea;
+      --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9fcba7;
+      --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d8b88d;
+      --bp-tone-danger-bg: #1f0101; --bp-tone-danger-fg: #e6aea6;
+      --bp-tone-neutral-bg: #0d0c0d; --bp-tone-neutral-fg: #bfbdbf;
+    }
+    html[data-bp-theme="charple"][data-theme="light"] #bp-mailapp {
+      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e0dde1;
+      --mail-ink: #241e27; --mail-soft: #565059; --mail-accent: #7b3a96;
+    }
+    html[data-bp-theme="charple"][data-theme="dark"] #bp-mailapp {
+      --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #363337;
+      --mail-ink: #e1dde3; --mail-soft: #a29da4; --mail-accent: #c78ae0;
     }
     html[data-bp-theme="ember"] body:has(.bp-paper-article),
     html[data-bp-theme="ember"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
@@ -286,6 +468,52 @@
         --mail-ink: #e5ddd9; --mail-soft: #a69d99; --mail-accent: #e8875a;
       }
     }
+    html[data-bp-theme="ember"][data-theme="light"] body:has(.bp-paper-article),
+    html[data-bp-theme="ember"][data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #fef9f7;
+      --paper-bg-deep: #f4ece9;
+      --paper-ink: #291d19;
+      --paper-ink-soft: #5b504c;
+      --paper-rule: #e2dcda;
+      --paper-accent: #b34e1e;
+      --paper-accent-soft: rgba(179, 78, 30, 0.10);
+      --paper-reading-accent: #bf321d;
+      --paper-ink-faint: #827a76;
+      --paper-chrome-bg: #fef9f7;
+      --paper-chrome-border: rgba(41, 29, 25, 0.12);
+      --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3b5487;
+      --bp-tone-success-bg: #dff6e3; --bp-tone-success-fg: #2a6339;
+      --bp-tone-warning-bg: #fdecd5; --bp-tone-warning-fg: #724d0a;
+      --bp-tone-danger-bg: #ffe9e6; --bp-tone-danger-fg: #803f39;
+      --bp-tone-neutral-bg: #f0eeee; --bp-tone-neutral-fg: #585453;
+    }
+    html[data-bp-theme="ember"][data-theme="dark"] body:has(.bp-paper-article),
+    html[data-bp-theme="ember"][data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #0d0806;
+      --paper-bg-deep: #18110e;
+      --paper-ink: #e5ddd9;
+      --paper-ink-soft: #a69d99;
+      --paper-rule: rgba(229, 221, 217, 0.13);
+      --paper-accent: #e8875a;
+      --paper-accent-soft: rgba(232, 135, 90, 0.16);
+      --paper-reading-accent: #f5855c;
+      --paper-ink-faint: #726b68;
+      --paper-chrome-bg: #18110e;
+      --paper-chrome-border: rgba(229, 221, 217, 0.13);
+      --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8bee9;
+      --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a0caa7;
+      --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d7b88e;
+      --bp-tone-danger-bg: #1f0101; --bp-tone-danger-fg: #e6aea7;
+      --bp-tone-neutral-bg: #0e0c0b; --bp-tone-neutral-fg: #c0bdbb;
+    }
+    html[data-bp-theme="ember"][data-theme="light"] #bp-mailapp {
+      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #e2dcda;
+      --mail-ink: #291d19; --mail-soft: #5b504c; --mail-accent: #b34e1e;
+    }
+    html[data-bp-theme="ember"][data-theme="dark"] #bp-mailapp {
+      --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #383330;
+      --mail-ink: #e5ddd9; --mail-soft: #a69d99; --mail-accent: #e8875a;
+    }
     html[data-bp-theme="fjord"] body:has(.bp-paper-article),
     html[data-bp-theme="fjord"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
       --paper-bg: #f6fbfd;
@@ -328,6 +556,52 @@
         --mail-ink: #d8e0e3; --mail-soft: #97a1a4; --mail-accent: #6cc4dd;
       }
     }
+    html[data-bp-theme="fjord"][data-theme="light"] body:has(.bp-paper-article),
+    html[data-bp-theme="fjord"][data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #f6fbfd;
+      --paper-bg-deep: #e7f0f2;
+      --paper-ink: #162327;
+      --paper-ink-soft: #495559;
+      --paper-rule: #d9dfe1;
+      --paper-accent: #0e6e85;
+      --paper-accent-soft: rgba(14, 110, 133, 0.10);
+      --paper-reading-accent: #0f8299;
+      --paper-ink-faint: #747e81;
+      --paper-chrome-bg: #f6fbfd;
+      --paper-chrome-border: rgba(22, 35, 39, 0.12);
+      --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #435579;
+      --bp-tone-success-bg: #e4f4e6; --bp-tone-success-fg: #3b5f42;
+      --bp-tone-warning-bg: #f9eddd; --bp-tone-warning-fg: #6a502b;
+      --bp-tone-danger-bg: #ffe9e6; --bp-tone-danger-fg: #754742;
+      --bp-tone-neutral-bg: #edeff0; --bp-tone-neutral-fg: #525657;
+    }
+    html[data-bp-theme="fjord"][data-theme="dark"] body:has(.bp-paper-article),
+    html[data-bp-theme="fjord"][data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #050a0c;
+      --paper-bg-deep: #0c1417;
+      --paper-ink: #d8e0e3;
+      --paper-ink-soft: #97a1a4;
+      --paper-rule: rgba(216, 224, 227, 0.13);
+      --paper-accent: #6cc4dd;
+      --paper-accent-soft: rgba(108, 196, 221, 0.16);
+      --paper-reading-accent: #53d6ea;
+      --paper-ink-faint: #666e70;
+      --paper-chrome-bg: #0c1417;
+      --paper-chrome-border: rgba(216, 224, 227, 0.13);
+      --bp-tone-info-bg: #040b1f; --bp-tone-info-fg: #adbedf;
+      --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a7c7ad;
+      --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d1ba9a;
+      --bp-tone-danger-bg: #1b0403; --bp-tone-danger-fg: #ddb2ac;
+      --bp-tone-neutral-bg: #0b0d0d; --bp-tone-neutral-fg: #bbbebf;
+    }
+    html[data-bp-theme="fjord"][data-theme="light"] #bp-mailapp {
+      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #d9dfe1;
+      --mail-ink: #162327; --mail-soft: #495559; --mail-accent: #0e6e85;
+    }
+    html[data-bp-theme="fjord"][data-theme="dark"] #bp-mailapp {
+      --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #2f3537;
+      --mail-ink: #d8e0e3; --mail-soft: #97a1a4; --mail-accent: #6cc4dd;
+    }
     html[data-bp-theme="iris"] body:has(.bp-paper-article),
     html[data-bp-theme="iris"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
       --paper-bg: #f9fafe;
@@ -369,6 +643,52 @@
         --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #343339;
         --mail-ink: #dedee5; --mail-soft: #9e9ea6; --mail-accent: #9d8cff;
       }
+    }
+    html[data-bp-theme="iris"][data-theme="light"] body:has(.bp-paper-article),
+    html[data-bp-theme="iris"][data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #f9fafe;
+      --paper-bg-deep: #ecedf5;
+      --paper-ink: #1f1f2a;
+      --paper-ink-soft: #51525b;
+      --paper-rule: #dddee2;
+      --paper-accent: #5b46d6;
+      --paper-accent-soft: rgba(91, 70, 214, 0.10);
+      --paper-reading-accent: #3692e6;
+      --paper-ink-faint: #7a7b83;
+      --paper-chrome-bg: #f9fafe;
+      --paper-chrome-border: rgba(31, 31, 42, 0.12);
+      --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #335296;
+      --bp-tone-success-bg: #daf8df; --bp-tone-success-fg: #0f662f;
+      --bp-tone-warning-bg: #ffecd2; --bp-tone-warning-fg: #734c00;
+      --bp-tone-danger-bg: #ffe9e6; --bp-tone-danger-fg: #8b3630;
+      --bp-tone-neutral-bg: #eeeff0; --bp-tone-neutral-fg: #555558;
+    }
+    html[data-bp-theme="iris"][data-theme="dark"] body:has(.bp-paper-article),
+    html[data-bp-theme="iris"][data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #09080e;
+      --paper-bg-deep: #121219;
+      --paper-ink: #dedee5;
+      --paper-ink-soft: #9e9ea6;
+      --paper-rule: rgba(222, 222, 229, 0.13);
+      --paper-accent: #9d8cff;
+      --paper-accent-soft: rgba(157, 140, 255, 0.16);
+      --paper-reading-accent: #8cc8ff;
+      --paper-ink-faint: #6c6c72;
+      --paper-chrome-bg: #121219;
+      --paper-chrome-border: rgba(222, 222, 229, 0.13);
+      --bp-tone-info-bg: #010828; --bp-tone-info-fg: #a4bef1;
+      --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9acca4;
+      --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #dcb785;
+      --bp-tone-danger-bg: #210001; --bp-tone-danger-fg: #ecaba3;
+      --bp-tone-neutral-bg: #0c0c0e; --bp-tone-neutral-fg: #bdbdc0;
+    }
+    html[data-bp-theme="iris"][data-theme="light"] #bp-mailapp {
+      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #dddee2;
+      --mail-ink: #1f1f2a; --mail-soft: #51525b; --mail-accent: #5b46d6;
+    }
+    html[data-bp-theme="iris"][data-theme="dark"] #bp-mailapp {
+      --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #343339;
+      --mail-ink: #dedee5; --mail-soft: #9e9ea6; --mail-accent: #9d8cff;
     }
     /* END GENERATED: tokens */
     .bp-paper-shell.bp-paper-article {
@@ -723,6 +1043,13 @@
     .bp-view-toggle--email { bottom: 62px; }
     body.bp-tui .bp-view-toggle--email { display: none; }
     body.bp-email .bp-view-toggle:not(.bp-view-toggle--email) { display: none; }
+    /* Dark/light mode pill — stacks above the email pill. The label names the
+       mode a click switches TO; the stamp itself is written by the nonced
+       mode-toggle IIFE at the end of <body>. Hidden inside the TUI view
+       (always terminal-dark); the email-mode rule above already hides it
+       there, and print + the no-article guard below cover the rest. */
+    .bp-mode-toggle { bottom: 104px; }
+    body.bp-tui .bp-mode-toggle { display: none; }
     .bp-view-toggle:focus-visible { outline: 2px solid #2f7d5b; outline-offset: 2px; }
     .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f7d5b; }
     /* hide the toggle when there is no article paper on the page */
@@ -1064,6 +1391,59 @@
     <span class="bp-vt-dot" aria-hidden="true"></span>
     <span class="bp-vt-label">Email view</span>
   </button>
+  <%!-- Dark/light mode pill. CSP layer-2: handler bound in the nonced IIFE
+        below, never an inline onclick. aria-pressed mirrors "dark mode on";
+        the label names the mode a click switches TO. --%>
+  <button
+    type="button"
+    class="bp-view-toggle bp-mode-toggle"
+    aria-pressed="false"
+    aria-label="Switch between dark and light mode"
+  >
+    <span class="bp-vt-dot" aria-hidden="true"></span>
+    <span class="bp-vt-label">Mode</span>
+  </button>
+  <script nonce={assigns[:csp_nonce]}>
+    (function () {
+      var KEY = "barkpark_theme";
+      var btn = document.querySelector(".bp-mode-toggle");
+      if (!btn) return;
+      var label = btn.querySelector(".bp-vt-label");
+      function mode() {
+        return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+      }
+      var last = mode();
+      function paint() {
+        var m = mode();
+        if (label) label.textContent = m === "dark" ? "Light mode" : "Dark mode";
+        btn.setAttribute("aria-pressed", m === "dark" ? "true" : "false");
+      }
+      // Broadcast only on an EFFECTIVE change — consumers that bake colors in
+      // (mermaid) re-render on `bp:mode`; an OS flip under a stored choice
+      // changes nothing and must not trigger a rebuild.
+      function announce() {
+        var m = mode();
+        if (m === last) return;
+        last = m;
+        window.dispatchEvent(new CustomEvent("bp:mode", { detail: { mode: m } }));
+      }
+      btn.addEventListener("click", function () {
+        var next = mode() === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+        paint();
+        announce();
+      });
+      // No stored choice → the pre-paint <head> listener (registered first,
+      // so the attribute is already fresh here) mirrors OS flips; track the
+      // label and rebroadcast.
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+        paint();
+        announce();
+      });
+      paint();
+    })();
+  </script>
   <script nonce={assigns[:csp_nonce]}>
     (function () {
       var KEY = "bp-paper-view"; // "reader" | "tui" | "email" — one mode at a time
@@ -1556,12 +1936,19 @@
       };
     }
     const mermaidScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    // Effective reader mode: the pre-paint data-theme stamp (OS default or the
+    // dark/light pill's persisted choice) wins; bare OS scheme is the fallback
+    // for the pathological no-stamp case.
+    function readerDark() {
+      const t = document.documentElement.dataset.theme;
+      return t ? t === "dark" : mermaidScheme.matches;
+    }
     function initMermaid() {
       if (window.mermaid && window.mermaid.initialize) {
         window.mermaid.initialize({
           startOnLoad: false,
           theme: "base",
-          themeVariables: mermaidThemeVariables(mermaidScheme.matches),
+          themeVariables: mermaidThemeVariables(readerDark()),
           flowchart: { useMaxWidth: true },
           sequence: { useMaxWidth: true }
         });
@@ -1569,10 +1956,13 @@
     }
     if (document.readyState === "complete") initMermaid();
     else window.addEventListener("load", initMermaid, { once: true });
-    // Re-render every diagram from its stashed source when the OS scheme
+    // Re-render every diagram from its stashed source when the EFFECTIVE mode
     // flips — mermaid bakes the palette into the SVG, so a live flip would
-    // otherwise strand light diagrams on a dark page (and vice versa).
-    mermaidScheme.addEventListener("change", () => {
+    // otherwise strand light diagrams on a dark page (and vice versa). The
+    // mode-toggle IIFE fires `bp:mode` for both toggle clicks and OS flips
+    // that actually change the effective mode (never for a no-op OS flip
+    // under a stored choice), so it replaces the old raw scheme listener.
+    window.addEventListener("bp:mode", () => {
       initMermaid();
       document.querySelectorAll("pre.mermaid[data-processed]").forEach((pre) => {
         if (pre.dataset.bpSrc != null) {
