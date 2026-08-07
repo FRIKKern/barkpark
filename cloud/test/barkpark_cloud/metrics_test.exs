@@ -16,6 +16,10 @@ defmodule BarkparkCloud.MetricsTest do
     * `latest` carries the newest beat's scalars (db size + named top relations,
       the swap PAIR, the BEAM footprint) with the same nil-not-zero discipline,
       proven against a REAL captured beat
+
+  It also covers `Telemetry.normalize_space/1` — the pure read half of the
+  agent's new space payload, under the same hand-built-payload discipline (the
+  route that LANDS it is proven over HTTP in `web/metrics_route_test.exs`).
   """
   use ExUnit.Case, async: true
 
@@ -23,6 +27,7 @@ defmodule BarkparkCloud.MetricsTest do
   alias BarkparkCloud.RealAgentBeats
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.AgentEvent
+  alias BarkparkCloud.Telemetry
 
   # The series key set is DEFINED by Metrics's @vitals; asserting it whole is the
   # tripwire that a key added there is a deliberate contract change (the Go
@@ -329,6 +334,115 @@ defmodule BarkparkCloud.MetricsTest do
         assert env.beat.status == "absent"
         assert env.series == empty_series()
       end
+    end
+  end
+
+  # `Telemetry.normalize_space/1` is the READ half of the space payload the
+  # agent now posts to /v1/agent/space — the pure sibling of `normalize/1`, and
+  # the counterpart of the `latest` block above ("what is taking up space", but
+  # for the whole BOX rather than just Postgres). It lives beside these tests
+  # because it is the same pure, hand-built-payload discipline; the route that
+  # LANDS the payload is proven over HTTP in web/metrics_route_test.exs.
+  describe "Telemetry.normalize_space/1 — honest absence, and the root PAIR" do
+    test "a measured payload names every consumer, and sites_top's `slug` reads as a name" do
+      space =
+        Telemetry.normalize_space(%{
+          "type" => "space",
+          "root_used_bytes" => 12_000_000_000,
+          "root_total_bytes" => 40_000_000_000,
+          "journal_bytes" => 900_000_000,
+          "pg_size_bytes" => 3_500_000_000,
+          "pg_top_relations" => [
+            %{"name" => "documents", "bytes" => 2_100_000_000},
+            %{"name" => "agent_events", "bytes" => 400_000_000}
+          ],
+          "sites_dir" => "/opt/barkpark/sites",
+          "sites_bytes" => 4_400_000_000,
+          "sites_top" => [%{"slug" => "guerrilla", "bytes" => 3_000_000_000}]
+        })
+
+      # THE PAIR SURVIVES: used and total travel together, never collapsed into
+      # a percent — 75% cannot tell a 40 GB box from a 400 GB one.
+      assert space.root == %{used_bytes: 12_000_000_000, total_bytes: 40_000_000_000}
+      assert space.journal_bytes == 900_000_000
+      assert space.db_size == 3_500_000_000
+
+      assert space.top_relations == [
+               %{name: "documents", bytes: 2_100_000_000},
+               %{name: "agent_events", bytes: 400_000_000}
+             ]
+
+      assert space.sites.dir == "/opt/barkpark/sites"
+      assert space.sites.bytes == 4_400_000_000
+      assert space.sites.top == [%{name: "guerrilla", bytes: 3_000_000_000}]
+      # A bare payload map is undatable — the event stamps reported_at.
+      assert space.reported_at == nil
+    end
+
+    test "the -1 sentinel passes through VERBATIM and is never zeroed" do
+      space =
+        Telemetry.normalize_space(%{
+          "root_used_bytes" => -1,
+          "root_total_bytes" => -1,
+          "journal_bytes" => -1,
+          "pg_size_bytes" => -1,
+          "sites_bytes" => -1
+        })
+
+      assert space.root == %{used_bytes: -1, total_bytes: -1}
+      assert space.journal_bytes == -1
+      assert space.db_size == -1
+      assert space.sites.bytes == -1
+    end
+
+    test "an unmeasured list is nil, an honestly EMPTY list stays [] — different facts" do
+      unmeasured = Telemetry.normalize_space(%{"pg_top_relations" => nil, "sites_top" => nil})
+      assert unmeasured.top_relations == nil
+      assert unmeasured.sites.top == nil
+      # Absent keys behave the same as an explicit JSON null.
+      assert Telemetry.normalize_space(%{}).sites.top == nil
+
+      measured = Telemetry.normalize_space(%{"pg_top_relations" => [], "sites_top" => []})
+      assert measured.top_relations == []
+      assert measured.sites.top == []
+    end
+
+    test "TOTAL: garbage in, the fixed all-absent envelope out — never a raise" do
+      for junk <- [nil, "x", 7, [], %{"root_used_bytes" => "lots", "sites_top" => "nope"}] do
+        space = Telemetry.normalize_space(junk)
+        assert space.root == %{used_bytes: nil, total_bytes: nil}
+        assert space.journal_bytes == nil
+        assert space.db_size == nil
+        assert space.top_relations == nil
+        assert space.sites == %{dir: nil, bytes: nil, top: nil}
+        assert space.reported_at == nil
+      end
+    end
+
+    test "a malformed consumer row is dropped, never rendered nameless or sizeless" do
+      space =
+        Telemetry.normalize_space(%{
+          "sites_top" => [
+            %{"slug" => "ok", "bytes" => 10},
+            %{"slug" => "no-bytes"},
+            %{"bytes" => 5},
+            "garbage"
+          ]
+        })
+
+      assert space.sites.top == [%{name: "ok", bytes: 10}]
+    end
+
+    test "a full %AgentEvent{} stamps reported_at from the row's inserted_at" do
+      event = %AgentEvent{
+        type: "space",
+        payload: %{"root_used_bytes" => 5},
+        inserted_at: DateTime.add(@now, -30, :second)
+      }
+
+      space = Telemetry.normalize_space(event)
+      assert space.root.used_bytes == 5
+      assert space.reported_at == "2026-07-09T11:59:30.000000Z"
     end
   end
 end

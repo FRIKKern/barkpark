@@ -3791,6 +3791,27 @@ export const SCENARIOS = {
       operatorDenied: true,
     },
   },
+  // cch-w37-s6 — the OTHER unreadable: not the operator routes 403ing, but
+  // /v1/me itself failing. `me` is PRESENT (this really is an operator) and only
+  // the WIRE fails, so meState() lands on "failed" rather than the cold
+  // "loading" the console used to be indistinguishable from. Before the fix the
+  // page sat on "Checking operator access…" for the whole session, because
+  // loadMe's failure arm deliberately does not re-enter loadOperator. This is a
+  // WAIT, not a false grant: the sidebar entry stays hidden and zero
+  // /v1/operator/* routes are read.
+  "operator-me-unreadable": {
+    label: "Operator console — /v1/me itself 500s: the page says it couldn't check, and offers a retry instead of a forever spinner",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: operatorMe("Acme Inc"),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
 
   // ── gr-p5-account-2fa: the account modal (GR54/GR58) ──────────────────────
   // The modal is opened by a CLICK, so it is unreachable by deepLink — smoke
@@ -4158,6 +4179,13 @@ export function route(name, method, path, state) {
       : { status: 404, body: { ok: false, error: "task not found" } };
   }
 
+  // cch-w37-s6 — THE WIRE FAILURE, which no committed fixture could express.
+  // Below, /v1/me answers 200-or-401 only, and a 401 SIGNS THE PERSON OUT
+  // (app.js clearSession + render), so meState()=="failed" — the state
+  // absorbMe writes on a 500/502/offline — was unreachable from every scenario
+  // in this file. `meFault` is a per-scenario override that fails the READ while
+  // leaving `me` present: the account exists, the wire did not answer.
+  if (p === "/v1/me" && d.meFault) return d.meFault;
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
   // than 404 so every scenario answers HONESTLY ("No active sessions") instead
@@ -4345,12 +4373,14 @@ export function route(name, method, path, state) {
   if (p === "/v1/audit") {
     // cch-w35-s4: the refusal carries the server's EVIDENCE, because the real one
     // does. Auth.require_primary_team_admin answers this route with
-    // `forbidden(conn, required: "admin", scope: "primary_team")` — note
-    // "primary_team", NOT "team": a fixture that modelled a refusal shape the
-    // server never sends would be its own kind of lie. The console renders the
-    // `required` label and deliberately ignores `scope`.
+    // `forbidden(conn, required: "admin", scope: "team")` — "team", NOT
+    // "primary_team": cch-w37-s3 renamed the label because the gate reads
+    // conn.assigns[:current_team] (resolve_team/2 honours the x-barkpark-team
+    // header), so it never consulted the primary team. A fixture that modelled a
+    // refusal shape the server never sends would be its own kind of lie. The
+    // console renders the `required` label and deliberately ignores `scope`.
     if (d.auditDenied) {
-      return { status: 403, body: { error: "forbidden", required: "admin", scope: "primary_team" } };
+      return { status: 403, body: { error: "forbidden", required: "admin", scope: "team" } };
     }
     const q = new URLSearchParams(String(path || "").split("?")[1] || "");
     const ttype = q.get("target_type");

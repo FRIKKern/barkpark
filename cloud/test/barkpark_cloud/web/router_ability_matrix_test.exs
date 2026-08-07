@@ -377,7 +377,10 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
              }
     end
 
-    test "require_primary_team_admin names admin on the primary team (the audit-trail exhibit)" do
+    # cch-w37-s3: the label is "team", not "primary_team" — the gate reads
+    # conn.assigns[:current_team], which resolve_team/2 fills from the
+    # x-barkpark-team header, so it judges the SELECTED team, not the primary one.
+    test "require_primary_team_admin names admin on the current team (the audit-trail exhibit)" do
       user = user_fixture()
       team = team_fixture()
       {:ok, _} = Accounts.add_member(team, user, "member")
@@ -389,7 +392,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       assert Jason.decode!(conn.resp_body) == %{
                "error" => "forbidden",
                "required" => "admin",
-               "scope" => "primary_team"
+               "scope" => "team"
              }
     end
 
@@ -405,7 +408,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       assert Jason.decode!(conn.resp_body) == %{
                "error" => "forbidden",
                "required" => "owner",
-               "scope" => "primary_team"
+               "scope" => "team"
              }
     end
 
@@ -419,7 +422,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     # suite is green in BOTH directions, which is exactly why the flip needed a
     # test that can lose.
     #
-    # `scope` stays "primary_team", matching the two required-role refusals
+    # `scope` is "team", matching the two required-role refusals
     # above, so each gate emits ONE scope label. The 15 INLINE
     # `json(conn, 422, %{error: "no_team"})` emitters in router.ex are a
     # different contract and deliberately unchanged (`bp cloud support add` and
@@ -434,7 +437,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       assert Jason.decode!(conn.resp_body) == %{
                "error" => "forbidden",
                "reason" => "no_team",
-               "scope" => "primary_team"
+               "scope" => "team"
              }
     end
 
@@ -448,7 +451,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       assert Jason.decode!(conn.resp_body) == %{
                "error" => "forbidden",
                "reason" => "no_team",
-               "scope" => "primary_team"
+               "scope" => "team"
              }
     end
 

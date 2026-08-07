@@ -127,6 +127,70 @@ defmodule BarkparkCloud.Telemetry do
   # nil / any non-map (a corrupt or absent payload) → the all-absent envelope.
   def normalize(_), do: normalize(%{})
 
+  @doc """
+  Normalize one captured SPACE report — the agent's disk-consumption payload
+  (`internal/agent/report.go` `SpaceReport`, posted to `/v1/agent/space` on its
+  own 15-minute cadence) — into a stable envelope, the sibling of `normalize/1`
+  and under exactly the same discipline: PURE, TOTAL, nil-not-zero, and the
+  agent's `-1` sentinel passed through VERBATIM (a view decides how to word an
+  unmeasured probe; a normalizer that "helpfully" zeroes it has destroyed the
+  distinction). A non-list consumer list stays `nil` — "we did not measure" is a
+  different fact from "we measured and it is empty", and under-reporting space
+  is the exact failure this payload exists to prevent.
+
+      %{
+        # The root filesystem as a PAIR, never a percent: 75% cannot tell a
+        # 40 GB box needing 10 GB freed from a 400 GB box needing 100 GB, and
+        # the operator's next action depends on which it is. Collapsing them
+        # throws away the whole reason the payload exists.
+        root: %{used_bytes: number | nil, total_bytes: number | nil},
+        journal_bytes: number | nil,
+        db_size: number | nil,
+        top_relations: [%{name: String.t(), bytes: number}] | nil,
+        # The RESOLVED sites root the probe actually read (never the configured
+        # one — a wrong root must be visible, D59), the tree's total, and its
+        # biggest named slugs.
+        sites: %{
+          dir: String.t() | nil,
+          bytes: number | nil,
+          top: [%{name: String.t(), bytes: number}] | nil
+        },
+        reported_at: String.t() | nil   # the event's inserted_at, RFC3339
+      }
+
+  Accepts a full `%AgentEvent{}` (stamps `reported_at`), a bare payload map, or
+  anything at all (the all-absent envelope).
+  """
+  @spec normalize_space(AgentEvent.t() | map() | nil | any()) :: map()
+  def normalize_space(%AgentEvent{payload: payload, inserted_at: inserted_at}) do
+    payload
+    |> normalize_space()
+    |> Map.put(:reported_at, to_rfc3339(inserted_at))
+  end
+
+  def normalize_space(payload) when is_map(payload) do
+    %{
+      root: %{
+        used_bytes: num_or_nil(Map.get(payload, "root_used_bytes")),
+        total_bytes: num_or_nil(Map.get(payload, "root_total_bytes"))
+      },
+      journal_bytes: num_or_nil(Map.get(payload, "journal_bytes")),
+      db_size: num_or_nil(Map.get(payload, "pg_size_bytes")),
+      top_relations: relation_sizes(Map.get(payload, "pg_top_relations")),
+      sites: %{
+        dir: str_or_nil(Map.get(payload, "sites_dir")),
+        bytes: num_or_nil(Map.get(payload, "sites_bytes")),
+        # `SiteSize` names its key `slug` where `RelationSize` names it `name`;
+        # both are "a named consumer and its bytes", so one row shaper serves
+        # both and every surface renders one shape.
+        top: relation_sizes(Map.get(payload, "sites_top"))
+      },
+      reported_at: nil
+    }
+  end
+
+  def normalize_space(_), do: normalize_space(%{})
+
   # Roll the health-gate array up to {pass, total, failing}. A non-list (absent
   # / malformed) yields the zero roll-up — never nil arithmetic downstream.
   defp summarize_checks(checks) when is_list(checks) do
@@ -156,8 +220,13 @@ defmodule BarkparkCloud.Telemetry do
 
   defp relation_sizes(_), do: nil
 
+  # `RelationSize` names the consumer `name`; the space payload's `SiteSize`
+  # names it `slug`. Same fact ("who is consuming this, and how much"), so the
+  # row shaper accepts either and always emits `name` — one rendered shape, not
+  # two near-identical ones a surface has to branch on.
   defp relation_size(row) when is_map(row) do
-    case {str_or_nil(Map.get(row, "name")), num_or_nil(Map.get(row, "bytes"))} do
+    case {str_or_nil(Map.get(row, "name")) || str_or_nil(Map.get(row, "slug")),
+          num_or_nil(Map.get(row, "bytes"))} do
       {name, bytes} when is_binary(name) and is_number(bytes) -> [%{name: name, bytes: bytes}]
       _ -> []
     end

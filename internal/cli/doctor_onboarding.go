@@ -93,12 +93,40 @@ type onbPathCheck struct {
 	Detail   string `json:"detail"`
 }
 
+// The CLI-freshness leg is a TRI-state, not a boolean. "up-to-date" and "behind"
+// are READINGS — they require a resolved release to compare against. Everything
+// else (a dev build, an unreachable release feed) is an ABSENCE of reading, and
+// this receipt refuses to launder an absence into either verdict: reporting
+// up-to-date would be a green nobody earned, reporting behind would be a false
+// alarm. Both are forbidden; "unreported" is the honest third answer.
+const (
+	onbCLIUpToDate   = "up-to-date"
+	onbCLIBehind     = "behind"
+	onbCLIUnreported = "unreported"
+)
+
+// onbCLIDevRemedy is the ONE command that refreshes a dev build. A dev binary
+// cannot be compared against the cli-v* channel at all (and `bp upgrade` refuses
+// on that same ground), so the only move that makes it current is rebuilding it
+// from the tree it was built from.
+const onbCLIDevRemedy = "git pull && make cli-install"
+
 type onbCLICheck struct {
 	Installed string `json:"installed"`
 	Latest    string `json:"latest"`
-	UpToDate  bool   `json:"up_to_date"`
-	Detail    string `json:"detail"`
+	// Status is the tri-state verdict: onbCLIUpToDate / onbCLIBehind /
+	// onbCLIUnreported. It is the authoritative field — read this, not the bool.
+	Status string `json:"status"`
+	// UpToDate is the boolean PROJECTION of Status, kept for readers written
+	// against the original shape. It is a POINTER on purpose: an unreported leg
+	// serialises as `"up_to_date": null`, so a bool-only reader gets an explicit
+	// "no reading" instead of a fabricated true.
+	UpToDate *bool  `json:"up_to_date"`
+	Detail   string `json:"detail"`
 }
+
+// onbBool boxes a boolean for onbCLICheck.UpToDate (nil = no reading taken).
+func onbBool(b bool) *bool { return &b }
 
 type onbCloudSession struct {
 	Present bool   `json:"present"`
@@ -218,6 +246,16 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context) onboardingReceipt {
 	}
 	// The core readiness gate: bp is drivable, the target answers, and a real
 	// read-only tool call round-tripped. Freshness/Cloud are advisory.
+	//
+	// WHAT AN UNREPORTED LEG DOES TO `ok` (decided, not defaulted): nothing. An
+	// unknown is not a failure — flipping ok:false on a dev build would fire an
+	// alarm on the most common developer setup, and a receipt that cries wolf gets
+	// ignored, which is the failure mode this whole check exists to prevent. The
+	// leg stays advisory (as it always was) but it is now VISIBLY unreported in
+	// both renders — Status "unreported", `up_to_date: null`, a "?" mark, and a
+	// named caveat on the READY line — so nobody can read a green receipt as
+	// "freshness verified". Silence about a leg is the sin; ok:false is a
+	// different, equally dishonest one.
 	r.OK = r.Path.Resolved && r.Auth.Reachable && r.ToolCall.OK
 	return r
 }
@@ -292,25 +330,29 @@ func onboardingPathCheck() onbPathCheck {
 }
 
 // onboardingCLIFreshness is (b): installed version vs the newest cli-v* release.
-// A dev build is not "stale" — it just can't be compared.
+// A dev build is not "stale" — but it is not FRESH either: it cannot be compared,
+// so it reports onbCLIUnreported and names the one command that fixes it. The
+// same applies when the release feed cannot be resolved: no feed, no reading.
 func onboardingCLIFreshness() onbCLICheck {
-	c := onbCLICheck{Installed: cliVersion}
+	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
 	if cliVersion == "dev" {
-		c.UpToDate = true
-		c.Detail = "running a dev build — release comparison skipped"
+		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
 		return c
 	}
 	latest, err := onboardingLatestRelease()
 	if err != nil {
-		c.Detail = "could not resolve the latest release: " + err.Error()
+		c.Detail = "freshness UNREPORTED — could not resolve the latest release: " + err.Error()
 		return c
 	}
 	c.Latest = latest
 	if compareVersions(cliVersion, latest) < 0 {
+		c.Status = onbCLIBehind
+		c.UpToDate = onbBool(false)
 		c.Detail = "a newer CLI is available — run `bp upgrade`"
 		return c
 	}
-	c.UpToDate = true
+	c.Status = onbCLIUpToDate
+	c.UpToDate = onbBool(true)
 	c.Detail = "up to date"
 	return c
 }
@@ -570,7 +612,7 @@ func renderOnboardingReceipt(out *writer, r onboardingReceipt) {
 	out.outf("bp doctor — onboarding readiness receipt")
 
 	out.outf("  %s PATH                bp %s", mark(r.Path.Resolved), pathDetail(r.Path))
-	out.outf("  %s CLI                 %s", mark(r.CLI.UpToDate), cliDetail(r.CLI))
+	out.outf("  %s CLI                 %s", markTri(r.CLI.Status), cliDetail(r.CLI))
 	out.outf("  %s Cloud session       %s", mark(r.CloudSession.Present), cloudDetail(r.CloudSession))
 	out.outf("  %s Instance            %s", mark(r.Instance != nil), instanceDetail(r.Instance))
 	out.outf("  %s Auth                %s", mark(r.Auth.Reachable), authDetail(r.Auth))
@@ -580,10 +622,27 @@ func renderOnboardingReceipt(out *writer, r onboardingReceipt) {
 	out.outf("  → reload: %s", r.Reload)
 
 	if r.OK {
-		out.outf("=> READY — bp resolves, %s is reachable, and a read-only tool call round-tripped", r.Auth.Server)
+		verdict := "=> READY — bp resolves, " + r.Auth.Server + " is reachable, and a read-only tool call round-tripped"
+		// A READY receipt must never imply that an unreported leg was verified.
+		if un := onboardingUnreported(r); len(un) > 0 {
+			verdict += " (UNREPORTED: " + strings.Join(un, "; ") + ")"
+		}
+		out.outf("%s", verdict)
 	} else {
 		out.outf("=> NOT READY — %s", strings.Join(onboardingBlockers(r), "; "))
 	}
+}
+
+// onboardingUnreported names the legs that took NO reading — legs that are
+// neither pass nor fail. They do not sink r.OK (see buildOnboardingReceipt), but
+// they are printed on the verdict line so a green receipt cannot be mistaken for
+// a fully-measured one.
+func onboardingUnreported(r onboardingReceipt) []string {
+	var u []string
+	if r.CLI.Status == onbCLIUnreported {
+		u = append(u, "CLI freshness")
+	}
+	return u
 }
 
 // onboardingBlockers lists the core failures sinking readiness (advisory misses
@@ -610,6 +669,19 @@ func mark(ok bool) string {
 		return "✓"
 	}
 	return "✗"
+}
+
+// markTri renders a tri-state leg: ✓ read-and-good, ✗ read-and-bad, ? no reading
+// taken. A "?" is deliberately NOT a "✗" — the check did not fail, it abstained.
+func markTri(status string) string {
+	switch status {
+	case onbCLIUpToDate:
+		return "✓"
+	case onbCLIBehind:
+		return "✗"
+	default:
+		return "?"
+	}
 }
 
 func pathDetail(p onbPathCheck) string {
@@ -680,7 +752,9 @@ USAGE
 
 WHAT IT DOES
   emits ONE trustworthy receipt for THIS machine's readiness to drive a Barkpark,
-  in a fixed order: (a) bp on PATH, (b) CLI freshness vs the newest release,
+  in a fixed order: (a) bp on PATH, (b) CLI freshness vs the newest release
+  (up-to-date / behind / unreported — a dev build can't be compared, so it says
+  so instead of claiming a green),
   (c) Cloud session presence, (d) the target instance's id + team + URL/aliases,
   (e) target reachability + auth tier, (f) the 8-tool MCP task catalog,
   (g) a READ-ONLY tool-call proof (a real task_ready call), and (h) the exact

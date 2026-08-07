@@ -395,15 +395,22 @@ defmodule BarkparkCloud.Web.Auth do
   end
 
   @doc """
-  Require that the authed user is owner|admin of their PRIMARY team — the gate
-  for privileged actions on routes that still resolve the team implicitly
+  Require that the authed user is owner|admin of the CURRENTLY SELECTED team —
+  the gate for privileged actions on routes that resolve the team implicitly
   (billing/checkout, go-live, DELETE barkpark) rather than from a path `:id`.
-  401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
-  "primary_team"}` if the user has no team; 403 `{forbidden, required: "admin",
-  scope: "primary_team"}` if a member but not admin. Holding no grant is an
-  AUTHORITY answer, not a malformed body — one condition, one status. On success
-  the conn passes through with `:current_team` already assigned by
-  `require_user/2`.
+
+  The team read is `conn.assigns[:current_team]`, which `require_user/2` fills
+  via `resolve_team/2`: the `x-barkpark-team` header wins whenever the caller is
+  a member of that team (the SPA's team switcher), and only an absent/unusable
+  header falls back to the primary membership. So this gate is NOT primary-team
+  scoped — it judges whichever team the caller currently has selected, and EVERY
+  refusal it emits says `scope: "team"` for that reason.
+
+  401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope: "team"}` if
+  the user has no team; 403 `{forbidden, required: "admin", scope: "team"}` if a
+  member but not admin. Holding no grant is an AUTHORITY answer, not a malformed
+  body — one condition, one status. On success the conn passes through with
+  `:current_team` already assigned by `require_user/2`.
   """
   @spec require_primary_team_admin(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_admin(conn) do
@@ -414,26 +421,29 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        forbidden(conn, reason: "no_team", scope: "primary_team")
+        forbidden(conn, reason: "no_team", scope: "team")
 
       Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
         conn
 
       true ->
-        forbidden(conn, required: "admin", scope: "primary_team")
+        forbidden(conn, required: "admin", scope: "team")
     end
   end
 
   @doc """
-  Require that the authed user is the OWNER of their PRIMARY team — the billing
-  gate (checkout / portal / cancel). The narrower twin of
+  Require that the authed user is the OWNER of the CURRENTLY SELECTED team — the
+  billing gate (checkout / portal / cancel). The narrower twin of
   `require_primary_team_admin/1`, and it answers the same three conditions the
   same way: 401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
-  "primary_team"}` if the user has no team; 403 `{forbidden, required: "owner",
-  scope: "primary_team"}` if a member/admin but not the owner — a missing grant
-  is an authority answer, never a bad body. Reads `Authz.team_owner?/2`. On
-  success the conn passes through with `:current_team` already assigned by
-  `require_user/2`.
+  "team"}` if the user has no team; 403 `{forbidden, required: "owner", scope:
+  "team"}` if a member/admin but not the owner — a missing grant is an authority
+  answer, never a bad body. Reads `Authz.team_owner?/2` against
+  `conn.assigns[:current_team]` — filled by `resolve_team/2` from the
+  `x-barkpark-team` header when the caller is a member of that team, primary
+  membership only as the fallback. Not primary-team scoped, hence
+  `scope: "team"` on every refusal. On success the conn passes through with
+  `:current_team` already assigned by `require_user/2`.
   """
   @spec require_primary_team_owner(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_owner(conn) do
@@ -444,13 +454,13 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        forbidden(conn, reason: "no_team", scope: "primary_team")
+        forbidden(conn, reason: "no_team", scope: "team")
 
       Authz.team_owner?(conn.assigns.current_user, conn.assigns.current_team) ->
         conn
 
       true ->
-        forbidden(conn, required: "owner", scope: "primary_team")
+        forbidden(conn, required: "owner", scope: "team")
     end
   end
 

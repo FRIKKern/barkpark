@@ -28,21 +28,28 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
     assert json_response(conn, 401)
   end
 
-  test "200 with the agent token seam; contract shape {req_per_s, p95_ms, window_s}", %{
-    conn: conn
-  } do
+  test "200 with the agent token seam; contract shape {req_per_s, p95_ms, err_5xx_per_s, window_s}",
+       %{
+         conn: conn
+       } do
     body =
       conn
       |> authed_conn()
       |> get(@route)
       |> json_response(200)
 
-    assert Map.keys(body) |> Enum.sort() == ["p95_ms", "req_per_s", "window_s"]
+    assert Map.keys(body) |> Enum.sort() ==
+             ["err_5xx_per_s", "p95_ms", "req_per_s", "window_s"]
+
     assert body["window_s"] == 60
     assert is_float(body["req_per_s"])
     assert body["req_per_s"] >= 0.0
     # Honesty: p95_ms is null (no samples) or a real integer — never a fake 0ms
     # standing in for "no data".
     assert is_nil(body["p95_ms"]) or is_integer(body["p95_ms"])
+    # Same law for the error rate: an empty window is null, not a reassuring 0.0
+    # standing in for "this box is serving no errors".
+    assert is_nil(body["err_5xx_per_s"]) or is_float(body["err_5xx_per_s"])
+    assert is_nil(body["err_5xx_per_s"]) or body["err_5xx_per_s"] >= 0.0
   end
 end

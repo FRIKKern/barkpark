@@ -14,8 +14,14 @@ defmodule BarkparkCloud.Metrics do
   health event that already lands; an ETS ring would empty on every blue/green
   deploy). `Telemetry` and `Usage` are its untouched siblings.
 
+  The window must be fetched TYPE-FILTERED (`Registry.recent_events_of_type(bp,
+  "health", points)`), not sliced off the mixed stream: `points` is a count of
+  BEATS, and a type-blind limit spends part of it on the box's `space` rows
+  (D58), rendering ~188 points of a requested 200. `build/3` filters to health
+  again as a second fence, but a fold can only drop rows the fetch already lost.
+
   `build/3` is PURE and TOTAL: handed a barkpark, a window of that box's events
-  (newest-first, exactly as `Registry.recent_events/2` returns), and the current
+  (newest-first, exactly as `Registry.recent_events_of_type/3` returns), and the current
   time (injectable for tests), it never raises and never invents a reading. A
   vital that was ABSENT or carried the agent's `-1` "unwired" sentinel in a beat
   becomes a `null` point (the `Telemetry` nil-not-zero doctrine) so a consumer
@@ -104,8 +110,9 @@ defmodule BarkparkCloud.Metrics do
   @doc """
   Fold a window of `barkpark`'s agent events into the metrics envelope.
 
-  `events` is the window newest-first (as `Registry.recent_events/2` returns);
-  only `"health"` events contribute. `opts`:
+  `events` is the window newest-first (as `Registry.recent_events_of_type/3`
+  returns); only `"health"` events contribute — a second fence, not the first
+  (see the module doc: the LIMIT lives at the fetch). `opts`:
 
     * `:points` — the requested (already-clamped) window size echoed into the
       envelope. Defaults to `30`.

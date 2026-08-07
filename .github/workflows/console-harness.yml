@@ -370,6 +370,33 @@ jobs:
       - name: CSS/token drift gate
         run: node cloud/priv/static/__css_check.mjs
 
+      # THE ELEVATED-WRITE BINDING CENSUS (cch-w37-s4, charter D383/D409/D421).
+      #
+      # The console draws write affordances. Forty of the seventy-nine are above
+      # plain team membership, and eighteen of THOSE have no client predicate in
+      # front of them — a member sees the button, clicks it, gets a 403. This
+      # step does not fix those eighteen; it makes the NINETEENTH impossible to
+      # add quietly. Two arms, both proven able to lose by mutation before this
+      # step was wired: ADD (a write call site no PIN row predicts) and REMOVE
+      # (a pinned site whose function/route pair has vanished).
+      #
+      # A SEPARATE STEP, NOT A CASE IN __app.test.mjs, and deliberately so: this
+      # wave has three other slices editing that file, and a census that has to
+      # merge with them is a census that gets weakened to land. It also reads
+      # cloud/lib/barkpark_cloud/web/router.ex and accounts.ex — outside the
+      # node:vm harness's world — to check that the six inline-`cond` non-admin
+      # refusals are still six and that every `context_fn` it names still exists.
+      # Both of those paths are already in the console dispatch set (see
+      # scripts/console-path-escape-check.sh), so a router edit reaches it.
+      #
+      # WHY IT CAN LOSE, in one line each: delete the `providerCanWrite` fence
+      # and add a POST — ADD reds and names the line; delete a pinned call site
+      # — REMOVE reds and names the row. Neither arm is a count (D383): a commit
+      # that predicates one affordance and ships another unpredicated keeps the
+      # population identical and a `count <= N` gate green.
+      - name: Elevated-write binding census (ADD + REMOVE)
+        run: node cloud/priv/static/__binding_census.mjs
+
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
   # app.css, or scans its comment nesting, or reads `--x:` declarations out of

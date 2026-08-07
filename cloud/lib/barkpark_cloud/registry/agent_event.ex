@@ -26,7 +26,16 @@ defmodule BarkparkCloud.Registry.AgentEvent do
   # claim the operator can re-issue, and every run lands on the instance's event
   # timeline. Unlike the agent-posted types above, this one is control-plane
   # authored (no on-box coupling — D16 holds).
-  @types ~w(health status backup tls content verify)
+  #
+  # `space` (D58) is the on-box agent's DISK-consumption payload, posted to
+  # `/v1/agent/space` on its own slow (15-minute) cadence — root used/total,
+  # journal bytes, the PG size + its biggest named relations, and the sites tree
+  # with its biggest slugs. It rides its OWN type rather than the 60s health
+  # beat on purpose: the health payload is read up to 200 rows at a time by the
+  # metrics chart, and folding a per-slug list into it would detoast a large
+  # jsonb on every chart render. Its row NEVER moves health columns — a box
+  # whose disk probe succeeds while its BEAT is dead must not read as alive.
+  @types ~w(health status backup tls content verify space)
 
   # Append-only stream: stamp inserted_at, never updated_at.
   @timestamps_opts [type: :utc_datetime_usec, updated_at: false]
