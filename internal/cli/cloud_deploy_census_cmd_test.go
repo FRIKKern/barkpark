@@ -351,7 +351,7 @@ func TestCloudDeploymentsRefusals(t *testing.T) {
 			status:   401,
 			body:     `{"error":"unauthorized"}`,
 			wantExit: exitAuth,
-			wantIn:   []string{"401 unauthorized", "NOT a fleet with zero failures", "bp login"},
+			wantIn:   []string{"401 unauthorized", "NOT a population with zero failures", "bp login"},
 		},
 		{
 			name:     "403 forbidden",
@@ -412,6 +412,17 @@ func TestCloudDeploymentsRefusals(t *testing.T) {
 			}
 			if pctRe.MatchString(all) {
 				t.Fatalf("a refusal must never render a percentage:\n%s", all)
+			}
+			// A REFUSAL HAS NO SCOPE LINE BENEATH IT TO CORRECT AN OVER-CLAIM.
+			// On a 200 the render names the population under the window; here
+			// there is nothing to name, because the control plane never said
+			// which team it would have covered. A refusal that calls this read
+			// "the fleet deploy census" tells a team owner the FLEET is
+			// unreadable when only their own census was refused — the same
+			// class of over-statement this epic exists to delete. This reader
+			// is team-scoped (GET /v1/deploy-ledger/census) on every path.
+			if strings.Contains(all, "fleet deploy census") {
+				t.Fatalf("a refusal must not claim fleet scope on a team-scoped read:\n%s", all)
 			}
 			// The window is named even when nothing could be read, so the operator
 			// knows which population they FAILED to measure.

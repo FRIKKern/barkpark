@@ -71,7 +71,7 @@ const deployCensusSiteRows = 10
 var deployCensusNow = func() time.Time { return time.Now().UTC() }
 
 // runCloudDeployments is `bp cloud deployments [--from X --to Y | --days N]
-// [--sites N]`: read the fleet deploy census over a pinned window and render the
+// [--sites N]`: read the team deploy census over a pinned window and render the
 // rate WITH its denominator — or the refusal, named. Requires `bp login` and a
 // credential carrying ability "read" on a team; no operator grant is involved.
 func runCloudDeployments(out *writer, g globals, args []string) int {
@@ -109,7 +109,7 @@ func runCloudDeployments(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "read config: "+cerr.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to read the fleet deploy census", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to read the deploy census for your team", exitAuth)
 	}
 
 	census, derr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
@@ -230,11 +230,18 @@ func emitDeployCensusRaw(out *writer, census cloudclient.DeployCensus) {
 
 // deployCensusFail renders a census that could NOT be read. Every branch names
 // what refused and prints the window anyway, so the operator can tell a healthy
-// fleet from a fleet nobody was allowed to look at.
+// population from a population nobody was allowed to look at.
+//
+// A REFUSAL HAS NO SCOPE LINE TO CORRECT IT. On a 200 the render prints the
+// population under the window; on a refusal there is nothing to print, because
+// the control plane never told us which team it would have covered. Every
+// sentence below therefore says "the deploy census for your team" and NEVER
+// "the fleet" — over-claiming scope on the one render that has no scope line
+// beneath it is the same defect this epic exists to kill.
 func deployCensusFail(out *writer, from, to time.Time, err error) int {
 	var ce *cloudclient.DeployCensusError
 	if !errors.As(err, &ce) {
-		return cloudFail(out, "read the fleet deploy census", err)
+		return cloudFail(out, "read the deploy census for your team", err)
 	}
 	return useError(out, deployCensusErrLabel(ce), deployCensusMessage(from, to, ce), deployCensusExit(ce.HTTPStatus))
 }
@@ -274,12 +281,12 @@ func deployCensusMessage(from, to time.Time, ce *cloudclient.DeployCensusError) 
 	window := deployCensusWindowPhrase(from, to)
 	switch {
 	case ce.HTTPStatus == 401:
-		return "could not read the fleet deploy census for " + window +
-			" — the control plane did not recognise this session (401 unauthorized). Nothing was read: this is NOT a fleet with zero failures. Run `bp login` and try again."
+		return "could not read the deploy census for your team for " + window +
+			" — the control plane did not recognise this session (401 unauthorized). Nothing was read: this is NOT a population with zero failures. Run `bp login` and try again."
 	case ce.HTTPStatus == 403:
 		authority := deployCensusAuthority(ce)
-		return "could not read the deploy census for " + window +
-			" — the control plane refused this credential (403 forbidden" + authority + "). Nothing was read: this is NOT a fleet with zero failures. " +
+		return "could not read the deploy census for your team for " + window +
+			" — the control plane refused this credential (403 forbidden" + authority + "). Nothing was read: this is NOT a population with zero failures. " +
 			"This read needs a token carrying ability \"read\" on your team; an operator allowlist is not involved. " +
 			"Run `bp login` again, or ask a team owner for a token with read access."
 	// THE 422s ARE TWO DIFFERENT REFUSALS AND MUST NOT SHARE A SENTENCE. This
@@ -290,7 +297,7 @@ func deployCensusMessage(from, to time.Time, ce *cloudclient.DeployCensusError) 
 	case ce.HTTPStatus == 422 && ce.Code == "no_team":
 		return "could not read the deploy census for " + window +
 			" — this credential belongs to no team (422 no_team), so there is no population to take a census over. " +
-			"Nothing was read: this is NOT a fleet with zero failures, and no window can fix it. " +
+			"Nothing was read: this is NOT a population with zero failures, and no window can fix it. " +
 			"Join or create a team, then run `bp login` again."
 	case ce.HTTPStatus == 422:
 		detail := ce.Detail
@@ -301,10 +308,10 @@ func deployCensusMessage(from, to time.Time, ce *cloudclient.DeployCensusError) 
 			" (422 " + deployCensusErrLabel(ce) + "): " + sanitizeCell(detail) +
 			". Nothing was read. Pin the window with --from/--to (an ISO date or instant) or widen it with --days."
 	case ce.HTTPStatus >= 500:
-		return "the control plane failed to compute the fleet deploy census for " + window +
+		return "the control plane failed to compute the deploy census for your team for " + window +
 			" (HTTP " + strconv.Itoa(ce.HTTPStatus) + ": " + sanitizeCell(ce.Error()) + "). Nothing was read — retry, and if it persists the census query itself is the fault."
 	default:
-		return "could not read the fleet deploy census for " + window +
+		return "could not read the deploy census for your team for " + window +
 			" (HTTP " + strconv.Itoa(ce.HTTPStatus) + ": " + sanitizeCell(ce.Error()) + "). Nothing was read."
 	}
 }
@@ -356,7 +363,7 @@ func deployCensusScopeLine(scope *cloudclient.DeployCensusScope) string {
 // + volume + denominator, on ONE line, always), then the failure classes, the
 // deferrals and the worst sites.
 func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.DeployCensus, siteLimit int) {
-	out.outf("fleet deploy census · %s", deployCensusWindowPhrase(from, to))
+	out.outf("deploy census · %s", deployCensusWindowPhrase(from, to))
 	out.outf("  the window is pinned by this command, not defaulted by the server — every number below is about THIS population.")
 	out.outf("%s", deployCensusScopeLine(census.Scope))
 	out.outf("")
