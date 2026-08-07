@@ -429,7 +429,11 @@ defmodule BarkparkCloud.PublishClock do
     secret = Keyword.fetch!(opts, :content_webhook_secret)
 
     census =
-      census(from, to, Keyword.merge(opts, site_id: site_id) |> Keyword.delete(:content_webhook_secret))
+      census(
+        from,
+        to,
+        Keyword.merge(opts, site_id: site_id) |> Keyword.delete(:content_webhook_secret)
+      )
 
     Map.put(census, :publish_trigger, trigger_node(secret, census.deliveries))
   end
@@ -604,9 +608,14 @@ defmodule BarkparkCloud.PublishClock do
       cond do
         # D200/D214: the per-site ban is prior to the sample question, and a
         # sample that clears the floor does not lift it.
-        not is_nil(site_id) -> @per_site_refusal
-        sample < @min_sample -> "sample #{sample} below min_sample #{@min_sample} over #{window_label(from, to)}"
-        true -> nil
+        not is_nil(site_id) ->
+          @per_site_refusal
+
+        sample < @min_sample ->
+          "sample #{sample} below min_sample #{@min_sample} over #{window_label(from, to)}"
+
+        true ->
+          nil
       end
 
     if refusal do

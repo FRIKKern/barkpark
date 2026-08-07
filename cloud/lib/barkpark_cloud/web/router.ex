@@ -6620,7 +6620,7 @@ defmodule BarkparkCloud.Web.Router do
             # deploy-reliability W14 S6: the publish→web clock's FIRST production
             # caller. A SIBLING node — `deployments` and `next_cursor` are byte
             # unchanged, and `deployment_json/1` is not touched.
-            publish_clock: publish_clock_node(site)
+            publish_clock: publish_clock_node(site, opts[:before])
           })
 
         {:error, :invalid_cursor} ->
@@ -6654,6 +6654,47 @@ defmodule BarkparkCloud.Web.Router do
   # (`ContentPublish.record/3` writes on exactly one HMAC-verified arm), and
   # telling that owner "no data yet" would be a falsehood aimed at precisely the
   # owner who most needs the truth (D201).
+  #
+  # REVIEW (W14): TWO GUARDS THE FIRST CUT DID NOT HAVE, both about the fact that
+  # this route is not a dashboard curiosity — it is the read `bp cloud site
+  # status` itself performs, so the whole owner-facing surface slice 1 built
+  # hangs off this handler answering 200.
+  #
+  #   1. PAGE ONE ONLY. The node describes a 24h WINDOW, not the page. Recomputing
+  #      it on every page of a keyset walk is the identical answer re-derived, and
+  #      `census/3` defaults `verify_seek_bound: true` — a filtered count over the
+  #      whole deployments table with no index for `became_live_at < inserted_at`.
+  #      A deep walk therefore paid for one seq scan per page. On a paged read the
+  #      node says where the number lives instead of recomputing it.
+  #   2. IT MAY NOT TAKE THE LEDGER DOWN. An added SIBLING node must never be able
+  #      to turn a working 200 into a 500: the deployments array is the answer the
+  #      owner (and the CLI) came for, and the clock is commentary beside it. A
+  #      raised census degrades to a node that NAMES the failure — never a silent
+  #      omission, which would read as "no clock for this site" and be a lie of
+  #      exactly the kind this epic exists to end.
+  defp publish_clock_node(_site, before) when is_binary(before) and before != "" do
+    %{
+      computed?: false,
+      state: "not_computed_on_a_paged_read",
+      note:
+        "the publish clock describes a 24h window for this site, not this page of the ledger — it is computed on the FIRST page only. Read it without ?before=/?cursor= rather than treating its absence here as a missing clock"
+    }
+  end
+
+  defp publish_clock_node(site, _before) do
+    try do
+      publish_clock_node(site)
+    rescue
+      e ->
+        %{
+          computed?: false,
+          state: "census_failed",
+          note:
+            "the publish clock could not be read for this site (#{inspect(e.__struct__)}) — the deployments below are unaffected, and this is reported rather than omitted so an absent clock is never mistaken for a site that has none"
+        }
+    end
+  end
+
   defp publish_clock_node(site) do
     to = DateTime.utc_now()
     from = DateTime.add(to, -24 * 3600, :second)

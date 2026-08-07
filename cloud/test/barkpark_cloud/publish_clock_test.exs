@@ -682,7 +682,9 @@ defmodule BarkparkCloud.PublishClockTest do
       # record a publish; this one might simply have been quiet, and from the
       # control plane the two are not the same statement.
       assert quiet.publish_trigger.note =~ PublishClock.unverifiable_trigger_copy()
-      assert quiet.publish_trigger.note =~ "either a genuinely quiet window or a hook that was never wired"
+
+      assert quiet.publish_trigger.note =~
+               "either a genuinely quiet window or a hook that was never wired"
 
       absent =
         PublishClock.site_node(site.id, @from, @to, now: @now, content_webhook_secret: :absent)
@@ -713,7 +715,10 @@ defmodule BarkparkCloud.PublishClockTest do
       assert recording.publish_trigger.note =~ "1 recorded delivery"
 
       unreadable =
-        PublishClock.site_node(site.id, @from, @to, now: @now, content_webhook_secret: :unreadable)
+        PublishClock.site_node(site.id, @from, @to,
+          now: @now,
+          content_webhook_secret: :unreadable
+        )
 
       assert unreadable.publish_trigger.content_webhook_secret == "unreadable"
       assert unreadable.publish_trigger.state == "secret_present_but_undecryptable"
