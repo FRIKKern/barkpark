@@ -21,6 +21,18 @@ name: Shell harnesses
 # release-scan.sh at all before this: no syntax check, no test, no caller, while
 # it classified advisory jobs by a NAME REGEX and counted `cancelled` as
 # failure. Same lesson as doctor.sh — an unguarded reader drifts silently.
+#
+# Fourth tenant: scripts/epic-zero-criteria-census.sh, which had ZERO callers of
+# ANY kind — six repo-wide grep hits, every one inside the script itself. No
+# workflow, no Makefile target, no hook: break the census outright and nothing
+# reds. Only its `--self-test` rides this lane, and the split is deliberate.
+# `--self-test` is hermetic (mktemp fixtures through an in-script python3
+# classifier, 8 named mutation cases, no bp, no network). The census's LIVE
+# ratchet shells `bp task get`, and `bp` is not on GitHub runners — it would
+# print `UNKNOWN: bp is not on PATH` and exit 2 on every PR forever, so it is
+# deliberately NOT wired here. Note this workflow is NOT one of main's required
+# contexts (those are exactly: Elixir gate, PR references an active task, Cloud
+# gate, Console gate) — wiring the census makes it RUN, not BLOCK.
 
 on:
   pull_request:
@@ -32,6 +44,7 @@ on:
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
+      - "scripts/epic-zero-criteria-census.sh"
       - ".github/workflows/shell-harnesses.yml"
   push:
     branches: [main]
@@ -43,6 +56,7 @@ on:
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
+      - "scripts/epic-zero-criteria-census.sh"
       - ".github/workflows/shell-harnesses.yml"
 
 permissions:
@@ -102,3 +116,30 @@ jobs:
         # vacuously. Set RELEASE_SCAN_TEST_LIVE=1 locally to re-verify the
         # recordings against the real API.
         run: bash scripts/release-scan.test.sh
+
+  zero-criteria-census:
+    name: epic-zero-criteria-census.sh self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the classifier is python3; absence would be exit 2)
+        # The census turns a missing python3 into exit 2 UNKNOWN — correctly red,
+        # but illegibly so. ubuntu-latest ships python3 preinstalled (as
+        # deploy-harnesses.yml and reland-check.yml already rely on); this step
+        # makes that dependency explicit so an image change fails by NAME here
+        # rather than as a mysterious UNKNOWN from the census.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — add actions/setup-python" >&2
+            exit 1
+          }
+          python3 --version
+      - name: epic-zero-criteria-census.sh syntax check
+        run: bash -n scripts/epic-zero-criteria-census.sh
+      - name: census self-test (8 mutation cases, mktemp fixtures, no bp/network)
+        # ONLY --self-test. The live ratchet shells `bp task get` against the
+        # server; `bp` is not on runners, so wiring it here would print
+        # "UNKNOWN: bp is not on PATH" and exit 2 on every PR forever — a gate
+        # that can only lose is not a gate. The token-free ratchet port is
+        # tracked separately.
+        run: bash scripts/epic-zero-criteria-census.sh --self-test
