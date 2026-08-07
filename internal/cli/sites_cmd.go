@@ -539,15 +539,15 @@ func runDeploy(out *writer, args []string) int {
 // deploymentRow is the JSON projection of a Deployment row.
 func deploymentRow(d Deployment) map[string]any {
 	return map[string]any{
-		"id":             d.ID,
-		"site_id":        d.SiteID,
-		"status":         d.Status,
-		"git_ref":        d.GitRef,
-		"artifact_url":   d.ArtifactURL,
-		"image_tag":      d.ImageTag,
-		"build_log_url":  d.BuildLogURL,
-		"inserted_at":    d.InsertedAt,
-		"updated_at":     d.UpdatedAt,
+		"id":            d.ID,
+		"site_id":       d.SiteID,
+		"status":        d.Status,
+		"git_ref":       d.GitRef,
+		"artifact_url":  d.ArtifactURL,
+		"image_tag":     d.ImageTag,
+		"build_log_url": d.BuildLogURL,
+		"inserted_at":   d.InsertedAt,
+		"updated_at":    d.UpdatedAt,
 		// The POINTER fields stay pointers here: a nil marshals to JSON null,
 		// which a machine consumer can tell apart from "" the way a human
 		// consumer tells the table's dash apart from a value.
@@ -682,13 +682,14 @@ const deferredMarker = "DEFERRED"
 // deploymentSummary is the counted shape behind the summary line. Every field
 // here appears in the rendered output — there is no number computed and hidden.
 type deploymentSummary struct {
-	Rows     int // rows in the fetched window
-	Live     int
-	Failed   int
-	Deferred int
-	Pending  int // still in flight: queued/building/pushing — not yet an outcome
-	OldestAt string
-	NewestAt string
+	Rows      int // rows in the fetched window
+	Live      int
+	Failed    int
+	Deferred  int
+	Cancelled int // a person (or a superseding deploy) stopped it — terminal, but not a build failure
+	Pending   int // still in flight: queued/building/pushing — not yet an outcome
+	OldestAt  string
+	NewestAt  string
 }
 
 // Terminal is the denominator a success/failure rate is honest over: rows that
@@ -699,18 +700,19 @@ func (s deploymentSummary) Terminal() int { return s.Live + s.Failed }
 // the human line prints so a machine reader cannot get a bare rate either.
 func (s deploymentSummary) row() map[string]any {
 	m := map[string]any{
-		"rows":            s.Rows,
-		"live":            s.Live,
-		"failed":          s.Failed,
-		"deferred":        s.Deferred,
-		"pending":         s.Pending,
-		"terminal":        s.Terminal(),
-		"window_oldest":   nil,
-		"window_newest":   nil,
-		"min_sample":      minDeploymentSample,
-		"failed_pct":      nil,
-		"deferred_pct":    nil,
-		"failed_metered":  s.Terminal() >= minDeploymentSample,
+		"rows":             s.Rows,
+		"live":             s.Live,
+		"failed":           s.Failed,
+		"deferred":         s.Deferred,
+		"cancelled":        s.Cancelled,
+		"pending":          s.Pending,
+		"terminal":         s.Terminal(),
+		"window_oldest":    nil,
+		"window_newest":    nil,
+		"min_sample":       minDeploymentSample,
+		"failed_pct":       nil,
+		"deferred_pct":     nil,
+		"failed_metered":   s.Terminal() >= minDeploymentSample,
 		"deferred_metered": s.Rows >= minDeploymentSample,
 	}
 	if s.OldestAt != "" {
@@ -737,18 +739,32 @@ func pct(n, d int) float64 {
 	return float64(n) * 100 / float64(d)
 }
 
-// classifyDeployment buckets one row. DEFERRED wins over status: a deferred row
-// is usually recorded with status "failed", and counting a build that never ran
-// as a build failure is exactly the mis-reporting this slice removes.
+// classifyDeployment buckets one row. DEFERRED wins over status, and the
+// control plane spells a deferral BOTH ways — `status: "deferred"` is a real
+// terminal state in the Deployment schema's transition map, and the row also
+// carries a DEFERRED_* failure_class — so both are read here. Counting a build
+// that never ran as a build failure is exactly the mis-reporting this slice
+// removes, and a reader that only knew one spelling would re-introduce it the
+// day the other one arrives.
+//
+// `cancelled` is its OWN bucket, not "in flight" (reviewer fix, W9): a person
+// or a superseding deploy stopped that row, it is never going to move again,
+// and painting a stopped row as still-running is the same lie in the other
+// direction. It is out of the terminal denominator because nothing was decided
+// about the BUILD.
 func classifyDeployment(d Deployment) string {
-	if strings.Contains(strings.ToUpper(depStr(d.FailureClass)), deferredMarker) {
+	status := strings.ToLower(strings.TrimSpace(d.Status))
+	if status == "deferred" ||
+		strings.Contains(strings.ToUpper(depStr(d.FailureClass)), deferredMarker) {
 		return "deferred"
 	}
-	switch strings.ToLower(strings.TrimSpace(d.Status)) {
+	switch status {
 	case "live", "running", "ready", "active":
 		return "live"
 	case "failed", "error":
 		return "failed"
+	case "cancelled", "canceled":
+		return "cancelled"
 	default:
 		return "pending"
 	}
@@ -768,6 +784,8 @@ func summarizeDeployments(ds []Deployment) deploymentSummary {
 			s.Failed++
 		case "deferred":
 			s.Deferred++
+		case "cancelled":
+			s.Cancelled++
 		default:
 			s.Pending++
 		}
@@ -787,15 +805,26 @@ func summarizeDeployments(ds []Deployment) deploymentSummary {
 
 // renderDeploymentSummary prints the two-line honest header:
 //
-//	20 live, 3 failed, 77 deferred — 13.0% failed of 23 terminal outcomes, 77.0% of 100 rows absorbed by the build cap
+//	20 live, 3 failed, 77 deferred — 13.0% failed of 23 terminal outcomes, 77.0% of 100 rows never attempted (box deferred them)
 //	window: 2026-08-06T21:10:04Z → 2026-08-07T02:58:11Z (100 rows fetched)
 //
 // Both rates carry their denominator ON THE SAME LINE as the counts, and a
 // window too small to divide honestly prints UNMETERED instead of a number.
 // The window line exists because a rate whose window is unstated is the
 // vacuous green this epic refuses.
+//
+// Reviewer fix (W9): the deferred clause used to read "absorbed by the build
+// cap", which is affirmatively FALSE for the BOX_BUSY_DEFERRED half of the
+// deferred family — that box was busy with THIS site, not out of slots. Naming
+// one deferral cause for all of them is the same defect S2 fixed on the server
+// side, one surface later. The clause now names the OUTCOME (never attempted),
+// which is true of every deferral class; the per-row CAUSE column still names
+// which one.
 func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string) {
 	counts := fmt.Sprintf("%d live, %d failed, %d deferred", s.Live, s.Failed, s.Deferred)
+	if s.Cancelled > 0 {
+		counts += fmt.Sprintf(", %d cancelled", s.Cancelled)
+	}
 	if s.Pending > 0 {
 		counts += fmt.Sprintf(", %d in flight", s.Pending)
 	}
@@ -809,9 +838,9 @@ func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string
 
 	var deferredPart string
 	if s.Rows >= minDeploymentSample {
-		deferredPart = fmt.Sprintf("%.1f%% of %d rows absorbed by the build cap", pct(s.Deferred, s.Rows), s.Rows)
+		deferredPart = fmt.Sprintf("%.1f%% of %d rows never attempted (box deferred them)", pct(s.Deferred, s.Rows), s.Rows)
 	} else {
-		deferredPart = fmt.Sprintf("absorbed rate UNMETERED (%d rows, need %d)", s.Rows, minDeploymentSample)
+		deferredPart = fmt.Sprintf("deferral rate UNMETERED (%d rows, need %d)", s.Rows, minDeploymentSample)
 	}
 
 	out.outf("%s — %s, %s", counts, failedPart, deferredPart)

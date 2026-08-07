@@ -643,7 +643,7 @@ func TestSitesDeploymentsSummaryCarriesItsDenominator(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
 	}
 	lines := strings.Split(stdout, "\n")
-	wantSummary := "20 live, 3 failed, 77 deferred — 13.0% failed of 23 terminal outcomes, 77.0% of 100 rows absorbed by the build cap"
+	wantSummary := "20 live, 3 failed, 77 deferred — 13.0% failed of 23 terminal outcomes, 77.0% of 100 rows never attempted (box deferred them)"
 	if lines[0] != wantSummary {
 		t.Fatalf("summary line\n got: %q\nwant: %q", lines[0], wantSummary)
 	}
@@ -666,9 +666,48 @@ func TestSitesDeploymentsUnmeteredBelowSample(t *testing.T) {
 	if strings.Contains(summary, "%") {
 		t.Fatalf("a 4-row window must not print a percentage at all, got: %q", summary)
 	}
-	want := "2 live, 1 failed, 1 deferred — failure rate UNMETERED (3 terminal outcomes, need 10), absorbed rate UNMETERED (4 rows, need 10)"
+	want := "2 live, 1 failed, 1 deferred — failure rate UNMETERED (3 terminal outcomes, need 10), deferral rate UNMETERED (4 rows, need 10)"
 	if summary != want {
 		t.Fatalf("summary\n got: %q\nwant: %q", summary, want)
+	}
+}
+
+// TestSitesDeploymentsCancelledAndBareDeferredAreNotMisbucketed is the
+// REVIEWER's addition (W9). Two ways the summary could still mis-report:
+//
+//   - `status:"cancelled"` is a real terminal state in the control plane's
+//     Deployment transition map. Falling through to the default arm painted it
+//     "in flight" — a row that will never move again, reported as running.
+//   - `status:"deferred"` is ALSO a real state, and such a row can arrive
+//     without a DEFERRED_* failure_class (a nil reason still classifies, but
+//     the CLI must not depend on the class key being the only spelling). A
+//     class-only reader counted it as neither an attempt nor a deferral.
+//
+// Both would inflate/deflate a denominator silently, which is this epic's
+// disease. Mutation-checked: dropping either arm from classifyDeployment reds
+// this test.
+func TestSitesDeploymentsCancelledAndBareDeferredAreNotMisbucketed(t *testing.T) {
+	body := `{"deployments":[
+		{"id":"dep-4","site_id":"site-1","status":"cancelled","inserted_at":"2026-08-07T04:00:00Z"},
+		{"id":"dep-3","site_id":"site-1","status":"deferred","inserted_at":"2026-08-07T03:00:00Z"},
+		{"id":"dep-2","site_id":"site-1","status":"failed","failure_class":"BUILD_FAILED","inserted_at":"2026-08-07T02:00:00Z"},
+		{"id":"dep-1","site_id":"site-1","status":"live","inserted_at":"2026-08-07T01:00:00Z"}
+	]}`
+	_, stdout, code := runDeploymentsFixture(t, body)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	summary := strings.Split(stdout, "\n")[0]
+	if !strings.HasPrefix(summary, "1 live, 1 failed, 1 deferred, 1 cancelled —") {
+		t.Fatalf("counts\n got: %q\nwant the cancelled row in its own bucket and the bare deferred row counted as deferred", summary)
+	}
+	if strings.Contains(summary, "in flight") {
+		t.Fatalf("nothing here is in flight — a cancelled row is stopped, not running: %q", summary)
+	}
+	// And the terminal denominator stays the two rows that actually decided
+	// something about a build.
+	if !strings.Contains(summary, "2 terminal outcomes") {
+		t.Fatalf("terminal denominator must be 2 (live + failed), got: %q", summary)
 	}
 }
 
