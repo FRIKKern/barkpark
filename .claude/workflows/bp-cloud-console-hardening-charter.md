@@ -2340,6 +2340,82 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-08 — wave 50 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd; 2 round-2 slices deferred by the sequenced-rounds law — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| CROWN — the sold-capability manifest and the two bullets that fail it | `cch-w50-s1-sold-capability-manifest-and-the-two-bullets-that-fail-it` | `…crown-the-sold-capability-manifest-and-t-0-r` | #10557 | **one fix, cosmetic.** `mix format` on the new guard (it was the only unformatted file the slice added; `flunk/1` had been hand-wrapped). The substance was re-proved, not re-read: the DELETE direction was independently mutated on the fixed tree — emptying `planFeatures` reds `test DELETE: every manifest row is still claimed by some tier` at :271, which is exactly the vacuous-green D564 warns about |
+| Every 500 stops directing users to a support desk that does not exist | `cch-w50-s2-every-500-stops-directing-users-to-a-support-desk-that-does-not-exist` | `…every-500-stops-directing-users-to-a-sup-1-r` | #10559 | **none.** Branch is the builder's commit unchanged. Independently swept: `grep -rniE "contact support\|support@\|mailto:"` over `cloud/lib`, `app.js` and `index.html` now returns THREE hits and all three are comments or a moduledoc quoting the retired sentence as history — zero customer-facing bytes |
+| The cancel modal promise becomes true, bounded and guarded | `cch-w50-s3-the-cancel-modal-promise-becomes-true-bounded-and-guarded` | `…the-cancel-modal-promise-becomes-true-bo-2-r` | #10560 | **two fixes.** `mix format`, and a CORRECTION to the builder's own side-effect note: it claimed a `barkpark.restored` + `barkpark.suspended` PAIR is broadcast, but `resume_team_barkparks/1` is an `update_all` that broadcasts NOTHING — what an event consumer actually sees is an UNPAIRED `barkpark.suspended` with no restore before it, which is worse for an audit trail than what was written down. Comment now says that; the narrowing it argues for is filed |
+| Member-actor rendered-state authority sweep (deferred from wave 46) | `cch-w46-s7-member-actor-rendered-state-authority-sweep` | `…member-actor-rendered-state-authority-sw-3-r` | #10561 | **none.** Losability re-proved independently rather than accepted: reverting cch-w48-s2's fence (`var githubControl = authority === "grant"` → `= true`) reds the sweep with TWO named failures (UNACCOUNTED `site-member #site-body → button#site-github [ENABLED]`, and the finding naming the fence by PR number), exit 1 — while `smoke.mjs` stays at "all 110 scenarios rendered" |
+
+**WHAT LANDED.** Wave 50 is the promise wave, and it is the correct successor to 49's numeral wave: 49
+deleted the figure, 50 deletes the *sentence that survived the deletion*. Four sold-or-stated promises the
+plane cannot keep are gone, and three of the four ship the guard that reds when the next one appears.
+`planFeatures` stops selling **Daily backups** (no backup worker, zero crontab rows, no wired BackupProbe,
+a remote verb shelling a `make` target that does not exist) and **Priority/Standard support** (no route,
+address, inbox, SLA, docs page or nav link anywhere in the plane; the only mail identity is a no-reply
+sender) — and the `support_plus` PLAN_CATALOG `note` went with them, because `tierCardHtml` renders it as
+`<p class="tier-note">` on the same card and deleting only the bullet would have shipped the identical
+claim one line up. `ERRORS.server_error` and `failure_copy.ex`'s PLATFORM pointing arm stop naming that
+same absent desk, in both languages, in one wave. And the cancel modal's "Everything comes back if you
+resubscribe" stopped being a sentence with **no executor**: `Registry.resume_team_barkparks/1` now runs on
+the resubscribe insert branch, so the boxes actually come back — bounded, honestly, by the ceiling of the
+plan you come back ON.
+
+**THE INTEGRATION PROOF.** All four branches merged together off `origin/main` in a probe: **clean
+auto-merge, zero conflicts**, including the three that all edit `app.js` and `__app.test.mjs`. The COMBINED
+tree is green on every instrument: full cloud Elixir suite **3191 tests / 0 failures**, console unit
+**1003 / 0**, smoke **all 110 scenarios rendered**, breakpoint sweep `110 · 25 distinct covered by 26 cells
+· 85 residue over 13 families` with **54/54** on its test file, binding census **79 sites / 40 elevated / 7
+unpredicated** rc 0, member-authority sweep **10 member actors · 66 controls · 23 hook rows · 0 findings ·
+0 guard failures** exit 0, `mix format --check-formatted` clean. **Merge order is free.**
+
+**HIGH-FLIP-RISK, independently re-derived (not re-read).** cch-w50-s3's ORDERING judgment was
+re-derived from `reconcile_plan_limit/1`'s own source, not from the brief: `live = list_barkparks |>
+reject(& &1.suspended)`, `overflow = length(live) - limit`, and the `else` arm restores only
+`quota_exceeded` rows. With the resume AFTER the reconcile, a resubscribing team's boxes are all still
+`billing_lapsed`, so `live == 0`, `overflow < 0`, nothing is suspended, and the blanket resume then clears
+every flag. Then measured by moving the call: the ordering pin reds with *"supporter's ceiling is 3; a
+resume that outruns the reconcile would leave 5 boxes running on a 3-box plan."* The builder's judgment is
+correct. cch-w50-s1's REACHABILITY judgment (the upsell card renders in zero committed scenarios, so the
+guard is Elixir-hosted over the FUNCTION and must not grow a render-layer arm) also holds — the shipped
+guard reads `planFeatures`'s return value and no fixture can blind it.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+
+1. **DISPATCH ORDER FOR ROUND 2.** Merge round 1 (#10557, #10559, #10560, #10561 — any order) → then
+   `cch-w50-s4-the-two-missing-billing-actors-and-the-five-integers` (needs s1 AND cch-w46-s7 on main) and
+   `cch-w50-s5-the-trial-reminder-numerals-stop-being-three-hand-typed-literals` (needs s3 on main, EOF
+   handoff on `__app.test.mjs`) in parallel — their file fences are disjoint.
+2. **s4 IS COUPLED TO THE SWEEP'S PINS, DELIBERATELY.** `member-authority-sweep.mjs` pins
+   `PIN_MEMBER_SCENARIOS=10` and `PIN_TOTAL_SCENARIOS=110`. Two OWNER-actor billing fixtures fire only a
+   non-fatal NOTE; a MEMBER-actor fixture **REDS the actor-set check**, and s4 must then add its controls'
+   HOOKS rows and raise the pin in the same commit. The failure message says exactly that. This is growth
+   being NAMED, not a defect — but it is a cross-slice coupling the lead should expect.
+3. **THE CANCEL FIX IS WIDER THAN ITS SENTENCE.** The insert branch is also a team's FIRST-EVER paid
+   subscription, so an entitled team holding suspended boxes now gets them resumed. Arguably right, but
+   nobody asked for it. And `resume_team_barkparks/1` is REASON-blind and MODE-blind (no
+   `mode == "managed"` filter, unlike its suspend counterpart) — unreachable today, but wave 50 grew the
+   number of paths that can reach it. Filed as `cch-w50-bl-resume-billing-suspended-narrowing`.
+4. **THE JS BAN DRIVES A HAND-COPIED SLUG LIST.** `ERRORS` is not exported, so cch-w50-s2's ban sweeps 24
+   names it copied rather than the live map; a new slug is banned only once someone adds it there. What
+   forces that edit is the neighbouring verbatim pin, which reds on any map change — real coupling, but
+   indirect. `cch-w50-s2-followup-export-errors-so-the-support-ban-sweeps-the-live-map` closes it.
+5. **THE PLAN CARD IS NOW FLAT.** All three tiers show the same two ✓ bullets; differentiation rests
+   entirely on the note and the (unrendered) instance ceiling. That is honest and it is also a
+   product-visible flattening. The right repair is a genuinely per-tier capability that names a signal —
+   not a re-worded bullet.
+6. **BACKLOG FILED THIS WAVE:** four `cch-w50-bl-*` rows at Decide, plus three review/builder follow-ups
+   (`cch-tier-note-undefined-render`, `cch-w50-s2-followup-export-errors-…`,
+   `cch-w50-bl-resume-billing-suspended-narrowing`) and `cch-w50-bl-shared-route-fence-module`, which the
+   s4 builder left as an unpublishable DRAFT. **Its diagnosis was wrong and is corrected here:** the
+   publish wall was not 422-ing every new task — two sibling rows published fine in the same window. One
+   of that row's four tags was the offender; re-tagged and published in review.
+7. **INDEPENDENT SECOND REVIEW IS OWED ON cch-w50-s3.** Its ordering judgment was re-derived and
+   re-measured here and holds, but this is the money path and one human read of the eight lines in
+   `do_activate_from_session` is cheap insurance before merge.
+
 ### 2026-08-07 — wave 49 REVIEW (5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd; 3 round-2 slices deferred by the sequenced-rounds law — grade A−)
 
 | Slice | Task | Final branch | Reviewer fix |
