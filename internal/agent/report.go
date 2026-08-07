@@ -80,6 +80,22 @@ type Report struct {
 	MemUsedPercent int `json:"mem_used_percent"`
 	// Load1 is the 1-minute load average. -1 when the probe was not wired/failed.
 	Load1 float64 `json:"load1"`
+	// Load15 is the 15-minute load average — the SUSTAIN signal (charter D67),
+	// carrying the same -1 unmeasured sentinel as Load1 and landing from the same
+	// single read of /proc/loadavg (fields[2], which the probe already had in
+	// memory and threw away).
+	//
+	// It exists because the sustain rule D52 asked for is not computable
+	// downstream: /v1/barkparks serves ONE beat (a DISTINCT ON … ORDER BY
+	// inserted_at DESC), so no consumer of the payload the console and
+	// `bp cloud status` read can see a window at all. A 15-minute kernel EWMA is
+	// a sustained measurement delivered as a scalar, which is why it needs no
+	// window and no client state. Live: a box read load1 0.64/core — dark on any
+	// single-beat fence — while its load15 read 1.89/core in the same sample.
+	//
+	// Load1 is kept, not replaced: it is the present-tense colour in the reason
+	// string, while Load15 is what the fence is evaluated on.
+	Load15 float64 `json:"load15"`
 
 	// CPUCores is the box's usable core count (runtime.NumCPU()). It is the
 	// DENOMINATOR the strained fence needs: sustained load-per-core, not a raw
@@ -123,6 +139,21 @@ type Report struct {
 	// probe was not wired/failed, OR when the instance reported p95 null (no
 	// samples in the window yet) — the CP renders that unmetered, never a fake 0.
 	P95Ms int `json:"p95_ms"`
+	// Err5xxPerS is the instance's recent 5xx responses per second, read off the
+	// SAME request-stats envelope as ReqPerS/P95Ms — the existing 60s ring, now
+	// keeping the response status it was already handed and discarding (D75). -1
+	// when the probe was not wired, failed, the instance predates the key, OR the
+	// instance reported it null (an empty window). Zero 5xx and "no samples yet"
+	// are different facts, and only one of them is good news.
+	//
+	// HONEST BOUND, and it must travel with the number: the ring is 60s and
+	// PER-SLOT. It dies on every blue/green flip and reads an empty window for
+	// the first minute after boot, so it answers "is this box answering 5xx RIGHT
+	// NOW" and can never produce a cumulative count. It is also blind to 5xx the
+	// BEAM never served — a Caddy 502/504 while the VM is unresponsive, which is
+	// exactly the total-outage case — so a 0 here is not proof the box is
+	// answering.
+	Err5xxPerS float64 `json:"err_5xx_per_s"`
 
 	// BackupOK / BackupDetail come from the injected backup-status probe — is a
 	// recent backup present and scheduled?
@@ -307,14 +338,18 @@ type ReportConfig struct {
 	CPUProbe func() (int, error)
 	// MemProbe returns used-memory percent (0..100). nil → MemUsedPercent=-1.
 	MemProbe func() (int, error)
-	// LoadProbe returns the 1-minute load average. nil → Load1=-1.
-	LoadProbe func() (float64, error)
-	// ReqStatsProbe returns (req/s, p95 ms) from the instance RequestStats route.
-	// nil → ReqPerS=-1 and P95Ms=-1. Fail-soft like the other probes: a non-nil
-	// error leaves BOTH sentinels; a successful read with a null instance-side p95
-	// lands req/s but keeps P95Ms=-1 (see NewReqStatsProbe). Wire the production
-	// implementation with NewReqStatsProbe(base, token, rootCAs).
-	ReqStatsProbe func() (reqPerS float64, p95Ms int, err error)
+	// LoadProbe returns the 1-minute AND 15-minute load averages. nil → BOTH
+	// Load1 and Load15 = -1. Fail-soft as ONE unit like SwapProbe: the two come
+	// from a single line of /proc/loadavg, so a failed read leaves both sentinels
+	// rather than half a measurement.
+	LoadProbe func() (load1 float64, load15 float64, err error)
+	// ReqStatsProbe returns (req/s, p95 ms, 5xx/s) from the instance RequestStats
+	// route. nil → ReqPerS, P95Ms and Err5xxPerS all -1. Fail-soft like the other
+	// probes: a non-nil error leaves ALL sentinels; a successful read with a null
+	// instance-side p95 or err_5xx_per_s lands req/s but keeps that field at -1
+	// (see NewReqStatsProbe). Wire the production implementation with
+	// NewReqStatsProbe(base, token, rootCAs).
+	ReqStatsProbe func() (reqPerS float64, p95Ms int, err5xxPerS float64, err error)
 	// SwapProbe returns (used percent 0..100, total swap bytes). nil → BOTH swap
 	// fields keep the -1 sentinel. Gathered fail-soft as ONE unit like
 	// ReqStatsProbe, not independently like CPU/Mem: a percent landed against an
@@ -359,8 +394,10 @@ func gatherReport(cfg ReportConfig) Report {
 		CPUUsedPercent:  -1,
 		MemUsedPercent:  -1,
 		Load1:           -1,
+		Load15:          -1,
 		ReqPerS:         -1,
 		P95Ms:           -1,
+		Err5xxPerS:      -1,
 		SwapUsedPercent: -1,
 		SwapTotalBytes:  -1,
 		BeamPSSBytes:    -1,
@@ -394,19 +431,23 @@ func gatherReport(cfg ReportConfig) Report {
 			r.MemUsedPercent = pct
 		}
 	}
+	// Load — one read of /proc/loadavg, two averages, landed together (D67).
 	if cfg.LoadProbe != nil {
-		if l, err := cfg.LoadProbe(); err == nil {
-			r.Load1 = l
+		if l1, l15, err := cfg.LoadProbe(); err == nil {
+			r.Load1 = l1
+			r.Load15 = l15
 		}
 	}
 
-	// Request stats (req/s + p95). Fail-soft as one unit: a probe error leaves
-	// both at the -1 sentinel; a null instance-side p95 arrives as P95Ms=-1 with
-	// a real req/s (NewReqStatsProbe applies that mapping).
+	// Request stats (req/s + p95 + 5xx/s). Fail-soft as one unit: a probe error
+	// leaves all three at the -1 sentinel; a null instance-side p95 or
+	// err_5xx_per_s arrives as that field's -1 with a real req/s
+	// (NewReqStatsProbe applies that mapping).
 	if cfg.ReqStatsProbe != nil {
-		if rps, p95, err := cfg.ReqStatsProbe(); err == nil {
+		if rps, p95, err5xx, err := cfg.ReqStatsProbe(); err == nil {
 			r.ReqPerS = rps
 			r.P95Ms = p95
+			r.Err5xxPerS = err5xx
 		}
 	}
 
@@ -490,12 +531,15 @@ const requestStatsPath = "/v1/instance/request-stats"
 // degrades to the -1 sentinel rather than blocking every other vital.
 const reqStatsTimeout = 3 * time.Second
 
-// reqStatsBody is the instance RequestStats response. P95Ms is a pointer so a
-// JSON null (no samples in the window yet) is distinguishable from a real 0 and
-// maps to the -1 sentinel — never a fake zero latency.
+// reqStatsBody is the instance RequestStats response. P95Ms and Err5xxPerS are
+// pointers so a JSON null (no samples in the window yet) — and an ABSENT key, an
+// instance built before the field existed — are both distinguishable from a real
+// 0 and map to the -1 sentinel. Never a fake zero latency, and never a fake zero
+// error rate: "no samples" is not "no errors".
 type reqStatsBody struct {
-	ReqPerS float64 `json:"req_per_s"`
-	P95Ms   *int    `json:"p95_ms"`
+	ReqPerS    float64  `json:"req_per_s"`
+	P95Ms      *int     `json:"p95_ms"`
+	Err5xxPerS *float64 `json:"err_5xx_per_s"`
 }
 
 // NewReqStatsProbe builds the production ReqStatsProbe: a short-timeout HTTP GET
@@ -504,20 +548,23 @@ type reqStatsBody struct {
 //
 // It is fail-soft to sentinels: any transport error, non-200 status (a 404 from
 // an old instance without the route included), or undecodable body returns a
-// non-nil error so gatherReport keeps ReqPerS=-1 and P95Ms=-1. On a 200 the
-// decoded req/s always lands; a null p95_ms maps to the -1 sentinel while req/s
-// still reports. base=="" returns a nil probe (unwired), mirroring how the
-// health gate is skipped when HealthBaseURL is empty.
-func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float64, int, error) {
+// non-nil error so gatherReport keeps ReqPerS=-1, P95Ms=-1 and Err5xxPerS=-1. On
+// a 200 the decoded req/s always lands; a null (or absent) p95_ms/err_5xx_per_s
+// maps to the -1 sentinel while req/s still reports — an instance built before
+// the 5xx field simply omits the key and the beat says "unmeasured", which is
+// the same version-skew honesty the 404 path already keeps. base=="" returns a
+// nil probe (unwired), mirroring how the health gate is skipped when
+// HealthBaseURL is empty.
+func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float64, int, float64, error) {
 	base = strings.TrimRight(base, "/")
 	if base == "" {
 		return nil
 	}
 	url := base + requestStatsPath
-	return func() (float64, int, error) {
+	return func() (float64, int, float64, error) {
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
-			return -1, -1, err
+			return -1, -1, -1, err
 		}
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
@@ -530,21 +577,25 @@ func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float6
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return -1, -1, err
+			return -1, -1, -1, err
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return -1, -1, fmt.Errorf("request-stats: status %d", resp.StatusCode)
+			return -1, -1, -1, fmt.Errorf("request-stats: status %d", resp.StatusCode)
 		}
 		var body reqStatsBody
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			return -1, -1, err
+			return -1, -1, -1, err
 		}
 		p95 := -1
 		if body.P95Ms != nil {
 			p95 = *body.P95Ms
 		}
-		return body.ReqPerS, p95, nil
+		err5xx := float64(-1)
+		if body.Err5xxPerS != nil {
+			err5xx = *body.Err5xxPerS
+		}
+		return body.ReqPerS, p95, err5xx, nil
 	}
 }
 
