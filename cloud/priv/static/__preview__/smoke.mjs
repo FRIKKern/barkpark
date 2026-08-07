@@ -2448,6 +2448,24 @@ const EXPECTATIONS = {
       // Manage affordances present for the admin; Remove is the destroy path.
       assert.ok(body.includes(">Change role<") && body.includes(">Remove<"), "manager rows carry Change role + Remove");
 
+      // ── cch-w45-s2, PROVED IN THE LIVE DOM AND NOT ONLY IN THE UNIT ────────
+      // This scenario IS the sole-owner case: ada is the only owner AND the
+      // acting principal, so every in-range self role change is a demotion
+      // do_update_role rolls back with :last_owner (409). The unit tests pin the
+      // predicate; this pins that the RENDERED panel a person actually sees
+      // withheld the control — and that the omission is EXPLAINED rather than
+      // silently missing. `>Change role<` above stays true from the two peers,
+      // which is exactly why a substring check could never have seen this.
+      {
+        const roleBtns = reg.get("members-body").querySelectorAll("[data-member-role]");
+        const roleEmails = roleBtns.map((b) => b.getAttribute("data-email")).sort();
+        assert.deepEqual(roleEmails, ["lin@acme.com", "rex@acme.com"],
+          "the SOLE owner's own row must not offer a role change the server 409s — offered on " +
+          JSON.stringify(roleEmails));
+        assert.ok(body.includes("only owner") && body.includes("promote another member to owner first"),
+          "a withheld control with no sentence is a silently missing control; got: " + body.slice(0, 400));
+      }
+
       // ── cch-w10 LEG 2/5: REMOVE MEMBER, CLICKED FOR REAL ──────────────────
       // The path carries the team id, which this check has no business
       // hard-coding — so the wire assertion matches the SHAPE and reads the id

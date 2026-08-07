@@ -18523,6 +18523,34 @@
     return actorRole === "owner" || memberRoleRank(actorRole) > memberRoleRank(targetRole);
   }
 
+  // Pure, FAIL-OPEN: is the acting principal PROVABLY the team's only owner?
+  // This is a STATE question, not an authority one — canChangeMemberRole keeps
+  // its boolean and stays a mirror of update_member_role_as/4's authority arms
+  // (D439); this sibling answers the OTHER half, do_update_role's
+  // `locked_owner_count(team) <= 1 -> Repo.rollback(:last_owner)` (409), which
+  // the self? bypass walks straight into.
+  //
+  // The console MAY answer this because the roster it renders IS the whole
+  // roster: GET /v1/teams/:id/members maps list_team_members/1 with no limit and
+  // no offset, so `members` is complete in the same frame — not a page.
+  //
+  // Every arm below is a REASON TO HAVE NO OPINION, and no opinion means OFFER.
+  // A predicate that fails CLOSED on a roster it cannot read would withhold a
+  // control the server honours — the same lie running backwards.
+  function isSoleOwnerSelf(roster, userId) {
+    if (!Array.isArray(roster) || !roster.length) return false;
+    if (userId == null || String(userId) === "") return false;
+    var actorId = String(userId);
+    var legible = roster.every(function (r) {
+      return r && typeof r.role === "string" && r.role !== "" && r.user_id != null;
+    });
+    if (!legible) return false;
+    var mine = roster.filter(function (r) { return String(r.user_id) === actorId; });
+    if (mine.length !== 1) return false;
+    var owners = roster.filter(function (r) { return r.role === "owner"; });
+    return owners.length === 1 && String(owners[0].user_id) === actorId;
+  }
+
   // Pure: one member row on the GR33 roster anatomy — avatar, email (+ "(you)"),
   // a mono joined-at line, a role chip, and the Change-role / Remove actions,
   // each emitted INDEPENDENTLY under its own server-mirroring predicate (they
@@ -18540,8 +18568,15 @@
     // own m.role — a row can carry a stale or incoherent role for yourself and
     // the server would still read your real one.
     var targetRole = isSelf ? ctx.role : m.role;
+    // The one 409 the console can see coming: you are the last owner and every
+    // role you could pick for yourself is a demotion do_update_role rolls back
+    // with :last_owner. ctx.roster is threaded by membersPanelHtml; a ctx that
+    // carries none (or an illegible one) leaves this false and the control is
+    // offered, with the 409 handler as the backstop.
+    var lastOwnerSelf = isSelf && targetRole === "owner" &&
+      isSoleOwnerSelf(ctx.roster, ctx.userId);
     var actions = "";
-    if (canChangeMemberRole(ctx.role, targetRole, isSelf)) {
+    if (!lastOwnerSelf && canChangeMemberRole(ctx.role, targetRole, isSelf)) {
       actions += '<button class="btn btn-ghost btn-sm" data-member-role="' + esc(m.user_id) +
         '" data-role="' + esc(targetRole) + '" data-email="' + esc(m.email) + '" type="button">Change role</button>';
     }
@@ -18582,12 +18617,22 @@
   // plain-member law).
   function membersPanelHtml(members, invitations, ctx) {
     var canManage = assignableRoles(ctx.role).length > 0;
+    // The roster rides along in the row ctx so memberRowHtml can answer the
+    // last-owner STATE question without a second request — the list it needs is
+    // the one being rendered.
+    var rowCtx = Object.assign({}, ctx, { roster: members });
+    var soleOwnerSelf = ctx.role === "owner" && isSoleOwnerSelf(members, ctx.userId);
     var out = '<section class="set-section">' +
       '<h2 class="set-h">Team members</h2>' +
       '<p class="set-purpose">Everyone with access to this team. A member\'s role decides what they can do.</p>' +
       '<div class="set-list">' +
-        members.map(function (m) { return memberRowHtml(m, ctx); }).join("") +
-      "</div></section>";
+        members.map(function (m) { return memberRowHtml(m, rowCtx); }).join("") +
+      "</div>" +
+      (soleOwnerSelf
+        ? '<p class="set-empty">You\'re the only owner, so you can\'t change your own role — ' +
+            "promote another member to owner first.</p>"
+        : "") +
+      "</section>";
     if (canManage) {
       out += '<section class="set-section">' +
         '<h2 class="set-h">Pending invitations</h2>' +
@@ -18838,12 +18883,24 @@
         closeModal();
         if (r.ok) toast({ kind: "success", title: "Role updated" });
         else toast({ kind: "error", title: "Couldn't change role",
-          body: (r.status === 409 && r.data && r.data.error === "last_owner")
-            ? "You're the last owner — promote another member to owner first."
-            : friendly(r.data) });
+          body: roleChangeFailureCopy(r.status, r.data) });
         loadMembers();
       });
     });
+  }
+
+  // Pure: honest copy for a failed ROLE CHANGE — the REACHABLE last_owner 409
+  // (do_update_role rolls back on `locked_owner_count(team) <= 1`, router.ex
+  // renders {error: "last_owner"}). It lived as an unexported, untested inline
+  // ternary in openRoleModal while the remove-path twin below was exported and
+  // pinned three times; the offer-side guard now withholds the control before
+  // this fires, so this is the BACKSTOP for a roster that went stale between
+  // render and Save — which makes it more load-bearing, not less.
+  function roleChangeFailureCopy(status, data) {
+    if (status === 409 && data && data.error === "last_owner") {
+      return "You're the last owner — promote another member to owner first.";
+    }
+    return friendly(data);
   }
 
   // Pure: honest copy for a failed member removal. The server's 409 last_owner is
@@ -21336,6 +21393,7 @@
       // The two server laws differ — remove has an owner escape hatch, re-role
       // has a self? bypass — so they are two predicates, pinned per-verb.
       memberRoleRank: memberRoleRank, canChangeMemberRole: canChangeMemberRole,
+      isSoleOwnerSelf: isSoleOwnerSelf, roleChangeFailureCopy: roleChangeFailureCopy,
       canRemoveMember: canRemoveMember,
       // cch-w42-s3: the two silent controls next door — the invite click's
       // missing else arm (lifted out of init() so a harness can press it) and

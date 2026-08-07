@@ -7699,6 +7699,131 @@ test("cch-w42-s3: the self row's data-role carries ctx.role, not the roster row'
   assert.match(peerRow, /data-member-role="usr_them" data-role="member"/);
 });
 
+// ── cch-w45-s2: THE SOLE OWNER'S OWN ROW STOPS OFFERING A DEMOTION ──────────
+// The lie, live in the DEFAULT preview scenario: the roster holds exactly one
+// owner (usr_ada) and that owner IS the me() actor, canChangeMemberRole returns
+// true unconditionally on isSelf, roleModalOptionsHtml("owner","owner") offers
+// all three roles, and wireMembersPanel binds the button. Both in-range choices
+// are refused server-side — update_member_role_as/4's rank arm is
+// `not self? and not outranks?(...)`, so a SELF change skips the authority
+// refusal entirely and lands in do_update_role, whose first act is
+// `locked_owner_count(team) <= 1 -> Repo.rollback(:last_owner)` → 409.
+//
+// This is NOT the "console cannot know server state" case (D502): the roster is
+// rendered in the same frame and GET /v1/teams/:id/members carries no limit and
+// no offset, so `members` is COMPLETE. The guard therefore reads the list it is
+// already painting — and FAILS OPEN on every shape it cannot fully read, which
+// is the half proved by mutation below.
+const SOLE_OWNER_ROSTER = [
+  { user_id: "usr_ada", email: "ada@acme.com", role: "owner", joined_at: "2026-01-01T00:00:00Z" },
+  { user_id: "usr_lin", email: "lin@acme.com", role: "admin", joined_at: "2026-02-01T00:00:00Z" },
+  { user_id: "usr_rex", email: "rex@acme.com", role: "member", joined_at: "2026-03-01T00:00:00Z" },
+];
+const ADA_CTX = { role: "owner", userId: "usr_ada" };
+
+test("cch-w45-s2: the sole owner's own row omits the Change-role the server 409s", () => {
+  // BEFORE this guard the panel emitted THREE [data-member-role] buttons over
+  // this roster; the self one was live and both of its in-range choices 409.
+  const panel = hooks.membersPanelHtml(SOLE_OWNER_ROSTER, [], ADA_CTX);
+  assert.ok(!panel.includes('data-member-role="usr_ada"'),
+    "the SELF row of the sole owner (usr_ada) still offers a Change role, and every " +
+    "in-range choice is a demotion do_update_role rolls back with :last_owner (409)");
+  const offers = panel.match(/data-member-role="/g) || [];
+  assert.equal(offers.length, 2,
+    "the sole owner's own row must stop offering a demotion the server refuses; got " +
+    offers.length + " Change-role control(s)");
+  // The peers are untouched — this guard is about ONE cell, not the panel.
+  assert.ok(panel.includes('data-member-role="usr_lin"'), "the admin peer still offers Change role");
+  assert.ok(panel.includes('data-member-role="usr_rex"'), "the member peer still offers Change role");
+  // …and Remove is not disturbed in either direction (self stays withheld by
+  // the pre-existing D492 ruling, peers keep theirs).
+  assert.equal((panel.match(/data-member-remove="/g) || []).length, 2);
+});
+
+test("cch-w45-s2: the withheld control is OMITTED, never a disabled ghost", () => {
+  const selfRow = hooks.memberRowHtml(SOLE_OWNER_ROSTER[0],
+    Object.assign({}, ADA_CTX, { roster: SOLE_OWNER_ROSTER }));
+  assert.match(selfRow, /\(you\)/, "it is the self row");
+  assert.match(selfRow, /class="set-chip">Owner</, "and it still states the role it will not let you change");
+  assert.ok(!selfRow.includes("data-member-role"), "no Change-role ghost");
+  assert.ok(!selfRow.includes("disabled"), "an omitted control must not ship as a disabled button");
+  assert.ok(!selfRow.includes(">Change role<"), "and the label must not survive as inert text");
+});
+
+test("cch-w45-s2: the panel says WHY the sole owner's row lost its control", () => {
+  const panel = hooks.membersPanelHtml(SOLE_OWNER_ROSTER, [], ADA_CTX);
+  assert.match(panel, /only owner[\s\S]*promote another member to owner first/,
+    "an omission with no sentence is a silently missing control");
+  // A team with two owners gets no sentence — nothing was withheld.
+  const twoOwners = SOLE_OWNER_ROSTER.map((m) =>
+    m.user_id === "usr_lin" ? Object.assign({}, m, { role: "owner" }) : m);
+  assert.ok(!hooks.membersPanelHtml(twoOwners, [], ADA_CTX).includes("only owner"),
+    "no omission, no sentence");
+});
+
+test("cch-w45-s2: the guard FAILS OPEN on every roster it cannot fully read", () => {
+  const selfRow = (roster) => hooks.memberRowHtml(SOLE_OWNER_ROSTER[0],
+    Object.assign({}, ADA_CTX, roster === undefined ? {} : { roster: roster }));
+  // 1. TWO owners — the demotion is legal, so it must still be offered.
+  const twoOwners = SOLE_OWNER_ROSTER.map((m) =>
+    m.user_id === "usr_lin" ? Object.assign({}, m, { role: "owner" }) : m);
+  assert.ok(selfRow(twoOwners).includes('data-member-role="usr_ada"'),
+    "a second owner makes the self-demotion legal — the control must be offered");
+  // 2. A row missing its role — the owner count is unknowable, so no opinion.
+  const illegible = SOLE_OWNER_ROSTER.map((m) =>
+    m.user_id === "usr_rex" ? Object.assign({}, m, { role: undefined }) : m);
+  assert.ok(selfRow(illegible).includes('data-member-role="usr_ada"'),
+    "an illegible roster row must not be read as 'no other owners'");
+  // 3. NO roster at all — the bare ctx the authority matrix hands in.
+  assert.ok(selfRow(undefined).includes('data-member-role="usr_ada"'),
+    "a ctx with no roster carries no state knowledge — offer, and let the 409 back it up");
+});
+
+test("cch-w45-s2: isSoleOwnerSelf answers only when the roster PROVES it", () => {
+  assert.equal(hooks.isSoleOwnerSelf(SOLE_OWNER_ROSTER, "usr_ada"), true);
+  // Every arm is a reason to have NO opinion, and no opinion is false (= offer).
+  assert.equal(hooks.isSoleOwnerSelf(SOLE_OWNER_ROSTER, "usr_lin"), false, "not the owner");
+  assert.equal(hooks.isSoleOwnerSelf(undefined, "usr_ada"), false, "no roster");
+  assert.equal(hooks.isSoleOwnerSelf([], "usr_ada"), false, "empty roster");
+  assert.equal(hooks.isSoleOwnerSelf("usr_ada", "usr_ada"), false, "a string is not a roster");
+  assert.equal(hooks.isSoleOwnerSelf(SOLE_OWNER_ROSTER, null), false, "no actor id");
+  assert.equal(hooks.isSoleOwnerSelf(SOLE_OWNER_ROSTER, ""), false, "empty actor id");
+  assert.equal(hooks.isSoleOwnerSelf([{ user_id: "usr_ada", role: "owner" }, null], "usr_ada"),
+    false, "a null row makes the count unknowable");
+  assert.equal(hooks.isSoleOwnerSelf([{ user_id: "usr_ada", role: "owner" }, { role: "member" }], "usr_ada"),
+    false, "a row with no user_id makes the actor count unknowable");
+  assert.equal(hooks.isSoleOwnerSelf(
+    [{ user_id: "usr_ada", role: "owner" }, { user_id: "usr_ada", role: "member" }], "usr_ada"),
+    false, "a duplicated actor row is incoherent — no opinion");
+  // The actor's own row must be the owner row, not merely present alongside one.
+  assert.equal(hooks.isSoleOwnerSelf(
+    [{ user_id: "usr_ada", role: "member" }, { user_id: "usr_lin", role: "owner" }], "usr_ada"),
+    false, "someone else is the sole owner — nothing about the actor is withheld");
+});
+
+test("cch-w45-s2: canChangeMemberRole keeps its BOOLEAN (D439) — the state answer is a sibling", () => {
+  // Widening the authority predicate to a richer value would make `if (pred)`
+  // truthy for a REFUSAL object and ship the lie green. It stays a boolean and
+  // stays authority-only: it says nothing about owner counts.
+  assert.equal(typeof hooks.canChangeMemberRole("owner", "owner", true), "boolean");
+  assert.equal(hooks.canChangeMemberRole("owner", "owner", true), true,
+    "the self? bypass is still modelled here — last_owner is a STATE refusal, not an authority one");
+  assert.equal(typeof hooks.isSoleOwnerSelf(SOLE_OWNER_ROSTER, "usr_ada"), "boolean");
+});
+
+test("cch-w45-s2: the REACHABLE last_owner sentence is exported copy, not an inline ternary", () => {
+  // It was unexported and pinned by zero tests, while the UNREACHABLE
+  // remove-path twin was exported and pinned three times. Inverted: this is the
+  // backstop for a roster that goes stale between render and Save.
+  assert.equal(typeof hooks.roleChangeFailureCopy, "function");
+  assert.match(hooks.roleChangeFailureCopy(409, { error: "last_owner" }),
+    /last owner — promote another member to owner first/);
+  // Any other 409 is NOT the last-owner story.
+  assert.ok(!/last owner/.test(hooks.roleChangeFailureCopy(409, { error: "conflict" })));
+  assert.equal(typeof hooks.roleChangeFailureCopy(403, { error: "forbidden" }), "string");
+  assert.equal(typeof hooks.roleChangeFailureCopy(0, null), "string");
+});
+
 test("cch-w42-s3: memberRoleRank mirrors TeamMembership.rank/1 — unknown is 0, i.e. BELOW everyone", () => {
   assert.equal(hooks.memberRoleRank("member"), 1);
   assert.equal(hooks.memberRoleRank("admin"), 2);
