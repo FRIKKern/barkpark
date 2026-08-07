@@ -344,6 +344,46 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
     end
   end
 
+  describe "the two member verbs DISAGREE — the law the console mirrors" do
+    # This describe pins the four cells the console's members row mirrors
+    # (cch-w42-s3, charter D492/D496) and that no other test in cloud/test/**
+    # asserts. The two verbs answer owner-on-peer-owner DIFFERENTLY, and that
+    # single disagreement is why the console needs TWO predicates, not one:
+    #
+    #   remove_member_as/3   carries an OWNER ESCAPE HATCH — accounts.ex:1722
+    #                        `actor_role == "owner" or outranks?(...)`
+    #   update_member_role_as/4 has NO such hatch — accounts.ex:1801 demands
+    #                        `outranks?(...)` outright (unless acting on SELF)
+    #
+    # Adding the hatch to :1801 (or removing it from :1722) must RED here, not
+    # ship green and silently turn the console's mirror into a lie.
+
+    test "owner on a PEER OWNER: role-change is forbidden, removal is allowed" do
+      {owner1, team} = owned_team()
+      owner2 = user_fixture()
+      {:ok, _} = Accounts.add_member(team, owner2, "owner")
+
+      # TWO owners on the team, so `last_owner` (a 409 STATE refusal) can never
+      # confound the AUTHORITY answer either verb gives.
+      assert {:error, :forbidden} = Accounts.update_member_role_as(owner1, team, owner2, "admin")
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team, owner2)
+    end
+
+    test "admin on THEMSELVES: removal is forbidden, self-demotion is allowed" do
+      {_owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      # remove_member_as/3 has no `self?` branch at all — an admin does not
+      # outrank themselves, so leaving via DELETE is refused…
+      assert {:error, :forbidden} = Accounts.remove_member_as("admin", team, admin)
+      # …while update_member_role_as/4's `self?` bypass lets them demote
+      # themselves to "member" (can_grant? alone governs a self role-change).
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role_as(admin, team, admin, "member")
+    end
+  end
+
   describe "invite_member/4 — expired re-invite (M5)" do
     test "an EXPIRED unaccepted invite no longer blocks re-inviting the same email" do
       {owner, team} = owned_team()
