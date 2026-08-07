@@ -20998,6 +20998,16 @@
       // section mounts (renderBillingManage/renderBillingCancel/openCancelPlanModal)
       // are smoke+browser-verified.
       billingCanManage: billingCanManage,
+      // cch-w41-s3 — the other three owner|admin authority predicates, exported
+      // for the SAME reason billingCanManage is: until now they were pinned by
+      // nothing. Measured on the shipped bytes: rewriting providerCanWrite /
+      // notifCanManage / canManageOnboarding to OWNER-ONLY (dropping the admin
+      // limb) shipped 919/919 + 104/104 green, and canManageOnboarding survived
+      // even ALWAYS-TRUE — a fail-open GR9 forbids. Pure role reads; the render
+      // policy they gate stays smoke+browser-verified.
+      providerCanWrite: providerCanWrite,
+      notifCanManage: notifCanManage,
+      canManageOnboarding: canManageOnboarding,
       billingHasPaidPlan: billingHasPaidPlan,
       readOnlyPlanCardHtml: readOnlyPlanCardHtml,
       dunningDates: dunningDates,
