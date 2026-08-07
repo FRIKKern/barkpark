@@ -343,6 +343,90 @@ defmodule BarkparkCloud.BillingLifecycleTest do
     end
   end
 
+  ## ── Resubscribe after cancel: the console's restore promise, with teeth ──
+
+  # cch-w50-s3. The cancel modal tells an owner their instances "come back if you
+  # resubscribe". Before this block that sentence had no executor: a cancel stamps
+  # `billing_lapsed` (Registry.suspend_team_barkparks/2), the resubscribe webhook
+  # lands `do_activate_from_session`'s `nil ->` INSERT branch (a canceled row is
+  # invisible to live_subscription/1), and reconcile_plan_limit restores ONLY
+  # `quota_exceeded` rows — so every box stayed suspended forever.
+  describe "handle_webhook/2 — resubscribe after cancel restores the team's boxes" do
+    defp checkout_completed(team_id, plan) do
+      Jason.encode!(%{
+        "id" => "evt_#{System.unique_integer([:positive])}",
+        "type" => "checkout.session.completed",
+        "data" => %{
+          "object" => %{
+            "metadata" => %{"team_id" => team_id, "plan" => plan},
+            "customer" => "cus_resub_#{System.unique_integer([:positive])}",
+            "subscription" => "sub_resub_#{System.unique_integer([:positive])}"
+          }
+        }
+      })
+    end
+
+    defp cancel_via_webhook(sub) do
+      assert {:ok, %Subscription{status: "canceled"}} =
+               Billing.handle_webhook(event("customer.subscription.deleted", sub.gateway_customer_id), sig())
+    end
+
+    defp live_barkparks(team), do: Registry.list_barkparks(team) |> Enum.reject(& &1.suspended)
+
+    test "a billing-lapsed box is LIVE again after the resubscribe checkout lands" do
+      {team, sub} = subscribed_team("supporter")
+      bp = barkpark_fixture(team)
+
+      cancel_via_webhook(sub)
+      assert %Barkpark{suspended: true, suspended_reason: "billing_lapsed"} = reload_bp(bp)
+
+      assert {:ok, %Subscription{status: "active", plan: "supporter"}} =
+               Billing.handle_webhook(checkout_completed(team.id, "supporter"), sig())
+
+      assert %Barkpark{suspended: false, suspended_reason: nil} = reload_bp(bp),
+             "the cancel modal promises the box comes back on resubscribe — it must actually come back"
+    end
+
+    # ORDERING PIN — this is the whole reason the resume lives INSIDE
+    # do_activate_from_session's insert branch rather than beside
+    # reconcile_plan_limit in activate_from_session.
+    #
+    # resume BEFORE reconcile (shipped): reconcile sees 5 live on a limit of 3 and
+    # re-suspends the 2 newest as `quota_exceeded` → live == 3. Correct.
+    # resume AFTER reconcile: reconcile sees ZERO live boxes (all still
+    # billing_lapsed) so it suspends nothing, then the blanket resume clears every
+    # flag → live == 5 on a 3-box plan. A live billing hole, not a style
+    # preference. Moving the call reds THIS test with live == 5.
+    #
+    # register_barkpark/2 enforces the ceiling on create, so overflow is only
+    # reachable via a DOWNGRADE — the fixture must buy on support_plus first.
+    test "resubscribing on a SMALLER plan restores only up to the new ceiling" do
+      {team, sub} = subscribed_team("support_plus")
+      bps = for _ <- 1..5, do: barkpark_fixture(team)
+      assert length(live_barkparks(team)) == 5
+
+      cancel_via_webhook(sub)
+      assert Enum.all?(bps, &(reload_bp(&1).suspended_reason == "billing_lapsed"))
+
+      assert {:ok, %Subscription{status: "active", plan: "supporter"}} =
+               Billing.handle_webhook(checkout_completed(team.id, "supporter"), sig())
+
+      live = live_barkparks(team)
+
+      assert length(live) == 3,
+             "supporter's ceiling is 3; a resume that outruns the reconcile would leave " <>
+               "#{length(live)} boxes running on a 3-box plan"
+
+      quota_suspended =
+        Registry.list_barkparks(team) |> Enum.filter(&(&1.suspended_reason == "quota_exceeded"))
+
+      assert length(quota_suspended) == 2
+
+      # And no box is left carrying the stale billing reason.
+      refute Enum.any?(Registry.list_barkparks(team), &(&1.suspended_reason == "billing_lapsed"))
+    end
+  end
+
   ## ── Registry suspension primitives ──
 
   describe "Registry.suspend_team_barkparks/2 + resume_team_barkparks/1" do

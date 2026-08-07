@@ -627,15 +627,42 @@ defmodule BarkparkCloud.Billing do
         {:ok, :already_active}
 
       nil ->
-        %Subscription{}
-        |> Subscription.changeset(%{
-          team_id: team_id,
-          plan: plan,
-          status: "active",
-          gateway_customer_id: customer_id,
-          gateway_subscription_id: subscription_id
-        })
-        |> Repo.insert()
+        inserted =
+          %Subscription{}
+          |> Subscription.changeset(%{
+            team_id: team_id,
+            plan: plan,
+            status: "active",
+            gateway_customer_id: customer_id,
+            gateway_subscription_id: subscription_id
+          })
+          |> Repo.insert()
+
+        # cch-w50-s3: a team reaching this branch after a CANCEL still has every
+        # managed box suspended with `"billing_lapsed"` — a reason the quota
+        # reconciler never restores (see reconcile_plan_limit/1). Lift the billing
+        # suspension here so the console's "your instances come back when you
+        # resubscribe" is actually executed by something.
+        #
+        # ORDER IS LOAD-BEARING: this runs INSIDE do_activate_from_session, i.e.
+        # BEFORE activate_from_session's reconcile_plan_limit/1. Resume-then-
+        # reconcile makes the fleet visible to the reconciler, which then re-stamps
+        # any overflow as `"quota_exceeded"` against the NEW ceiling. Moving it
+        # after the reconcile inverts that: the reconciler would see zero live
+        # boxes, suspend nothing, and the blanket resume would then run a 5-box
+        # fleet on a 3-box plan. Pinned by billing_lifecycle_test.exs
+        # "resubscribing on a SMALLER plan restores only up to the new ceiling".
+        #
+        # Known side effect: resume_team_barkparks/1 is reason-blind, so a
+        # pre-existing `quota_exceeded` row is resumed too and immediately
+        # re-suspended by the reconcile — net state is right, but suspended_at is
+        # reset and a barkpark.restored + barkpark.suspended pair is broadcast for
+        # a box whose availability never changed.
+        with {:ok, %Subscription{}} <- inserted do
+          {:ok, _count} = Registry.resume_team_barkparks(team_id)
+        end
+
+        inserted
     end
   end
 

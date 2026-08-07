@@ -14450,7 +14450,7 @@
     }
     showBillingSection("#billing-cancel-section", true);
     body.innerHTML =
-      '<p class="set-purpose">Cancelling keeps your instances running until the end of the current billing period, then stops them &mdash; not deleted. Everything comes back if you resubscribe.</p>' +
+      '<p class="set-purpose">Cancelling keeps your plan until the end of the current billing period. After that your instances are suspended &mdash; not deleted. Resubscribing brings them back, up to your new plan&rsquo;s instance limit.</p>' +
       '<button class="btn btn-danger" id="plan-cancel" type="button">Cancel plan&hellip;</button>';
     var cb = $("#plan-cancel");
     if (cb) cb.addEventListener("click", openCancelPlanModal);
@@ -14468,7 +14468,7 @@
   function openCancelPlanModal() {
     var body = openModal(
       '<h2 class="modal-title" id="modal-title">Cancel your plan?</h2>' +
-      '<p class="modal-sub">Your instances keep running until the end of the current billing period, then they\'re stopped &mdash; not deleted. Everything comes back if you resubscribe.</p>' +
+      '<p class="modal-sub">Your plan stays active until the end of the current billing period. After that your instances are suspended &mdash; not deleted. Resubscribing brings them back, up to your new plan&rsquo;s instance limit.</p>' +
       '<div class="field"><label class="label" for="cancel-pw">Confirm your password</label>' +
         '<input class="form-input" id="cancel-pw" type="password" autocomplete="current-password" /></div>' +
       '<div class="cm-error" id="cancel-err" role="alert" hidden><p class="cm-error-msg" id="cancel-err-msg"></p></div>' +
