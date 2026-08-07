@@ -96,7 +96,16 @@ func For(status string) string {
 	// distinct from "suspended" (the system-imposed instance state).
 	// "near_limit" is a usage meter approaching its plan quota (warn_at reached
 	// but the ceiling not yet crossed) — attention-worthy, not yet a fault.
-	case "degraded", "unknown", "suspended", "inactive", "near_limit":
+	//
+	// "deploys_failing" (dr-w10) joins this family rather than danger, and the
+	// reason is the LADDER: it sits at rank 5, between "degraded" (4, warn) and
+	// "behind" (6, info), so painting it danger would make the tone ladder
+	// non-monotone — a rung shouting louder than the more urgent rung above it.
+	// It is the same grammar as degraded: a box to LOOK AT, still up and still
+	// serving, whose deploys are not landing. ("unmetered", rank 9, is
+	// deliberately NOT here: an unmeasured box makes no claim, and this package
+	// never guesses a role.)
+	case "degraded", "unknown", "suspended", "inactive", "near_limit", "deploys_failing":
 		return "warn"
 	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling
 	// the operator must act on, so it paints the same danger tone as a failure.

@@ -1114,4 +1114,268 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert json_body(conn)["detail"] =~ "pinned, never floating"
     end
   end
+
+  ## ── 5. The per-BOX rate (dr-w10 S1) ──────────────────────────────────────
+  #
+  # The census can say WHAT is failing across the fleet. Until `box_rates/3`
+  # nothing could say WHICH BOX is sick — `barkpark_id` appeared zero times in
+  # the module — so `bp cloud status` printed `ok` for a box that failed 46.28%
+  # of its 1,290 terminal deploys in 24 h. These tests are that verdict's spine.
+
+  describe "box_rates/3 — the vital that names the BOX" do
+    setup do
+      {_user, team} = user_team()
+      %{team: team}
+    end
+
+    test "ONE grouped query for N boxes — never one per box", %{team: team} do
+      boxes = for _ <- 1..3, do: barkpark_fixture(team)
+
+      for bp <- boxes do
+        site = site_on(bp)
+        bulk_deploys!(site, 3, %{status: "live"})
+      end
+
+      ids = Enum.map(boxes, & &1.id)
+      {from, to} = window()
+
+      # The N+1 this route already paid for once is a REGRESSION class, not a
+      # style note, so it is counted rather than asserted about in prose.
+      handler = "box-rates-query-count-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:barkpark_cloud, :repo, :query],
+        fn _event, _measure, _meta, _cfg -> send(test_pid, :repo_query) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      rates = DeployLedger.box_rates(ids, from, to)
+      assert map_size(rates) == 3
+      assert count_messages(:repo_query) == 1
+    end
+
+    test "the terminal rate is failed/(failed+live) and carries its denominator", %{team: team} do
+      bp = barkpark_fixture(team)
+      site = site_on(bp)
+
+      # 240 box refusals + 60 broken site builds = 300 failed, against 200 live.
+      bulk_deploys!(site, 240, %{status: "failed", failure_reason: @r500})
+      bulk_deploys!(site, 60, %{status: "failed", stage: "BUILD", failure_reason: @build_plain})
+      bulk_deploys!(site, 200, %{status: "live"})
+
+      {from, to} = window()
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      assert node.rate.sample == 500
+      assert node.rate.numerator == 300
+      assert node.rate.pct == 60.0
+      refute node.rate.refused
+      assert node.rate.min_sample == DeployLedger.min_sample()
+      assert node.window == %{from: from, to: to}
+
+      # box_caused is a SHARE OF THE NUMERATOR, off the class enum: 240 of 300.
+      assert node.box_caused.sample == 300
+      assert node.box_caused.pct == 80.0
+    end
+
+    test "below min_sample the rate REFUSES — pct is nil, never 0.0", %{team: team} do
+      bp = barkpark_fixture(team)
+      site = site_on(bp)
+      bulk_deploys!(site, 55, %{status: "failed", failure_reason: @r500})
+
+      {from, to} = window()
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      assert node.rate.sample == 55
+      assert node.rate.refused
+      assert node.rate.pct == nil
+      refute node.rate.pct == 0.0
+      assert node.rate.reason =~ "below min_sample 200"
+      # …and the box still shows a SURFACE, which is what makes it `unmetered`
+      # rather than "nothing to deploy".
+      assert node.sites == 1
+    end
+
+    test "a box with sites but ZERO deploys in the window is present, and refuses", %{team: team} do
+      bp = barkpark_fixture(team)
+      _site = site_on(bp)
+
+      {from, to} = window()
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      # PRESENT, not absent: "nobody deployed" is a silence to report, not an
+      # absence of a deploy surface.
+      assert node.sites == 1
+      assert node.sites_deploying == 0
+      assert node.rate.sample == 0
+      assert node.rate.refused
+      assert node.rate.pct == nil
+    end
+
+    test "a barkpark with NO sites is ABSENT from the map", %{team: team} do
+      bare = barkpark_fixture(team)
+      with_site = barkpark_fixture(team)
+      site = site_on(with_site)
+      bulk_deploys!(site, 2, %{status: "live"})
+
+      {from, to} = window()
+      rates = DeployLedger.box_rates([bare.id, with_site.id], from, to)
+
+      refute Map.has_key?(rates, bare.id)
+      assert Map.has_key?(rates, with_site.id)
+    end
+
+    test "sites is the SURFACE; sites_deploying is who actually deployed", %{team: team} do
+      bp = barkpark_fixture(team)
+      busy = site_on(bp)
+      _quiet = site_on(bp)
+      bulk_deploys!(busy, 4, %{status: "live"})
+
+      {from, to} = window()
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      assert node.sites == 2
+      assert node.sites_deploying == 1
+    end
+
+    test "absorption counts deferrals over EVERY row in the window", %{team: team} do
+      bp = barkpark_fixture(team)
+      site = site_on(bp)
+      bulk_deploys!(site, 250, %{status: "deferred", failure_reason: @d_busy})
+      bulk_deploys!(site, 150, %{status: "failed", failure_reason: @r500})
+      bulk_deploys!(site, 100, %{status: "live"})
+
+      {from, to} = window()
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      # 250 of 500 rows absorbed — and the terminal rate is denominated on the
+      # 250 SETTLED rows, so a rate halved by deferrals can never read as a
+      # repair: both numbers ride in the same node.
+      assert node.absorption.sample == 500
+      assert node.absorption.pct == 50.0
+      assert node.rate.sample == 250
+      assert node.rate.pct == 60.0
+    end
+
+    test "the window is half-open and PINNED — a row on `to` is out", %{team: team} do
+      bp = barkpark_fixture(team)
+      site = site_on(bp)
+      {from, to} = window()
+
+      bulk_deploys!(site, 3, %{status: "live", inserted_at: from})
+      bulk_deploys!(site, 5, %{status: "live", inserted_at: to})
+      bulk_deploys!(site, 7, %{status: "failed", failure_reason: @r500, inserted_at: from})
+
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      # from <= inserted_at < to: the 3 + 7 on the lower bound count, the 5 on
+      # the upper bound do not.
+      assert node.rate.sample == 10
+      assert node.rate.numerator == 7
+    end
+
+    test "not-attempted rows never enter the denominator", %{team: team} do
+      bp = barkpark_fixture(team)
+      site = site_on(bp)
+      bulk_deploys!(site, 9, %{status: "failed", failure_reason: @gh_push})
+      bulk_deploys!(site, 4, %{status: "live"})
+
+      {from, to} = window()
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      # 9 born-failed tombstones (D19) are outside the rate entirely: 0 of 4.
+      assert node.rate.sample == 4
+      assert node.rate.numerator == 0
+    end
+  end
+
+  describe "agency/1 — box_caused comes from the CLASS ENUM, never from prose" do
+    test "every class the ledger can name has an agency, and the map is EXHAUSTIVE" do
+      known = Map.keys(DeployLedger.agency_map())
+
+      # EXHAUSTIVE: no class reaches the map's default. A class added to the
+      # taxonomy without an agency fails HERE, at edit time, rather than silently
+      # landing in AMBIGUOUS and shrinking the box numerator by surprise.
+      for class <- DeployLedger.classes() ++ DeployLedger.not_attempted_classes() do
+        assert class in known, "#{class} has no agency — the map is not exhaustive"
+        assert DeployLedger.agency(class) in [:box, :site, :ambiguous]
+      end
+    end
+
+    test "an unknown class falls to AMBIGUOUS — never to SITE" do
+      # The synthetic class stands in for tomorrow's taxonomy addition. Falling to
+      # :site would silently SHRINK the box-caused numerator, which is the
+      # comforting direction and therefore the forbidden one (charter D148).
+      assert DeployLedger.agency("SYNTHETIC_FUTURE_CLASS") == :ambiguous
+      assert DeployLedger.agency(nil) == :ambiguous
+    end
+
+    test "the split accuses the box for refusals and the SITE for its own build" do
+      assert DeployLedger.agency("BOX_BUSY_409") == :box
+      assert DeployLedger.agency("BOX_500") == :box
+      assert DeployLedger.agency("HEALTH_GATE_FAILED") == :box
+      assert DeployLedger.agency("BOX_UNREACHABLE") == :box
+      # Both `build_class/1` outputs are the site's own build, and a raw rate
+      # accuses the box for them — which is exactly why box_caused exists.
+      assert DeployLedger.agency("BUILD_FAILED") == :site
+      assert DeployLedger.agency("FORBIDDEN_403") == :site
+      assert DeployLedger.agency("PROCESS_DIED") == :ambiguous
+      assert DeployLedger.agency("UNCLASSIFIED") == :ambiguous
+    end
+  end
+
+  ## Fixtures for the per-box rate
+
+  defp barkpark_fixture(team) do
+    n = System.unique_integer([:positive])
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+    bp
+  end
+
+  defp site_on(barkpark) do
+    n = System.unique_integer([:positive])
+    {:ok, site} = Registry.create_site(barkpark, %{name: "S #{n}", slug: "s-#{n}"})
+    site
+  end
+
+  # A pinned window (never "now minus"), and a default instant INSIDE it.
+  defp window do
+    {~U[2026-08-06 00:00:00.000000Z], ~U[2026-08-07 00:00:00.000000Z]}
+  end
+
+  # `insert_all` rather than N inserts: these tests need real ROW COUNTS on both
+  # sides of `min_sample`, and 500 struct inserts per test is a minute of gate.
+  defp bulk_deploys!(site, n, attrs) do
+    {from, _to} = window()
+    at = attrs |> Map.get(:inserted_at, DateTime.add(from, 1, :hour)) |> usec()
+
+    rows =
+      for _ <- 1..n do
+        %{
+          id: Ecto.UUID.generate(),
+          site_id: site.id,
+          status: Map.fetch!(attrs, :status),
+          stage: Map.get(attrs, :stage),
+          failure_reason: Map.get(attrs, :failure_reason),
+          environment: "production",
+          inserted_at: at,
+          updated_at: at
+        }
+      end
+
+    {^n, _} = Repo.insert_all(Deployment, rows)
+    :ok
+  end
+
+  defp count_messages(msg, seen \\ 0) do
+    receive do
+      ^msg -> count_messages(msg, seen + 1)
+    after
+      0 -> seen
+    end
+  end
 end

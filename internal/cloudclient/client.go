@@ -154,6 +154,41 @@ type Barkpark struct {
 	//     emits it.
 	VerifiedReachable *bool  `json:"verify_reachable"`
 	LastVerifiedAt    string `json:"last_verified_at"`
+
+	// DeployRate is the box's OWN deploy vital (dr-w10-s1) — the terminal
+	// failure rate over the control plane's pinned window, with the absorption
+	// and box-caused companions that make it readable, and the site counts that
+	// say whether the box had anything to deploy at all.
+	//
+	// A POINTER on purpose, and the distinction is the whole slice: nil means the
+	// control plane never sent the vital (an older CP — we could not ask), which
+	// is NOT the same as a CP that sent `sites: 0` (this box has no deploy
+	// surface) and NOT the same as a CP that sent a refusing rate (it has sites
+	// and we could not score them). Collapsing those three is how a fleet view
+	// ends up printing `ok` for a box failing 46% of its deploys.
+	DeployRate *BoxDeployRate `json:"deploy_rate"`
+}
+
+// BoxDeployRate is one barkpark's deploy vital off the fleet row.
+//
+// Rate is the RAW TERMINAL failure rate (failed / (failed + live)) over the
+// window the control plane pinned — raw, per charter D148, because it depends
+// only on `deployments.status`, an enum, while every regex-derived subset can be
+// silenced by rewording an error message or retiring three sites. The price of
+// raw is that it accuses the box for a customer's broken build; BoxCaused is
+// that price paid out loud, and Absorption is the companion that stops a rate
+// halved by deferrals from reading as a repair.
+//
+// Sites is the deploy SURFACE (how many sites this box could deploy at all),
+// SitesDeploying how many actually produced a terminal row in the window. A box
+// with Sites == 0 has nothing to deploy and has not failed to report.
+type BoxDeployRate struct {
+	Rate           DeployRate          `json:"rate"`
+	Absorption     DeployRate          `json:"absorption"`
+	BoxCaused      DeployRate          `json:"box_caused"`
+	Sites          int                 `json:"sites"`
+	SitesDeploying int                 `json:"sites_deploying"`
+	Window         *DeployCensusWindow `json:"window"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane

@@ -1,5 +1,6 @@
 {
   "_comment": "Concrete input→order cases for the charter decision-15 ranking. The canonical cross-surface vocabulary (state/rank/bucket/tone/glyph/label) is cloud/priv/static/__fixtures__/attention_order.json (charter decision 32) — this file is its test companion: a synthetic fleet covering EVERY rank plus the case-insensitive name tiebreak. 'barkparks' is the INPUT (deliberately shuffled); 'expected_order' is the exact name order rankBarkparks must produce. Any surface implementing the decision-15 rank should reproduce this order.",
+  "_deploy_comment": "The dr-w10 deploy rungs ride the same file. 'deploy_rate' is the control-plane vital: 'sites' is the deploy SURFACE (0 = nothing to deploy, verdict unchanged + a marker), and rate.pct null with sites > 0 is a SILENCE (unmetered), not a zero. 'df-1' replays guerrilla's measured 24h shape (46.28% of n=1290); 'unm-1' replays jarl (55 terminal, forever under min_sample 200); 'nosite-1' replays the six barkparks that own no sites at all and must stay ok. A row with no deploy_rate key at all is an OLDER control plane and its verdict is unchanged, with no marker.",
   "barkparks": [
     { "id": "id-zeta", "name": "Zeta", "host": "10.0.0.12", "health_status": "up", "agent_status": "online", "update_state": "current" },
     { "id": "id-rem-2", "name": "rem-2", "host": "10.0.0.2", "deprovision_status": "claimed" },
@@ -12,7 +13,37 @@
     { "id": "id-deg-2", "name": "deg-2", "host": "10.0.0.9", "health_status": "up", "agent_status": "offline" },
     { "id": "id-susp-1", "name": "susp-1", "host": "10.0.0.10", "suspended": true, "suspended_reason": "payment_failed", "health_status": "up", "agent_status": "online" },
     { "id": "id-rem-1", "name": "rem-1", "host": "10.0.0.11", "deprovision_status": "pending" },
-    { "id": "id-ok-1", "name": "ok-1", "host": "10.0.0.13", "health_status": "up", "agent_status": "online", "update_state": "current" }
+    { "id": "id-ok-1", "name": "ok-1", "host": "10.0.0.13", "health_status": "up", "agent_status": "online", "update_state": "current" },
+    {
+      "id": "id-df-1", "name": "df-1", "host": "10.0.0.14",
+      "health_status": "up", "agent_status": "online", "update_state": "current",
+      "deploy_rate": {
+        "sites": 11, "sites_deploying": 7,
+        "rate": { "sample": 1290, "pct": 46.28, "numerator": 597, "min_sample": 200, "refused": false, "reason": null },
+        "absorption": { "sample": 3208, "pct": 21.1, "numerator": 677, "min_sample": 200, "refused": false, "reason": null },
+        "box_caused": { "sample": 597, "pct": 61.2, "numerator": 365, "min_sample": 200, "refused": false, "reason": null }
+      }
+    },
+    {
+      "id": "id-unm-1", "name": "unm-1", "host": "10.0.0.15",
+      "health_status": "up", "agent_status": "online", "update_state": "current",
+      "deploy_rate": {
+        "sites": 2, "sites_deploying": 1,
+        "rate": { "sample": 55, "pct": null, "numerator": 3, "min_sample": 200, "refused": true, "reason": "sample 55 below min_sample 200" },
+        "absorption": { "sample": 60, "pct": null, "numerator": 0, "min_sample": 200, "refused": true, "reason": "sample 60 below min_sample 200" },
+        "box_caused": { "sample": 3, "pct": null, "numerator": 1, "min_sample": 200, "refused": true, "reason": "sample 3 below min_sample 200" }
+      }
+    },
+    {
+      "id": "id-nosite-1", "name": "nosite-1", "host": "10.0.0.16",
+      "health_status": "up", "agent_status": "online", "update_state": "current",
+      "deploy_rate": {
+        "sites": 0, "sites_deploying": 0,
+        "rate": { "sample": 0, "pct": null, "numerator": 0, "min_sample": 200, "refused": true, "reason": "sample 0 below min_sample 200" },
+        "absorption": { "sample": 0, "pct": null, "numerator": 0, "min_sample": 200, "refused": true, "reason": "sample 0 below min_sample 200" },
+        "box_caused": { "sample": 0, "pct": null, "numerator": 0, "min_sample": 200, "refused": true, "reason": "sample 0 below min_sample 200" }
+      }
+    }
   ],
   "expected_order": [
     "rf-1",
@@ -20,11 +51,14 @@
     "susp-1",
     "deg-1",
     "deg-2",
+    "df-1",
     "beh-1",
     "rem-1",
     "rem-2",
     "prov-1",
+    "unm-1",
     "alpha",
+    "nosite-1",
     "ok-1",
     "Zeta"
   ]
