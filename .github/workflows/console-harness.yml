@@ -1032,3 +1032,4 @@ jobs:
             This issue is idempotent per key: an ongoing failure appends a
             comment rather than opening a new issue. CLOSE IT once main is green
             again — the next main-push failure opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
