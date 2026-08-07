@@ -32,6 +32,12 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
     2. It covers ONLY the `instances` numeral. Price is structurally
        uncoverable — no price amount exists server-side at all (pinned by the
        SCOPE test below). `trial_days` is a separate row and not mirrored here.
+    3. It pins the CONSTANT, not the render. Whether the console ever PRINTS a
+       ceiling to a user is a different question, owned by cch-w49-s1's
+       absent-arm assertion over the rendered bytes in `__preview__/smoke.mjs`
+       — which, as of that slice, requires the answer to be "never". The two
+       are complements: `PLAN_CATALOG.instances` survives as the client half of
+       THIS mirror and reaches no DOM.
 
   ── WHY THE PINNED KEY SET IS DECLARED BY NEITHER SIDE ─────────────────────
 
@@ -164,17 +170,25 @@ defmodule BarkparkCloud.BillingClientMirrorTest do
     end
   end
 
-  test "SCOPE: price is structurally uncoverable — the server holds no price amount, only integer ceilings" do
+  test "SCOPE: price is structurally uncoverable — the server holds no price amount at all, only integer ceilings" do
+    # This test is deliberately SERVER-ONLY, and says why: there is nothing on
+    # the client for it to compare against, because there is nothing on the
+    # server to compare TO. `Billing.limits/0` holds integer ceilings and
+    # nothing else; `STRIPE_PRICE_*` are Stripe price IDENTIFIERS, not amounts.
+    # So no mirror over a price can ever exist, in either direction.
+    #
+    # It used to also assert that each client tier carried a "$…" display
+    # string. That clause was REMOVED by review: it pinned the very fabrication
+    # cch-w49-s1 deletes (a hand-typed $0/$69/$499 rendered as fact), so it
+    # would have red the moment that slice merged and, worse, it read as this
+    # guard endorsing the numeral. Whether the console carries a price is now
+    # owned end-to-end by cch-w49-s1's absent-arm assertion over the RENDERED
+    # bytes in `__preview__/smoke.mjs`, which is the surface that matters.
     server = Billing.limits()
+
+    assert map_size(server) > 0, "the server's limits map is empty — nothing to scope"
 
     assert Enum.all?(Map.values(server), &is_integer/1),
            "the server's limits map holds only integer ceilings: #{inspect(server)}"
-
-    for tier <- client_catalog!() do
-      price = Map.get(tier, "price")
-
-      assert is_binary(price) and String.starts_with?(price, "$"),
-             "plan #{Map.fetch!(tier, "plan")} carries a display price string the server has no counterpart for; got #{inspect(price)}"
-    end
   end
 end
