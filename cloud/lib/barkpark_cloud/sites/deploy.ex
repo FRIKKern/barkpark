@@ -1194,16 +1194,39 @@ defmodule BarkparkCloud.Sites.Deploy do
         fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
 
       prior >= max_consecutive_deferrals(cause) - 1 ->
-        fail(
-          ctx,
-          reason <>
-            " — and it has now refused #{prior + 1} rebuilds in a row for this site, #{terminal_verdict(cause)}"
-        )
+        fail(ctx, abandonment_reason(reason, prior + 1, cause))
 
       true ->
+        # THE DEPTH TRAVELS (deploy-reliability charter D99, PR #9905). `prior`
+        # was computed here, spent on the threshold above and interpolated into
+        # the terminal string and the Logger line — and then DISCARDED, so the
+        # operator-visible reason on refusal 1 and refusal 11 was byte-identical
+        # and a chain eight rounds deep read exactly like a first blip. It rides
+        # the EXISTING failure_reason/detail columns; no column was added.
+        #
+        # THE HONEST BOUND, and why the sentence says "zero-progress guard"
+        # instead of counting down: `consecutive_deferrals/2` counts deferrals OF
+        # THIS SAME CAUSE at the HEAD of the site's stream, scanned only
+        # @deferral_scan_depth rows deep. It is NOT a lifetime total — one
+        # successful deploy, or one deferral of a DIFFERENT cause, resets it to
+        # zero — so a site that deferred 75 times in 12h can legitimately read 3
+        # here, and did. A bare "3 of 12" would read as a countdown to a drop
+        # that a merely-slow box may never reach.
+        #
+        # The bound comes from `max_consecutive_deferrals/1`, never a literal:
+        # a capacity chain gets 12 and a busy/stuck chain gets 6, and a sentence
+        # that hardcoded either would misstate the other cause's whole budget.
+        bound = max_consecutive_deferrals(cause)
+
+        # The depth sits EARLY, before the re-queue promise: `detail` is the
+        # varchar(255) caption `short_detail/1` clamps, and a reason that carries
+        # the box's own words can already be ~200 chars — so anything appended
+        # last is the part the caption loses.
         detail =
           reason <>
-            " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
+            " — deferred: refusal #{prior + 1} of #{bound} in this site's current chain" <>
+            " — a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes" <>
+            " (the count is a zero-progress guard, not a countdown: only back-to-back refusals of this same cause count, and any successful deploy resets it to 0)"
 
         # THE PROMISE IS MADE FIRST, and the row only says `deferred` once it
         # holds. `deferred` is a TERMINAL status (`Deployment.@transitions` maps
@@ -1260,6 +1283,24 @@ defmodule BarkparkCloud.Sites.Deploy do
             {:error, {:deferral_requeue_failed, enqueue_error}}
         end
     end
+  end
+
+  @doc """
+  The terminal ABANDONMENT sentence: the box's own refusal plus the driver's
+  admission that it has stopped retrying this publish.
+
+  PUBLIC ON PURPOSE, and it is the only place this sentence is written.
+  `DeployLedger.classify/2` has to recognise an abandoned row out of the RAW
+  `failure_reason` column, and its only handle on one is this prose — so a reword
+  here would silently degrade every abandoned row back to `BOX_BUSY_409`, whose
+  label ("the box was already deploying") is affirmatively false for a capacity
+  abandonment, with nothing failing anywhere. `deploy_ledger_test.exs` builds its
+  fixtures through THIS function, so the classifier reds at edit time instead.
+  """
+  @spec abandonment_reason(String.t(), pos_integer(), String.t() | nil) :: String.t()
+  def abandonment_reason(reason, rounds, cause) do
+    reason <>
+      " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
   end
 
   # The deferral's NAMED cause, from the same classifier the ledger reports with —

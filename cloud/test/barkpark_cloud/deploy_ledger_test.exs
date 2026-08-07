@@ -31,6 +31,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry, Repo}
   alias BarkparkCloud.Registry.Deployment
+  alias BarkparkCloud.Sites.Deploy
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -140,6 +141,46 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @d_spoof_prose "the instance refused the deploy (HTTP 409): box_at_capacity was blamed by the shim, wrongly" <>
                    @requeued
 
+  # ── The ABANDONED corpus (dr-w9 S2) ───────────────────────────────────────
+  # The LAST round of a bounded refusal chain does NOT defer — it settles the row
+  # `failed`, and `Sites.Deploy.abandonment_reason/3` appends the driver's
+  # admission that it has stopped retrying this publish. These are the most
+  # severe rows the fleet produces: a publish that never happened and never will.
+  #
+  # Four such rows exist in production as of 2026-08-07 and every one of them
+  # classified as `BOX_BUSY_409`, label "the box was already deploying (HTTP
+  # 409)" — affirmatively FALSE for the three capacity rows, where the box was
+  # not deploying this site at all and had no free slot.
+  #
+  # Written as LITERALS (the bytes a prod row carries) and re-derived from the
+  # real producer in "the producer's own sentence is what the classifier
+  # anchors on" below, so a reword there reds instead of degrading silently.
+  @abandon_cap " — and it has now refused 12 rebuilds in a row for this site, so the instance has been at its concurrent-build cap for that entire run; check for builds holding slots without finishing, or raise the cap"
+  @abandon_busy " — and it has now refused 6 rebuilds in a row for this site, so the instance is not busy but stuck; check its deploy runner"
+
+  # 2026-08-07 01:20:14Z, 01:37:41Z, 02:33:55Z — three 12-cap abandonments, all
+  # `box_at_capacity`, in the three refusal shapes the box actually sends: code
+  # only, code + request-id stamp, code + message.
+  @a_capacity "the instance refused the deploy (HTTP 409): box_at_capacity" <> @abandon_cap
+  @a_capacity_stamped "the instance refused the deploy (HTTP 409): box_at_capacity" <>
+                        @rid <> @abandon_cap
+  @a_capacity_msg "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+                    @abandon_cap
+  # 2026-08-05 22:57:53Z — the one 6-cap abandonment, the busy slug.
+  @a_busy "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight" <>
+            @abandon_busy
+  # D7's codeless 409 predates the concurrent-build cap entirely, so an
+  # abandonment carrying no code can only be the busy slug.
+  @a_bare @r409_bare <> @abandon_busy
+  # A terminal 409 refusing with a code the ledger has never named: it must NOT
+  # be absorbed by whichever abandonment bucket it most resembles (D8).
+  @a_unknown_code "the instance refused the deploy (HTTP 409): slot_reservation_denied — the runner would not reserve a slot" <>
+                    @abandon_busy
+  # The OTHER terminal 409 `defer/3` writes — a prebuilt deploy, which is never
+  # deferred because its bytes cannot be rebuilt. It is not an abandoned chain,
+  # and must keep the ordinary name.
+  @prebuilt_terminal @r409_coded <> " — re-run the upload once the in-flight deploy finishes"
+
   ## Fixtures
 
   defp user_fixture do
@@ -216,6 +257,118 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert DeployLedger.classify("PLAN", @r409_coded) == "BOX_BUSY_409"
       assert DeployLedger.classify("PLAN", @r409_bare) == "BOX_BUSY_409"
       refute String.contains?(@r409_bare, "already_running")
+    end
+
+    # dr-w9 S2. GIVING UP ON A PUBLISH WORE THE MILDEST NAME IN THE TAXONOMY.
+    # All four real cap-terminal prod rows classified as BOX_BUSY_409 — "the box
+    # was already deploying (HTTP 409)" — which for the three capacity rows is
+    # not merely vague but false, and sends an operator to the wrong place.
+    test "a chain-terminal 409 is an ABANDONED publish, split by the box's own code word" do
+      # The three 12-cap rows, in all three shapes the box sends them.
+      assert DeployLedger.classify("PLAN", @a_capacity) == "ABANDONED_AT_CAPACITY"
+      assert DeployLedger.classify("PLAN", @a_capacity_stamped) == "ABANDONED_AT_CAPACITY"
+      assert DeployLedger.classify("PLAN", @a_capacity_msg) == "ABANDONED_AT_CAPACITY"
+
+      # The one 6-cap row: the box is not busy, it is stuck.
+      assert DeployLedger.classify("PLAN", @a_busy) == "ABANDONED_BOX_STUCK"
+
+      # …and through the row-shaped arm the census actually folds over.
+      assert DeployLedger.classify(%{
+               status: "failed",
+               stage: "PLAN",
+               failure_reason: @a_capacity_stamped
+             }) == "ABANDONED_AT_CAPACITY"
+
+      assert DeployLedger.classify(%{status: "failed", stage: "PLAN", failure_reason: @a_busy}) ==
+               "ABANDONED_BOX_STUCK"
+
+      # Never the mild name, in any shape.
+      for reason <- [@a_capacity, @a_capacity_stamped, @a_capacity_msg, @a_busy] do
+        refute DeployLedger.classify("PLAN", reason) == "BOX_BUSY_409"
+      end
+
+      # D7's codeless 409 predates the cap, so an abandonment with no code is the
+      # busy slug — read exactly as the deferred arm reads it.
+      assert DeployLedger.classify("PLAN", @a_bare) == "ABANDONED_BOX_STUCK"
+
+      # …and D8 holds on this arm too: a terminal 409 whose code the ledger has
+      # never named rises in the tail rather than joining the nearer bucket.
+      assert DeployLedger.classify("PLAN", @a_unknown_code) == "UNCLASSIFIED"
+    end
+
+    test "an ordinary 409 is untouched by the split — only a chain-terminal one promotes" do
+      # The two shapes that are 100% of the live 409 mass.
+      assert DeployLedger.classify("PLAN", @r409_coded) == "BOX_BUSY_409"
+      assert DeployLedger.classify("PLAN", @r409_bare) == "BOX_BUSY_409"
+
+      # A DEFERRED round of the very chain that later abandons is still a
+      # deferral, and still not a failure.
+      assert DeployLedger.classify("PLAN", @d_capacity_stamped) == "BOX_BUSY_409"
+
+      assert DeployLedger.classify(%{
+               status: "deferred",
+               stage: "PLAN",
+               failure_reason: @d_capacity_stamped
+             }) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # The other terminal 409 `defer/3` writes — the prebuilt refusal — is not
+      # an abandoned chain and keeps the ordinary name.
+      assert DeployLedger.classify("PLAN", @prebuilt_terminal) == "BOX_BUSY_409"
+      # It really does carry a terminal clause, so this is not a fixture that
+      # quietly dropped the thing under test.
+      assert String.contains?(@prebuilt_terminal, "re-run the upload")
+    end
+
+    test "both ABANDONED classes are named, labelled, and counted as failures" do
+      for class <- ["ABANDONED_AT_CAPACITY", "ABANDONED_BOX_STUCK"] do
+        assert class in DeployLedger.classes()
+        # A label the taxonomy did not write is `label/1`'s own fallback: the
+        # class name. A class registered without one would pass unnoticed.
+        refute DeployLedger.label(class) == class
+        assert DeployLedger.label(class) =~ "given up on"
+        # They ARE failures: attempted, terminal, in the numerator.
+        refute DeployLedger.deferred?(class)
+        refute DeployLedger.not_attempted?(class)
+      end
+
+      # The two names say different things — a split that collapses in the UI is
+      # not a split.
+      refute DeployLedger.label("ABANDONED_AT_CAPACITY") ==
+               DeployLedger.label("ABANDONED_BOX_STUCK")
+    end
+
+    # THE GUARD THAT CAN LOSE. The classifier anchors on PROSE written in
+    # `Sites.Deploy` — reword that sentence and every abandoned row silently
+    # degrades back to BOX_BUSY_409 with nothing failing anywhere, which is this
+    # epic's own disease. So the fixtures above are re-derived from the REAL
+    # producer here: an edit to the sentence reds at edit time.
+    test "the producer's own sentence is what the classifier anchors on" do
+      cap =
+        Deploy.abandonment_reason(
+          "the instance refused the deploy (HTTP 409): box_at_capacity",
+          12,
+          "BOX_AT_CAPACITY_DEFERRED"
+        )
+
+      busy =
+        Deploy.abandonment_reason(
+          "the instance refused the deploy (HTTP 409): already_running — a deploy is already in flight",
+          6,
+          "BOX_BUSY_DEFERRED"
+        )
+
+      # Byte-identical to the pinned prod rows…
+      assert cap == @a_capacity
+      assert busy == @a_busy
+
+      # …and classified from the producer's own output, not only from a literal.
+      assert DeployLedger.classify("PLAN", cap) == "ABANDONED_AT_CAPACITY"
+      assert DeployLedger.classify("PLAN", busy) == "ABANDONED_BOX_STUCK"
+
+      # The chain bound really is what the producer counts to, so a bound change
+      # cannot quietly stop producing abandoned rows in the shape pinned here.
+      assert cap =~ "refused 12 rebuilds in a row"
+      assert busy =~ "refused 6 rebuilds in a row"
     end
 
     test "the box-refusal statuses each get their own name; an unnamed one does not" do

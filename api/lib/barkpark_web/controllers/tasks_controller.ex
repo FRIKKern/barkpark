@@ -1149,7 +1149,19 @@ defmodule BarkparkWeb.TasksController do
         # Fold over the documents the node phase ALREADY read (doc_lists is in
         # `types` order), instead of `corpus_edges/3` re-listing every type a
         # second time, and hand the fold its schema prefetch.
-        edge_opts = Keyword.put(opts, :schemas, schemas)
+        #
+        # `dangling: :skip` is the OPT-IN escape from `extract_edges/2`'s
+        # per-target existence query — ONE un-batched round-trip per reference
+        # value per document (~1,300 serial queries on the live corpus), held
+        # against a single checked-out pool connection long enough to hit the
+        # 15s DBConnection checkout ceiling and return a 500. This path NEVER
+        # reads the boolean: the `edges` mapping below keeps only
+        # from_id/to_id/kind/weight/plugin_source, and the phantom-node pass
+        # answers the same "does the target exist?" question in memory off
+        # `node_ids`. The flag is local to THIS call site — /v1/graph/dangling
+        # (Graph.dangling/1), EdgeProjector and corpus_edges/3 read through the
+        # unchanged `:resolve` default and keep resolving.
+        edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
 
         raw_edges =
           types

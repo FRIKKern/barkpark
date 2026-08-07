@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -1077,18 +1078,62 @@ type Site struct {
 // queued → building → pushing → live (or failed). `BuildLogURL` is opaque to
 // the control plane — `bp sites logs <site>` prints it as a best-effort
 // pointer at the builder's log surface.
+//
+// deploy-reliability W9: the control plane has always serialized the row's
+// CAUSE — failure_class, failure_reason, stage, trigger, content_rev — and this
+// struct decoded almost none of it, so the only cause-bearing keys on the wire
+// were dropped on the floor before any human surface could print them.
+//
+// The six cause/lifecycle fields below are POINTERS on purpose. A `string` zero
+// value cannot tell "the control plane did not send this key" apart from "the
+// control plane measured it as empty", and this epic exists because
+// deployment reporting kept presenting the first as the second. nil MUST render
+// as an explicit dash, never as a value.
 type Deployment struct {
-	ID            string `json:"id"`
-	SiteID        string `json:"site_id"`
-	Status        string `json:"status"`
-	GitRef        string `json:"git_ref"`
-	ArtifactURL   string `json:"artifact_url"`
-	ImageTag      string `json:"image_tag"`
-	BuildLogURL   string `json:"build_log_url"`
-	FailureReason string `json:"failure_reason"`
-	BecameLiveAt  string `json:"became_live_at"`
-	InsertedAt    string `json:"inserted_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID          string `json:"id"`
+	SiteID      string `json:"site_id"`
+	Status      string `json:"status"`
+	GitRef      string `json:"git_ref"`
+	ArtifactURL string `json:"artifact_url"`
+	ImageTag    string `json:"image_tag"`
+	BuildLogURL string `json:"build_log_url"`
+	InsertedAt  string `json:"inserted_at"`
+	UpdatedAt   string `json:"updated_at"`
+
+	// FailureClass is the control plane's NAMED cause, e.g. "BUILD_FAILED" or
+	// "BOX_AT_CAPACITY_DEFERRED" — the single most load-bearing key a human
+	// reading a failing site needs, and the one `bp sites deployments` printed
+	// nowhere before W9.
+	FailureClass *string `json:"failure_class"`
+	// FailureReason is the free-text detail behind FailureClass.
+	FailureReason *string `json:"failure_reason"`
+	// ContentRev is the content revision the build was cut from.
+	ContentRev *string `json:"content_rev"`
+	// Trigger is what asked for this deploy (push, manual, api, …).
+	Trigger *string `json:"trigger"`
+	// Stage is how far the row got before it stopped.
+	Stage *string `json:"stage"`
+	// BecameLiveAt is set only on rows that actually reached live.
+	BecameLiveAt *string `json:"became_live_at"`
+}
+
+// DeploymentQuery narrows GET /v1/sites/:id/deployments to one window. Zero
+// values mean "server default" — which is a page of 100, the reason the CLI
+// could never see past the newest hundred rows before W9.
+//
+//	Limit  — how many rows to ask for (omitted from the wire when <= 0).
+//	Before — an opaque cursor from a previous page's NextCursor.
+type DeploymentQuery struct {
+	Limit  int
+	Before string
+}
+
+// DeploymentPage is one window of a site's deployments plus the cursor that
+// reaches the window behind it. NextCursor is "" when the server did not send
+// one — i.e. this window is the whole tail.
+type DeploymentPage struct {
+	Deployments []Deployment
+	NextCursor  string
 }
 
 // SiteCreate is the body the CLI POSTs to /v1/sites. Pointer-ish optionality
@@ -1191,23 +1236,46 @@ func (c *Client) Deploy(ctx context.Context, siteID, gitRef, artifactURL string)
 	return out.Deployment, nil
 }
 
-// ListDeployments returns a site's deployments newest-first via
+// ListDeployments returns one window of a site's deployments, newest-first, via
 // GET /v1/sites/:id/deployments (Bearer).
-func (c *Client) ListDeployments(ctx context.Context, siteID string) ([]Deployment, error) {
-	status, body, err := c.do(ctx, "GET", "/v1/sites/"+esc(siteID)+"/deployments", true, nil)
+//
+// deploy-reliability W9: the call used to send no query string at all, so it
+// took whatever the server's default page was (100) and had no way to ask for
+// anything else. A caller that wanted a bigger sample, or the rows BEHIND the
+// newest hundred, silently got the same hundred — and any rate computed from
+// them was a rate over an unstated window. `q` names the window; the returned
+// NextCursor is how the caller walks past it.
+func (c *Client) ListDeployments(ctx context.Context, siteID string, q DeploymentQuery) (DeploymentPage, error) {
+	path := "/v1/sites/" + esc(siteID) + "/deployments"
+	vals := url.Values{}
+	if q.Limit > 0 {
+		vals.Set("limit", strconv.Itoa(q.Limit))
+	}
+	if q.Before != "" {
+		vals.Set("before", q.Before)
+	}
+	if len(vals) > 0 {
+		path += "?" + vals.Encode()
+	}
+	status, body, err := c.do(ctx, "GET", path, true, nil)
 	if err != nil {
-		return nil, err
+		return DeploymentPage{}, err
 	}
 	if !ok(status) {
-		return nil, cloudError(status, body)
+		return DeploymentPage{}, cloudError(status, body)
 	}
 	var out struct {
 		Deployments []Deployment `json:"deployments"`
+		NextCursor  *string      `json:"next_cursor"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("decode deployments response: %w", err)
+		return DeploymentPage{}, fmt.Errorf("decode deployments response: %w", err)
 	}
-	return out.Deployments, nil
+	page := DeploymentPage{Deployments: out.Deployments}
+	if out.NextCursor != nil {
+		page.NextCursor = *out.NextCursor
+	}
+	return page, nil
 }
 
 // SetEnv REPLACES the encrypted env blob via POST /v1/sites/:id/env (Bearer).
@@ -1754,6 +1822,169 @@ func (c *Client) ListSpawnSiteDeployments(ctx context.Context, siteID string, li
 		return SiteDeploymentPage{}, fmt.Errorf("decode deployments response: %w", err)
 	}
 	return page, nil
+}
+
+// DeployRate is one rate NODE from the fleet deploy census: a percentage that
+// can never travel without the denominator that produced it, and that REFUSES
+// to be a percentage below `min_sample` rather than reporting a number nobody
+// should act on (`Pct` nil, `Refused` true, `Reason` saying so in words).
+//
+// Pct is a POINTER on purpose: a refusing node sends JSON null, and a float64
+// would decode that as 0.0 — the exact comforting zero this reader exists to
+// stop. Basis is the s1 addition (the name of what the denominator counts); it
+// is empty against today's payload and a reader must survive that.
+type DeployRate struct {
+	Sample    int      `json:"sample"`
+	Pct       *float64 `json:"pct"`
+	Numerator int      `json:"numerator"`
+	MinSample int      `json:"min_sample"`
+	Refused   bool     `json:"refused"`
+	Reason    string   `json:"reason"`
+	Basis     string   `json:"basis"`
+}
+
+// DeployCensusClass is one failure/deferral/not-attempted class row: the machine
+// class, its human label, its count, and that count's share WITH the denominator
+// the share was taken against (class shares are denominated on `failed`,
+// deferred shares on `volume` — which is why the share carries its own sample).
+type DeployCensusClass struct {
+	Class string     `json:"class"`
+	Label string     `json:"label"`
+	Count int        `json:"count"`
+	Share DeployRate `json:"share"`
+}
+
+// DeployCensusSite is one site's slice of the window: its volume, its failures,
+// its deferrals, its own rate node and the class that hurt it most (nil when the
+// site had no failures at all — never an invented "none" class).
+type DeployCensusSite struct {
+	SiteID      string     `json:"site_id"`
+	Volume      int        `json:"volume"`
+	Failed      int        `json:"failed"`
+	Deferred    int        `json:"deferred"`
+	FailureRate DeployRate `json:"failure_rate"`
+	TopClass    *string    `json:"top_class"`
+}
+
+// DeployCensusWindow is the PINNED window the census was taken over, echoed back
+// by the control plane. There is no default window server-side (a floating one
+// compares two different populations), so this is always the window the caller
+// asked for — and a caller that prints a rate without printing this is quoting a
+// number with no population.
+type DeployCensusWindow struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// DeployCensus is GET /v1/operator/deploy-ledger/census — the cross-site deploy
+// ledger folded into counts per failure class, counts per site, and the failure
+// rate WITH its denominator.
+//
+// Live and TerminalFailureRate are the dr-w8-s1 additions (the second D34
+// convention: failures over TERMINAL rows rather than over attempted rows). Both
+// are pointers so a reader can tell "the control plane did not send this" from
+// "the control plane sent zero" — today's deployed payload carries neither.
+//
+// Raw is the envelope bytes verbatim so `-o json` re-emits the contract instead
+// of a second, drifting definition of it.
+type DeployCensus struct {
+	Window              DeployCensusWindow  `json:"window"`
+	Volume              int                 `json:"volume"`
+	Failed              int                 `json:"failed"`
+	Live                *int                `json:"live"`
+	FailureRate         DeployRate          `json:"failure_rate"`
+	TerminalFailureRate *DeployRate         `json:"terminal_failure_rate"`
+	Classes             []DeployCensusClass `json:"classes"`
+	Deferred            []DeployCensusClass `json:"deferred"`
+	NotAttempted        []DeployCensusClass `json:"not_attempted"`
+	Sites               []DeployCensusSite  `json:"sites"`
+	MinSample           int                 `json:"min_sample"`
+	Raw                 []byte              `json:"-"`
+}
+
+// DeployCensusError is a census the control plane REFUSED to answer, with the
+// status and the refusal's own evidence kept intact — because the whole point of
+// this reader is that a human can tell "the fleet is healthy" from "I could not
+// look". Three shapes reach it:
+//
+//   - 401 {"error":"unauthorized"} — no session token, or a dead one.
+//   - 403 {"error":"forbidden","scope":"platform","required":"platform_operator"} —
+//     authenticated, not on the operator allowlist. It names the AUTHORITY but
+//     structurally CANNOT say whether the allowlist is EMPTY: the gate's single
+//     cond arm serves both "nobody is configured" and "you are not on the list".
+//   - 422 {"error":"invalid_window","detail":"…"} — the window did not parse, or
+//     was not pinned at all.
+//
+// A caller must branch on this error BEFORE it reads any count, since the refusal
+// body and the census body share zero keys and a nil-coalescing read of the
+// refusal renders a fleet with zero failures.
+type DeployCensusError struct {
+	HTTPStatus int
+	Code       string
+	Detail     string
+	Scope      string
+	Required   string
+	Raw        []byte
+}
+
+func (e *DeployCensusError) Error() string {
+	msg := e.Code
+	if msg == "" {
+		msg = http.StatusText(e.HTTPStatus)
+	}
+	if e.Detail != "" {
+		msg += ": " + e.Detail
+	}
+	return msg
+}
+
+// FleetDeployCensus reads the cross-site deploy census over a PINNED window via
+// GET /v1/operator/deploy-ledger/census?from=&to= (Bearer — the same user
+// session token the platform-operator gate resolves).
+//
+// from/to are REQUIRED by the route and are sent as RFC3339 UTC instants; the
+// caller owns the window and there is no client-side default here either, so
+// nothing can quote a rate over a window nobody chose. Every non-2xx becomes a
+// *DeployCensusError carrying the status and the refusal's evidence — never a
+// zero-valued census.
+func (c *Client) FleetDeployCensus(ctx context.Context, from, to time.Time) (DeployCensus, error) {
+	q := url.Values{}
+	q.Set("from", from.UTC().Format(time.RFC3339))
+	q.Set("to", to.UTC().Format(time.RFC3339))
+	status, body, err := c.do(ctx, "GET", "/v1/operator/deploy-ledger/census?"+q.Encode(), true, nil)
+	if err != nil {
+		return DeployCensus{}, err
+	}
+	if !ok(status) {
+		return DeployCensus{}, deployCensusError(status, body)
+	}
+	var census DeployCensus
+	if err := json.Unmarshal(body, &census); err != nil {
+		return DeployCensus{}, fmt.Errorf("decode deploy census response: %w", err)
+	}
+	census.Raw = body
+	return census, nil
+}
+
+// deployCensusError decodes a refusal envelope into the typed error. A body that
+// does not decode still yields a typed error carrying the STATUS, so the reader
+// keeps its "I could not look" branch even against a gateway HTML page.
+func deployCensusError(status int, body []byte) error {
+	var env struct {
+		Error    string `json:"error"`
+		Detail   string `json:"detail"`
+		Scope    string `json:"scope"`
+		Required string `json:"required"`
+	}
+	_ = json.Unmarshal(body, &env)
+	return &DeployCensusError{
+		HTTPStatus: status,
+		Code:       strings.TrimSpace(env.Error),
+		Detail:     strings.TrimSpace(env.Detail),
+		Scope:      strings.TrimSpace(env.Scope),
+		Required:   strings.TrimSpace(env.Required),
+		Raw:        body,
+	}
 }
 
 // RollbackSpawnSite flips a spawned site back to its previous good build via

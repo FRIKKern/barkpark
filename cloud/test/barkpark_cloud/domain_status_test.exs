@@ -923,6 +923,30 @@ defmodule BarkparkCloud.DomainStatusTest do
       assert custom =~ "custom domain"
     end
 
+    # THE GUARD THAT CAN LOSE (wave 40 S6). `points_here` used to be
+    # `(_kind, "points_here")` — one sentence asserting "It's pointed
+    # automatically when the instance is provisioned", which is TRUE of the
+    # platform FQDN and FALSE of a custom host, where router.ex's own attach
+    # path says "external hosts: box wiring only — the customer owns DNS".
+    # Every SITE domain is "custom", so a site owner was told their DNS was
+    # handled for them and that support was the recourse.
+    test "platform vs custom pointing stories differ, and only platform claims it is automatic" do
+      platform = FailureCopy.domain_stage_remediation("platform", "points_here")
+      custom = FailureCopy.domain_stage_remediation("custom", "points_here")
+
+      assert platform != custom
+
+      # The platform FQDN's record IS ours to set.
+      assert platform =~ ~r/platform sets this record/i
+
+      # A custom host's is NOT — and the copy must name the record the owner
+      # actually controls rather than sending them to support.
+      refute custom =~ ~r/automatic/i
+      refute custom =~ ~r/contact support/i
+      assert custom =~ ~r/\bA record\b/
+      assert custom =~ ~r/stays with you/i
+    end
+
     test "every stage (and the terminal default) yields non-empty copy" do
       for kind <- ~w(platform custom),
           stage <- ~w(dns_found points_here tls serving anything_new) do
