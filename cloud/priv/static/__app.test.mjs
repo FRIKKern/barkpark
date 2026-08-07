@@ -13196,6 +13196,24 @@ test("cch-w48-s2: siteDetailHtml's authority input FAILS CLOSED — an unknown a
   assert.doesNotMatch(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "admin"), /site-github/);
 });
 
+test("cch-w48-s2 (review): a /v1/me that lands LATE re-decides the site screen — the fence must not strand a real admin", () => {
+  // The band is read ONCE, inline in loadSite, at paint time. A deep link into
+  // #site/:id paints before /v1/me answers, so instanceAdminAuthority() is
+  // "unknown" and an actual ADMIN takes the closed arm — and nothing else on
+  // this view re-reads it (no SSE tick reaches #view-site's badges cluster).
+  // That is the D521 stranding shape on a new surface, so the success arm of
+  // loadMe carries the same re-decide seam the six surfaces before it carry.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const success = appRegion(src, "    return api(\"GET\", \"/v1/me\").then(function (r) {", "      } else {");
+  assert.ok(success.includes('if (currentView() === "site" && currentSiteId) loadSite(currentSiteId'),
+    "a late /v1/me must re-decide #site-github, or the fence this slice added strands the admin it was never about");
+  // …and it is the SUCCESS arm that needs it: on the failed arm the band stays
+  // "unknown", so a repaint would be byte-identical and only re-issue reads.
+  const failed = appRegion(src, "        absorbMe(r); // records {status, data, transport}", "\n      }\n    });");
+  assert.ok(!failed.includes('loadSite(currentSiteId'),
+    "the failed arm re-decides nothing — repainting an unchanged band is a wasted read, not a fix");
+});
+
 test("cch-w48-s2: siteThemeFailureCopy — no raw slug, no raw `detail`, and no manufactured status sentence", () => {
   // THE MEASURED LEAK: the handler read `r.data.detail` raw, so a constraint
   // violation on the theme FK reached a human's toast verbatim.

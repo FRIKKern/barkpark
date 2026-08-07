@@ -14970,6 +14970,16 @@
         // closed, then re-decide the moment the answer arrives. loadArchives
         // no-ops when its mount is absent, so the guard is belt-and-braces.
         if (currentView() === "fleet") loadArchives();
+        // cch-w48-s2 (review) — THE SEAM THIS SLICE'S OWN FENCE CREATED. The
+        // site screen now decides #site-github from instanceAdminAuthority()
+        // ONCE, at paint time in loadSite. A deep link into #site/:id paints
+        // before /v1/me answers, so an actual ADMIN takes the closed arm and
+        // keeps it for the rest of the page life — nothing else re-reads the
+        // band and no SSE tick reaches this view. This is the D521 stranding
+        // shape reproduced on a new surface, and the fix is the same one the
+        // six seams above already use. quiet:true because the rail is already
+        // painted; this is a re-decide, not a first load.
+        if (currentView() === "site" && currentSiteId) loadSite(currentSiteId, { quiet: true });
         // cch-w46-s3 — THE SIXTH TWIN, and the one nobody had filed: a /v1/me
         // that succeeds LATE strands the instance rail exactly as a failed one
         // does. See repaintLifecycleAuthority for why this is not
