@@ -200,11 +200,27 @@
     // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
-    // GR36: billing writes are owner-only (require_primary_team_owner). A residual
-    // 403 on the portal/cancel POSTs is an authority answer, NOT a transient
-    // failure — this honest copy keeps it from reading as "try again in a moment"
-    // (absorbs gr-backlog-portal-retry-sentence).
-    forbidden: "Only the team owner can manage billing.",
+    // cch-w40-s1 (charter D447) — THE DEFAULT NOW STATES ONLY WHAT A BARE 403
+    // PROVES. This key used to read "Only the team owner can manage billing."
+    // (GR36, written when the billing writes were the only refusals that reached
+    // it). Three waves of fences moved the ground under it: the billing gate
+    // itself (Auth.require_primary_team_owner) sends `required: "owner"`, so
+    // forbiddenEvidenceCopy wins there and this string is now STRUCTURALLY
+    // UNREACHABLE from every billing screen — it could only ever render where it
+    // was FALSE. Measured on origin/main: friendly({error:"forbidden",
+    // reason:"outranked"}) — a plain team ADMIN clicking Remove on a peer admin —
+    // returned the billing sentence (D448).
+    //
+    // THE KEY IS REPLACED, NEVER REMOVED (D447(a)). Deleting it puts the raw slug
+    // "forbidden" in a toast and turns a permanent authority determination into
+    // "Please try again." inside a destroy-confirm modal — strictly worse.
+    //
+    // The sentence names NO role and offers NO remedy, because a bare 403 proves
+    // neither: it is the answer for an un-upgraded route, an edge proxy, or an
+    // arm the server deliberately left bare (router.ex:4394's cross-tenant env-var
+    // refusal, where the caller IS an admin — any role sentence there is a new
+    // lie). GR36's own property survives: it still never reads as transient.
+    forbidden: "You don't have permission to do that, and the refusal didn't say which role would allow it.",
     // cch-w30-s5 — the CRASH slugs the router's Plug.ErrorHandler now sends.
     // These MUST be registered here: friendly()'s precedence is curated ERRORS →
     // details → the caller's fallback, so an unregistered slug silently loses to
@@ -228,10 +244,33 @@
     owner: "You need the owner role on this team — only the team owner can grant it.",
     platform_operator: "That's limited to platform operators — no team role grants it."
   };
-  // The one non-role arm: gate_role() answers a user who holds NO team with
-  // reason "no_team" and no `required`, because no role grant could repair it.
+  // THE NON-ROLE ARMS — refusals whose cause is real but whose authority label
+  // would be a lie. Each is MAPPED through a written sentence, NEVER echoed: the
+  // payload carries a slug ("outranked"), and a human must never read one.
+  //
+  //   no_team                    — gate_role() (auth.ex:496) answers a user who
+  //                                holds NO team, with no `required`, because no
+  //                                role grant could repair it.
+  //   outranked                  — cch-w40-s1 (charter D419(c), D448). router.ex
+  //   cannot_grant_higher_role     :4958 (PATCH member role) and :4997 (DELETE
+  //                                member) send these with NO `required`, on
+  //                                purpose: the caller is ALREADY inside
+  //                                with_team_role(conn, "admin"), so any static
+  //                                authority label would be a fresh lie — the SAME
+  //                                admin refused on a peer admin succeeds on a
+  //                                plain member. The refusal is RANK-RELATIVE, so
+  //                                the copy states the relation and stops.
+  //
+  // NEITHER SENTENCE INVENTS A REMEDY. `outranked` is reachable by an OWNER acting
+  // on a peer owner (TeamMembership.outranks?/2 is strict `>`), where no higher
+  // role exists to appeal to; "ask an owner" would be the same confidently-wrong
+  // remedy this epic keeps deleting. Until these arms landed, both slugs fell
+  // through forbiddenEvidenceCopy to the curated `forbidden` entry — which is how
+  // an admin on the members screen came to be told about billing (D448).
   var FORBIDDEN_REASON_COPY = {
-    no_team: "Your account isn't on a team yet, so no role can allow this — ask a team owner to invite you."
+    no_team: "Your account isn't on a team yet, so no role can allow this — ask a team owner to invite you.",
+    outranked: "You can only act on members whose role is below your own, and this member's is not.",
+    cannot_grant_higher_role: "You can't grant a role above your own — that has to come from someone who already holds it on this team."
   };
   // A slug the server invented that we have no sentence for is still renderable
   // as evidence, but ONLY if it looks like a label (an unbounded echo of a
@@ -270,14 +309,20 @@
   // slug beat the fallback, so a per-call fallback never rendered.)
   //
   // cch-w35-s4 — ONE fenced exception, ahead of the curated map: a `forbidden`
-  // that CARRIES SERVER EVIDENCE renders that evidence. ERRORS.forbidden is copy
-  // for the five owner-gated billing writes (GR36), and it used to win at all 55
-  // friendly() sites — so a member refused by the admin-gated /v1/audit read
-  // "Only the team owner can manage billing." on the Activity screen: wrong
-  // subject, wrong remedy, and confident. The fence is narrow on purpose. A bare
-  // `{error: "forbidden"}` (which is all the billing gate's own refusal renders
-  // through, and all any un-upgraded route sends) still resolves to ERRORS.forbidden
-  // byte-identically, and every other slug never reaches this branch at all.
+  // that CARRIES SERVER EVIDENCE renders that evidence. ERRORS.forbidden used to
+  // be billing copy and won at all 55 friendly() sites — so a member refused by
+  // the admin-gated /v1/audit read "Only the team owner can manage billing." on
+  // the Activity screen: wrong subject, wrong remedy, and confident. The fence is
+  // narrow on purpose: every other slug never reaches this branch at all.
+  //
+  // cch-w40-s1 — THE STALE HALF OF THIS COMMENT, CORRECTED. It used to say a bare
+  // `{error: "forbidden"}` "is all the billing gate's own refusal renders through".
+  // That is FALSE on main and was false when it was written: Auth.require_primary_
+  // team_owner (auth.ex:459) sends `required: "owner", scope: "team"`, so all three
+  // billing routes (router.ex:5202/5243/5278) take the EVIDENCE arm and the curated
+  // entry is unreachable from every billing screen. A bare forbidden is what an
+  // un-upgraded route, an edge proxy, or a deliberately-bare arm sends — and it now
+  // resolves to a generic that claims no role and no remedy (D447).
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
@@ -364,12 +409,15 @@
 
   // cch-w34-s1 — THE COPY FOR A READ THAT FAILED, and why it is not bare
   // friendly()/faultCopy(). The shared ERRORS map keys the GENERIC `forbidden`
-  // slug to "Only the team owner can manage billing." (grep -n 'forbidden:' in
-  // the ERRORS object above friendly()) — copy written for
-  // the billing writes, which is the only place that slug used to surface. But
-  // friendly()'s precedence is curated ERRORS → details → the caller's fallback,
-  // so a 403 on a READ (the sites list, the token list) renders a sentence about
-  // a screen the person is not even on, and no caller-supplied fallback can win.
+  // slug to a curated sentence (grep -n 'forbidden:' in the ERRORS object above
+  // friendly()) — when this fence was written that sentence was "Only the team
+  // owner can manage billing.", copy for the billing writes, the only place the
+  // slug used to surface. (cch-w40-s1/D447 has since inverted it to a generic
+  // that names no role; the STRUCTURE below is unchanged, and is still what lets
+  // a caller say WHICH list was refused.) friendly()'s precedence is curated
+  // ERRORS → details → the caller's fallback, so a 403 on a READ (the sites
+  // list, the token list) renders a sentence about a screen the person is not
+  // even on, and no caller-supplied fallback can win.
   // An authority answer on a read gets a READ-SCOPED sentence; every other
   // status keeps faultCopy's honest classification (5xx = our fault, status 0 =
   // the named transport class, 4xx = the caller's designed fallback).
@@ -3164,7 +3212,24 @@
 
   // The honest degrade when the deliveries route is absent (older control plane) or
   // errors — the log is ABOUT the send record, not served by it, so it never spins.
-  function notifDeliveriesErrorHtml() {
+  //
+  // cch-w40-s1 (charter D419(d)) — A 403 IS A DETERMINATION, NOT A HICCUP. This was
+  // arity-0 and status-BLIND, so it told everyone "it may be momentarily unavailable.
+  // Try again shortly." — including the two people GET /v1/notifications/deliveries
+  // refuses permanently (router.ex:4704, a user on no team; :4725, a non-admin with
+  // no self-scopable address). Retrying does nothing for either, and the sentence
+  // asserted transience the console had never read. It now takes the status and the
+  // body it already had in scope at the call site, and the 403 arm consults the
+  // evidence seam rather than inventing an authority — both emitters are deliberately
+  // BARE (charter D396(5): admin is sufficient but NOT necessary here, so
+  // `required: "admin"` would misdescribe the gate), so the fallback names the access
+  // fact and no role. Every other status keeps the original line byte-identically.
+  function notifDeliveriesErrorHtml(status, data) {
+    if (status === 403) {
+      return '<div class="wh-del-empty dim">' +
+        esc(forbiddenEvidenceCopy(data) || "You don't have access to this team's delivery log.") +
+        "</div>";
+    }
     return '<div class="wh-del-empty dim">Couldn\'t load the delivery log &mdash; it may be momentarily unavailable. Try again shortly.</div>';
   }
 
@@ -3600,7 +3665,9 @@
     api("GET", notifDeliveriesQuery(null)).then(function (r) {
       if (!(r.ok && r.data && Array.isArray(r.data.deliveries))) {
         notifDeliveryRows = null;
-        box.innerHTML = notifDeliveriesErrorHtml();
+        // cch-w40-s1: the status and body were always here — the copy just never
+        // asked for them, so a permanent 403 read as a momentary blip.
+        box.innerHTML = notifDeliveriesErrorHtml(r.status, r.data);
         toggleNotifDeliveryMore(false);
         return;
       }
@@ -18407,7 +18474,20 @@
     if (status === 409 && data && data.error === "write_once") {
       return "A write-once variable with that key already exists. Delete it first, then create it again.";
     }
-    if (status === 403) return "Only team owners and admins can change environment variables.";
+    // cch-w40-s1 — THE 403 CONSULTS WHAT THE SERVER PROVED. This arm used to
+    // return "Only team owners and admins can change environment variables." and
+    // it returned BEFORE faultCopy/friendly, structurally shadowing
+    // forbiddenEvidenceCopy — so the console's own authored guess outranked the
+    // server's evidence on every 403 this seam sees. TWO of them reach here and
+    // the sentence was wrong on both counts:
+    //   • router.ex:4355/4417 send `required: "admin", scope: "team"`. The old
+    //     sentence was roughly true and threw the evidence away anyway.
+    //   • router.ex:4394 is the CROSS-TENANT arm, left bare on purpose (D396(5)):
+    //     an admin of team A writing team B's barkpark_id. The caller IS an
+    //     owner-or-admin, so the old sentence was FLATLY FALSE and unfixable by
+    //     the person reading it — no role grant repairs a wrong-team id.
+    // Evidence first, then the curated generic, which now claims no role at all.
+    if (status === 403) return forbiddenEvidenceCopy(data) || ERRORS.forbidden;
     if (status === 422 && data && data.error === "key_required") return "Enter a key.";
     return faultCopy(status, data, "Check the values and try again.");
   }
