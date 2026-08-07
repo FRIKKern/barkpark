@@ -2142,6 +2142,81 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-07 — wave 43 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd; 3 round-2 slices deferred by the sequenced-rounds law — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The preview corpus mints the account the server mints (THE CROWN) | `cch-w43-s1-corpus-mints-the-account-the-server-mints` | `…the-preview-corpus-mints-the-account-the-0-r` | [#10199](https://github.com/FRIKKern/barkpark/pull/10199) | **two fixes.** The census's `walkMap` located each segment's value with `body.indexOf(seg)` — the FIRST textual occurrence, so two identically-indented segments would have walked the wrong nested map and reported a confident wrong key set; `topLevelSplit` now carries exact offsets. And `membersContext`'s new comment claimed "both of those bands require a non-nil `ta`", which is false (`refuse` is exactly what a nil `ta` returns) — corrected to the real reason. Both floor deletions independently mutation-proved (`not ok 931`, `not ok 932`), and the census's nested arm re-derived on a router copy with `user.locale` added → `FAIL(1)` naming it |
+| Owner-only billing remedies stop being prescribed to members | `cch-w42-s6-owner-only-remedies-stop-being-prescribed-to-members` | `…the-two-owner-only-billing-remedies-stop-1-r` | [#10200](https://github.com/FRIKKern/barkpark/pull/10200) | **one fix.** `render.ex`'s `trial_window` comment still said "TrialExpiryWorker supplies both a `days` integer and a first-party `detail` sentence" — the worker now sends `%{days:, name:}` only. Code correct, its account of the wire stale. Mutation independently re-derived: `owner?(_) -> true` reds 7 of 10. Full cloud suite 3022/0 + format clean on the `-r` head |
+| The binding census names the authority below the router | `cch-w43-s3-binding-census-names-the-authority-below-the-router` | `…the-binding-census-stops-asserting-a-fal-2` | [#10201](https://github.com/FRIKKern/barkpark/pull/10201) | none — correct as built. All four refusal modes independently re-derived at **rc 2** (renamed `Authz` target, renamed `Accounts` target, unmapped module `Ghost`, unreadable source), measured without a pipe so the rc is the census's own; and the router call chain re-derived by grep (`update_member_role_as` :4960, `can_grant?` :4995, `remove_member_as` :5026) rather than re-read from the builder |
+
+**WHAT LANDED.** The wave's centre of gravity is a lie about the *gate itself*, not about the
+console. The Console gate is a required context on a protected `main`, and everything it certified
+it certified against ONE fixture producer — `me()` in `__preview__/scenarios.mjs` — which emitted
+**four of the six** top-level keys `GET /v1/me` sends. No `teams`, no `team_authority`. So all 93
+logged-in scenarios took app.js's pre-wave-42 compatibility floors, and the `grant` authority band
+had **never been painted by any instrument in this repo**. Wave 42 read the server's authority;
+wave 43 proved the corpus had never once served it. Fixture widening, both floor deletions
+(`canManageOnboarding` → `return teamAuthorityState() === "grant";`, `membersContext`'s `|| me.role`
+gone) and the second producer in `__app.test.mjs` ride in ONE commit, because unpaired each is
+inert — the fixture alone leaves smoke byte-identical, and the strict app.js against the unpatched
+fixture reds `members-populated` and `env-populated` by name.
+
+The instrument that keeps it honest is `__me_envelope_census.mjs`, wired as one `run:` step in
+`console-harness.yml`'s `console-unit` job. It is a **runtime** census by design (D480): it calls the
+exported `route(name, "GET", "/v1/me")` over every scenario and diffs the served key-path set,
+nesting included, against the paths brace-walked out of the route's own response map. Runtime is
+self-proving — it reports `user.platform_operator` as served by **5/93** scenarios, which a source
+scan of `me()` would have mis-called a hole. No count literal on either side; the gate is the
+symmetric set difference, so drop-one-add-one cannot hold it green.
+
+On the control-plane side, the two billing alerts stopped prescribing a remedy only the OWNER can
+perform to every member — and **the audience is untouched**, which is the whole judgment. The
+recipient's role rides inside the existing 4th argument of `EventEmail.build/4`, so the merged
+event-vocabulary census keeps driving the same public function at the same arity. The structural
+trap was paid: `trial_expiring`'s imperative moved OUT of `TrialExpiryWorker.notify/3`'s `:detail` —
+a sentence authored per TEAM, before any recipient existed — into two recipient-aware render arms
+that compose the window from the `:days` integer. A slice that only touched `build/4` would have
+fixed past-due and left trial-expiry lying. The split is OWNER vs NOT-OWNER, not this epic's usual
+`owner|admin` band, because the gate is `Authz.team_owner?`; an admin gets the non-owner copy and
+that is asserted explicitly. And the third slice fixed a lie *inside a guard*: both rank-relative
+member writes were pinned `context_fn: null`, asserting that `with_team_role(conn, "admin")` is
+their whole authority when the real decision lives in `Accounts.update_member_role_as/4` +
+`Authz.can_grant?/3` and `Accounts.remove_member_as/3`. Check (2e) gained a module→file map, and an
+UNMAPPED module is a failure rather than a skip, so naming a random module cannot buy silence.
+
+**WHAT STALLED.** Nothing. All three round-1 slices built, gated, reviewed and PR'd. Three round-2
+slices were deferred by the sequenced-rounds law, not by failure: `cch-w42-s3` (members row reads
+the TARGET's rank, two predicates), `cch-w41-bl` (the last two free authority literals), and
+`cch-w43-s6` (the switcher's first rendered proof) — all three wait on s1's widened envelope.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+
+1. **DISPATCH ORDER IS NOT OPTIONAL.** Merge #10199 (s1) first; #10200 and #10201 are file-disjoint
+   from it and from each other and may merge in any order. Then `cch-w42-s3`, then `cch-w41-bl`
+   (which additionally needs s3's `memberRowHtml` landed), and `cch-w43-s6` any time after s1.
+   Converting the authority literals WITHOUT s1's fixture reds smoke with SEVEN named scenarios.
+2. **THE STALE ARM IS NOW REACHABLE AND LOAD-BEARING.** Serving `team_authority` activates
+   `teamAuthorityState`'s `stale` branch across the whole corpus for the first time. It stays green
+   only because both sides of the pin comparison are `null`. D489 holds absolutely: **no scenario
+   may seed `localStorage["bp.active-team"]`** — one seed flips every scenario to `stale`,
+   `membersContext` returns `null`, and the corpus reds en masse.
+3. **THE CORPUS NOW RENDERS A TEAM ROW.** `renderTeamMenu` no longer paints "No teams yet" for
+   logged-in scenarios. PR #10005 is rewriting that function against a corpus whose team menu now
+   has content — expect an honest merge conflict or a red, not silence. One team was chosen
+   deliberately (the server always includes the current team); two teams is a defensible
+   alternative that no fixture asks for yet.
+4. **THE CENSUS'S KNOWN BLIND SPOT, filed not hidden**
+   (`cch-w43-bl-me-census-onboarding-subtree`): the server side derives 22 key paths, the corpus
+   serves 29, and the 7-path gap is the entire `onboarding` subtree — `router.ex` builds it with
+   `onboarding_json(...)`, a call, so the walker marks the node OPAQUE and compares nothing beneath
+   it in either direction. The INVENTED arm is blind inside `onboarding`. Fix: resolve
+   `onboarding_json/1` in the same file and walk it.
+5. **A LEDGER MECHANIC WORTH REMEMBERING**, reported by a builder and re-observed by the reviewer:
+   `bp task pulse` bumps the claim epoch, and the CLI's exit text on a fenced stamp still contains
+   the substring a naive grep looks for. A printed success is not persistence — read the criteria
+   back. This is "bp writes silently don't land" in a new shape.
+
 ### 2026-08-07 — wave 42 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd; 2 round-2 slices deferred by the sequenced-rounds law — grade A−)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
