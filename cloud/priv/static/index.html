@@ -377,12 +377,18 @@
           <!-- gr-p4 G-02: the connected roster (member-readable) + the inline
                hybrid connect card (admin-only, verify+save in a .set-save-row).
                loadProviders() paints both; a member sees the roster without any
-               Disconnect… affordance and no connect card at all. -->
+               Disconnect… affordance and no connect card at all. This sentence
+               speaks for loadProviders() ONLY — the GitHub card below is a
+               separate mount with its own authority arm (cch-w48-s3). -->
           <div id="provider-roster" aria-live="polite"></div>
           <div id="provider-connect"></div>
 
           <!-- gh-2: GitHub App connection card. Renders connected / connect /
-               not-configured from GET /v1/github/installation. -->
+               not-configured from GET /v1/github/installation.
+               cch-w48-s3 — AUTHORITY: both write affordances are team-admin-only
+               on the server, so githubCardHtml(g, providerCanWrite()) OMITS the
+               Disconnect button and the Connect anchor for a member (never a
+               disabled ghost); the read — state, account, badge — is unchanged. -->
           <div id="github-card" aria-live="polite"></div>
 
           <!-- gr-p4 G-03: the honest capability matrix (member-readable). -->
