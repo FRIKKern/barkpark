@@ -3134,3 +3134,257 @@ required-check spec.
 Coverage: every survey and verify agent reported; there is no coverage deficit this wave.
 
 Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
+
+## Wave 11 — the vital is a CLOCK, and the clock has never been started
+
+- **D161 — TIME TO WEB IS THE VITAL. `content_rev` CANNOT KEY IT. D142 IS AMENDED FOR LATENCY AND RETAINED
+  VERBATIM FOR THE RATE.** Ten waves measured what fraction of ATTEMPT ROWS settle `failed`. That is a
+  measure of box waste; the customer's question is a clock. Two independent verifiers ran BOTH keyings on ONE
+  pinned 24 h window (`[2026-08-06 06:00Z, 2026-08-07 06:00Z)`, cloud-db-1): D142's run-keyed journey reads
+  **p50 0.0 s / p95 399.1 s / max 1,594.0 s**; the revision-keyed census reads **p50 264.7 s / p95 10,422.9 s
+  / max 22,637.6 s**. The 26x is not window noise and the mechanism is named, not argued: under D142 a
+  `failed` row is TERMINAL and therefore CLOSES a run, so a string of consecutive failures becomes a string
+  of SINGLETON runs of identically 0.0 s — **393 of 647 live journeys (60.7 %) are singletons, which is why
+  the run-keyed p50 is exactly 0.0 s.** The decisive case: site `d8e9c2c7`, 06:00–12:20 on 08-06, is ONE
+  22,638 s (6 h 17 m) revision wait and EIGHTY-TWO D142 runs — 80 singleton `failed` runs at 0.0 s.
+  **D142's metric reports 0.0 s for a 6 h 17 m outage**, and its ceiling across the entire 24 h window
+  (1,594 s) sits **14.2x below** the single worst wait it is supposed to describe. Run-keying is structurally
+  incapable of printing the number this epic exists to expose. D142's refusal is nonetheless scoped to a
+  RATE — its own backlog row says "an abandonment rate built on `content_rev` has three measured defects",
+  and defect (a) is `term_rev <> head_rev` direction-readability, which a latency never performs. **RULED:
+  "segment by RUN, never by rev group" continues to govern the abandoned rate and attempt-cluster reporting
+  unchanged; it does NOT govern a latency.** But the census does not therefore get to key on `content_rev`
+  either — see D162.
+
+- **D162 — `content_rev` IS NOT A REVISION, AND 100 % OF THE INFLATION REVISION-KEYING PRODUCES IS ITS OWN
+  COLLAPSE ARTEFACT. THE CROWN IS THAT THE CONTROL PLANE NEVER RECORDS THE PUBLISH INSTANT.** `content_rev`
+  is `binary_part(sha256(json([doc_type, published_count, published_events])), 0, 12)` probed FROM THE BOX at
+  enqueue time (`sites/deploy.ex:484`). `published_events/2` filters a **dataset-wide last-50 activity
+  window** down to one `doc_type` — AFTER truncation — so other types' churn EVICTS the bound type out of
+  the window and moves the hash with zero publishes of that type. The file's own docstring (`deploy.ex:481-483`,
+  "a draft edit or another type's churn cannot move it") is FALSE for the events half. Measured, all four ways:
+  (a) all 13 sites share `(default, default, production)`, and the live last-50 window is **48 `task` events
+  and 2 `paper`** — eleven production websites derive their entire revision from ONE event, and one of the
+  two papers is a draft the projection also drops; (b) `task` churn is 148.8 ev/hr against `paper` 9.1 (16:1),
+  so the 50-slot window holds **≈19 minutes** of history; (c) DEMONSTRATED — around a real publish at
+  03:32:59Z the projection went 1 event → **EMPTY** across 20 minutes with **zero paper publishes in between**;
+  (d) **189 distinct `content_rev` in 24 h against 142 published non-draft paper events**, so ≥46 revs (24 %)
+  are eviction artefacts no publish accounts for. The key is also not injective: **1,474 of 3,106 (47.5 %)
+  `(site, content_rev)` groups repeat**, rev `216e1851b7fb` covering ~345 rows across 2 h 07 m on five sites
+  simultaneously, max group span **29.2 h**. And the split that settles it — singleton rev groups read
+  **p50 108 s / p95 233 s**, statistically indistinguishable from the per-attempt distribution
+  (p50 104 s / p95 225 s), while collapsed groups read p50 152 s / p95 693 s. A second verifier reached the
+  same place from the other side: **delivered-as-self p50 is 127 s (n=977) against 8,200 s once supersessions
+  are credited (n=3,121)**. The 76x gap the direction named is manufactured by the credit rule and the
+  collapse, not by content waiting.
+  **The real wait was measured, once, by the only method that can see it — a cross-host join of guerrilla's
+  `mutation_events` to cloud-db-1's `deployments`, 144 paper publishes × the 5 webhook-bound sites = 720
+  pairs, ZERO censored: publish→web W24 p50 352 s / p95 11,752 s, W7 p50 32,184 s (8 h 56 m) / p95 493,029 s.**
+  Against the row-keyed clock (`inserted_at → became_live_at`, W24 p50 74 s / W7 p50 108 s) that is an
+  under-statement of **4.8x at 24 h and 298x at 7 d**, and the strict rule (first build STARTED after the
+  publish) reproduces the same order — so it is not a successor-rule artefact. **RULED: every latency this
+  epic has ever published starts when the CONTROL PLANE ENQUEUED an attempt, not when a human pressed
+  publish, and the gap is floored by construction** — `AutoDeployWorker.@schedule_in_default` is 60 s (D44),
+  and the measured enqueue lag is p50 61 s / p95 692 s / max 1,550 s. The receiver at
+  `web/router.ex:7139-7173` verifies the HMAC, answers 202, and its ONLY act is
+  `Sites.AutoDeployWorker.enqueue(site.id)` — **no row, no timestamp, nothing.** Worse, `Deploy.enqueue/6`'s
+  `recover_conflict/3` returns `{:duplicate, existing}` and mints NO ROW at all, so **26–35 % of paper
+  publishes leave no attempt record anywhere** and are invisible in both numerator and denominator of every
+  instrument this epic has built. **THE WAVE-11 CROWN IS THEREFORE NOT A CENSUS — IT IS STARTING THE CLOCK.**
+  Until the control plane records the publish instant, a truthful time-to-web is not a query anyone can
+  write, and any number that claims to be one is an under-estimate of unknown size.
+
+- **D163 — "ZERO STRANDED" IS VACUOUS, AND CENSORING IS AN IDENTIFIABILITY PROBLEM, NOT A WIDTH ONE.**
+  Under the generous successor rule the direction used, `stranded` is **0 at every window width from 1 h to
+  168 h** (3,118 revisions at the widest) — that is a property of the RULE, not of the fleet: any site that
+  ever deploys again retroactively delivers every earlier revision. Printing it as a fleet-health claim is a
+  guard that cannot lose. It is also a function of WHEN YOU LOOK: the same pinned window returned **3 → 2 → 0
+  in five minutes**, both survivors 1 m 51 s old. Any published stranded count needs an as-of timestamp and a
+  `STILL WAITING ≥ X` representation, never a bare 0. The estimator hazard is sharper and was mis-framed as
+  window width: the FLOORED estimator swings **829x** with width (p50 133 s @1 h → 110,251 s @168 h) while the
+  DROPPED estimator sits FLAT at 94–150 s at every width — structurally incapable of ever showing delay. But
+  narrowing the window is not the fix: **p95 already diverges 11.0x at the NARROWEST width.** The predicate
+  that actually discriminates is **`censored_fraction > 1 − q`**, which agreed **14/14** with the empirical
+  test of whether the row AT the quantile position is itself censored. `@min_sample 200` does not catch it —
+  the 6 h window passes at n=217 with **36.9 % censored**. **RULED: the estimator refuses on identifiability,
+  floors rather than drops, prints its window WIDTH beside the number, and reports NULL-key rows as an
+  explicit `unmetered` cohort rather than dropping them** (66 such rows in 24 h; and `jarl-website` has 55
+  rows, 23 live deliveries and **zero** non-NULL `content_rev`, so a rev-keyed census silently omits an
+  entire customer site — the instrument creating a new silent failure). Errata against the wave's own
+  verify brief: a ~40 %-censored fixture where p50 drop-vs-floor differ >10x is **UNCONSTRUCTIBLE** (the
+  divergence is a step function at exactly 50 %); the same fixture gives **3335.6x on p95**, so the fixture
+  targets p95. The tell to assert is the dropper's own denominator: **`sample` shrank 1000 → 600.**
+
+- **D164 — THE REPORTING IS NOT MISSING. IT IS POINTED AT THE WRONG QUANTITY, AT ALARM-FATIGUE VOLUME.**
+  The epic's founding sentence — "nothing reports it" — is REFUTED at L1. `notification_deliveries` holds
+  **2,291 `deployment_failed` emails SENT** (4 failed), most recent 2026-08-07 05:43Z, rising: **870 on
+  Aug 6, 625 Aug 5, 446 Aug 4.** It is default-ON for all 22 teams, wired at three producers, and
+  edge-guarded to fire only on the transition INTO failed. So Barkpark already exceeds Kinsta's one opt-in
+  email. What it has never sent is a single notification about a revision sitting unpublished. Given that the
+  same night's ledger shows nothing stranded and revisions superseded, **the fleet has been emailing ~870
+  times a day about attempts that destroyed no content, and zero times about the wait that actually hurts.**
+  The external bar agrees on shape and not on ours: Vercel's per-deployment vital is a phase timeline
+  (`createdAt` → `buildingAt` → `ready`) plus a SEPARATE `readySubstate` ∈ STAGED/ROLLING/PROMOTED meaning
+  "READY but never seen production traffic" — `became_live_at` modelled as a distinct STATE, not a
+  subtraction — and NEITHER Vercel nor Kinsta publishes anything shaped like `deploys_failing`. **RULED: the
+  wave adds a WAITING alert and does not add a failure alert; the failure alert's volume is itself filed as a
+  defect.**
+
+- **D165 — `bp cloud deployments` HAS NEVER PRINTED A NUMBER, FOR ANY ACCOUNT.** Built from origin/main and
+  run live, it exits **3** with a 403 (`scope=platform, required=platform_operator`) before reaching the
+  payload, because `PLATFORM_ADMIN_EMAILS` is **EMPTY on the serving container** `cloud-control_plane_green-1`.
+  Wave 10's crown reads a census no human can fetch. Its refusal copy is excellent and says so out loud
+  ("this is NOT a fleet with zero failures"), which is the only reason this is a finding and not an
+  incident. Separately confirmed: the host-installed `bp` is commit `f59aaf717` (2026-07-31) and does not
+  have the verb at all — any wave proof run with the host binary is measuring a July build. **D158h is
+  CONFIRMED and permanent**: `cloud/` emits `terminal_failure_rate` **zero times** while
+  `cloud_deploy_census_cmd.go:398` branches on `TerminalFailureRate == nil`, so the headline is welded to its
+  "older control plane" arm and no test can tell that from a real older CP. The emitter for all three phantom
+  keys **already exists, complete and green, stranded in open PR #10014**, blocked by ONE undeclared path in
+  `scripts/cloud-path-escape-check.sh` (`deploy/site-deploy-node.sh`, read by that PR's own test) — a correct
+  guard, working correctly, holding a correct fix hostage for a day because nobody read its scan. The
+  one-line fix takes the ratchet 120 passed/2 failed → **123/0**. The lead owns #10014; the wave does not
+  re-cut it. **D158g is FALSE as written**: `cloudclient.Pressure` exists and is read at seven sites; the
+  unread residue is **TWO** keys (`req_per_s`, `p95_ms`), not fourteen.
+
+- **D166 — `tmp_dep_site_live` IS PRODUCTION SCHEMA IN NO MIGRATION, AND IT IS WORTH 236x–498x.**
+  `CREATE INDEX tmp_dep_site_live ON deployments (site_id, became_live_at) WHERE became_live_at IS NOT NULL`
+  is live on cloud-db-1 (53 pages / 424 kB, `pg_class.oid` 35410 — the HIGHEST of any object on the table, so
+  created last, by hand). `git grep tmp_dep_site_live origin/main` returns nothing, and neither does a grep
+  over all 327 worktrees. Measured by actual `DROP INDEX` inside a rolled-back transaction (the assignment's
+  suggested `enable_indexscan=off` is INVALID — Postgres falls back to a Bitmap Index Scan on the SAME index
+  and under-states the cost 14.5x): 7 d census **48.4 ms with / 24,089 ms without** (498x, 815x buffers);
+  24 h **35.4 ms / 8,349 ms** (236x); site-scoped **21.7 ms / 4,615 ms** (213x). Wave 10's own
+  `dr-w10-bl-inserted-at-index-watch-item` DECLINED a standalone `(inserted_at)` index at 14 % execution gain
+  against 3x buffers — same method, opposite verdict, which is what makes this a decision. That row also
+  declared the cleanup discipline ("presence or removal verified by reading `pg_indexes` afterwards …
+  deployments is back to exactly 9 indexes, zero `tmp_*`") at 05:12Z, and `deployments` now carries TEN:
+  **wave 11's own survey created it hours after the epic wrote down the discipline it violated.** RULED:
+  land it as a declared migration (`deployments_site_became_live_index`), build cost 40.8 ms / 424 kB, no
+  CONCURRENTLY needed at 30 k rows.
+
+- **D167 — #10129 IS CONFLICTING, ITS FENCE IS CLEAR, AND ITS REBASE IS SEMANTIC, NOT MECHANICAL.**
+  The direction's "open, MERGEABLE" is stale: `mergeable CONFLICTING / mergeStateStatus DIRTY` at head
+  `514ff5c6f`, with all four required contexts GREEN — the block is purely the merge state. The brief's
+  "seven conflicting files, one of them router.ex" is wrong twice: `git merge-tree` says **SIX**, and
+  **`router.ex` AUTO-MERGES**. Its three router hunks (1891, 8755, 8828 — the fleet-list prefetch and the
+  private `barkpark_json/5` serializer) are ~130 lines from the auth band and ~430 from wave 42's ONLY
+  router.ex claim (line 1460, D473/D477). **No fence breach; the rebase is authorised on that axis.** The
+  real brake is that **#9887 merged at 06:13:52Z carrying the ELEVEN-rung ladder**, so origin/main now reads
+  `… degraded 4 · strained 5 · filling 6 · unreported 7 · behind 8 …` while #10129 asserts a TEN-rung ladder
+  placing `deploys_failing` at 5 and `unmetered` at 9. A textual rebase mints a thirteen-rung ladder and
+  re-places both against three rungs that did not exist when wave 10 decided — **that is a charter decision,
+  not a merge resolution a builder may improvise**, and the two `attention_order` fixtures pin it, so
+  resolving the `.go` files without regenerating both produces a green tree whose fixture asserts a ladder
+  the code no longer implements. #10129 and #10086 do NOT genuinely collide (10129 inserts at
+  `client.go:154`, exactly #9887's anchor; #10086's seven hunks are all elsewhere) — order is free, take
+  #10086 first. The one genuine collision is **#6028** (stale 2026-07-31), on `router.ex` AND `app.js` —
+  wave 42's fence, and clearing it to unblock #10129 would breach that fence by the back door.
+  **RULED: the wave does not rebase #10129. The rung question is deferred to the lead with the ladder
+  arithmetic written down here, and the wave adds a clock rather than re-litigating a rung.**
+
+- **D168 — SEVENTEEN ZERO-CRITERIA CHILDREN, NOT FIFTEEN; TWO ARE DEAD AND THREE WOULD BE FALSE-CLOSED.**
+  The epic now has **182 children (166 open / 12 done / 3 cancelled / 1 in_progress)** — D157's own census
+  (166 children, "in_progress ZERO") is stale by 16 rows. Seventeen carry zero acceptance criteria, and
+  **two of the seventeen were filed by wave 10 itself, hours after the row that counted fifteen**, which is
+  the same recursion the console epic recorded ("TEN today, and seven were filed by the wave sent to fix
+  it"). Triage, verified against origin/main: **2 are not live work** (`dr-w5-followup-gyl-dooodo-host-keys`
+  cancelled, `task-ca88b8ea571b3470` done); **4 are PAID or half-paid** (the agent `/v1/agent/space` route
+  and its `@types` entry both landed; `runBounded` now bounds every shell-out and its comment names the
+  three-hour runaway; `@build_slot_capacity 1` + `box_at_capacity?/2` landed in #9827; the jarl disk RANKING
+  is fixed at `fillingDiskPercent = 90.0` while `SpaceReport`'s roots still name no build-plane path);
+  **8 are genuinely UNPAID with file:line proof** — the three fire-and-forget `Deploy.start/1` sites survive
+  at `template_freshness_worker.ex:290`, `router.ex:11240`, `router.ex:12782`; `semrole.go:82` `For/1` still
+  has no `unavailable` case; three preview servers still spawn `stdio: "ignore"`, one of them carrying the
+  comment *"`stdio: "ignore"` is a refusal nobody can audit"*; `POST /v1/tokens` is still the ONLY token
+  route and `internal/cli/token_cmd.go` does not exist, so the three live probe tokens remain unrevokable;
+  `DigestEmail.summary/1` still counts only `current`/`behind`/`paused` and a nil `update_state` is counted
+  by neither arm. **The repair row's own claim that five are "shipped work no criterion can record" is too
+  generous for at least three of them — they are UNSHIPPED work whose zero criteria hide that it is
+  unshipped, and closing them as paperwork would be false-done fabrication.** One row
+  (`task-a4b939801795cf94`) must be RE-SPECIFIED before any criterion: the `CONTENT_API_*` family it names
+  never landed in code (`git grep CONTENT_API origin/main` hits ONE line — this charter, 2424). The trap is
+  live-consumed, not latent: `cmux_hook.go:270-293` returns `(0,false)` for an absent list, so **all 15 live
+  zero-criteria rows are structurally unclosable by the turn-boundary hook.** The refusal seam exists —
+  `AuthoringWall` is already `@walled_types ~w(paper task)` with an Exemptions ledger and a second producer
+  already routed through it — but its grandfathering is UNVERIFIED (the ledger's moduledoc says it "only ever
+  holds deploy-snapshot rows"), so the guard is filed and the backfill ships.
+
+- **D169 — ERRATA WAVE 11 OWES ITSELF.** (a) The lead's provenance hazard — "origin/main's charter stops at
+  D105, D106–D146 exist only on #9976/#10069" — is STALE: `b4ef025cf` carries **D105 through D160**, landed
+  by #10101, so those two PRs are redundant and should be CLOSED, not rebased. (b) D142's sub-claim of
+  "78 rows in 24 h carry a NULL rev" does not reproduce: **66**, split failed 49 / **deferred 14** / live 3 —
+  and D142 has no `deferred` bucket at all, because that status postdates it. The daily series runs 1–122 and
+  never equals 78; 78 was a true point reading quoted as a fleet constant. (c) The direction's "the fleet
+  materially improved at 2026-08-06 20:00Z" is REFUTED: a journal sweep of 16:30Z–00:30Z returns **eleven**
+  unit transitions and the FIRST is **22:24:16Z**, and no commit landed on origin/main between 16:52:47Z and
+  00:14:48Z — a **7 h 22 m merge gap that swallows the entire window.** D137's boundary stands; the
+  19:00–22:00Z quiet is the 2 h 21 m TRIGGER BLACKOUT it already names, i.e. a denominator collapse.
+  (d) The direction's own census window (06:08–06:35Z) **straddles a slot cut at 06:19:03Z, a Caddy upstream
+  rewrite at 06:19:38Z and an agent binary roll at 06:20:25Z** — the third mid-measurement flip inside this
+  epic. (e) `site_artifacts` being empty is CORRECT and by design, not a failure: `SiteArtifact`'s moduledoc
+  says bytes are "dropped the moment the deployment settles", `drop_artifact/1` is called at two settle
+  sites, and all **6 prebuilt deploys ever** (against 30,453 box-builds) still carry `artifact_sha256` — the
+  durable receipt survives while the bytes are reaped. That thread is CLOSED. (f) The webhook `types` filter
+  leaked: five endpoints declaring `types={paper}` received **6,545 `task` deliveries against 705 `paper`**
+  over 24 h, ending abruptly at 03:46:11Z with no commit and no deploy to explain it — **cause NOT
+  established**, filed as an open question, and every attempt-rate figure over any window ending before
+  03:46Z today has a denominator ~10x inflated by triggers that were never supposed to fire. (g) Only **5 of
+  13 sites** have a content-publish webhook at all; the other paper sites never auto-deploy on publish and
+  nothing says so.
+
+- **D170 — DECLINED OUT LOUD, do not silently revive.** (a) A revision-keyed census (D162 — the key is not a
+  revision, is not injective, and manufactures its own inflation). (b) Re-keying wave 10's `box_rates/3` or
+  deleting the attempt rate — this wave ADDS, never substitutes, and `#10129`'s `box_rates/3` is preserved
+  verbatim. (c) Rebasing #10129 or re-cutting #10014/#10015 — the merge blockage and the ladder arithmetic
+  are the lead's (D167, D165). (d) An `AuthoringWall` min-1-criteria publish gate — the seam is right but the
+  grandfathering is unverified and a naive gate 422s every republish of the legacy corpus (D168). (e)
+  Kaplan-Meier quantile estimation under censoring — a real alternative to refusing, deliberately not
+  evaluated; if the lead wants a NUMBER at p95 rather than a refusal, this is the unexplored road. (f)
+  `PLATFORM_ADMIN_EMAILS` — still the lead's, still unset, and D165 now measures exactly what it costs.
+  (g) Automatic regime segmentation — D159(e) stands, and tonight's 06:19:03Z flip is its fifth confirmation.
+
+- **D171 — WAVE 11 IS ALL OPUS; TWO SLICES ARE HIGH-FLIP-RISK.** Fable remains unavailable fleet-wide, so
+  every slice is opus@medium regardless of difficulty. **S1** (a new table on a hot HMAC receiver, plus a
+  migration, plus the population that today mints no row at all) and **S3** (a guard whose two measured
+  failure modes are both silent: a naive AST match silently drops every GUARDED `def … when` clause, costing
+  17 keys with no error, and `merge_job_status/4` builds keys from VARIABLES that no literal extractor can
+  see) are flagged HIGH-FLIP-RISK, and the lead is owed an **independent second reviewer** on both before
+  merge.
+
+### Wave 11 plan — 7 slices, 6 in round 1, file sets disjoint within a round
+
+| # | Round | Slice | task | Surface | Size | Model |
+|---|---|---|---|---|---|---|
+| 1 | 1 | The control plane records the publish instant — the true t0 | `dr-w11-s1-record-the-publish-instant` | `cloud/**` | large | opus |
+| 2 | 1 | `bp cloud site status` learns to tell time | `dr-w11-s2-site-status-tells-time` | `internal/cli/**` | medium | opus |
+| 3 | 1 | The payload contract gets a bidirectional key-set guard that can lose | `dr-w11-s3-payload-key-set-guard` | `scripts/**` + `cloud/test/**` | medium | opus |
+| 4 | 1 | The delivery census refuses an unidentifiable percentile and names who is still waiting | `dr-w11-s4-delivery-census-refuses` | `cloud/lib/**` | large | opus |
+| 5 | 2 (after S4) | The alert points at the WAIT, not at the attempt | `dr-w11-s5-waiting-alert` | `cloud/lib/**` | medium | opus |
+| 6 | 1 | The census index becomes declared schema | `dr-w11-s6-declare-the-live-index` | `cloud/priv/repo/migrations/**` | small | opus |
+| 7 | 1 | Seventeen children get criteria, and three are not false-closed | `dr-w11-s7-zero-criteria-backfill` | ledger only | medium | opus |
+
+Rounds are law. S5 reads the still-waiting cohort S4 builds and is sequenced behind its MERGE, not dispatched
+beside it. Within round 1 the file sets are disjoint: S1 owns `router.ex:7139-7173` and new files only; S4
+owns `deploy_ledger.ex` inserted at line 675 (the free region ~115 lines above #10129's EOF anchor, so it
+cannot conflict with the crown in either merge order) and must NOT touch `census/3`, `rate/2`, `@classes`,
+`@labels` or `classify/2`; S3 READS `router.ex` and `client.go` but edits neither. Two coupled edits are
+named so nobody discovers them in review: S3 adds `internal/cloudclient/**` to `CLOUD_PATHS` and must raise
+`CLOUD_ESCAPE_MIN` in the SAME commit (the floor is `-lt`, so forgetting it decays silently rather than
+reding) — and #10014's own one-line fix touches the same array, so a trivial conflict is expected and the
+floor is one higher if that lands first. S4 ships its Go reader in the same slice (D136's landed precedent),
+so it cannot create the unread key S3 exists to catch.
+
+MIGRATIONS FOR THE LEAD TO ORDER: S1 (a `content_publishes` table) and S6 (`deployments_site_became_live_index`,
+which also DROPs the undeclared `tmp_dep_site_live`). Distinct version stamps are specified in each brief.
+
+HIGH-FLIP-RISK (D171): **S1** — whether recording the publish instant on the HMAC receiver is genuinely
+non-blocking and cannot fail the 202, and whether the recorded population truly includes the 26–35 % of
+publishes that mint no deployment row. **S3** — whether the extractor can SEE what it claims to census, given
+both measured blind spots, and whether its anti-vacuity floor can actually lose.
+
+Coverage: every survey and verify agent reported; there is no coverage deficit this wave. Two questions
+remain OPEN and are filed rather than assumed: the cause of the 03:46:11Z webhook `types`-leak stop (D169f),
+and whether `AuthoringWall`'s Exemptions ledger can grandfather the legacy task corpus (D168).
+
+Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
