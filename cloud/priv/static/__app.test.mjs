@@ -191,10 +191,19 @@ test("cch-w36-s1: the /new launch 403 toast BRANCHES ON THE SLUG, never on the s
   assert.doesNotMatch(authority.body, /owner/i, "launching does not need the owner — saying so is the second lie");
   assert.equal(authority.billingAction, false, "no 'Open dashboard' CTA — billing is not the fix");
 
-  // A pre-deploy control plane that ships the bare slug still gets an honest
-  // authority sentence, defaulted to the role go_live actually requires.
+  // cch-w48-s1 AMENDS THIS CASE (D537), it does not delete it. It used to
+  // assert that a BARE slug still rendered "the admin role on this team" — a
+  // sentence the server never sent, defaulted in by `|| "admin"` and then read
+  // back as evidence. A bare 403 (an un-upgraded route, an edge proxy, a
+  // deliberately bare arm) carries NO role, so this arm now delegates to
+  // friendly(), whose generic claims no role and invents no remedy.
   const bare = hooks.newLaunchRefusalToast({ error: "forbidden" });
-  assert.match(bare.body, /admin role on this team/);
+  assert.doesNotMatch(bare.body, /admin/,
+    "a role the refusal did not carry must not appear in the sentence about it");
+  assert.match(bare.body, /didn't say which role would allow it/);
+  assert.equal(bare.body, hooks.friendly({ error: "forbidden" }, "We couldn't launch for this team."),
+    "the bare arm is friendly()'s sentence verbatim — not a second copy of it");
+  assert.equal(bare.billingAction, false);
 
   // Anything else stays the neutral fallback — never a fabricated cause.
   const odd = hooks.newLaunchRefusalToast({ error: "team_suspended" });
@@ -18011,9 +18020,14 @@ test("cch-w47-s1: the refusal SENTENCE has one owner — no second copy was writ
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const sentence = "Launching needs the ";
   assert.equal(src.split(sentence).length - 1, 1,
-    "the wording lives in newLaunchRefusalToast alone; a second literal is a second thing to keep true");
+    "the wording lives in launchRoleClause alone; a second literal is a second thing to keep true");
   // …and the card really does read it from there, rather than re-stating it.
-  assert.equal(hooks.launchRefusalCopy().body, hooks.newLaunchRefusalToast({ error: "forbidden" }).body);
+  // cch-w48-s1 AMENDS the payload, not the property: the bare slug this used to
+  // compare against is no longer a role-naming sentence at all (it was the
+  // fabrication), so the comparison is against the EVIDENCED 403 — which is the
+  // one case where both callers legitimately say the same thing.
+  assert.equal(hooks.launchRefusalCopy().body,
+    hooks.newLaunchRefusalToast({ error: "forbidden", required: "admin", scope: "team" }).body);
   assert.ok(hooks.launchRefusalHtml({ runway: true }).includes(hooks.esc(hooks.launchRefusalCopy().body)));
 });
 
@@ -18160,5 +18174,200 @@ test("cch-w47-s1: BOTH loadMe arms repaint the launch surface — a failed read 
   for (const [armName, arm] of [["success", region.slice(0, cut)], ["failure", region.slice(cut)]]) {
     assert.ok(arm.includes("repaintLaunchAuthority()"),
       "the " + armName + " arm must repaint the launch surface — nothing re-reads /v1/me after it answers");
+  }
+});
+
+// ── cch-w48-s1 · THE FRONT DOOR STOPS SELLING A REFUSAL ────────────────────
+// /new sits ABOVE every auth plug (router.ex:702 is three lines of
+// send_dashboard) and renderNewFlow gates on `session() && session().token`
+// and nothing else — so a plain MEMBER's launch step was byte-identical to an
+// owner's, #new-launch-btn included, while go_live (router.ex:8312) answers
+// that member 403 {required:"admin", scope:"team"} the moment they press it.
+// The reachability premise IS the slice, so it is asserted on the REAL render
+// (renderNewLaunch, newly hookable) and not on the pure helper alone.
+
+// A #new-body slot the /new renderers can actually paint into, including the
+// retry control the unknown arm wires — minted ONCE per render (like
+// launchContainer's) so a click reaches the node the listener was bound to,
+// rather than a fresh object that only looks wired.
+function newBodySlot() {
+  const clicks = { retry: 0, submit: 0 };
+  const mk = (counter) => ({
+    disabled: false, _h: [], value: "",
+    addEventListener(_t, fn) { this._h.push(fn); },
+    click() { clicks[counter]++; this._h.forEach((fn) => fn()); },
+    getAttribute() { return null; },
+  });
+  const slot = {
+    _html: "",
+    controls: {},
+    get innerHTML() { return this._html; },
+    set innerHTML(v) {
+      this._html = String(v);
+      this.controls = {};
+      if (this._html.indexOf("data-me-retry") !== -1) this.controls["[data-me-retry]"] = mk("retry");
+      if (this._html.indexOf("data-new-launch-step") !== -1) this.controls["[data-new-launch-step]"] = mk("retry");
+      if (this._html.indexOf('id="new-launch-form"') !== -1) this.controls["#new-launch-form"] = mk("submit");
+    },
+    querySelector(sel) { return this.controls[String(sel)] || null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+  };
+  return { slot, clicks };
+}
+
+function newFlowDom(slot) {
+  return {
+    querySelector(sel) {
+      const s = String(sel);
+      return s === "#new-body" ? slot : slot.controls[s] || null;
+    },
+    querySelectorAll() { return []; },
+    getElementById() { return null; },
+    createElement: () => ({ ...inertEl }),
+    addEventListener() {},
+    body: { ...inertEl, appendChild() {} },
+    documentElement: { ...inertEl, getAttribute: () => null },
+  };
+}
+
+const W48_TPL = { slug: "blog", title: "Blog", description: "A blog", what_you_get: [] };
+
+test("cch-w48-s1: the /new launch step does not offer a member a launch the server refuses", async () => {
+  const saved = sandbox.document;
+  const { slot } = newBodySlot();
+  try {
+    sandbox.document = newFlowDom(slot);
+
+    await driveMe(200, W47_MEMBER);
+    hooks.renderNewLaunch(W48_TPL);
+    assert.doesNotMatch(slot.innerHTML, /new-launch-btn/,
+      "a member rendering the Launch control on /new is the badge selling a refusal");
+    assert.doesNotMatch(slot.innerHTML, /disabled/, "and never a disabled ghost (the GR36 plain-member law)");
+    assert.match(slot.innerHTML, /admin role on this team/, "the refusal states the role that would work");
+    assert.ok(slot.innerHTML.indexOf("data-me-retry") === -1,
+      "a determinate answer has no question left to retry");
+
+    hooks.clearMe();
+    await driveMe(200, W47_OWNER);
+    hooks.renderNewLaunch(W48_TPL);
+    assert.match(slot.innerHTML, /id="new-launch-btn"/, "an owner keeps the shipped Launch button");
+    assert.match(slot.innerHTML, /Fully managed/, "…and the whole shipped form with it");
+  } finally {
+    sandbox.document = saved;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w48-s1: newLaunchOffer is THREE-valued and FAILS CLOSED — an unknown band offers nothing", () => {
+  assert.equal(typeof hooks.newLaunchOffer, "function", "the offer must be hookable or the fence cannot lose");
+
+  const grant = hooks.newLaunchOffer("grant", W48_TPL);
+  assert.equal(grant.mode, "grant");
+  assert.match(grant.html, /id="new-launch-btn"/);
+
+  const refuse = hooks.newLaunchOffer("refuse", W48_TPL);
+  assert.equal(refuse.mode, "refuse");
+  assert.doesNotMatch(refuse.html, /new-launch-btn/, "the control is OMITTED, not disabled");
+  assert.doesNotMatch(refuse.html, /disabled/);
+  assert.doesNotMatch(refuse.html, /title=/, "no tooltip explaining a button that is not there");
+  assert.doesNotMatch(refuse.html, /data-me-retry/, "a determinate NO has nothing to retry");
+  assert.match(refuse.html, /admin role on this team/);
+
+  // Both unanswered bands withhold the control AND carry the one exit — a
+  // stalled /v1/me never settles (api() has no timeout), so "Checking…" with no
+  // way out is the same lie in a politer register.
+  for (const band of ["loading", "failed"]) {
+    const out = hooks.newLaunchOffer(band, W48_TPL);
+    assert.equal(out.mode, "unknown", band + " is not a grant");
+    assert.doesNotMatch(out.html, /new-launch-btn/, band + " must not sell the launch");
+    assert.match(out.html, /data-me-retry/, band + " must carry the exit");
+  }
+  assert.match(hooks.newLaunchOffer("failed", W48_TPL).html, /We couldn't check your account/);
+  assert.match(hooks.newLaunchOffer("loading", W48_TPL).html, /Checking your account…/);
+  assert.match(hooks.newLaunchOffer("loading", W48_TPL).html,
+    /offer Launch until we know your role on this team\./);
+
+  // FAIL CLOSED on anything unrecognised: a band a later read invents, or an
+  // undefined argument, must not fall through to the offer.
+  for (const band of [undefined, null, "", "unknown", "stale", "maybe", 1, {}]) {
+    const out = hooks.newLaunchOffer(band, W48_TPL);
+    assert.equal(out.mode, "unknown", JSON.stringify(band) + " is not a grant");
+    assert.doesNotMatch(out.html, /new-launch-btn/, JSON.stringify(band) + " must not sell the launch");
+  }
+
+  // D439: this is a NEW sibling, so the mode vocabulary is CLOSED at three and
+  // callers branch on it by name — nothing here is a boolean a caller could
+  // read as truthy for "loading".
+  const modes = new Set(["grant", "refuse", "loading", "failed", "stale", "", undefined]
+    .map((b) => hooks.newLaunchOffer(b, W48_TPL).mode));
+  assert.deepEqual([...modes].sort(), ["grant", "refuse", "unknown"]);
+});
+
+test("cch-w48-s1: ONE clause, two callers — the pre-hoc card and the evidenced toast cannot drift", () => {
+  const posthoc = hooks.newLaunchRefusalToast({ error: "forbidden", required: "admin", scope: "team" });
+  const prehoc = hooks.launchRefusalCopy();
+  assert.equal(prehoc.body, posthoc.body, "byte-identical, or the split traded a fabrication for a drift");
+  assert.equal(prehoc.title, posthoc.title);
+  assert.equal(prehoc.body, hooks.launchRoleClause("admin"), "…and both are the clause itself");
+
+  // The pre-hoc sentence is LICENSED, not synthesized: launchRefusalCopy no
+  // longer manufactures a {error:"forbidden"} payload to read its own default
+  // back out of. The literal is gone from the function (D537 source 2).
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "function launchRefusalCopy()", "function launchRefusalCardHtml(");
+  assert.doesNotMatch(region, /error:\s*"forbidden"/,
+    "the pre-hoc caller must state its console-derived authority, never fake a server answer");
+
+  // The evidenced arm still names what the SERVER asked for, whatever that is.
+  assert.match(hooks.newLaunchRefusalToast({ error: "forbidden", required: "owner" }).body,
+    /owner role on this team/);
+});
+
+test("cch-w48-s1: the /new launch step reuses renderNewPricing's seam — no loadMe, no second policy read", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "// ---- Step: launch (logged in)", "// ---- Step: pricing");
+
+  assert.equal(region.split("loadMe").length - 1, 0,
+    "loadMe() boots the dashboard's topbar/fleet/four surfaces — /new has none of them");
+  assert.ok(region.includes('api("GET", "/v1/me")'), "the read is this screen's own, once");
+  assert.equal(region.split('api("GET", "/v1/me")').length - 1, 1, "…exactly once");
+  assert.ok(region.includes("absorbMe(r)"), "and it lands through the SHIPPED absorber");
+  assert.ok(region.includes("launchAuthority()"), "the band stays launchAuthority's");
+  assert.doesNotMatch(region, /meCache\.role|=== "owner"|=== "admin"/,
+    "a second policy read re-deriving the role from string literals is the thing this reuses away");
+});
+
+test("cch-w48-s1: the unanswered /new step asks ONCE, and its exit re-asks", async () => {
+  const saved = { document: sandbox.document, fetch: sandbox.fetch };
+  const { slot } = newBodySlot();
+  try {
+    sandbox.document = newFlowDom(slot);
+    hooks.clearMe();
+
+    // Cold: nothing has asked, so the step paints "Checking…" WITH the exit and
+    // fires exactly one GET /v1/me.
+    const first = fetchStub(500, { error: "server_error" });
+    sandbox.fetch = first;
+    hooks.renderNewLaunch(W48_TPL);
+    assert.doesNotMatch(slot.innerHTML, /new-launch-btn/, "an unread role never sells the launch");
+    assert.match(slot.innerHTML, /data-me-retry/, "…and never without a way out");
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(first.calls.length, 1, "one read, from this screen");
+    assert.equal(first.calls[0].path.indexOf("/v1/me") !== -1, true, "…and it is /v1/me");
+    assert.match(slot.innerHTML, /We couldn't check your account/,
+      "a failed read is a fault, never a refusal — and never a grant");
+    assert.doesNotMatch(slot.innerHTML, /new-launch-btn/, "FAIL CLOSED: the failed arm withholds too");
+
+    // THE EXIT WORKS: one click re-drives the read and the answer paints.
+    const second = fetchStub(200, W47_OWNER);
+    sandbox.fetch = second;
+    slot.querySelector("[data-me-retry]").click();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    assert.equal(second.calls.length, 1, "the retry actually re-asks");
+    assert.match(slot.innerHTML, /id="new-launch-btn"/, "one click, one answer, painted without a reload");
+  } finally {
+    Object.assign(sandbox, saved);
+    hooks.clearMe();
   }
 });

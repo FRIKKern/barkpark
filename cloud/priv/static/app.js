@@ -13471,12 +13471,49 @@
   // Mount the launch component into `container`. opts: { runway } for the inline
   // empty-fleet welcome, or { modal, name } for the focus-trapped header modal.
   // cch-w47-s1 — THE PRE-HOC REFUSAL, and its wording has exactly ONE owner.
-  // newLaunchRefusalToast already turns go_live's 403 into an honest sentence
-  // that names the role the server asked for; today that sentence is reachable
-  // ONLY after a full form fill plus a provider detour returns 403. There is no
-  // server answer to read yet (that is the point of asking early), so the bare
-  // slug is passed and its default names go_live's actual requirement, `admin`.
-  function launchRefusalCopy() { return newLaunchRefusalToast({ error: "forbidden" }); }
+  //
+  // cch-w48-s1 (D537) — …but that owner is now a CLAUSE, not a fake 403. This
+  // used to be `newLaunchRefusalToast({error: "forbidden"})`: a payload no
+  // server ever sent, whose default (`|| "admin"`) was then read back as if it
+  // were evidence. Driven twice, an EVIDENCED 403 and a BARE one produced
+  // byte-identical toasts, so the post-hoc caller could not tell the server's
+  // answer from the client's guess. The pre-hoc sentence is licensed by the
+  // CONSOLE-DERIVED band instead — launchAuthority() said "refuse", and
+  // go_live's requirement on that route is `admin` — and it states that
+  // directly, composing the same clause the evidenced toast composes.
+  var LAUNCH_REFUSAL_TITLE = "You can't launch for this team";
+  // go_live (router.ex:8312) is the ONE route this copy is about, and the role
+  // it requires there is the only role either caller may name unprompted.
+  var LAUNCH_REQUIRED_ROLE = "admin";
+
+  // THE CLAUSE — one owner, two callers (the pre-hoc card below and the
+  // post-hoc toast at newLaunchRefusalToast). A test asserts the two RENDERED
+  // bodies are byte-identical for the admin case, so removing the fabrication
+  // cannot decay into two sentences that drift apart.
+  function launchRoleClause(role) {
+    return "Launching needs the " + role + " role on this team. Ask a team " + role +
+      " to launch it, or to give you that role.";
+  }
+
+  function launchRefusalCopy() {
+    return {
+      title: LAUNCH_REFUSAL_TITLE,
+      body: launchRoleClause(LAUNCH_REQUIRED_ROLE),
+      billingAction: false
+    };
+  }
+
+  // The refusal CARD, without a shell — the /new launch step (cch-w48-s1)
+  // renders it inside the funnel's own panel, where `.launch-flow` would be a
+  // dashboard class on a page that has no dashboard. One owner for the markup;
+  // the shells differ, the block does not.
+  function launchRefusalCardHtml() {
+    var copy = launchRefusalCopy();
+    return '<div class="empty-state">' +
+      "<h2>" + esc(copy.title) + "</h2>" +
+      "<p>" + esc(copy.body) + "</p>" +
+    "</div>";
+  }
 
   // The refusal card. MARKUP CONSTRAINT, measured live: it must NOT carry the
   // class `.runway-sub` — refreshRunwaySubline rewrites every node with that
@@ -13485,21 +13522,20 @@
   // required." within a second. No new class is introduced either: this is the
   // shipped `.empty-state` grammar, the same block meUnknownHtml renders.
   function launchRefusalHtml(opts) {
-    var copy = launchRefusalCopy();
-    return launchFlowShell(
-      '<div class="empty-state">' +
-        "<h2>" + esc(copy.title) + "</h2>" +
-        "<p>" + esc(copy.body) + "</p>" +
-      "</div>", opts);
+    return launchFlowShell(launchRefusalCardHtml(), opts);
   }
 
   // The unanswered arm. It reuses the epic's ONE unknown block (headline +
   // meFailureCopy on the failed arm + a per-surface consequence + the single
   // shared Retry) rather than minting a second "Checking…" with no way out —
   // a spinner without an exit is the same lie in a politer register.
+  // cch-w48-s1: the consequence sentence is a const because the /new launch
+  // step renders the SAME unknown block in a different shell — two literals
+  // would be two sentences to keep true.
+  var LAUNCH_UNKNOWN_CONSEQUENCE = "We can't offer Launch until we know your role on this team.";
+
   function launchUnknownHtml(state, opts) {
-    return launchFlowShell(
-      meUnknownHtml(state, "We can't offer Launch until we know your role on this team."), opts);
+    return launchFlowShell(meUnknownHtml(state, LAUNCH_UNKNOWN_CONSEQUENCE), opts);
   }
 
   // cch-w47-s1 — WHAT THE LAUNCH MOUNT IS CURRENTLY MADE OF, so a /v1/me that
@@ -17312,16 +17348,94 @@
   }
 
   // ---- Step: launch (logged in) ---------------------------------------------
-  function renderNewLaunch(tpl) {
-    var launch =
-      '<form id="new-launch-form" class="new-launch" novalidate>' +
+  function newLaunchFormHtml(tpl) {
+    return '<form id="new-launch-form" class="new-launch" novalidate>' +
         '<div class="field"><label class="label" for="new-name">Project name <span class="dim">(optional)</span></label>' +
           '<input class="form-input" id="new-name" type="text" placeholder="' + esc(tpl.title) + '" /></div>' +
         '<button class="btn btn-primary btn-block btn-lg" id="new-launch-btn" type="submit">Launch</button>' +
         '<p class="new-fineprint dim">Fully managed. Your free trial starts automatically — no card required.</p>' +
       "</form>";
-    newSetBody(newPanel(newTemplateHead(tpl) + launch));
-    $("#new-launch-form").addEventListener("submit", newLaunch);
+  }
+
+  // cch-w48-s1 — THE OFFER, AS A PURE HELPER, and it is a new sibling for a
+  // mechanical reason: renderNewLaunch paints through newSetBody and is not on
+  // __bpTestHook, so a fence written INSIDE it could never be reached by a unit
+  // assertion — a guard nothing can drive is a guard that cannot lose. This
+  // takes the band as an ARGUMENT and returns {mode, html}, so every band
+  // (including one a future read invents) is decidable in node.
+  //
+  // THREE-VALUED and FAIL CLOSED, exactly like launchFlow's dashboard twin:
+  //   grant   · the server will accept POST /v1/launch — offer the form
+  //   refuse  · it will not — OMIT the control entirely (never a disabled ghost,
+  //             never a title attribute explaining a dead button: the GR36
+  //             plain-member law), and state the role that would work
+  //   unknown · "loading", "failed", or anything unrecognised — WITHHOLD the
+  //             control AND render the epic's one exit, because a false offer
+  //             here costs a full form fill and then a 403
+  // No shipped boolean predicate was widened to carry this (D439): callers
+  // branch on `mode` by name.
+  function newLaunchOffer(authority, tpl) {
+    if (authority === "grant") return { mode: "grant", html: newLaunchFormHtml(tpl) };
+    if (authority === "refuse") return { mode: "refuse", html: launchRefusalCardHtml() };
+    return {
+      mode: "unknown",
+      html: meUnknownHtml(authority === "failed" ? "failed" : "loading", LAUNCH_UNKNOWN_CONSEQUENCE)
+    };
+  }
+
+  // /new NEVER LOADS /v1/me — renderNewFlow returns before the dashboard shell
+  // boots, and the dashboard's own account loader repaints the topbar, the
+  // fleet and four surfaces that do not exist here. So this screen asks for the role
+  // ITSELF, once, through the SAME seam renderNewPricing uses one step down —
+  // and absorbs the answer with the shipped absorbMe(), so the band below stays
+  // launchAuthority()'s alone rather than a second policy read re-deriving the
+  // role from string literals.
+  var newLaunchMeAsked = false;
+  var NEW_LAUNCH_STEP_MARK = "data-new-launch-step";
+
+  function newAskLaunchAuthority(tpl) {
+    if (newLaunchMeAsked) return;
+    newLaunchMeAsked = true;
+    api("GET", "/v1/me").then(function (r) {
+      absorbMe(r);
+      // The answer can land after the person has moved on (a resume jumped to
+      // progress, a 402 folded in the plan step). newSetBody writes into
+      // #new-body whatever step is mounted, so repaint ONLY while this step is
+      // still the one on screen — the renderNewPricing precedent, same reason.
+      // The mounted check reads the MARKUP rather than resolving a selector:
+      // this step's marker sits on a plain <div>, and the preview shim leaves
+      // container elements unparsed (smoke.mjs's shim note), so a querySelector
+      // here answers null on a step that IS mounted — a fix that silently never
+      // repaints under the instrument that would have caught it.
+      var body = $("#new-body");
+      var html = body && typeof body.innerHTML === "string" ? body.innerHTML : "";
+      if (html.indexOf(NEW_LAUNCH_STEP_MARK) === -1) return;
+      renderNewLaunch(tpl);
+    });
+  }
+
+  function renderNewLaunch(tpl) {
+    var offer = newLaunchOffer(launchAuthority(), tpl);
+    newSetBody(newPanel(newTemplateHead(tpl) +
+      "<div " + NEW_LAUNCH_STEP_MARK + ">" + offer.html + "</div>"));
+    if (offer.mode === "grant") {
+      var form = $("#new-launch-form");
+      if (form) form.addEventListener("submit", newLaunch);
+      return;
+    }
+    if (offer.mode === "refuse") return; // a determinate answer has no question left to retry
+    newAskLaunchAuthority(tpl);
+    // The exit, wired to THIS screen's read: the shared wireMeRetry re-drives
+    // the DASHBOARD's account loader, which would boot half a shell onto the
+    // funnel — same control, same block, this page's seam.
+    var retry = $("[data-me-retry]"); // the only one on /new — this step owns the screen
+    if (!retry) return;
+    retry.addEventListener("click", function () {
+      retry.disabled = true;
+      clearMe();                 // the question is open again — back to "loading"
+      newLaunchMeAsked = false;  // …so the one read is allowed to happen once more
+      renderNewLaunch(tpl);
+    });
   }
 
   // cch-w36-s1: POST /v1/launch answers 403 for TWO different reasons and the
@@ -17341,11 +17455,19 @@
       };
     }
     if (slug === "forbidden") {
-      var role = (data && typeof data.required === "string" && data.required) || "admin";
+      // cch-w48-s1 (D537) — THE POST-HOC ARM STOPS INVENTING ITS EVIDENCE. The
+      // `|| "admin"` default that used to sit here was correct for the pre-hoc
+      // caller (which had a console-derived band licensing it) and a
+      // FABRICATION for this one: a BARE 403 — an un-upgraded route, an edge
+      // proxy, a deliberately bare arm — carries no role at all, and naming one
+      // anyway told the person to go ask an admin the server never mentioned.
+      // The evidenced arm still names exactly what the server asked for; the
+      // bare arm delegates to friendly(), which already owns the honest generic
+      // for an unevidenced refusal (D447: no role claimed, no remedy invented).
+      var role = data && typeof data.required === "string" && data.required ? data.required : null;
       return {
-        title: "You can't launch for this team",
-        body: "Launching needs the " + role + " role on this team. Ask a team " + role +
-          " to launch it, or to give you that role.",
+        title: LAUNCH_REFUSAL_TITLE,
+        body: role ? launchRoleClause(role) : friendly(data, "We couldn't launch for this team."),
         billingAction: false
       };
     }
@@ -21971,6 +22093,14 @@
       setHeaderLaunchHidden: setHeaderLaunchHidden,
       newLaunchRefusalToast: newLaunchRefusalToast,
       renderLaunchPlan: renderLaunchPlan, renderNewPricing: renderNewPricing,
+      // cch-w48-s1 — the /new launch step: the PURE offer (band in, {mode,html}
+      // out, so every band including an unrecognised one is decidable here) and
+      // the render that consumes it, because the defect was that a member's
+      // paint was byte-identical to an owner's — which only a real render can
+      // show. launchRoleClause rides along so the ONE clause behind both the
+      // pre-hoc card and the post-hoc toast is asserted, not assumed.
+      newLaunchOffer: newLaunchOffer, renderNewLaunch: renderNewLaunch,
+      launchRoleClause: launchRoleClause,
       launchOwnerOnlyCopy: LAUNCH_OWNER_ONLY_COPY,
       // cch-w31-s4 follow-up: api() ITSELF, so the response envelope is drivable
       // from node against a stub instead of only being read as source text. The
