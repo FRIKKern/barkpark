@@ -1975,6 +1975,63 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-07 — wave 40 REVIEW (5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| THE CROWN — the bare-403 default inverts, two rank causes get written arms | `cch-w40-s1-…-three-authored-causes-converge` | `…bare-403-default-stops-nam-0` | [#10083](https://github.com/FRIKKern/barkpark/pull/10083) | none — gate re-run green, census fail-before re-proved, HIGH-FLIP-RISK re-derived independently |
+| The binding census gets a fixture control; (2d) stops freezing a live defect | `cch-w40-s3-…-2d-stops-freezing-a-live-defect` | `…binding-census-gains--1` | [#10085](https://github.com/FRIKKern/barkpark/pull/10085) | none — all four 2×2 cells re-run, (2d-ii) independently mutation-proved able to lose AND the fix direction proved to pass |
+| The bp CLI reads a refusal's evidence instead of a bare slug | `cch-w40-s4-…-instead-of-printing-a-bare-slug` | `…refusal-s-reason-re-2-r` | [#10086](https://github.com/FRIKKern/barkpark/pull/10086) | the exit ladder keyed on `reason` while the message keyed on `reason` OR `code`, so a 403 `{"error":"no_team"}` printed "run `bp team use`" and exited 3 in the same breath; the support predicate had the same hole. Both fixed with fail-before-proved test rows. Also `gofmt` — the new `codeExit` row broke the map's alignment block |
+| Seven route-table rows stop advertising a tier their body refuses | `cch-w40-s5-…-seven-routes-do-not-enforce` | `…stop-advertising--3` | [#10087](https://github.com/FRIKKern/barkpark/pull/10087) | none — oracle mutation-proved, `POST /v1/resurrect`'s `admin` cell re-derived from the body independently |
+| FailureCopy stops naming a party, an owner and a remedy it never determined | `cch-w40-s6-…-a-remedy-it-never-determined` | `…blaming-the-hosting-pr-4-r` | [#10088](https://github.com/FRIKKern/barkpark/pull/10088) | the new path guard excluded ANY trailing `.`, so a producer that merely ended a SENTENCE ("the registry said Unauthorized.") fell out of the credential class and passed through unclassified. Guard narrowed to `.` + NON-space; `unauthorized.html` still excluded |
+
+**WHAT LANDED.** D447/D448's frame — *a refusal renders what was proved, and nothing else* — is now
+true on both sides of the wire. The console's curated `forbidden` default no longer names billing at
+a member removing a peer admin; the two rank refusals (`outranked`, `cannot_grant_higher_role`) have
+MAPPED arms rather than echoed slugs; `envVarWriteFailureCopy`'s 403 stops shadowing the evidence
+seam with a sentence that is flatly false on the cross-tenant arm; and the delivery-log 403 stops
+selling a permanent authority determination as "momentarily unavailable". On the Elixir side, seven
+route-table rows stopped advertising `user` over a body that 403s a member, and `FailureCopy` stopped
+blaming the hosting provider for the user's own token and telling a custom-host owner their DNS is
+automatic. On the CLI side, `bp` now decodes `reason`/`required`/`scope`/`details`, so #9956's
+`422 no_team → 403 forbidden(reason:no_team)` flip cannot silently change a sentence or an exit.
+
+**THE GUARDS, AND THAT THEY CAN LOSE.** Three new instruments, each proved in both directions by the
+reviewer independently, not just by its author. `__reason_arm_census.mjs` derives every `reason:` slug
+`router.ex` can emit — resolving the dynamic binding one hop back, which is what turns one visible
+call site into three real emissions — and exits **2** rather than pass on an input it cannot read;
+re-run against `origin/main`'s `app.js` it reds naming all three sites. The binding census's new
+fixture control measures the full 2×2 (1/0/1/0), and its retired directional clause is replaced by a
+non-directional (2d-ii) that reds on a flattened pin and *passes* on the fix — the exact freeze the
+old clause caused. The tier oracle gained its first positive control, a committed fixture pair pinning
+that a `team_admin?` which SCOPES a query is not a tier and one whose false branch 403s is.
+
+**WHAT DID NOT SHIP, BY DESIGN.** `cch-w40-s2` (the refusal-copy census) is round 2 — its pin must be
+cut against the POST-crown tree, since the crown adds two `FORBIDDEN_REASON_COPY` keys and re-words
+`ERRORS.forbidden`. Its task is `open`, unclaimed, 0/11.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+1. **MERGE ORDER IS NOT OPTIONAL HERE.** #10083 and #10085 both append a step to
+   `.github/workflows/console-harness.yml` at the same anchor and conflict TEXTUALLY (verified by a
+   real merge, not arithmetic). Resolution is keep-both; nothing semantic overlaps. Merge #10083 first.
+2. **DISPATCH `cch-w40-s2` ONLY AFTER #10083 MERGES.** A pre-crown pin arrives with 2 ADD rows.
+3. **A SECOND INDEPENDENT REVIEWER IS OWED ON `cch-w40-s1`.** Its HIGH-FLIP-RISK judgment (that a plain
+   team admin reaches `outranked` through a rendered button) was re-derived here and CONFIRMED — but
+   the confirmation and the build share one reviewer, which is exactly the independence the E2 rule
+   asks the lead to supply by hand.
+4. **THE WIRE SHAPE UNDER #9956 IS STILL UNVERIFIED.** No slice drove a request against a control plane
+   with it applied. If it nests `reason` inside an error OBJECT on these routes, the CLI's flat support
+   path misses it. Cheap to re-check against the merged `auth.ex` before merging #9956.
+5. **THE REASON-ARM CENSUS SCANS `router.ex` ONLY.** `auth.ex:496` is the actual source of `no_team` and
+   is outside the scan — filed as `cch-w40-bl-reason-arm-census-authex-arm`, not fixed. A new cause
+   added there ships uncovered and the census stays green over it.
+
+**LEDGER.** Clean — no fixes required. All five built slices sit `in_progress` with N−1 criteria
+stamped and evidence written AS the builders worked; the single open row on each is the merge-gated
+one the LEAD closes on merge. `task-b4b3edfc4b8838cf` was correctly closed as ALREADY-LANDED from
+#9657 (zero lines rebuilt). Five backlog rows filed and published for work discovered but not taken.
+
+
 ### 2026-08-07 — wave 39 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
