@@ -67,9 +67,8 @@ A PR targeting `main` must clear:
    name either and **cannot block a merge**; it lives in this path-unfiltered
    workflow so that it runs on the same trigger as the gate it tests. The only
    name this workflow contributes to the required set is
-   `PR references an active task`, the job described in this item.
-   The workflow only plumbs PR context in. Four designed
-   behaviours:
+   `PR references an active task`, the job described in this item; the workflow
+   itself only plumbs PR context in. Four designed behaviours:
    **merge-base cutoff, three-state** — the base COMMIT is resolved first; base
    resolves + this workflow absent = grandfathered (so turning the gate on did
    not red the open-PR fleet), base resolves + present = enforced, base
