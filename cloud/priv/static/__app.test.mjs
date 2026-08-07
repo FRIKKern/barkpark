@@ -1319,6 +1319,56 @@ test("gr-p5-session-provenance: the session row shows origin only when the serve
     "the origin must be escaped");
 });
 
+test("sessions fold: past five rows the list collapses to an honest count, and the current device never hides", () => {
+  // The pure seam for the many-sessions shape (a live account carried 12 rows
+  // and the modal was mostly scrollbar). The contract: five or fewer rows fold
+  // nothing; more than five collapse to exactly five with the tail behind a
+  // #sessions-fold button whose count is DERIVED from the rows actually hidden;
+  // the current device is always among the visible five, wherever the server
+  // sorted it; expanding shows everything plus "Show fewer".
+  const mk = (n, currentAt) => Array.from({ length: n }, (_, i) => ({
+    id: "sess_" + i, user_agent: "barkpark-cli/0.9", current: i === currentAt,
+  }));
+
+  // Five rows: nothing to fold, no button.
+  const five = hooks.sessionListHtml(mk(5, 0), false);
+  assert.equal((five.match(/class="session-row"/g) || []).length, 5);
+  assert.ok(!five.includes("sessions-fold"), "five rows must not grow a fold button");
+
+  // Nine rows collapsed: five visible, four hidden, count spelled out.
+  const nine = hooks.sessionListHtml(mk(9, 0), false);
+  assert.equal((nine.match(/class="session-row"/g) || []).length, 5,
+    "collapsed shows exactly SESSIONS_COLLAPSED_MAX rows");
+  assert.ok(nine.includes(">Show 4 more sessions<"), "the count must match the hidden tail: " + nine);
+  assert.ok(nine.includes('aria-expanded="false"'), "the fold state must be legible to a reader");
+
+  // Six rows collapsed: singular grammar.
+  assert.ok(hooks.sessionListHtml(mk(6, 0), false).includes(">Show 1 more session<"),
+    "one hidden row is a session, not sessions");
+
+  // Current device sorted PAST the fold still renders — it is the row the
+  // operator orients by, and hiding it would miscount the tail as revokable.
+  const late = hooks.sessionListHtml(mk(9, 8), false);
+  assert.ok(late.includes("badge-current"), "the current device must survive the fold");
+  assert.equal((late.match(/class="session-row"/g) || []).length, 5,
+    "keeping the current device must not widen the fold");
+  assert.ok(late.includes(">Show 4 more sessions<"), "the count still matches the hidden tail");
+
+  // Expanded: everything, plus the way back.
+  const open = hooks.sessionListHtml(mk(9, 0), true);
+  assert.equal((open.match(/class="session-row"/g) || []).length, 9);
+  assert.ok(open.includes(">Show fewer<") && open.includes('aria-expanded="true"'));
+
+  // The DOM mount (no pure seam, so this arm reads source, exactly like the
+  // .session-revoke delegation check above): loadSessions must wire the fold
+  // through #sessions-fold, or the button renders dead.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function loadSessions("));
+  const body = fn.slice(0, fn.indexOf("\n  function ", 10));
+  assert.ok(body.includes('querySelector("#sessions-fold")'),
+    "loadSessions must delegate the fold toggle through #sessions-fold");
+});
+
 test("gr-p5-account: the account is reachable from #acct-btn and the palette — and #ws-switch is NOT one of its doors", () => {
   // openAccountModal keeps its entry points; a recomposition that renames the
   // function or drops a listener leaves the account unreachable.
