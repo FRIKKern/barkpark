@@ -16983,6 +16983,37 @@ test("cch-w39-s1: there is exactly ONE retry control, in the shipped grammar, on
   assert.ok(wire.includes("btn.disabled = true"), "the press has an answer immediately");
 });
 
+// cch-w45-s5 (review): THE EXIT ONLY EXITS IF THE SURFACE HAS A SEAM.
+// wireMeRetry's `selfHealing` default is TRUE, and it means "loadMe's own arms
+// repaint this surface when the read lands" — so on a SUCCESSFUL retry the
+// wirer deliberately does NOT repaint. loadMe has such a seam for billing,
+// providers, notifications, activity and operator; it has NONE for the instance
+// view. A default-selfHealing retry on the instance header would therefore
+// re-read /v1/me, get "loaded", skip the repaint, and leave the control reading
+// "Checking capabilities…" forever — an exit that cannot exit.
+//
+// This is a SOURCE-TEXT pin because wireMeRetry is a DOM wirer with no export;
+// it is the same region-scan shape the seam tests above already use. It fails
+// in BOTH directions: drop the `false` and it reds, and add an instance seam to
+// loadMe without revisiting this call site and it reds too (at which point the
+// `false` becomes the double-paint and the fix is to delete both).
+test("cch-w45-s5: the instance view's /v1/me retry is NOT self-healing, because loadMe has no seam for it", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  const call = src.match(/wireMeRetry\(box, function \(\) \{ loadInstance\([^)]*\); \}(,\s*false)?\)/);
+  assert.ok(call, "the instance render site still wires the shipped exit");
+  assert.ok(call[1], "…and passes selfHealing=false, so a SUCCESSFUL re-read repaints the header");
+
+  const load = appRegion(src, "  function loadMe(", "\n  }\n");
+  assert.ok(!/currentView\(\)\s*===\s*"instance"/.test(load),
+    "loadMe still has no instance seam — the moment it grows one, drop the `false` above or the view paints twice");
+  // The surfaces loadMe DOES heal, so the asymmetry above is a fact and not a
+  // guess about which arms exist.
+  for (const view of ["billing", "providers", "notifications", "activity", "operator"]) {
+    assert.ok(load.includes('"' + view + '"'), "loadMe repaints " + view + " itself");
+  }
+});
+
 test("cch-w39-s1: the shared unknown block reports, never accuses, and names no cause the read did not return", async () => {
   hooks.clearMe();
   const CONSEQUENCE = "Until it answers we can't tell whether this account may manage billing, so nothing was changed and nothing was refused.";

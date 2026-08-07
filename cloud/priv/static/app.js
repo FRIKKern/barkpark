@@ -6559,7 +6559,17 @@
       // D437: a still-checking control needs a way out — the shipped
       // [data-me-retry] exit, present only while the answer is unknown, repaints
       // this whole view once /v1/me lands (no-op when it is absent).
-      wireMeRetry(box, function () { loadInstance(bp.id, tab); });
+      //
+      // selfHealing MUST be false here. wireMeRetry's default (true) means "the
+      // read landing is enough, because loadMe's own arms repaint this surface"
+      // — and loadMe has such a seam for billing, providers, notifications,
+      // activity and operator, but NONE for the instance view. With the default
+      // a SUCCESSFUL retry would satisfy `meState() === "loaded"`, skip the
+      // repaint, and leave the header reading "Checking capabilities…" forever:
+      // an exit that cannot exit, which is the exact class of lie this slice
+      // exists to remove. The team menu (:5376) passes false for the same
+      // reason. Idempotent: loadInstance re-renders this box from scratch.
+      wireMeRetry(box, function () { loadInstance(bp.id, tab); }, false);
       wireInstanceActions(bp);
       wireLifecycleActions(bp); // S11b: fill the lifecycle action-row slot (conduit-driven)
       var panel = box.querySelector("#instance-tabpanel");
