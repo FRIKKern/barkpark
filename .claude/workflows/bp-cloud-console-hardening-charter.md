@@ -2084,6 +2084,57 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-07 — wave 42 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd; 2 round-2 slices deferred by the sequenced-rounds law — grade A−)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The console consumes the team authority the server states | `cch-w42-s1-console-consumes-the-team-authority` | `…the-console-consumes-the-team-authority--0` | [#10153](https://github.com/FRIKKern/barkpark/pull/10153) | none — gate re-run (931/0, 104 scenarios, census rc 0), and the high-flip-risk staleness judgment independently re-derived BY MUTATION: substituting the tautological `ta.team_id !== meCache.team.id` form → 930/1, forcing unconditional `"grant"` → 930/1 |
+| The role-ladder census derives its own domain | `cch-w42-s2-role-ladder-census-derives-its-domain` | `…the-role-ladder-census-derives-its-own-d-1` | [#10154](https://github.com/FRIKKern/barkpark/pull/10154) | none — gate re-run (11/0 + format clean), limb 1 re-run from scratch (`TEAM-ADMIN SPLIT: at role "superadmin", Accounts=true but Authz=false`), and `"superadmin"` confirmed ABSENT from `@off_ladder`, so the derivation is load-bearing rather than incidentally covered |
+| Main-push gate failures find a human | `cch-w42-s4-main-push-gate-failures-find-a-human` | `…main-push-gate-failures-find-a-human-ins-2-r` | [#10155](https://github.com/FRIKKern/barkpark/pull/10155) | **REAL DEFECT FIXED.** Both new `report-main-failure` steps carried `name:` + `env:` and NO `run:` — valid YAML (which is why the slice gate's `ruby -ryaml` parse passed) but an invalid Actions step, so the job that exists to make a main-push red reach a human would never have executed the filer. Restored the `paper-readers.yml:75` shape in both files; re-verified BY PARSE that every step in `cloud.yml` (6 jobs) and `console-harness.yml` (8 jobs) carries `run` or `uses` and neither file has a workflow-level `permissions` key |
+| The notification event vocabulary gets a census | `cch-w42-s5-notification-event-vocabulary-census` | `…the-notification-event-vocabulary-gets-a-3` | [#10156](https://github.com/FRIKKern/barkpark/pull/10156) | none — gate re-run (108/0 + format clean), and a DIFFERENT limb than the builder's independently mutated (renaming the live `"agent_unreachable"` render arm) → the census reds by name, 3/1. Reverted |
+
+**WHAT LANDED.** Wave 41 put `team_authority` on `/v1/me`; wave 42 made the console actually read
+it. `grep -c team_authority app.js` went 0 → 8 behind a NEW five-valued sibling
+(`loading|failed|stale|refuse|grant`) rather than a widened boolean — the D439 trap, avoided by
+construction. The staleness arm is the wave's best work: it refuses the tautological
+`team_authority.team_id === meCache.team.id` form (both keys come from ONE binding in one map
+literal, so no fixture can falsify it) and instead pins the team pin the answer was FETCHED under
+against the pin live NOW, in lockstep with `meLoaded`/`meError`. On the control-plane side the two
+`team_admin?` predicates — set membership over `Authz.@admin_roles` for 17 routes, rank threshold
+over `TeamMembership.@ranks` for 7 — now have a census whose DOMAIN is read from both ladders, so a
+single-limb edit puts its own new role into the population that convicts it; `router.ex`'s false
+"the wire cannot disagree with the gate" is replaced by what is true. Two censuses, both LATENT not
+live, both honest about it. And nine measured main-push `Console gate` reds that told nobody now
+file an idempotent issue against a job-level `issues: write` grant.
+
+**WHAT STALLED / WHAT THE NEXT WAVE MUST KNOW.**
+
+1. **The s4 defect is the wave's lesson, and it is bigger than s4.** A workflow step with no `run:`
+   is valid YAML. `actionlint` is not installed and NOTHING in this repo validates workflow SHAPE —
+   every existing check is well-formedness only. A gate that cannot tell an invalid job from a valid
+   one is precisely the class this epic exists to close. Filed as
+   `cch-w42-bl-no-guard-proves-a-workflow-step-can-run`.
+2. **s1's compatibility floor is a real, stamped MISS, not an oversight.** Both converted functions
+   keep the pre-wave role literal as a floor for an answer with NO `team_authority` key, because
+   `scenarios.mjs`/`mock.js` build their `/v1/me` envelopes without it and those fixtures were
+   outside the fence. Against a control plane not sending the key the console still invents the
+   answer exactly as before. `cch-w42-bl-smoke-fixtures-carry-no-team-authority` is the unblocker,
+   and it is cheap — the next wave should take it FIRST, because it is what converts s1 from
+   "reads the authority when offered" into "requires the authority".
+3. **Round 2 is dispatch-ordered, not skipped.** `cch-w42-s3-members-row-reads-the-targets-rank`
+   needs s1 merged (both edit the app.js 18071-18120 band and both insert at the single
+   `__app.test.mjs:16015` window); `cch-w42-s6-owner-only-remedies-stop-being-prescribed-to-members`
+   needs s5 merged (s6 changes the arity of the PUBLIC `EventEmail.build/4` that s5's census calls).
+   Merge round 1 first, then dispatch each as its dep lands.
+4. **A real 7th notification event needs a MIGRATION**, not just an atom: `@events` doubles as
+   `changeset/2`'s cast list, and the column must exist. Measured during s5's mutation and not
+   predicted by the brief.
+5. **Independence is owed on s1's staleness judgment.** It was flagged HIGH-FLIP-RISK and the
+   reviewer re-derived it by mutation rather than by re-reading — but nobody has clicked the
+   two-tab race in a browser, and smoke has no two-tab fixture. A genuinely independent second
+   reviewer before merge is warranted.
+
+
 ### 2026-08-07 — wave 41 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A−)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
