@@ -2000,6 +2000,335 @@ for fixed in .github/workflows/bp-graph-drift.yml scripts/check-bp-graph-drift.s
 done
 
 
+section "19. docs/ops/merge-gates.md never calls a TRANSITIVE UPSTREAM of a required aggregator non-blocking"
+
+# THE DEFECT THIS CLAUSE EXISTS FOR. Two canonical artifacts disagreed about the
+# same two check names. `.github/required-checks.json` files `mix-prod-compile`
+# and `validation-perf` under "S3 SUBSUMED: an upstream `needs` of a required
+# aggregator — the aggregator already fails when it fails". docs/ops/merge-gates.md
+# — canonical-for: merge-gates, the page an agent actually reads before pushing —
+# said they "do not block". The spec is right: elixir.yml:667 declares
+# `needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape]`
+# and the aggregator's Decide body fails closed over every upstream result, so a
+# red in either one reds `Elixir gate`, which is one of exactly four required
+# contexts under `enforce_admins: true`.
+#
+# WHY A GUARD AND NOT JUST A COMMIT. The doc was not wrong about topology it
+# never mentioned; it was wrong about a CONSEQUENCE, and a consequence drifts
+# back the moment someone adds a job to `needs:` and describes it here from
+# memory. So the two lists are DERIVED, never typed: the aggregators' `needs:`
+# come out of `.github/workflows/`, the required contexts out of
+# `.github/required-checks.json`. Editing either one re-aims the guard.
+#
+# THREE CLASSES, AND THE GUARD MUST NOT COLLAPSE THEM. `format` really is
+# advisory — `continue-on-error: true`, and deliberately NOT in any required
+# aggregator's `needs:` — so a guard that simply deleted the "do not block"
+# sentence would ship a NEW lie about `format`. The guard therefore reds only on
+# a name that is a transitive upstream, which is what forces the doc to make the
+# split rather than to soften the wording.
+#
+# SENTENCE-SCOPED, NOT LINE-SCOPED, AND THIS IS MEASURED. merge-gates.md soft-
+# wraps its prose at ~78 columns, so a subject and its predicate routinely sit on
+# different physical lines: the fixed sentence at the head of item 4 spans four.
+# A line-scoped prototype run against this file found ONE of THREE promises — a
+# vacuous green inside the suite written to attack vacuous greens. Mutation 3
+# below runs the line-scoped rival on a specimen and proves it misses.
+#
+# THE UNIT IS A MARKDOWN BLOCK (paragraph, list item, heading), split into
+# sentences on `. ` / `! ` / `? `. Within a unit the guard carries the SUBJECT
+# forward, because "…nothing mechanically enforces it" — the second false
+# sentence fixed in this commit — names no job at all; its subject is the
+# `validation-perf` heading two sentences earlier. Carry applies ONLY when the
+# sentence names no job whatsoever: a sentence that names `format` is a sentence
+# about `format`, not about whatever the item started with, which is exactly the
+# false positive that killed the naive version on item 2.
+#
+# NAMES ARE MATCHED BACKTICKED, deliberately. Job ids in this tree include
+# `test`, `compile` and `changes`; matching those as bare words would red on
+# ordinary English. The doc's own convention is a backticked job id or a
+# backticked rendered check name, and a name written without backticks is out of
+# reach — stated here rather than discovered later.
+#
+# THE STANDING COST, so nobody discovers it as a surprise and silences the
+# section: a sentence that MENTIONS a blocking job while denying about a
+# different one is reported. Measured on the pre-fix doc — item 2's "It was
+# split out of `mix-test` … but today a red `format` check does not block merge"
+# came back as a CLAIM against `mix-test`, and the fix is to end the sentence
+# after the clause about `mix-test` (which is what the shipped item 2 does).
+# That is a fair price rather than a defect: a sentence carrying both a blocking
+# and a non-blocking subject is genuinely ambiguous to a reader too.
+#
+# WHAT IT CANNOT DO: it is a phrase matcher, not a reader. A fresh paraphrase
+# ("`validation-perf` is a courtesy signal") walks straight through it, the same
+# limit §18 records for its census. It closes the SHAPE that was actually
+# present, and reds when that shape returns.
+MERGE_GATES_DOC="$REPO_ROOT/docs/ops/merge-gates.md"
+
+# `<file>\t<job id>\t<name: template>\t<needs csv>` for every job in a workflow
+# directory. Independent of required-checks-generate.sh's own index ON PURPOSE:
+# a guard that shared the generator's parser would inherit its blind spots and
+# could only ever agree with it.
+rc_job_index() { # <workflow-dir>
+  local dir="$1" f
+  for f in "$dir"/*.yml; do
+    [ -f "$f" ] || continue
+    awk -v file="$(basename "$f")" '
+      BEGIN { injobs = 0; job = ""; jname = ""; needs = ""; inneeds = 0 }
+      function flush() { if (job != "") print file "\t" job "\t" jname "\t" needs }
+      /^jobs:[[:space:]]*$/ { injobs = 1; next }
+      injobs && /^[^[:space:]#]/ { flush(); job = ""; jname = ""; needs = ""; injobs = 0; next }
+      injobs && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
+        flush()
+        j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j)
+        job = j; jname = ""; needs = ""; inneeds = 0; next
+      }
+      injobs && job != "" {
+        if ($0 ~ /^    name:/) {
+          v = $0; sub(/^    name:[[:space:]]*/, "", v)
+          gsub(/^["'"'"']|["'"'"']$/, "", v); jname = v; next
+        }
+        if ($0 ~ /^    needs:[[:space:]]*\[/) {
+          v = $0; sub(/^    needs:[[:space:]]*\[/, "", v); sub(/\].*$/, "", v)
+          gsub(/[[:space:]]/, "", v); needs = v; inneeds = 0; next
+        }
+        if ($0 ~ /^    needs:[[:space:]]*$/) { inneeds = 1; next }
+        if (inneeds && $0 ~ /^      - /) {
+          v = $0; sub(/^      - /, "", v); gsub(/[[:space:]]/, "", v)
+          needs = (needs == "" ? v : needs "," v); next
+        }
+        if (inneeds && $0 !~ /^      /) { inneeds = 0 }
+      }
+      END { flush() }
+    ' "$f"
+  done
+}
+
+# Every name a merge-gates.md sentence could be ABOUT: job ids plus the rendered
+# `name:` of any job whose template interpolates nothing.
+rc_all_job_names() { # <index>
+  local f j n rest
+  while IFS=$'\t' read -r f j n rest; do
+    [ -n "$j" ] || continue
+    printf '%s\n' "$j"
+    if [ -n "$n" ] && ! grep -q '\${{' <<<"$n"; then printf '%s\n' "$n"; fi
+  done <<EOF
+$1
+EOF
+}
+
+# Walk one aggregator's `needs:` transitively, emitting `JOB<TAB><name>` for each
+# upstream. A `needs:` entry naming a job that does not exist in that workflow is
+# `UNRESOLVED` — the guard FAILS on it rather than quietly walking a shorter
+# graph, because a rename that outruns this file must refuse, not pass.
+rc_walk_needs() { # <index> <file> <needs-csv>
+  local idx="$1" file="$2" queue="$3" seen="" cur rest row rf rj rn rneeds
+  while [ -n "$queue" ]; do
+    cur="${queue%%,*}"; rest="${queue#*,}"
+    [ "$rest" = "$queue" ] && rest=""
+    queue="$rest"
+    [ -n "$cur" ] || continue
+    case ",$seen," in *",$cur,"*) continue ;; esac
+    seen="$seen,$cur"
+    row="$(awk -F'\t' -v f="$file" -v j="$cur" '$1 == f && $2 == j { print; exit }' <<EOF
+$idx
+EOF
+)"
+    if [ -z "$row" ]; then
+      printf 'UNRESOLVED\t%s declares `needs: %s`, which is not a job in that workflow\n' "$file" "$cur"
+      continue
+    fi
+    IFS=$'\t' read -r rf rj rn rneeds <<<"$row"
+    printf 'JOB\t%s\n' "$rj"
+    if [ -n "$rn" ] && ! grep -q '\${{' <<<"$rn"; then printf 'JOB\t%s\n' "$rn"; fi
+    [ -n "$rneeds" ] && queue="${queue:+$queue,}$rneeds"
+  done
+}
+
+# The required contexts, resolved to jobs, expanded to their transitive
+# upstreams. A required context matching no job `name:` is UNRESOLVED — the same
+# refusal: an aggregator someone renamed must red here, never silently vanish
+# from the guard's scope taking its whole upstream set with it.
+rc_transitive_upstreams() { # <workflow-dir> <spec-json>
+  local idx ctx row rf rj rn rneeds
+  idx="$(rc_job_index "$1")"
+  while IFS= read -r ctx; do
+    [ -n "$ctx" ] || continue
+    row="$(awk -F'\t' -v c="$ctx" '$3 == c { print; exit }' <<EOF
+$idx
+EOF
+)"
+    if [ -z "$row" ]; then
+      printf 'UNRESOLVED\trequired context `%s` matches no job `name:` under %s\n' "$ctx" "$1"
+      continue
+    fi
+    IFS=$'\t' read -r rf rj rn rneeds <<<"$row"
+    rc_walk_needs "$idx" "$rf" "$rneeds"
+  done <<EOF
+$(jq -r '.protection.required_status_checks.checks[].context' "$2")
+EOF
+}
+
+# The phrasings that assert a check cannot stop a merge. Narrow on purpose:
+# bare "advisory" is NOT here — merge-gates.md uses the word correctly about
+# `format` and about the shape of an advisory job, and matching it would red a
+# truth (the same reasoning §18 applies to `no rulesets`).
+RC_NONBLOCKING_RE='do(es)? not block|do not block|don.t block|never blocks?|not blocking|non-blocking|cannot block|unable to block|do(es)? not gate|nothing mechanically enforces|nothing enforces|is advisory|are advisory|purely advisory|merely advisory|advisory only|is not required to pass|does not stop a merge|cannot stop a merge'
+
+# <doc> <all-names-file> <target-names-file> -> `CLAIM<TAB><name><TAB><sentence>`
+rc_nonblocking_claims() {
+  awk -v allf="$2" -v tgtf="$3" -v neg="$RC_NONBLOCKING_RE" '
+    function trunc(s) { return (length(s) > 120 ? substr(s, 1, 117) "…" : s) }
+    function flush(   u, n, parts, i, s, k, named, nnamed, hit, m) {
+      if (unit == "") return
+      u = unit; unit = ""
+      gsub(/[[:space:]]+/, " ", u)
+      n = split(u, parts, /[.!?] +/)
+      for (i = 1; i <= n; i++) {
+        s = parts[i]
+        nnamed = 0
+        for (k = 1; k <= na; k++) if (index(s, "`" ALL[k] "`") > 0) {
+          named[++nnamed] = ALL[k]
+          carry[++nc] = ALL[k]
+        }
+        if (s ~ neg) {
+          if (nnamed > 0) {
+            for (k = 1; k <= nnamed; k++) if (named[k] in TGT) print "CLAIM\t" named[k] "\t" trunc(s)
+          } else {
+            for (k = 1; k <= nc; k++) if (carry[k] in TGT) print "CLAIM\t" carry[k] "\t" trunc(s)
+          }
+        }
+        for (k = 1; k <= nnamed; k++) delete named[k]
+      }
+      for (k = 1; k <= nc; k++) delete carry[k]
+      nc = 0
+    }
+    BEGIN {
+      while ((getline l < allf) > 0) if (l != "") ALL[++na] = l
+      while ((getline l < tgtf) > 0) if (l != "") TGT[l] = 1
+      fence = 0; unit = ""; nc = 0
+    }
+    /^[[:space:]]*```/ { flush(); fence = !fence; next }
+    fence { next }
+    /^[[:space:]]*$/ { flush(); next }
+    /^#/ { flush(); next }
+    /^[[:space:]]*([-*+][[:space:]]|[0-9]+\.[[:space:]])/ { flush() }
+    { unit = (unit == "" ? $0 : unit " " $0) }
+    END { flush() }
+  ' "$1"
+}
+
+# One driver, pointed at a workflow dir / spec / doc, so every mutation below
+# re-runs the SAME code path rather than a look-alike.
+rc_gate_report() { # <workflow-dir> <spec-json> <doc>
+  local up all tgt
+  up="$(rc_transitive_upstreams "$1" "$2")"
+  grep '^UNRESOLVED' <<<"$up" || true
+  all="$TMP/rc19-all.txt"; tgt="$TMP/rc19-tgt.txt"
+  rc_all_job_names "$(rc_job_index "$1")" | sort -u > "$all"
+  grep '^JOB' <<<"$up" | cut -f2 | sort -u > "$tgt"
+  [ -s "$tgt" ] || printf 'UNRESOLVED\tno required aggregator resolved to a single upstream job — the derivation produced an empty target set\n'
+  rc_nonblocking_claims "$3" "$all" "$tgt"
+}
+
+RC19_TARGETS="$(rc_transitive_upstreams "$REPO_ROOT/.github/workflows" "$SPEC" | grep '^JOB' | cut -f2 | sort -u | tr '\n' ' ')"
+if [ -n "$RC19_TARGETS" ]; then
+  ok "derived the required aggregators' transitive upstreams from source, nothing typed: $RC19_TARGETS"
+else
+  bad "no transitive upstreams derived — the guard would pass by having nothing to check"
+fi
+
+RC19_OUT="$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")"
+if [ -z "$RC19_OUT" ]; then
+  ok "merge-gates.md calls no transitive upstream of a required aggregator non-blocking"
+else
+  bad "merge-gates.md tells a reader that a check which reds a REQUIRED aggregator cannot stop a merge:"
+  printf '%s\n' "$RC19_OUT" | sed 's/^/       /' >&2
+fi
+
+# MUTATION 1 — DIRECTION 1, the doc lies. A copy of the doc with the retired
+# sentence put back must be reported, naming the check.
+RC19_DOC_CANARY="$TMP/merge-gates-canary.md"
+cp "$MERGE_GATES_DOC" "$RC19_DOC_CANARY"
+printf '\nEverything else on a PR is advisory: `mix-prod-compile`, `validation-perf`\nand `format` do not block.\n' >> "$RC19_DOC_CANARY"
+RC19_CANARY_OUT="$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC19_DOC_CANARY")"
+if grep -q '^CLAIM	mix-prod-compile' <<<"$RC19_CANARY_OUT" \
+   && grep -q '^CLAIM	validation-perf' <<<"$RC19_CANARY_OUT"; then
+  ok "…and it FIRES, BY NAME, on the retired sentence put back (mutation-proven able to fail)"
+else
+  bad "the planted 'do not block' sentence was not reported — the guard is a grep that can only pass:"
+  printf '%s\n' "$RC19_CANARY_OUT" | sed 's/^/       /' >&2
+fi
+
+# MUTATION 2 — the SPLIT. The same planted sentence names `format`, which is
+# genuinely advisory. If the guard ever red on it, the honest fix (say the
+# mechanism) and the dishonest one (delete the sentence) would be
+# indistinguishable, and deleting it would ship a new lie about `format`.
+if ! grep -q '^CLAIM	format' <<<"$RC19_CANARY_OUT"; then
+  ok "…and it does NOT fire on \`format\`, which is genuinely advisory — the split is measured, not asserted"
+else
+  bad "the guard reddened on \`format\`, a continue-on-error job in no required aggregator's needs — it has become a word filter"
+fi
+
+# MUTATION 3 — SENTENCE vs LINE, run rather than argued. The specimen is one
+# sentence soft-wrapped so that the check name and the phrase land on different
+# physical lines. The shipped scanner catches it; a line-scoped rival, modelled
+# the only way it could be written, misses it. That contrast is why this guard
+# is not three greps.
+#
+# The specimen is its own file, NOT an append to the doc: a rival run against
+# the whole doc could score a hit on some OTHER line and look competent. Both
+# scanners see exactly the same two lines and nothing else.
+RC19_WRAP="$TMP/merge-gates-wrapped.md"
+printf 'The `validation-perf` bench is worth watching, though a red run of it\ndoes not block anything on this repo.\n' > "$RC19_WRAP"
+if grep -q '^CLAIM	validation-perf' <<<"$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC19_WRAP")"; then
+  ok "…and it FIRES on a claim soft-wrapped across two lines — the scope is the sentence, not the line"
+else
+  bad "a soft-wrapped claim was missed — the scanner has degraded to line scope on a file that wraps at 78 columns"
+fi
+if ! grep -qE "\`validation-perf\`.*($RC_NONBLOCKING_RE)" "$RC19_WRAP"; then
+  ok "…and the LINE-scoped rival DROPS that same claim — the sentence scope is measured, not preferred"
+else
+  bad "the line-scoped rival caught the wrapped specimen — re-derive why sentence scope was required"
+fi
+
+# MUTATION 4 — DIRECTION 2, the graph moves under the doc. A renamed aggregator
+# must make the guard REFUSE. The failure mode being closed is the comfortable
+# one: an unresolvable name silently removes an aggregator's whole upstream set
+# from scope, and every claim about those checks turns green overnight.
+RC19_WF="$TMP/rc19-workflows"
+rm -rf "$RC19_WF"; mkdir -p "$RC19_WF"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$RC19_WF/"
+sed -i.bak 's/^    name: Elixir gate$/    name: Elixir gate v2/' "$RC19_WF/elixir.yml" && rm -f "$RC19_WF/elixir.yml.bak"
+if grep -q '^UNRESOLVED.*Elixir gate' <<<"$(rc_gate_report "$RC19_WF" "$SPEC" "$MERGE_GATES_DOC")"; then
+  ok "…and a RENAMED required aggregator is UNRESOLVED, not silently out of scope (the guard refuses rather than passes)"
+else
+  bad "renaming \`Elixir gate\` did not make the guard refuse — a rename would silently empty its upstream set"
+fi
+
+# MUTATION 5 — a `needs:` edge pointed at a job that does not exist. Same
+# refusal, one level down: the walk must not simply find nothing and continue.
+cp "$REPO_ROOT"/.github/workflows/elixir.yml "$RC19_WF/elixir.yml"
+sed -i.bak 's/^    needs: \[changes, mix-test, mix-prod-compile, validation-perf, path-escape\]$/    needs: [changes, mix-test, mix-prod-compile-renamed, validation-perf, path-escape]/' \
+  "$RC19_WF/elixir.yml" && rm -f "$RC19_WF/elixir.yml.bak"
+if grep -q '^UNRESOLVED.*mix-prod-compile-renamed' <<<"$(rc_gate_report "$RC19_WF" "$SPEC" "$MERGE_GATES_DOC")"; then
+  ok "…and a \`needs:\` entry naming no job is UNRESOLVED — a job rename refuses instead of shrinking the graph"
+else
+  bad "a dangling \`needs:\` entry was walked past in silence — the derivation fails open"
+fi
+
+# MUTATION 6 — the derivation reads the SPEC, not a list in this file. Drop
+# `Elixir gate` from a copy of the spec and its upstreams must leave the target
+# set; if they survive, they were typed here.
+RC19_SPEC="$TMP/rc19-spec.json"
+jq '.protection.required_status_checks.checks |= map(select(.context != "Elixir gate"))' "$SPEC" > "$RC19_SPEC"
+if ! grep -qx 'mix-prod-compile' \
+     <<<"$(rc_transitive_upstreams "$REPO_ROOT/.github/workflows" "$RC19_SPEC" | grep '^JOB' | cut -f2 | sort -u)"; then
+  ok "…and dropping a context from the SPEC drops its upstreams — the required list is read, not hardcoded"
+else
+  bad "\`mix-prod-compile\` survived removing \`Elixir gate\` from the spec — the target set is typed into this file"
+fi
+
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
