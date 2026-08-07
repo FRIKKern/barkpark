@@ -111,6 +111,20 @@ set -euo pipefail
 # string is how a rail guard ends up green by construction), and it makes the
 # engine a real dependency of the Cloud suite — an edit to that line must re-run
 # this suite, or the fixture and its producer drift apart behind a green check.
+#
+# templates/astro-search-starter/src/lib/bp.ts — dr-w16-s1.
+# templates/search-starter/lib/markers.corpus-status.test.ts — dr-w16-s1.
+#     `deploy_ledger_test.exs` reads these TWO repo-root starter files and
+#     censuses the deploy markers they PRODUCE against the ledger's parser. They
+#     are the producer half of that contract, so an edit to either is a change to
+#     the thing under test — unfiltered, the census would never run on the PR
+#     that moved it. Declared as EXACT FILES, not `templates/*/**` (D270): the
+#     tests read exactly these two files, and the directory glob is the expensive
+#     shape. Measured over the last 60 days — 54 commits touched `templates/`; of
+#     those, 47 dispatch nothing in this set today and a templates glob would
+#     newly hand every one of them the Postgres-backed Cloud `test` job, against
+#     5 for the exact files. Declaring what is actually read is both the honest
+#     and the cheap answer; widen only when a test starts reading more.
 CLOUD_PATHS='cloud/**
 .github/workflows/cloud.yml
 deploy/site-deploy.sh
@@ -120,7 +134,9 @@ internal/cloudclient/**
 js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
 scripts/cloud-path-escape-check.sh
-scripts/cloud-path-escape-check.test.sh'
+scripts/cloud-path-escape-check.test.sh
+templates/astro-search-starter/src/lib/bp.ts
+templates/search-starter/lib/markers.corpus-status.test.ts'
 
 # EXEMPT — census rows that resolve to a real repo-root file but are NOT a
 # repo-root DEPENDENCY. Two shapes qualify, and nothing else does:
@@ -136,7 +152,8 @@ scripts/cloud-path-escape-check.test.sh'
 # literal's REAL target is itself covered by the declared set.
 CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin_env_test.exs:189 reads Path.join(__DIR__, "../../docker-compose.yml"), which is cloud/docker-compose.yml (covered by cloud/**). The repo-root file of the same name is reached only by the `cloud/` cwd base, and that base does not apply to a __DIR__-anchored literal.'
 
-# The census floor. The measured population is 6 resolved repo-root reads: the
+# The census floor — a LOWER BOUND, not a headcount. It was set from a
+# population of 6 resolved repo-root reads (the population only grows): the
 # two cross-tree reads above, the vendored-template directory, the one EXEMPT
 # phantom above, (cch-w27-s2) the box engine `deploy/site-deploy.sh` that
 # `sites_deploy_stage_caption_test.exs` derives its failure corpus from, and
@@ -146,10 +163,20 @@ CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin
 # a regex or find that silently stopped matching would otherwise report "0
 # uncovered reads" and exit 0 — clean-looking, and completely blind.
 #
-# It is deliberately EQUAL to the population, not comfortably under it, because
-# the population is small: a floor of 1 here would let two thirds of the scanner
-# die unnoticed. A legitimate new escape RAISES this number in the same commit
-# that declares the path.
+# It is set CLOSE to the population, not far under it, because the population is
+# small: a floor of 1 here would let two thirds of the scanner die unnoticed. It
+# was originally set EQUAL to the then-population of 6, and that equality is
+# history, not a rule — as producer reads are declared the population grows past
+# it and the floor stays put.
+#
+# A legitimate new escape does NOT raise this number (dr-w16-s1). The floor is a
+# LOWER BOUND on a scanner's liveness, and the harness proves that bound against
+# a synthetic fixture (cloud-path-escape-check.test.sh:59-73) that emits only
+# FIVE covered reads. Raise the floor past what that fixture can produce and the
+# harness's own fixture-tree cases go red on the floor instead of exercising
+# coverage — measured on this tree, a floor of 7 turns a clean
+# "158 passed, 0 failed" into "152 passed, 6 failed". Widen the fixture first,
+# or leave the floor alone.
 #
 # It is a CONSTANT on purpose. An env-var override would be a one-line CI bypass
 # of the only check that can tell "clean" from "blind", and the harness asserts
