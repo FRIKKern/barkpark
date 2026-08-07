@@ -699,7 +699,20 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert row.failure_reason =~ "is already running"
       # …plus the promise that makes `deferred` different from `failed`.
       assert row.failure_reason =~ "re-queued"
-      assert row.detail == row.failure_reason
+      # `detail` is the varchar(255) caption, `failure_reason` the whole story.
+      # They were byte-equal until dr-w7 S1 gave the sentence a chain depth (D99,
+      # PR #9905) — now the caption is `short_detail/1`'s clamp of the reason,
+      # which is what keeps an over-long reason from RAISING 22001 mid-transition.
+      assert String.length(row.detail) <= 255
+
+      if String.length(row.failure_reason) <= 255 do
+        assert row.detail == row.failure_reason
+      else
+        assert String.starts_with?(row.failure_reason, String.trim_trailing(row.detail, "…"))
+        # The caption keeps the part an operator needs at a glance.
+        assert row.detail =~ "refusal 1 of 6"
+        assert row.detail =~ "re-queued"
+      end
 
       # THE RE-FIRE, as a real Oban row: a debounced rebuild for THIS site is
       # pending. Nothing about the old path enqueued anything at all.
@@ -830,6 +843,94 @@ defmodule BarkparkCloud.SitesDeployTest do
       # The verdict is DERIVED from the cause, so the busy-box accusation cannot
       # be aimed at a box that was never busy with this site.
       refute last.failure_reason =~ "not busy but stuck"
+    end
+
+    # dr-w7 S1 (deploy-reliability charter D99, PR #9905). The depth was computed
+    # for the threshold, logged once, and DISCARDED: on the production ledger 63
+    # capacity-deferred rows across five sites all carried the SAME sentence, so
+    # refusal 1 and refusal 8 were byte-identical to the operator and the only
+    # moment depth ever reached a human was the instant of the terminal drop.
+    test "consecutive deferrals are no longer byte-identical — each names its own depth, bound, and what is being counted" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "box_at_capacity",
+               "message" => "1 of 1 build slots in use"
+             }
+           }}
+      )
+
+      rows =
+        for _ <- 1..2 do
+          {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+          assert {:ok, :deferred} = Deploy.run(d.id)
+          Repo.get(Deployment, d.id)
+        end
+
+      reasons = Enum.map(rows, & &1.failure_reason)
+      [first, second] = reasons
+
+      # THE WHOLE POINT: two rounds of the same refusal no longer read the same.
+      refute first == second
+      assert first =~ "refusal 1 of 12"
+      assert second =~ "refusal 2 of 12"
+
+      # All three facts, in every round: the depth, the cause's own bound, and
+      # that the counter is a ZERO-PROGRESS guard rather than a countdown — a
+      # bare "2 of 12" would promise a drop a merely-slow box may never reach.
+      for r <- reasons do
+        assert r =~ "in this site's current chain"
+        assert r =~ "zero-progress guard, not a countdown"
+        assert r =~ "any successful deploy resets it to 0"
+        # …and the promise that makes `deferred` different from `failed` still
+        # travels, unshadowed by the new clause.
+        assert r =~ "re-queued"
+      end
+
+      # The clamped varchar(255) caption keeps the DEPTH — the clause sits ahead
+      # of the parenthetical for exactly this reason.
+      second_row = List.last(rows)
+      assert second_row.detail =~ "refusal 2 of 12"
+      assert String.length(second_row.detail) <= 255
+    end
+
+    # The bound is READ FROM THE CAUSE (`max_consecutive_deferrals/1`), never a
+    # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
+    # sentence that hardcoded either would misstate the other cause's whole
+    # budget to the operator reading it.
+    test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "1 of 1 build slots in use"}}}
+      )
+
+      {:ok, capacity} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(capacity.id)
+      capacity_reason = Repo.get(Deployment, capacity.id).failure_reason
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      {:ok, busy} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(busy.id)
+      busy_reason = Repo.get(Deployment, busy.id).failure_reason
+
+      assert capacity_reason =~ "refusal 1 of 12"
+      refute capacity_reason =~ "of 6"
+
+      # A DIFFERENT cause breaks the chain, so this is refusal 1 again — and it
+      # is measured against the busy box's shorter leash.
+      assert busy_reason =~ "refusal 1 of 6"
+      refute busy_reason =~ "of 12"
     end
 
     # THE FIRST TEST THIS BRANCH HAS EVER HAD. `git grep 'could NOT be
