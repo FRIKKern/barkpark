@@ -965,10 +965,41 @@ function me(teamName, onb, role) {
     { key: "instance", done: !!onb.instance },
     { key: "published_doc", done: !!onb.published_doc },
   ];
+  // cch-w43-s1: the envelope is the one the SERVER mints, key for key. The
+  // shape is DERIVED from /v1/me's own response map (router.ex, the
+  // `get "/v1/me"` clause): user{id,email,confirmed,two_factor_enabled,
+  // platform_operator} · team{id,name,slug} · teams[]{id,name,slug,role} ·
+  // role · team_authority{team_id,role,admin,owner} · onboarding.
+  // __me_envelope_census.mjs re-derives that map at test time and diffs it
+  // against what route(name,"GET","/v1/me") actually serves, so this comment
+  // is not the guard — the census is, and it reds by key path when the two
+  // drift. Until wave 43 the corpus emitted FOUR of those six keys, which is
+  // why every rendered scenario ran on app.js's compatibility floors and the
+  // `grant` band had never been painted by any instrument.
+  //
+  // `platform_operator` is deliberately NOT set here: it is the operator axis,
+  // and operatorMe() (below) is the ONE producer that raises it, exactly as
+  // GR39 requires. The census unions over the whole corpus, so those scenarios
+  // are what prove the key is served at all.
+  const actorRole = role || "owner";
   return {
     user: { id: "usr_ada", email: "ada@acme.com", confirmed: true, two_factor_enabled: false },
     team: { id: IDS.team, name: teamName, slug: "acme" },
-    role: role || "owner",
+    // EVERY membership, the server's words. The corpus's actor belongs to the
+    // one team it is scoped to — a SECOND team here would be a scenario-level
+    // claim (a switcher with somewhere to switch to) that no fixture asks for.
+    teams: [{ id: IDS.team, name: teamName, slug: "acme", role: actorRole }],
+    role: actorRole,
+    // The authority the GATE enforces, stated on the wire. Scoped to the SAME
+    // team as `team:` and `role:` above — one resolved team, never a role from
+    // one team beside an id from another. admin/owner mirror Authz: owner is
+    // both, admin is admin-not-owner, everyone else is neither.
+    team_authority: {
+      team_id: IDS.team,
+      role: actorRole,
+      admin: actorRole === "owner" || actorRole === "admin",
+      owner: actorRole === "owner",
+    },
     onboarding: {
       completed: !!onb.completed,
       completed_at: onb.completed ? tMinus(80000) : null,
