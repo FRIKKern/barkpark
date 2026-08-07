@@ -3609,3 +3609,120 @@ same-slug `already_running` collapsed 277 → 1 (D179), and the cause of the 03:
 
 Charter published as a docs-only PR, not pushed to main (D39, honest-gates). It carries D161–D171 forward
 from the still-blocked #10173, so merging THIS PR makes #10173 redundant.
+
+### Wave 2026-08-07 (wave 12) — REVIEWED · Paper `deploy-reliability-wave-12-2026-08-07` · grade **A−**
+
+**All seven round-1 slices built, reviewed, gate-green, PUSHED and PR'd. Nothing merged — the lead merges.**
+`dr-w12-s8-terminal-rate-and-abandonment` was deferred to round 2 BY DESIGN (it edits the same `@known_open`
+list and `deploy_ledger.ex` that S1 edits on #10192's branch); its task is open, unclaimed, 0/10, which is the
+correct ledger state for a sequenced slice and not a stall.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| Unblock #10192's delivery phantom | `dr-w12-s1-unblock-10192-allowlist-row` | `…refuses-an-unidentif-3-r` (#10192's OWN branch) | [#10192](https://github.com/FRIKKern/barkpark/pull/10192) | census 11/0 · full cloud suite 3058/0 |
+| The publish clock gets a reader | `dr-w12-s2-publish-clock-reader` | `…gets-a-reader-that-is--1` | [#10244](https://github.com/FRIKKern/barkpark/pull/10244) | 11 tests, 0 failures |
+| A zero-webhook publish becomes countable | `dr-w12-s3-zero-delivery-publish-countable` | `…zero-webhooks-becom-2-r` | [#10245](https://github.com/FRIKKern/barkpark/pull/10245) | 46/0 · full `test/barkpark/webhooks/` 111/0 |
+| The Elixir escape floor stops decaying | `dr-w12-s4-elixir-escape-derived-floor` | `…ratchet-stops-decaying-3` | [#10246](https://github.com/FRIKKern/barkpark/pull/10246) | ratchet exit 0 (29 reads / 4 idioms) · harness 127/0 |
+| The zero-criteria census gets a caller | `dr-w12-s5-zero-criteria-census-caller` | `…census-gets-a-caller-i-4` | [#10247](https://github.com/FRIKKern/barkpark/pull/10247) | self-test PASS, exit 0 · 4 jobs parse |
+| The deferral becomes structure (**MIGRATION**) | `dr-w12-s6-deferral-becomes-structure` | `…becomes-structure-and-the-p-5` | [#10248](https://github.com/FRIKKern/barkpark/pull/10248) | 89/0 · full cloud suite 3051/0 |
+| `siteWaitingSince` counts refused rounds | `dr-w12-s7-waiting-counts-deferrals` | `…stops-excluding-the-one-6` | [#10249](https://github.com/FRIKKern/barkpark/pull/10249) | build + vet + `go test ./internal/cli/` ok · gofmt clean |
+
+**CROSS-SLICE PROOF, run once by the reviewer rather than inferred from seven separate greens.** All seven
+branches were merged together onto `origin/main` (46b5373ed) in a probe branch — every merge clean, no
+conflicts — and the integrated tree runs: cloud suite **3071 tests / 0 failures**, `go build ./...` +
+`go test ./internal/cli/ ./internal/cloudclient/` ok, `api` webhooks suite 111/0, the Elixir escape ratchet
+exit 0, the zero-criteria self-test PASS. Seven greens on seven trees is not the same claim as one green on
+the tree that will exist after merge, and this wave has both.
+
+**What landed against the wish.** The wish was three verbs: find the failures still SILENT or still
+MIS-REPORTED, fix them, and make the reporting able to LOSE. All three moved, and the strongest work is on
+the third.
+
+*Still silent, now countable.* S3 closes the loss class UPSTREAM of every instrument this epic owns: a publish
+that fires zero webhooks was indistinguishable from a publish nobody subscribed to, because `fan_out/3`
+discarded its own outcome and the failure IS the absence of a row. `selected` is now recorded synchronously in
+the caller before the task is spawned (so it survives a task that never starts) and `settled` after the stream
+drains, with `minted < selected` at WARNING. S6 makes the OTHER silent producer speak —
+`defer_behind_running_build/2` still correctly mints no deployment row, but the attempt is now counted on the
+in-flight row it coalesced onto (1,204 attempts that minted no row vs 277 counted deferrals over twelve hours;
+0.086:1 today, i.e. dormant, not fixed).
+
+*Still mis-reported, now correct.* S7 removes the exclusion that made the censored waiting clock structurally
+unable to see a deferral chain — the one shape whose wait is genuinely unbounded and now 53.6% of attempts —
+and measures it from the chain's FIRST refusal rather than its newest (= shortest) round, with the clock named
+in the sentence per #10189. S6 ends the producer↔reader-through-English coupling: chain depth/bound/cause are
+columns written by the same fenced transition that writes the sentence, and the sentence is KEPT.
+
+*Reporting able to lose.* S4 is the sharpest finding of the wave and it is about the epic's own guards.
+`ELIXIR_ESCAPE_MIN=8` was a whole-population floor over a scanner with four independent doors: deleting
+`api/test` from its `find` — ONE WORD, 62% of coverage — collapsed the census 29→11 and the ratchet still
+printed `OK`, exit 0, INSIDE the REQUIRED Elixir gate. It now carries per-idiom derived floors, and its harness
+runs a mutant of the REAL script against the REAL repo. S5 gives `epic-zero-criteria-census.sh` its first
+caller of any kind (six repo-wide grep hits, all self-references). S1 stops #10192's stale green from redding
+main after merge, and corrects the file's own MERGE-ORDER NOTE, whose scripted reason greens one arm by redding
+another.
+
+**What did NOT land, and must be said plainly.**
+1. **Nothing is merged, so no AFTER number exists.** The 69% failure rate is not yet measured post-fix, and no
+   slice this wave was a repair of the failure rate itself — this was an instrumentation wave.
+2. **Nothing READS S6's five new columns.** By brief it is write-only; `DeployLedger` still classifies off the
+   reason string and the Go CLI still regex-parses depth out of English. If
+   `dr-w12-s6-followup-serialize-deferral-columns` is never taken, this wave shipped five columns nobody reads.
+3. **S3 has no durable table**, so the epic's SQL census still cannot query the fan-out records — they live in
+   telemetry + journald only (`dr-w12-s3-followup-census-reads-fanout-records`).
+4. **S5 makes the census RUN, not CATCH.** The ratchet that would actually catch zero-criteria children is
+   deliberately unwired (it shells `bp`, absent on runners). "The census can no longer silently break" is the
+   honest claim; "zero-criteria tasks are now caught in CI" is not.
+5. **S2's reader has no human surface.** Every operator read path is behind `require_platform_operator` and
+   `PLATFORM_ADMIN_EMAILS` is unset on prod (D165), so nothing a human can reach calls `PublishClock`.
+
+**Review fix made in place** (one commit, `556ad6d41` on `…zero-webhooks-becom-2-r`): S3's `record/3` runs
+INLINE in the publishing process on the `:selected` arm, and its `metadata = Map.put(ctx, :phase, phase)` sat
+OUTSIDE the three `safely/1` wrappers. The slice's whole contract is that the counter can never fail the publish
+it counts, and that held only by the argument "ctx is a literal map at all three call sites". Proved the
+exposure by mutation — a `record/3` that raises before the first `safely` failed 27 of 46 dispatcher fixtures —
+and wrapped the body, so the guard is structural rather than argued. Every other slice was already right and
+was left alone.
+
+**Adversarial re-derivations the reviewer ran rather than trusting the reports.** S1: deleting the allowlist row
+→ `new phantom (declared by Go, emitted by nobody)`; installing the MERGE-ORDER NOTE's verbatim reason →
+`a KNOWN OPEN row must name the task or PR that closes it`. Both confirmed, both 11 tests / 1 failure. S2:
+deleting `AND dd.inserted_at >= p.received_at` from `@census_sql` → 2 of 11 red, so the honesty guard is
+genuinely pinned and not merely described. S4: case 5b read line by line — it really does run a mutant of the
+real script against the real repo via `ELIXIR_PATH_ESCAPE_ROOT`, guarded by a `cmp -s` so it cannot pass
+vacuously. S7: `sitePendingRows` compared statement by statement against the pre-refactor `siteWaitingSince` —
+the `liveIdx` scoping, the stamp fallback and the keep-on-ambiguity rule are preserved exactly.
+
+**LEAD ACTIONS, named so they cannot be lost.**
+- **MERGE ORDER: #10192 (S1) FIRST.** `dr-w12-s8` edits the same `@known_open` list and `deploy_ledger.ex`;
+  re-derive it on main after #10192 lands. #10192 also carries `deploy_ledger.ex`, which S8 owns.
+- **MIGRATION `20260807150000` (S6) MUST BE APPLIED BEFORE THE DEPLOY.** `coalesced_attempts` carries a schema
+  default, so every deployment INSERT now names it — new code against an un-migrated DB fails hard on every
+  insert rather than degrading. The catalog-only-ALTER safety argument is ANALYTIC and was applied only against
+  `barkpark_cloud_test`; the ACCESS EXCLUSIVE lock still queues behind any long statement on `deployments`.
+- **INDEPENDENT SECOND REVIEW is owed on S3 and S6** (D189 flagged both HIGH-FLIP-RISK). This workflow spawns
+  one reviewer; that dispatch is a manual lead step.
+- **The lead closes the merge-gated criterion on every one of the seven slice tasks on merge.** All seven are
+  correctly left `in_progress` with the merge criterion open.
+
+**Ledger.** Honest across the board — seven tasks, every one claimed, every non-merge-gated criterion stamped
+with evidence as the work happened, lifecycle `in_progress`, no false `done`. One fix: S5's PR-body criterion
+was correctly stamped `--miss` (builders do not push, so there was no body to quote); the reviewer opened
+#10247 with the required sentence verbatim and stamped it met. Two new tasks filed from the review itself —
+`dr-w12-rv-publish-clock-match-ceiling` (the lateral is bounded below but not above, so a three-week-later
+deploy reads as "delivered" and would enter a percentile once the sample clears `min_sample`) and
+`dr-w12-rv-site-waiting-page-truncation` (a chain older than the 20-row page reads as a short wait with no
+marker saying the page ran out). No task outside this wave was touched.
+
+**HOUSEKEEPING NOTE for whoever maintains this file.** This log jumps from wave 7 straight to wave 12: waves
+8, 9, 10 and 11 have `### Wave N plan` sections but NO `REVIEWED` entry. That is the orphaned-wave-log failure
+mode — merging a charter PR mid-wave strands the reviewer's entry on a dead branch. This entry is appended on
+the charter PR's OWN branch (#10208) for exactly that reason.
+
+**What the next wave should take.** Round 2 first: `dr-w12-s8-terminal-rate-and-abandonment`, re-derived on
+main after #10192 merges — it is the last slice standing between the epic and a rate that names its own
+denominator, and #10014 is superseded by its re-cut. Then close the read half of what this wave wrote:
+`dr-w12-s6-followup-serialize-deferral-columns` (five columns nobody reads) and
+`dr-w12-s3-followup-census-reads-fanout-records` (a loss class recorded only in journald). Then the AFTER
+number — nothing in twelve waves has yet measured the failure rate post-repair, and an epic founded on "69% of
+deploys fail and nothing reports it" owes that measurement more than it owes another instrument.
