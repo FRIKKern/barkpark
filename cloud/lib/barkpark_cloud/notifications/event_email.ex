@@ -38,6 +38,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Mailer
   alias BarkparkCloud.Notifications.EmailSettings
+  alias BarkparkCloud.Notifications.Render
 
   # Separates the human cause from the raw provider capture below it, so a reader
   # who only wants the answer can stop at the first paragraph and a reader
@@ -115,10 +116,15 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   # `detail/1` would scrub and ship raw. The dashboard classifies the same string;
   # the inbox now tells the same person the same story, with the honest capture
   # kept below the class exactly as D310 ruled for `provision_failed`.
+  # wave 15 S4 (charter D248): the identity line goes ABOVE the cause, because a
+  # reader with three of these open needs to know WHICH deployment before they
+  # care why. `Render.deployment_identity/1` is the single formatter both rails
+  # use, so the inbox and Slack name the same deployment the same way.
   defp render(:deployment_failed, payload, _owner?),
     do:
       {"Deployment failed",
-       "A deployment for #{name(payload)} failed.#{cause_then_capture(payload)}"}
+       "A deployment for #{name(payload)} failed." <>
+         "#{identity(payload)}#{cause_then_capture(payload)}"}
 
   defp render(:agent_reachable, payload, _owner?),
     do: {"Your Barkpark is reachable again", "#{name(payload)} is reporting healthy again."}
@@ -166,6 +172,18 @@ defmodule BarkparkCloud.Notifications.EventEmail do
     do: {"Barkpark Cloud notification", "Event: #{event}.#{detail(payload)}"}
 
   defp name(payload), do: Map.get(payload, :name) || Map.get(payload, "name") || "Your Barkpark"
+
+  # WHICH deployment failed, as its own paragraph — deployment id, stage and one
+  # real code identity, all columns, no invented commit field and no computed
+  # build duration (`deployments` has neither a start nor a finish timestamp to
+  # subtract). There is no link: the notifications layer has no console base URL,
+  # and the id is what `GET /v1/sites/:id/deployments/:dep_id` takes.
+  defp identity(payload) do
+    case Render.deployment_identity(payload) do
+      "" -> ""
+      line -> "\n\n#{line}"
+    end
+  end
 
   # The trial window, BUILT FROM THE INTEGER — the same shape (and the same
   # degraded "soon") `Notifications.Render.trial_window/1` uses, so the two rails
