@@ -474,4 +474,100 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       System.delete_env("AUTODEPLOY_DEBOUNCE_S")
     end
   end
+
+  # An `:executing` row whose node is gone: attempted long enough ago to be past
+  # any rescue cutoff (dr-w8-s7).
+  defp orphaned_executing(site_id, max_attempts, attempt, minutes_ago) do
+    job =
+      %{"site_id" => site_id}
+      |> Oban.Job.new(worker: AutoDeployWorker, queue: :site_deploy, max_attempts: max_attempts)
+      |> Repo.insert!()
+
+    {1, _} =
+      Repo.update_all(
+        from(j in Oban.Job, where: j.id == ^job.id),
+        set: [
+          state: "executing",
+          attempt: attempt,
+          attempted_at: DateTime.add(DateTime.utc_now(), -minutes_ago, :minute),
+          attempted_by: ["cloud@dead-node-#{System.unique_integer([:positive])}"]
+        ]
+      )
+
+    job.id
+  end
+
+  # Scope the rescue to the ids under test so it can never reach a neighbour's
+  # rows — `rescue_jobs/3` takes the queryable, exactly as Lifeline passes `Job`.
+  defp rescue_only(ids) do
+    {:ok, _touched} =
+      Oban.Engines.Basic.rescue_jobs(
+        Oban.config(),
+        from(j in Oban.Job, where: j.id in ^ids),
+        rescue_after: :timer.minutes(5)
+      )
+
+    Map.new(Repo.all(from(j in Oban.Job, where: j.id in ^ids, select: {j.id, j.state})))
+  end
+
+  describe "orphan rescue — Oban.Plugins.Lifeline (dr-w8-s7)" do
+    # A blue/green container replacement kills the BEAM mid-job. The row stays
+    # `:executing` forever: Pruner only reaps completed/cancelled/discarded, so
+    # nothing on the control plane ever contradicts a job that claims to have
+    # been running for ten days. Lifeline is what ends that lie.
+    #
+    # These tests drive `Engine.rescue_jobs/3` DIRECTLY — the same call Lifeline
+    # makes — rather than running the plugin, precisely BECAUSE the plugin is
+    # leader-gated (`Peer.leader?/1`): during a blue/green overlap only one node
+    # rescues, so a test that started the plugin on two nodes and expected both
+    # to act would be asserting a falsehood. What is under test here is the split
+    # the engine performs, which is what decides what actually happens on
+    # adoption.
+
+    test "under max_attempts RESCUES to available, at max_attempts DISCARDS" do
+      # The five stranded AutoDeployWorker rows: max_attempts 3, attempt 1. They
+      # go back to `available` and re-run — the one-time price of adoption, and
+      # safe, because perform/1 only re-enqueues + re-spawns the driver.
+      retryable = orphaned_executing(Ecto.UUID.generate(), 3, 1, 10)
+
+      # A max_attempts-1 worker (the StalenessWorker / UsageSamplerWorker shape)
+      # has no attempt left to spend: it is DISCARDED, never re-run. Both
+      # outcomes are safe here; what matters is that neither stays `:executing`.
+      exhausted = orphaned_executing(Ecto.UUID.generate(), 1, 1, 10)
+
+      states = rescue_only([retryable, exhausted])
+
+      assert states[retryable] == "available"
+      assert states[exhausted] == "discarded"
+    end
+
+    test "a job still inside the rescue window is left alone" do
+      # The healthy case: a build that started thirty seconds ago is IN FLIGHT,
+      # not orphaned. rescue_after is a cutoff, not a kill switch — if this ever
+      # rescued, a live job would be double-enqueued.
+      fresh = orphaned_executing(Ecto.UUID.generate(), 3, 1, 0)
+
+      assert rescue_only([fresh])[fresh] == "executing"
+    end
+
+    test "Lifeline is configured, above the measured tail, with an explicit grace" do
+      oban = Application.fetch_env!(:barkpark_cloud, Oban)
+
+      assert {Oban.Plugins.Lifeline, opts} =
+               Enum.find(oban[:plugins], &match?({Oban.Plugins.Lifeline, _}, &1)),
+             "without Lifeline an orphaned :executing row is stranded forever"
+
+      # Never below 60s: the all-time max completed AutoDeployWorker duration
+      # (15.017s over 13,287 jobs) is EXACTLY Oban's old unset
+      # shutdown_grace_period, so the observed distribution is clipped there and
+      # the true healthy tail is unobservable. 5 minutes is 20x that max and well
+      # clear of the 60s debounce window.
+      assert opts[:rescue_after] >= :timer.seconds(60)
+      assert opts[:rescue_after] == :timer.minutes(5)
+
+      # Set explicitly rather than inherited: a longer grace PREVENTS orphans,
+      # where Lifeline only cleans up after them.
+      assert oban[:shutdown_grace_period] >= :timer.seconds(30)
+    end
+  end
 end
