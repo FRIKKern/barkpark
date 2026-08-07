@@ -48,8 +48,36 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @r429 "the instance refused the deploy (HTTP 429): rate_limited — try again shortly"
   # An HTTP status the ledger has never named: 2 rows. Must be UNCLASSIFIED.
   @r404 "the instance refused the deploy (HTTP 404)"
+  # The CAUSELESS doc-id row: the empty marker and nothing else. 1 row in the
+  # pinned 24h window of 2026-08-07 (7d: 2,594 — the window is part of the count
+  # or the count is false, D111). After dr-w8 S1 this shape is structurally the
+  # STATIC-ENGINE bucket: `deploy/site-deploy.sh` has no bp-corpus-status reader
+  # at all, so a static site can never write a cause here (D112).
   @doc_id "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty"
   @doc_id_alt "HEALTH failed — bp-doc-id marker is empty — the SSR rendered nothing"
+
+  # ── The doc-id rows that CARRY their cause (dr-w8 S1) ─────────────────────
+  # `deploy/site-deploy-node.sh` reads the SSR's own `bp-corpus-status` marker
+  # and writes the upstream condition into the SAME failure_reason, after the
+  # symptom. 249 of the 250 doc-id rows in the pinned 24h window of 2026-08-07
+  # carry it (500=131, 0=62, 503=56); the classifier used to throw all 249 away
+  # by matching the symptom first.
+  @doc_id_head "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — the SSR could not read a content document: "
+  @doc_id_500 @doc_id_head <> "graph 500: the content API errored while reading the corpus"
+  @doc_id_503 @doc_id_head <> "graph 503: search API is restarting, try again in a moment"
+  # Status 0 is the fetch that never got an HTTP answer at all (graph.ts:246) —
+  # NOT a mis-stamped 503, even though bp-fetch.ts hands it the same sentence.
+  @doc_id_0 @doc_id_head <> "graph 0: search API is restarting, try again in a moment"
+  @doc_id_403 @doc_id_head <>
+                "graph 403: public-read tokens may only read published public documents"
+  # A status the ledger has never named. Must rise in UNCLASSIFIED (D8), never in
+  # a catch-all CONTENT_API_OTHER.
+  @doc_id_418 @doc_id_head <> "graph 418: the content API is a teapot"
+  # D110, recorded as a DECISION and not an oversight: 10 BUILD-stage rows in the
+  # same 24h window also mention the graph, in the Astro renderer's own words.
+  # They stay BUILD_FAILED — the build stage's failure is that the build exited
+  # non-zero, and the HEALTH arm's producer phrase is not in them.
+  @build_graph "BUILD failed (exit 12): \e[31m[ERROR] [build]\e[39m Caught error rendering /graph.json: Error: graph 500"
   @health_slot "HEALTH gate failed — not switched (exit 14): slot a on :8404 returned 502"
   # 1,082 rows: the site build fetched its corpus from the Barkpark API and was
   # refused. Real 0x1B bytes, exactly as captured from the build PTY.
@@ -217,6 +245,92 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # Every one of the 3,584 doc-id rows is HEALTH. If that stops being true,
       # the ledger says UNCLASSIFIED rather than quietly widening the class.
       assert DeployLedger.classify("BUILD", @doc_id) == "UNCLASSIFIED"
+    end
+
+    # dr-w8 S1. THE CAUSE WAS ALREADY IN THE STRING AND THE CLASSIFIER THREW IT
+    # AWAY. The HEALTH arm matched "bp-doc-id marker is empty" FIRST and answered
+    # DOC_ID_EMPTY, discarding the upstream status that sits in the SAME reason —
+    # 249 of 250 doc-id rows in the pinned 24h window of 2026-08-07, collapsed
+    # into one illegible bucket while the producer had recorded the diagnosis.
+    #
+    # WHAT THIS IS NOT: a rate repair. Every row relabelled here was ALREADY in
+    # the failure numerator and stays in it. The headline does not move.
+    test "a doc-id row is classified by the upstream status the producer already recorded" do
+      assert DeployLedger.classify("HEALTH", @doc_id_500) == "CONTENT_API_500"
+      assert DeployLedger.classify("HEALTH", @doc_id_503) == "CONTENT_API_503"
+      assert DeployLedger.classify("HEALTH", @doc_id_0) == "CONTENT_API_UNREACHABLE"
+
+      # 403 folds into the EXISTING class instead of growing a CONTENT_API_403
+      # twin: one cause, one name (D109). The BUILD-stage arm already routes a
+      # corpus 403 there and its label already says what happened.
+      assert DeployLedger.classify("HEALTH", @doc_id_403) == "FORBIDDEN_403"
+      assert DeployLedger.label("FORBIDDEN_403") =~ "403"
+
+      # 0 and 503 are DIFFERENT causes wearing the same human sentence: the
+      # producer's copy is identical, and only the status separates "the API
+      # answered 503" from "there was no HTTP answer at all".
+      assert String.contains?(@doc_id_0, "search API is restarting")
+      assert String.contains?(@doc_id_503, "search API is restarting")
+
+      refute DeployLedger.classify("HEALTH", @doc_id_0) ==
+               DeployLedger.classify("HEALTH", @doc_id_503)
+
+      # …and the three new names are in the taxonomy, each with its own sentence.
+      for class <- ["CONTENT_API_500", "CONTENT_API_503", "CONTENT_API_UNREACHABLE"] do
+        assert class in DeployLedger.classes()
+        assert DeployLedger.label(class) != class
+      end
+
+      labels = Enum.map(DeployLedger.classes(), &DeployLedger.label/1)
+      assert length(Enum.uniq(labels)) == length(labels)
+    end
+
+    test "an unnamed content status rises in UNCLASSIFIED, never in a catch-all" do
+      assert DeployLedger.classify("HEALTH", @doc_id_418) == "UNCLASSIFIED"
+      refute Enum.any?(DeployLedger.classes(), &(&1 =~ "CONTENT_API_OTHER"))
+    end
+
+    # The anchor is the PRODUCER'S OWN PHRASE, not a loose "graph 500" substring.
+    # A loose match would steal rows from other classes the moment any producer
+    # printed a graph status for another reason.
+    test "the content-status arm is ANCHORED on the producer's phrase and on the HEALTH stage" do
+      loose = "HEALTH gate failed — not switched (exit 14): slot a on :8404 returned graph 500"
+      assert DeployLedger.classify("HEALTH", loose) == "HEALTH_GATE_FAILED"
+
+      # Same bytes, wrong stage: the phrase belongs to the HEALTH gate's producer.
+      assert DeployLedger.classify("BUILD", @doc_id_500) == "UNCLASSIFIED"
+
+      # D110, A DECISION, NOT AN OVERSIGHT: the 10 BUILD-stage rows that mention
+      # the graph in the Astro renderer's words stay BUILD_FAILED. Their failure
+      # is that the build exited non-zero; re-badging them as a content-API class
+      # would move rows between stages on the strength of a shared noun.
+      assert DeployLedger.classify("BUILD", @build_graph) == "BUILD_FAILED"
+    end
+
+    # D112. With the 249 named rows gone, DOC_ID_EMPTY is no longer "the doc-id
+    # bucket" — it is what is LEFT when nobody recorded a cause, and the one
+    # producer that can never record one is the static engine. The label must say
+    # so, because a class whose name outlives its meaning is how a ledger lies.
+    test "DOC_ID_EMPTY now means the cause went UNRECORDED — structurally, the static-engine bucket" do
+      assert DeployLedger.classify("HEALTH", @doc_id) == "DOC_ID_EMPTY"
+      assert DeployLedger.classify("HEALTH", @doc_id_alt) == "DOC_ID_EMPTY"
+
+      label = DeployLedger.label("DOC_ID_EMPTY")
+      assert label =~ "UNRECORDED"
+      assert label =~ "bp-corpus-status"
+
+      # The structural claim, checked against the file rather than asserted in
+      # prose: the static deploy path has NO bp-corpus-status reader, so a static
+      # site's HEALTH failure can only ever land here.
+      static_engine = Path.expand("../../../deploy/site-deploy.sh", __DIR__)
+      assert File.exists?(static_engine)
+      refute File.read!(static_engine) =~ "bp-corpus-status"
+
+      # …while the node engine, which DOES read it, is the producer of the phrase
+      # the classifier anchors on. If that sentence is reworded, the shell side's
+      # own `--self-test` reds (see site-deploy-node.sh).
+      node_engine = Path.expand("../../../deploy/site-deploy-node.sh", __DIR__)
+      assert File.read!(node_engine) =~ "could not read a content document: "
     end
 
     test "a BUILD failure splits on what the build could not READ" do
@@ -670,6 +784,24 @@ defmodule BarkparkCloud.DeployLedgerTest do
         inserted_at: DateTime.add(from, 90, :second)
       })
 
+      # dr-w8 S1: this fixture used to be DEGENERATE — volume == failed == 7 — so
+      # a class share and a deferred share had the SAME denominator and the
+      # `basis` label on each was untestable. One live row and one deferred row
+      # pull the two apart: 7 failed, 9 attempted.
+      deployment!(other, %{
+        status: "live",
+        stage: "SWITCH",
+        failure_reason: nil,
+        inserted_at: DateTime.add(from, 100, :second)
+      })
+
+      deployment!(other, %{
+        status: "deferred",
+        stage: "PLAN",
+        failure_reason: @d_busy,
+        inserted_at: DateTime.add(from, 110, :second)
+      })
+
       census = DeployLedger.census(from, to)
       by_class = Map.new(census.classes, &{&1.class, &1.count})
 
@@ -678,18 +810,151 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # The tail rose because the corpus changed — which is the signal.
       assert by_class["UNCLASSIFIED"] == 1
 
-      # Per-class share is a rate node too, so it also carries its denominator.
+      # Per-class share is a rate node too, so it also carries its denominator —
+      # and, since dr-w8 S1, what that denominator COUNTS.
       busy = Enum.find(census.classes, &(&1.class == "BOX_BUSY_409"))
       assert busy.share.sample == 7
       assert busy.label =~ "already deploying"
+
+      # THE TWO BASES ARE DIFFERENT QUESTIONS, and now they say so. A class share
+      # is "of the failures, how many were this"; a deferred share is "of the
+      # attempts, how many were this". `sample` alone could never tell them apart
+      # — the same payload carried both meanings under one key name.
+      deferred_row = Enum.find(census.deferred, &(&1.class == "BOX_BUSY_DEFERRED"))
+      assert deferred_row.share.sample == 9
+      refute busy.share.basis == deferred_row.share.basis
+      assert busy.share.basis =~ "failed"
+      assert deferred_row.share.basis =~ "attempted"
+
+      # The fixture is no longer degenerate: if it were, both samples would be 7
+      # and the two bases would be indistinguishable in practice.
+      refute busy.share.sample == deferred_row.share.sample
+      assert census.volume == 9
+      assert census.failed == 7
+      assert census.live == 1
 
       sites = Map.new(census.sites, &{&1.site_id, &1})
       assert sites[site.id].volume == 6
       assert sites[site.id].failed == 6
       assert sites[site.id].top_class == "BOX_BUSY_409"
-      assert sites[other.id].volume == 1
-      # A one-row site gets a refusal, not a 100%.
+      assert sites[other.id].volume == 3
+      assert sites[other.id].failed == 1
+      # A three-row site gets a refusal, not a 33%.
       assert sites[other.id].failure_rate.refused
+    end
+
+    # dr-w8 S1, part 2. The census printed ONE rate and never said what its
+    # denominator counted. Charter D34 mandates BOTH conventions; the mandate had
+    # only ever been discharged in prose. All three additions are ADDITIVE — the
+    # headline `failure_rate` keeps its `volume` denominator, because repointing
+    # it would move the fleet's published number with nobody deploying.
+    test "the census names BOTH rate conventions, and every rate says what it counts", %{
+      site: site
+    } do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      # 160 failed + 60 live + 20 deferred + 1 still building = 241 attempted.
+      # Both denominators clear min_sample on purpose: the TERMINAL one is the
+      # smaller of the two, so a fixture sized only for the headline would have
+      # left the second rate refusing and its pct untested.
+      # ONE building row, not five: `deployments_active_site_env_index` allows a
+      # single active production deploy per site, and one is all the "in flight
+      # rows are inside volume and outside all four cohorts" claim needs.
+      for i <- 1..160 do
+        deployment!(site, %{
+          stage: "HEALTH",
+          failure_reason: @doc_id_500,
+          inserted_at: DateTime.add(from, i, :second)
+        })
+      end
+
+      for i <- 1..60 do
+        deployment!(site, %{
+          status: "live",
+          stage: "SWITCH",
+          failure_reason: nil,
+          inserted_at: DateTime.add(from, 1_000 + i, :second)
+        })
+      end
+
+      for i <- 1..20 do
+        deployment!(site, %{
+          status: "deferred",
+          stage: "PLAN",
+          failure_reason: @d_busy,
+          inserted_at: DateTime.add(from, 2_000 + i, :second)
+        })
+      end
+
+      for i <- 1..1 do
+        deployment!(site, %{
+          status: "building",
+          stage: "BUILD",
+          failure_reason: nil,
+          inserted_at: DateTime.add(from, 3_000 + i, :second)
+        })
+      end
+
+      census = DeployLedger.census(from, to)
+
+      # THE SUCCESS COUNT the census never printed. Read off `status`, because
+      # `classify/1` answers nil for a live row and a building row alike.
+      assert census.live == 60
+      assert census.volume == 241
+      assert census.failed == 160
+
+      # THE HEADLINE IS UNMOVED: still failed / attempted, deferrals included.
+      assert census.failure_rate.sample == 241
+      assert census.failure_rate.numerator == 160
+      assert census.failure_rate.pct == 66.39
+      assert census.failure_rate.basis =~ "attempted"
+
+      # …and BESIDE it, the other convention: of the deploys that SETTLED, how
+      # many failed. Strictly harsher, because deferrals and in-flight rows leave
+      # the denominator — 160/220, not 160/241.
+      assert census.terminal_failure_rate.sample == 220
+      assert census.terminal_failure_rate.numerator == 160
+      assert census.terminal_failure_rate.pct == 72.73
+      assert census.terminal_failure_rate.basis =~ "settled"
+
+      # The two are DIFFERENT numbers over the same window — which is exactly why
+      # printing one of them unlabelled was the defect.
+      refute census.failure_rate.pct == census.terminal_failure_rate.pct
+
+      # THE FOUR COHORTS DO NOT PARTITION VOLUME, and no basis string may imply
+      # they do: the 5 building rows are inside `volume` and outside all four.
+      deferred_total = Enum.reduce(census.deferred, 0, &(&1.count + &2))
+      assert deferred_total == 20
+      assert census.volume - census.failed - census.live - deferred_total == 1
+      refute census.failure_rate.basis =~ "partition"
+      assert census.failure_rate.basis =~ "in flight"
+
+      # EVERY rate node in the payload carries a basis — including the per-site
+      # ones and the class shares.
+      nodes =
+        [census.failure_rate, census.terminal_failure_rate] ++
+          Enum.map(census.classes, & &1.share) ++
+          Enum.map(census.deferred, & &1.share) ++
+          Enum.map(census.sites, & &1.failure_rate)
+
+      refute Enum.empty?(nodes)
+      assert Enum.all?(nodes, &is_binary(&1.basis))
+      assert Enum.all?(nodes, &(&1.basis != ""))
+    end
+
+    # BOTH `rate/3` clauses stamp a basis — the refusing one too. A refusal is
+    # the node a reader is most likely to misread, because it has no pct to
+    # anchor on; leaving it unlabelled would have made the label decorative.
+    test "the REFUSING rate node carries its basis too" do
+      refused = DeployLedger.rate(3, 10)
+      assert refused.refused
+      assert refused.pct == nil
+      assert refused.basis == DeployLedger.default_basis()
+
+      computed = DeployLedger.rate(100, 400, "settled rows only — a caller's own basis")
+      refute computed.refused
+      assert computed.basis == "settled rows only — a caller's own basis"
     end
   end
 

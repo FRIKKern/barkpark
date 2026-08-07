@@ -89,6 +89,9 @@ defmodule BarkparkCloud.DeployLedger do
   # presentation only; `classify/2`'s own arms are ordered by specificity.
   @classes [
     "BOX_BUSY_409",
+    "CONTENT_API_500",
+    "CONTENT_API_UNREACHABLE",
+    "CONTENT_API_503",
     "DOC_ID_EMPTY",
     "BOX_500",
     "FORBIDDEN_403",
@@ -138,7 +141,13 @@ defmodule BarkparkCloud.DeployLedger do
 
   @labels %{
     "BOX_BUSY_409" => "the box was already deploying (HTTP 409)",
-    "DOC_ID_EMPTY" => "HEALTH gate: the bp-doc-id marker was empty",
+    "CONTENT_API_500" => "the SSR could not read its content: the content API errored (500)",
+    "CONTENT_API_503" =>
+      "the SSR could not read its content: the content API was unavailable (503)",
+    "CONTENT_API_UNREACHABLE" =>
+      "the SSR got no HTTP answer from the content API at all (status 0)",
+    "DOC_ID_EMPTY" =>
+      "HEALTH gate: the bp-doc-id marker was empty and the cause went UNRECORDED (no bp-corpus-status marker — the static-engine deploy path emits none)",
     "BOX_500" => "the box errored on the deploy (HTTP 500)",
     "FORBIDDEN_403" => "the build could not read its content (403)",
     "BUILD_FAILED" => "the site build exited non-zero",
@@ -162,6 +171,24 @@ defmodule BarkparkCloud.DeployLedger do
   # the 2026-08-05 daily volume (n=332, and n≈70 in a 24h slice of the quiet
   # sites) a single row moves the rate more than a percentage point.
   @min_sample 200
+
+  # WHAT A RATE NODE IS DENOMINATED ON, in the node itself. Before this, `sample`
+  # meant two different things inside ONE payload — class shares are denominated
+  # on `failed`, deferred shares on `volume` — and nothing said which, so a reader
+  # comparing two shares was comparing two different questions.
+  #
+  # NAMED NARROWLY ON PURPOSE. `status: "building"` rows classify to `nil` and
+  # land in `attempted`, so `volume - failed - deferred - live` is NOT guaranteed
+  # to be zero: these four cohorts do not partition volume, and no basis string
+  # here may imply that they do.
+  @basis_attempted "attempted rows in the window — failed + deferred + live + still in flight"
+  @basis_terminal "settled rows only — failed + live (deferrals and in-flight rows excluded)"
+  @basis_failed "failed rows only — the failure numerator"
+  @basis_not_attempted "rows that were never a deploy attempt — outside every rate denominator"
+
+  @doc "What `rate/3`'s denominator counts, when the caller does not name one."
+  @spec default_basis() :: String.t()
+  def default_basis, do: @basis_attempted
 
   @doc "The named failure classes, most-frequent-first on the corpus that motivated them."
   @spec classes() :: [class()]
@@ -237,6 +264,15 @@ defmodule BarkparkCloud.DeployLedger do
       code = refusal_code(reason) ->
         refusal_class(code)
 
+      # THE CAUSE IS ALREADY IN THE STRING. `site-deploy-node.sh` writes the
+      # upstream condition AFTER the empty-marker symptom, out of the SSR's own
+      # `bp-corpus-status` marker, so the row that reads "bp-doc-id marker is
+      # empty" also carries "… could not read a content document: graph 503: …".
+      # Matching the symptom first threw that away and answered DOC_ID_EMPTY for
+      # every one of them. Read the status the producer already recorded.
+      status = content_doc_status(stage, reason) ->
+        content_doc_class(status)
+
       stage == "HEALTH" and String.contains?(reason, "bp-doc-id marker is empty") ->
         "DOC_ID_EMPTY"
 
@@ -280,6 +316,44 @@ defmodule BarkparkCloud.DeployLedger do
       nil -> nil
     end
   end
+
+  # The PRODUCER'S OWN PHRASE, not a loose "graph 500" substring: the sentence is
+  # written in exactly one place (`deploy/site-deploy-node.sh`, the empty-doc-id
+  # branch) and `site-deploy-node.sh --self-test` asserts the emitted bytes still
+  # match this anchor, so a reflow of that English REDS the shell side instead of
+  # silently degrading every row back to DOC_ID_EMPTY. A HEALTH row that merely
+  # PRINTS "graph 500" somewhere else is not a content-API failure and does not
+  # match. Re-derived 2026-08-07: 0 rows in the 24h window carry the phrase
+  # outside the doc-id rows, so this arm cannot steal from another class.
+  @content_doc_status ~r/could not read a content document: graph (\d+):/
+
+  # Stage-gated for the same reason every other rule is (see the moduledoc): the
+  # phrase belongs to the HEALTH gate's producer, and a BUILD-stage row that
+  # quoted it would be a shape this ledger has never seen.
+  defp content_doc_status("HEALTH", reason) do
+    case Regex.run(@content_doc_status, reason) do
+      [_, status] -> status
+      nil -> nil
+    end
+  end
+
+  defp content_doc_status(_stage, _reason), do: nil
+
+  defp content_doc_class("500"), do: "CONTENT_API_500"
+  defp content_doc_class("503"), do: "CONTENT_API_503"
+  # Status 0 is NOT a mis-stamped 503. `templates/search-starter/lib/graph.ts`
+  # stamps 0 when the fetch threw before any HTTP answer existed — DNS, TLS,
+  # connection refused — even though `bp-fetch.ts` gives it the same human
+  # sentence a 503 gets. One cause, one name (D109), so it gets its own.
+  defp content_doc_class("0"), do: "CONTENT_API_UNREACHABLE"
+  # 403 folds into the EXISTING class rather than growing a CONTENT_API_403 twin:
+  # `FORBIDDEN_403` already means "the build could not read its content (403)",
+  # and the BUILD-stage arm already routes there. D109 — one cause, one name.
+  defp content_doc_class("403"), do: "FORBIDDEN_403"
+  # Any other status the ledger has not named is UNCLASSIFIED, never a catch-all
+  # CONTENT_API_OTHER (D8): a taxonomy that absorbs a new shape keeps looking
+  # complete while telling nobody the shape appeared.
+  defp content_doc_class(_other), do: "UNCLASSIFIED"
 
   defp refusal_class("409"), do: "BOX_BUSY_409"
   defp refusal_class("500"), do: "BOX_500"
@@ -441,11 +515,27 @@ defmodule BarkparkCloud.DeployLedger do
   (`site_id, stage, status, failure_reason`), which is ~1,400 groups over a
   26,000-row table, and the classification runs once per GROUP.
 
-  Every rate node is the same shape and always carries its own denominator:
+  Every rate node is the same shape and always carries its own denominator AND
+  what that denominator counts:
 
-      %{sample: 18_541, pct: 85.19, min_sample: 200, refused: false, reason: nil}
+      %{sample: 18_541, pct: 85.19, min_sample: 200, refused: false, reason: nil,
+        basis: "attempted rows in the window — …"}
       %{sample: 74,     pct: nil,   min_sample: 200, refused: true,
-        reason: "sample 74 below min_sample 200"}
+        basis: "…", reason: "sample 74 below min_sample 200"}
+
+  TWO rates, both named (charter D34), because "what fraction of attempts failed"
+  and "what fraction of settled deploys failed" are different questions and a
+  ledger that prints one unlabelled number cannot say which it answered:
+
+    * `failure_rate` — failed / `volume`, i.e. every attempted row, DEFERRALS
+      AND IN-FLIGHT BUILDS INCLUDED. The headline, unchanged.
+    * `terminal_failure_rate` — failed / (failed + `live`). Deferrals and
+      still-building rows leave the denominator, so it is >= the headline.
+
+  `live` is counted off `status`, not off the classifier — `classify/1` answers
+  `nil` for a live row and for a building row alike, and those are not the same
+  fact. The four cohorts (failed, deferred, live, not-attempted) do NOT partition
+  `volume`: in-flight rows sit inside it and outside all four.
   """
   @spec census(DateTime.t(), DateTime.t(), keyword()) :: map()
   def census(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
@@ -480,15 +570,30 @@ defmodule BarkparkCloud.DeployLedger do
 
     volume = total(attempted)
     failed = total(failed_rows)
+    # The SUCCESS count the census never printed. Read off `status`, not off the
+    # classifier: `classify/1` answers `nil` for BOTH a live row and a row still
+    # building, and those are not the same fact.
+    live = total(Enum.filter(attempted, &(&1.status == "live")))
 
     %{
       window: %{from: from, to: to},
       volume: volume,
       failed: failed,
-      failure_rate: rate(failed, volume),
-      classes: class_rows(failed_rows, failed),
-      deferred: class_rows(deferred, volume),
-      not_attempted: class_rows(not_attempted, total(not_attempted)),
+      live: live,
+      # THE HEADLINE IS UNCHANGED, deliberately. Its denominator is still
+      # `volume` — every attempted row, deferrals included. Repointing it would
+      # move the fleet's published number without a single deploy changing, and
+      # the one assertion that guards it (`failure_rate.sample == 20`) would go
+      # green on a redefined question. The second convention (D34) ships BESIDE
+      # it, named, rather than replacing it in place.
+      failure_rate: rate(failed, volume, @basis_attempted),
+      # …the other convention: of the deploys that actually SETTLED, how many
+      # failed. Strictly >= the headline, because deferrals and in-flight rows
+      # leave the denominator.
+      terminal_failure_rate: rate(failed, failed + live, @basis_terminal),
+      classes: class_rows(failed_rows, failed, @basis_failed),
+      deferred: class_rows(deferred, volume, @basis_attempted),
+      not_attempted: class_rows(not_attempted, total(not_attempted), @basis_not_attempted),
       sites: site_rows(attempted, site_limit),
       min_sample: @min_sample
     }
@@ -539,23 +644,27 @@ defmodule BarkparkCloud.DeployLedger do
   The denominator rides IN the node so no caller can print a percentage without
   the volume that produced it.
   """
-  @spec rate(non_neg_integer(), non_neg_integer()) :: map()
-  def rate(numerator, denominator) when denominator < @min_sample do
+  @spec rate(non_neg_integer(), non_neg_integer(), String.t()) :: map()
+  def rate(numerator, denominator, basis \\ @basis_attempted)
+
+  def rate(numerator, denominator, basis) when denominator < @min_sample do
     %{
       sample: denominator,
       pct: nil,
       numerator: numerator,
+      basis: basis,
       min_sample: @min_sample,
       refused: true,
       reason: "sample #{denominator} below min_sample #{@min_sample}"
     }
   end
 
-  def rate(numerator, denominator) do
+  def rate(numerator, denominator, basis) do
     %{
       sample: denominator,
       pct: Float.round(numerator * 100 / denominator, 2),
       numerator: numerator,
+      basis: basis,
       min_sample: @min_sample,
       refused: false,
       reason: nil
@@ -564,7 +673,7 @@ defmodule BarkparkCloud.DeployLedger do
 
   defp total(groups), do: Enum.reduce(groups, 0, &(&1.count + &2))
 
-  defp class_rows(groups, denominator) do
+  defp class_rows(groups, denominator, basis) do
     groups
     |> Enum.filter(& &1.class)
     |> Enum.group_by(& &1.class)
@@ -575,7 +684,7 @@ defmodule BarkparkCloud.DeployLedger do
         class: class,
         label: label(class),
         count: count,
-        share: rate(count, denominator)
+        share: rate(count, denominator, basis)
       }
     end)
     |> Enum.sort_by(& &1.count, :desc)
@@ -598,7 +707,7 @@ defmodule BarkparkCloud.DeployLedger do
         volume: volume,
         failed: failed,
         deferred: total(deferred),
-        failure_rate: rate(failed, volume),
+        failure_rate: rate(failed, volume, @basis_attempted),
         top_class: top_class(failed_rows)
       }
     end)
