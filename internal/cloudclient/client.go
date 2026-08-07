@@ -1756,6 +1756,169 @@ func (c *Client) ListSpawnSiteDeployments(ctx context.Context, siteID string, li
 	return page, nil
 }
 
+// DeployRate is one rate NODE from the fleet deploy census: a percentage that
+// can never travel without the denominator that produced it, and that REFUSES
+// to be a percentage below `min_sample` rather than reporting a number nobody
+// should act on (`Pct` nil, `Refused` true, `Reason` saying so in words).
+//
+// Pct is a POINTER on purpose: a refusing node sends JSON null, and a float64
+// would decode that as 0.0 — the exact comforting zero this reader exists to
+// stop. Basis is the s1 addition (the name of what the denominator counts); it
+// is empty against today's payload and a reader must survive that.
+type DeployRate struct {
+	Sample    int      `json:"sample"`
+	Pct       *float64 `json:"pct"`
+	Numerator int      `json:"numerator"`
+	MinSample int      `json:"min_sample"`
+	Refused   bool     `json:"refused"`
+	Reason    string   `json:"reason"`
+	Basis     string   `json:"basis"`
+}
+
+// DeployCensusClass is one failure/deferral/not-attempted class row: the machine
+// class, its human label, its count, and that count's share WITH the denominator
+// the share was taken against (class shares are denominated on `failed`,
+// deferred shares on `volume` — which is why the share carries its own sample).
+type DeployCensusClass struct {
+	Class string     `json:"class"`
+	Label string     `json:"label"`
+	Count int        `json:"count"`
+	Share DeployRate `json:"share"`
+}
+
+// DeployCensusSite is one site's slice of the window: its volume, its failures,
+// its deferrals, its own rate node and the class that hurt it most (nil when the
+// site had no failures at all — never an invented "none" class).
+type DeployCensusSite struct {
+	SiteID      string     `json:"site_id"`
+	Volume      int        `json:"volume"`
+	Failed      int        `json:"failed"`
+	Deferred    int        `json:"deferred"`
+	FailureRate DeployRate `json:"failure_rate"`
+	TopClass    *string    `json:"top_class"`
+}
+
+// DeployCensusWindow is the PINNED window the census was taken over, echoed back
+// by the control plane. There is no default window server-side (a floating one
+// compares two different populations), so this is always the window the caller
+// asked for — and a caller that prints a rate without printing this is quoting a
+// number with no population.
+type DeployCensusWindow struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// DeployCensus is GET /v1/operator/deploy-ledger/census — the cross-site deploy
+// ledger folded into counts per failure class, counts per site, and the failure
+// rate WITH its denominator.
+//
+// Live and TerminalFailureRate are the dr-w8-s1 additions (the second D34
+// convention: failures over TERMINAL rows rather than over attempted rows). Both
+// are pointers so a reader can tell "the control plane did not send this" from
+// "the control plane sent zero" — today's deployed payload carries neither.
+//
+// Raw is the envelope bytes verbatim so `-o json` re-emits the contract instead
+// of a second, drifting definition of it.
+type DeployCensus struct {
+	Window              DeployCensusWindow  `json:"window"`
+	Volume              int                 `json:"volume"`
+	Failed              int                 `json:"failed"`
+	Live                *int                `json:"live"`
+	FailureRate         DeployRate          `json:"failure_rate"`
+	TerminalFailureRate *DeployRate         `json:"terminal_failure_rate"`
+	Classes             []DeployCensusClass `json:"classes"`
+	Deferred            []DeployCensusClass `json:"deferred"`
+	NotAttempted        []DeployCensusClass `json:"not_attempted"`
+	Sites               []DeployCensusSite  `json:"sites"`
+	MinSample           int                 `json:"min_sample"`
+	Raw                 []byte              `json:"-"`
+}
+
+// DeployCensusError is a census the control plane REFUSED to answer, with the
+// status and the refusal's own evidence kept intact — because the whole point of
+// this reader is that a human can tell "the fleet is healthy" from "I could not
+// look". Three shapes reach it:
+//
+//   - 401 {"error":"unauthorized"} — no session token, or a dead one.
+//   - 403 {"error":"forbidden","scope":"platform","required":"platform_operator"} —
+//     authenticated, not on the operator allowlist. It names the AUTHORITY but
+//     structurally CANNOT say whether the allowlist is EMPTY: the gate's single
+//     cond arm serves both "nobody is configured" and "you are not on the list".
+//   - 422 {"error":"invalid_window","detail":"…"} — the window did not parse, or
+//     was not pinned at all.
+//
+// A caller must branch on this error BEFORE it reads any count, since the refusal
+// body and the census body share zero keys and a nil-coalescing read of the
+// refusal renders a fleet with zero failures.
+type DeployCensusError struct {
+	HTTPStatus int
+	Code       string
+	Detail     string
+	Scope      string
+	Required   string
+	Raw        []byte
+}
+
+func (e *DeployCensusError) Error() string {
+	msg := e.Code
+	if msg == "" {
+		msg = http.StatusText(e.HTTPStatus)
+	}
+	if e.Detail != "" {
+		msg += ": " + e.Detail
+	}
+	return msg
+}
+
+// FleetDeployCensus reads the cross-site deploy census over a PINNED window via
+// GET /v1/operator/deploy-ledger/census?from=&to= (Bearer — the same user
+// session token the platform-operator gate resolves).
+//
+// from/to are REQUIRED by the route and are sent as RFC3339 UTC instants; the
+// caller owns the window and there is no client-side default here either, so
+// nothing can quote a rate over a window nobody chose. Every non-2xx becomes a
+// *DeployCensusError carrying the status and the refusal's evidence — never a
+// zero-valued census.
+func (c *Client) FleetDeployCensus(ctx context.Context, from, to time.Time) (DeployCensus, error) {
+	q := url.Values{}
+	q.Set("from", from.UTC().Format(time.RFC3339))
+	q.Set("to", to.UTC().Format(time.RFC3339))
+	status, body, err := c.do(ctx, "GET", "/v1/operator/deploy-ledger/census?"+q.Encode(), true, nil)
+	if err != nil {
+		return DeployCensus{}, err
+	}
+	if !ok(status) {
+		return DeployCensus{}, deployCensusError(status, body)
+	}
+	var census DeployCensus
+	if err := json.Unmarshal(body, &census); err != nil {
+		return DeployCensus{}, fmt.Errorf("decode deploy census response: %w", err)
+	}
+	census.Raw = body
+	return census, nil
+}
+
+// deployCensusError decodes a refusal envelope into the typed error. A body that
+// does not decode still yields a typed error carrying the STATUS, so the reader
+// keeps its "I could not look" branch even against a gateway HTML page.
+func deployCensusError(status int, body []byte) error {
+	var env struct {
+		Error    string `json:"error"`
+		Detail   string `json:"detail"`
+		Scope    string `json:"scope"`
+		Required string `json:"required"`
+	}
+	_ = json.Unmarshal(body, &env)
+	return &DeployCensusError{
+		HTTPStatus: status,
+		Code:       strings.TrimSpace(env.Error),
+		Detail:     strings.TrimSpace(env.Detail),
+		Scope:      strings.TrimSpace(env.Scope),
+		Required:   strings.TrimSpace(env.Required),
+		Raw:        body,
+	}
+}
+
 // RollbackSpawnSite flips a spawned site back to its previous good build via
 // POST /v1/sites/:id/rollback (Bearer) — a sub-second flip whose mechanism depends
 // on the runtime target: an atomic symlink swap for a static site, a Caddy

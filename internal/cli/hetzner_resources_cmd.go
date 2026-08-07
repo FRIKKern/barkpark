@@ -591,6 +591,9 @@ FLEET (control plane — needs 'bp login')
             box; exit 0 only when all pass             (bp cloud verify -h)
   deploy    push any git ref (branch/PR/main) to an instance over SSH — the
             same blue/green mechanics, pointed anywhere (bp cloud deploy -h)
+  deployments the FLEET deploy rate over a pinned window, printed WITH its
+            denominator — and a named refusal, never a fake zero, when it could
+            not be read                            (bp cloud deployments -h)
   domain    a domain's DNS/TLS checklist (found · points here · TLS · serving);
             exit 0 only when it's serving              (bp cloud domain -h)
   usage     an instance's usage meters — honest counts, "unmetered" where a
