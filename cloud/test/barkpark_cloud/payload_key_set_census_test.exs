@@ -553,6 +553,26 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "PR #10014 carries the emitter — the D34 convention label that says WHICH denominator a rate was taken over."}
   ]
 
+  # MERGE-ORDER NOTE (wave-11 review, proved not predicted). Wave 11's slice
+  # `dr-w11-s4-delivery-census-refuses` declares `Delivery *DeployDelivery
+  # json:"delivery"` on `DeployCensus` while `census/3` — which this pair censuses
+  # and which S4 is fenced out of — emits no `delivery` key, because nothing routes
+  # `DeployLedger.delivery/3` yet (filed: dr-w11-s4-followup-emit-delivery-on-route).
+  # That is a REAL phantom and this guard is right to catch it: verified by adding
+  # the tag to `internal/cloudclient/client.go` on this branch, which reds the
+  # PHANTOM arm naming `delivery`, and reverting, which greens it.
+  #
+  # WHICHEVER OF THE TWO PRs MERGES SECOND MUST ADD THIS ROW IN THAT SAME PR —
+  # nothing else is needed, and set equality means it must NOT be added earlier:
+  #
+  #   {"DeployLedger.census/3", :phantom, "delivery",
+  #    "dr-w11-s4 ships the Go reader with the estimator (D136); the route that
+  #     emits it is dr-w11-s4-followup-emit-delivery-on-route. Decodes to nil
+  #     until that lands, which is exactly what the pointer type is for."},
+  #
+  # Delete the row the moment the route emits the key — the "no longer phantom"
+  # arm reds if you forget, which is the point.
+
   @allowlist @reconciled ++ @known_open
 
   # ---------------------------------------------------------------------------
