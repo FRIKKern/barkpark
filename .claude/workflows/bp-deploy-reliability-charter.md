@@ -5584,3 +5584,65 @@ allowlist row). s2 wires deploy.yml to the on-main failure-issue engine and adds
 s3 makes the static engine stop advertising a URL it did not verify. s4 lands the live-row fan-out guard as
 a shell pair with a named human gate. s6 pays the ledger debt. Round 2, after s1 merges: s5 re-addresses the
 digest and rules the brake; s7 gives `bp cloud status` an honest deploy line over the team door.
+
+### Wave 2026-08-08 (wave 19) — REVIEWED · Paper `deploy-reliability-wave-19-2026-08-07` · grade **A−**
+
+**Five of seven slices built, reviewed, gate-green, pushed and PR'd. The lead merges.** s5 and s7 were
+deferred to round 2 BY DESIGN — both edit regions s1 owns, and both wait on `#10518` landing.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| Unblock #10518 (census rebase) | `dr-w19-s1-unblock-10518-census-rebase` | `…bp-cloud-deployments-reaches-a-door-that-0-r` | [#10518](https://github.com/FRIKKern/barkpark/pull/10518) (updated in place) | `cd cloud && CC=clang mix test` → 3178 tests, 0 failures |
+| deploy.yml can scream | `dr-w19-s2-deploy-yml-can-scream` | `…a-failed-production-deploy-reaches-a-hum-1-r` | [#10562](https://github.com/FRIKKern/barkpark/pull/10562) | yaml parse asserts + `file-ci-failure-issue.test.sh` 23/23 |
+| The route stops lying | `dr-w19-s3-site-deploy-route-stops-lying` | `…the-static-deploy-engine-stops-advertisi-2-r` | [#10563](https://github.com/FRIKKern/barkpark/pull/10563) | `site-deploy.sh --self-test` → 290/290 (was 274/274) |
+| Webhook fan-out live-row guard | `dr-w19-s4-webhook-fanout-live-row-guard` | `…a-live-row-guard-reds-when-any-site-auto-3-r` | [#10564](https://github.com/FRIKKern/barkpark/pull/10564) | `webhook-fanout-watch.test.sh` → 45/45 (was 38/38) |
+| The ledger pays its debt | `dr-w19-s6-ledger-pays-its-debt` | `…the-epic-s-ledger-stops-manufacturing-fa-4-r` | [#10565](https://github.com/FRIKKern/barkpark/pull/10565) | epic census → 354 children / 29 partial (was 352 / 76) |
+
+**What landed against the wish.** Two genuinely-silent failures learned to speak. Production CD failed **102
+times in 30 days and told nobody** — 84 of them inside one 48h47m stretch with **zero** successes — and
+`deploy.yml` now files a keyed GitHub issue on `failure()`, mutation-proved to *execute* (a fake GitHub API
+gives `filed issue #4242`; a broken delivery gives exit 1 and `::error::`) rather than merely to parse. The
+static site engine stopped **advertising a URL it never verified**: `arm_caddy_site_route` used to `return 0`
+out of its own revert path, so `|| true` was not even the bug — the sign-off named `https://host/sites/slug/`
+over a 404 at exit 0. It now returns 2, splits *observed-not-armed* from *never-checked*, and says
+`HEALTHY ON DISK … no URL is claimed for it`. s4 re-asserts the 2026-08-07 fan-out repair on the **live rows**
+with a boolean verdict and a metered-never-judged fan-out line. s1 unblocked `#10518` by re-measuring three
+census guards on the merged tree — `@go_tag_floor` 222→**225**, measured off the refusal's own count, and the
+free riders turned out to be `team` and `scope`, **not** the pair the brief guessed.
+
+**The mis-reporting that was fixed is the epic's own ledger.** Wave 19 opened believing a repair had never run;
+it had run 18 hours earlier. 76 of 352 children sat at N−1/N with the merge gate as the only unmet criterion,
+so a finished row and an unfinished one were indistinguishable from the board. s6 closed 52 rows on 51 distinct
+merge shas (51/51 ancestors of `origin/main`), collapsed 3 duplicates, and **held 19 with reasons** — including
+two refusals the brief did not ask for: rows bundling a manual second review inside the merge gate, and
+`dr-w6-s1`, whose #9888 merge commit records **Console gate = FAILURE**. Refusing to stamp "all four green"
+over a red is the slice working. Epic reads 18.7% done, up from 3.7% — **entirely paperwork**; 282 rows still
+carry real work.
+
+**Reviewer fixes, in place.** `webhook-fanout-watch.sh` **hung forever** on a flag with no value (`shift 2` on a
+one-element argv fails without shifting under `set -uo pipefail`; proved — 142 under a 10s alarm), and a
+non-numeric floor made `[ 5 -lt abc ]` exit 2, which a bare `if` read as *floor met* — a vacuous green inside the
+one check whose job is refusing vacuity. Both fixed and pinned; harness 38→45.
+
+**Independently re-derived, not re-read.** The high-flip-risk judgement (s1's `scope` = `@known_open` phantom):
+`grep census_scope cloud/lib` lands only on `web/router.ex:3613`, and `DeployLedger.census/3` (`deploy_ledger.ex:808`)
+has zero `scope` hits — a walker blind spot, not a dead key. `@known_open` is right. The `+3` tag delta was
+re-derived from a different extraction than the builder's (220→223 on a `json:"…"` name union) and agrees.
+
+**What the lead must close on merge.** Every slice leaves its merge-gated criterion open by design. `dr-w19-s6`
+additionally leaves criterion 4 an honest **miss**: the brief ordered `dr-w6-s1` closed and the builder refused
+on the Console-gate red, filed as `dr-bl-w19-console-gate-red-on-a-merged-main-commit`. `dr-w19-s4` filed
+`dr-w19-hg-cloud-control-plane-read-token` as a NAMED open human gate — until it is armed, the live verdict is a
+runbook command, not a check.
+
+**What is still silent, named honestly.** The 49-hour blackout's **cause** is unaudited — this makes the next one
+loud, it does not explain the last one — and **84 of 102 failures were CONTROL-PLANE**, not guerrilla, so the
+epic's framing is not what the census says. `go-tests.yml` is advisory and structurally cannot become required
+while it keeps a workflow-level `on: paths:`. The fan-out guard never reaches the network itself, so it cannot
+verify the provenance of its input. And `site-deploy.sh`'s *no slot anchor* path still returns 0 while logging
+"not armed" — the same unmade claim, one branch over.
+
+**What the next wave should take.** Dispatch order is fixed: merge round 1 first, then `dr-w19-s5-digest-audience-and-brake-ruling`
+and `dr-w19-s7-status-reads-the-deploy-verdict` as `#10518` lands (both contend s1's regions). Beside them, the
+control-plane share of the failures is the wish's real unexamined mass, and the blackout root-cause audit is
+unclaimed.
