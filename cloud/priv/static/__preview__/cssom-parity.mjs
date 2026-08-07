@@ -96,7 +96,9 @@
 //  Exit codes: 0 = every authored selector reached the CSSOM · 1 = at least one
 //  MISS or a baseline-count mismatch — a fact about the CSS · 2 = GUARD (no Chrome,
 //  no stylesheet, no baseline sidecar, wrong Node) — a fact about the ENVIRONMENT,
-//  refused before anything is spawned. The 1/2 split is load-bearing, see D19 below.
+//  refused before anything is spawned, PLUS (D101) a Chrome that was spawned and
+//  never came up, refused at the bring-up boundary. The 1/2 split is load-bearing,
+//  see D19 and D101 below.
 //
 //  WIRED INTO CI (cch-w1-cssom-ci-wiring, epic decisions D17-D20). It runs as its
 //  OWN job in .github/workflows/console-harness.yml — deliberately not a fourth
@@ -538,6 +540,28 @@ async function main() {
     }
   }
 
+  // D101 (deploy-reliability charter, PR #9905) — the BRING-UP class.
+  // Chrome failing to come up is an environment fact, never a CSS fact: no
+  // stylesheet was ever parsed, so there is nothing to accuse. Until D101 the
+  // bring-up throw below was a PLAIN Error, so the classifier at the bottom of
+  // this block scored it as a MEASURED defect (exit 1) and console-harness.yml's
+  // `1)` arm told the reviewer "This is a REAL CSS defect in app.css" on a run
+  // whose own stderr said Chrome never started. The workflow's case block is
+  // correct; this instrument was lying to it. Sibling overflow-guard.mjs routes
+  // the IDENTICAL fault through die() → exit 2 = REFUSED TO MEASURE; this is the
+  // same vocabulary, deliberately not a third one.
+  //
+  // The class is carried on the error OBJECT, never sniffed out of its message.
+  // A message match would widen silently every time someone reworded a throw,
+  // and a refusal class that widens until nothing can ever be accused is a gate
+  // that can never fail — strictly worse than the bug it replaces. So exactly
+  // the three bring-up steps are tagged: the DevToolsActivePort wait, the
+  // /json/version handshake, and the CDP socket connect. Everything the browser
+  // tells us AFTER it is up — injection threw, ZERO rules parsed, unreadable
+  // sheets — is a claim about the stylesheet and stays exit 1.
+  const REFUSED = Symbol("cssom-parity refused to measure");
+  const bringUpFailure = (message) => Object.assign(new Error(message), { [REFUSED]: true });
+
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "cssom-parity-"));
   const t0 = Date.now();
   let chrome = null;
@@ -600,15 +624,27 @@ async function main() {
       } catch { /* not written yet */ }
       await sleep(100);
     }
-    if (!devPort) throw new Error("Chrome never wrote DevToolsActivePort — it did not start");
+    if (!devPort) throw bringUpFailure("Chrome never wrote DevToolsActivePort — it did not start");
 
-    const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    let version;
+    try {
+      version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    } catch (err) {
+      throw bringUpFailure(`Chrome wrote port ${devPort} but /json/version never answered: ${err.message}`);
+    }
     process.stdout.write(
       `>> chrome     ${chromeBin}\n` +
         `>> build      ${version.Browser} · node ${process.version}\n` +
         `>> stylesheet ${path.relative(process.cwd(), cssPath)} · ${bytes} B · sha256 ${sha.slice(0, 12)}…\n\n`,
     );
-    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
+    try {
+      cdp = await Cdp.connect(version.webSocketDebuggerUrl);
+    } catch (err) {
+      // A ReferenceError here (no global WebSocket) must keep its OWN class —
+      // D19's arm names the runtime fix, this one names the browser. Both refuse.
+      if (err instanceof ReferenceError) throw err;
+      throw bringUpFailure(`CDP bring-up failed: ${err.message}`);
+    }
 
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
@@ -643,15 +679,28 @@ async function main() {
     // GUARD path like the preflight above. The preflight already catches the one
     // known case (WebSocket); this keeps a FUTURE missing global from being
     // reported to a reviewer as a stylesheet defect.
-    const envFailure = err instanceof ReferenceError;
+    //
+    // D101, first line of defence. A tagged bring-up failure means the browser
+    // never came up, so this run measured NOTHING about app.css. It refuses on
+    // the GUARD path too — two distinct environment classes, one exit code (2),
+    // each naming the thing a human should actually go fix.
+    const missingGlobal = err instanceof ReferenceError;
+    const neverStarted = Boolean(err && err[REFUSED]);
+    const envFailure = missingGlobal || neverStarted;
     const detail = err && err.message ? err.message : err;
     process.stderr.write(
-      envFailure
+      missingGlobal
         ? `\n!! GUARD (exit 2): ENVIRONMENT — ${detail}\n` +
             `   A required global is missing from this runtime. No parity claim was made about\n` +
             `   the stylesheet. Fix the environment (Node 22+), not the CSS.\n` +
             `   teardown ${teardownMs}ms\n`
-        : `\n!! PARITY ERROR: ${detail}\n   teardown ${teardownMs}ms\n`,
+        : neverStarted
+          ? `\n!! GUARD (exit 2): REFUSED TO MEASURE — ${detail}\n` +
+              `   Headless Chrome never came up, so NOT ONE rule of the stylesheet was parsed.\n` +
+              `   No parity claim was made about ${path.relative(process.cwd(), cssPath)} — this is NOT a CSS defect.\n` +
+              `   Fix the browser in this environment (CHROME=${chromeBin}), then re-run.\n` +
+              `   teardown ${teardownMs}ms\n`
+          : `\n!! PARITY ERROR: ${detail}\n   teardown ${teardownMs}ms\n`,
     );
     process.exit(envFailure ? 2 : 1);
   }
