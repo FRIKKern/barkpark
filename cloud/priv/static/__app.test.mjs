@@ -8789,6 +8789,20 @@ test("cch-w48-s3: the GitHub card omits Disconnect for a non-admin — and OFFER
   assert.match(hooks.githubCardHtml({}, false), /Not configured/);
 });
 
+test("cch-w48-s3 (review): a late /v1/me re-enters loadGithub — the new fence must not strand a real admin", () => {
+  // providerCanWrite() is FALSE while meCache is null, which is the correct
+  // direction — but applyRoute paints #providers with TWO mounts (loadProviders
+  // AND loadGithub) and loadMe's success seam only ever re-entered the first.
+  // Without the second, an admin who deep-links to #providers before /v1/me
+  // answers keeps the member card for the whole page life.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const success = appRegion(src, "    return api(\"GET\", \"/v1/me\").then(function (r) {", "      } else {");
+  assert.ok(success.includes('if (currentView() === "providers") loadProviders();'),
+    "the shipped roster seam must still be there");
+  assert.ok(success.includes('if (currentView() === "providers") loadGithub();'),
+    "…and the GitHub card is a separate mount that needs its own re-entry");
+});
+
 test("cch-w48-s3: the disconnect refusal renders friendly()'s sentence, never the slug `forbidden`", () => {
   const payload = { error: "forbidden", required: "admin", scope: "team" };
   const t = hooks.githubDisconnectErrorToast(payload);

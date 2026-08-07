@@ -14942,6 +14942,13 @@
         // was repainted here, so a promotion (or a demotion) on those two
         // screens was invisible until a full page reload.
         if (currentView() === "providers") loadProviders();
+        // cch-w48-s3 (review) — the GitHub card is a SEPARATE mount on the same
+        // screen (applyRoute calls loadProviders() AND loadGithub()), and this
+        // seam only ever re-entered the first one. Now that githubCardHtml
+        // decides its Disconnect and its Connect anchor from providerCanWrite()
+        // — which is false while meCache is null — a late /v1/me left a real
+        // admin looking at the member card for the rest of the page life.
+        if (currentView() === "providers") loadGithub();
         if (currentView() === "notifications") loadNotifications();
         // cch-w47-s3 — the archives band joins the same list, and it has to:
         // now that Resurrect is offered only on a CONFIRMED grant, a /v1/me
