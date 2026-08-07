@@ -2538,6 +2538,71 @@ const EXPECTATIONS = {
       assert.equal(reg.get("members-invite").hidden, true, "the Invite button is hidden for a member");
     },
   },
+  // cch-w45-s1: the acting ADMIN who is NOT row 0 of the roster. Asserted BY ROW
+  // — the set of emails each control is offered on — never by a substring of the
+  // panel, because "the panel contains >Change role<" is true of any roster with
+  // one manageable row and would go green with the owner's row over-offered.
+  // Both member buttons carry data-email, so the offered set is readable exactly.
+  "members-admin-actor": {
+    what: "Members (admin actor lin, not the owner) — ada's row offers NOTHING, lin's own row only Change role, rex's row both",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const panel = reg.get("members-body");
+      const body = panel.innerHTML || "";
+      // IDENTITY, not rank: the acting principal is lin, and the whole envelope
+      // moved with the id — a corpus that shipped ada's email under lin's id
+      // would tag the wrong row "(you)" and every predicate below would be a
+      // coincidence.
+      assert.ok(body.includes("lin@acme.com <span class=\"dim\">(you)</span>"),
+        "lin's row must be the self row — the actor identity, not just the actor rank; got: " + body.slice(0, 400));
+      assert.ok(!body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+        "ada must NOT be self-tagged when the acting principal is lin");
+      const emailsFor = (attr) =>
+        panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
+      const roleOffers = emailsFor("data-member-role");
+      const removeOffers = emailsFor("data-member-remove");
+      // ada OUTRANKS the acting admin: the server 403s `outranked` on both verbs,
+      // so neither control may be painted on her row.
+      assert.ok(!roleOffers.includes("ada@acme.com"),
+        "an acting ADMIN was offered Change role on the team OWNER's row — the server 403s outranked; offered on " + JSON.stringify(roleOffers));
+      assert.ok(!removeOffers.includes("ada@acme.com"),
+        "an acting ADMIN was offered Remove on the team OWNER's row — the server 403s outranked; offered on " + JSON.stringify(removeOffers));
+      // The exact sets, so an over-offer ANYWHERE reds and names the row.
+      assert.deepEqual(roleOffers, ["lin@acme.com", "rex@acme.com"],
+        "Change role belongs on the self row (self-demotion is legal) and the outranked member — got " + JSON.stringify(roleOffers));
+      assert.deepEqual(removeOffers, ["rex@acme.com"],
+        "Remove belongs ONLY on the outranked member's row — got " + JSON.stringify(removeOffers));
+      // An admin still manages: the invitations card is there, so the absences
+      // above are RANK refusals and not a plain-member panel by accident.
+      assert.ok(body.includes("Pending invitations"), "an acting admin still sees the invitations card");
+    },
+  },
+  // cch-w45-s1: the acting OWNER on a roster with a PEER OWNER — the one cell
+  // where the server's two member verbs disagree (remove_member_as/3 has an
+  // owner escape hatch, update_member_role_as/4 does not).
+  "members-peer-owner": {
+    what: "Members (owner) — the PEER OWNER row carries Remove and NOT Change role; the two server verbs disagree",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const panel = reg.get("members-body");
+      const body = panel.innerHTML || "";
+      assert.ok(body.includes("ozz@acme.com"), "the peer owner renders on the roster");
+      assert.ok(body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+        "the acting owner is still ada — this scenario moves the ROSTER, never the default actor");
+      const emailsFor = (attr) =>
+        panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
+      const roleOffers = emailsFor("data-member-role");
+      const removeOffers = emailsFor("data-member-remove");
+      assert.ok(!roleOffers.includes("ozz@acme.com"),
+        "an owner was offered Change role on a PEER OWNER's row — update_member_role_as/4 has no owner escape hatch and 403s; offered on " + JSON.stringify(roleOffers));
+      assert.ok(removeOffers.includes("ozz@acme.com"),
+        "an owner must be offered Remove on a PEER OWNER's row — remove_member_as/3's owner escape hatch permits it; offered on " + JSON.stringify(removeOffers));
+      assert.deepEqual(roleOffers, ["ada@acme.com", "lin@acme.com", "rex@acme.com"],
+        "Change role reaches the two outranked rows and the actor's OWN (self-demotion is a 409 state refusal, not an authority one) — got " + JSON.stringify(roleOffers));
+      assert.deepEqual(removeOffers, ["lin@acme.com", "ozz@acme.com", "rex@acme.com"],
+        "Remove reaches every row but the actor's own — got " + JSON.stringify(removeOffers));
+    },
+  },
   // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
   // secret + write-once chips, the sealed write-once note) + the add FORM.
   "env-populated": {

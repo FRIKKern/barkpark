@@ -570,16 +570,26 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // this test exited 1 on 104/79 before the four numbers below were RE-READ from
 // `scenarioReport` on THIS merge base (origin/main 9e39c60), never carried from
 // the brief.
-test("the census reconciles: 106 scenarios, 25 distinct covered by 26 cells, 81 residue over 13 families", () => {
+// cch-w45-s1 moved it a SEVENTH time, and by TWO: `members-admin-actor` and
+// `members-peer-owner` — the first fixtures whose acting principal is not the
+// roster's row 0, and so the first that can ask a rank-relative predicate about
+// a row the actor does NOT outrank — are the 107th and 108th scenarios and the
+// 82nd and 83rd residue entries. It refused exactly as designed: the bare sweep
+// exited 2 with `UNLISTED scenario "members-admin-actor" (family hash:#settings)`
+// (and the twin on the next line) and this test exited 1 on 106/81 before the
+// five numbers below — and the TITLE above them, which no assertion can red —
+// were RE-READ from `scenarioReport` on THIS merge base (origin/main b00d793c0),
+// never carried from the brief.
+test("the census reconciles: 108 scenarios, 25 distinct covered by 26 cells, 83 residue over 13 families", () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 106);
+  assert.equal(r.total, 108);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 81, "81 is the RESIDUE, not the census");
+  assert.equal(r.residue, 83, "83 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 81, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 83, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
