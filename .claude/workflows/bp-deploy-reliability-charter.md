@@ -2370,3 +2370,21 @@ CLI's `refusal (\d+) of (\d+)` regex are ONE contract across two languages with 
 `cssom-parity.mjs` classifies errors in one place at the bottom of a catch block, where two waves have now
 added a class and the second one MISSED a step — a `die()`-style helper that picks a class *at the throw site*
 (the shape `overflow-guard.mjs` already has) would have made the ENOEXEC hole unwritable.
+
+**ADDENDUM, same day, before the lead touches either PR.** Both wave-7 PRs are RED on `Console gate` — one of
+the four required blocking contexts — and **neither red is caused by either PR.** The hosted runner's headless
+Chrome is intermittently failing to start:
+
+- #9959, *Overflow guard (rendered)*: `!! OVERFLOW GUARD: Chrome never wrote DevToolsActivePort — it did not start`
+- #9960, *Billing tier floor (rendered)*: `!! BREAKPOINT SWEEP (exit 2): Chrome never wrote DevToolsActivePort — it did not start`
+
+`CSSOM parity` **passed** in the same #9960 run, so the fault is intermittent bring-up, not a missing binary.
+Every affected probe refused correctly at exit 2 and said in plain words that no claim was being made — the
+discipline this epic built is working, and this is the exact fault class wave 7's own D101 slice extends to
+`cssom-parity`. What is wrong is the last step: `console-harness.yml`'s `2)` arm converts a REFUSAL into
+`exit 1`, so at gate level a refusal is indistinguishable from a defect, and a runner that cannot start Chrome
+blocks every PR in the repo — including PRs that touch no console asset at all. Filed as
+`dr-bl-w7-runner-chrome-refusal-blocks-every-pr` (published, 5 criteria, unclaimed) with three candidate
+shapes and the counter-argument stated: the fix is **not** "make refusals green", which is how a browser gate
+quietly stops gating. Not re-run by the reviewer — a `gh run rerun --failed` has previously *deleted* a
+required context on this repo, and that is the lead's call, not a reviewer's.
