@@ -44,7 +44,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/auth/resend-verification user  re-send the confirm mail (always 200)
       POST    /v1/account/email/change     user  {new_email} → stage + email a 6-digit code
       POST    /v1/account/email/confirm    user  {code} → swap email + Stripe sync
-      GET     /v1/me               user      {user{id,email,confirmed,two_factor_enabled}, team{id,name,slug}}
+      GET     /v1/me               user      {user{id,email,confirmed,two_factor_enabled,platform_operator}, team{id,name,slug}, teams[], role, team_authority{team_id,role,admin,owner}, onboarding}
       GET     /v1/onboarding       user      the team's onboarding checklist state
       POST    /v1/onboarding       admin     advance/dismiss an onboarding step
       GET     /v1/archives         user      the team's archived (torn-down) instances, restorable
@@ -75,8 +75,8 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
       POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
-      POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
-      DELETE  /v1/fleet/supports/:id user    unbind + delete a SUPPORT fleet row (PDF-D61; mains refused 409)
+      POST    /v1/fleet/supports   admin(d)  register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
+      DELETE  /v1/fleet/supports/:id admin(d)  unbind + delete a SUPPORT fleet row (PDF-D61; same disjunction as the POST; mains refused 409)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
@@ -120,8 +120,8 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/github/repos             user  the installation's repos (the "Import Git Repository" picker)
       POST    /v1/github/repos             admin create a repo from a template + push app files (deploy button)
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
-      POST    /v1/env-vars         user      create/update an env var (owner/admin)
-      DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
+      POST    /v1/env-vars         admin     create/update an env var (owner/admin)
+      DELETE  /v1/env-vars/:id     admin     delete an env var (owner/admin)
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
       PUT     /v1/notifications/settings  admin  update transport / per-event toggles / SMTP secrets
       PUT     /v1/notifications/channels admin  update per-channel transport settings
@@ -143,9 +143,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/billing/webhook  —*        Stripe events (signature-verified, raw body)
       POST    /v1/billing/portal   owner     open the Stripe billing portal → {portal_url}
       POST    /v1/billing/cancel   owner     cancel the active subscription (period-end)
-      POST    /v1/resurrect        user      restore a torn-down instance from an object-storage bundle
-      POST    /v1/launch           user      go-live (alias of /v1/go-live)
-      POST    /v1/go-live          user      gate on active subscription + create a provisioning Barkpark
+      POST    /v1/resurrect        admin     restore a torn-down instance from an object-storage bundle (billed box ⇒ same admin gate as launch)
+      POST    /v1/launch           admin(d)  go-live (alias of /v1/go-live)
+      POST    /v1/go-live          admin(d)  gate on active subscription + create a provisioning Barkpark
       POST    /v1/internal/provision-jobs/claim       worker  claim oldest pending job
       POST    /v1/internal/provision-jobs/:id/succeed worker  flip barkpark up at {ip} (+ optional encrypted admin_token/bootstrap)
       POST    /v1/internal/provision-jobs/:id/fail    worker  mark job failed {error}
@@ -206,8 +206,15 @@ defmodule BarkparkCloud.Web.Router do
   Every `/v1/*` response is JSON; errors are `{"error": "<reason>"}`. The bare-path
   routes (`/`, `/dashboard`, `/new`, `/activate`) instead serve the SPA HTML shell.
   The AUTH column: `—` public · `user` a USER session token · `admin`/`owner` that
-  session plus a team-admin/owner role · `agent` an AGENT token · `worker` the shared
-  WORKER token · `—*` a signature-verified webhook. The agent routes authenticate
+  session plus a team-admin/owner role · `admin(d)` EITHER of two credentials — a
+  session with the team-admin role, OR a Personal Access Token carrying the `deploy`
+  ability (a deploy-PAT needs no role, so `admin` on these rows would be its own
+  lie) · `agent` an AGENT token · `worker` the shared WORKER token · `—*` a
+  signature-verified webhook. A row's tier is the tier its body ENFORCES, gate or
+  post-gate: seven of these routes call a permissive `Auth.require_*` and then
+  refuse a plain member from the `cond` below it, and the tier column reports the
+  refusal (`router_moduledoc_table_test.exs` re-derives both sides from this file
+  and fails on any disagreement). The agent routes authenticate
   with an AGENT token (`Registry.verify_agent_token`); the user routes with a USER
   session token (`Accounts.verify_user_session_token`); the internal `/v1/internal/*`
   routes with the shared WORKER token (`require_worker` — Bearer WORKER_TOKEN, never a
@@ -480,6 +487,8 @@ defmodule BarkparkCloud.Web.Router do
     mem_used_percent: nil,
     load1: nil,
     load15: nil,
+    req_per_s: nil,
+    p95_ms: nil,
     err_5xx_per_s: nil,
     disk_used_percent: nil,
     swap_used_percent: nil,
@@ -1395,6 +1404,11 @@ defmodule BarkparkCloud.Web.Router do
     else
       user = conn.assigns.current_user
       team = conn.assigns.current_team
+      # ONE role read, spent by both the top-level `role:` key and
+      # `team_authority.role` — the two state the same fact and a second lookup
+      # would let a future edit desync them (and costs an extra membership read
+      # on every boot).
+      team_role = team && Accounts.team_role(user, team)
 
       json(conn, 200, %{
         # two-factor-auth: the SPA reads two_factor_enabled to render the right
@@ -1425,7 +1439,34 @@ defmodule BarkparkCloud.Web.Router do
           end),
         # The caller's role in their current team — the SPA hides/shows the
         # invite + member-management controls on this. nil when teamless.
-        role: team && Accounts.team_role(user, team),
+        role: team_role,
+        # The team authority the GATE will enforce, stated on the wire so the
+        # console stops re-deriving `role in ["owner","admin"]` locally (six
+        # hand-written copies in app.js, none of which can be wrong-proofed).
+        # Scoped to the SAME `team` variable as `team:` and `role:` above — one
+        # resolved team, never a role from one team beside an id from another.
+        # nil when teamless, so a consumer fails CLOSED.
+        #
+        # These are ROLE facts, NOT capability claims, and the distinction is
+        # load-bearing. GR9 is a TWO-AXIS law: `platform_operator` is the other
+        # axis and is NOT folded in here, and neither are a PAT's token
+        # abilities. `/v1/me` is PAT-reachable behind require_ability("read"),
+        # so a READ-ONLY PAT held by an owner already receives role: "owner" —
+        # inert while it describes membership, but emitting a CAPABILITY set
+        # ("may delete the instance") would make that over-statement
+        # load-bearing against a require_ability("write") 403. Membership is
+        # the whole scope.
+        #
+        # Both booleans come from Authz — the SAME module require_team_admin
+        # calls — so the wire cannot disagree with the gate.
+        team_authority:
+          team &&
+            %{
+              team_id: team.id,
+              role: team_role,
+              admin: Authz.team_admin?(user, team),
+              owner: Authz.team_owner?(user, team)
+            },
         # Fold the onboarding summary into the boot read so the SPA renders the
         # "Finish setup" checklist without a second round-trip. Non-secret shape
         # (no gateway/customer ids) — safe for a PAT caller too.
@@ -8869,6 +8910,21 @@ defmodule BarkparkCloud.Web.Router do
       # scalar. `load1` stays for the reason string's present-tense colour: a box
       # can read load1 0.64/core (idle-looking) while load15 reads 1.89/core.
       load15: measured_or_nil(Map.get(payload, "load15")),
+      # THE DENOMINATOR (charter D103). `err_5xx_per_s` is a rate whose severity
+      # cannot be read without the volume it came out of: 0.22 5xx/s is 14.4% of
+      # traffic at the median observed n and 2.0% at the max — a 7x severity
+      # spread from one unchanged number. So the request rate rides WITH the
+      # error rate, always, and a consumer that prints a share without it is
+      # printing a number it cannot bound. Same honesty law as every vital
+      # above: absent key or the agent's -1 sentinel renders nil, and a
+      # genuinely idle box (a measured 0.0 req/s) survives as a measured zero.
+      req_per_s: measured_or_nil(Map.get(payload, "req_per_s")),
+      # p95 request latency, and it lands here as a VITAL — colour for a reason
+      # string — and is REFUSED as a fence (charter D131). The beat carries ONE
+      # p95 off a 60s per-slot ring that dies on every blue/green flip, so it is
+      # a small-sample lottery; most boxes in the field still report the -1
+      # unwired sentinel, which renders nil rather than "0ms — instant".
+      p95_ms: measured_or_nil(Map.get(payload, "p95_ms")),
       # 5xx per second off the instance's own 60s ring (D75). Same law as every
       # vital above: an absent key (an agent predating the field) and the -1
       # sentinel (probe unwired, instance too old, or an EMPTY window) both

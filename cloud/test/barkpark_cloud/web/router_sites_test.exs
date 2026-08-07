@@ -852,7 +852,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
         {"E_ABSOLUTE_PATH", ~s(entry "/timeout.html" is an absolute path — refused),
          "A network step timed out"},
         {"E_ABSOLUTE_PATH", ~s(entry "/unauthorized.html" is an absolute path — refused),
-         "The hosting provider rejected our credentials"},
+         "A credential was rejected."},
         {"E_PATH_TRAVERSAL", ~s(entry "../dns/failed.html" escapes the artifact root),
          "Securing the domain failed on the provider side."}
       ]
