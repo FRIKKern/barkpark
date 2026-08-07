@@ -99,7 +99,8 @@ defmodule BarkparkCloud.FailureCopyTest do
   end
 
   test "auth/token jargon → human credentials copy" do
-    auth = "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
+    auth =
+      "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
     assert FailureCopy.humanize("hcloud: unauthorized (401)") == auth
     assert FailureCopy.humanize("provider returned invalid token") == auth
@@ -1199,6 +1200,15 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
   # before the credential arm) owns this one and names the exact portal fix.
   @probe_azure "az: AuthorizationFailed - invalid token for subscription"
 
+  # Added at review of cch-w40-s6. The path guard originally excluded ANY
+  # trailing dot, so a producer that simply ended a SENTENCE fell out of the
+  # class and passed through unclassified — a narrowing nobody asked for, in a
+  # shape at least as common as the path it was aimed at. These two must-FLAG
+  # beside the disk-full must-CLEAR: a dot before whitespace or end-of-capture is
+  # punctuation, a dot before a non-space is a filename.
+  @probe_sentence_dot "deploy step failed: the registry said Unauthorized."
+  @probe_mid_sentence_dot "release refused: unauthorized. re-run after rotating the token"
+
   describe "humanize/1 — the credential arm names no party" do
     test "the Azure RBAC control still classifies to its own copy" do
       assert FailureCopy.humanize(@probe_azure) ==
@@ -1233,11 +1243,33 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
       out = FailureCopy.humanize(@probe_disk_full)
 
       refute out =~ "credential", "a path slug satisfied the credential predicate: #{out}"
-      refute out =~ ~r/hosting provider/i, "a path slug satisfied the credential predicate: #{out}"
+
+      refute out =~ ~r/hosting provider/i,
+             "a path slug satisfied the credential predicate: #{out}"
 
       # It lands where an unclassifiable capture belongs: through, verbatim.
       assert out == FailureCopy.scrub(@probe_disk_full)
       assert out =~ "no space left on device"
+    end
+
+    test "a sentence-final dot is punctuation, not a path segment" do
+      for probe <- [@probe_sentence_dot, @probe_mid_sentence_dot] do
+        out = FailureCopy.humanize(probe)
+
+        assert out =~ "credential",
+               "a producer that ended a sentence lost the credential class: #{out}"
+
+        refute out == FailureCopy.scrub(probe), "#{probe} stopped classifying"
+      end
+
+      # …and the guard it relaxes still holds: a dot followed by a NON-space is
+      # still a filename, and still not a credential rejection.
+      assert FailureCopy.humanize(
+               "BUILD failed: writing unauthorized.html failed: no space left on device"
+             ) ==
+               FailureCopy.scrub(
+                 "BUILD failed: writing unauthorized.html failed: no space left on device"
+               )
     end
 
     test "the classified copy is idempotent under a second pass" do
@@ -1247,5 +1279,4 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
       end
     end
   end
-
 end

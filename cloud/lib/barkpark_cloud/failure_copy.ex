@@ -401,12 +401,20 @@ defmodule BarkparkCloud.FailureCopy do
   # A credential rejection, matched against the LOWERED reason. Both tokens are
   # ordinary English that a producer-controlled PATH carries routinely
   # (`dist/errors/unauthorized/index.html` is what a framework calls its 401
-  # page), so each side is guarded against `/`, `\`, `.`, `-`, `_` and word
+  # page), so each side is guarded against `/`, `\`, `-`, `_` and word
   # characters: the token must stand as its OWN word, never as a path segment or
   # part of a longer identifier. `401 Unauthorized`, `unauthorized (401)`,
   # `unauthorized:` and `returned invalid token` all still match — a real
   # producer always leaves the word standing alone.
-  @credential_rejected ~r{(?<![\w/\\.\-])(?:unauthorized|invalid token)(?![\w/\\.\-])}
+  #
+  # A TRAILING DOT IS NOT A PATH SEPARATOR, and the trailing guard says so
+  # (review of cch-w40-s6). A flat `(?!\.)` also excluded `…said Unauthorized.`
+  # and `…: unauthorized. check the token` — a producer ending a SENTENCE, which
+  # is at least as common as a path — so the token would have passed through
+  # unclassified. The guard is `\.` followed by a NON-SPACE (`unauthorized.html`,
+  # `auth.unauthorized` via the lookbehind); a dot at end-of-capture or before
+  # whitespace still classifies.
+  @credential_rejected ~r{(?<![\w/\\.\-])(?:unauthorized|invalid token)(?:(?![\w/\\\-])(?!\.\S))}
 
   # The fallback-ladder aggregate's TWO markers. BOTH are required: the header
   # phrase alone can appear inside a longer operator note, and the `"\n  - "`
