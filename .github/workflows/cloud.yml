@@ -407,3 +407,62 @@ jobs:
             echo "::notice title=Cloud gate: green — nothing ran::NOTHING CLOUD RAN on this head.%0ACloud gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Cloud job executed', never as 'the Cloud suite passed'."
           fi
           echo "Cloud gate: every upstream job either succeeded or was legitimately not dispatched."
+
+  report-main-failure:
+    # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
+    #
+    # Same defect, same fix, same reasoning as console-harness.yml's job of this
+    # name: a post-merge red X on `main` is only visible to whoever thinks to
+    # open the Actions tab, so main-push gate failures have been concluding into
+    # the void — nine measured `Console gate` reds in the sampled window against
+    # exactly TWO "CI failure" issues in the repository's entire history. This
+    # job is the record for the Cloud control plane's half of that net.
+    #
+    #   * `needs: [cloud-gate]` — it reports the AGGREGATOR'S verdict, the name
+    #     branch protection actually reads, never a single leaf.
+    #
+    #   * `failure()` is true only for a real FAILURE and is FALSE for
+    #     `cancelled`. Deliberate: a cancelled main-push run (queue-depth-1
+    #     displacement — charter D115's CADENCE class) ran zero substantive jobs
+    #     and has nothing to report. Filing for those is the noise that trains
+    #     people to ignore the real ones.
+    #
+    #   * `github.ref == 'refs/heads/main'` — a failing PR already has a human
+    #     attached. Only main's post-merge red is ownerless.
+    #
+    #   * `permissions:` is JOB-LEVEL and must stay that way. The repository's
+    #     `default_workflow_permissions` is "read", so the issue POST 403s
+    #     without `issues: write` — but a WORKFLOW-level block would silently
+    #     re-scope every other job's token in this file. The grant lives on the
+    #     one job that needs it.
+    #
+    # scripts/file-ci-failure-issue.sh exits 1 when the alert was NOT delivered,
+    # so this job cannot warn-and-pass. Its red never touches `Cloud gate`, which
+    # has already published its verdict by the time this runs.
+    name: Report main-push failure to a human
+    needs: [cloud-gate]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: cloud-main
+          CI_FAILURE_DETAIL: |
+            The `Cloud gate` required context is RED on a push to `main`.
+            This is POST-MERGE: the breakage is already on the default branch,
+            and every PR branched from this tip inherits it.
+
+            Read the aggregator's "Decide (fail-closed over every upstream
+            result)" step first — it names which upstream job is outside the
+            allow-set (`changes` dispatcher, `path-escape` ratchet, `compile`,
+            `test`) and on which OTP/Elixir matrix leg.
+
+            This issue is idempotent per key: an ongoing failure appends a
+            comment rather than opening a new issue. CLOSE IT once main is green
+            again — the next main-push failure opens a fresh one.
