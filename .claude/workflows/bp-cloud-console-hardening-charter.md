@@ -2024,6 +2024,71 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-07 — wave 41 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A−)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The two server authority predicates are proved single over the full role domain | `cch-w41-s1-…-are-proved-single` | `…two-server-authority-predicates-are--0` | [#10124](https://github.com/FRIKKern/barkpark/pull/10124) | none — full gate re-run (2992/0), and the derived `authorize(:manage_members)` seam independently mutation-proved able to lose |
+| `/v1/me` states the team authority the gate will enforce | `cch-w41-s2-…-the-gate-will-enforce` | `…v1-me-states-the-team-authority-the-gate-1-r` | [#10125](https://github.com/FRIKKern/barkpark/pull/10125) | the handler resolved `Accounts.team_role/2` TWICE — once for `role:`, once inside `team_authority` — so the payload carried one fact from two lookups and a future edit could desync them. Collapsed to one binding (two fewer membership reads per boot, desync structurally impossible); the role half of the equality pin annotated as the regression fence it now is |
+| The admin limb of the four `owner\|admin` console predicates gets a guard that can lose | `cch-w41-s3-…-a-guard-that-can-lose` | `…four-owner-admin-console-predicates--2` | [#10126](https://github.com/FRIKKern/barkpark/pull/10126) | none — gate re-run (920 pass / 104 scenarios), and BOTH the owner-only and the ALWAYS-TRUE mutations independently re-run and reverted |
+
+**WHAT LANDED.** The wave's frame — *the console stops inventing who you are* — closed on both sides
+of the wire. On the SERVER, the control plane's four separate statements of "who may" stopped being
+four unwatched opinions: `Accounts.team_admin?/2` and `Authz.team_admin?/2` are now asserted equal
+over the FULL role domain — the three schema roles, `nil`, and five off-ladder strings that a third
+test proves genuinely persist (there is no CHECK constraint on `team_memberships.role` in any
+migration) — with the right-hand admin set DERIVED through the public `Authz.authorize(:manage_members)`
+seam rather than a re-typed `~w(owner admin)`. The invitation path's private literal triple is proved
+equal to the rank-derived `Authz.can_grant?/3` over the whole (actor, target) matrix, measured only
+through `invite_member/4`. On the WIRE, `/v1/me` now emits `team_authority{team_id, role, admin, owner}`
+— both booleans from `Authz`, the same module `require_team_admin` calls, scoped to the SAME
+`conn.assigns.current_team` binding as `team:` and `role:`, and `nil` when teamless so a consumer fails
+CLOSED. On the CLIENT, the four `owner || admin` predicates finally have a pin that reds when the admin
+limb is deleted.
+
+**THE HOLE THIS WAVE CLOSED IS BIGGER THAN IT SOUNDS.** Two measurements make the case. Across 2,988
+cloud tests exactly ONE assertion pinned `/v1/me.role`, and it pinned `"member"` — so
+`role: team && "member"` (every owner reported as a member) shipped green. And in the console harness,
+rewriting ANY of the four predicates to OWNER-ONLY shipped 919/919 + 104/104 green, while
+`canManageOnboarding` survived even ALWAYS-TRUE — a fail-open. The mechanism is censused: across ~100
+`me()` call sites in the preview corpus the role argument is `"member"` 7×, `"owner"` 3× and `"admin"`
+ZERO times. No fixture in the whole corpus has ever been an admin.
+
+**WHAT DID NOT SHIP, BY DESIGN.** `cch-w41-s4` (canManageOnboarding reads `team_authority` instead of
+re-deriving) and `cch-w41-s5` (the binding census ratchets on a frozen legacy ceiling) are round 2.
+Both tasks sit `open`, unclaimed, 0/10.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+1. **MERGE ORDER.** #10124 first, then #10125. S2's headline claim — *the authority `/v1/me` states is
+   the authority the gate enforces* — rests on `Accounts.team_admin?/2 == Authz.team_admin?/2`, which
+   only #10124's ARM C pins. Merge #10125 alone and the claim is true but unguarded. #10126 is disjoint
+   from both (JS only) and can merge in any order.
+2. **A SECOND INDEPENDENT REVIEWER IS OWED ON `cch-w41-s2`.** Its HIGH-FLIP-RISK judgment was
+   re-derived here from the gate side (`require_team_admin` → `Authz.team_admin?/2` and
+   `require_primary_team_admin` → `Accounts.team_admin?/2`, both reading `conn.assigns.current_team`)
+   and CONFIRMED — but confirmation and build share one reviewer, which is exactly the independence
+   E2 asks the lead to supply by hand.
+3. **S4 IS NOW THE POINT OF THE WHOLE WAVE.** S2 ships the wire fact and nothing reads it; S3 pins the
+   six hand-written local copies. Until S4 lands, the console has TWO sources of truth for the same
+   question. Dispatch it the moment #10125 and #10126 merge.
+4. **THE PREDICATE GUARD DOES NOT REACH THE RENDER SITES.** S3's block guards the predicate seam only.
+   Invert a CONSUMER (`if (canManageOnboarding())` at a render site) and it still ships green, because
+   no preview scenario is an admin. Filed as `cch-no-admin-fixture-in-the-preview-corpus`; taking it
+   means moving the census literal, which D461/D464 fence until #9955/#10005 resolve.
+5. **ARM D'S ACTOR DOMAIN STOPS AT THE SCHEMA ROLES.** Off-ladder ACTORS on the invitation path are
+   unproven, and widening the arm there breaks the decisive mutation's exclusivity — a real tension
+   between "an arm earns its place" and "a mutation reds EXACTLY these tests". Filed as
+   `cch-w41-bl-arm-d-off-ladder-actors-unproved`; the rescope is the lead's call.
+6. **THE CENSUS PROVES AGREEMENT, NOT CORRECTNESS.** If both sides were wrong in the same direction it
+   stays green, by construction. That is the honest ceiling of every arm in that file.
+
+**LEDGER.** Clean — no fixes required. All three built slices sit `in_progress` with N−1 criteria
+stamped and evidence written AS the builders worked; the single open row on each is the merge-gated
+one the LEAD closes on merge. The two round-2 tasks are `open` with zero false stamps. Two backlog
+rows were filed and published by the builders for work discovered but not taken. No task outside this
+wave was touched.
+
+
 ### 2026-08-07 — wave 40 REVIEW (5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
