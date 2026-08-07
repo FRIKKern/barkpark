@@ -2630,3 +2630,80 @@ stays outside D17's fence. **S5** — whether the aggregator's refusal arm can e
 
 Coverage: every survey and verify agent reported; there is no coverage deficit this wave.
 
+
+### Wave 2026-08-07 (wave 8) — REVIEWED · Paper `deploy-reliability-wave-8-2026-08-07` · grade **A−**
+
+**All seven slices built, reviewed, gate-green on the reviewed tree, PUSHED and PR'd. Nothing merged — the lead merges.**
+No slice was deferred; all seven were round 1 with disjoint file sets, and all seven dispatched and finished.
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| Ledger names the cause + the denominator | `dr-w8-s1-ledger-names-cause-and-denominator` | `…names-the-cause-it-alr-0` (unchanged) | [#10014](https://github.com/FRIKKern/barkpark/pull/10014) | full cloud suite 2982/0 · site-deploy-node selftest 159/159 |
+| Runner timeout stops blaming the flag | `dr-w8-s2-runner-timeout-stops-blaming-the-flag` | `…did-not-answer-in-5-1-r` | [#10015](https://github.com/FRIKKern/barkpark/pull/10015) | api 30/0 · cloud 65/0 · format clean |
+| `/v1/graph` stops paying for a discarded boolean | `dr-w8-s3-graph-stops-paying-for-a-discarded-boolean` | `…1-300-serial-datab-2-r` | [#10016](https://github.com/FRIKKern/barkpark/pull/10016) | api 37/0 · format clean |
+| The census reaches a human | `dr-w8-s4-census-reaches-a-human` | `…reaches-a-human-a--3-r` | [#10017](https://github.com/FRIKKern/barkpark/pull/10017) | go build · vet · test (4 pkgs) · gofmt clean |
+| A refusal is not an accusation | `dr-w8-s5-refusal-is-not-an-accusation` | `…could-not-star-4` (unchanged) | [#10018](https://github.com/FRIKKern/barkpark/pull/10018) | 4× node --check · 12/0 · 51/0 · path-escape harness 172/0 |
+| The raw capture stops leaking | `dr-w8-s6-raw-capture-stops-leaking` | `…stops-leaking-a--5-r` | [#10019](https://github.com/FRIKKern/barkpark/pull/10019) | 118/0 · full cloud suite 2985/0 · format clean |
+| Orphaned jobs stop claiming to run | `dr-w8-s7-orphaned-jobs-stop-claiming-to-run` | `…container-replac-6` (unchanged) | [#10020](https://github.com/FRIKKern/barkpark/pull/10020) | 19/0 · format clean |
+
+**What landed.** This is the wave where the epic's own instruments stopped lying, and it hits all three
+clauses of the wish — *still silent*, *still mis-reported*, *make the reporting able to lose*.
+
+STILL MIS-REPORTED, and the biggest single win: the number-one failure class was mis-named while the
+producer had already written the diagnosis into the same string. 249 of 250 doc-id rows in the pinned 24 h
+window carried `: graph <status>:` and the classifier threw all 249 away by matching the symptom first
+(D108). S1 reads the status the producer recorded — and proves through the REAL `census/3` that this is a
+RELABEL inside a constant numerator (volume=600 failed=350 pct=58.33 before AND after), not a rate repair
+dressed up as one. Second: 207 rows, 24.5% of the numerator, said `feature_not_configured` on a box that
+had carried the flag for 75 minutes — a 5,000 ms `GenServer.call` default wearing a config accusation, and
+wrong about the OUTCOME too, because the deploy completed behind the lie (D113). S2 gives that path its own
+typed code AND co-merges the control-plane allowlist arm, because the rename alone would have sent this
+epic's numerator UP (D114, mutation-proved 3-red).
+
+STILL SILENT: seven waves built a ledger no human could read a number out of — a grep for `deploy-ledger`
+across `internal/`, `js/`, `web/` returned nothing. S4 is the first reader, and its refusals are the
+load-bearing half: three of the four ways this census can fail decode to a comforting ZERO under a
+nil-coalescing read, and all four now render as named refusals with the window attached. S6 found a live
+secret boundary shipping backwards (`scrub |> strip_ansi`, 2000/2000 leak on sub-32-char colourised
+`api_key=`) whose test was green **by asserting the leak**, and whose email path stripped nothing at all.
+S7 closed a pure reporting lie — five rows claiming to run for ten days — and the write-up REFUSES the
+tempting premise (nothing was lost; the next job carried every trigger within 62–156 s).
+
+ABLE TO LOSE: S5 is the wave's cleanest expression of the wish. The console gate's exit-2 REFUSED banner
+already existed; the exit code was the defect, so an unmeasured gate accused `app.css` at the merge button
+(D122). The verdict channel names the fault while `bad=1` is set FIRST, unconditionally, from `result`
+ALONE — fail-closed re-derived independently by the reviewer, and proven by a harness that EXTRACTS AND
+EXECUTES the workflow's own step bodies. S3 removed ~1,300 serial round trips per `/v1/graph` call and
+correctly refuses to claim a live rate improvement, because the class was extinct at build time and any
+green measured tonight would be vacuous.
+
+**What the reviewer fixed in place.** Four small things, one of which would have reddened CI: S2 shipped
+**unformatted** Elixir (`mix format --check-formatted` red on `deploy.ex`). S3 left `Content.extract_edges/2`'s
+delegate `@spec` declaring `dangling: boolean()` after widening the same field in `Edges`. S4's new help row
+broke the two-column alignment every other `bp cloud` verb keeps. S6 left a comment three lines above its own
+changed line still asserting the OLD, wrong order. S1, S5 and S7 needed nothing.
+
+**What stalled.** Nothing. The honest gaps are named rather than hidden: S1's criterion 0 is stamped
+`--miss` (the four fixture strings are re-derived from the brief and the producer line, not from a psql
+session a builder ran — `task-a4b939801795cf94` re-derives them and re-confirms the anchor's safety claim
+against live data). S4's success path is unverified against a live control plane because
+`PLATFORM_ADMIN_EMAILS` is still unset on the SERVING container — that is the LEAD's ops half and criterion 8
+is gated on exactly it. S3 and S5 are flagged **HIGH-FLIP-RISK (D129)**: the reviewer performed a distinct,
+independent re-derivation of both key judgments and both held, but that is still ONE reviewer and a second
+is owed before merge.
+
+**Filed, not swept.** Six builder-filed follow-ups all exist and are published under the epic. Three more
+from the reviewer: `dr-w8-rev-stage-caption-collapse-to-raw` (S2's hand-rolled `strip_ansi |> scrub` is
+exactly S6's `FailureCopy.raw/1`, left inline deliberately so each PR compiles independent of merge order —
+collapse it once both land), `dr-w8-rev-finderlive-still-pays-per-edge-queries` (S3's builder named this
+second consumer and did not file it), and `dr-w8-rev-escape-harness-learns-the-refusal-sentence` (case 9 of
+the path-escape harness pins ONE aggregator sentence and will red cosmetically on the first verdict-bearing
+case; it also lacks a permanent fail-closed guard for S5's property).
+
+**What the next wave should take.** (1) MERGE, then RE-QUERY — D127 is a rule, not a list. S2 and S6 are
+co-scoped through `FailureCopy`; merge both, then collapse. (2) The ops half of S4 and the live re-curl:
+until that happens this epic has a reader and still no human-read number. (3) The 16 merged-but-unstamped
+tasks of D128 — the epic mis-reporting ITSELF is squarely inside this wish, and a bulk-stamp script is
+BANNED. (4) The ledger's refusal arm is still keyed on STATUS alone (D115), so a 500-to-503 move would
+refile rows; make it code-aware. (5) After S1 lands, re-derive the class table and expect the
+`DOC_ID_EMPTY` collapse — a relabel, not a repair, and nothing in the payload says so yet.
