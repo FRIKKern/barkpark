@@ -1716,16 +1716,26 @@
   // mount could not be represented in the harness at all. Absent (every one of
   // the existing 2-arg call sites) it defaults to "grant" — byte-identical
   // behaviour to the shipped model, which is what keeps this an ADD.
-  function lifecycleActionsModel(capPayload, bp, authority) {
+  // cch-w46-s3 — THE FOURTH ARGUMENT SAYS *WHY* THE AUTHORITY IS UNKNOWN, and
+  // it exists because "unknown" covers two states the rail rendered
+  // BYTE-IDENTICALLY: /v1/me still in flight, and /v1/me FAILED. One of those
+  // resolves itself and one never will, and a card that says "Checking
+  // capabilities…" forever after a 500 is the same lie the epic keeps killing.
+  // It carries meState()'s own vocabulary ("loading" / "failed" / "loaded") so
+  // no second spelling of the read's state is minted here. Absent — every
+  // existing 2- and 3-arg call site — it reads as still-checking, which is
+  // byte-identical to the shipped model apart from the exit added below.
+  function lifecycleActionsModel(capPayload, bp, authority, authorityState) {
     bp = bp || {};
     authority = authority || "grant";
+    var authorityFailed = authority === "unknown" && authorityState === "failed";
     var kind = bp.provider || "hetzner";
     var pill = lifecyclePill(bp);
     var decommission = decommissionAction(bp, authority);
 
     if (capPayload === undefined) {
       return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
-        loading: true, retry: false, devTier: false, authority: authority, actions: [decommission] };
+        loading: true, retry: false, devTier: false, authority: authority, authorityFailed: authorityFailed, actions: [decommission] };
     }
 
     var providers = capPayload && typeof capPayload === "object" ? capPayload.providers : null;
@@ -1734,7 +1744,7 @@
 
     if (!entry || devTier) {
       return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
-        loading: false, retry: !devTier, devTier: devTier, authority: authority, actions: [decommission] };
+        loading: false, retry: !devTier, devTier: devTier, authority: authority, authorityFailed: authorityFailed, actions: [decommission] };
     }
 
     var caps = entry.capabilities || {};
@@ -1749,7 +1759,7 @@
       return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
     });
     return { kind: kind, provider: bp.provider || null, pill: pill, available: true,
-      loading: false, retry: false, devTier: false, authority: authority, actions: actions };
+      loading: false, retry: false, devTier: false, authority: authority, authorityFailed: authorityFailed, actions: actions };
   }
 
   // Pure optimistic-transition reducer for the live decommission: applies the
@@ -1828,7 +1838,32 @@
           : "Capabilities unavailable.") + "</span>" +
         (model.retry ? '<button class="btn btn-ghost btn-sm" type="button" data-life-retry>Retry</button>' : "");
     }
-    if (!model.loading && model.authority === "unknown") status += checking;
+    // cch-w46-s3 — THE UNKNOWN ARM GETS AN EXIT, AND STOPS SPELLING TWO STATES
+    // THE SAME WAY. D437: "a wave that ships 'Checking…' without a Retry has
+    // moved the lie, not killed it" — and this rail was the surface D437's own
+    // slice never reached, so it said "Checking capabilities…" forever after a
+    // /v1/me that had already failed, with no control anywhere on the card to
+    // re-drive the read. Two changes, no new vocabulary:
+    //   • a FAILED read says so, in meFailureCopy()'s fault-classified sentence
+    //     (the same words every other unknown arm renders — none is invented
+    //     here), warn-toned like the "Capabilities unavailable." note beside it;
+    //   • both unknown states carry meRetryHtml() — THE epic's one exit, the
+    //     same [data-me-retry] control five surfaces already mount, wired by
+    //     wireMeRetry in paintLifecycleActions. Not a second retry: the row's
+    //     own [data-life-retry] re-reads /v1/providers/capabilities and cannot
+    //     move the AUTHORITY answer at all, which is why a rail with a live
+    //     capabilities Retry was still stranded.
+    // meFailureCopy() reads the retained fault (module state), exactly as
+    // meUnknownHtml does — the render is honest about the fault it was handed
+    // rather than pure about a fault it would have to invent.
+    if (model.authority === "unknown") {
+      if (model.authorityFailed) {
+        status += '<span class="inst-life-note inst-life-note--warn">' + esc(meFailureCopy()) + "</span>";
+      } else if (!model.loading) {
+        status += checking;
+      }
+      status += meRetryHtml();
+    }
 
     var actions = model.actions || [];
     // The disabled PAUSE verb moves to the foot as the server's own sentence
@@ -6996,6 +7031,12 @@
     if (!isSupportBp(bp)) wireOffloadActions(bp, supportsOf(fleetCache, bp.id));
   }
 
+  // cch-w46-s3 — WHAT THE MOUNTED RAIL IS MADE OF: {bp, caps} for the instance
+  // whose lifecycle row is on screen, where `caps` is the /v1/providers/
+  // capabilities answer already held (undefined = frame 1, still asking). It is
+  // what lets the authority answer be re-asked without re-asking the conduit.
+  var lifecycleRail = null;
+
   // The thin DOM mount for the lifecycle action row — an extension of the
   // wireInstanceActions pattern (add-listener-if-present), called right after it.
   // Paints the live-decommission frame immediately, then queries the capability
@@ -7004,26 +7045,69 @@
   function wireLifecycleActions(bp) {
     var box = $("#inst-lifecycle-actions");
     if (!box) return;
+    // cch-w46-s3: remember what the rail is currently made of, so a /v1/me that
+    // lands AFTER this paint can be re-asked without re-asking the conduit.
+    lifecycleRail = { bp: bp, caps: undefined };
     // Frame 1: decommission is live from the first paint (it predates the
     // conduit), with a "checking capabilities" note — teardown is never absent.
     // cch-w38-s1: the authority answer is read at PAINT time, both frames. At
     // frame 1 /v1/me is usually already in (loadMe fires at shell boot, long
     // before this route's capability read) — but when it is not, the rail says
     // "checking", never "refused".
-    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp, instanceAdminAuthority()));
+    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp, instanceAdminAuthority(), meState()));
     api("GET", "/v1/providers/capabilities").then(function (r) {
       if (!box.isConnected && box.isConnected !== undefined) return; // navigated away
       // 404 (conduit not deployed yet) / 5xx / network → null → the honest
       // "capabilities unavailable" + Retry state, decommission still live.
       var payload = r && r.ok && r.data ? r.data : null;
-      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp, instanceAdminAuthority()));
+      lifecycleRail = { bp: bp, caps: payload };
+      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp, instanceAdminAuthority(), meState()));
     });
+  }
+
+  // cch-w46-s3 — THE REPAINT SEAM THE INSTANCE VIEW NEVER HAD. Authority is
+  // read at PAINT time in both frames above and never re-read, while loadMe
+  // carried repaint seams for billing, operator, activity, providers and
+  // notifications in BOTH arms and none for this view — so a /v1/me that
+  // succeeded LATE (deep link, slow control plane, a retry) left the rail dead:
+  // measured byte-identical before and after the read landed.
+  //
+  // WHICH SEAM, AND WHY (the brief's two options). This is the AUTHORITY-ONLY
+  // repaint, NOT `if (currentView() === "instance") reloadInstanceView()` and
+  // not a re-entry into wireLifecycleActions:
+  //   * reloadInstanceView() hard-returns on the webhooks and usage tabs (its
+  //     exclusions are load-bearing — a remount there clobbers an in-flight
+  //     toggle or an open delivery log), so routing through it fixes Overview
+  //     and leaves exactly the tabs a slow /v1/me strands. Measured: the usage
+  //     rail stayed at its identical byte count.
+  //   * re-entering wireLifecycleActions() would re-issue
+  //     GET /v1/providers/capabilities and drop the card back to its frame-1
+  //     "Checking capabilities…" — a second request and a visible regression to
+  //     answer a question the conduit was never asked.
+  // So: repaint the rail from the capabilities answer we ALREADY hold, with the
+  // authority re-read. No fetch, no tab exclusions, and a no-op everywhere the
+  // rail is not mounted.
+  function repaintLifecycleAuthority() {
+    if (!lifecycleRail || !lifecycleRail.bp) return;
+    var h = parseHash();
+    if (h.view !== "instance") return;
+    // The rail belongs to ONE instance; a stale mount from a previous drill-down
+    // is never repainted with this instance's authority.
+    if (String(h.id) !== String(lifecycleRail.bp.id)) return;
+    var box = $("#inst-lifecycle-actions");
+    if (!box) return;
+    paintLifecycleActions(box, lifecycleRail.bp,
+      lifecycleActionsModel(lifecycleRail.caps, lifecycleRail.bp, instanceAdminAuthority(), meState()));
   }
 
   function paintLifecycleActions(box, bp, model) {
     box.innerHTML = lifecycleActionRowHtml(model);
     var retry = box.querySelector("[data-life-retry]");
     if (retry) retry.addEventListener("click", function () { wireLifecycleActions(bp); });
+    // cch-w46-s3: the unknown arm's exit. selfHealing is left at its default —
+    // loadMe now repaints this surface from BOTH arms (repaintLifecycleAuthority
+    // above), so wireMeRetry only re-paints when the read still did not land.
+    wireMeRetry(box, repaintLifecycleAuthority);
     var decomm = box.querySelector('[data-life-verb="decommission"]');
     if (decomm) decomm.addEventListener("click", function () { confirmDecommission(bp); });
   }
@@ -14534,6 +14618,12 @@
         // screens was invisible until a full page reload.
         if (currentView() === "providers") loadProviders();
         if (currentView() === "notifications") loadNotifications();
+        // cch-w46-s3 — THE SIXTH TWIN, and the one nobody had filed: a /v1/me
+        // that succeeds LATE strands the instance rail exactly as a failed one
+        // does. See repaintLifecycleAuthority for why this is not
+        // reloadInstanceView() — that call fixes Overview and leaves the usage
+        // and webhooks tabs, which it hard-returns on, stranded.
+        repaintLifecycleAuthority();
       } else {
         // cch-w36-s3 — THE MISSING ELSE, and it was the whole defect. api()
         // ends in a .catch returning {ok:false,status:0,…}, so this promise
@@ -14574,6 +14664,11 @@
         // unknown arm — zero write affordances, one Retry.
         if (currentView() === "providers") loadProviders();
         if (currentView() === "notifications") loadNotifications();
+        // cch-w46-s3 — the mirror. A FAILED read is terminal (nothing re-reads
+        // it), so without this the rail keeps saying "Checking capabilities…"
+        // about a read that already answered; repainting swaps that for the
+        // fault's own sentence plus the one Retry that can move it.
+        repaintLifecycleAuthority();
       }
     });
   }
@@ -21264,6 +21359,14 @@
       lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,
+      // cch-w46-s3: the rail's MOUNT and its authority-only repaint seam. Both
+      // are impure (they paint, and the seam re-reads /v1/me's state), and both
+      // are exported because the defect they fix — a late /v1/me leaving the
+      // painted rail untouched — is invisible to any pure-helper assertion:
+      // every frame it renders is individually correct for the answer it was
+      // handed, and the bug is that no second frame was ever painted.
+      wireLifecycleActions: wireLifecycleActions,
+      repaintLifecycleAuthority: repaintLifecycleAuthority,
       // cch-w38-s1: the ONE canonical three-valued authority read, exported
       // because the rail's mount and all seven elevated write functions have
       // zero hook reach — a positive control written against the other exports

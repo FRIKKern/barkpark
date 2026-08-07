@@ -338,7 +338,15 @@ function makeDom() {
 }
 
 // ── per-scenario boot ────────────────────────────────────────────────────────
-function bootScenario(name) {
+// OPTIONS (cch-w46-s3), all smoke-only and all defaulting to the shipped boot:
+//   • deferMe — HOLD every GET /v1/me response until the returned resolveMe()
+//     is called. The scenario boots, routes and paints with the authority read
+//     STILL IN FLIGHT, which is the state a deep link into a slow control plane
+//     actually produces; resolveMe() then lands the answer LATE, so a surface
+//     that read /v1/me at paint time and never again is observable as such
+//     (before/after bytes). Without it the whole corpus resolves /v1/me on the
+//     first microtask and no late-answer defect can be represented at all.
+function bootScenario(name, opts) {
   const { registry, document } = makeDom();
 
   // Backing stores we control so each scenario boots clean.
@@ -391,18 +399,31 @@ function bootScenario(name) {
   const calls = [];
 
   // fetch → scenario router → a Response-like the app's api() understands.
+  // cch-w46-s3: the held /v1/me responses, drained (in request order) by the
+  // resolveMe() bootScenario hands back. Empty unless opts.deferMe.
+  const heldMe = [];
+  const resolveMe = () => { heldMe.splice(0).forEach((land) => land()); };
+
   function fetchStub(url, init) {
     const method = (init && init.method) || "GET";
     const p = String(url);
     calls.push({ method, path: p.split("?")[0] });
-    const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
-    return Promise.resolve({
-      ok: res.status >= 200 && res.status < 300,
-      status: res.status,
-      headers: { get: (h) => (String(h).toLowerCase() === "content-type" ? "application/json" : null) },
-      json: () => Promise.resolve(res.body),
-      text: () => Promise.resolve(JSON.stringify(res.body)),
-    });
+    // Routed at LANDING time, not at call time, so a deferred response still
+    // reflects whatever the fixture state is when it actually answers.
+    const answer = () => {
+      const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
+      return {
+        ok: res.status >= 200 && res.status < 300,
+        status: res.status,
+        headers: { get: (h) => (String(h).toLowerCase() === "content-type" ? "application/json" : null) },
+        json: () => Promise.resolve(res.body),
+        text: () => Promise.resolve(JSON.stringify(res.body)),
+      };
+    };
+    if (opts && opts.deferMe && p.split("?")[0].endsWith("/v1/me")) {
+      return new Promise((resolve) => heldMe.push(() => resolve(answer())));
+    }
+    return Promise.resolve(answer());
   }
 
   function EventSourceStub() {
@@ -449,7 +470,7 @@ function bootScenario(name) {
   vm.createContext(sandbox);
   vm.runInContext(APP_JS, sandbox, { filename: "app.js" });
 
-  return { registry, hooks: captured.hooks, calls, fixtureState };
+  return { registry, hooks: captured.hooks, calls, fixtureState, resolveMe };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -459,6 +480,53 @@ async function flush() {
     await new Promise((r) => setImmediate(r));
   }
 }
+
+// ── cch-w46-s3 · THE LATE-/v1/me GUARD, and it runs BEFORE the corpus ────────
+// Not an EXPECTATION (those own their scenarios; this owns a HARNESS
+// CAPABILITY): it boots ONE existing scenario twice-over in a single run — with
+// the authority read held open past the paint, then landed — and asserts the
+// instance rail actually repainted. It is deliberately pinned on `usage-quota`,
+// the tab reloadInstanceView() HARD-RETURNS on: the obvious
+// `if (currentView() === "instance") reloadInstanceView()` seam was built and
+// measured, and it left this exact rail byte-identical while Overview looked
+// fixed. So a fix that only covers Overview reds here.
+//
+// It runs at module top level, ahead of main(), so a broken seam is named at
+// the START of the run rather than inferred from a scenario failing downstream.
+async function assertLateMeRepaintsTheRail() {
+  const boot = bootScenario("usage-quota", { deferMe: true });
+  await flush();
+  const railEl = boot.registry.get("inst-lifecycle-actions");
+  const before = (railEl && railEl.innerHTML) || "";
+  boot.resolveMe();
+  await flush();
+  const after = (railEl && railEl.innerHTML) || "";
+
+  const broken = [];
+  if (!before) broken.push("the rail never painted with /v1/me in flight — the scenario or the mount moved");
+  if (before.indexOf("data-me-retry") === -1) {
+    broken.push("an UNKNOWN authority rendered no exit: no [data-me-retry] in the in-flight rail, so the only " +
+      "way out of \"Checking capabilities…\" is a full page reload");
+  }
+  if (after === before) {
+    broken.push("a /v1/me that answered LATE left the rail BYTE-IDENTICAL (" + before.length + " bytes) — the " +
+      "authority is still read at paint time only. Note the tab: reloadInstanceView() refuses #usage, so a seam " +
+      "routed through it passes on Overview and fails here.");
+  }
+  if (after.indexOf('data-life-verb="decommission"') === -1) {
+    broken.push("the landed answer (an owner) did not restore the live destroy verb — the repaint fired but " +
+      "painted the wrong model");
+  }
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " late-/v1/me   — usage tab rail: " + before.length +
+    " bytes in flight (exit: " + (before.indexOf("data-me-retry") !== -1) + ") → " + after.length +
+    " bytes once it landed (repainted: " + (after !== before) + ")\n");
+  if (broken.length) {
+    process.stdout.write("\nlate-/v1/me guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+await assertLateMeRepaintsTheRail();
 
 // ── EXPECTATIONS: the per-scenario view skeleton (edit HERE when markup moves) ─
 const EXPECTATIONS = {

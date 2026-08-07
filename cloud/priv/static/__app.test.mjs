@@ -16272,6 +16272,252 @@ test("cch-w38-s1: the loading and unavailable frames carry the authority too —
   assert.equal(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP).authority, "grant");
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w46-s3 — "CHECKING CAPABILITIES…" GETS AN EXIT, AND A LATE /v1/me STOPS
+// STRANDING THE RAIL.
+//
+// Two defects, measured on origin/main 77cf2060c by booting the instance
+// drill-down with /v1/me held open past the rail's paint:
+//
+//   (a) NO EXIT, AND TWO STATES SPELLED THE SAME WAY. The unknown arm rendered
+//       `data-me-retry present: false | data-life-retry present: false | any
+//       Retry text: false` — a bare disabled Decommission and "Checking
+//       capabilities…", forever, with a FAILED /v1/me rendering BYTE-IDENTICALLY
+//       to a pending one. D437 rules exactly this ("a wave that ships
+//       'Checking…' without a Retry has moved the lie, not killed it"); its own
+//       slice covered five role reads and never reached this rail. The epic's
+//       shared exit (meUnknownHtml / meRetryHtml / wireMeRetry) had five
+//       consumers and zero instance-detail ones.
+//
+//   (b) THE LATE *SUCCESS*, WHICH NOBODY HAD FILED. Authority is read at PAINT
+//       time in both frames and never re-read, and loadMe's repaint seams
+//       covered billing, operator, activity, providers and notifications in
+//       BOTH arms — never the instance view. Measured: "B2 byte-identical to B1?
+//       true". The filed row cch-w38-bl-unknown-authority-has-no-recovery-seam
+//       has five criteria and all five are about the FAILED arm; a builder can
+//       meet 5/5 and leave this untouched.
+//
+// WHY THE OBVIOUS SEAM IS THE WRONG ONE (asserted below, not just narrated):
+// `if (currentView() === "instance") reloadInstanceView()` fixes Overview and
+// leaves the usage and webhooks tabs stranded, because reloadInstanceView
+// hard-returns on both. Every DOM assertion here is therefore driven on the
+// USAGE tab, and the smoke harness's late-/v1/me guard pins `usage-quota` for
+// the same reason.
+
+const W46_BP = { id: "bp-1", provider: "hetzner", host: "h", name: "web" };
+
+// A rail element the mount can actually WIRE: recordingDom's querySelector
+// answers null for everything, so wireMeRetry/paintLifecycleActions would find
+// no controls and a click could never be exercised. This resolves the three
+// attribute hooks the mount binds on, against the html currently written.
+function railDom() {
+  const clicks = { me: 0, life: 0, decommission: 0 };
+  const mk = (key) => ({
+    disabled: false,
+    _h: [],
+    addEventListener(_t, fn) { this._h.push(fn); },
+    click() { clicks[key]++; this._h.forEach((fn) => fn()); },
+  });
+  const el = {
+    _html: "",
+    controls: {},
+    get innerHTML() { return this._html; },
+    set innerHTML(v) {
+      this._html = String(v);
+      this.controls = {};
+      if (this._html.indexOf("data-me-retry") !== -1) this.controls["[data-me-retry]"] = mk("me");
+      if (this._html.indexOf("data-life-retry") !== -1) this.controls["[data-life-retry]"] = mk("life");
+      if (this._html.indexOf('data-life-verb="decommission"') !== -1) {
+        this.controls['[data-life-verb="decommission"]'] = mk("decommission");
+      }
+    },
+    isConnected: true,
+    addEventListener() {},
+    querySelector(sel) { return this.controls[sel] || null; },
+    querySelectorAll() { return []; },
+    getAttribute() { return null; },
+  };
+  return {
+    el,
+    clicks,
+    document: {
+      querySelector(sel) { return String(sel) === "#inst-lifecycle-actions" ? el : null; },
+      getElementById(id) { return id === "inst-lifecycle-actions" ? el : null; },
+      querySelectorAll() { return []; },
+      createElement: () => ({ ...inertEl }),
+    },
+  };
+}
+
+// Routes by PATH (the shared fetchStub answers every path the same, which
+// cannot model "capabilities answered, /v1/me has not").
+function railFetch(routes) {
+  const calls = [];
+  const fn = (path) => {
+    calls.push(String(path));
+    const hit = Object.keys(routes).find((k) => String(path).indexOf(k) !== -1);
+    const r = hit ? routes[hit] : { status: 404, body: { error: "not_found" } };
+    return Promise.resolve({
+      ok: r.status >= 200 && r.status < 300,
+      status: r.status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(r.body),
+    });
+  };
+  fn.calls = calls;
+  fn.count = (needle) => calls.filter((c) => c.indexOf(needle) !== -1).length;
+  return fn;
+}
+
+const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+
+// Mount the rail on the USAGE tab with the authority still unknown, then hand
+// the caller the live element so it can land /v1/me afterwards.
+async function mountRailUnknown(dom, fetchFn) {
+  hooks.clearMe();
+  sandbox.document = dom.document;
+  sandbox.location.hash = "#instance/bp-1/usage";
+  sandbox.fetch = fetchFn;
+  hooks.wireLifecycleActions(W46_BP);
+  await settle();
+  return dom.el.innerHTML;
+}
+
+test("cch-w46-s3: the unknown arm carries the epic's ONE exit, and IN-FLIGHT no longer renders as FAILED", async () => {
+  const railHtml = (authority, state) =>
+    hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, authority, state));
+
+  hooks.clearMe();
+  const inflight = railHtml("unknown", "loading");
+  await driveMe(500, { error: "server_error" });
+  const failed = railHtml("unknown", "failed");
+
+  // (a1) THE DISTINGUISHABILITY. On main these two are the same bytes, so a
+  // 500 was rendered as "still checking" for the rest of the session.
+  assert.notEqual(failed, inflight,
+    "a FAILED /v1/me must not render as an in-flight one — that is the lie, not a nicety");
+  assert.match(inflight, /inst-life-note">Checking capabilities&hellip;</,
+    "in flight, the rail states the truth: it is still checking");
+  assert.ok(failed.indexOf("Checking capabilities") === -1,
+    "a read that already answered is NOT still being checked");
+  // The failed sentence is the FAULT's own, from the same meFailureCopy() every
+  // other unknown arm renders — no copy is minted for this surface.
+  assert.ok(failed.includes(hooks.esc(hooks.meFailureCopy())),
+    "the failed arm carries meFailureCopy() verbatim: " + hooks.meFailureCopy());
+  assert.match(failed, /inst-life-note--warn/, "…in the shipped warn tone, beside the same note grammar");
+
+  // (a2) THE EXIT, and it is the EPIC'S exit — byte-identical to meRetryHtml(),
+  // not a second control minted for this rail.
+  const exit = hooks.meRetryHtml();
+  for (const [what, html] of [["in flight", inflight], ["failed", failed]]) {
+    assert.ok(html.includes(exit), "the " + what + " arm mounts the shared exit verbatim: " + exit);
+    assert.equal(html.split("data-me-retry").length - 1, 1,
+      "…exactly ONE of it — two controls for one job is the founding class again");
+    assert.ok(html.indexOf("data-life-retry") === -1,
+      "…and the capabilities Retry is NOT it: re-reading /v1/providers/capabilities cannot move the authority answer");
+  }
+
+  // An ANSWERED authority keeps the shipped bytes exactly — the fourth argument
+  // is an ADD, and this is what proves it rather than asserting it in prose.
+  await driveMe(200, ME_OWNER);
+  assert.equal(railHtml("grant", "loaded"), hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP)),
+    "grant + loaded is byte-identical to the shipped 2-arg call");
+  assert.equal(railHtml("refuse", "loaded"), hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse")),
+    "…and so is a refusal: no exit is offered for an answer we HAVE");
+  assert.ok(railHtml("refuse", "loaded").indexOf("data-me-retry") === -1,
+    "a refused rail offers no Retry — retrying a known answer is the transient-refusal lie");
+  hooks.clearMe();
+});
+
+test("cch-w46-s3: a /v1/me that succeeds LATE repaints the rail — on the USAGE tab, which reloadInstanceView refuses", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, hash: sandbox.location.hash };
+  const dom = railDom();
+  try {
+    const before = await mountRailUnknown(dom, railFetch({
+      "/v1/providers/capabilities": { status: 200, body: CAP_PAYLOAD },
+    }));
+    // The strand's starting point: the rail painted while the answer was out.
+    assert.ok(before.length > 0, "the rail painted");
+    assert.ok(before.indexOf('data-life-verb="decommission"') === -1,
+      "an unknown authority offers no destroy verb");
+    assert.match(before, /data-me-retry/, "…but it does offer the way out");
+
+    // THE LATE SUCCESS. driveMe swaps fetch only, so the mounted rail stays.
+    await driveMe(200, ME_OWNER);
+    const after = dom.el.innerHTML;
+    assert.notEqual(after, before,
+      "B2 must not be byte-identical to B1 — on main it is (" + before.length + " bytes), which is the whole defect");
+    assert.match(after, /data-life-verb="decommission"/,
+      "the owner's rail comes alive without a reload");
+    assert.ok(after.indexOf("data-me-retry") === -1, "…and the exit retires with the question it answered");
+    assert.ok(after.indexOf("Checking capabilities") === -1);
+
+    // THE SEAM IS NOT reloadInstanceView(). That call hard-returns on #usage
+    // (and #webhooks), so a repaint routed through it would leave `after`
+    // untouched here while looking fixed on Overview. It also must not refetch:
+    // the repaint answers from the capabilities payload already held.
+    assert.equal(sandbox.location.hash, "#instance/bp-1/usage", "…and this ran on the tab it refuses");
+  } finally {
+    Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
+    sandbox.location.hash = saved.hash;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w46-s3: a /v1/me that FAILS late repaints too, and its Retry re-drives the read", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, hash: sandbox.location.hash };
+  const dom = railDom();
+  try {
+    const before = await mountRailUnknown(dom, railFetch({
+      "/v1/providers/capabilities": { status: 200, body: CAP_PAYLOAD },
+    }));
+    await driveMe(500, { error: "server_error" });
+    const failed = dom.el.innerHTML;
+    assert.notEqual(failed, before, "the failed answer repaints — 'checking' stops outliving the request");
+    assert.ok(failed.includes(hooks.esc(hooks.meFailureCopy())), "…with the fault's own sentence");
+    assert.match(failed, /data-me-retry/, "…and the exit survives the failure that made it necessary");
+
+    // THE EXIT WORKS: the click re-drives /v1/me, and the answer repaints the
+    // rail live. Without wireMeRetry on this surface the button is decoration.
+    const owner = railFetch({ "/v1/me": { status: 200, body: ME_OWNER } });
+    sandbox.fetch = owner;
+    const btn = dom.el.querySelector("[data-me-retry]");
+    assert.ok(btn, "the exit is a control the mount can find");
+    btn.click();
+    await settle();
+    assert.equal(owner.count("/v1/me"), 1, "one click, one fresh authority read");
+    assert.match(dom.el.innerHTML, /data-life-verb="decommission"/,
+      "…and the answer it fetched paints, without a page reload");
+  } finally {
+    Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
+    sandbox.location.hash = saved.hash;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w46-s3: the repaint is SCOPED — a foreign instance's mount is never painted with this one's authority", async () => {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, hash: sandbox.location.hash };
+  const dom = railDom();
+  try {
+    const before = await mountRailUnknown(dom, railFetch({
+      "/v1/providers/capabilities": { status: 200, body: CAP_PAYLOAD },
+    }));
+    // Navigate away: the rail on screen is no longer this instance's.
+    sandbox.location.hash = "#fleet";
+    await driveMe(200, ME_OWNER);
+    assert.equal(dom.el.innerHTML, before, "off the instance view, the seam is a no-op");
+
+    sandbox.location.hash = "#instance/bp-OTHER/usage";
+    hooks.clearMe();
+    await driveMe(200, ME_OWNER);
+    assert.equal(dom.el.innerHTML, before, "a DIFFERENT instance's route never repaints this mount");
+  } finally {
+    Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });
+    sandbox.location.hash = saved.hash;
+    hooks.clearMe();
+  }
+});
+
 test("cch-w38-s1: THE POST-CLICK ARMS AGREE WITH THE RAIL — a permanent refusal is never sold as transient", () => {
   // (a) updateInstance: a flat gate 403/422 used to land in the default arm's
   // "Please try again in a moment." — copy for a TRANSIENT fault.
