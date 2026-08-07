@@ -142,8 +142,7 @@ defmodule BarkparkCloud.DeployLedger do
     "BOX_BUSY_409" => "the box was already deploying (HTTP 409)",
     "ABANDONED_AT_CAPACITY" =>
       "the box stayed at its concurrent-build cap and the publish was given up on",
-    "ABANDONED_BOX_STUCK" =>
-      "the box kept refusing this site and the publish was given up on",
+    "ABANDONED_BOX_STUCK" => "the box kept refusing this site and the publish was given up on",
     "DOC_ID_EMPTY" => "HEALTH gate: the bp-doc-id marker was empty",
     "BOX_500" => "the box errored on the deploy (HTTP 500)",
     "FORBIDDEN_403" => "the build could not read its content (403)",
