@@ -656,8 +656,14 @@ defmodule BarkparkCloud.Billing do
         # Known side effect: resume_team_barkparks/1 is reason-blind, so a
         # pre-existing `quota_exceeded` row is resumed too and immediately
         # re-suspended by the reconcile — net state is right, but suspended_at is
-        # reset and a barkpark.restored + barkpark.suspended pair is broadcast for
-        # a box whose availability never changed.
+        # reset. Stated precisely (cch-w50 review): the bulk resume does an
+        # `update_all` and broadcasts NOTHING, so the event feed sees an
+        # UNPAIRED `barkpark.suspended` for a box whose availability never
+        # changed — not a restored/suspended pair. A consumer treating these as
+        # edges will read one spurious suspend, with no matching restore before
+        # it. Narrowing this to a `resume_billing_suspended/1` (reason-scoped,
+        # and mode-scoped like its suspend_team_barkparks/2 counterpart) is
+        # filed rather than done here: registry.ex is outside this slice's fence.
         with {:ok, %Subscription{}} <- inserted do
           {:ok, _count} = Registry.resume_team_barkparks(team_id)
         end

@@ -368,7 +368,10 @@ defmodule BarkparkCloud.BillingLifecycleTest do
 
     defp cancel_via_webhook(sub) do
       assert {:ok, %Subscription{status: "canceled"}} =
-               Billing.handle_webhook(event("customer.subscription.deleted", sub.gateway_customer_id), sig())
+               Billing.handle_webhook(
+                 event("customer.subscription.deleted", sub.gateway_customer_id),
+                 sig()
+               )
     end
 
     defp live_barkparks(team), do: Registry.list_barkparks(team) |> Enum.reject(& &1.suspended)
