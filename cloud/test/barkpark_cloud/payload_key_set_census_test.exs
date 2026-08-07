@@ -550,7 +550,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     {"DeployLedger.census/3", :phantom, "terminal_failure_rate",
      "PR #10014 carries the emitter. THE HEADLINE CASE: internal/cli/cloud_deploy_census_cmd.go:398 branches on nil here, so `bp cloud deployments` is permanently on its \"older control plane\" arm and cannot tell that from a genuinely older CP."},
     {"DeployLedger.rate/2", :phantom, "basis",
-     "PR #10014 carries the emitter — the D34 convention label that says WHICH denominator a rate was taken over."}
+     "PR #10014 carries the emitter — the D34 convention label that says WHICH denominator a rate was taken over."},
+    {"DeployLedger.census/3", :phantom, "delivery",
+     "PR #10192 ships the Go reader with the estimator (D136); the route that emits it is dr-w11-s4-followup-emit-delivery-on-route. Decodes to nil until that lands, which is exactly what the pointer type is for."}
   ]
 
   # MERGE-ORDER NOTE (wave-11 review, proved not predicted). Wave 11's slice
@@ -562,13 +564,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # the tag to `internal/cloudclient/client.go` on this branch, which reds the
   # PHANTOM arm naming `delivery`, and reverting, which greens it.
   #
-  # WHICHEVER OF THE TWO PRs MERGES SECOND MUST ADD THIS ROW IN THAT SAME PR —
-  # nothing else is needed, and set equality means it must NOT be added earlier:
-  #
-  #   {"DeployLedger.census/3", :phantom, "delivery",
-  #    "dr-w11-s4 ships the Go reader with the estimator (D136); the route that
-  #     emits it is dr-w11-s4-followup-emit-delivery-on-route. Decodes to nil
-  #     until that lands, which is exactly what the pointer type is for."},
+  # SETTLED: the Go tag merges as PR #10192, and its `delivery` row is now in
+  # @known_open above — added in that same PR, because set equality means the row
+  # must not exist a moment earlier than the tag it allows. The reason string this
+  # note originally scripted named only the follow-up task, which is NOT enough:
+  # "every KNOWN OPEN row names its tracker" matches
+  # ~r/dr-w11-payload-divergence-close|PR #\d+/, so the row's reason OPENS with
+  # the PR number. A reason that greens one arm by redding another is not a fix.
   #
   # Delete the row the moment the route emits the key — the "no longer phantom"
   # arm reds if you forget, which is the point.
