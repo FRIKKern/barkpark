@@ -1529,7 +1529,11 @@ func supportCPNoTeam(status int, body []byte) bool {
 	case http.StatusUnprocessableEntity:
 		return supportCPErrorCode(body) == "no_team"
 	case http.StatusForbidden:
-		return supportCPRefusalReason(body) == "no_team"
+		// Either shape at the new status: the cause in `reason` beside the generic
+		// code, or the cause AS the code. Reading only the first would drop a flat
+		// 403 {"error":"no_team"} into the role arm — the exact mis-narration this
+		// predicate exists to prevent, one status later.
+		return supportCPRefusalReason(body) == "no_team" || supportCPErrorCode(body) == "no_team"
 	default:
 		return false
 	}

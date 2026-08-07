@@ -1124,6 +1124,10 @@ func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
 		{"401 dead session", http.StatusUnauthorized, `{"error":"unauthorized"}`, "bp login", exitAuth},
 		{"422 no_team", http.StatusUnprocessableEntity, `{"error":"no_team"}`, "bp team use", exitGeneric},
 		{"403 no_team (post-#9956)", http.StatusForbidden, `{"error":"forbidden","reason":"no_team","scope":"team"}`, "bp team use", exitGeneric},
+		// Added at review: the cause AS the code at the new status. The predicate
+		// read `reason` only, so this body fell into the role arm and told a
+		// teamless caller they needed team-admin.
+		{"403 no_team, cause as code", http.StatusForbidden, `{"error":"no_team"}`, "bp team use", exitGeneric},
 		{"403 forbidden", http.StatusForbidden, `{"error":"forbidden"}`, "a session needs team-admin, a PAT needs the deploy ability", exitAuth},
 		{"403 role", http.StatusForbidden, `{"error":"forbidden","reason":"role","required":"team_admin"}`, "a session needs team-admin, a PAT needs the deploy ability", exitAuth},
 	}

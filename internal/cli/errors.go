@@ -52,8 +52,8 @@ var codeExit = map[string]int{
 	// `bp team use <team>`, not a re-login. It kept exit 1 for the whole life of the
 	// 422 shape and must keep it now that the gate answers 403 with
 	// {"error":"forbidden","reason":"no_team"} (cch-w40-s4).
-	"no_team": exitGeneric,
-	"malformed":       exitUsage,
+	"no_team":   exitGeneric,
+	"malformed": exitUsage,
 	// An unknown filter operator (?filter[f][bogus]=x) — a malformed request,
 	// same bucket as `malformed`. Added when the query API began rejecting
 	// unknown ops instead of silently returning every row (#570).
