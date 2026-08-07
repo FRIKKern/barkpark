@@ -1619,6 +1619,28 @@ const EXPECTATIONS = {
       assert.ok(!card.includes("btn-danger"), "the destroy-tier styling goes with the destroy-tier affordance");
       // NOT a checking state: /v1/me answered, and it said member.
       assert.ok(!card.includes("Checking capabilities"), "an ANSWERED /v1/me is not a checking state");
+
+      // ── cch-w45-s5: and the rail is not the only place the screen was
+      // selling this member a 403. Measured on the PRE-FIX tree by booting THIS
+      // scenario: #instance-body carried a LIVE `id="inst-domain"` button and a
+      // LIVE `data-rollback="1"` button, both against require_primary_team_admin
+      // routes, while every read the screen makes is `user`. Same remedy, same
+      // sentence, same grammar — asserted on the BODY, not the CLI card.
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes("Attach domain"), "the Attach domain affordance is never hidden from a member — it explains itself");
+      assert.ok(body.includes("Roll back"), "nor is Rollback");
+      assert.ok(!body.includes('id="inst-domain"'),
+        "no click hook is wired for the domain attach the server will refuse");
+      assert.ok(!body.includes("data-rollback"),
+        "no click hook is wired for the rollback the server will refuse");
+      assert.ok(body.includes("You need the admin role on this team — an admin on this team can grant it."),
+        "both refusals speak the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
+      assert.equal(countMatches(body, '<div class="inst-life-disabled">'), 2,
+        "exactly the two member-reachable writes render through the disable-and-explain arm");
+      assert.ok(!body.includes("Checking capabilities"),
+        "an ANSWERED /v1/me is not a checking state on the body either");
+      assert.ok(!body.includes("data-me-retry"),
+        "and an answered read offers no /v1/me retry — the exit belongs to the unknown arm alone");
     },
   },
 

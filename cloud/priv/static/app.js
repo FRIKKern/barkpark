@@ -6552,7 +6552,14 @@
         startInstanceTicker(bp);
         return;
       }
-      box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady });
+      // cch-w45-s5: the ONE place the instance screen asks who is looking. Both
+      // admin-only writes it offers (Attach domain, Roll back) are decided here,
+      // at OFFER time, instead of by the server after the click.
+      box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady }, instanceAdminAuthority());
+      // D437: a still-checking control needs a way out — the shipped
+      // [data-me-retry] exit, present only while the answer is unknown, repaints
+      // this whole view once /v1/me lands (no-op when it is absent).
+      wireMeRetry(box, function () { loadInstance(bp.id, tab); });
       wireInstanceActions(bp);
       wireLifecycleActions(bp); // S11b: fill the lifecycle action-row slot (conduit-driven)
       var panel = box.querySelector("#instance-tabpanel");
@@ -6606,8 +6613,13 @@
   // full re-renders of this view — the instanceConsoleCollapsed precedent.
   var instanceCliOpen = false;
 
-  function instanceDetailHtml(bp, tab, opts) {
+  // cch-w45-s5: `authority` is threaded (not read) so every pure call site keeps
+  // the shipped "grant" behaviour and the ONE DOM render site (loadInstance)
+  // decides — the lifecycleActionsModel precedent, and the only shape the node
+  // harness can drive without a meCache.
+  function instanceDetailHtml(bp, tab, opts, authority) {
     tab = instanceTabOf(tab);
+    authority = authority || "grant";
     // S11b + GR24: the lifecycle surface between the header and the tabs is now
     // the collapsible "bp CLI" card (screens/02), disclosed by the header's
     // #inst-cli-toggle. The slot is filled async by wireLifecycleActions (the
@@ -6618,11 +6630,11 @@
       ? '<div id="inst-lifecycle-actions" class="inst-lifecycle-actions" data-inst="' + esc(bp.id) + '"' +
         (instanceCliOpen ? "" : " hidden") + "></div>"
       : "";
-    return instanceHeaderHtml(bp) +
+    return instanceHeaderHtml(bp, authority) +
       lifeSlot +
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel" data-inst="' + esc(bp.id) + '">' +
-        (tab === "overview" ? instanceOverviewHtml(bp, opts) : "") +
+        (tab === "overview" ? instanceOverviewHtml(bp, opts, authority) : "") +
       "</div>";
   }
 
@@ -6686,7 +6698,55 @@
     return String(raw == null ? "" : raw).replace(/^https?:\/\//i, "");
   }
 
-  function instanceHeaderHtml(bp) {
+  // cch-w45-s5 — THE OFFER-TIME AUTHORITY OF THE TWO MEMBER-REACHABLE INSTANCE
+  // WRITES. POST /v1/barkparks/:id/domain (attachDomain) and POST
+  // /v1/barkparks/:id/rollback (rollbackInstance) are both
+  // require_primary_team_admin server-side, while EVERY read this screen makes
+  // is `user` — so a plain member painted the instance in full and both writes
+  // answered 403 on click. Measured, not assumed: booting the committed
+  // panel-overview-member scenario served BOTH controls live.
+  //
+  // D428 authorises DISABLE-AND-EXPLAIN on this surface (and only here): these
+  // are discoverable product capabilities, not settings rows, so the control
+  // stays visible and says WHY. The three-valued answer is
+  // instanceAdminAuthority()'s — a NEW reader of it, never a widened boolean
+  // predicate (D439) — and the refusal sentence is the SERVER'S OWN
+  // (FORBIDDEN_ROLE_COPY.admin, the same bytes its 403 renders through
+  // friendly()), never a fresh one:
+  //   grant   → the live control, byte-identical to what shipped.
+  //   refuse  → disabled, no mount hook (an id/data-* the wiring binds on would
+  //             re-arm the dead click), carrying the server's sentence in the
+  //             shipped .inst-life-reason span.
+  //   unknown → disabled and NOTHING is claimed: no reason at all, just the
+  //             shipped "Checking capabilities…" note, because /v1/me has not
+  //             answered and a refusal we cannot prove is the same lie in the
+  //             other direction.
+  // The grammar (.inst-life-disabled / .inst-life-reason / .inst-life-note) and
+  // the copy are the rail's, reused verbatim — this slice mints neither.
+  //
+  // labelHtml is an authored CONSTANT and is emitted as HTML (the Rollback
+  // label carries a literal &hellip;); liveAttrs is the mount hook the wiring
+  // binds on and is dropped on both non-grant arms. exitHtml rides the unknown
+  // arm only (see wireMeRetry at the render site).
+  function adminWriteControlHtml(authority, labelHtml, liveAttrs, exitHtml) {
+    if (authority !== "refuse" && authority !== "unknown") {
+      return '<button class="btn btn-ghost btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
+    }
+    var reason = authority === "refuse" ? FORBIDDEN_ROLE_COPY.admin : "";
+    return '<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled' +
+      (reason ? ' title="' + esc(reason) + '"' : "") + ">" + labelHtml + "</button>" +
+      (reason
+        ? '<span class="inst-life-reason">' + esc(reason) + "</span>"
+        : '<span class="inst-life-note">Checking capabilities&hellip;</span>' + (exitHtml || "")) +
+      "</div>";
+  }
+
+  // cch-w45-s5: `authority` is instanceAdminAuthority()'s three-valued answer,
+  // threaded from the render site (loadInstance) rather than read here — the
+  // lifecycleActionsModel precedent. Absent (every pure-helper call site) it
+  // defaults to "grant", which is byte-identical to the shipped header.
+  function instanceHeaderHtml(bp, authority) {
+    authority = authority || "grant";
     var lc = instanceLifecycle(bp);
 
     // The address line (screens/02): mono URL + the shared [data-copy]
@@ -6717,8 +6777,14 @@
       : "";
 
     // custom-domain: live + no custom host yet → offer the attach flow.
+    // cch-w45-s5: POST /v1/barkparks/:id/domain is require_primary_team_admin,
+    // so the OFFER is authority-gated too — a member gets the disabled control
+    // and the server's own sentence instead of a 403 after the modal.
+    // D437: the still-checking arm carries the page's ONE shipped exit
+    // (meRetryHtml's [data-me-retry]), wired by wireMeRetry at the render site,
+    // so a /v1/me that never landed is a state you can leave.
     var domainBtn = lc.live && !bp.custom_host
-      ? '<button class="btn btn-ghost btn-sm" id="inst-domain" type="button">Attach domain</button>'
+      ? adminWriteControlHtml(authority, "Attach domain", 'id="inst-domain"', meRetryHtml())
       : "";
 
     // GR24 (screens/02): the "bp CLI ▾" disclosure — opens the CLI card
@@ -6778,7 +6844,9 @@
   // The Overview tab panel: the C3 provisioning timeline + the sites/details grid
   // — the pre-C6 detail body verbatim, now living under the Overview tab. opts.ready
   // folds the timeline slot into the shared ready panel (A4).
-  function instanceOverviewHtml(bp, opts) {
+  // cch-w45-s5: `authority` is a pass-through to the Updates panel's Rollback
+  // offer — this function decides nothing about it (default "grant").
+  function instanceOverviewHtml(bp, opts, authority) {
     opts = opts || {};
     var lc = instanceLifecycle(bp);
     var hasHost = !!bp.host;
@@ -6838,7 +6906,7 @@
           // slot is filled async by loadInstanceVerify — empty renders nothing.
           verifySlot +
           (hasHost
-            ? updatePanelHtml(bp) +
+            ? updatePanelHtml(bp, authority) +
               '<section class="card inst-sites-card"><div class="inst-sites-head"><h2>Sites</h2>' +
                 '<button class="btn btn-ghost btn-sm" id="site-new-btn" type="button">+ New site</button></div>' +
                 '<div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></section>'
@@ -6900,8 +6968,6 @@
       cliT.setAttribute("aria-expanded", instanceCliOpen ? "true" : "false");
       cliT.classList.toggle("is-open", instanceCliOpen);
     });
-    var retry = $("#inst-retry");
-    if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
     // The bare Remove button is superseded by the lifecycle action row's typed
     // Decommission (see wireLifecycleActions); the header keeps only Retry removal.
     var removeRetry = $("#inst-remove-retry");
@@ -7798,8 +7864,12 @@
   // checked, the policy chip, and the policy action buttons. Pure string builder;
   // buttons carry data-au the wiring reads. Degrades: blank cells + hidden buttons
   // when the policy block is absent (older CP).
-  function updatePanelHtml(bp) {
+  // cch-w45-s5: `authority` gates the Rollback OFFER only (the autoupdate
+  // policy buttons are a different route and are not this slice's business);
+  // absent it defaults to "grant" — byte-identical to the shipped panel.
+  function updatePanelHtml(bp, authority) {
     bp = bp || {};
+    authority = authority || "grant";
     var b = updateBadge(bp);
     var running = bp.update_running_release
       ? vRel(bp.update_running_release)
@@ -7834,7 +7904,13 @@
     // — data-rollback, never data-au — and the SERVER owns whether a previous slot
     // exists: a box with nothing to flip to gets the honest no_previous_slot typed
     // conflict on click, never a flip to garbage (charter D23).
-    buttons += '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back&hellip;</button>';
+    // cch-w45-s5: …but WHO may flip it is not for-every-hosted-box. POST
+    // /v1/barkparks/:id/rollback is require_primary_team_admin, and this button
+    // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
+    // write on the screen and got a 403 on the confirm. The offer is now
+    // authority-gated (no exit here: the page's one [data-me-retry] rides the
+    // header, where the still-checking arm first appears).
+    buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "");
     var actionsHtml = buttons ? '<div class="update-panel-actions">' + buttons + "</div>" : "";
 
     return '<div class="card update-panel">' +
