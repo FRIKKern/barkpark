@@ -60,6 +60,16 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     {user, team}
   end
 
+  # deploy-reliability W14 S4. Every other fixture in this file hands back an
+  # OWNER — `user_with_team/0` hardcodes the role — which is exactly why the
+  # role-blindness of the deploy-reporting reads was invisible to 101 tests.
+  # This one joins a SECOND user to an existing team at the lowest role there is.
+  defp member_of(team, role) do
+    user = user_fixture()
+    {:ok, _} = Accounts.add_member(team, user, role)
+    user
+  end
+
   defp barkpark_fixture(team) do
     n = System.unique_integer([:positive])
 
@@ -523,6 +533,103 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert none["deferral_depth"] == nil
       assert none["deferral_bound"] == nil
       assert none["deferral_cause"] == nil
+    end
+  end
+
+  ## deploy-reliability W14 S4 — WHO can read the owner's own deploy numbers.
+  ##
+  ## Two reads carry every owner-facing deployment number in this epic:
+  ##
+  ##     GET /v1/sites/:id/deployments   (the ledger list — `bp cloud site status`)
+  ##     GET /v1/sites/:id               (the site's current deployment)
+  ##
+  ## Both are gated by the 2-arity `with_team_site(conn, fun)`, which defaults to
+  ## `:session` (router.ex:11065) and runs `Auth.require_user/2` ONLY — the cond
+  ## in its body is `halted -> is_nil(current_team) -> Registry.get_team_site`,
+  ## with no Authz/role call anywhere; `resolve_team/2` asks for nothing beyond
+  ## membership. GET /v1/sites/:id inlines the same three steps.
+  ##
+  ## THE REACHABILITY WAS GUARDED BY NOTHING. Every other test in this file logs
+  ## in an OWNER (`user_with_team/0` hardcodes the role), so prepending
+  ## `Auth.require_team_admin(conn, [])` to the list route reds ONLY the probes
+  ## below while all 101 pre-existing tests here stay green. That is the shape of
+  ## a guard that cannot lose, and these three tests are the guard that can.
+  describe "deploy-reliability W14 S4: role reachability of the deploy-reporting reads" do
+    # IT CAN LOSE: put any role gate on the list route and this reds 403 vs 200.
+    test "a plain team MEMBER — not an owner — lists the site's deployments → 200 with rows" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, d1} = Registry.create_deployment(site, %{git_ref: "a"})
+      {:ok, _} = Registry.transition_deployment(d1, %{status: "failed"})
+      {:ok, d2} = Registry.create_deployment(site, %{git_ref: "b"})
+
+      member = member_of(team, "member")
+      assert Accounts.get_membership(team, member).role == "member"
+
+      conn = call(:get, "/v1/sites/#{site.id}/deployments", nil, login_token(member))
+
+      assert conn.status == 200
+      rows = json_body(conn)["deployments"]
+      # Rows, not an empty 200: a gate that quietly filtered the ledger to
+      # nothing would still answer 200, and that is the failure this asserts past.
+      assert Enum.map(rows, & &1["id"]) |> Enum.sort() == Enum.sort([d1.id, d2.id])
+    end
+
+    # The same role blindness on the sibling read the dashboard opens first.
+    test "a plain team MEMBER reads GET /v1/sites/:id → 200" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+
+      member = member_of(team, "member")
+
+      conn = call(:get, "/v1/sites/#{site.id}", nil, login_token(member))
+
+      assert conn.status == 200
+      assert json_body(conn)["site"]["id"] == site.id
+    end
+
+    # PINS TODAY'S PAT CONTRACT, deliberately — see the PR body for the cost.
+    #
+    # The refusal on the two reads above is CREDENTIAL-CLASS, not role-class: no
+    # PAT of any tier reaches a `:session` route, so a read PAT is 401 (not 403 —
+    # `require_user` never saw a session token) on both, while the single-
+    # deployment poll, which is gated `{:ability, "read"}`, answers 200 on a REAL
+    # row with the SAME token. A member's read PAT is equally 401.
+    #
+    # The consequence, stated so the pin is deliberate: no automation credential
+    # can compute the owner's number, because `bp cloud site status` reads the
+    # ledger through the session-only list route. Re-tiering it to
+    # {:ability, "read"} sits inside cloud-console-hardening's auth fence and is
+    # FILED, not built here (deploy-reliability charter D219).
+    test "a read PAT is 401 on BOTH owner reads while the single-deployment poll is 200" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, dep} = Registry.create_deployment(site, %{git_ref: "a"})
+
+      {:ok, read_pat, stored} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "read-key",
+          abilities: ["read"]
+        })
+
+      assert stored.abilities == ["read"]
+
+      list = call(:get, "/v1/sites/#{site.id}/deployments", nil, read_pat)
+      assert list.status == 401
+      assert json_body(list)["error"] == "unauthorized"
+
+      show = call(:get, "/v1/sites/#{site.id}", nil, read_pat)
+      assert show.status == 401
+
+      # The SAME token, on the SAME site, one path segment deeper — 200 on a real
+      # row. The refusal above is therefore about the credential CLASS the route
+      # accepts, not about what the token is allowed to read.
+      poll = call(:get, "/v1/sites/#{site.id}/deployments/#{dep.id}", nil, read_pat)
+      assert poll.status == 200
+      assert json_body(poll)["deployment"]["id"] == dep.id
     end
   end
 
