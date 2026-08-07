@@ -1174,6 +1174,55 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert d.sites |> hd() |> Map.get(:delivered) == 3
     end
 
+    test "THE THIRD REFUSAL FIRES ALONE: the row AT the quantile is itself still waiting",
+         %{site: site} do
+      # The two headline fixtures both trip the censored-fraction policy first, so
+      # the empirical policy — "the row at ceil(n*q) is itself censored" — was
+      # implemented, reachable, and never actually exercised. It is the arm that
+      # survives when the fraction test AGREES the sample is identifiable, which is
+      # exactly the case a future re-key onto the publish clock will produce, so it
+      # must not merge unproven.
+      #
+      # The construction: 200 rows (min_sample passes), only TWO still waiting
+      # (1.0% against p50's 50.0% headroom, so the fraction policy does NOT fire) —
+      # but their bounds sit at 100s and 101s, right where p50 lands, because the
+      # censored rows here are SHORT waits rather than the long tail. Sorted
+      # ascending the 100th of 200 is a censored 100.0s.
+      delivered =
+        for i <- 1..198 do
+          at = DateTime.add(@dw_from, i, :second)
+          wait = if i <= 99, do: i, else: 101 + i
+
+          %{status: "live", inserted_at: at, became_live_at: DateTime.add(at, wait, :second)}
+        end
+
+      # as_of - inserted_at = 100s and 101s. Inserted last, after every live mark,
+      # so nothing can resolve them.
+      waiting =
+        for bound <- [100, 101] do
+          %{status: "failed", inserted_at: DateTime.add(@dw_as_of, -bound, :second)}
+        end
+
+      deployments!(site, delivered ++ waiting)
+
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      assert d.sample == 200
+      assert d.censored.count == 2
+
+      # The fraction policy is SATISFIED — this is not the arm under test.
+      assert d.p50.censored_fraction == 0.01
+      assert d.p50.headroom == 0.5
+      refute d.p50.reason =~ "UNIDENTIFIABLE"
+
+      # …and p50 still refuses, on the empirical policy alone, naming the position
+      # and the lower bound rather than printing the 100s it cannot vouch for.
+      assert d.p50.refused
+      assert is_nil(d.p50.seconds)
+      assert d.p50.reason =~ "lands ON a still-waiting row (position 100 of 200)"
+      assert d.p50.reason =~ "at least 100.0s"
+    end
+
     test "the emitted key set is PINNED — the Go reader decodes every key", %{site: site} do
       delivery_40pct!(site)
       d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
