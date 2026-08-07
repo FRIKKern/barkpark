@@ -89,6 +89,21 @@ function bpBase(over) {
       update_running_release: null,
       update_latest_release: null,
       update_checked_at: null,
+      // cch-w47-s2 (D529/D515): `barkpark_json` serializes the autoupdate policy
+      // block on EVERY row, so a fixture that OMITS these keys makes
+      // `hasAutoupdatePolicy` false for the whole corpus — the policy chip and
+      // the four policy buttons then render in NO scenario at all, and any
+      // guard on them is one that structurally cannot fail. The values are the
+      // MIGRATIONS' OWN COLUMN DEFAULTS (20260710160000_add_channel_and_fleet_settings):
+      // enabled true, paused false, channel "prod" — never nulls, which are a
+      // third state no control plane has ever serialized and which paint a bare
+      // "Auto" chip that withholds the channel that IS the policy. Only
+      // pinned_release and autoupdate_triggered_at are genuinely nullable.
+      autoupdate_enabled: true,
+      autoupdate_paused: false,
+      channel: "prod",
+      pinned_release: null,
+      autoupdate_triggered_at: null,
       inserted_at: tMinus(86400),
       provision_status: null,
       provision_error: null,
