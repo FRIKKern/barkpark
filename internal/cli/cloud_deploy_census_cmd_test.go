@@ -414,6 +414,172 @@ func censusLineContaining(t *testing.T, out, needle string) string {
 	return ""
 }
 
+// censusLiveEnvelope is the dr-w16-s2 payload: the s1 census PLUS `live_rate`
+// (live-per-attempt), `in_flight`, `cancelled` and `residual` — every state an
+// attempt can end in, named.
+//
+// `cancelled` IS SYNTHETIC HERE AND CANNOT BE ANYTHING ELSE. It has never
+// existed on prod: 0 of 31,137 deployment rows all-time, both spellings, since
+// 2026-07-14; the lifetime status vocabulary is exactly failed / live /
+// deferred. Two producers exist and neither has ever fired. A test that waited
+// for a prod render of it would wait forever, and an acceptance that claimed one
+// would be vacuous — so it is proved here, on an envelope made by hand.
+const censusLiveEnvelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2216,
+  "failed": 832,
+  "live": 591,
+  "in_flight": 9,
+  "cancelled": 4,
+  "residual": 0,
+  "failure_rate": {"sample": 2216, "pct": 37.55, "numerator": 832, "min_sample": 200, "refused": false, "reason": null, "basis": "attempted rows (deferrals included)"},
+  "live_rate": {"sample": 2216, "pct": 26.67, "numerator": 591, "min_sample": 200, "refused": false, "reason": null, "basis": "attempted rows (deferrals included)"},
+  "terminal_failure_rate": {"sample": 1423, "pct": 58.47, "numerator": 832, "min_sample": 200, "refused": false, "reason": null, "basis": "terminal rows (failed + live)"},
+  "classes": [],
+  "deferred": [
+    {"class": "BOX_BUSY_DEFERRED", "label": "the box was busy; re-queued", "count": 793,
+     "share": {"sample": 2216, "pct": 35.78, "numerator": 793, "min_sample": 200, "refused": false, "reason": null}}
+  ],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsLivePerAttemptLeadsTheHeadline: when the control plane
+// sends `live_rate`, the headline LEADS with it and the failure rate becomes a
+// labelled sibling — additively, on the same line, beside the same cohort
+// parenthetical. A census whose headline answers only "how bad is it" never
+// answers "did anything ship", which on this fleet is the question.
+func TestCloudDeploymentsLivePerAttemptLeadsTheHeadline(t *testing.T) {
+	newCensusServer(t, 200, censusLiveEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	headline := censusLineContaining(t, stdout, "of 2216 attempted")
+	for _, want := range []string{
+		"live 26.7% of 2216 attempted", "failure 37.5% of 2216 attempted",
+		"832 failed", "793 deferred", "591 live", "58.5% of 1423 terminal",
+		"9 in flight", "4 cancelled", "0 residual",
+	} {
+		if !strings.Contains(headline, want) {
+			t.Fatalf("headline %q missing %q — live-per-attempt is co-equal and rides the SAME line", headline, want)
+		}
+	}
+	if strings.Index(headline, "live 26.7%") > strings.Index(headline, "failure 37.5%") {
+		t.Fatalf("the live rate must LEAD, not trail the failure rate: %q", headline)
+	}
+	// ONE line carries the denominator phrase. A live rate on a line of its own
+	// would be a second "of N attempted" line, and every reader that reaches for
+	// the headline by that phrase — this test included — takes the first one.
+	n := 0
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "of 2216 attempted") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d lines carry \"of 2216 attempted\", want exactly 1:\n%s", n, stdout)
+	}
+}
+
+// TestDeployCensusHeadlineRendersLiveInBOTHBranches is the anti-vacuity pin.
+//
+// deployCensusHeadline has two branches: the ok-rate branch and the REFUSED
+// branch. A prepend applied only to the ok branch drops the live rate exactly
+// when the failure rate refused — and it passes the package's existing guards
+// vacuously, because the only refusing fixture carries no live node, so the term
+// is never rendered and nothing can fire. This test renders the refused branch
+// WITH a live node and asserts the term is there, so an ok-branch-only
+// implementation reds here for its own reason.
+func TestDeployCensusHeadlineRendersLiveInBOTHBranches(t *testing.T) {
+	refusedFailure := cloudclient.DeployRate{Sample: 12, Numerator: 3, MinSample: 200, Refused: true, Reason: "sample 12 below min_sample 200"}
+
+	// (a) An HONEST live node beside a refused failure rate: the percentage is
+	// the live one, and it must survive into the refused branch.
+	pct := 25.0
+	honest := cloudclient.DeployCensus{
+		Failed: 3, MinSample: 200, FailureRate: refusedFailure,
+		LivePerAttempt: &cloudclient.DeployRate{Sample: 12, Pct: &pct, Numerator: 3, MinSample: 200},
+	}
+	head := deployCensusHeadline(honest)
+	if !strings.HasPrefix(head, "live 25.0% of 12 attempted") {
+		t.Fatalf("the refused branch dropped the live term — the prepend is on the ok branch only: %q", head)
+	}
+	if !strings.Contains(head, "failure NO RATE") {
+		t.Fatalf("the refused failure rate must still refuse, in its own labelled place: %q", head)
+	}
+
+	// (b) A live node that itself REFUSES prints the refusal and NO percentage —
+	// the same discipline the failure rate has always had.
+	refused := cloudclient.DeployCensus{
+		Failed: 3, MinSample: 200, FailureRate: refusedFailure,
+		LivePerAttempt: &cloudclient.DeployRate{Sample: 12, Numerator: 3, MinSample: 200, Refused: true, Reason: "sample 12 below min_sample 200"},
+	}
+	head = deployCensusHeadline(refused)
+	if !strings.HasPrefix(head, "live per attempt: NO RATE — the control plane refused a percentage: sample 12 below min_sample 200") {
+		t.Fatalf("a refused live node must refuse in words, in the leading position: %q", head)
+	}
+	if pctRe.MatchString(head) {
+		t.Fatalf("a refused live rate must print NO percentage: %q", head)
+	}
+
+	// (c) NO live node at all (every control plane older than dr-w16-s2): the
+	// headline says so. Silence would read as a fleet that ships nothing.
+	head = deployCensusHeadline(cloudclient.DeployCensus{Failed: 3, MinSample: 200, FailureRate: refusedFailure})
+	if !strings.HasPrefix(head, "live per attempt: NOT SENT") {
+		t.Fatalf("an absent live rate must be NAMED absent, never omitted: %q", head)
+	}
+}
+
+// TestCloudDeploymentsBasisNamesRowsNotAttempts: the basis line says what its
+// denominator actually counts. The control plane calls it "attempted rows",
+// which reads as ATTEMPTS; it is rows, and 1,584 attempts on 2026-08-06 minted
+// no row at all, so every rate above it is a ceiling. The line prints on EVERY
+// payload, including the one that sends no basis of its own.
+func TestCloudDeploymentsBasisNamesRowsNotAttempts(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		envelope string
+		wantIn   []string
+	}{
+		{
+			name:     "control plane sent a basis",
+			envelope: censusS1Envelope,
+			// The control plane's own words are kept, verbatim, and corrected after.
+			wantIn: []string{"attempted rows (deferrals included)", "deployment ROWS, not attempts", "1,584 attempts excluded", "CEILING"},
+		},
+		{
+			name:     "control plane sent no basis",
+			envelope: censusTodayEnvelope,
+			wantIn:   []string{"deployment ROWS, not attempts", "coalesces onto an in-flight build", "CEILING"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newCensusServer(t, 200, tc.envelope)
+			pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+			stdout, stderr, code := runDeployments(t, "table")
+			if code != exitOK {
+				t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+			}
+			basis := censusLineContaining(t, stdout, "basis:")
+			for _, want := range tc.wantIn {
+				if !strings.Contains(basis, want) {
+					t.Fatalf("basis line %q missing %q", basis, want)
+				}
+			}
+			// The basis line rides beside rates that may have REFUSED, so it may
+			// never carry a percentage of its own.
+			if pctRe.MatchString(basis) {
+				t.Fatalf("the basis line must carry no percentage: %q", basis)
+			}
+		})
+	}
+}
+
 // censusDeliveryEnvelope is the census WITH dr-w11-s4's `delivery` node. Its key
 // set is the one `DeployLedger.delivery/3` emits, pinned on the Elixir side by
 // "the emitted key set is PINNED — the Go reader decodes every key" in
