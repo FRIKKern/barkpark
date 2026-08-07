@@ -112,6 +112,19 @@ set -euo pipefail
 # engine a real dependency of the Cloud suite — an edit to that line must re-run
 # this suite, or the fixture and its producer drift apart behind a green check.
 #
+# DELIBERATELY NOT DECLARED — internal/cli/**. dr-w18-s4's empty-audience census
+# (`deploy_signal_audience_census_test.exs`) derives each deploy-health signal's
+# audience from Go SOURCE, and it reads `internal/cloudclient/**` ONLY, which is
+# already declared above. It could have read `internal/cli/cloud_status_cmd.go`
+# or `cloud_deploy_census_cmd.go` instead — and that would have been a guard
+# publishing a GREEN required context on every PR where it never ran, because the
+# dispatcher returns false for `internal/cli/**`. The choice was to keep the
+# guard's reads inside the already-declared package rather than widen the set:
+# `internal/cli/**` would hand every Go CLI edit the full Postgres-backed Cloud
+# suite, and listing individual reader files rots the moment a reader moves. No
+# extra rule enforces this — the ratchet below already does: a census read of an
+# undeclared repo-root file is an `UNCOVERED repo-root read` and exit 1.
+#
 # templates/astro-search-starter/src/lib/bp.ts — dr-w16-s1.
 # templates/search-starter/lib/markers.corpus-status.test.ts — dr-w16-s1.
 #     `deploy_ledger_test.exs` reads these TWO repo-root starter files and
