@@ -1340,6 +1340,7 @@
   function openAccountModal() {
     openModal(accountModalHtml(accountModel(session(), meCache)));
 
+    sessionsExpanded = false; // every open starts folded — the tail is opt-in
     loadSessions();
 
     // Password on demand — disclosure only. The form and all four of its ids
@@ -1465,6 +1466,44 @@
     "</div>";
   }
 
+  // Pure: the whole sessions list. Past SESSIONS_COLLAPSED_MAX rows the list
+  // folds: the current device plus the most recent others stay visible and the
+  // long tail hides behind one honest count ("Show 7 more sessions") — the
+  // 12-session shape that made the account modal mostly scrollbar. Server order
+  // is preserved; the current device is ALWAYS kept visible even if the server
+  // sorted it past the fold, because it is the one row the operator orients by.
+  // The fold button carries aria-expanded so the state is legible to a reader,
+  // and the count never lies: it is derived from the rows actually hidden.
+  var SESSIONS_COLLAPSED_MAX = 5;
+  function sessionListHtml(rows, expanded) {
+    rows = rows || [];
+    var foldable = rows.length > SESSIONS_COLLAPSED_MAX;
+    var visible = rows;
+    if (foldable && !expanded) {
+      var hasCurrent = rows.some(function (x) { return x.current; });
+      var budget = SESSIONS_COLLAPSED_MAX - (hasCurrent ? 1 : 0);
+      visible = rows.filter(function (x) {
+        if (x.current) return true;
+        if (budget > 0) { budget--; return true; }
+        return false;
+      });
+    }
+    var html = visible.map(sessionRowHtml).join("");
+    if (foldable) {
+      var hidden = rows.length - visible.length;
+      html += expanded
+        ? '<button class="session-fold" type="button" id="sessions-fold" aria-expanded="true">Show fewer</button>'
+        : '<button class="session-fold" type="button" id="sessions-fold" aria-expanded="false">Show ' +
+          hidden + " more session" + (hidden === 1 ? "" : "s") + "</button>";
+    }
+    return html;
+  }
+
+  // Whether the sessions list is unfolded past the collapse point. Module scope
+  // so a revoke's repaint keeps the operator's place in the open list; reset
+  // each time the account modal opens.
+  var sessionsExpanded = false;
+
   // Fetch + render the active-sessions list into #sessions-box. The current row
   // is badged "This device" and its Revoke button disabled.
   function loadSessions() {
@@ -1475,7 +1514,16 @@
       if (!r.ok) { box.innerHTML = '<p class="muted">Couldn\'t load sessions.</p>'; return; }
       var rows = (r.data && r.data.sessions) || [];
       if (!rows.length) { box.innerHTML = '<p class="muted">No active sessions.</p>'; return; }
-      box.innerHTML = rows.map(sessionRowHtml).join("");
+      paint();
+      function paint() {
+      box.innerHTML = sessionListHtml(rows, sessionsExpanded);
+      var fold = box.querySelector("#sessions-fold");
+      if (fold) fold.addEventListener("click", function () {
+        // Pure re-render from the same fetch — folding is a view choice, not a
+        // reason to hit the server again.
+        sessionsExpanded = !sessionsExpanded;
+        paint();
+      });
       box.querySelectorAll(".session-revoke").forEach(function (b) {
         b.addEventListener("click", function () {
           // NO confirm sheet on this leg, deliberately: revoking ONE named row
@@ -1500,6 +1548,7 @@
           });
         });
       });
+      }
     });
   }
 
@@ -21680,6 +21729,9 @@
       // GR63: one session row, pure — the seam that lets a node test build the
       // TALL (9+ session) modal that broke on live without a browser.
       sessionRowHtml: sessionRowHtml,
+      // Sessions fold: the pure list render (current-device-always-visible
+      // collapse past SESSIONS_COLLAPSED_MAX, honest hidden count).
+      sessionListHtml: sessionListHtml,
       // GR55: the QR encoder + its canonical text form. qrText IS the byte-match
       // oracle against __qr_fixture.json — never a self-written decoder.
       qrMatrix: qrMatrix, qrText: qrText, qrSvg: qrSvg,

@@ -538,4 +538,9 @@
 # the prescribed way: merge main first, RE-RUN parity, and record the number the
 # run printed — never arithmetic over two deltas. MISSES 0 confirmed FIRST,
 # which is what makes it an unrecorded ADD rather than a parity defect.
-1305
+#
+# Re-measured 2026-08-07: 1307 authored heads, MISSES 0 — the +2 are the
+# account modal's sessions fold (.session-fold and its :hover), added when the
+# sessions list learned to collapse past five rows. Number recorded from the
+# parity run itself, MISSES 0 confirmed first.
+1307

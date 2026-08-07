@@ -208,7 +208,7 @@ const PIN = [
   { line: 1246, fn: "run", verb: "DELETE", route: "/v1/account/two-factor", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `run` is the confirm-modal callback" },
   { line: 1293, fn: "run", verb: "DELETE", route: "/v1/account/sessions", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: sign out your other sessions" },
   { line: 1325, fn: "openAccountModal", verb: "DELETE", route: "/v1/auth/logout", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1410, fn: "loadSessions", verb: "DELETE", route: "/v1/account/sessions/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { line: 1537, fn: "paint", verb: "DELETE", route: "/v1/account/sessions/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `paint` is loadSessions' repaint closure (sessions fold)" },
   { line: 1436, fn: "submitPasswordChange", verb: "PUT", route: "/v1/account/password", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
 
   // ── instance lifecycle — resurrect stands up (and bills) a real box.
