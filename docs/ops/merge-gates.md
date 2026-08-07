@@ -15,16 +15,26 @@ A PR targeting `main` must clear:
    `mix format --check-formatted`. Currently **advisory** (`continue-on-error:
    true`; the job is named "Format … advisory"). Its own dedicated, fast job
    (~30s, no DB, no full compile) so drift is visible in <60s. It was split out
-   of `mix-test` to *become* a blocking gate once format drift is cleared, but
-   today a red `format` check does not block merge.
-3. **`mix-prod-compile` CI job** — same workflow, depends on `mix-test`.
-   Cleans `api/_build/prod`, force-recompiles deps, then runs
-   `MIX_ENV=prod mix compile --warnings-as-errors`. **This is the gate.**
+   of the `mix-test` job to *become* a blocking gate once format drift is
+   cleared. Today a red `format` check still does not block merge, and it is the
+   only job on this list that genuinely cannot: it carries
+   `continue-on-error: true` and is deliberately absent from every required
+   aggregator's `needs:` (see §"Blocking, required, and the difference" below).
+3. **`mix-prod-compile` CI job** — same workflow, gated only by the `changes`
+   dispatcher (`needs: [changes]` at elixir.yml:510 — there is **no** edge to
+   `mix-test`; the in-file comment at :515 records why it was removed, and a
+   reader who plans around a test→compile ordering is planning around an edge
+   that no longer exists). Cleans `api/_build/prod`, force-recompiles deps,
+   then runs `MIX_ENV=prod mix compile --warnings-as-errors`. **This is the
+   gate** — and it stops a merge transitively, as an upstream `needs:` of the
+   required `Elixir gate`.
 4. **`validation-perf` CI job** — same workflow, independent of `mix-test`.
    Runs the synthetic 200-field / 100-rule bench, takes the median of 5 timed
-   runs, fails if the median exceeds 100ms. Treated as a hard gate — a red
-   perf bench should stop a merge even while the test suite is advisory (but
-   see the branch-protection note below: nothing mechanically enforces it).
+   runs, fails if the median exceeds 100ms. A hard gate, and mechanically
+   enforced: it too is an upstream `needs:` of the required `Elixir gate`, so a
+   red bench reds the required context and the merge button stays grey. (Until
+   2026-08-07 this item ended by denying that any mechanism enforced it — false
+   since the aggregator became a required context.)
 5. **`plugin-node` CI job** — `.github/workflows/plugin-node.yml`. Discovers
    plugins under `api/priv/plugins/` whose `plugin.json` declares a top-level
    `"node"` object and runs `npm ci` + lint + typecheck per plugin. Emits a
@@ -150,12 +160,47 @@ conclusion. `.github/required-checks.json` on `origin/main` now carries
 
 Exactly **four** contexts are required — `Elixir gate`, `PR references an active
 task`, `Cloud gate`, `Console gate`, byte-matching the four `app_id: 15368`
-entries in `.github/required-checks.json` — and everything else on a PR is advisory:
-`mix-prod-compile`, `validation-perf` and `format` do not block (PR #123 merged
-with `format` red), and `plugin-node` matters only when the PR touches
-`api/priv/plugins/**`. `strict: false` means a PR is not forced to be
-up-to-date with `main` before merge. To make another check binding, add its
-context to `.github/required-checks.json` and apply — never hand-PUT.
+entries in `.github/required-checks.json`. `strict: false` means a PR is not
+forced to be up-to-date with `main` before merge. To make another check binding,
+add its context to `.github/required-checks.json` and apply — never hand-PUT.
+
+### Blocking, required, and the difference
+
+**"Not required" and "cannot stop a merge" are different properties, and this
+page conflated them until 2026-08-07.** Everything on a PR that is not one of
+the four required contexts falls into one of two classes, and only one of them
+is harmless:
+
+- **SUBSUMED — blocking transitively.** The mechanism, in one sentence: a
+  required aggregator declares upstream jobs in `needs:` and fails closed over
+  their results, so a red upstream reds the required context and blocks the
+  merge exactly as if it had been required itself. `Elixir gate` is
+  `needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape]`
+  (elixir.yml:667), so all five block. Driven rather than read off the topology:
+  its `Decide` body, extracted and run with every upstream `success`, exits 0;
+  re-run with only the prod-compile result set to `failure` it exits 1; re-run
+  with only the perf-bench result set to `failure` it exits 1, printing
+  "Elixir gate: at least one upstream job is not in the allow-set … This is the
+  required context; it is RED on purpose." `Cloud gate` and `Console gate`
+  subsume their own upstreams the same way. They are held out of the required
+  list because requiring a leaf of a required aggregator re-implements the
+  aggregator at leaf granularity and pins its internals as a contract — which is
+  why `.github/required-checks.json` files each of them under **S3 SUBSUMED**,
+  not as a claim that they are harmless.
+- **ADVISORY — structurally unable to block.** A job carrying
+  `continue-on-error: true` that no required aggregator lists in `needs:`. Here
+  that is `format`: a red `format` does not block merge, and PR #123 merged with
+  it red. The `continue-on-error` half alone is not enough — for such a job
+  `needs.<job>.result` reads `success` even when it failed, so an advisory job
+  wired into an aggregator's `needs:` would launder its own red into a green
+  required context. `format` is deliberately kept out of that list for exactly
+  this reason (elixir.yml:655). `plugin-node` is a third case again: blocking
+  nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
+
+§19 of `scripts/required-checks.test.sh` derives both lists from source — the
+aggregators' `needs:` from `.github/workflows/`, the required contexts from
+`.github/required-checks.json` — and reds if this page ever again describes a
+transitive upstream of a required aggregator as unable to stop a merge.
 
 ## Security gates (Sobelow + mix_audit)
 
