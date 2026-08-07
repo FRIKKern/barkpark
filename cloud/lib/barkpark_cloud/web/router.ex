@@ -10683,12 +10683,16 @@ defmodule BarkparkCloud.Web.Router do
       #   * `failure_reason_raw` — the capture WITHOUT the humanize rewrite, so a
       #     reader can see what the box actually said when the prose above is the
       #     generic arm. Raw of the REWRITE, never raw of the SECRETS:
-      #     `humanize/1` is this payload's scrub carrier (`classify |> scrub`), so
-      #     an unscrubbed twin field beside it would ship the credential the
-      #     neighbouring field just redacted — exactly the leak shape
-      #     task-4f363dc65ac43203 names ("an eighth channel added later ships
-      #     unscrubbed and nothing reds"). Scrubbed, then ANSI-stripped: 1,366 of
-      #     17,395 failed rows carry real 0x1B bytes from the build PTY.
+      #     `humanize/1` is this payload's scrub carrier
+      #     (`classify |> strip_ansi |> scrub`), so an unscrubbed twin field
+      #     beside it would ship the credential the neighbouring field just
+      #     redacted — exactly the leak shape task-4f363dc65ac43203 names ("an
+      #     eighth channel added later ships unscrubbed and nothing reds").
+      #     ANSI-STRIPPED, THEN scrubbed — `FailureCopy.raw/1`, and the order is
+      #     the whole bug: this line shipped the two the other way round and a
+      #     colourised sub-32-char `api_key=` walked out in cleartext (2000/2000
+      #     measured). 1,366 of 17,395 failed rows carry real 0x1B bytes from the
+      #     build PTY.
       failure_class: DeployLedger.classify(d),
       failure_reason_raw: FailureCopy.raw(d.failure_reason),
       became_live_at: d.became_live_at,

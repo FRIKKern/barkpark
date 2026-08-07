@@ -150,8 +150,8 @@ defmodule BarkparkCloud.FailureCopy do
   Three properties, each of which is a test in `failure_copy_test.exs`:
 
     * **Post-classification, never pre.** `humanize/1` is
-      `reason |> classify() |> strip_ansi() |> scrub()`. Scrubbing FIRST would shift
-      classification — `"client_secret=timeout"` loses its `timeout` token to the
+      `reason |> classify() |> strip_ansi() |> scrub()`. Scrubbing FIRST would
+      shift classification — `"client_secret=timeout"` loses its `timeout` to the
       redaction and stops reading as the network class. Scrubbing LAST is also
       free of risk over a matched class, because every class arm returns a
       LITERAL and a literal has no secret shape.
