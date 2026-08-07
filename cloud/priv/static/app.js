@@ -2750,19 +2750,40 @@
     });
   }
 
+  // cch-w39-s1 — the providers unknown arm, pure so its bytes are node-pinnable.
+  // providerRosterHtml's signature is NOT widened (8 test call sites pass
+  // booleans); the three-valuedness lives here and in the mount below.
+  function providerUnknownHtml(state) {
+    return meUnknownHtml(state,
+      "Until it answers we can't tell whether this account may connect or disconnect a provider, so nothing was connected and nothing was refused.");
+  }
+
   function renderProviderPage(list, canWrite) {
+    // cch-w39-s1 — fail-CLOSED, stated rather than assumed: an unloaded /v1/me
+    // can never produce a write affordance here no matter what the caller
+    // passed. loadProviders already computes providerCanWrite() (false while
+    // unknown), so this is belt-and-braces for every other call path.
+    var state = meState();
+    var write = state === "loaded" && !!canWrite;
     var roster = $("#provider-roster");
     if (roster) {
       roster.innerHTML = '<div class="set-section">' +
         '<h2 class="set-h">Connected providers</h2>' +
         '<p class="set-purpose">Credentials Barkpark uses to provision on your account, encrypted at rest and never shown again. ' +
           "We show when each was connected — not a live-validity check.</p>" +
-        providerRosterHtml(list, canWrite) + "</div>";
-      if (canWrite) wireProviderDisconnect();
+        providerRosterHtml(list, write) + "</div>";
+      if (write) wireProviderDisconnect();
     }
     var connect = $("#provider-connect");
     if (connect) {
-      if (canWrite) renderConnectCard(list, null);
+      // The connect region is the WHOLE unknown arm's subtree (D444) — under an
+      // unknown role it holds the honest block and nothing else, so the Retry
+      // is never a sibling of a loaded connect card. A member (meState()
+      // "loaded", canWrite false) still gets the empty region, byte-unchanged.
+      if (state !== "loaded") {
+        connect.innerHTML = providerUnknownHtml(state);
+        wireMeRetry(connect, function () { renderProviderPage(list, providerCanWrite()); });
+      } else if (write) renderConnectCard(list, null);
       else connect.innerHTML = "";
     }
   }
@@ -3604,8 +3625,22 @@
   // The whole page: admin gets every section over the WHOLE team's log; a member
   // gets read-only email, the corrected admin-only notice (no save-rows, no write
   // affordances), and their OWN self-scoped delivery log.
+  // cch-w39-s1 — the notifications unknown arm. The MEMBER page is two claims,
+  // not one omission: "Only team admins can change these settings." on the
+  // email card and "managed by team admins" on the channels notice. Both are
+  // stated as fact from a read that may never have happened, so under an
+  // unknown role neither renders. What survives is the delivery log, which is
+  // self-scoped and is the person's own either way.
+  function notifMeUnknownHtml(state) {
+    return meUnknownHtml(state,
+      "Until it answers we can't tell whether this account may change notification settings, so nothing was changed and nothing was refused.");
+  }
+
   function notifPageHtml(s, opts) {
     opts = opts || {};
+    if (opts.state && opts.state !== "loaded") {
+      return notifMeUnknownHtml(opts.state) + notifDeliveriesShellHtml(true);
+    }
     if (!opts.canManage) {
       return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml() + notifDeliveriesShellHtml(true);
     }
@@ -3632,13 +3667,27 @@
     notifCache = s;
     var box = $("#notif-body");
     if (!box) return;
+    var meSt = meState();
     var canManage = notifCanManage();
     // A member reads the log SELF-SCOPED, and the channel axis is not offered in
     // that view — so drop any channel value a previous render left behind rather
     // than sending a filter the user can no longer see or clear.
     notifDeliverySelfScoped = !canManage;
     if (notifDeliverySelfScoped) notifDeliveryFilter.channel = null;
-    box.innerHTML = notifPageHtml(s, { canManage: canManage });
+    box.innerHTML = notifPageHtml(s, { canManage: canManage, state: meSt });
+
+    // cch-w39-s1 — the unknown arm's own wiring, ahead of every role branch
+    // below. The header's test-email action is a MUTATION, so it stays hidden
+    // (fail-closed); the delivery log is self-scoped and mounts exactly as it
+    // does for a member; and the Retry is the only control on the page.
+    if (meSt !== "loaded") {
+      var testBtn0 = $("#notif-test");
+      if (testBtn0) testBtn0.hidden = true;
+      wireMeRetry(box, function () { renderNotifications(s); });
+      wireNotifDeliveryFilters();
+      loadNotifDeliveries();
+      return;
+    }
 
     // The header "Send test email" action is admin-only (email test is a mutation).
     var testBtn = $("#notif-test");
@@ -4065,7 +4114,12 @@
     // the server caps an unproven actor at read, so that is what would be minted.
     var note = failed
       ? "Your role didn't load, so we can't show which abilities you may pick. Retry in a moment — a token created now would be read-only."
-      : "Your role hasn't loaded yet. Reopen this in a moment to pick abilities — a token created now would be read-only.";
+      // REVIEW (cch-w39-s1-r): this arm used to say "Reopen this in a moment",
+      // which was the only exit the sheet had. This slice gives it a Retry, so
+      // that instruction now points past the control sitting directly below it.
+      // Re-pointed at the mechanism that exists — the failed arm's shipped verb,
+      // not a newly authored next step (charter D438).
+      : "Your role hasn't loaded yet. Retry in a moment to pick abilities — a token created now would be read-only.";
     return '<div class="field"><span class="label">Abilities</span>' +
       '<div class="set-check-list">' +
         '<div class="set-check set-check--scope" id="token-scope-unknown" data-me-state="' + esc(state) + '">' +
@@ -4073,6 +4127,13 @@
           '<span class="set-check-sub">' + esc(sub) + "</span></span></div>" +
       "</div>" +
       '<p class="field-hint dim" id="token-unknown-note">' + esc(note) + "</p>" +
+      // cch-w39-s1 — the note above has said "Retry in a moment" since
+      // cch-w36-s3 with NOTHING on the sheet to press: the copy promised an
+      // exit the surface did not have, which is D438's inversion in its purest
+      // form. Same control every other unknown arm uses; no correctness change
+      // here, because the picker already branches on meState() first and the
+      // unknown arm renders zero checkboxes.
+      meRetryHtml() +
       "</div>";
   }
 
@@ -4138,6 +4199,17 @@
         });
       });
     }
+    // cch-w39-s1 — the unknown picker's Retry, and the modal is its own seam:
+    // loadMe has no re-entry for a transient sheet, deliberately. Re-opening
+    // rebuilds the picker from the answer that just landed (checkboxes AND the
+    // exclusivity wiring, which a partial repaint would have dropped) and
+    // carries the typed name across, so the press costs nothing already given.
+    wireMeRetry($("#modal-body"), function () {
+      var typed = (($("#token-name") || {}).value) || "";
+      openTokenModal();
+      var again = $("#token-name");
+      if (again) { again.value = typed; }
+    }, false);
     $("#token-submit").addEventListener("click", submitToken);
     $("#token-name").focus();
   }
@@ -5256,8 +5328,16 @@
     var activeId = (meCache && meCache.team && meCache.team.id) || "";
     var q = ((($("#team-menu-q") || {}).value) || "").toLowerCase();
 
+    // cch-w39-s1 — this used to be `if (!meCache)`, a TWO-valued read that
+    // rendered "Loading teams…" for a /v1/me that had already failed. Nothing
+    // re-reads it, so the picker claimed to be loading for the rest of the
+    // session — a spinner that outlives its request. Three-valued now: loading
+    // still says loading, and a FAILED read says so and offers the exit.
     var body;
-    if (!meCache) {
+    var meSt = meState();
+    if (meSt === "failed") {
+      body = '<div class="team-empty">' + esc(meFailureCopy()) + "</div>" + meRetryHtml();
+    } else if (meSt === "loading") {
       body = '<div class="team-empty">Loading teams…</div>';
     } else {
       var shown = teams.filter(function (t) {
@@ -5286,6 +5366,10 @@
       '<span class="team-avatar" aria-hidden="true">+</span>' +
       '<span class="team-name">Create team<span class="team-sub">Collaborate in a shared workspace</span></span>' +
       "</button>";
+
+    // cch-w39-s1 — the picker is an open/close surface loadMe has no repaint
+    // seam for, so its retry repaints on both outcomes (see wireMeRetry).
+    wireMeRetry(menu, renderTeamMenu, false);
 
     var q0 = $("#team-menu-q");
     if (q0) q0.addEventListener("input", function () {
@@ -13610,6 +13694,18 @@
       return;
     }
 
+    // cch-w39-s1 — THE HEADLINE DEFECT, and it sat one line below this comment.
+    // billingIsOwner() is a TWO-valued read of a THREE-valued fact: with /v1/me
+    // in flight or FAILED it answers false, the arm below fires, and a genuine
+    // OWNER is told "Only the team owner can manage billing." — the console
+    // accusing someone of a role on the strength of an answer that never
+    // arrived, with nothing on the page to press. Browser-confirmed on main:
+    // meState()=="failed", role=null, the sentence visible, visibleRetryButtons
+    // empty. The unknown arm goes AHEAD of the refusal, and it is fail-CLOSED —
+    // it renders the same button-free plan card the member gets, hides the
+    // grid, and hides Cancel; the only control it adds is the Retry.
+    if (meState() !== "loaded") { renderBillingMeUnknown(box); return; }
+
     // GR36 plain-member law: a non-owner (admin OR member) sees the plan state
     // read-only with NO write CTA anywhere — never a disabled ghost. The honest
     // "Only the team owner can manage billing." copy lives in the Manage section.
@@ -13633,6 +13729,28 @@
     var grid = $("#billing-tiers");
     if (grid) grid.hidden = true;
     renderBillingManage(false);
+    renderBillingCancel(false);
+  }
+
+  // cch-w39-s1 — the UNKNOWN surface, which is NOT the member surface. It keeps
+  // everything the server actually told us (the plan card is /v1/subscription's
+  // truth, member-readable and role-free) and replaces the ROLE CLAIM — the
+  // Manage section's owner-gate sentence — with the honest unknown block. The
+  // whole region is the arm, so the Retry is never a sibling of loaded content
+  // (charter D444): #billing-manage holds the unknown block and nothing else,
+  // and the six plain-member expectations still render at meState()=="loaded",
+  // untouched.
+  function renderBillingMeUnknown(box) {
+    box.innerHTML = readOnlyPlanCardHtml(subCache);
+    var grid = $("#billing-tiers");
+    if (grid) grid.hidden = true;
+    showBillingSection("#billing-manage-section", true);
+    var body = $("#billing-manage");
+    if (body) {
+      body.innerHTML = meUnknownHtml(meState(),
+        "Until it answers we can't tell whether this account may manage billing, so nothing was changed and nothing was refused.");
+      wireMeRetry(body, renderBilling);
+    }
     renderBillingCancel(false);
   }
 
@@ -14174,6 +14292,61 @@
     return faultCopy(f.status || 0, f.data, "We couldn't check your account. Retry in a moment.", f.transport);
   }
 
+  // cch-w39-s1 — THE ONE EXIT, and it is ONE control, not five. Every surface
+  // that branches on meState() renders this same block: the shipped headline,
+  // meFailureCopy() verbatim on the failed arm, a per-surface CONSEQUENCE
+  // sentence, and a single Retry. Nothing else is authored here — no next step
+  // ("check your connection", "ask your team owner") and no cause the read did
+  // not return, because a /v1/me that never answered reported no cause at all.
+  //
+  // WHY "loading" GETS THE EXIT TOO. api() (grep -n 'function api(') has no
+  // AbortController and no timeout, so a stalled /v1/me never settles: nothing
+  // ever flips meState() off "loading", and the sentence "Checking your
+  // account…" outlives the request that justified it. A spinner with no exit is
+  // the same lie as a refusal with no evidence, just politer.
+  function meUnknownHtml(state, consequence) {
+    var failed = state === "failed";
+    return '<div class="empty-state">' +
+      // The headline is a CONSTANT, emitted the same way operatorMeFailedHtml
+      // emits its own — esc() here would ship "We couldn&#39;t", which is the
+      // same words spelled differently on two surfaces.
+      "<h2>" + (failed ? "We couldn't check your account" : "Checking your account…") + "</h2>" +
+      (failed ? "<p>" + esc(meFailureCopy()) + "</p>" : "") +
+      '<p class="muted">' + esc(consequence) + "</p>" +
+      meRetryHtml() + "</div>";
+  }
+
+  // The retry itself, in the SHIPPED grammar (data-*-retry + .btn.btn-primary
+  // .btn-sm), which already has three instances on main: data-members-retry,
+  // data-env-retry and #9922's id="operator-me-retry". This is a fourth
+  // instance of a known idiom, not a new one — and it is the ONLY one the five
+  // unknown arms below use.
+  function meRetryHtml() {
+    return '<p><button class="btn btn-primary btn-sm" data-me-retry type="button">Retry</button></p>';
+  }
+
+  // #9922's merged re-entry shape, verbatim: loadMe's SUCCESS arm re-enters the
+  // view's own loader itself, its failure arm deliberately does not — so
+  // repaint here ONLY when the read still did not land, or the surface paints
+  // twice. The button disables on click so the press has an answer immediately;
+  // whichever path wins replaces the node, so it is never re-enabled in place.
+  // `selfHealing` (default true) says loadMe's OWN arms repaint this surface
+  // when the read lands, so re-entering on success would paint it twice. Pass
+  // false for a surface loadMe has no seam for — the token modal is transient
+  // and deliberately has none, and there the retry must repaint on BOTH
+  // outcomes or a successful read leaves the stale unknown picker on screen,
+  // which is the exact lie this slice exists to kill.
+  function wireMeRetry(root, repaint, selfHealing) {
+    var btn = root && root.querySelector ? root.querySelector("[data-me-retry]") : null;
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      loadMe().then(function () {
+        if (selfHealing === false || meState() !== "loaded") repaint();
+      });
+    });
+  }
+
   function setAccountChip(team, email) {
     var name = (team && team.name) || (email ? email.split("@")[0] : null) || "My team";
     setText($("#account-team"), name);
@@ -14238,6 +14411,12 @@
           paintActivityFilters();
           ensureActivityActors();
         }
+        // cch-w39-s1 — the fourth and fifth twins. Providers and Notifications
+        // BOTH decide their write affordances from meCache's role and NEITHER
+        // was repainted here, so a promotion (or a demotion) on those two
+        // screens was invisible until a full page reload.
+        if (currentView() === "providers") loadProviders();
+        if (currentView() === "notifications") loadNotifications();
       } else {
         // cch-w36-s3 — THE MISSING ELSE, and it was the whole defect. api()
         // ends in a .catch returning {ok:false,status:0,…}, so this promise
@@ -14270,6 +14449,14 @@
         // zero /v1/operator/* routes, grants nothing, and the sidebar entry
         // above stays hidden.
         if (currentView() === "operator") loadOperator();
+        // cch-w39-s1 — the same two seams on the arm that needs them MORE. A
+        // failed /v1/me is terminal (nothing re-reads it), so without these a
+        // deep-linked #providers / #notifications kept whatever it painted
+        // while me was unknown, with no exit on the page. Re-entering is
+        // fail-CLOSED: meState() is "failed", so both loaders take their
+        // unknown arm — zero write affordances, one Retry.
+        if (currentView() === "providers") loadProviders();
+        if (currentView() === "notifications") loadNotifications();
       }
     });
   }
@@ -20767,6 +20954,7 @@
       // renderProviderPage / renderConnectCard / disconnectProvider /
       // loadCapabilityMatrix) are browser-verified.
       providerDisplayName: providerDisplayName, providerRosterHtml: providerRosterHtml,
+      providerUnknownHtml: providerUnknownHtml,
       providerConnectModel: providerConnectModel, providerConnectCardHtml: providerConnectCardHtml,
       providerIsConnected: providerIsConnected,
       // cch wave 13 — WHICH cloud account a connection points at, shown before a
@@ -21136,6 +21324,8 @@
       // state is DISTINGUISHABLE from the cold one — on origin/main both are
       // {role:null, loaded:false, error:false}.
       loadMe: loadMe, clearMe: clearMe, meState: meState, meFailureCopy: meFailureCopy,
+      // cch-w39-s1 — the one shared unknown block + the one shared retry.
+      meUnknownHtml: meUnknownHtml, meRetryHtml: meRetryHtml,
       // cch-w37-s6 — the Operator console's FAILED-me body. Pure, so the node
       // harness can pin its bytes; the reachability proof (that a real 500 on
       // /v1/me actually lands here) belongs to smoke's operator-me-unreadable
@@ -21302,6 +21492,7 @@
         .map(function (s) { return s.value; })
         .filter(function (v) { return v != null; }),
       notifMemberAdminNoticeHtml: notifMemberAdminNoticeHtml, notifPageHtml: notifPageHtml,
+      notifMeUnknownHtml: notifMeUnknownHtml,
       // cch-w32-s1: the chat-test toast, pulled out of the fetch callback so the
       // zero-reach case is pinnable. `sendChatTest` was the surface that said
       // "Sent to slack." over a fan-out that reached nobody.

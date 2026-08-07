@@ -3515,6 +3515,37 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w39-s1 — THE HEADLINE DEFECT, DRIVEN. A genuine OWNER of a paid team
+  // whose /v1/me 500s: on origin/main billingIsOwner() answered false (a
+  // two-valued read of a three-valued fact) and #billing-manage told the OWNER
+  // "Only the team owner can manage billing." with nothing on the page to
+  // press. It consumes the meFault override cch-w37-s6 already merged (route()
+  // in this file) rather than minting a second one, and deep-links to #billing
+  // — a residue family that already exists, so no 14th family is created.
+  "billing-me-unreadable": {
+    label: "Billing — an OWNER whose /v1/me 500s: the page reports the failed check with a retry instead of accusing them of not being the owner",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+
   // The owner AFTER an in-app cancel: the subscription is now cancel_at_period_end
   // (grace) — the plan card reads "Access until {date}" + the Ending badge, the
   // Cancel section is GONE (a second cancel is a no-op), but Manage billing stays
