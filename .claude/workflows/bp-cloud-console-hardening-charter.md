@@ -2345,7 +2345,7 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 | Slice | Task | Final branch | PR | Reviewer fix |
 |---|---|---|---|---|
 | CROWN — the sold-capability manifest and the two bullets that fail it | `cch-w50-s1-sold-capability-manifest-and-the-two-bullets-that-fail-it` | `…crown-the-sold-capability-manifest-and-t-0-r` | #10557 | **one fix, cosmetic.** `mix format` on the new guard (it was the only unformatted file the slice added; `flunk/1` had been hand-wrapped). The substance was re-proved, not re-read: the DELETE direction was independently mutated on the fixed tree — emptying `planFeatures` reds `test DELETE: every manifest row is still claimed by some tier` at :271, which is exactly the vacuous-green D564 warns about |
-| Every 500 stops directing users to a support desk that does not exist | `cch-w50-s2-every-500-stops-directing-users-to-a-support-desk-that-does-not-exist` | `…every-500-stops-directing-users-to-a-sup-1-r` | #10559 | **none.** Branch is the builder's commit unchanged. Independently swept: `grep -rniE "contact support\|support@\|mailto:"` over `cloud/lib`, `app.js` and `index.html` now returns THREE hits and all three are comments or a moduledoc quoting the retired sentence as history — zero customer-facing bytes |
+| Every 500 stops directing users to a support desk that does not exist | `cch-w50-s2-every-500-stops-directing-users-to-a-support-desk-that-does-not-exist` | `…every-500-stops-directing-users-to-a-sup-1-r` | #10559 | **one fix, and CI found it, not the slice gate.** The Console gate — a *required* context — was RED on this branch alone: `__css_check`'s **E11** bans the `app.js:<digits>` citation SHAPE across every harness source, and the new ban block carried two (`"moved with app.js:231"`, `"re-add … to app.js:231"`). **The slice gate does not run `__css_check`**, so both survived a green local run and a green reviewer re-run. Re-anchored to the convention E11 asks for (`grep -n 'server_error:' app.js` inside the `var ERRORS = {` block); comments only, no assertion or copy touched. `__css_check` **2 error(s) → 0**, slice gate re-run green (1002/1002, 110, 53/0). Substance independently swept: `grep -rniE "contact support\|support@\|mailto:"` over `cloud/lib`, `app.js` and `index.html` returns THREE hits, all comments or a moduledoc quoting the retired sentence as history — zero customer-facing bytes |
 | The cancel modal promise becomes true, bounded and guarded | `cch-w50-s3-the-cancel-modal-promise-becomes-true-bounded-and-guarded` | `…the-cancel-modal-promise-becomes-true-bo-2-r` | #10560 | **two fixes.** `mix format`, and a CORRECTION to the builder's own side-effect note: it claimed a `barkpark.restored` + `barkpark.suspended` PAIR is broadcast, but `resume_team_barkparks/1` is an `update_all` that broadcasts NOTHING — what an event consumer actually sees is an UNPAIRED `barkpark.suspended` with no restore before it, which is worse for an audit trail than what was written down. Comment now says that; the narrowing it argues for is filed |
 | Member-actor rendered-state authority sweep (deferred from wave 46) | `cch-w46-s7-member-actor-rendered-state-authority-sweep` | `…member-actor-rendered-state-authority-sw-3-r` | #10561 | **none.** Losability re-proved independently rather than accepted: reverting cch-w48-s2's fence (`var githubControl = authority === "grant"` → `= true`) reds the sweep with TWO named failures (UNACCOUNTED `site-member #site-body → button#site-github [ENABLED]`, and the finding naming the fence by PR number), exit 1 — while `smoke.mjs` stays at "all 110 scenarios rendered" |
 
@@ -2415,6 +2415,15 @@ guard reads `planFeatures`'s return value and no fixture can blind it.
 7. **INDEPENDENT SECOND REVIEW IS OWED ON cch-w50-s3.** Its ordering judgment was re-derived and
    re-measured here and holds, but this is the money path and one human read of the eight lines in
    `do_activate_from_session` is cheap insurance before merge.
+8. **THE SLICE GATE IS NOT THE MERGE GATE, AND WAVE 50 PAID FOR IT.** cch-w50-s2 was green on its
+   briefed gate, green on the reviewer's independent re-run, and **RED on the required Console gate**
+   — because no slice gate this epic has ever written runs `node cloud/priv/static/__css_check.mjs`,
+   and E11 (the `app.js:<digits>` citation ban) lives only there. Two comment citations rode a green
+   local run all the way to a blocked PR. **Every future slice that edits `app.js`, `app.css`,
+   `__app.test.mjs` or anything under `__preview__/` should append `&& node
+   cloud/priv/static/__css_check.mjs | tail -1` to its gate** — it is ~2s and it is the difference
+   between "my gate is green" and "this can merge". Decide should write it into the gate string, not
+   leave it to the builder.
 
 ### 2026-08-07 — wave 49 REVIEW (5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd; 3 round-2 slices deferred by the sequenced-rounds law — grade A−)
 
