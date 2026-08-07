@@ -281,7 +281,46 @@ defmodule BarkparkCloud.DeployLedger do
   # `the instance refused the deploy (HTTP 409)` must land in the same class —
   # the 43% of 409-rows written before `refusal_detail/1` grew its nested-envelope
   # arm carry no code at all (D7). Anchored at the start of the capture.
-  @refusal ~r/^the instance refused the deploy \((?:HTTP )?(\d{3})\)/
+  #
+  # BOTH PHASES, and that is charter D218. `Sites.Deploy.box_refusal/3` writes
+  # two captions from one helper — `the instance refused the deploy (HTTP …)`
+  # when the box refused the TRIGGER, and `the instance refused the build poll
+  # (HTTP …)` when it refused a BEAT of a build it had already accepted. This
+  # anchor read only the first, so the poll caption matched NEITHER this regex
+  # nor `@deferral_prefix` below and every poll refusal fell into UNCLASSIFIED
+  # with its status and its code word sitting unread in the string. That path is
+  # live code: an untyped 5xx that never clears exhausts `site_deploy_poll_grace`
+  # and falls out of the graced arm wearing exactly this caption
+  # (`sites_deploy_test.exs` drives it end to end). Zero poll rows exist on
+  # cloud-db-1 all-time against 14,753 start-phase refusals — so this is a
+  # TRIPWIRE for the day the first one lands, not a claim that rows are
+  # mis-reported today.
+  @refusal ~r/^the instance refused the (?:deploy|build poll) \((?:HTTP )?(\d{3})\)/
+
+  # The phase the caption names, kept READABLE rather than folded into the class:
+  # a poll 500 and a start 500 are the same cause with different blast radii (the
+  # start one never began a build; the poll one killed a build already running),
+  # and the taxonomy deliberately does not split on it — 0 poll rows all-time is
+  # not a corpus that earns two names. This is how a reader gets the phase back.
+  @refusal_phases [
+    {~r/^the instance refused the deploy \((?:HTTP )?\d{3}\)/, :start},
+    {~r/^the instance refused the build poll \((?:HTTP )?\d{3}\)/, :poll}
+  ]
+
+  @doc """
+  Which PHASE of the deploy the box refused, out of a RAW `failure_reason`.
+
+  `:start` (the trigger), `:poll` (a beat of an accepted build), or `nil` when
+  the reason is not a box refusal at all.
+  """
+  @spec refusal_phase(String.t() | nil) :: :start | :poll | nil
+  def refusal_phase(reason) when is_binary(reason) do
+    Enum.find_value(@refusal_phases, fn {re, phase} ->
+      if Regex.match?(re, reason), do: phase
+    end)
+  end
+
+  def refusal_phase(_reason), do: nil
 
   defp refusal_code(reason) do
     case Regex.run(@refusal, reason) do
@@ -447,7 +486,11 @@ defmodule BarkparkCloud.DeployLedger do
   # the tail before it reads unless `refusal_code/1` already said "409" — and
   # that safety is pinned by mutation over BOTH 409 shapes in
   # `deploy_ledger_test.exs`, not by this comment.
-  @deferral_prefix ~r/^the instance refused the deploy \((?:HTTP )?\d{3}\):\s*(.+)$/s
+  #
+  # It accepts BOTH phase captions for the same reason `@refusal` does (D218):
+  # a poll refusal carries the box's code word in exactly the same position, and
+  # an anchor that reads only the start caption throws that word away.
+  @deferral_prefix ~r/^the instance refused the (?:deploy|build poll) \((?:HTTP )?\d{3}\):\s*(.+)$/s
 
   # `Sites.Deploy.box_refusal/3` stamps the box's request id AFTER the detail —
   # `"#{base} [box request_id: #{rid}]"` — while `refusal_detail/1` returns the

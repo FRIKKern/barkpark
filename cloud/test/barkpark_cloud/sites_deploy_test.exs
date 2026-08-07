@@ -1357,28 +1357,39 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       # POLL: the box accepted the build, then refused a beat of it. Same helper,
       # a caption a reader (and a journal join) can tell apart.
+      #
+      # THE SHAPE HAS TO BE ONE THE PRODUCER CAN MAKE (dr-w14 S3). This used to
+      # program a poll answer of 503 `feature_not_configured`, which the real box
+      # cannot emit from the GET: unlike `trigger/2`, which opens with
+      # `if DeployRunner.enabled?()`, `status/2` has NO apply-flag gate at all,
+      # and `feature_not_configured/1` has exactly one caller. A green off a
+      # scenario the producer cannot produce is the stamped-evidence
+      # overstatement this epic exists to refuse. So the caption is driven from
+      # the path that IS reachable: an untyped 5xx that outlives the poll grace
+      # and falls out of the graced arm.
       {:ok, d2} = Deploy.enqueue(site, bp, true, "content-auto")
 
-      FakeBoxRelay.program(
-        polls: [
-          {:ok, 503,
-           %{
-             "error" => %{
-               "code" => "feature_not_configured",
-               "message" => "site deploys are disabled on this instance",
-               "request_id" => "F9-poll-xyz"
-             }
-           }}
-        ]
-      )
+      FakeBoxRelay.program(polls: [crash_500("F9-poll-xyz")])
 
       assert {:ok, :failed} = Deploy.run(d2.id)
       poll_reason = Repo.get(Deployment, d2.id).failure_reason
       assert poll_reason =~ "refused the build poll"
-      assert poll_reason =~ "feature_not_configured"
+      assert poll_reason =~ "internal_error"
       assert poll_reason =~ "request_id: F9-poll-xyz"
+      # The grace really was spent — this is the exhaustion path, not a first-beat
+      # verdict wearing its caption.
+      assert poll_reason =~ "3 transient box 5xx"
       # The two phases are genuinely distinguishable, which is the whole point.
       refute poll_reason =~ "refused the deploy"
+
+      # …and the caption the producer just wrote is one the LEDGER can read. Both
+      # of its anchors used to require the START caption, so this row classified
+      # as UNCLASSIFIED with its status and its code word sitting unread in the
+      # string (charter D218). Asserted from the row the driver wrote, not from a
+      # literal, so a reworded caption reds here at edit time.
+      assert DeployLedger.classify(Repo.get(Deployment, d2.id)) == "BOX_500"
+      assert DeployLedger.refusal_phase(poll_reason) == :poll
+      assert DeployLedger.refusal_phase(start_reason) == :start
     end
 
     # The START arm gets the same grace — and it is safe BY CONSTRUCTION, which
@@ -1484,6 +1495,49 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert final.failure_reason =~ "transient box 5xx"
       # And it never blames the operator's configuration.
       refute final.failure_reason =~ "BARKPARK_SITE_DEPLOY_APPLY"
+    end
+
+    # THE OTHER 503, and the only phase that can write it (dr-w14 S3). The api
+    # door's `trigger/2` opens with `if DeployRunner.enabled?()` and answers
+    # `feature_not_configured` when it is off; `status/2` has NO such gate, so
+    # this cause exists on the START arm and NOWHERE else. It is the 265-row
+    # shape that named the whole 503 split — the box was demonstrably UP and the
+    # operator was sent to check its health — so the producer side owes it a
+    # test, and the ledger's label gauge scrapes its wire vocabulary from this
+    # file (`deploy_ledger_test.exs`, assertion A): delete this and the gauge
+    # goes red rather than quietly measuring five words instead of six.
+    test "a switched-off deploy flag is a TERMINAL start refusal, named as configuration" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 503,
+           %{
+             "error" => %{
+               "code" => "feature_not_configured",
+               "message" =>
+                 "site deploys are not enabled on this instance (set BARKPARK_SITE_DEPLOY_APPLY=1)",
+               "request_id" => "F9-flag-off"
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "failed"
+      assert row.failure_reason =~ "refused the deploy"
+      assert row.failure_reason =~ "feature_not_configured"
+      # TYPED, so no grace is spent repeating a question a flag already answered.
+      assert Enum.count(FakeBoxRelay.calls(), &match?({:start_deploy, _}, &1)) == 1
+      refute row.failure_reason =~ "transient box 5xx"
+
+      # The class an operator reads, from the row the driver wrote: the flag,
+      # never the box's health.
+      assert DeployLedger.classify(row) == "BOX_DEPLOY_DISABLED_503"
+      refute DeployLedger.label("BOX_DEPLOY_DISABLED_503") =~ "unavailable"
+      assert DeployLedger.refusal_phase(row.failure_reason) == :start
     end
   end
 
