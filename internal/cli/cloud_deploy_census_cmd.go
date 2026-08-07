@@ -319,9 +319,7 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("  the window is pinned by this command, not defaulted by the server — every number below is about THIS population.")
 	out.outf("")
 	out.outf("%s", deployCensusHeadline(census))
-	if b := strings.TrimSpace(census.FailureRate.Basis); b != "" {
-		out.outf("  basis: %s", sanitizeCell(b))
-	}
+	out.outf("  basis: %s", deployCensusBasis(census.FailureRate.Basis))
 	out.outf("")
 
 	if len(census.Classes) > 0 {
@@ -373,12 +371,27 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 // deployCensusHeadline builds THE line: the rate, its volume, and the
 // denominator it was taken against, all together, never apart.
 //
+// LIVE-PER-ATTEMPT LEADS IT, AND THE FAILURE RATE IS A LABELLED SIBLING. A
+// headline that leads with the failure rate answers "how bad is it" and never
+// answers "did anything ship" — on 2026-08-07 that number read 1.1% on a day
+// where 72% of attempts produced nothing at all. The live term is rendered by
+// deployCensusLiveTerm in BOTH branches below (the ok-rate branch AND the
+// refused branch): a prepend on the ok branch only silently drops the live rate
+// exactly when the failure rate is refused, which is the case an operator most
+// needs it, and it passes a guard vacuously because the refused branch never
+// renders the term at all.
+//
 // It renders BOTH D34 conventions when the control plane sends both (the
 // attempted-row rate the ledger has always had, and the dr-w8-s1
 // terminal_failure_rate), and exactly one — SAYING which denominator it is —
 // against today's payload, which carries neither `live` nor
 // `terminal_failure_rate`. A refusing rate node prints its refusal here, in the
 // headline's own place, so a reader cannot miss it.
+//
+// Everything rides ONE line on purpose: the live rate on a line of its own
+// would also be a second line carrying "of N attempted", and a reader (human or
+// test) that reaches for the headline by that phrase would find whichever came
+// first.
 func deployCensusHeadline(census cloudclient.DeployCensus) string {
 	cohorts := []string{fmt.Sprintf("%d failed", census.Failed)}
 	if d := deployCensusDeferredTotal(census); d > 0 {
@@ -387,14 +400,16 @@ func deployCensusHeadline(census cloudclient.DeployCensus) string {
 	if census.Live != nil {
 		cohorts = append(cohorts, fmt.Sprintf("%d live", *census.Live))
 	}
+	cohorts = append(cohorts, deployCensusEndStates(census)...)
 	breakdown := " (" + strings.Join(cohorts, " · ") + ")"
 
+	live := deployCensusLiveTerm(census)
 	var head string
 	if pct, okRate := deployCensusPct(census.FailureRate); okRate {
-		head = fmt.Sprintf("%s of %d attempted%s", pct, census.FailureRate.Sample, breakdown)
+		head = fmt.Sprintf("%s · failure %s of %d attempted%s", live, pct, census.FailureRate.Sample, breakdown)
 	} else {
-		head = fmt.Sprintf("NO RATE — %s · %d attempted%s",
-			deployCensusRefusal(census.FailureRate, census.MinSample), census.FailureRate.Sample, breakdown)
+		head = fmt.Sprintf("%s · failure NO RATE — %s · %d attempted%s",
+			live, deployCensusRefusal(census.FailureRate, census.MinSample), census.FailureRate.Sample, breakdown)
 	}
 
 	if census.TerminalFailureRate == nil {
@@ -407,6 +422,83 @@ func deployCensusHeadline(census cloudclient.DeployCensus) string {
 	}
 	return head + fmt.Sprintf(" · terminal rate: NO RATE — %s (%d terminal)",
 		deployCensusRefusal(*census.TerminalFailureRate, census.MinSample), census.TerminalFailureRate.Sample)
+}
+
+// deployCensusLiveTerm renders the live-per-attempt node — the headline's
+// leading term. It is a rate node like any other, so it has the same three
+// endings, and NONE of them is a zero:
+//
+//   - the control plane does not send `live_rate` at all (every control plane
+//     older than dr-w16-s2): it says so. Silence there would read as a fleet
+//     that ships nothing, which is a different and much worse claim;
+//   - the node REFUSES (below min_sample): it prints the refusal, with no
+//     percentage, exactly as the failure rate does;
+//   - it has a percentage: the rate WITH the sample it was taken over.
+func deployCensusLiveTerm(census cloudclient.DeployCensus) string {
+	if census.LivePerAttempt == nil {
+		return "live per attempt: NOT SENT — this control plane does not compute it (nothing here says whether the fleet ships)"
+	}
+	rate := *census.LivePerAttempt
+	if pct, okRate := deployCensusPct(rate); okRate {
+		return fmt.Sprintf("live %s of %d attempted", pct, rate.Sample)
+	}
+	return "live per attempt: NO RATE — " + deployCensusRefusal(rate, census.MinSample)
+}
+
+// deployCensusEndStates renders the dr-w16-s2 cohorts that make success stop
+// being the unnamed remainder of Volume: in-flight rows, cancelled rows, and
+// the RESIDUAL — attempted rows whose status the census does not name.
+//
+// in_flight and cancelled print only when the control plane sent them AND they
+// are non-zero (a zero cohort is noise in a headline). The residual prints
+// whenever it was sent, INCLUDING zero: "0 residual" is the census asserting it
+// named every row, and a residual that starts rising is the signal this field
+// exists for — hiding it at zero would hide the day it stops being zero.
+//
+// `cancelled` HAS NEVER EXISTED ON PROD: 0 of 31,137 deployment rows all-time
+// (both spellings, since 2026-07-14); the lifetime status vocabulary is exactly
+// failed / live / deferred. Two producers exist and neither has ever fired. So
+// this branch is proved on a hand-made envelope in the test beside it, and a
+// prod render of it is unobtainable — any acceptance that implies one is
+// vacuous.
+func deployCensusEndStates(census cloudclient.DeployCensus) []string {
+	var out []string
+	if census.InFlight != nil && *census.InFlight > 0 {
+		out = append(out, fmt.Sprintf("%d in flight", *census.InFlight))
+	}
+	if census.Cancelled != nil && *census.Cancelled > 0 {
+		out = append(out, fmt.Sprintf("%d cancelled", *census.Cancelled))
+	}
+	if census.Residual != nil {
+		out = append(out, fmt.Sprintf("%d residual (attempted rows this census does not name)", *census.Residual))
+	}
+	return out
+}
+
+// deployCensusBasis names the DENOMINATOR every rate above it was taken over,
+// and corrects the one word the control plane's own basis gets wrong.
+//
+// The census calls its denominator "attempted rows". It is rows, and it is NOT
+// attempts: the (site_id, environment) active index refuses a second concurrent
+// production build, so an attempt that coalesces onto an in-flight build
+// completes having minted NO deployment row. Measured on cloud-db-1, auto-deploy
+// worker jobs against `trigger='content-auto'` rows: 2026-08-05 excluded 171,
+// 2026-08-06 excluded 1,584 against 2,182 counted rows, 2026-08-07 excluded 106.
+// Every excluded attempt is non-live, so including them can only LOWER the live
+// rate — which makes live-per-attempt as computed here a CEILING, in the
+// flattering direction. (`coalesced_attempts` now lands on the row but is not in
+// this envelope, so the denominator still excludes them.)
+//
+// It prints on EVERY render, including the payload that sends no basis at all,
+// and it carries no percentage — the basis line must be safe to print beside a
+// rate that refused one.
+func deployCensusBasis(sent string) string {
+	const correction = "denominator = deployment ROWS, not attempts. An attempt that coalesces onto an in-flight build completes without minting a row, so it is never counted here " +
+		"(measured 2026-08-06: 3,766 auto-deploy worker jobs against 2,182 rows — 1,584 attempts excluded). Every excluded attempt is non-live, so the live rate above is a CEILING."
+	if b := strings.TrimSpace(sent); b != "" {
+		return sanitizeCell(b) + " — " + correction
+	}
+	return correction
 }
 
 // deployCensusDeferredTotal sums the deferral class counts — the third cohort,
@@ -628,14 +720,23 @@ USAGE
   bp cloud deployments [--days N | --from <date> --to <date>] [--sites N]
 
 WHAT IT PRINTS
-  One line carrying the rate, the volume and the denominator together:
+  One line carrying BOTH rates, the volume and the denominator together — the
+  live-per-attempt rate first, the failure rate as its labelled sibling:
 
-    37.6% of 2216 attempted (832 failed · 793 deferred · 591 live) · 58.5% of 1423 terminal
+    live 26.7% of 2216 attempted · failure 37.5% of 2216 attempted (832 failed · 793 deferred · 591 live) · 58.5% of 1423 terminal
 
-  then the failure classes, the deferrals (counted in the volume, never in the
+  then the basis line, which names the denominator: it is deployment ROWS, not
+  attempts — an attempt that coalesces onto an in-flight build mints no row, so
+  the live rate is a CEILING.
+
+  Then the failure classes, the deferrals (counted in the volume, never in the
   failure numerator), the DELIVERY census (how long content waited to reach the
   web, each percentile beside the sample and window width that produced it) and
   the sites, worst-volume first.
+
+  The parenthetical names every state an attempt ended in, so success is never
+  the unnamed remainder: it also carries "N in flight", "N cancelled" and
+  "N residual" when the control plane sends them.
 
   A percentile that cannot be identified prints NO NUMBER and the reason — on a
   fleet where 40% of rows are still waiting, no p95 exists to report. The
@@ -660,6 +761,12 @@ nobody is), a 422 (bad window) and the control plane's own below-min_sample
 refusal each print as a named refusal instead of a number.
 
 NEEDS 'bp login' AND a platform-operator account (PLATFORM_ADMIN_EMAILS on the
-control plane must name your account's email).`
+control plane must name your account's email).
+
+  FLAGGED, NOT YET TRUE: read that paragraph as "this VERB needs one", not as
+  "only a platform operator can see these numbers". dr-w16-s6 ships a
+  TEAM-scoped census over the identical population; this verb still reads the
+  operator route and has not been repointed at it. Until it is, a 403 here means
+  this route refused you — not that the census is unavailable to you.`
 	out.outf("%s", help)
 }
