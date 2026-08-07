@@ -846,9 +846,37 @@ func siteDeferralText(d cloudclient.SiteDeployment) string {
 }
 
 // siteDeferralChain is the chain's DEPTH and the bound its cause is measured
-// against, parsed out of the row's own words. ok is false against a control
-// plane that predates D99 (or any row whose sentence does not carry the pair).
+// against: the control plane's own COLUMNS first, and only then the row's words.
+// ok is false against a control plane that reports neither.
+//
+// COLUMN-FIRST, PROSE-FALLBACK, AND THE FALLBACK IS NOT A COURTESY (charter
+// D221). deferral_depth/deferral_bound went on the wire in #10301 and are stamped
+// on 116 of 1,934 post-boundary deferred rows (6.0%), first written at
+// 2026-08-07T10:12:35Z. That boundary is a HARD STEP: a row is NULL exactly when
+// it predates that instant, so a column-only reader pointed at any pre-boundary
+// window reads 100% NULL for the WHOLE window — it does not degrade by a
+// fraction, it loses everything. The prose regex is what renders those rows
+// today, and it is retired only when no un-backfilled deferred row can still be
+// read, which no backfill has been proposed to reach.
+//
+// A PRESENT-BUT-UNUSABLE PAIR IS "NO CHAIN", NEVER A PROSE RE-READ. When the
+// columns are there and say depth < 1 or bound < 1, the control plane has
+// answered — with a value that describes no chain — and falling through to the
+// regex would let a stale sentence CONTRADICT the column the same row carries.
+// The two arms disagreeing is the one outcome this order exists to prevent.
+//
+// THE TWO ARMS ALSO COUNT DIFFERENT THINGS, which is why the depth is never
+// presented as a chain identity: the column's notion is consecutive deferrals of
+// the same CAUSE at the head of the site's stream, NOT the (site_id, content_rev)
+// grouping — a content-rev chain of length 4 carries a stamped depth of 5.
 func siteDeferralChain(d cloudclient.SiteDeployment) (depth, bound int, ok bool) {
+	if d.DeferralDepth != nil && d.DeferralBound != nil {
+		cd, cb := *d.DeferralDepth, *d.DeferralBound
+		if cd < 1 || cb < 1 {
+			return 0, 0, false
+		}
+		return cd, cb, true
+	}
 	m := siteDeferralChainRe.FindStringSubmatch(siteDeferralText(d))
 	if m == nil {
 		return 0, 0, false
@@ -875,7 +903,7 @@ func siteDeferralChain(d cloudclient.SiteDeployment) (depth, bound int, ok bool)
 func siteDeferralLine(d cloudclient.SiteDeployment) string {
 	depth, bound, ok := siteDeferralChain(d)
 	if !ok {
-		return "the box refused this deploy and a rebuild was re-queued — this control plane does not report how deep the refusal chain is"
+		return "the box refused this deploy — this control plane does not report how deep the refusal chain is"
 	}
 	return fmt.Sprintf(
 		"refusal %d of %d consecutive — counts only back-to-back refusals of the SAME cause, so any successful deploy resets it to 0; it is a zero-progress guard, not a countdown",
@@ -895,6 +923,53 @@ func siteDeferredRow(dep, newest *cloudclient.SiteDeployment) *cloudclient.SiteD
 		return dep
 	}
 	return nil
+}
+
+// siteRequeueVisible answers the ONE question the deferral copy used to assume:
+// does the page this status read actually carry a re-queued attempt for the row
+// that was refused?
+//
+// It is deliberately narrow. A re-queue would arrive as a NEWER row on the same
+// site that has not settled — so the evidence is "a non-terminal row whose
+// inserted_at is strictly after the refused row's", and nothing else counts. A
+// newer FAILED or LIVE row is not the refused round being retried, and an
+// unparseable or absent stamp on either side proves nothing: both refuse rather
+// than guess, because guessing here is exactly how the unconditional promise got
+// written in the first place.
+//
+// In the shape the status header hits, this is nearly always false — the refused
+// row IS the newest row on a newest-first page, so by construction there is
+// nothing newer to see. That is the finding, not a defect in this function: from
+// this page a re-queue is usually UNOBSERVABLE, and the copy must say so instead
+// of asserting it.
+func siteRequeueVisible(dd cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) bool {
+	at, ok := siteParseStamp(dd.InsertedAt)
+	if !ok {
+		return false
+	}
+	for _, r := range ledger {
+		if strings.EqualFold(strings.TrimSpace(r.ID), strings.TrimSpace(dd.ID)) {
+			continue
+		}
+		if !siteDeployWaiting(r.Status) {
+			continue
+		}
+		rt, rok := siteParseStamp(r.InsertedAt)
+		if !rok || !rt.After(at) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// siteRequeueClause is the parenthetical the deferred-newest status line ends on
+// — a claim when the page proves one, and a named blind spot when it does not.
+func siteRequeueClause(dd cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) string {
+	if siteRequeueVisible(dd, ledger) {
+		return "(a newer attempt is already on this site's ledger)"
+	}
+	return "(nothing newer than it is on the page this status read, so whether a rebuild has been re-queued is not visible from here — it is not evidence your publish was dropped)"
 }
 
 // runCloudSiteRollback is `bp cloud site rollback <site>` — the sub-second
@@ -1226,11 +1301,20 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 			payload["latest_deployment"] = siteDeploymentMap(*newest)
 			payload["staleness"] = siteStalenessMap(dep, newest, ledger)
 		}
+		// The window rides as its OWN node, present only when a page was actually
+		// read — an absent `window` means "this status could not read the ledger",
+		// which is the one thing a zeroed census would hide.
+		if w, ok := siteReadWindow(ledger); ok {
+			payload["window"] = siteWindowMap(w)
+		}
 		out.emitStructured(payload)
 		return exitOK
 	}
 
 	renderKV(out, spawnSiteStatusMap(site, dep, newest, ledger))
+	if w, ok := siteReadWindow(ledger); ok {
+		renderSiteWindow(out, w)
+	}
 	if dep == nil {
 		out.outf("")
 		if newest != nil && siteDeployFailed(newest.Status) {
@@ -1552,13 +1636,28 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 		if newest != nil && siteDeployDeferred(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
 			// Same shape as the staleness arm above, for the sibling half-truth:
 			// "live" alone names a build the box is still serving BECAUSE the next
-			// one was refused — the difference being that this one is re-queued,
-			// not lost, and the copy must not scare an operator about a deploy
-			// that is going to run.
+			// one was refused.
+			//
+			// THE RE-QUEUE IS NOW CONDITIONAL, and this is the sharpest correction
+			// on this surface (charter D213). Both lines used to end "(a rebuild is
+			// already re-queued)" UNCONDITIONALLY, and the comment that stood here
+			// said so out loud — "the difference being that this one is re-queued,
+			// not lost". The CLI cannot see that. On site `search`, 47 of 523
+			// content_rev chains are deferred-only with no live and no failed row,
+			// and every one of them printed that promise. So the clause is asserted
+			// only where the page actually carries a newer attempt, and otherwise
+			// the header says what it can and cannot see from here.
+			//
+			// IT IS NOT ESCALATED INTO A LOSS CLAIM (charter D212): of 227 settled
+			// abandoned chains, 227 have a later live row on the same site and ZERO
+			// do not — the abandonment is benign supersession. "We cannot see one
+			// from here" is the honest register; "your publish was lost" would be a
+			// second false claim pointing the other way.
+			requeue := siteRequeueClause(*newest, ledger)
 			if dep != nil {
-				m["status"] = "live — the NEWEST deploy was DEFERRED by the box (a rebuild is already re-queued)"
+				m["status"] = "live — the NEWEST deploy was DEFERRED by the box " + requeue
 			} else {
-				m["status"] = "never went live — the newest deploy was DEFERRED by the box (a rebuild is already re-queued)"
+				m["status"] = "never went live — the newest deploy was DEFERRED by the box " + requeue
 			}
 			m["newest deployment"] = hzCell(newest.ID)
 			m["newest status"] = hzCell(newest.Status)
@@ -1891,6 +1990,131 @@ func siteFailureClass(dep, newest *cloudclient.SiteDeployment) string {
 		return strings.TrimSpace(dep.FailureClass)
 	}
 	return ""
+}
+
+// siteWindow is the WINDOW this status actually read, and the outcomes inside it.
+//
+// WHY IT EXISTS. `bp cloud site status` is the one deploy surface a site owner
+// runs, and it could print six green stage ticks over a stream that was three
+// quarters refused: measured on search-capstone, the reachable 200-row window
+// (2026-08-07T01:32:34Z → 10:29:17Z) was 148 deferred / 47 live / 5 failed, and
+// the header named none of it and named no window over which anyone could
+// contest it. A surface that does not print the window it read is already
+// mis-reporting, because it invites the reader to generalise a bounded page into
+// a site's whole history.
+//
+// EVERY COUNT SHIPS WITH ITS DENOMINATOR (charter D3) and none of them is a rate:
+// the counts are over THIS page, not over the site, and dividing them would
+// manufacture a percentage that is era-unstable and unfalsifiable (D174/D142).
+// The span is the stamps the page ACTUALLY carried — never siteClock(), never an
+// imputed "last 24h" — and rows whose inserted_at will not parse are counted out
+// loud rather than silently dropped from the span.
+type siteWindow struct {
+	Rows      int
+	Deferred  int
+	Failed    int
+	Live      int
+	Waiting   int
+	Stampless int
+	Oldest    string
+	Newest    string
+	PageFull  bool
+	PageLimit int
+}
+
+// siteReadWindow measures the page. It reports only what the rows say.
+func siteReadWindow(ledger []cloudclient.SiteDeployment) (siteWindow, bool) {
+	if len(ledger) == 0 {
+		return siteWindow{}, false
+	}
+	w := siteWindow{Rows: len(ledger), PageLimit: siteStatusLedgerPage, PageFull: len(ledger) >= siteStatusLedgerPage}
+	var oldest, newest time.Time
+	for _, r := range ledger {
+		switch {
+		case siteDeployDeferred(r.Status):
+			w.Deferred++
+		case siteDeployFailed(r.Status):
+			w.Failed++
+		case strings.EqualFold(strings.TrimSpace(r.Status), "live"):
+			w.Live++
+		case siteDeployWaiting(r.Status):
+			w.Waiting++
+		}
+		t, ok := siteParseStamp(r.InsertedAt)
+		if !ok {
+			w.Stampless++
+			continue
+		}
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+		if newest.IsZero() || t.After(newest) {
+			newest = t
+		}
+	}
+	if !oldest.IsZero() {
+		w.Oldest = oldest.Format(time.RFC3339)
+		w.Newest = newest.Format(time.RFC3339)
+	}
+	return w, true
+}
+
+// renderSiteWindow prints the census as its OWN block after the KV table.
+//
+// NOT KV ROWS, and that is mechanical rather than aesthetic: renderKV sorts its
+// keys ALPHABETICALLY and pads every key to the widest one, so census rows would
+// scatter between `dataset` and `framework` and widen the whole header away from
+// the facts it exists to show. `stages:` already established the block shape on
+// this surface.
+func renderSiteWindow(out *writer, w siteWindow) {
+	out.outf("")
+	out.outf("recent attempts (the window this status read — not this site's whole history):")
+	if w.Oldest != "" {
+		out.outf("  %d attempts read, from %s to %s", w.Rows, w.Oldest, w.Newest)
+	} else {
+		out.outf("  %d attempts read — none of them carried a readable inserted_at, so this window has no span", w.Rows)
+	}
+	parts := make([]string, 0, 4)
+	parts = append(parts, fmt.Sprintf("%d of %d deferred by the box", w.Deferred, w.Rows))
+	parts = append(parts, fmt.Sprintf("%d of %d live", w.Live, w.Rows))
+	parts = append(parts, fmt.Sprintf("%d of %d failed", w.Failed, w.Rows))
+	if w.Waiting > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d still running or queued", w.Waiting, w.Rows))
+	}
+	out.outf("  %s", strings.Join(parts, " · "))
+	if w.Stampless > 0 && w.Oldest != "" {
+		out.outf("  %d of %d rows carried no readable inserted_at and are outside that span", w.Stampless, w.Rows)
+	}
+	if w.PageFull {
+		out.outf("  the page came back full at %d rows, so older attempts exist that this status did not read", w.PageLimit)
+	}
+}
+
+// siteWindowMap is the census's `-o json` twin. It is its OWN sibling node, NOT a
+// `staleness` key: staleness answers "is what is serving also the last thing that
+// happened?" about TWO rows, while this answers "what did I read, and how did it
+// go?" about a page — folding them would let a reader threshold a page-scoped
+// count as if it were a property of the live pointer.
+func siteWindowMap(w siteWindow) map[string]any {
+	m := map[string]any{
+		"attempts_read":  w.Rows,
+		"page_limit":     w.PageLimit,
+		"page_full":      w.PageFull,
+		"deferred_count": w.Deferred,
+		"failed_count":   w.Failed,
+		"live_count":     w.Live,
+		"waiting_count":  w.Waiting,
+	}
+	// Absent, never zero-valued: a span the page could not support must read as
+	// unknown, and "1970-01-01" is the most confident lie this node could tell.
+	if w.Oldest != "" {
+		m["oldest_inserted_at"] = w.Oldest
+		m["newest_inserted_at"] = w.Newest
+	}
+	if w.Stampless > 0 {
+		m["attempts_without_a_stamp"] = w.Stampless
+	}
+	return m
 }
 
 // siteStalenessMap is the `-o json` twin of the staleness arm above: the explicit
