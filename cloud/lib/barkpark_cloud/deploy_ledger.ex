@@ -74,6 +74,87 @@ defmodule BarkparkCloud.DeployLedger do
   carries `sample` beside it, every window is PINNED by an explicit `inserted_at`
   bound (never a floating "now minus"), and below `min_sample/0` the census
   refuses to compute a percentage at all — as behaviour, not as a docstring.
+
+  ## The vocabulary BOUNDARIES are a LIST, and the commit derivation is the one that ships
+
+  A window can span an instant at which the ledger's own vocabulary changed, and
+  a count taken across such an instant blends two taxonomies while looking like
+  one number. There is not ONE such instant — there are two, each a SCHEMA
+  EVENT trailing its own commit by a plain deploy lag, which is why
+  `boundaries` on the census envelope is a LIST and not a scalar:
+
+    * the `deferred` settle status — commit `2026-08-05T21:13:50Z` (#9615),
+      first deferred row `21:27:11.413210` (+13m21s).
+    * `deferral_cause` / `deferral_depth` / `deferral_bound` — commit
+      `2026-08-07T10:01:00Z` (#10248), first such row `10:12:35.033826`
+      (+11m35s).
+
+  THE COMMIT INSTANT IS THE BOUNDARY (`method: "schema_commit"`). The `min()`
+  over rows rides only as a corroborating twin, labelled
+  `method: "first_observed_row"`, and it is an UPPER BOUND that a SITE DELETE
+  CAN SLIDE: `deployments.site_id` is `references(:sites, on_delete: :delete_all)`
+  and `Registry.delete_site/1` has already fired it (six `site.deleted` audit
+  rows on 2026-07-18, all `proof-20260718-*` slugs). Measured on cloud-db-1:
+  site `search` owns the boundary row and 444 of 2,206 deferred rows (20.1%) —
+  delete it and the derived boundary jumps +28m15s to `21:55:26.382661` while a
+  fifth of the cohort vanishes without a sound. A boundary a `DELETE` can move
+  is not a boundary.
+
+  Only the REFUSAL-VOCABULARY boundary (the `deferred` settle status) refuses
+  anything, and only for a window that STRADDLES it: inside such a window the
+  same physical box refusal is written `failed` on one side and `deferred` on
+  the other, so `failure_rate` and `classes` are a blend of two taxonomies and
+  come back refused. A window wholly on one side is internally consistent and is
+  NOT refused — the boundary list is emitted so a reader can see the
+  cross-window comparison hazard for themselves.
+
+  `live_rate` NEVER refuses across a boundary (D229): it is the one quantity
+  whose numerator and denominator are both label-independent — a deploy that
+  switched is `status == "live"` on both sides of every vocabulary change — and
+  a comparator that refuses everything is an outage a reader routes around.
+
+  ## The COMPLETENESS audit, and the blind spot it does NOT close
+
+  `census/3` folds exactly ONE `Repo.all` and derives every term from it. So the
+  partition identity (`failed + deferred + live + in_flight + cancelled +
+  residual == volume`) balances at ANY level of loss: injecting a spurious
+  `where: d.environment == "production"` into the grouped query — the good-faith
+  edit, since `delivery/3` one function away has exactly that predicate — leaves
+  the partition guard 4/4 GREEN and the whole cloud suite green while the census
+  silently under-reports. Disjointness was proved; COMPLETENESS was not.
+
+  So `completeness` is a SECOND INDEPENDENT COUNT taken inside `census/3`:
+  `Repo.aggregate(scoped, :count, :id)` — no `GROUP BY`, no classification fold
+  — reconciled against `volume + sum(not_attempted.count)`. It is `volume` PLUS
+  `not_attempted` and never `volume` alone, because the D19 tombstones sit
+  outside `volume` on purpose (7 rows all-time) and reconciling against `volume`
+  would be a permanent false red on the real corpus.
+
+  IT LIVES IN THE CODE, NOT IN A TEST, because a test is only as good as its
+  fixture: under the environment mutation the audit PASSES on every shipped
+  fixture and reds only once a preview-environment row exists. In `census/3` it
+  reds against whatever population the caller actually asked about.
+
+  THE RESIDUAL BLIND SPOT, NAMED: both query shapes inherit `scoped`. A wrong
+  `WHERE` in `scoped` itself — the window bound, the `:site_ids` narrowing — is
+  invisible to BOTH counts, and this audit cannot see it.
+
+  ## The coalesced-attempt gauge REFUSES below its own coverage floor
+
+  `coalesced_attempts` counts the deploy attempts that minted NO ROW at all
+  (`AutoDeployWorker.defer_behind_running_build/2` coalescing onto an in-flight
+  build). It is emitted BESIDE `volume` and never folded into it: the two
+  populations are disjoint by construction — a deferred row IS in `volume`, a
+  coalesced attempt produced no row to count.
+
+  THE PRE-MIGRATION ROWS ARE NOT HONESTLY-UNKNOWN NULL, measured on prod:
+  `count(*) filter (where coalesced_attempts is null)` is ZERO across all 31,254
+  rows and every pre-migration row reads exactly `0` (distinct=1, min=0, max=0)
+  — PostgreSQL 11+ materialised the constant default logically, contradicting
+  the migration's own moduledoc. So NO coverage signal is derivable from the
+  data, and a bare `SUM` over 2026-08-06 returns a confident `0` for a day whose
+  true coalesced volume was ~1,563. The floor is therefore a CODE CONSTANT — the
+  migration's applied instant — and any window starting before it is REFUSED.
   """
 
   import Ecto.Query, warn: false
@@ -177,6 +258,72 @@ defmodule BarkparkCloud.DeployLedger do
   # the 2026-08-05 daily volume (n=332, and n≈70 in a 24h slice of the quiet
   # sites) a single row moves the rate more than a percentage point.
   @min_sample 200
+
+  # ── The vocabulary boundaries ──────────────────────────────────────────────
+  #
+  # THE REFUSAL-VOCABULARY BOUNDARY. Before this instant the `deferred` settle
+  # status did not exist, so a box-busy 409 was written `failed` and IS counted
+  # in the failure numerator; after it the same physical refusal is `deferred`
+  # and is not. Keyed on the COMMIT, never on `min(inserted_at)` — see the
+  # moduledoc for why the row-derived twin is an upper bound a DELETE can slide.
+  @deferred_status_boundary %{
+    subject: "deferred settle status",
+    instant: ~U[2026-08-05 21:13:50Z],
+    method: "schema_commit",
+    source: "#9615",
+    voids:
+      "before this instant no row could settle `deferred`: every box-busy refusal was written `failed`. A window that STRADDLES it counts the same physical event under two names, so `classes` and `failure_rate` are refused across it. `live_rate` is not — its numerator and denominator are both label-independent (D229)."
+  }
+
+  # The corroborating twin, and the two `deferral_cause` events. Emitted so a
+  # reader can see the deploy lag and the derivation disagreement for
+  # themselves; only `@deferred_status_boundary` refuses anything.
+  @boundaries [
+    @deferred_status_boundary,
+    %{
+      subject: "deferred settle status",
+      instant: ~U[2026-08-05 21:27:11.413210Z],
+      method: "first_observed_row",
+      source: "min(inserted_at) where status = 'deferred'",
+      voids:
+        "corroborating twin of the schema_commit row above, +13m21s of deploy lag. AN UPPER BOUND, NOT THE BOUNDARY: `deployments.site_id` is `on_delete: :delete_all` and `Registry.delete_site/1` has already fired it — deleting site `search` slides this instant +28m15s to 21:55:26.382661 and takes 444 of 2,206 deferred rows with it. Never refuse on a number a DELETE can move."
+    },
+    %{
+      subject: "deferral_cause / deferral_depth / deferral_bound",
+      instant: ~U[2026-08-07 10:01:00Z],
+      method: "schema_commit",
+      source: "#10248",
+      voids:
+        "the deferral chain columns are NULL before this instant — every deferral is still prose in `failure_reason`. No count in this envelope reads them yet, so nothing refuses on it; a later wave that aggregates chain depth must."
+    },
+    %{
+      subject: "deferral_cause / deferral_depth / deferral_bound",
+      instant: ~U[2026-08-07 10:12:35.033826Z],
+      method: "first_observed_row",
+      source: "min(inserted_at) where deferral_cause is not null",
+      voids:
+        "corroborating twin of the row above, +11m35s of deploy lag. Same UPPER-BOUND caveat: a site delete cascade slides it."
+    }
+  ]
+
+  # ── The coalesced-attempt coverage floor ───────────────────────────────────
+  #
+  # `20260807150000_add_deferral_structure_to_deployments` applied at this
+  # instant. A CODE CONSTANT because prod carries ZERO NULLs in the column —
+  # PostgreSQL materialised the `default 0` logically over all 31,254
+  # pre-migration rows — so there is no coverage signal in the data to derive it
+  # from, and a bare SUM reads a confident 0 for a day whose true value was
+  # ~1,563. Overridable via config because the instant is per-control-plane: a
+  # second CP applies the same migration at a different time, and a bare literal
+  # would silently mis-state the floor there.
+  @coalesced_counter_since ~U[2026-08-07 10:02:23Z]
+
+  @coalesced_basis "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from `volume`, never folded into it"
+
+  # What each rate's denominator COUNTS — the D34 convention label, emitted so no
+  # percentage travels without saying what it is a percentage OF.
+  @basis_attempted "attempted rows in the window: failed + deferred + live + in_flight + cancelled + residual (never-attempted tombstones excluded, D19)"
+  @basis_failed "settled failed rows in the window — the failure numerator"
 
   @doc "The named failure classes, most-frequent-first on the corpus that motivated them."
   @spec classes() :: [class()]
@@ -710,6 +857,10 @@ defmodule BarkparkCloud.DeployLedger do
     # be absorbed by `live`.
     residual = volume - (failed + total(deferred) + live + in_flight + cancelled)
 
+    not_attempted_rows = class_rows(not_attempted, total(not_attempted), @basis_attempted)
+    sites = site_rows(attempted)
+    straddled = straddled_boundary(from, to)
+
     %{
       window: %{from: from, to: to},
       volume: volume,
@@ -718,13 +869,121 @@ defmodule BarkparkCloud.DeployLedger do
       in_flight: in_flight,
       cancelled: cancelled,
       residual: residual,
-      failure_rate: rate(failed, volume),
-      live_rate: rate(live, volume),
-      classes: class_rows(failed_rows, failed),
-      deferred: class_rows(deferred, volume),
-      not_attempted: class_rows(not_attempted, total(not_attempted)),
-      sites: site_rows(attempted, site_limit),
+      # REFUSED ACROSS THE VOCABULARY BOUNDARY, in place: the counts stay (they
+      # are real rows), the PERCENTAGE goes away, because it is the ratio that
+      # blends two taxonomies. `live_rate` is deliberately NOT refused (D229).
+      failure_rate:
+        refuse_across_boundary(rate_basis(failed, volume, @basis_attempted), straddled),
+      live_rate: rate_basis(live, volume, @basis_attempted),
+      classes: refuse_class_rows(class_rows(failed_rows, failed, @basis_failed), straddled),
+      deferred: class_rows(deferred, volume, @basis_attempted),
+      not_attempted: not_attempted_rows,
+      sites: Enum.take(sites, site_limit),
+      # THE TRUNCATION MARKER. `site_limit` has always defaulted to 50 and has
+      # always cut silently; a reader who cannot tell a 50-site fleet from the
+      # top 50 of a larger one is reading a number with no population.
+      total_sites: length(sites),
+      truncated: length(sites) > site_limit,
+      # The counter that measures the attempts which minted NO row, with a
+      # coverage floor that REFUSES rather than summing stored zeros.
+      coalesced_attempts: coalesced_attempts(scoped, from),
+      # THE SECOND INDEPENDENT COUNT, in the code and not in a test.
+      completeness: completeness(scoped, volume, not_attempted_rows),
+      boundaries: @boundaries,
       min_sample: @min_sample
+    }
+  end
+
+  # A window STRADDLES a boundary when the boundary instant falls strictly
+  # inside it. A window wholly on one side is internally consistent — every row
+  # in it was labelled by the same vocabulary — and refusing it too would make
+  # the census refuse most of its own history for no gain.
+  defp straddled_boundary(from, to) do
+    if DateTime.compare(from, @deferred_status_boundary.instant) == :lt and
+         DateTime.compare(to, @deferred_status_boundary.instant) == :gt,
+       do: @deferred_status_boundary,
+       else: nil
+  end
+
+  defp boundary_reason(%{subject: subject, instant: instant, method: method, source: source}) do
+    "the window STRADDLES the #{subject} boundary at #{DateTime.to_iso8601(instant)} " <>
+      "(method: #{method}, source: #{source}) — the same box refusal is written `failed` " <>
+      "before it and `deferred` after it, so this is a blend of two taxonomies, not a measurement"
+  end
+
+  defp refuse_across_boundary(node, nil), do: node
+
+  defp refuse_across_boundary(node, boundary),
+    do: %{node | pct: nil, refused: true, reason: boundary_reason(boundary)}
+
+  # `classes` is a LIST when it is an answer and a REFUSAL NODE when it is not.
+  # It is deliberately NOT an empty list: an empty list reads as "this fleet had
+  # no failures", which is the comforting zero this whole module refuses.
+  defp refuse_class_rows(rows, nil), do: rows
+
+  defp refuse_class_rows(_rows, boundary) do
+    %{
+      value: nil,
+      refused: true,
+      reason: boundary_reason(boundary),
+      boundary: boundary
+    }
+  end
+
+  # The migration's applied instant. Config-overridable because it is a fact
+  # about THIS control plane's database, not about this source tree.
+  defp coalesced_counter_since do
+    Application.get_env(:barkpark_cloud, :coalesced_counter_since, @coalesced_counter_since)
+  end
+
+  defp coalesced_attempts(scoped, from) do
+    since = coalesced_counter_since()
+
+    if DateTime.compare(from, since) == :lt do
+      %{
+        value: nil,
+        refused: true,
+        since: since,
+        basis: @coalesced_basis,
+        reason:
+          "the coalesced-attempt counter did not exist before #{DateTime.to_iso8601(since)} " <>
+            "(migration 20260807150000). Every earlier row carries a materialised default of 0, " <>
+            "not a NULL, so a SUM over this window would report a confident 0 — it read 0 for " <>
+            "2026-08-06, a day whose true coalesced volume was ~1,563"
+      }
+    else
+      %{
+        value: Repo.aggregate(scoped, :sum, :coalesced_attempts) || 0,
+        refused: false,
+        since: since,
+        basis: @coalesced_basis,
+        reason: nil
+      }
+    end
+  end
+
+  # THE COMPLETENESS AUDIT. A second query SHAPE over the same `scoped` source:
+  # a bare row count with no GROUP BY and no classification fold, reconciled
+  # against the numbers this envelope actually reports. `volume` PLUS
+  # `not_attempted` — never `volume` alone, or the 7 D19 tombstones make it a
+  # permanent false red on the real corpus.
+  defp completeness(scoped, volume, not_attempted_rows) do
+    audited = Repo.aggregate(scoped, :count, :id)
+    accounted = volume + Enum.reduce(not_attempted_rows, 0, &(&1.count + &2))
+
+    %{
+      audited: audited,
+      accounted: accounted,
+      unaccounted: audited - accounted,
+      balanced: audited == accounted,
+      method:
+        "Repo.aggregate(scoped, :count, :id) — no GROUP BY, no classification fold — against volume + sum(not_attempted.count). BLIND SPOT: both shapes inherit `scoped`, so a wrong WHERE in `scoped` itself is invisible to either",
+      reason:
+        if(audited == accounted,
+          do: nil,
+          else:
+            "the grouped fold reported #{accounted} of #{audited} rows in this window: #{audited - accounted} row(s) are in the population and in NO cohort. Do not read any count in this envelope as complete"
+        )
     }
   end
 
@@ -776,11 +1035,15 @@ defmodule BarkparkCloud.DeployLedger do
   defp parse_instant(_raw, name), do: {:error, "#{name} is not an ISO-8601 date or instant"}
 
   @doc """
-  A rate node: the percentage, its denominator, and — below `min_sample/0` — a
-  refusal instead of a number.
+  A rate node: the percentage, its denominator, WHAT that denominator counts,
+  and — below `min_sample/0` — a refusal instead of a number.
 
   The denominator rides IN the node so no caller can print a percentage without
-  the volume that produced it.
+  the volume that produced it, and `basis` rides beside it so no caller can
+  print a percentage without saying what it is a percentage OF (D34). The
+  default basis is the attempted population; `rate_basis/3` threads a different
+  one where the denominator is a different cohort (a failure class's share is
+  taken over `failed`, not over `volume`).
   """
   @spec rate(non_neg_integer(), non_neg_integer()) :: map()
   def rate(numerator, denominator) when denominator < @min_sample do
@@ -790,7 +1053,8 @@ defmodule BarkparkCloud.DeployLedger do
       numerator: numerator,
       min_sample: @min_sample,
       refused: true,
-      reason: "sample #{denominator} below min_sample #{@min_sample}"
+      reason: "sample #{denominator} below min_sample #{@min_sample}",
+      basis: @basis_attempted
     }
   end
 
@@ -801,13 +1065,26 @@ defmodule BarkparkCloud.DeployLedger do
       numerator: numerator,
       min_sample: @min_sample,
       refused: false,
-      reason: nil
+      reason: nil,
+      basis: @basis_attempted
     }
   end
 
+  # The basis as a REAL argument, never a default one on `rate/2` (D199): a
+  # default would let a caller emit a rate whose label says "attempted" over a
+  # denominator that is nothing of the kind, and the payload census pairs
+  # `rate/2` with the Go `DeployRate` struct on the assumption that every clause
+  # of it names the same key set.
+  defp rate_basis(numerator, denominator, basis),
+    do: %{rate(numerator, denominator) | basis: basis}
+
   defp total(groups), do: Enum.reduce(groups, 0, &(&1.count + &2))
 
-  defp class_rows(groups, denominator) do
+  # The basis rides in as a REAL argument for the same reason `rate_basis/3`
+  # takes one: a class share is denominated on `failed`, a deferral share on
+  # `volume`, and a single default would put the wrong sentence beside half the
+  # percentages this module emits.
+  defp class_rows(groups, denominator, basis) do
     groups
     |> Enum.filter(& &1.class)
     |> Enum.group_by(& &1.class)
@@ -818,35 +1095,50 @@ defmodule BarkparkCloud.DeployLedger do
         class: class,
         label: label(class),
         count: count,
-        share: rate(count, denominator)
+        share: rate_basis(count, denominator, basis)
       }
     end)
     |> Enum.sort_by(& &1.count, :desc)
   end
 
-  defp site_rows(groups, site_limit) do
+  # EVERY site, volume-sorted and UNCUT. The `site_limit` take moved up into
+  # `census/3` so the cut and the marker that reports it are written next to
+  # each other — a truncation applied here and a `total_sites` computed there
+  # is exactly how a silent cut gets re-introduced.
+  defp site_rows(groups) do
     groups
     |> Enum.group_by(& &1.site_id)
-    |> Enum.map(fn {site_id, rows} ->
-      volume = total(rows)
-      # Same three-cohort split as the fleet totals: a deferral is in the site's
-      # volume and out of its failure count, and is reported beside it so a site
-      # whose 409s became deferrals does not read as a site that got healthy.
-      {deferred, settled} = Enum.split_with(rows, &deferred?(&1.class))
-      failed_rows = Enum.filter(settled, & &1.class)
-      failed = total(failed_rows)
-
-      %{
-        site_id: site_id,
-        volume: volume,
-        failed: failed,
-        deferred: total(deferred),
-        failure_rate: rate(failed, volume),
-        top_class: top_class(failed_rows)
-      }
-    end)
+    |> Enum.map(fn {site_id, rows} -> site_row(site_id, rows) end)
     |> Enum.sort_by(& &1.volume, :desc)
-    |> Enum.take(site_limit)
+  end
+
+  # ONE site's row, as a NAMED single-clause producer rather than an inline
+  # anonymous fn — the payload census can only walk a named `def`/`defp`, so an
+  # inline map literal is a wire shape NOTHING checks against its Go decoder.
+  # `{:site_row, 2}` is a censused pair; a key added here without a matching
+  # `DeployCensusSite` tag now reds.
+  defp site_row(site_id, rows) do
+    volume = total(rows)
+    # Same three-cohort split as the fleet totals: a deferral is in the site's
+    # volume and out of its failure count, and is reported beside it so a site
+    # whose 409s became deferrals does not read as a site that got healthy.
+    {deferred, settled} = Enum.split_with(rows, &deferred?(&1.class))
+    failed_rows = Enum.filter(settled, & &1.class)
+    failed = total(failed_rows)
+
+    %{
+      site_id: site_id,
+      volume: volume,
+      failed: failed,
+      deferred: total(deferred),
+      # PER-SITE SUCCESS, READ POSITIVELY — the same one-liner the fleet total
+      # uses (D257), never `volume - failed - deferred`. A subtraction would
+      # fold in-flight and cancelled rows into `live` and report a site as
+      # healthy on the strength of builds that never finished.
+      live: total(Enum.filter(settled, &(&1.status == "live"))),
+      failure_rate: rate_basis(failed, volume, @basis_attempted),
+      top_class: top_class(failed_rows)
+    }
   end
 
   defp top_class([]), do: nil
@@ -978,6 +1270,11 @@ defmodule BarkparkCloud.DeployLedger do
     censored = Enum.filter(observations, & &1.censored)
     width = DateTime.diff(to, from)
 
+    ranked =
+      site_nodes
+      |> Enum.map(&Map.delete(&1, :observations))
+      |> Enum.sort_by(&{&1.sample, &1.site_id}, :desc)
+
     %{
       window: %{from: from, to: to, width_seconds: width},
       as_of: as_of,
@@ -996,11 +1293,13 @@ defmodule BarkparkCloud.DeployLedger do
       },
       unmetered: Enum.reduce(site_nodes, 0, &(&1.unmetered + &2)),
       min_sample: @min_sample,
-      sites:
-        site_nodes
-        |> Enum.map(&Map.delete(&1, :observations))
-        |> Enum.sort_by(&{&1.sample, &1.site_id}, :desc)
-        |> Enum.take(site_limit)
+      sites: Enum.take(ranked, site_limit),
+      # THE SAME TRUNCATION MARKER the census node carries. `site_limit` has
+      # defaulted to 50 here too and cut just as silently; the Go side's own
+      # marker is over its OWN 10-row clamp and is structurally blind to this
+      # cut, so a reader could never tell a 50-site fleet from the top 50.
+      total_sites: length(ranked),
+      truncated: length(ranked) > site_limit
     }
   end
 
