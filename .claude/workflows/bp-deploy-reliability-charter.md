@@ -5638,3 +5638,71 @@ absence; slug lookup goes through the repo. The epic task's `children` array car
 are not recoverable from the board. And `bp cloud deployments` defaults to `table` on a tty and `json` when
 piped — a piped acceptance run silently takes the json arm, which prints `census.Raw` verbatim and therefore
 proves NOTHING about decode; every human-render acceptance must pass `-o table` explicitly.
+
+### Wave 2026-08-07 (wave 18) — REVIEWED · Paper `deploy-reliability-wave-18-2026-08-07` · grade **A−**
+
+**Four of five slices built, reviewed, rebased onto `origin/main` `b4a3569`, gate-green on their final state,
+pushed and PR'd.** The fifth (`dr-w18-s5`) is round 2 by design and was not built — it needs S1's re-pointed
+client and S2's census node on `main` first.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The census reader reaches the team door | `dr-w18-s1-census-reader-reaches-the-team-door` | `…reaches-a-door-that-0-r` | [#10518](https://github.com/FRIKKern/barkpark/pull/10518) | build + vet + `go test -count=1` — `internal/cli` ok, `internal/cloudclient` ok |
+| One owner for the census map | `dr-w18-s2-census-map-one-owner` | `…census-map-per-site-li-1-r` | [#10519](https://github.com/FRIKKern/barkpark/pull/10519) | 110 tests, 0 failures · full cloud suite 3166/0 |
+| The push rail can lose | `dr-w18-s3-push-rail-can-lose` | `…digest-stops-succeeding--2-r` | [#10520](https://github.com/FRIKKern/barkpark/pull/10520) | 15 tests, 0 failures · full cloud suite 3162/0 |
+| Every signal declares its audience | `dr-w18-s4-empty-audience-guard` | `…signal-declares-the--3-r` | [#10521](https://github.com/FRIKKern/barkpark/pull/10521) | escape check OK + 28 tests, 0 failures |
+
+**What landed — the wave's own sentence.** Sixteen waves of this epic computed a correct failure rate that no
+human could read, because `bp cloud deployments` knocked on `/v1/operator/deploy-ledger/census`, a door
+`require_platform_operator` holds shut against an allowlist that is `[]` by default and unset on prod. S1
+re-points it at the team route (proved live: 403 on the operator route and 200 on the team route, same
+credential, same minute, same window) and makes every human render NAME the population it read — with a nil
+scope printing `population NOT NAMED` rather than a census of team `""`. S4 turns that lesson into a standing
+guard: five deploy-health signals declare their readers, and each reader's credential tier is derived FROM
+SOURCE — never from an `Application.get_env`, which is vacuous in CI by construction. S2 gives the census map
+one owner and three new ways to lose: a boundary LIST whose commit derivation ships and whose row-derived twin
+is labelled an upper bound a `DELETE` can slide, a coalesced gauge that REFUSES below its coverage floor
+rather than summing materialised zeros, and a completeness audit living in `census/3` rather than in a test.
+S3 stops the daily digest succeeding at sending nothing: both arms now emit a telemetry event and a greppable
+key=value line, at WARNING whenever the run lost anyone.
+
+**What the review changed, and why it mattered.** The load-bearing find was cross-slice and would have shipped
+green: S2's straddling-window refusal replaced the class LIST with a refusal MAP, and the only reader of that
+envelope declares `Classes []DeployCensusClass`. `bp cloud deployments` defaults to the last seven days, which
+straddles the 2026-08-05 boundary — so the flagship reader S1 had just repointed at a door that opens would
+have died on its DEFAULT invocation with `json: cannot unmarshal object into Go struct field
+DeployCensus.classes`, the moment both slices merged. The refusal now lands on each class row's `share`, where
+`failure_rate` already takes it; counts survive, shape does not switch, mutation-proved both ways. Three
+smaller corrections: every refusal sentence in S1 stopped calling a team-scoped read "the fleet deploy census"
+(a refusal has no scope line beneath it to correct the over-claim); S4's `fleet_operator_digest` row cited S3
+as its closer, which S3 cannot be (it fixes the counting, not the address) — re-cited to a newly filed task;
+and S3's `sent` counter, changed from `length(recipients)` to a real classification count, gained the partial-
+send test its builder had honestly flagged as missing.
+
+**What did NOT land.** Nothing is merged — the lead merges. The digest still reaches nobody: S3 fixed neither
+the payload (`dr-w10-bl-digest-email-calls-a-sick-fleet-healthy`) nor the address
+(`dr-w19-fleet-digest-audience-still-empty`, filed this review), it only made the silence audible. The team
+census route sends no `delivery` node, so the live reader shows `NOT MEASURED` where the operator route would
+have shown a number — an honest regression, filed. And `fleet_rollout_state` resolves to tier `worker`: no
+human credential can read whether the fleet brake is on, and the audience census declines to red on that
+(`dr-w19-rollout-brake-is-machine-only`, filed this review).
+
+**MERGE ORDER — the lead must sequence two of these.** S4 allowlists `fleet_deploy_census` as empty by
+construction and names S1 as its closer. The rot assertion is ARMED: whichever of S1 and S4 merges SECOND
+takes a red, and the fix either way is to delete the `fleet_deploy_census` row from
+`@empty_audience_allowlist` in that second PR. They are deliberately not co-merged — a guard and its fix in
+one diff can never demonstrate the fail-before state. S2 and S3 are independent of both.
+
+**What the next wave should take.** Dispatch `dr-w18-s5` the moment S1 and S2 are on `main` — `bp cloud
+status` still reads ZERO deploy data and renders guerrilla `ok` about a box that ships one site per 3.69
+attempts, and it is now the only thing standing between this epic's instrument and the surface a human
+actually looks at. Then the two audience holes this review opened: give fleet-health push a reachable
+recipient set, and rule on whether a `worker`-tier deploy-health signal should red the audience census.
+
+**The measurement discipline this wave adds.** A REFUSAL IS ALSO A WIRE SHAPE. Changing a key from a list to a
+refusal object is a decode error on the reader, not a refusal it can render — the discipline is to refuse the
+VALUE (a `pct`, a `share`) and never the CONTAINER, and to pin container types with an explicit `is_list/1`
+loop over every cohort key so a shape switch cannot pass. And a floor re-measured after a rebase is not the
+old floor plus a delta: S2's `@emitted_floor` was 121 on its base and 110 on main, and the 999-technique on the
+merged tree read **123** — the arithmetic guess would have been wrong in both directions, which is exactly the
+argument for `==` over `>=`.
