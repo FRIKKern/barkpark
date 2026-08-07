@@ -262,9 +262,13 @@
   //                                the copy states the relation and stops.
   //
   // NEITHER SENTENCE INVENTS A REMEDY. `outranked` is reachable by an OWNER acting
-  // on a peer owner (TeamMembership.outranks?/2 is strict `>`), where no higher
-  // role exists to appeal to; "ask an owner" would be the same confidently-wrong
-  // remedy this epic keeps deleting. Until these arms landed, both slugs fell
+  // on a peer owner — but on the PATCH verb ONLY (cch-w42-s3): update_member_role_as/4
+  // has NO escape hatch and TeamMembership.outranks?/2 is strict `>`, so owner-on-
+  // peer-owner 403s there, while remove_member_as/3 opens with
+  // `actor_role == "owner" or …`, so the SAME owner may DELETE that peer. The
+  // copy has to hold for the reachable (PATCH) case, where no higher role exists
+  // to appeal to; "ask an owner" would be the same confidently-wrong remedy this
+  // epic keeps deleting. Until these arms landed, both slugs fell
   // through forbiddenEvidenceCopy to the curated `forbidden` entry — which is how
   // an admin on the members screen came to be told about billing (D448).
   var FORBIDDEN_REASON_COPY = {
@@ -18469,20 +18473,82 @@
     return (local.charAt(0) || "?").toUpperCase();
   }
 
+  // Pure: the rank ladder the server enforces, mirrored VERBATIM from
+  // TeamMembership.rank/1 (cloud/lib/barkpark_cloud/accounts/team_membership.ex:42
+  // — `Map.get(@ranks, role, 0)` over %{member=>1, admin=>2, owner=>3}). An
+  // UNKNOWN role therefore ranks 0, i.e. BELOW everyone — deliberately, because
+  // the server ACCEPTS acting on an off-ladder target (outranks?("admin", any
+  // unknown) is true). Ranking an unrankable target ABOVE the actor would hide a
+  // control the server would honour: a FALSE REFUSAL, this epic's own class
+  // running backwards. The fail-closed floor belongs on the ACTOR side, and it
+  // already exists there — membersContext floors ctx.role to "member".
+  var MEMBER_ROLE_RANKS = { member: 1, admin: 2, owner: 3 };
+  function memberRoleRank(role) {
+    return Object.prototype.hasOwnProperty.call(MEMBER_ROLE_RANKS, role)
+      ? MEMBER_ROLE_RANKS[role] : 0;
+  }
+
+  // Pure: may the acting principal CHANGE this member's role? Mirrors
+  // Accounts.update_member_role_as/4 (cloud/lib/barkpark_cloud/accounts.ex:1784):
+  //   Authz.can_grant?/3 must pass for at least one role — that predicate never
+  //     consults the target's current role, only the actor's tier, which is
+  //     exactly what assignableRoles/1 already models; AND
+  //   `not self? and not TeamMembership.outranks?(team_role(actor, team), current_role)`
+  //     -> {:error, :forbidden}  (accounts.ex:1801)
+  // Two consequences the old single boolean got wrong: the rank arm is BYPASSED
+  // on your OWN row (self-demotion is legal — last_owner is a 409 STATE refusal
+  // the server owns, not an authority one), and there is NO owner escape hatch
+  // here, so an owner may NOT change a PEER OWNER's role (strict `>`).
+  function canChangeMemberRole(actorRole, targetRole, isSelf) {
+    if (!assignableRoles(actorRole).length) return false;
+    if (isSelf) return true;
+    return memberRoleRank(actorRole) > memberRoleRank(targetRole);
+  }
+
+  // Pure: may the acting principal REMOVE this member? Mirrors
+  // Accounts.remove_member_as/3 (cloud/lib/barkpark_cloud/accounts.ex:1715, the
+  // predicate at :1722):
+  //   `actor_role == "owner" or TeamMembership.outranks?(actor_role, target_role)`
+  // — an OWNER ESCAPE HATCH that the role-change law does NOT have, so an owner
+  // MAY remove a peer owner even though they may not re-role them. The tier gate
+  // is the route's `with_team_role(conn, "admin")`, modelled by assignableRoles.
+  // The server has no self? branch on this verb; the self row is withheld here
+  // by console ruling (D492 variant B) because the merge-blocking members smoke
+  // pins removes.length === 2 over a 3-row roster whose row 0 IS the actor. That
+  // withheld owner-self Remove is an UNDER-offer, pre-existing on main, filed
+  // separately — it is not this slice's class.
+  function canRemoveMember(actorRole, targetRole, isSelf) {
+    if (isSelf) return false;
+    if (!assignableRoles(actorRole).length) return false;
+    return actorRole === "owner" || memberRoleRank(actorRole) > memberRoleRank(targetRole);
+  }
+
   // Pure: one member row on the GR33 roster anatomy — avatar, email (+ "(you)"),
-  // a mono joined-at line, a role chip, and (for managers, never on yourself) the
-  // Change-role / Remove actions. THREE roles only (owner/admin/member); the chip
-  // reads straight off ROLE_LABELS, which already matches the server's 3-role
-  // vocabulary — no invented "operator"/"supporter" tiers (GR36/gr-backlog-role-vocabulary).
+  // a mono joined-at line, a role chip, and the Change-role / Remove actions,
+  // each emitted INDEPENDENTLY under its own server-mirroring predicate (they
+  // were one ternary over an actor-only boolean, which is how an acting admin
+  // came to be offered both on the team OWNER's row — four controls the server
+  // 403s `outranked`). A refused control is OMITTED, never a disabled ghost
+  // (D428 is an ONLY-clause over the seven lifecycle-rail verbs). THREE roles
+  // only (owner/admin/member); the chip reads straight off ROLE_LABELS, which
+  // already matches the server's 3-role vocabulary — no invented
+  // "operator"/"supporter" tiers (GR36/gr-backlog-role-vocabulary).
   function memberRowHtml(m, ctx) {
-    var canManage = assignableRoles(ctx.role).length > 0;
     var isSelf = ctx.userId != null && String(m.user_id) === String(ctx.userId);
-    var actions = (canManage && !isSelf)
-      ? '<button class="btn btn-ghost btn-sm" data-member-role="' + esc(m.user_id) +
-          '" data-role="' + esc(m.role) + '" data-email="' + esc(m.email) + '" type="button">Change role</button>' +
-        '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
-          '" data-email="' + esc(m.email) + '" type="button">Remove</button>'
-      : "";
+    // On your OWN row the target IS the actor, so the role the server compares
+    // against is ctx.role (the resolved team_authority), never the roster row's
+    // own m.role — a row can carry a stale or incoherent role for yourself and
+    // the server would still read your real one.
+    var targetRole = isSelf ? ctx.role : m.role;
+    var actions = "";
+    if (canChangeMemberRole(ctx.role, targetRole, isSelf)) {
+      actions += '<button class="btn btn-ghost btn-sm" data-member-role="' + esc(m.user_id) +
+        '" data-role="' + esc(targetRole) + '" data-email="' + esc(m.email) + '" type="button">Change role</button>';
+    }
+    if (canRemoveMember(ctx.role, targetRole, isSelf)) {
+      actions += '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
+        '" data-email="' + esc(m.email) + '" type="button">Remove</button>';
+    }
     return '<div class="set-row">' +
       '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(m.email)) + "</span>" +
       '<div class="set-row-main"><div class="set-row-name">' + esc(m.email) +
@@ -18566,6 +18632,30 @@
       }
       fetchMembers(c);
     });
+  }
+
+  // The #members-invite click, lifted out of init() so it can be DRIVEN (it was
+  // an anonymous listener with a two-line body and no else arm — unreachable
+  // from any harness, which is the only reason the silence below survived).
+  //
+  // cch-w42-s3: the else arm did not exist. The button is un-hidden at RENDER
+  // under a `grant` band (fetchMembers), but membersContext() is re-read at
+  // CLICK time and its loading / failed / stale arms all answer null — the
+  // stale arm being a live localStorage read that can flip between the paint
+  // and the press. So a visible, enabled button produced LITERALLY NOTHING: no
+  // modal, no toast, no refusal, no console write. Name the cause and repaint
+  // the true state (loadMembers re-hides the button when the band stops
+  // granting). A silent `return` with a comment would be the same lie with a
+  // paper trail.
+  function membersInviteClick() {
+    var c = membersContext();
+    if (c) { openInviteModal(c); return; }
+    toast({
+      kind: "error",
+      title: "Can't invite right now",
+      body: "We can't confirm your permissions on this team at the moment — refreshing the members list.",
+    });
+    loadMembers();
   }
 
   function fetchMembers(ctx) {
@@ -18692,13 +18782,35 @@
     });
   }
 
+  // Pure: the <option> list for the Change-role dialog.
+  //
+  // cch-w42-s3: when NO option matches currentRole the browser preselects the
+  // FIRST one, so the dialog opened having already silently STAGED a change the
+  // actor never chose (live case: an admin on a row whose role is "owner" saw
+  // "Admin" pre-picked, one Save away from a demotion nobody asked for). The
+  // no-match arm is now explicit: a disabled, selected placeholder carrying an
+  // EMPTY value that names the role the member holds now, so nothing is staged
+  // until a real choice is made — and the submit arm refuses "" out loud rather
+  // than PATCHing a role the actor never picked.
+  function roleModalOptionsHtml(actorRole, currentRole) {
+    var roles = assignableRoles(actorRole);
+    var matched = roles.indexOf(currentRole) !== -1;
+    return (matched ? "" :
+      '<option value="" selected disabled>' +
+        esc(currentRole
+          ? "Currently " + (ROLE_LABELS[currentRole] || currentRole) + " — choose a new role"
+          : "Choose a role") +
+      "</option>") +
+      roles.map(function (r) {
+        return '<option value="' + esc(r) + '"' + (r === currentRole ? " selected" : "") + ">" + esc(ROLE_LABELS[r]) + "</option>";
+      }).join("");
+  }
+
   // Change role: PATCH /v1/teams/:id/members/:user_id {role}.
   function openRoleModal(ctx, userId, email, currentRole) {
     var roles = assignableRoles(ctx.role);
     if (!roles.length) return;
-    var opts = roles.map(function (r) {
-      return '<option value="' + esc(r) + '"' + (r === currentRole ? " selected" : "") + ">" + esc(ROLE_LABELS[r]) + "</option>";
-    }).join("");
+    var opts = roleModalOptionsHtml(ctx.role, currentRole);
     openModal(
       '<h2 class="modal-title" id="modal-title">Change role</h2>' +
       '<p class="modal-sub">Set the team role for <b>' + esc(email || "this member") + "</b>.</p>" +
@@ -18712,6 +18824,12 @@
     $("#role-submit").addEventListener("click", function () {
       var role = $("#role-select").value;
       var btn = $("#role-submit");
+      // The placeholder above carries an empty value: nothing was chosen yet.
+      if (!role) {
+        toast({ kind: "error", title: "Choose a role first",
+          body: "This member's current role isn't one you can assign, so nothing is preselected." });
+        return;
+      }
       btn.disabled = true;
       btn.textContent = "Saving…";
       api("PATCH", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId), { role: role }).then(function (r) {
@@ -19936,10 +20054,7 @@
     $("#token-add").addEventListener("click", openTokenModal);
     // C10: the Members panel's invite button — reads the team context at click.
     var membersInvite = $("#members-invite");
-    if (membersInvite) membersInvite.addEventListener("click", function () {
-      var c = membersContext();
-      if (c) openInviteModal(c);
-    });
+    if (membersInvite) membersInvite.addEventListener("click", membersInviteClick);
 
     // GR105: the hash the shell last ROUTED, seeded at wiring time so the very
     // first hashchange compares against where the console booted. Only the
@@ -21214,6 +21329,16 @@
       // pinned by NOTHING — which is exactly why it drifted into inventing the
       // role. teamAuthorityState is the five-valued band it now reads.
       membersContext: membersContext, teamAuthorityState: teamAuthorityState,
+      // cch-w42-s3: the two RANK-RELATIVE siblings of assignableRoles (which
+      // stays actor-only, and stays the honest gate for its other three sites).
+      // The two server laws differ — remove has an owner escape hatch, re-role
+      // has a self? bypass — so they are two predicates, pinned per-verb.
+      memberRoleRank: memberRoleRank, canChangeMemberRole: canChangeMemberRole,
+      canRemoveMember: canRemoveMember,
+      // cch-w42-s3: the two silent controls next door — the invite click's
+      // missing else arm (lifted out of init() so a harness can press it) and
+      // the role dialog's no-match option list.
+      membersInviteClick: membersInviteClick, roleModalOptionsHtml: roleModalOptionsHtml,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
       removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,

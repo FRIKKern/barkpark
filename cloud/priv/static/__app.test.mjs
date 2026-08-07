@@ -7129,7 +7129,12 @@ test("C10: the Usage + Members helpers are exported", () => {
   for (const name of ["c10FmtBytes", "usageMeterDisplay", "usageMeterHtml",
     "usageMetersHtml", "usageTabShellHtml", "usageFailureCopy",
     "assignableRoles", "membersFailureCopy", "memberRowHtml",
-    "invitationRowHtml", "membersPanelHtml"]) {
+    "invitationRowHtml", "membersPanelHtml",
+    // cch-w42-s3: the two RANK-RELATIVE siblings + the two silent controls next
+    // door. Unexported, these ship unpinned — which is exactly how the members
+    // row came to gate a rank-relative question on an actor-only boolean.
+    "memberRoleRank", "canChangeMemberRole", "canRemoveMember",
+    "membersInviteClick", "roleModalOptionsHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
   // The fixed 13-meter vocabulary, in SPA render order — `instances` leads as the
@@ -7558,6 +7563,250 @@ test("C10: memberRowHtml — manage controls are role-gated and self-hidden", ()
   const self = hooks.memberRowHtml(m, { role: "admin", userId: "u2" });
   assert.match(self, /\(you\)/);
   assert.ok(!self.includes("data-member-remove"));
+});
+
+// ── cch-w42-s3: THE MEMBERS ROW READS THE TARGET'S RANK, PER VERB ───────────
+// The defect this replaces: memberRowHtml gated BOTH controls on one
+// actor-only boolean, `assignableRoles(ctx.role).length > 0`, in front of a
+// question the server answers RANK-RELATIVELY — and answers DIFFERENTLY for the
+// two verbs. So an acting ADMIN was offered Change role and Remove on the team
+// OWNER's row and on every peer-admin row: four controls the server 403s
+// `outranked`.
+//
+// The two laws, read from cloud/lib/barkpark_cloud/accounts.ex (NOT api/, which
+// has zero hits for either verb):
+//   REMOVE   accounts.ex:1722 — `actor_role == "owner" or outranks?(actor, target)`
+//            ⇒ an OWNER ESCAPE HATCH: an owner MAY remove a peer owner.
+//   RE-ROLE  accounts.ex:1798/:1801 — can_grant? (actor tier only) AND
+//            `not self? and not outranks?(actor, current_role)`
+//            ⇒ NO hatch (owner-on-peer-owner 403s, `>` is strict) and a self?
+//            BYPASS (self-demotion is legal).
+// Same relation, OPPOSITE answers on owner-vs-owner. One boolean cannot say
+// both, which is why this is a per-verb matrix and not a per-row one.
+//
+// This drives the EXPORTED memberRowHtml and reads the RENDERED row — no source
+// scan anywhere. Every mismatch lands in ONE named list, so a red says which
+// cell lies and IN WHICH DIRECTION.
+const MEMBER_AUTHORITY_MATRIX = [
+  // [cell, actorRole, targetRole, isSelf, changeRoleOffered, removeOffered]
+  // ── acting OWNER ──
+  ["owner acting on a owner row", "owner", "owner", false, false, true],
+  ["owner acting on a admin row", "owner", "admin", false, true, true],
+  ["owner acting on a member row", "owner", "member", false, true, true],
+  // ── acting ADMIN: the defect's home. Both controls 403 on owner and on a peer admin.
+  ["admin acting on a owner row", "admin", "owner", false, false, false],
+  ["admin acting on a admin row", "admin", "admin", false, false, false],
+  ["admin acting on a member row", "admin", "member", false, true, true],
+  // ── acting MEMBER: below the route's own with_team_role(conn, "admin") floor.
+  ["member acting on a owner row", "member", "owner", false, false, false],
+  ["member acting on a admin row", "member", "admin", false, false, false],
+  ["member acting on a member row", "member", "member", false, false, false],
+  // ── THE SELF ROW: two per-verb answers, never one boolean.
+  // Change role is REAL on your own row (update_member_role_as/4's self? branch
+  // bypasses the rank arm; last_owner is a 409 STATE refusal the server owns,
+  // not an authority one, so it does not withhold the control). Remove is
+  // withheld on the self row by console ruling — the server has no self? branch
+  // on that verb, so this is a known UNDER-offer, pre-existing on main, filed
+  // separately; it is pinned here so it stays a DECISION and not a drift.
+  ["owner acting on THEIR OWN row", "owner", "owner", true, true, false],
+  ["member acting on THEIR OWN row", "member", "member", true, false, false],
+  // The self row's target role comes from ctx.role, NEVER the roster row's own
+  // m.role: this cell hands memberRowHtml an INCOHERENT row (an acting admin
+  // whose own roster entry says "member"). A naive m.role mirror computes
+  // outranks?(admin, member) = true and renders Remove on your own row.
+  ["admin acting on THEIR OWN row (row says member)", "admin", "member", true, true, false],
+  // ── OFF-LADDER TARGET: rank/1 is `Map.get(@ranks, role, 0)`, so an unknown
+  // role ranks 0 — BELOW everyone — and the server ACCEPTS acting on it
+  // (outranks?("admin", "superadmin") is true; a live removal returned
+  // {:ok, :removed}). Hiding these would be a FALSE REFUSAL, this epic's class
+  // running backwards. This cell locks the mirror against a "fail-closed"
+  // refactor; the fail-closed floor belongs on the ACTOR side, where
+  // membersContext already floors ctx.role to "member".
+  ["admin acting on an OFF-LADDER row", "admin", "superadmin", false, true, true],
+];
+
+test("cch-w42-s3: memberRowHtml offers each verb exactly where the server allows it", () => {
+  const row = (actorRole, targetRole, isSelf) => hooks.memberRowHtml(
+    {
+      user_id: isSelf ? "usr_me" : "usr_them",
+      email: isSelf ? "me@x.io" : "them@x.io",
+      role: targetRole,
+      joined_at: "2026-06-01T00:00:00Z",
+    },
+    { role: actorRole, userId: "usr_me" },
+  );
+  const lies = [];
+  for (const [cell, actor, target, isSelf, wantChange, wantRemove] of MEMBER_AUTHORITY_MATRIX) {
+    const html = row(actor, target, isSelf);
+    const gotChange = html.includes('data-member-role="');
+    const gotRemove = html.includes('data-member-remove="');
+    if (gotChange !== wantChange) {
+      lies.push(cell + ": Change role is " + (gotChange ? "OFFERED but the server 403s it"
+        : "OMITTED but the server accepts it"));
+    }
+    if (gotRemove !== wantRemove) {
+      lies.push(cell + ": Remove is " + (gotRemove ? "OFFERED but the server 403s it"
+        : "OMITTED but the server accepts it"));
+    }
+  }
+  assert.deepEqual(lies, [], "the members row disagrees with the server on " + lies.length +
+    " cell(s):\n  " + lies.join("\n  "));
+});
+
+test("cch-w42-s3: a refused control is ABSENT, never a disabled ghost", () => {
+  // D428 is an ONLY-clause over the seven lifecycle-rail verbs; the settings
+  // sections stay OMIT, and a disabled ghost trips the plain-member smoke
+  // absence assertions. Asserted on the RENDERED row, not by reading source.
+  const outranked = hooks.memberRowHtml(
+    { user_id: "usr_ada", email: "ada@acme.com", role: "owner", joined_at: "2026-06-01T00:00:00Z" },
+    { role: "admin", userId: "usr_lin" },
+  );
+  assert.match(outranked, /class="set-chip">Owner</,
+    "the outranked row still states the role it refuses to let you change");
+  assert.ok(!outranked.includes("data-member-role"), "no Change-role ghost");
+  assert.ok(!outranked.includes("data-member-remove"), "no Remove ghost");
+  assert.ok(!outranked.includes("disabled"), "an omitted control must not ship as a disabled button");
+  assert.ok(!outranked.includes(">Change role<") && !outranked.includes(">Remove<"),
+    "and neither label survives as inert text");
+});
+
+test("cch-w42-s3: the self row's data-role carries ctx.role, not the roster row's own claim", () => {
+  // The Change-role button's data-role is what openRoleModal receives as
+  // currentRole, and on your OWN row the role the server will compare against
+  // is the resolved team_authority (ctx.role), never whatever the roster entry
+  // says about you. A row that disagrees with the envelope would otherwise open
+  // the dialog on the wrong current role — and, since the no-match placeholder
+  // keys on exactly that value, either mint a bogus placeholder or hide a real
+  // one. This is the cell that makes the derivation load-bearing: the predicates
+  // themselves short-circuit on isSelf, so nothing else can see it.
+  const selfRow = hooks.memberRowHtml(
+    { user_id: "usr_me", email: "me@x.io", role: "member", joined_at: "2026-06-01T00:00:00Z" },
+    { role: "admin", userId: "usr_me" },
+  );
+  assert.match(selfRow, /data-member-role="usr_me" data-role="admin"/,
+    "the self row must open the dialog on the actor's REAL role");
+  // A peer row is unaffected — there the roster's role IS the target's role.
+  const peerRow = hooks.memberRowHtml(
+    { user_id: "usr_them", email: "them@x.io", role: "member", joined_at: "2026-06-01T00:00:00Z" },
+    { role: "admin", userId: "usr_me" },
+  );
+  assert.match(peerRow, /data-member-role="usr_them" data-role="member"/);
+});
+
+test("cch-w42-s3: memberRoleRank mirrors TeamMembership.rank/1 — unknown is 0, i.e. BELOW everyone", () => {
+  assert.equal(hooks.memberRoleRank("member"), 1);
+  assert.equal(hooks.memberRoleRank("admin"), 2);
+  assert.equal(hooks.memberRoleRank("owner"), 3);
+  // `Map.get(@ranks, role, 0)` — every non-role, including the prototype keys a
+  // bare object lookup would answer with a function.
+  for (const odd of ["superadmin", "", "constructor", "toString", undefined, null]) {
+    assert.equal(hooks.memberRoleRank(odd), 0, String(odd) + " must rank 0");
+  }
+});
+
+test("cch-w42-s3: the two predicates disagree on owner-vs-owner, exactly as the two laws do", () => {
+  // The crux, stated directly on the predicates as well as through the render:
+  // one boolean cannot be both, so a future re-merge of them reds here too.
+  assert.equal(hooks.canRemoveMember("owner", "owner", false), true,
+    "remove_member_as/3 opens with `actor_role == \"owner\" or` — the hatch is real");
+  assert.equal(hooks.canChangeMemberRole("owner", "owner", false), false,
+    "update_member_role_as/4 has no hatch and outranks?/2 is strict `>`");
+  // And the self? bypass lives on ONE verb only.
+  assert.equal(hooks.canChangeMemberRole("admin", "admin", true), true);
+  assert.equal(hooks.canRemoveMember("owner", "owner", true), false);
+});
+
+test("cch-w42-s3: roleModalOptionsHtml — a currentRole with no matching option stages NOTHING", () => {
+  // On origin/main the dialog marked `selected` only on `r === currentRole`, so
+  // with no match the browser preselected the FIRST option: an admin opening a
+  // row whose role is "owner" saw "Admin" pre-picked, one Save away from a
+  // demotion they never chose.
+  const noMatch = hooks.roleModalOptionsHtml("admin", "owner");
+  assert.match(noMatch, /^<option value="" selected disabled>/,
+    "the no-match arm must lead with a disabled, EMPTY-valued placeholder");
+  assert.match(noMatch, /Currently Owner/, "and it must name the role the member holds now");
+  assert.ok(!/<option value="(admin|member)" selected/.test(noMatch),
+    "no assignable option may be preselected when none matches the current role");
+  // The matching case is untouched: the real option carries `selected` and no
+  // placeholder is minted.
+  const matched = hooks.roleModalOptionsHtml("admin", "member");
+  assert.ok(!matched.includes('value=""'), "a matching currentRole needs no placeholder");
+  assert.match(matched, /<option value="member" selected>Member<\/option>/);
+});
+
+// A DOM just wide enough to PRESS the members Invite button: the roster mount,
+// the invite button itself, and a toast stack that RECORDS instead of rendering.
+function membersInviteDom() {
+  const toasts = [];
+  const mk = (id) => ({
+    id, hidden: false, innerHTML: "", className: "", children: [], parentNode: null,
+    setAttribute() {}, getAttribute: () => null,
+    appendChild(n) { n.parentNode = this; this.children.push(n); return n; },
+    removeChild(n) { this.children = this.children.filter((c) => c !== n); return n; },
+    querySelector: () => ({ addEventListener() {}, select() {} }),
+    querySelectorAll: () => [],
+    addEventListener() {},
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    style: {},
+  });
+  const body = mk("members-body");
+  const invite = mk("members-invite");
+  const stack = mk("toast-stack");
+  stack.appendChild = (n) => { n.parentNode = stack; toasts.push(n); return n; };
+  const byId = { "members-body": body, "members-invite": invite, "toast-stack": stack };
+  const doc = {
+    readyState: "complete",
+    addEventListener() {}, removeEventListener() {},
+    querySelector: (sel) => byId[String(sel).replace(/^#/, "")] || null,
+    querySelectorAll: () => [],
+    getElementById: (id) => doc.querySelector("#" + id),
+    createElement: () => mk(""),
+    documentElement: mk(""), body: mk(""),
+  };
+  return { document: doc, body, invite, toasts };
+}
+
+test("cch-w42-s3: a visible Invite button under a non-granting band SAYS SO — it never does nothing", async () => {
+  // On origin/main this handler was `var c = membersContext(); if (c) openInviteModal(c);`
+  // with NO else. The button is un-hidden at RENDER under a `grant` band, but
+  // membersContext() is re-read at CLICK time, so a band that went loading /
+  // failed / stale between paint and press produced literally nothing: no
+  // modal, no toast, no refusal, no console write.
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const dom = membersInviteDom();
+  const calls = [];
+  sandbox.document = dom.document;
+  sandbox.fetch = (path, init) => {
+    calls.push((init && init.method) + " " + path);
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({}),
+    });
+  };
+  try {
+    hooks.clearMe(); // /v1/me has not answered → the band is "loading", not "no team"
+    hooks.membersInviteClick();
+    assert.equal(dom.toasts.length, 1,
+      "the click must produce exactly one honest toast; got " + dom.toasts.length);
+    // (the toast body is escaped on the way in, so the apostrophes read as &#39;)
+    assert.match(dom.toasts[0].innerHTML, /Can(&#39;|')t invite right now/);
+    assert.match(dom.toasts[0].innerHTML, /can(&#39;|')t confirm your permissions/i,
+      "the toast must name the CAUSE, not just decline");
+    assert.equal(dom.toasts[0].className, "toast toast-error");
+    // …and it repaints the true state rather than leaving the stale affordance up.
+    assert.match(dom.body.innerHTML, /Loading members/);
+    assert.equal(dom.invite.hidden, true,
+      "loadMembers must re-hide the invite button it could not honour");
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(calls, ["GET /v1/me"],
+      "the repaint must actually re-ask the server; got " + JSON.stringify(calls));
+  } finally {
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+    hooks.clearMe();
+  }
 });
 
 test("C10: invitationRowHtml — revoke is manager-gated", () => {
