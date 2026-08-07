@@ -1888,6 +1888,88 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-07 — wave 39 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The console stops calling a missing `/v1/me` a NO | `cch-w39-s1-me-reads-are-three-valued-and-the-unknown-has-an-exit` | `…calling-a-missing-v1-m-0-r` | [#10005](https://github.com/FRIKKern/barkpark/pull/10005) | the token picker's LOADING note still said *"Reopen this in a moment"* — the only exit that sheet used to have — with the slice's new Retry sitting directly beneath it; re-pointed at the failed arm's shipped verb |
+| The account modal stops stating a 2FA state it never read | `cch-w39-s2-the-account-modal-stops-stating-a-2fa-state-it-never-read` | `…determinate-2fa-badge-1-r` | [#10006](https://github.com/FRIKKern/barkpark/pull/10006) | `a2fConfirmed` also beat a `/v1/me` that had since LANDED; guarded to `twoFactorEnabled === null` so the retained echo fills an UNKNOWN and never overrides a fresh read |
+| The registration sweep stops greening on a candidate it never examined | `cch-w39-s4-the-registration-sweep-stops-greening-on-a-candidate-it-never-examined` | `…stops-returning-a-2` | [#10007](https://github.com/FRIKKern/barkpark/pull/10007) | none in-file — the builder's commit stands; the guard was WIRED on S5's branch instead (see below) |
+| The spec-gate packet is refreshed and the ledger is disposed | `cch-w39-s5-the-spec-gate-packet-is-refreshed-and-the-ledger-is-disposed` | `…s-refusal-is-stale--3-r` | [#10008](https://github.com/FRIKKern/barkpark/pull/10008) | THE ORDERING TRAP section wired to S4's `--require-new-context`, with the flag's inertness on a correctly-ordered run measured rather than assumed |
+
+**WHAT LANDED.** D436's frame — *the console must not state a fact it did not read* — is now true at
+the surface that mattered most. An owner whose `/v1/me` 500s is no longer told **"Only the team owner
+can manage billing."**: `renderBilling` decides `meState() !== "loaded"` AHEAD of the
+`!billingIsOwner()` refusal and takes a fail-CLOSED arm that keeps the role-free plan card, hides the
+tier grid and Cancel, and replaces `#billing-manage` wholesale with the honest block plus one Retry.
+Four more surfaces converted the same way (providers, notifications, the token picker, the team
+picker, whose `if (!meCache)` had said *"Loading teams…"* for the rest of the session after a
+failure). All five role predicates are **byte-unchanged and still boolean** — D439 held, three-
+valuedness lives in new siblings. ONE shared exit (`meUnknownHtml` + `meRetryHtml` + `wireMeRetry`)
+in the shipped `data-*-retry` grammar; `loadMe` gains providers + notifications repaint seams as
+LINES on BOTH arms, no dispatcher. Alongside it the account modal stops painting a SECURITY fact it
+never read: `accountModel`'s `!!user.two_factor_enabled` under `me = me || {}` is now three-valued at
+the model boundary, one `accountTwoFactorPhase` owner replaces a second independently-written
+re-derive, the badge went boolean→state, and `accountTwoFactorPanelHtml`'s unguarded fallthrough — a
+bare `phase:"unknown"` silently rendering *"Set up two-factor authentication"* — is an explicit arm.
+Zero CSS on either: `cssom-parity` **PARITY PASS, baseline 1305 unchanged** on both branches.
+
+**THE GUARDS CAN LOSE — RE-PROVEN AT REVIEW BY MUTATION, NOT READ.** Replacing billing's unknown arm
+with the owner render reds **smoke** (rc 1) — a behavioural instrument, not a source scan. Pointing
+providers fail-OPEN on the unknown axis (`state !== "loaded" ? true : …`) reds `__app.test.mjs`
+(920/1). S4's refusal was mutation-proved twice by the builder (in-suite control **and** the same
+`sed` applied to the real file: 126/2, then restored to 128/0). **The honest caveat, stated because
+D441 predicted it:** billing is the only converted surface whose unknown arm reds a BEHAVIOURAL
+instrument. Providers, notifications, the token picker and the team picker are pinned by source-text
+region scans and pure-HTML assertions only — no scenario drives them into the unknown state. That is
+exactly the hole `cch-w39-s3`'s census is built to close, and it is why that slice must not be cut.
+
+**THE CROSS-SLICE MERGE WAS MEASURED, NOT ASSUMED.** #10005 and #10006 both edit `app.js` and
+`__app.test.mjs`. Review test-merged the two final branches: **clean auto-merge**, and on the union
+`__app.test.mjs` **926/0**, `smoke` **all 105 scenarios**, `modal-oracle` **8 states**, `__css_check`
+0 errors, `cssom-parity` PARITY PASS, `breakpoint-sweep.test` 51/0.
+
+**THE GUARD THAT SHIPPED UNWIRED, AND HALF OF IT PAID.** S4 built `--require-new-context` (the
+identity short-circuit routed through the script's own `fail()` → exit 2) and honestly headlined that
+**nothing passed it** — the flip packet's step 2 was still the bare command. Review wired it into the
+live turnkey packet on S5's branch and *measured* that the flag is inert on a correctly-ordered run
+(flagged sweep against a genuine 5-context candidate: rc 0, `evaluated 2, skipped 12`, PARTIAL
+COVERAGE line — identical to the unflagged row), with the branch-dependency stated in the packet. The
+remaining unwired caller is the `bp` row itself
+(`cch-w39-fu-flip-packet-passes-require-new-context`).
+
+**WHAT DID NOT LAND, NAMED RATHER THAN CLAIMED.** `cch-w39-s3` (the `meCache` census with a fixture
+control) is round 2 by design — its pins are written against the POST-fix tree, so it dispatches when
+#10005 merges; annotated on the ledger as SEQUENCED, NOT STALLED with the moved census literals
+(104/79 → 105/80, 916 → 921/926) so nobody carries them. `#a2f-retry`'s reachability is markup-proved
+but NOT oracle-proved (adding the state needs a scenario, which would move the census literals #10005
+already moves) — the builder filed the debt. **The flip is NOT authorized**: no PUT was performed,
+`cch-w37-bl-register-spec-gate-human-gate` is untouched at 1/7, and S5 proved the PUT will not even
+make `verify` green on its own (`required-checks-drift.yml:9`'s advisory-prose clause still fails).
+
+**TWO INCOHERENCES FOUND AT REVIEW AND FILED RATHER THAN QUIETLY FIXED.** (1) The console will carry
+**two** `/v1/me` retry idioms once both merge — s1's shared `data-me-retry` and s2's independently
+written `#a2f-retry` — and no gate can see it, because s1's "exactly one emitter" assertions count
+bytes s2 does not share (`cch-w39-rv-one-me-retry-idiom-not-two`). (2) The five unknown arms disagree
+about role-free data: billing KEEPS the member-readable plan card and strips only the role claim,
+notifications DELETES its whole read-only email section because that section's own purpose line
+carries the claim. Neither is wrong alone; the epic owes a rule before it converts more surfaces
+(`cch-w39-rv-unknown-arms-disagree-on-keeping-role-free-data`).
+
+**LEDGER.** All four built rows `in_progress`, published, parented, carrying `wave_paper`, with every
+provable criterion stamped as it was proven and only the merge-gated one open for the lead. One extra
+row for the lead on S4: criterion **8** (*"the PR body states the honest severity"*) is satisfied
+verbatim by #10007's body but could NOT be stamped — the builder's claim was still live and review
+refuses to steal a claim to make a board look finished. Close it with the merge-gated one.
+
+**NEXT WAVE.** Merge round 1 in this order — #10007 and #10008 (file-disjoint, zero CI contention),
+then #10005, then #10006 (they auto-merge clean, proven above). The moment #10005 is on main,
+dispatch `cch-w39-s3`: it is the only instrument that can ever red on this wave's direction, and D441
+already proved a fail-open scoped to the unknown axis is invisible to every gate in the repo. Then
+the doctrine row above, then the two remaining `meCache` conversions the census names. `auth.ex` and
+`router.ex` stay off limits while #9917/#9918/#9956 contend.
+
+
 ### 2026-08-07 — wave 38 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd — grade A)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
