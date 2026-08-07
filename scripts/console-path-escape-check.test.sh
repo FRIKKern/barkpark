@@ -786,12 +786,25 @@ PY
   # report-main-failure, has not merged yet. The PR that merges it must drop
   # the "" alternative, at which point deleting the reporter reds the ratchet
   # directly instead of only in the mutation matrix below.
-  case "$(fact post_verdict_jobs)" in
-    "" | "report-main-failure")
-      ok "post_verdict_jobs = '$(fact post_verdict_jobs)' (inside the pinned roster)" ;;
-    *)
-      no "post_verdict_jobs = '$(fact post_verdict_jobs)' — outside the pinned roster {report-main-failure}" ;;
-  esac
+  #
+  # ONE ENCODING OF THE ROSTER, consulted by the live assertion below AND by the
+  # mutation matrix's pin_reds. It used to be written twice, and the second copy
+  # drifted immediately: the matrix printed "the exact pin REDS it" for the
+  # DELETED mutant while the shipped pin, carrying the transitional "", happily
+  # accepted it. A ratchet that reports catching what it does not catch is the
+  # exact lie this harness exists to refuse, so the roster is a function and
+  # there is nothing left to keep in sync.
+  post_verdict_roster_ok() {
+    case "$1" in
+      "" | "report-main-failure") return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  if post_verdict_roster_ok "$(fact post_verdict_jobs)"; then
+    ok "post_verdict_jobs = '$(fact post_verdict_jobs)' (inside the pinned roster)"
+  else
+    no "post_verdict_jobs = '$(fact post_verdict_jobs)' — outside the pinned roster {report-main-failure}"
+  fi
   # A post-verdict job that mutes its own exit-1 has spent the exemption's
   # price without paying it. Named as its own fact so it cannot hide inside
   # `coe_jobs` if that assertion is ever relaxed.
@@ -965,17 +978,31 @@ PY
   # lower bound of 1 would PASS both of these — the smuggled job only adds a
   # name, the deleted reporter only removes one — so only equality against the
   # named roster reds them.
+  # pin_reds runs the mutant's fact through post_verdict_roster_ok — the SHIPPED
+  # roster, not a second copy of it — so it reports what this ratchet actually
+  # does on that tree, and cannot drift away from the assertion it describes.
   pin_reds() {
     local got
     got="$(sed -n 's|^post_verdict_jobs=||p' "$TMPROOT/pv-$1.facts")"
-    if [ "$got" != "report-main-failure" ]; then
-      ok "  post-verdict[$1]: the exact pin REDS it ('$got' != 'report-main-failure')"
-    else
+    if post_verdict_roster_ok "$got"; then
       no "  post-verdict[$1]: the pin does NOT red it — post_verdict_jobs = '$got'"
+    else
+      ok "  post-verdict[$1]: the shipped roster REDS it (post_verdict_jobs = '$got')"
     fi
   }
   pin_reds smuggled
-  pin_reds deleted
+  # …and the DELETED mutant, which the shipped roster does NOT red today, because
+  # the transitional "" alternative is still in it. That is a real, currently-open
+  # hole and it is asserted as such rather than papered over: this harness used to
+  # claim it caught this case. It does not. The assertion is written so it FLIPS
+  # the day "" is dropped — at which point delete this block and add `pin_reds
+  # deleted` beside the smuggled one. Tracked as
+  # cch-w46-s4-followup-drop-empty-post-verdict-alternative.
+  if post_verdict_roster_ok "$(sed -n 's|^post_verdict_jobs=||p' "$TMPROOT/pv-deleted.facts")"; then
+    ok "  post-verdict[deleted]: KNOWN GAP — the transitional '' alternative accepts a deleted reporter (not a red)"
+  else
+    no "  post-verdict[deleted]: the roster now reds a deleted reporter — drop this block and use pin_reds deleted"
+  fi
 fi
 echo
 
