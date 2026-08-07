@@ -2298,3 +2298,75 @@ from any disk: jarl's 25 GB — `/var/lib/containerd` 13.80 GiB plus `/var/lib/b
 a **known, filed, unbuilt** platform gap (`cp-ops.yml:99-104` says so verbatim: "*the jarl box hit 100% of 38G
 this way and took the instance down*") whose fix, `jpf-runtime-image-pruning`, has sat unclaimed since
 2026-08-01. It becomes VISIBLE and NAMED, never smaller.
+
+### Wave 2026-08-07 (wave 7) — REVIEWED · Paper `deploy-reliability-wave-7-2026-08-07` · grade **B+**
+
+**Two of three slices built, reviewed, fixed in place, re-gated, PUSHED and PR'd. Nothing merged — the lead
+merges.** The third (`dr-w6-s4-space-reaches-eyes`) is round 2, deferred by the sequenced-rounds law behind
+#9889, which is not merged. That is not a stall; it *is* the wave's honest headline, see below.
+
+| Slice | Task | Final branch | PR | Gate on the FINAL state |
+|---|---|---|---|---|
+| A deferred site names how deep its refusal chain is (D99) | `dr-w7-s1-deferral-chain-names-its-depth` | `…names-how-deep-its-refus-0-r` | [#9959](https://github.com/FRIKKern/barkpark/pull/9959) | 64 tests, 0 failures (cloud) · `go build`+`vet`+`test ./internal/cli` ok · gofmt clean |
+| The parity instrument refuses to measure instead of accusing (D101) | `dr-w7-s2-parity-instrument-refuses-instead-of-accusing` | `…refuses-to-measure-1-r` | [#9960](https://github.com/FRIKKern/barkpark/pull/9960) | ENOEXEC binary → 2 · dead-chrome stub → 2 · real Chrome → 0 (1305/1305 heads, MISSES 0) · `proof.sh` clean=0 swallowed=1 · dropped-rule sheet → 1 (MISSES 1) |
+
+**What landed.** S1 is the wish-bearing slice and the wave's strongest work. `defer/3` computed the chain
+depth, spent it on the terminal threshold and one `Logger` line, and **discarded** it — so on the production
+ledger 63 capacity-deferred rows across five sites carried a byte-identical sentence and refusal 8 read
+exactly like a first blip. The depth, the *cause's own* bound (12 for capacity, 6 for a busy box, read from
+`max_consecutive_deferrals/1`, never a literal) and the fact that the counter is a **zero-progress guard, not
+a countdown** now ride the existing `failure_reason`/`detail` columns — no migration. The consumer shipped in
+the SAME PR, per this epic's standing shape-fix after three waves of producers landing in drawers:
+`git grep 'deferred' internal/cli/cloud_site_cmd.go` returned nothing before, and `bp cloud site status` now
+prints a dedicated `deferral` row plus `deferral_depth`/`deferral_bound` as numbers in `-o json`. A pre-D99
+control plane says the depth is *unavailable* rather than printing a zero that would read as "no chain".
+S2 closed a gate that accused the stylesheet for the environment's fault, and held the anti-vacuity line that
+was the whole point of the slice: the refusal class rides the error **object**, never its message, and
+everything the browser reports once it IS up still exits 1 (independently re-derived on both defect paths).
+
+**What did NOT land, and must be said plainly.** The wish names three things; this wave moved one of them,
+partly. *"See what is taking up space"* — jarl's 25 GB, the concrete thing the owner asked about — advanced by
+**zero merged code**, for the second consecutive wave, because the read half is sequenced behind an unmerged
+PR both times. *"See a struggling box as struggling"* advanced by nothing. The cap exists and fires, and S1
+makes its refusals legible, which is real progress on the third clause's operator surface — but half the
+wave's built output (S2) is CI hygiene on a console-stylesheet gate and serves the wish only by analogy.
+
+**Review fixes made in place** (three commits on the two `-r` branches, each proved by mutation, not reading):
+
+1. **S1** — the deferral arm and the failed-staleness arm both write `reason`, and the deferral arm runs
+   SECOND. With a failed NEWEST row and a deferred live pointer the header said "the NEWEST deploy FAILED" and
+   then printed the OLDER deferral's sentence beneath it, describing a different row than the status line
+   named. The drop is the louder truth and now wins; reverting the guard makes the new test FAIL.
+2. **S1** — the depth clause sits ahead of the re-queue promise *because* `short_detail/1` clamps `detail` to
+   varchar(255), but every assertion ran on a SHORT reason where the clamp never fires, so the ordering was
+   unpinned. A new test forces the clamp with a 180-char box message and pins that the depth survives it.
+   (This was the builder's own named gap #3 — the self-review was honest and worth its length.)
+3. **S2** — D101 tagged three bring-up steps and **missed the fourth: the spawn itself.** `findChrome()`'s
+   `X_OK` preflight cannot see exec-time faults (ENOEXEC — the arm64/amd64 runner-image mismatch class —
+   EACCES, ETXTBSY). Measured on the review host (node v22.22.0, darwin): `spawn` throws ENOEXEC
+   **synchronously**, so an unexecutable Chrome reached the classifier untagged and printed
+   `!! PARITY ERROR: spawn ENOEXEC` at exit 1 — i.e. `console-harness.yml`'s "This is a REAL CSS defect in
+   app.css". The slice shipped with its own bug class still live inside it. Both delivery shapes now covered.
+
+**Ledger audit: clean.** Both builders claimed before working, stamped evidence as they went (S1 8/9, S2 6/7),
+left lifecycle `in_progress`, and left the merge-gated "PR is merged" criterion OPEN for the lead. The unbuilt
+round-2 slice reads open / 0-of-9 / unclaimed. No task outside this wave was touched. One staleness fix: both
+now-lines still said "Not pushed", so a flat `review_verdict` was added to each task naming the final branch,
+the PR, the fixes on top, and the gate re-run — patched, re-published, read back.
+
+**What the next wave should take.** Dispatch order: merge round 1 (#9959 first — it carries the wish — then
+#9960); `dr-w6-s4-space-reaches-eyes` becomes dispatchable only once #9889 merges, and it is HIGH-FLIP-RISK on
+two judgments (the `/metrics`-fold-versus-new-route ruling D96, and the `Metrics.build/3` purity constraint)
+so an independent second reviewer is owed before merge. Then, in priority order:
+**(a)** point the wave at clause 1 and stop deferring it — if #9889 will not merge, re-cut the read half
+against what IS on `main` rather than sequencing behind it a third time;
+**(b)** take `dr-w7-followup-deploy-follow-spins-on-deferred` (filed this wave, five criteria, unclaimed) —
+`cloudclient.SiteDeploymentTerminal` omits `deferred`, so `bp cloud site deploy --follow` polls a SETTLED
+deferred row for its full ~10-minute budget against the box that just said it was at capacity and then prints
+"deploy in progress" and exits 0. Leaving it open means `status` tells the truth about a deferred row while
+`--follow` lies about the same row;
+**(c)** two structural debts, both named by their builders and neither taken: S1's producer sentence and the
+CLI's `refusal (\d+) of (\d+)` regex are ONE contract across two languages with no shared constant; and
+`cssom-parity.mjs` classifies errors in one place at the bottom of a catch block, where two waves have now
+added a class and the second one MISSED a step — a `die()`-style helper that picks a class *at the throw site*
+(the shape `overflow-guard.mjs` already has) would have made the ENOEXEC hole unwritable.
