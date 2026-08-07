@@ -545,12 +545,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — declared on the deployment decoder; `port` is emitted on site_json (router.ex:10657), never on a deployment row. Decodes to 0 forever."},
     {"site_deployment_json/3", :phantom, "runtime_target",
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
-    {"DeployLedger.census/3", :phantom, "live",
-     "PR #10014 (the lead's) carries the emitter — do NOT re-cut it. Until it lands this decodes to nil on every response."},
     {"DeployLedger.census/3", :phantom, "terminal_failure_rate",
-     "PR #10014 carries the emitter. THE HEADLINE CASE: internal/cli/cloud_deploy_census_cmd.go:398 branches on nil here, so `bp cloud deployments` is permanently on its \"older control plane\" arm and cannot tell that from a genuinely older CP."},
+     "dr-w16-bl-emit-terminal-failure-rate — THE EMITTER IS UNBUILT AND NOW OWNED. The row previously read \"PR #10014 carries the emitter\"; #10014 is CLOSED with mergedAt null, so that sentence pointed a reader at a dead branch and this hole had no owner at all. THE HEADLINE CASE: internal/cli/cloud_deploy_census_cmd.go:398 branches on nil here, so `bp cloud deployments` is permanently on its \"older control plane\" arm and cannot tell that from a genuinely older CP."},
     {"DeployLedger.rate/2", :phantom, "basis",
-     "PR #10014 carries the emitter — the D34 convention label that says WHICH denominator a rate was taken over."},
+     "dr-w16-bl-emit-rate-basis — THE EMITTER IS UNBUILT AND NOW OWNED, same dead citation as the row above (#10014, CLOSED). This is the D34 convention label that says WHICH denominator a rate was taken over; until it is emitted every rate on the wire decodes basis as \"\". Thread it as a REAL argument, never the stranded branch's default arg (D199)."},
     {"DeployLedger.census/3", :phantom, "delivery",
      "PR #10192 ships the Go reader with the estimator (D136); the route that emits it is dr-w11-s4-followup-emit-delivery-on-route. Decodes to nil until that lands, which is exactly what the pointer type is for."}
   ]
@@ -594,8 +592,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `internal/cloudclient` across earlier waves without the floor following
   # them, which is precisely the slack this comment forbids. Restored to
   # equality, measured, not guessed.
-  @emitted_floor 103
-  @go_tag_floor 218
+  # W16 S2: 103 -> 108 emitted (census/3 now names live, in_flight, cancelled,
+  # residual and live_rate). The go-tag floor moves 218 -> 221, and the arithmetic
+  # is the point: FIVE keys were added to DeployCensus, FOUR of them as new Go
+  # fields, and the union only grew by THREE — because `in_flight` was already in
+  # it, declared by the unrelated `RolloutState`. That one-tag gap IS charter
+  # D260, measured on this tree rather than argued.
+  @emitted_floor 108
+  @go_tag_floor 221
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 56 keys with the :when unwrap, 42 without.
@@ -732,6 +736,37 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
              "floor is #{@go_tag_floor} — the TAG SCANNER is broken, not the package empty."
   end
 
+  # THE UNREAD ARM'S MEASURED BLIND SPOT (charter D260). `Go.all_tags/1` is
+  # FILE-GLOBAL: it unions every json tag in internal/cloudclient, so a key whose
+  # name collides with ANY unrelated struct's tag passes the UNREAD arm without a
+  # single line being added to the struct that actually decodes it.
+  #
+  # Measured on this tree, not predicted: `RolloutState.InFlight` (client.go, the
+  # autoupdate feature) already declares `json:"in_flight"`, so `census/3`
+  # emitting `in_flight` would have gone GREEN through the UNREAD arm with
+  # DeployCensus carrying no such field at all — the CLI would decode nothing and
+  # nothing would say so. This test is the per-struct assertion the union cannot
+  # make. It is deliberately NOT a general fix (that is dr-w16's own slice for
+  # the collision-blind census); it pins THIS slice's keys to THIS struct.
+  test "D260: the census's own cohort keys are declared on DeployCensus ITSELF, not merely somewhere in the package" do
+    src = Go.source(@cloudclient)
+    census_tags = Go.struct_tags(src, "DeployCensus")
+
+    for key <- ~w(live live_rate in_flight cancelled residual) do
+      assert key in census_tags,
+             "`#{key}` is emitted by census/3 but is NOT a json tag on DeployCensus itself. " <>
+               "The UNREAD arm cannot catch this: it compares against the FILE-GLOBAL tag " <>
+               "union, so an unrelated struct declaring the same name greens it silently."
+    end
+
+    # And the collision this guard exists for is REAL, not hypothetical: prove
+    # `in_flight` is declared by a second, unrelated struct too. If this ever
+    # fails, the blind spot has moved and the comment above is stale.
+    assert "in_flight" in Go.struct_tags(src, "RolloutState"),
+           "RolloutState no longer declares in_flight — re-derive D260's blind spot before " <>
+             "trusting the UNREAD arm on any cohort key."
+  end
+
   # ---------------------------------------------------------------------------
   # The two arms
   # ---------------------------------------------------------------------------
@@ -790,8 +825,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   end
 
   test "every KNOWN OPEN row names its tracker, and the two halves are disjoint" do
+    # A bp task slug is a first-class tracker, not a second-class one. The regex
+    # used to accept ONLY `dr-w11-payload-divergence-close` or a PR number, and
+    # that is precisely how three rows came to cite PR #10014: a PR number was
+    # the only citable thing, and a PR number keeps matching after the PR is
+    # CLOSED with mergedAt null — a dead pointer that still reads as an owner.
+    # A `dr-w<n>-…` slug points at the ledger, which carries a lifecycle.
     for {payload, _arm, key, reason} <- @known_open do
-      assert reason =~ ~r/dr-w11-payload-divergence-close|PR #\d+/,
+      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|PR #\d+/,
              "#{payload}/#{key}: a KNOWN OPEN row must name the task or PR that closes it"
     end
 
