@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
@@ -2287,5 +2288,183 @@ func TestRunCloudSiteStatusFailedNewestBeatsDeferredLivePointer(t *testing.T) {
 	}
 	if strings.Contains(stdout, "refusal 3 of 12") || strings.Contains(stdout, "deferral ") {
 		t.Fatalf("no deferral section may be printed when the newest row is a drop:\n%s", stdout)
+	}
+}
+
+// --- dr-w12 S7: the waiting clock counts the one shape that IS an unbounded wait -
+
+// TestSiteWaitingSinceMeasuresADeferralChainFromItsStart is the whole slice in one
+// fixture. Before it, siteDeployWaiting read `!terminal && !deferred`, so
+// siteWaitingSince skipped every refused round — and a refusal chain is precisely
+// the shape whose wait is unbounded, since a refusal can be followed by a refusal
+// forever. On the production ledger deferrals are 53.6% of attempts, and the
+// operator's censored bound over all of them was NOTHING.
+//
+// MUTATION / BEFORE-AFTER PROOF: `git checkout HEAD -- internal/cli/cloud_site_cmd.go`
+// (this test calls only siteWaitingSince and siteTimeToWebLine, both of which
+// predate the slice, so the package still compiles) and this test REDS with
+// "measured no wait at all" — the exact silence being fixed.
+func TestSiteWaitingSinceMeasuresADeferralChainFromItsStart(t *testing.T) {
+	ttwFreeze(t)
+	dep := &cloudclient.SiteDeployment{
+		ID: "dep-live", Status: "live",
+		InsertedAt: ttwStamp(9 * time.Hour), BecameLiveAt: ttwStamp(8*time.Hour - 5*time.Minute),
+	}
+	chainReason := func(depth int) string {
+		return fmt.Sprintf("the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal %d of 12 in this site's current chain — a rebuild carrying this content has been re-queued", depth)
+	}
+	// Newest-first, as the page arrives: four rounds of ONE chain. Each round is
+	// its own row with its own inserted_at, and the newest one is the SHORTEST wait
+	// in the chain — reading it would report 2m for a publish that has been stuck
+	// for over three hours.
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "dep-r4", Status: "deferred", InsertedAt: ttwStamp(2 * time.Minute), FailureReason: chainReason(4)},
+		{ID: "dep-r3", Status: "deferred", InsertedAt: ttwStamp(21 * time.Minute), FailureReason: chainReason(3)},
+		{ID: "dep-r2", Status: "deferred", InsertedAt: ttwStamp(58 * time.Minute), FailureReason: chainReason(2)},
+		{ID: "dep-r1", Status: "deferred", InsertedAt: ttwStamp(3*time.Hour + 5*time.Minute), FailureReason: chainReason(1)},
+		*dep,
+	}
+
+	waited, id, ok := siteWaitingSince(dep, ledger)
+	if !ok {
+		t.Fatal("a four-round deferral chain measured no wait at all — the clock is still blind to the one shape that is unbounded")
+	}
+	if waited != 3*time.Hour+5*time.Minute {
+		t.Fatalf("the wait must run from the FIRST refused attempt (3h05m), got %s", waited)
+	}
+	if id != "dep-r1" {
+		t.Fatalf("the bound must name the chain's START row, got %q", id)
+	}
+
+	line := siteTimeToWebLine(dep, ledger)
+	if !strings.Contains(line, "at least 3h05m so far") {
+		t.Fatalf("the printed bound must be the chain's, got %q", line)
+	}
+	for _, shorter := range []string{"at least 2m", "at least 21m", "at least 58m"} {
+		if strings.Contains(line, shorter) {
+			t.Fatalf("the newest refusal is the shortest wait in the chain and must never be the bound (%s): %q", shorter, line)
+		}
+	}
+	// The clock is measured from the START, the DEPTH is read off the head — two
+	// different rows, because "how deep am I now" is only true on the latest round.
+	// Quoting the measured row's own sentence would print "refusal 1 of 12" over a
+	// chain four rounds deep.
+	if !strings.Contains(line, "refusal 4 of 12 consecutive") {
+		t.Fatalf("the depth must come from the NEWEST refusal, not the row the clock was measured from: %q", line)
+	}
+	if strings.Contains(line, "refusal 1 of 12") {
+		t.Fatalf("the chain-start row's stale depth must not be printed as the current one: %q", line)
+	}
+	// The WAIT leads; the depth is a detail behind it. The chain is bounded and
+	// small (24h p50 3, max 11) while the wait it produces is not, so a header that
+	// opened with the depth would lead with the least alarming number on the row.
+	if i, j := strings.Index(line, "still waiting"), strings.Index(line, "refusal 4 of 12"); i < 0 || j < 0 || i > j {
+		t.Fatalf("the wait must be printed BEFORE the chain depth: %q", line)
+	}
+	// Depth-of-fence, never a bare count — and never a chain-derived rate
+	// (charter D174/D142: chains carry no key, so any percentage over them is
+	// unfalsifiable and era-unstable).
+	for _, want := range []string{"of 12 consecutive", "zero-progress guard, not a countdown", "any successful deploy resets it to 0"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("the depth must carry its fence and what it counts (%q): %q", want, line)
+		}
+	}
+	if strings.Contains(line, "%") {
+		t.Fatalf("no chain-derived rate may be printed: %q", line)
+	}
+}
+
+// TestSiteWaitingClauseNamesItsClock: #10189 landed the NAME THE CLOCK law on this
+// surface for the time-to-web number, and the censored wait had been printing a
+// bare duration beside it. The two clocks are 7.1x apart at p50 and 13.6x at p95
+// on IDENTICAL rows (publish-keyed p50 235s vs row-keyed p50 33s) — a duration
+// that does not say which one it is has an order of magnitude of slack in it.
+func TestSiteWaitingClauseNamesItsClock(t *testing.T) {
+	ttwFreeze(t)
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "dep-q", Status: "queued", InsertedAt: ttwStamp(40 * time.Minute)},
+	}
+	line := siteTimeToWebLine(nil, ledger)
+	if !strings.Contains(line, "at least 40m00s so far") {
+		t.Fatalf("the censored bound must be printed: %q", line)
+	}
+	for _, want := range []string{"inserted_at", "not from your publish", "60s of debounce"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("every printed wait must disclose whose clock it is (%q): %q", want, line)
+		}
+	}
+	// A queued row is not a refused one: no chain vocabulary may attach to it.
+	if strings.Contains(line, "REFUSED") || strings.Contains(line, "refusal") {
+		t.Fatalf("a slow build is not a refusal chain: %q", line)
+	}
+}
+
+// TestSiteWaitingChainDegradesWhenTheControlPlaneIsSilent is the able-to-lose arm,
+// and it is the reason the pre-D99 branch in siteDeferralLine is kept rather than
+// tidied away: a box that does not report chain depth must produce a wait that
+// SAYS the depth is unavailable, not a wait with a zero in it. "refusal 0 of 0"
+// would read as "no chain" — the exact inversion of the truth.
+func TestSiteWaitingChainDegradesWhenTheControlPlaneIsSilent(t *testing.T) {
+	ttwFreeze(t)
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "dep-d2", Status: "deferred", InsertedAt: ttwStamp(6 * time.Minute),
+			FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity - deferred: a rebuild carrying this content has been re-queued"},
+		{ID: "dep-d1", Status: "deferred", InsertedAt: ttwStamp(52 * time.Minute),
+			FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity - deferred: a rebuild carrying this content has been re-queued"},
+	}
+	line := siteTimeToWebLine(nil, ledger)
+	// The WAIT survives the silence — it is measured from stamps the row carries,
+	// not from the sentence it does not.
+	if !strings.Contains(line, "at least 52m00s so far") {
+		t.Fatalf("an unreported chain must still be timed from its start: %q", line)
+	}
+	if !strings.Contains(line, "does not report how deep the refusal chain is") {
+		t.Fatalf("a silent control plane must be named as silent: %q", line)
+	}
+	if strings.Contains(line, "refusal 0") {
+		t.Fatalf("an unparseable chain must never print a zero depth: %q", line)
+	}
+}
+
+// TestSiteStalenessCarriesTheChainBesideTheWait is the machine twin: a script that
+// pages a fleet should be able to separate "a build is slow" from "the box keeps
+// refusing", without grepping prose. The flag rides ONLY a deferred bound (never a
+// `false` on the others, which would read as a measurement the CLI did not make),
+// and the depth pair rides only a control plane that actually said it.
+func TestSiteStalenessCarriesTheChainBesideTheWait(t *testing.T) {
+	ttwFreeze(t)
+	newest := &cloudclient.SiteDeployment{ID: "dep-r2", Status: "deferred"}
+	chain := []cloudclient.SiteDeployment{
+		{ID: "dep-r2", Status: "deferred", InsertedAt: ttwStamp(4 * time.Minute),
+			FailureReason: "box_at_capacity — deferred: refusal 7 of 12 in this site's current chain"},
+		{ID: "dep-r1", Status: "deferred", InsertedAt: ttwStamp(80 * time.Minute),
+			FailureReason: "box_at_capacity — deferred: refusal 6 of 12 in this site's current chain"},
+	}
+	m := siteStalenessMap(nil, newest, chain)
+	if m["latest_waiting_seconds_at_least"] != int64(80*60) {
+		t.Fatalf("the censored bound must be the chain start's 80m, got %v", m["latest_waiting_seconds_at_least"])
+	}
+	if m["latest_waiting_deferred"] != true {
+		t.Fatalf("a refused wait must be flagged as one: %+v", m)
+	}
+	if m["latest_waiting_deferral_depth"] != 7 || m["latest_waiting_deferral_bound"] != 12 {
+		t.Fatalf("the depth pair must come from the chain HEAD (7 of 12): %+v", m)
+	}
+	// No rate, no percentage, ever: chains have no key and the closed-live rate is
+	// era-unstable (48.4% over 7d vs 28.3% over 24h) — charter D174/D142.
+	for k := range m {
+		if strings.Contains(k, "rate") || strings.Contains(k, "percent") {
+			t.Fatalf("no chain-derived rate may reach the envelope: %q", k)
+		}
+	}
+
+	// A slow build carries neither the flag nor the pair — absence means "not a
+	// refusal", which is the only honest shape for a fact we did not measure.
+	slow := []cloudclient.SiteDeployment{{ID: "dep-q", Status: "building", InsertedAt: ttwStamp(11 * time.Minute)}}
+	q := siteStalenessMap(nil, &cloudclient.SiteDeployment{ID: "dep-q", Status: "building"}, slow)
+	for _, k := range []string{"latest_waiting_deferred", "latest_waiting_deferral_depth", "latest_waiting_deferral_bound"} {
+		if _, present := q[k]; present {
+			t.Fatalf("%s must be ABSENT on a non-refused wait: %+v", k, q)
+		}
 	}
 }
