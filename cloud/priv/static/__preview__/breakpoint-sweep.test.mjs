@@ -552,16 +552,24 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // hash:#operator)` and this test exited 1 on 103/78 before the four numbers
 // below were RE-READ from `scenarioReport` (charter D413 — cch-w35-s4's brief
 // carried target numbers that were wrong; these are derived, never copied).
-test("the census reconciles: 104 scenarios, 25 distinct covered by 26 cells, 79 residue over 13 families", () => {
+// cch-w39-s1 moved it a SIXTH time: `billing-me-unreadable` — the first fixture
+// that fails the /v1/me read on a screen that makes a ROLE CLAIM (an owner told
+// "Only the team owner can manage billing.") — is the 105th scenario and the
+// 80th residue entry. It refused exactly as designed: the bare sweep exited 2
+// with `UNLISTED scenario "billing-me-unreadable" (family hash:#billing)` and
+// this test exited 1 on 104/79 before the four numbers below were RE-READ from
+// `scenarioReport` on THIS merge base (origin/main 9e39c60), never carried from
+// the brief.
+test("the census reconciles: 105 scenarios, 25 distinct covered by 26 cells, 80 residue over 13 families", () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 104);
+  assert.equal(r.total, 105);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 79, "79 is the RESIDUE, not the census");
+  assert.equal(r.residue, 80, "80 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 79, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 80, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

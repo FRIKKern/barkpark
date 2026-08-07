@@ -1962,6 +1962,39 @@ const EXPECTATIONS = {
       assert.equal(reg.get("billing-cancel-section").hidden, true, "no Cancel section for a member");
     },
   },
+  // cch-w39-s1 — THE FAIL-BEFORE PIN. Every assertion below is FAULT-DEPENDENT:
+  // it reds on origin/main's bytes, where billingIsOwner() answered false for an
+  // unread /v1/me and the owner was handed the member surface verbatim.
+  "billing-me-unreadable": {
+    what: "an OWNER whose /v1/me 500s — billing REPORTS the failed check with a retry, and never accuses them of not being the owner",
+    check(reg) {
+      const manage = reg.get("billing-manage").innerHTML || "";
+      // THE DEFECT, DRIVEN. On main this exact sentence is what an owner reads.
+      assert.ok(!manage.includes("Only the team owner can manage billing."),
+        "an unread /v1/me is not evidence that this person is not the owner; got: " + manage);
+      assert.ok(manage.includes("We couldn't check your account"),
+        "it says what actually happened; got: " + manage);
+      // HONEST ABOUT THE FAULT CLASS: a 500 is ours, not the person's input —
+      // and this string can only come from meFailureCopy() classifying the
+      // RETAINED fault, so it cannot pass without the fault actually landing.
+      assert.ok(manage.includes("broke on our side"), "a 5xx is reported as a 5xx; got: " + manage);
+      assert.ok(manage.includes("data-me-retry"), "…and the unknown arm carries the shared retry the member surface never had");
+      // NO CAUSE THE READ DID NOT RETURN (charter D438): /v1/me has no rate
+      // limiter, and nothing here may invent a next step.
+      assert.ok(!/rate limit|slow down|too many/i.test(manage), "no cause is named that the read did not return");
+      assert.ok(!/check your (internet|connection)|ask (your|the) team owner/i.test(manage),
+        "no newly authored next step");
+      // FAIL-CLOSED: an unknown role gets ZERO billing write affordances. The
+      // plan card is /v1/subscription's truth (role-free) and still renders, so
+      // the person is not blinded to what they are paying for.
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.includes(">Supporter<"), "the real plan still renders — it was never a role claim");
+      assert.ok(!/<button/i.test(box), "the plan region offers no write affordance while the role is unknown");
+      assert.ok(!manage.includes(">Manage billing<"), "no portal button on an unproven role");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "no Cancel section on an unproven role");
+      assert.equal(reg.get("billing-tiers").hidden, true, "the plan grid stays closed while the role is unknown");
+    },
+  },
   "billing-cancelling": {
     what: "owner after an in-app cancel — the grace 'Access until' + Ending badge, Cancel section retired, Manage billing kept",
     check(reg) {

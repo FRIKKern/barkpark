@@ -373,7 +373,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
   "path:/new": "The launch/theater page is likewise its own document outside the shell.",
-  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 3 vary member-role, cancelling copy and the portal return inside those same panels.",
+  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 4 vary member-role, cancelling copy, the portal return and cch-w39-s1's `billing-me-unreadable` inside those same panels — the last swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 4 vary zero-staging / denied / route-unreadable / me-unreadable states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 15 widths.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
@@ -503,6 +503,7 @@ export const SCENARIO_RESIDUE = {
   // hash:#billing — 3
   "billing-portal-return": "hash:#billing",
   "billing-member": "hash:#billing",
+  "billing-me-unreadable": "hash:#billing",
   "billing-cancelling": "hash:#billing",
   // hash:#operator — 4
   "operator-zero-staging": "hash:#operator",
