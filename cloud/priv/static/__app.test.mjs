@@ -1685,6 +1685,12 @@ test("cch-w39-s2: a server-CONFIRMED enrolment survives a /v1/me that never land
   const model = src.slice(src.indexOf("function accountModalModel("), src.indexOf("function a2fWire()"));
   assert.ok(/a2fConfirmed\.token === sessionToken\(\)/.test(model),
     "the confirmed fact must be bound to the session that confirmed it: " + model);
+  // REVIEW (cch-w39-s2-r): …and it fills an UNKNOWN rather than outranking a
+  // read that landed. Without the null guard a local echo from an unread
+  // session would beat a fresh /v1/me forever — the same "state a fact the
+  // newest read does not support" defect, pointed the other way.
+  assert.ok(/model\.twoFactorEnabled === null && a2fConfirmed/.test(model),
+    "the retained fact may only fill an unknown, never override a landed read: " + model);
 });
 
 // ── gr-p5-account-2fa · GR56 THE ONE-SHOT SHEET, AND THE × TRAP ─────────────

@@ -1243,7 +1243,16 @@
   // server confirm for THIS token.
   function accountModalModel() {
     var model = accountModel(session(), meCache);
-    if (a2fConfirmed && a2fConfirmed.token === sessionToken()) {
+    // REVIEW (cch-w39-s2-r): the retained fact fills an UNKNOWN and never
+    // overrides a read that landed. `a2fSetEnabled` already writes the same
+    // truth into `meCache.user` whenever meCache exists, so on the normal path
+    // the two agree and this branch is inert. Where they can DIVERGE is the one
+    // case this retention exists for: enrol while /v1/me is unread, then land a
+    // later /v1/me that says something else (the factor was disabled from
+    // another device in between). Letting a stale local echo beat a fresh server
+    // read would re-create this slice's own defect pointed the other way — a
+    // determinate claim not supported by the newest thing we actually read.
+    if (model.twoFactorEnabled === null && a2fConfirmed && a2fConfirmed.token === sessionToken()) {
       model.twoFactorEnabled = a2fConfirmed.enabled;
     }
     return model;
