@@ -2329,6 +2329,454 @@ else
 fi
 
 
+# ── 20 ───────────────────────────────────────────────────────────────────────
+# §19 reds when the page UNDERSTATES a gate. Nothing red when it OVERSTATED one,
+# and on 2026-08-07 four checks that cannot stop a merge were listed on this page
+# as checks a PR must clear: `plugin-node` ("the workflow is always present in
+# the required-status list", contradicted by the same page 380 lines on),
+# `vendored-assets` (under "A PR targeting `main` must clear:", no disclosure, in
+# no aggregator's `needs:`), the `PR task gate self-test` job (item 7 reasoned
+# ABOUT required names while implying the self-test carries one), and `doc-gates`
+# (whose own spec files it S4 PATHS-FILTERED). §20 is §19's exact inverse, over
+# the same three derived sets and the SAME RC_NONBLOCKING_RE: 19 reds on a
+# disclosure that is FALSE, 20 reds on a disclosure that is MISSING.
+#
+# THREE CONSTRUCTION RULES, EACH LEARNED BY A MEASURED FAILURE:
+#
+# (i) THE NAME UNIVERSE MUST INCLUDE THE WORKFLOW-LEVEL `name:`, not only job ids
+# and job `name:`s. The overstatements are made about WORKFLOWS: neither
+# `vendored-assets` nor `plugin-node` is a job id or a job name anywhere in this
+# tree (vendored-assets.yml's only job is `check` / "deploy.sh ↔ embedded asset
+# in sync"), so with §19's two-source universe the two loudest instances are
+# INVISIBLE and this section passes with three of the four standing. A clause
+# below re-derives the universe from job sources alone and asserts both names are
+# missing from it, so the third source cannot be dropped quietly.
+#
+# (ii) NAMING SCOPE IS THE HEADING TEXT; DISCLOSURE SCOPE IS THE SECTION BODY. A
+# prototype that took names from the whole section body reported SEVEN names the
+# page makes no claim about (`release`, `console-harness`, `gate-shape`,
+# `sobelow`, `Security gate`, `mix-audit`, `Doc budgets + anchors` — all off
+# ordinary prose under "Security gates" and "When to override"). Narrowing the
+# NAMING scope to the heading — and, for a roster item, to its **bold** lead,
+# which is how this page writes an assertion — took false positives to zero
+# while keeping all four instances. The body still supplies the disclosure: a
+# section that says anywhere in its body that a check cannot block is excused.
+#
+# (iii) THE CARDINALITY CLAUSE IS SENTENCE-SCOPED, NOT LINE-SCOPED. The offending
+# phrase soft-wrapped — "…is one of the two\nrequired contexts" — so a line-
+# scoped grep ran GREEN against the very page it exists to catch: §19's vacuous-
+# green lesson recurring one clause over. The count itself is PARSED from
+# `.github/required-checks.json`, never typed here; a clause below grows a copy
+# of the spec to five contexts and watches the page's honest "four" get reported.
+#
+# THE STANDING COST, stated so the next wave fixes the sentence instead of
+# silencing the section: a unit whose heading names a check that is neither
+# required nor a transitive upstream is reported for ANY reason it is named,
+# including item 7 — which is fundamentally about a check that IS required and
+# earns its green from one disclosure clause about the self-test. Symmetrically,
+# ONE disclosure anywhere in a body excuses every name in that heading: the unit,
+# not the sentence, is the grain. Both are the price of a scope narrow enough to
+# have zero false positives on a 700-line page.
+#
+# WHAT IT CANNOT DO: like §19 it is a phrase matcher. A check named only in prose
+# the page never asserts about, or a disclosure written in a phrasing outside
+# RC_NONBLOCKING_RE, is out of reach. And its window is merge-gates.md alone —
+# `.github/workflows/required-checks-drift.yml:9-11` commits the same offence
+# about its own `Required-check spec gate` and is not in scope (filed as
+# cch-w49-bl-required-checks-drift-calls-its-own-job-blocking).
+section "20. docs/ops/merge-gates.md never presents a check that CANNOT block as one a PR must clear"
+
+# The third name source §19 does not need and this section cannot work without.
+rc20_workflow_names() { # <workflow-dir> -> `<file>\t<workflow name>`
+  local f n
+  for f in "$1"/*.yml; do
+    [ -f "$f" ] || continue
+    n="$(awk '/^name:[[:space:]]*/ { sub(/^name:[[:space:]]*/, ""); gsub(/^["'"'"']|["'"'"']$/, ""); print; exit }' "$f")"
+    [ -n "$n" ] && printf '%s\t%s\n' "$(basename "$f")" "$n"
+  done
+}
+
+# Every name a merge-gates.md heading could be ABOUT: §19's job ids and rendered
+# job names, PLUS the workflow-level names.
+rc20_all_names() { # <workflow-dir>
+  { rc_all_job_names "$(rc_job_index "$1")"; rc20_workflow_names "$1" | cut -f2; } | sort -u
+}
+
+# Every name that CAN stop a merge: the required contexts themselves, the jobs
+# they resolve to, those jobs' transitive upstreams, and the workflow-level name
+# of each file that carries a required aggregator. All of it derived — the spec
+# supplies the contexts, `.github/workflows/` supplies the graph.
+rc20_blocking_names() { # <workflow-dir> <spec-json>
+  local idx wfn ctx row rf rj rn rneeds
+  idx="$(rc_job_index "$1")"
+  wfn="$(rc20_workflow_names "$1")"
+  while IFS= read -r ctx; do
+    [ -n "$ctx" ] || continue
+    printf '%s\n' "$ctx"
+    row="$(awk -F'\t' -v c="$ctx" '$3 == c { print; exit }' <<EOF
+$idx
+EOF
+)"
+    [ -n "$row" ] || continue
+    IFS=$'\t' read -r rf rj rn rneeds <<<"$row"
+    printf '%s\n' "$rj"
+    if [ -n "$rn" ] && ! grep -q '\${{' <<<"$rn"; then printf '%s\n' "$rn"; fi
+    awk -F'\t' -v f="$rf" '$1 == f { print $2 }' <<EOF
+$wfn
+EOF
+    rc_walk_needs "$idx" "$rf" "$rneeds" | grep '^JOB' | cut -f2 || true
+  done <<EOF
+$(jq -r '.protection.required_status_checks.checks[].context' "$2")
+EOF
+}
+
+# <doc> <all-names> <blocking-names> [naming-scope: heading|body]
+# -> `OVER<TAB><name><TAB><kind><TAB><excerpt>`
+rc20_overstatements() {
+  awk -v allf="$2" -v blkf="$3" -v neg="$RC_NONBLOCKING_RE" -v scope="${4:-heading}" '
+    function trunc(s) { gsub(/[[:space:]]+/, " ", s); return (length(s) > 110 ? substr(s, 1, 107) "…" : s) }
+    # A roster item asserts in its **bold** lead, exactly as a section asserts in
+    # its heading; the rest of the item is prose about the mechanism.
+    function bolds(t,   out) {
+      out = ""
+      while (match(t, /\*\*[^*]+\*\*/)) {
+        out = out " " substr(t, RSTART + 2, RLENGTH - 4)
+        t = substr(t, RSTART + RLENGTH)
+      }
+      return out
+    }
+    function consider(naming, body, kind,   k, nm) {
+      gsub(/[[:space:]]+/, " ", naming)
+      gsub(/[[:space:]]+/, " ", body)
+      if (scope == "body") naming = body
+      for (k = 1; k <= na; k++) {
+        nm = ALL[k]
+        if (nm in BLK) continue
+        if (nm in SEEN) continue
+        # Backticked is the page convention; a BARE hyphenated name is matched
+        # too (`doc-gates`, `vendored-assets` appear unbackticked in headings),
+        # never a bare English word, and never inside a path or a filename.
+        if (index(naming, "`" nm "`") == 0) {
+          if (nm !~ /^[a-z0-9]+(-[a-z0-9]+)+$/) continue
+          if (naming !~ ("(^|[^A-Za-z0-9`_/.-])" nm "([^A-Za-z0-9`_/.-]|$)")) continue
+        }
+        if (body ~ neg) continue
+        SEEN[nm] = 1
+        print "OVER\t" nm "\t" kind "\t" trunc(naming)
+      }
+    }
+    BEGIN {
+      while ((getline l < allf) > 0) if (l != "") ALL[++na] = l
+      while ((getline l < blkf) > 0) if (l != "") BLK[l] = 1
+    }
+    { line[++n] = $0 }
+    END {
+      f = 0
+      for (i = 1; i <= n; i++) {
+        if (line[i] ~ /^[[:space:]]*```/) { f = !f; masked[i] = 1; continue }
+        masked[i] = f
+      }
+      # 1. the roster under the page assertive stem
+      start = 0
+      for (i = 1; i <= n; i++) if (!masked[i] && line[i] ~ /must clear:[[:space:]]*$/) { start = i; break }
+      if (start == 0)
+        print "UNRESOLVED\tthe assertive stem (\"A PR targeting `main` must clear:\") is not on the page — the roster scope resolved to nothing"
+      else {
+        item = ""
+        for (i = start + 1; i <= n; i++) {
+          if (masked[i]) continue
+          s = line[i]
+          if (s ~ /^[[:space:]]*$/) continue
+          if (s ~ /^#/) break
+          if (s ~ /^[0-9]+\.[[:space:]]/) { if (item != "") consider(bolds(item), item, "roster item"); item = s; continue }
+          if (s ~ /^[[:space:]]/) { if (item != "") item = item " " s; continue }
+          break
+        }
+        if (item != "") consider(bolds(item), item, "roster item")
+      }
+      # 2. headings — naming scope is the heading TEXT, disclosure scope is the
+      #    body down to the next heading of the same or higher level
+      for (i = 1; i <= n; i++) {
+        if (masked[i]) continue
+        if (line[i] !~ /^#+[[:space:]]/) continue
+        h = line[i]; sub(/[^#].*$/, "", h); lvl = length(h)
+        head = line[i]; sub(/^#+[[:space:]]*/, "", head)
+        body = ""
+        for (j = i + 1; j <= n; j++) {
+          if (!masked[j] && line[j] ~ /^#+[[:space:]]/) {
+            hh = line[j]; sub(/[^#].*$/, "", hh)
+            if (length(hh) <= lvl) break
+          }
+          body = body " " line[j]
+        }
+        consider(head, body, "heading")
+      }
+      # 3. any block that labels its subject `(blocking)`
+      blk = ""
+      for (i = 1; i <= n + 1; i++) {
+        if (i <= n && !masked[i] && line[i] !~ /^[[:space:]]*$/) { blk = blk " " line[i]; continue }
+        if (blk != "") { if (index(blk, "(blocking)") > 0) consider(bolds(blk), blk, "(blocking) label"); blk = "" }
+      }
+    }
+  ' "$1"
+}
+
+rc20_count_word() { # <n>
+  case "$1" in
+    1) echo one ;; 2) echo two ;; 3) echo three ;; 4) echo four ;; 5) echo five ;;
+    6) echo six ;; 7) echo seven ;; 8) echo eight ;; 9) echo nine ;; 10) echo ten ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# SENTENCE-scoped: the phrase this exists to catch wraps between "the two" and
+# "required contexts". `one of the` is stripped first — it is an idiom, not a
+# count — and the number must sit directly against the noun, so a sentence that
+# merely contains a digit and the words "required contexts" is not a claim.
+rc20_cardinality_claims() { # <doc> <n> <word>
+  awk -v want="$2" -v word="$3" '
+    function trunc(s) { gsub(/[[:space:]]+/, " ", s); return (length(s) > 110 ? substr(s, 1, 107) "…" : s) }
+    function flush(   u, m, parts, i, s, t, num) {
+      if (unit == "") return
+      u = unit; unit = ""
+      gsub(/[[:space:]]+/, " ", u)
+      m = split(u, parts, /[.!?] +/)
+      for (i = 1; i <= m; i++) {
+        s = parts[i]; t = s
+        gsub(/[*`_]/, "", t)
+        gsub(/one of the /, "", t)
+        if (t !~ /(required contexts?|contexts? (are|is) required)/) continue
+        if (match(t, /(zero|one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+) +(required contexts?|contexts? (are|is) required)/)) {
+          num = substr(t, RSTART, RLENGTH); sub(/ .*$/, "", num)
+          if (num != want && num != word) print "COUNT\t" num "\t" trunc(s)
+        }
+      }
+    }
+    /^[[:space:]]*```/ { flush(); fence = !fence; next }
+    fence { next }
+    /^[[:space:]]*$/ { flush(); next }
+    /^#/ { flush(); next }
+    /^[[:space:]]*([-*+][[:space:]]|[0-9]+\.[[:space:]])/ { flush() }
+    { unit = (unit == "" ? $0 : unit " " $0) }
+    END { flush() }
+  ' "$1"
+}
+
+RC20_ALL="$TMP/rc20-all.txt"
+RC20_BLK="$TMP/rc20-blk.txt"
+rc20_all_names "$REPO_ROOT/.github/workflows" > "$RC20_ALL"
+rc20_blocking_names "$REPO_ROOT/.github/workflows" "$SPEC" | sort -u > "$RC20_BLK"
+
+# CLAUSE 1 — the name universe really is three-sourced, and the third source is
+# load-bearing rather than decorative.
+RC20_JOBS_ONLY="$(rc_all_job_names "$(rc_job_index "$REPO_ROOT/.github/workflows")" | sort -u)"
+if grep -qx 'vendored-assets' "$RC20_ALL" && grep -qx 'plugin-node' "$RC20_ALL" \
+   && ! grep -qx 'vendored-assets' <<<"$RC20_JOBS_ONLY" && ! grep -qx 'plugin-node' <<<"$RC20_JOBS_ONLY"; then
+  ok "the name universe includes WORKFLOW-level \`name:\` — \`vendored-assets\` and \`plugin-node\` are names ONLY that source reaches (job ids + job names alone do not contain them)"
+else
+  bad "the workflow-level name source is missing or redundant — without it the two loudest overstatements are invisible to this section"
+fi
+
+# CLAUSE 2 — the blocking set is derived, and it is not empty.
+if [ -s "$RC20_BLK" ] && grep -qx 'Elixir gate' "$RC20_BLK" && grep -qx 'mix-prod-compile' "$RC20_BLK" \
+   && grep -qx 'elixir' "$RC20_BLK"; then
+  ok "derived what CAN block from source: $(wc -l < "$RC20_BLK" | tr -d ' ') names — required contexts, their jobs, their transitive upstreams, and the workflows that carry them"
+else
+  bad "the blocking set did not derive — every name would look non-blocking and the section would red on the whole page"
+fi
+
+# CLAUSE 3 — the page itself.
+RC20_OUT="$(rc20_overstatements "$MERGE_GATES_DOC" "$RC20_ALL" "$RC20_BLK")"
+if [ -z "$RC20_OUT" ]; then
+  ok "merge-gates.md presents no check as one a PR must clear that is neither required, transitively upstream of a required context, nor disclosed as non-blocking"
+else
+  bad "merge-gates.md tells a reader a PR must clear a check that cannot stop a merge:"
+  printf '%s\n' "$RC20_OUT" | sed 's/^/       /' >&2
+fi
+
+# THE CANARY — the four sentences as they stood on `main` before this commit,
+# copied verbatim rather than paraphrased, so the proof is that the section
+# catches what was actually there. It is its own file, never an append: a run
+# against the whole page could score its hits somewhere else and look competent.
+RC20_CANARY="$TMP/rc20-canary.md"
+cat > "$RC20_CANARY" <<'MD'
+A PR targeting `main` must clear:
+
+5. **`plugin-node` CI job** — `.github/workflows/plugin-node.yml`. Discovers
+   plugins under `api/priv/plugins/` whose `plugin.json` declares a top-level
+   `"node"` object and runs `npm ci` + lint + typecheck per plugin. Emits a
+   no-op success when no plugin declares Node, so the workflow is always
+   present in the required-status list.
+6. **`vendored-assets` CI job** — `.github/workflows/vendored-assets.yml`,
+   path-triggered on `deploy.sh` / `internal/cli/setup/assets/**`. Runs
+   `make cli-assets-check` so the go:embedded deploy.sh copy can never drift
+   from the root copy again (it diverged both ways on main, fixed 2026-07-02).
+   Edit the ROOT deploy.sh, then `make cli-assets-sync`.
+
+7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. The pure
+   ledger decision is the unit-tested `scripts/pr-task-gate.sh`
+   (`bash scripts/pr-task-gate.test.sh`, hermetic, and run in CI by this same
+   workflow's **`PR task gate self-test`** job — deliberately not in
+   `shell-harnesses.yml`, which is paths-filtered and so can never carry a
+   required name); the workflow only plumbs PR context in.
+
+## Documentation review rules (doc-gates)
+
+`doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
+undersells it: it runs **17 steps labelled `(blocking)`** plus 6 `(tripwire)`
+self-tests that prove a scanner still reds on a planted defect.
+
+**This gate is now BINDING** — `PR references an active task` is one of the two
+required contexts live on `main` (2026-07-28; see *Pre-merge gates*).
+MD
+RC20_CANARY_OUT="$(rc20_overstatements "$RC20_CANARY" "$RC20_ALL" "$RC20_BLK")"
+
+# CLAUSE 4 — mutation-proven able to fail, on all four instances at once.
+RC20_MISSED=""
+for nm in 'plugin-node' 'vendored-assets' 'PR task gate self-test' 'doc-gates'; do
+  grep -q "^OVER	$nm	" <<<"$RC20_CANARY_OUT" || RC20_MISSED="$RC20_MISSED $nm"
+done
+if [ -z "$RC20_MISSED" ]; then
+  ok "…and it FIRES, BY NAME, on all four retired claims put back verbatim (plugin-node, vendored-assets, PR task gate self-test, doc-gates)"
+else
+  bad "the canary put back the pre-fix sentences and this section missed:$RC20_MISSED"
+  printf '%s\n' "$RC20_CANARY_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 5 — DELETE. `format` is genuinely advisory and genuinely disclosed, so
+# it is NOT reported today; strip the disclosure from a copy and it must be. The
+# green on item 2 is therefore earned by the sentence, not by blindness.
+RC20_DEL="$TMP/rc20-nodisclosure.md"
+sed 's/Today a red `format` check still does not block merge, and it is the/Today a red `format` check still shows on the PR, and it is the/' \
+  "$MERGE_GATES_DOC" > "$RC20_DEL"
+RC20_DEL_OUT="$(rc20_overstatements "$RC20_DEL" "$RC20_ALL" "$RC20_BLK")"
+if grep -q '^OVER	format	' <<<"$RC20_DEL_OUT" && ! grep -q '^OVER	format	' <<<"$RC20_OUT"; then
+  ok "…and DELETING item 2's \`format\` disclosure reds it by name, while the unmutated page does not report \`format\` at all — the disclosure is what earns the green"
+else
+  bad "removing the \`format\` disclosure changed nothing (or \`format\` was already reported) — the section is not reading the disclosure:"
+  printf '%s\n' "$RC20_DEL_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 6 — the NAMING scope really is the heading. The body-scoped rival — the
+# prototype that reported seven names off ordinary prose — is run on a FIXED
+# specimen, not on the live page: a clause whose contrast depends on the doc
+# still happening to mention a non-blocking name in some body would red on an
+# innocent edit. The live page's own extras are reported in the message.
+RC20_PROSE="$TMP/rc20-prose.md"
+cat > "$RC20_PROSE" <<'MD'
+## Security gates (Sobelow + mix_audit)
+
+The `sobelow` job is Phoenix-aware static analysis and `mix-audit` runs
+`mix_audit` against a live advisory database. Neither is claimed here to be
+anything; this paragraph is prose ABOUT them.
+MD
+# The specimen carries no roster stem, so both runs also emit the UNRESOLVED
+# line for it; this clause is about the OVER rows and reads only those.
+RC20_PROSE_HEAD="$(rc20_overstatements "$RC20_PROSE" "$RC20_ALL" "$RC20_BLK" | grep '^OVER' || true)"
+RC20_PROSE_BODY="$(rc20_overstatements "$RC20_PROSE" "$RC20_ALL" "$RC20_BLK" body | grep '^OVER' || true)"
+RC20_BODY_OUT="$(rc20_overstatements "$MERGE_GATES_DOC" "$RC20_ALL" "$RC20_BLK" body)"
+RC20_BODY_EXTRA="$(comm -13 <(cut -f2 <<<"$RC20_OUT" | sort -u) <(cut -f2 <<<"$RC20_BODY_OUT" | sort -u) | tr '\n' ' ')"
+if [ -z "$RC20_PROSE_HEAD" ] \
+   && grep -q '^OVER	sobelow	' <<<"$RC20_PROSE_BODY" && grep -q '^OVER	mix-audit	' <<<"$RC20_PROSE_BODY"; then
+  ok "…and on a specimen that only MENTIONS \`sobelow\` and \`mix-audit\` the body-scoped rival reports both while the shipped heading scope reports neither — the narrowing is measured, not preferred (on the live page the rival's extras today are:${RC20_BODY_EXTRA:- none})"
+else
+  bad "the heading/body scope contrast did not reproduce on the fixed specimen — heading scope has widened to the body, or the rival is broken:"
+  printf 'head: %s\nbody: %s\n' "$RC20_PROSE_HEAD" "$RC20_PROSE_BODY" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 7 — ADD. Wire a `doc-gates` job into the required `Elixir gate`'s
+# `needs:` in a SCRATCH workflow tree and change not one byte of the doc: the
+# canary's doc-gates claim becomes TRUE and must stop being reported. Paired
+# with a non-vacuity assertion, so an empty or broken run cannot buy the flip.
+RC20_WF="$TMP/rc20-workflows"
+rm -rf "$RC20_WF"; mkdir -p "$RC20_WF"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$RC20_WF/"
+sed -i.bak 's/^    needs: \[changes, mix-test, mix-prod-compile, validation-perf, path-escape\]$/    needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape, doc-gates]/' \
+  "$RC20_WF/elixir.yml" && rm -f "$RC20_WF/elixir.yml.bak"
+cat >> "$RC20_WF/elixir.yml" <<'YAML'
+  doc-gates:
+    name: Doc budgets + anchors
+    runs-on: ubuntu-latest
+YAML
+RC20_ADD_ALL="$TMP/rc20-add-all.txt"; RC20_ADD_BLK="$TMP/rc20-add-blk.txt"
+rc20_all_names "$RC20_WF" > "$RC20_ADD_ALL"
+rc20_blocking_names "$RC20_WF" "$SPEC" | sort -u > "$RC20_ADD_BLK"
+RC20_ADD_OUT="$(rc20_overstatements "$RC20_CANARY" "$RC20_ADD_ALL" "$RC20_ADD_BLK")"
+if ! grep -q '^OVER	doc-gates	' <<<"$RC20_ADD_OUT" && grep -q '^OVER	doc-gates	' <<<"$RC20_CANARY_OUT"; then
+  ok "…and ADDING \`doc-gates\` to the required aggregator's \`needs:\` (scratch tree, doc untouched) drops it from the report — the section reads TOPOLOGY, not keywords"
+else
+  bad "wiring \`doc-gates\` upstream of \`Elixir gate\` did not change the verdict — the section is matching names, not the graph"
+fi
+if grep -q '^OVER	plugin-node	' <<<"$RC20_ADD_OUT" && grep -q '^OVER	vendored-assets	' <<<"$RC20_ADD_OUT"; then
+  ok "…and that same run STILL reports \`plugin-node\` and \`vendored-assets\` — the flip above was one name changing class, not a run that stopped reporting"
+else
+  bad "the ADD run went quiet on the other instances too — the doc-gates flip is vacuous"
+fi
+
+# CLAUSE 8 — the cardinality of the required set, read from the spec.
+RC20_N="$(jq '.protection.required_status_checks.checks | length' "$SPEC")"
+RC20_W="$(rc20_count_word "$RC20_N")"
+RC20_CARD_OUT="$(rc20_cardinality_claims "$MERGE_GATES_DOC" "$RC20_N" "$RC20_W")"
+if [ -z "$RC20_CARD_OUT" ]; then
+  ok "every sentence on the page that counts the required contexts says $RC20_W ($RC20_N), matching \`.github/required-checks.json\`"
+else
+  bad "the page states a required-context count that the spec does not support (it is $RC20_N):"
+  printf '%s\n' "$RC20_CARD_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 9 — and it catches the SOFT-WRAPPED phrase that was actually there,
+# where the line-scoped rival ran green.
+if grep -q '^COUNT	two	' <<<"$(rc20_cardinality_claims "$RC20_CANARY" "$RC20_N" "$RC20_W")"; then
+  ok "…and it FIRES on \"one of the two<newline>required contexts\" — the scope is the sentence, not the line"
+else
+  bad "the soft-wrapped cardinality claim was missed — the clause has degraded to line scope on a page that wraps at 78 columns"
+fi
+if ! grep -qE "(one|two|three|five|six|[0-9]+) +required contexts" "$RC20_CANARY"; then
+  ok "…and the LINE-scoped rival DROPS that same claim — this is why the clause is not a grep"
+else
+  bad "the line-scoped rival caught the wrapped specimen — re-derive why sentence scope was required"
+fi
+
+# CLAUSE 10 — the count is READ. Grow a copy of the spec and the page's honest
+# "four" must start being reported.
+RC20_SPEC5="$TMP/rc20-spec5.json"
+jq '.protection.required_status_checks.checks += [{"context": "Fifth gate", "app_id": 15368}]' "$SPEC" > "$RC20_SPEC5"
+RC20_N5="$(jq '.protection.required_status_checks.checks | length' "$RC20_SPEC5")"
+if grep -q '^COUNT	four	' <<<"$(rc20_cardinality_claims "$MERGE_GATES_DOC" "$RC20_N5" "$(rc20_count_word "$RC20_N5")")"; then
+  ok "…and growing the SPEC to $RC20_N5 contexts makes the page's \"four\" get reported — the number is parsed from the spec, never typed here"
+else
+  bad "adding a required context to a copy of the spec changed nothing — the expected count is hardcoded in this file"
+fi
+
+# CLAUSE 11 — the doc-gates roster's own arithmetic. The page claimed 17 while
+# the workflow declared 19; the two the table omitted were
+# `Never-cancel-main concurrency ratchet` and `Nil-polarity fail-closed gate`.
+RC20_DG_YML="$REPO_ROOT/.github/workflows/doc-gates.yml"
+RC20_DG_REAL="$(grep -cE '^[[:space:]]*- name: .*\(blocking\)' "$RC20_DG_YML" | tr -d ' ')"
+rc20_roster_claim() { grep -oE '\*\*[0-9]+ steps labelled' "$1" | head -1 | grep -oE '[0-9]+'; }
+rc20_roster_rows() {
+  awk '/^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Step[[:space:]]*\|/ { t = 1; next }
+       t && $0 !~ /^\|/ { t = 0 }
+       t && /^\|[[:space:]]*[0-9]+[[:space:]]*\|/ { c++ }
+       END { print c + 0 }' "$1"
+}
+RC20_DG_CLAIM="$(rc20_roster_claim "$MERGE_GATES_DOC")"
+RC20_DG_ROWS="$(rc20_roster_rows "$MERGE_GATES_DOC")"
+if [ "$RC20_DG_REAL" -gt 0 ] && [ "$RC20_DG_CLAIM" = "$RC20_DG_REAL" ] && [ "$RC20_DG_ROWS" = "$RC20_DG_REAL" ]; then
+  ok "the doc-gates roster counts what the workflow declares: $RC20_DG_REAL \`(blocking)\` steps, $RC20_DG_CLAIM claimed in prose, $RC20_DG_ROWS rows in the table"
+else
+  bad "the doc-gates roster miscounts: doc-gates.yml declares $RC20_DG_REAL \`(blocking)\` steps, the page claims $RC20_DG_CLAIM and tables $RC20_DG_ROWS"
+fi
+
+# CLAUSE 12 — and that arithmetic is able to fail: the canary's 17 is reported
+# against the same derived 19.
+if [ "$(rc20_roster_claim "$RC20_CANARY")" != "$RC20_DG_REAL" ]; then
+  ok "…and the pre-fix \"17 steps labelled \`(blocking)\`\" does NOT match the $RC20_DG_REAL derived from doc-gates.yml — the count is derived by running, not transcribed"
+else
+  bad "the canary's 17 matched the derived count — the derivation is not reading doc-gates.yml"
+fi
+
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
