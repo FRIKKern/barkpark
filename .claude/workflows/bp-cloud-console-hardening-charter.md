@@ -2212,6 +2212,61 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-07 — wave 46 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd; 4 round-2 slices deferred by the sequenced-rounds law — grade A−)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The two member-reachable instance writes stop selling a 403 | `cch-w45-s5-two-member-reachable-rail-verbs-stop-selling-a-403` | `…the-two-member-painted-instance-writes-s-0-r` | [#10343](https://github.com/FRIKKern/barkpark/pull/10343) | **one fix.** The slice gave the still-checking `Attach domain` arm the shipped `[data-me-retry]` exit but wired it with `wireMeRetry`'s DEFAULT `selfHealing`, which means "loadMe's own arms repaint this surface" — true for billing/providers/notifications/activity/operator, and false for the instance view, which `loadMe` has no seam for. A SUCCESSFUL retry would satisfy `meState() === "loaded"`, skip the repaint, and leave the control reading "Checking capabilities…" forever: an exit that cannot exit, the exact class the slice exists to remove. Now passes `selfHealing=false` (the team menu's own reason), pinned by a region-scan test that reds in BOTH directions. Mutation-proven 961/0 → 960/1 |
+| Decommission's permanent refusals stop offering "Try again" | `cch-w46-s2-decommission-refusal-is-terminal` | `…decommission-s-403-stops-offering-try-ag-1` (unchanged) | [#10344](https://github.com/FRIKKern/barkpark/pull/10344) | **none.** Reviewed adversarially and independently re-derived: `DELETE /v1/barkparks/:id`'s refusal vocabulary is exactly 403 `forbidden` / 422 `no_team` / 404 `not_found` / 409 `provisioning_in_progress` / 422 `invalid`, so the terminal set `{forbidden, no_team, not_found}` is right and unknown-stays-retryable is the correct fail-safe direction. The dual-shape read handles the FLAT envelope this route actually emits |
+| The rail's "Checking capabilities…" gets an exit, and a late `/v1/me` stops stranding it | `cch-w46-s3-unknown-authority-gets-an-exit-and-the-rail-gets-a-repaint-seam` | `…the-rail-s-checking-capabilities-gets-an-2-r` | [#10345](https://github.com/FRIKKern/barkpark/pull/10345) | **none.** The `deferMe` boot seam and the `assertLateMeRepaintsTheRail` guard were verified load-bearing by mutation: commenting out both `repaintLifecycleAuthority()` calls → `812 bytes in flight → 812 bytes once it landed (repainted: false)`, smoke rc 1; restored rc 0. Correctly refuses the `reloadInstanceView()` seam and says why in the code |
+| A blocking job outside the aggregator's needs gets an honest post-verdict category | `cch-w46-s4-post-verdict-job-category-unblocks-the-main-failure-reporter` | `…a-blocking-job-outside-the-aggregator-s--3-r` | [#10346](https://github.com/FRIKKern/barkpark/pull/10346) | **one fix, and it is this epic's own class inside its own harness.** `pin_reds` re-implemented the roster comparison instead of consulting the shipped pin, and the copy drifted on its first run: the matrix printed `post-verdict[deleted]: the exact pin REDS it` while the live assertion, carrying the transitional `""` alternative, accepts a deleted reporter. A ratchet reporting a red it does not produce is precisely what this wave hunts. `post_verdict_roster_ok()` is now the ONE encoding consulted by both; the `deleted` mutant is asserted as the KNOWN GAP it is, written to FLIP the day `""` is dropped. Mutation-proven 156/0 → 154/2 |
+
+**WHAT LANDED.** Wave 46 moved the refusal to the control the member actually clicks. Three of the four
+slices are the same lie in three grammars: an offer the server will refuse (`Attach domain`, `Roll back`),
+a recovery that cannot recover (decommission's `Try again` into a permanent 403 — measured 3 DELETEs after
+2 more clicks), and a waiting state with no way out (the rail's `Checking capabilities…` forever, with a
+FAILED `/v1/me` rendering byte-identically to a pending one). The fourth is the same class one layer up:
+a merge gate that could not tell a legitimate post-verdict reporter from a blocking job somebody forgot to
+wire, so #10155 took 2 of the 4 required contexts down for doing its job correctly.
+
+**THE INTEGRATION PROOF, and it is the number the lead should trust.** Slices 1-3 all edit `app.js` and
+`__app.test.mjs`. They were merged together in a probe branch off `origin/main` — clean auto-merge, no
+conflicts — and the COMBINED tree is green on every instrument: **971 pass / 0 fail**, `all 108 scenarios
+rendered`, census `79 sites / 40 elevated / 16 unpredicated` rc 0, breakpoint sweep `51 / 0`. Merge order
+is therefore free.
+
+**HIGH-FLIP-RISK, independently re-derived (not re-read).** Both of cch-w45-s5's flagged judgments hold.
+*Reachability*: `POST /v1/barkparks/:id/domain` and `POST /v1/barkparks/:id/rollback` both open with
+`Auth.require_primary_team_admin(conn)` in `cloud/lib/barkpark_cloud/web/router.ex`. *Authority-equivalence*:
+the gate is `Accounts.team_admin?(current_user, conn.assigns.current_team)` → `TeamMembership.rank(role) >=
+rank("admin")` → `{admin, owner}`, and `/v1/me` answers `Accounts.team_role(user, conn.assigns.current_team)`
+off the SAME membership row — so the console's `role === "owner" || role === "admin"` agrees exactly. One
+correction to the wave's own prose: for these two routes a teamless caller gets **422 `no_team`** from
+`require_primary_team_admin`'s halt, not the 404 the route bodies' own `is_nil(current_team)` arm suggests —
+that arm is unreachable for them. A genuinely independent second reviewer is still owed before merge; this
+workflow spawns one reviewer, so that dispatch is a manual lead step.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+1. **Dispatch the deferred round-2 slices in dependency order**, not as a batch: merge round 1 first, then
+   `cch-w46-s5` (corpus mints the autoupdate policy) and `cch-w46-s6` (`+ Add support` takes OMIT, D514) —
+   both need cch-w45-s5's census EXPECT and `panel-overview-member` block — plus `cch-w45-s6` (the CLI chip
+   names its provider). `cch-w46-s7`, the member-actor rendered-state sweep, goes LAST, after all of those
+   and cch-w46-s3, so its KNOWN baseline ships nearly empty instead of freezing five live defects as expected.
+2. **The authority repaint seam covers the rail ONLY.** `repaintLifecycleAuthority()` heals
+   `#inst-lifecycle-actions`; cch-w45-s5 lands two more authority-decided controls on the same screen
+   (`#inst-domain` in the header, `[data-rollback]` in the Updates panel) and neither is inside that box.
+   A late `/v1/me` still strands both. Filed at review as
+   `cch-w46-rv-authority-repaint-covers-the-rail-only` (published, 5 criteria). It must NOT become
+   `reloadInstanceView()` — that hard-returns on usage and webhooks, which is the trap cch-w46-s3's own
+   guard exists to red.
+3. **The post-verdict roster's `""` alternative is a real, currently-open hole**, now asserted as such
+   instead of papered over. The PR that merges #10155 must drop it and swap the known-gap block for
+   `pin_reds deleted` (`cch-w46-s4-followup-drop-empty-post-verdict-alternative`).
+4. **Nothing here was browser-verified.** Every proof runs against node DOM shims. Once slices 1 and 3 both
+   merge, the unknown state renders TWO `Retry` controls on one screen (header + rail) — both honest, and
+   the rail's sits inside a `hidden` CLI drawer by default, so in practice one is visible. Worth one look in
+   a real browser before the round-2 slices pile more onto the same surface.
+
 
 ### 2026-08-07 — wave 44 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd; 2 round-2 slices deferred by the sequenced-rounds law — grade A)
 
