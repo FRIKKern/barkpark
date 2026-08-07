@@ -351,6 +351,10 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "router.ex's keyset deployment list — the paged read behind `bp cloud deployments`."},
     {:parse_window, 2, :reachable,
      "router.ex parses ?from/?to before census/3; the refusal arm is what stops an unbounded scan."},
+    {:delivery, 3, :reachable,
+     "THE D136 delivery estimator, ROUTED AT LAST. Its UNREACHABLE row said \"PR #10401 adds the caller; when it merges this row moves to :reachable and the move is the proof\" — this is that move. `Web.Router.deploy_census_json/2` (router.ex:9489) puts it on the operator census envelope, so `renderDeployDelivery`'s `d == nil` \"NOT MEASURED\" arm stops being the only arm that ever executes."},
+    {:refusal_phase, 1, :reachable,
+     "start-vs-poll refusal phase, ROUTED AT LAST — the same closer as delivery/3 above, landed by the same PR. `site_deployment_json/3` reads it off the RAW failure_reason, so start-vs-poll is legible over HTTP instead of living only in this suite."},
 
     # -- INTERNAL_ONLY — over-public, alive ------------------------------------
     {:classify, 2, :internal_only,
@@ -369,10 +373,6 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "keyset cursor reader, used by list_page/2 on the way in. Public so the cursor SHAPE test can round-trip it."},
 
     # -- UNREACHABLE — the allowlist, reason + closer ---------------------------
-    {:delivery, 3, :unreachable,
-     "THE D136 delivery estimator. TEN test references, ZERO lib callers: nothing routes it, so no operator has ever seen a delivery estimate. PR #10401 adds the caller; when it merges this row moves to :reachable and the move is the proof."},
-    {:refusal_phase, 1, :unreachable,
-     "start-vs-poll refusal phase. EIGHT test references, ZERO lib callers — the same shape as delivery/3 and it lands with the same PR #10401."},
     {:classes, 0, :unreachable,
      "the named-class list. NINE test references, ZERO lib callers — the D245 disease verbatim: a suite keeps it warm and no operator can reach it. No route exposes the class vocabulary; filed as wave-16 follow-up rather than deleted, because the class list is the thing a CLI needs to render a legend."},
     {:deferred_classes, 0, :unreachable,
