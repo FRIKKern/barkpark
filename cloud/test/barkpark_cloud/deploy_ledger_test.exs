@@ -1608,6 +1608,332 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # A one-row site gets a refusal, not a 100%.
       assert sites[other.id].failure_rate.refused
     end
+
+    # ── dr-w18-s2: per-site live, read POSITIVELY ──────────────────────────
+    test "a site's live count is a FILTER on status, so an unfinished build is never success", %{
+      site: site
+    } do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for i <- 1..3,
+          do:
+            deployment!(site, %{
+              stage: "PLAN",
+              failure_reason: @r409_bare,
+              inserted_at: DateTime.add(from, i, :second)
+            })
+
+      for i <- 1..2,
+          do:
+            deployment!(site, %{
+              status: "live",
+              stage: "SWITCH",
+              failure_reason: nil,
+              inserted_at: DateTime.add(from, 100 + i, :second)
+            })
+
+      # The row that kills a SUBTRACTIVE definition: attempted, not failed, not
+      # deferred — and NOT live. `volume - failed - deferred` would report 3.
+      deployment!(site, %{
+        status: "building",
+        stage: "BUILD",
+        failure_reason: nil,
+        inserted_at: DateTime.add(from, 200, :second)
+      })
+
+      row = DeployLedger.census(from, to).sites |> hd()
+
+      assert row.volume == 6
+      assert row.failed == 3
+      assert row.deferred == 0
+      assert row.live == 2, "a positive status filter answers 2; a subtraction answers 3"
+    end
+
+    # ── dr-w18-s2: the boundary LIST and the refusal it enables ────────────
+    test "the census emits a boundary LIST, commit-derived, with the row-derived twin labelled" do
+      c = DeployLedger.census(~U[2026-07-26 00:00:00Z], ~U[2026-07-27 00:00:00Z])
+
+      assert is_list(c.boundaries)
+
+      for b <- c.boundaries do
+        assert Enum.sort(Map.keys(b)) == [:instant, :method, :source, :subject, :voids]
+        assert %DateTime{} = b.instant
+        assert b.voids != ""
+      end
+
+      commit =
+        Enum.find(
+          c.boundaries,
+          &(&1.method == "schema_commit" and &1.subject =~ "deferred settle")
+        )
+
+      assert commit.instant == ~U[2026-08-05 21:13:50Z]
+      assert commit.source == "#9615"
+
+      # The min()-derived twin rides ONLY as a corroborator, and it says out
+      # loud that a site DELETE can slide it — the measured cascade is +28m15s
+      # and 444 of 2,206 deferred rows.
+      twin =
+        Enum.find(
+          c.boundaries,
+          &(&1.method == "first_observed_row" and &1.subject =~ "deferred settle")
+        )
+
+      assert twin.instant == ~U[2026-08-05 21:27:11.413210Z]
+      assert twin.voids =~ "UPPER BOUND"
+      assert twin.voids =~ "delete"
+
+      # The SECOND schema event is on the list too — this is why it is a list.
+      assert Enum.any?(
+               c.boundaries,
+               &(&1.subject =~ "deferral_cause" and &1.method == "schema_commit" and
+                   &1.source == "#10248")
+             )
+    end
+
+    test "a window that STRADDLES the vocabulary boundary refuses failure_rate and classes — and NOT live_rate",
+         %{site: site} do
+      # Wholly BEFORE the boundary: a real, internally consistent answer.
+      before_from = ~U[2026-08-04 00:00:00Z]
+      before_to = ~U[2026-08-05 00:00:00Z]
+
+      for i <- 1..3,
+          do:
+            deployment!(site, %{
+              stage: "PLAN",
+              failure_reason: @r409_bare,
+              inserted_at: DateTime.add(before_from, i, :second)
+            })
+
+      inside = DeployLedger.census(before_from, before_to)
+      refute inside.failure_rate.reason =~ "STRADDLES"
+      assert is_list(inside.classes)
+
+      # A STRADDLING window with a real sample in it — n must clear min_sample
+      # or every rate refuses for the ordinary reason and the boundary proves
+      # nothing. 150 failed + 100 live = 250 attempted.
+      for i <- 1..147,
+          do:
+            deployment!(site, %{
+              stage: "PLAN",
+              failure_reason: @r409_bare,
+              inserted_at: DateTime.add(before_from, 1_000 + i, :second)
+            })
+
+      for i <- 1..100,
+          do:
+            deployment!(site, %{
+              status: "live",
+              stage: "SWITCH",
+              failure_reason: nil,
+              inserted_at: DateTime.add(before_from, 20_000 + i, :second)
+            })
+
+      # STRADDLING: the same physical box refusal is `failed` on one side and
+      # `deferred` on the other, so the ratio is a blend of two taxonomies.
+      straddle = DeployLedger.census(~U[2026-08-04 00:00:00Z], ~U[2026-08-06 00:00:00Z])
+
+      assert straddle.failure_rate.refused
+      assert is_nil(straddle.failure_rate.pct)
+      assert straddle.failure_rate.reason =~ "STRADDLES"
+      assert straddle.failure_rate.reason =~ "2026-08-05T21:13:50Z"
+      assert straddle.failure_rate.reason =~ "schema_commit"
+      assert straddle.failure_rate.reason =~ "#9615"
+
+      # `classes` STAYS A LIST — the wire shape does not switch under a
+      # straddling window, because the only reader of this envelope declares
+      # `Classes []DeployCensusClass` and an object there is a decode ERROR, not
+      # a refusal (w18 review). The counts are real rows and stay; the SHARES
+      # refuse, carrying the boundary verbatim, exactly as `failure_rate` does
+      # one level up.
+      assert is_list(straddle.classes)
+      assert straddle.classes != [], "the class rows are real counts and must not vanish"
+
+      for row <- straddle.classes do
+        assert row.count > 0
+        assert row.share.refused, "every class share must refuse across the boundary"
+        assert is_nil(row.share.pct)
+        assert row.share.reason =~ "STRADDLES"
+        assert row.share.reason =~ "2026-08-05T21:13:50Z"
+        assert row.share.reason =~ "#9615"
+      end
+
+      # AND NOTHING IN THE ENVELOPE MAY BE A MAP WHERE A LIST IS DECLARED. This
+      # is the assertion that would have caught the shape switch: the three
+      # cohort keys are lists on EVERY path this census can take.
+      for key <- [:classes, :deferred, :not_attempted, :sites] do
+        assert is_list(Map.fetch!(straddle, key)),
+               "#{key} must be a list on every path — the Go reader declares a slice"
+      end
+
+      # AND THE HALF THAT MUST NOT REFUSE (D229). A comparator that refuses
+      # everything is an outage a reader routes around; `live_rate`'s numerator
+      # and denominator are both label-independent.
+      refute straddle.live_rate.refused
+      assert straddle.live_rate.pct == 40.0
+      assert is_nil(straddle.live_rate.reason)
+      # The counts themselves are real rows and stay — only the RATIO goes.
+      assert straddle.volume == 250
+      assert straddle.failed == 150
+      assert straddle.live == 100
+    end
+
+    # ── dr-w18-s2: the coalesced gauge and its REFUSING coverage floor ─────
+    test "coalesced_attempts rides BESIDE volume and REFUSES below the counter's own floor", %{
+      site: site
+    } do
+      from = ~U[2026-08-06 00:00:00Z]
+      to = ~U[2026-08-07 00:00:00Z]
+
+      for i <- 1..3,
+          do:
+            deployment!(site, %{
+              stage: "PLAN",
+              failure_reason: @r409_bare,
+              coalesced_attempts: 5,
+              inserted_at: DateTime.add(from, i, :second)
+            })
+
+      # This window opens BEFORE the migration instant, so a SUM would be a
+      # confident number over rows that could not have counted. Measured on
+      # prod: the sum over 2026-08-06 is 0 while the day's true coalesced
+      # volume was ~1,563.
+      refused = DeployLedger.census(from, to)
+
+      assert refused.coalesced_attempts.refused
+      assert is_nil(refused.coalesced_attempts.value)
+      assert refused.coalesced_attempts.reason =~ "2026-08-07T10:02:23Z"
+      assert refused.coalesced_attempts.basis =~ "minted NO deployment row"
+      # It is never folded into volume — the two populations are disjoint.
+      assert refused.volume == 3
+
+      # THE FLOOR CAN LOSE: move the constant back and the SAME window answers a
+      # number instead of refusing. This is the mutation, run in-suite rather
+      # than described in a comment.
+      Application.put_env(:barkpark_cloud, :coalesced_counter_since, ~U[2026-08-05 00:00:00Z])
+      on_exit(fn -> Application.delete_env(:barkpark_cloud, :coalesced_counter_since) end)
+
+      moved = DeployLedger.census(from, to)
+      refute moved.coalesced_attempts.refused
+      assert moved.coalesced_attempts.value == 15
+    end
+
+    test "every rate on the envelope NAMES its basis", %{site: site} do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for i <- 1..3,
+          do:
+            deployment!(site, %{
+              stage: "PLAN",
+              failure_reason: @r409_bare,
+              inserted_at: DateTime.add(from, i, :second)
+            })
+
+      c = DeployLedger.census(from, to)
+
+      assert c.failure_rate.basis =~ "attempted rows"
+      assert c.live_rate.basis =~ "attempted rows"
+      # A class share is denominated on `failed`, not on the attempted
+      # population — and it says so rather than borrowing the default sentence.
+      assert hd(c.classes).share.basis =~ "failure numerator"
+      assert hd(c.classes).share.sample == 3
+    end
+
+    # ── dr-w18-s2: the completeness audit, in the code ─────────────────────
+    test "census/3 carries a SECOND INDEPENDENT COUNT reconciled against volume + not_attempted",
+         %{site: site} do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for i <- 1..4,
+          do:
+            deployment!(site, %{
+              stage: "PLAN",
+              failure_reason: @r409_bare,
+              inserted_at: DateTime.add(from, i, :second)
+            })
+
+      # A D19 tombstone: born failed, never attempted, OUTSIDE volume on
+      # purpose. Reconciling against `volume` alone would make this a permanent
+      # false red on the real corpus (7 rows all-time).
+      deployment!(site, %{
+        stage: "PLAN",
+        failure_reason: "github push builds require a build runner this CP does not have",
+        inserted_at: DateTime.add(from, 50, :second)
+      })
+
+      # A PREVIEW-ENVIRONMENT row. It belongs to the census population (nothing
+      # in `scoped` narrows on environment) and it is what makes this test
+      # DISCRIMINATING: inject `where: d.environment == "production"` into the
+      # grouped query and the partition guard stays 4/4 green while THIS audit
+      # reds, because the second count still sees the row the fold lost.
+      deployment!(site, %{
+        stage: "PLAN",
+        environment: "preview",
+        failure_reason: @r409_bare,
+        inserted_at: DateTime.add(from, 70, :second)
+      })
+
+      c = DeployLedger.census(from, to)
+
+      # THE AUDIT FIRST — it is the assertion that must be able to lose, and a
+      # volume assertion above it would red first and hide which guard caught
+      # the loss.
+      assert c.completeness.balanced,
+             "the audit lost rows: #{c.completeness.reason}"
+
+      assert c.completeness.unaccounted == 0
+      assert c.completeness.audited == 6
+      assert c.completeness.accounted == 6
+      assert is_nil(c.completeness.reason)
+
+      assert c.volume == 5
+      assert Enum.sum(Enum.map(c.not_attempted, & &1.count)) == 1
+      assert c.completeness.method =~ "no GROUP BY"
+      # The blind spot is NAMED on the wire, not only in the moduledoc.
+      assert c.completeness.method =~ "both shapes inherit `scoped`"
+    end
+
+    # ── dr-w18-s2: the truncation marker ──────────────────────────────────
+    # UNFALSIFIABLE BY LIVE DATA — the fleet has 13 sites and the cut is 50, so
+    # only a CONSTRUCTED population can make this marker fire. A live-data
+    # assertion here would be vacuous green.
+    test "51 sites against the default 50-cut sets `truncated` on BOTH the census and delivery nodes",
+         %{team: team} do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for _ <- 1..51 do
+        s = site_fixture(team)
+
+        deployments!(s, [
+          %{
+            status: "live",
+            inserted_at: DateTime.add(from, 10, :second),
+            became_live_at: DateTime.add(from, 40, :second)
+          }
+        ])
+      end
+
+      c = DeployLedger.census(from, to)
+      assert c.total_sites == 51
+      assert c.truncated
+      assert length(c.sites) == 50
+
+      d = DeployLedger.delivery(from, to, as_of: to)
+      assert d.total_sites == 51
+      assert d.truncated
+      assert length(d.sites) == 50
+
+      # …and the marker is FALSE when nothing was cut, so it is a fact and not a
+      # constant. 51 sites under a 60-cut is the same population, uncut.
+      wide = DeployLedger.census(from, to, site_limit: 60)
+      refute wide.truncated
+      assert wide.total_sites == 51
+      assert length(wide.sites) == 51
+    end
   end
 
   ## ── 5. The delivery clock ────────────────────────────────────────────────
@@ -1920,6 +2246,8 @@ defmodule BarkparkCloud.DeployLedgerTest do
                :p95,
                :sample,
                :sites,
+               :total_sites,
+               :truncated,
                :unmetered,
                :window
              ]
@@ -2179,6 +2507,11 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert conn.status == 403
     end
 
+    # The window ends BEFORE the refusal-vocabulary boundary (2026-08-05
+    # 21:13:50Z) on purpose: a window that straddles it gets a REFUSAL node for
+    # `classes` instead of a list, which is the correct answer and is asserted
+    # in its own test. Reading class counts here requires a window whose rows
+    # were all labelled by one taxonomy.
     test "an operator gets counts per class and per site in ONE call", %{user: user, site: site} do
       Application.put_env(:barkpark_cloud, :platform_admin_emails, [user.email])
       base = ~U[2026-07-26 00:00:00Z]
@@ -2194,7 +2527,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       conn =
         call(
           :get,
-          "/v1/operator/deploy-ledger/census?from=2026-07-26&to=2026-08-06",
+          "/v1/operator/deploy-ledger/census?from=2026-07-26&to=2026-08-05",
           login_token(user)
         )
 
