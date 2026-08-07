@@ -228,7 +228,17 @@
     // the details and try again." about a fault that was never theirs. The copy
     // names US as the party at fault and never asks the person to re-check input
     // they got right.
-    server_error: "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.",
+    // cch-w50-s2 — the trailing "contact support" clause is GONE. There is no
+    // support desk on this deployment: no address, no inbox, no route, no docs
+    // page, no nav link (the only "support" in the tree is the fleet SUPPORT
+    // MACHINE role — POST /v1/fleet/supports), and the plane's only mail
+    // identity is noreply@barkpark.cloud with no reply_to. Naming a recourse
+    // that does not exist is the same failure class as the retired role and
+    // billing sentences. No new next-step sentence replaces it (charter D438):
+    // the honest state is that there IS no further step the person can take,
+    // and "Try again in a moment" is the one true one, already here. The
+    // "broke on our side" clause is load-bearing and stays byte-for-byte.
+    server_error: "Something broke on our side — not your input. Try again in a moment.",
     malformed_body: "We couldn't read that request — reload the page and try again.",
     malformed_request: "We couldn't read that request — reload the page and try again.",
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",

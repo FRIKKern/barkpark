@@ -795,8 +795,17 @@ defmodule BarkparkCloud.FailureCopy do
 
   # PLATFORM pointing: the provisioning FQDN's A record is ours to set, and the
   # provision step sets it. "Automatically" is a true claim here and only here.
+  # cch-w50-s2 — "or contact support" removed. The wave that split this clause by
+  # kind cleaned the CUSTOM arm below and left the PLATFORM arm still offering a
+  # desk that does not exist on this deployment: no address, no inbox, no route,
+  # no docs page, no nav link (every "support" in cloud/lib is the fleet SUPPORT
+  # MACHINE role), and the plane's only mail identity is noreply@barkpark.cloud
+  # with no reply_to. Re-attaching IS the real remedy here and it stays; nothing
+  # new is authored in the removed clause's place (charter D438). Banned by
+  # test/barkpark_cloud/failure_copy_support_channel_test.exs, the Elixir twin of
+  # the console ban in __app.test.mjs.
   def domain_stage_remediation("platform", "points_here") do
-    "This domain resolves, but not to this instance's address. The platform sets this record itself when the instance is provisioned; if it persists, re-attach the domain or contact support."
+    "This domain resolves, but not to this instance's address. The platform sets this record itself when the instance is provisioned; if it persists, re-attach the domain."
   end
 
   # CUSTOM pointing: the customer owns this zone (router.ex attach path —
