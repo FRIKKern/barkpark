@@ -13104,7 +13104,10 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
     github_branch: "main", github_webhook_configured: true, inserted_at: "2026-07-01T10:00:00Z",
   };
   const deployments = [{ id: "d1", status: "live", environment: "production", inserted_at: "2026-07-19T10:00:00Z", became_live_at: "2026-07-19T10:00:40Z" }];
-  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", []);
+  // cch-w48-s2: the sixth argument is the authority band, and it FAILS CLOSED —
+  // #site-github is admin-gated, so this pin (which asserts the control) names
+  // "grant" explicitly. The closed arms have their own pins below.
+  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", [], "grant");
   assert.match(html, /id="site-domains"/);            // the domains rungs mount
   assert.match(html, /id="deploy-rail-slot"/);        // the live rail slot survives
   // Scale: a read-only rail value — no input/select/toggle control for it (GR28).
@@ -13114,6 +13117,124 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
   assert.match(html, /id="site-github"[^>]*><span class="mono">acme\/site<\/span>/);
   // The headline chip is honest: current live row → Live.
   assert.match(html, /dep-pill dep-live/);
+});
+
+// ── cch-w48-s2 (charter D539): THE ONE ADMIN DOOR AMONG FIVE MEMBER-LEGAL ONES ─
+//
+// #view-site offers five write controls a browser SESSION credential can
+// actually drive (deploy, rollback, promote, env, the theme PATCH — a session
+// carries ["root"], so require_ability("write") never refuses one) and exactly
+// one it cannot: #site-github, whose BOTH outcomes are Auth.require_team_admin
+// (router.ex:7086, :7116). It shipped unpredicated, and worse than a refusing
+// button: openSiteGithub's first read (GET /v1/github/repos) is require_user
+// ONLY, so a member got a SUCCESSFUL repo list and a populated select, and the
+// 403 landed only after they chose one.
+//
+// The criterion is the RENDER, never the 403 — no fixture in this corpus can
+// paint the configured+installed GitHub arm, so "a member is refused before the
+// modal" would be a vacuous green. These pin siteDetailHtml's RENDERED BYTES.
+const S2_GH_SITE = {
+  id: "s1", framework: "astro", scale_mode: "always_on",
+  inserted_at: "2026-07-01T10:00:00Z",
+};
+// The badges cluster up to (but excluding) the member-legal Deploy button — the
+// only region #site-github can occupy. Scoping the negative assertions here is
+// what makes "no disabled ghost, no title" falsifiable instead of file-wide.
+const S2_DEPLOY_BTN = '<button class="btn btn-primary btn-sm" id="site-deploy"';
+const s2Badges = (html) =>
+  html.slice(html.indexOf('<div class="fleet-badges">'), html.indexOf(S2_DEPLOY_BTN));
+
+test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admin; the connected member keeps the repo name as a non-interactive chip", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
+
+  // THE PAIRED POSITIVE CONTROL: the admin arm still emits exactly one control,
+  // byte-identically. Without this, a siteDetailHtml that rendered NOTHING at
+  // all would satisfy every negative assertion below.
+  const admin = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant");
+  assert.equal((admin.match(/id="site-github"/g) || []).length, 1);
+  assert.match(admin, /<button class="btn btn-ghost btn-sm" id="site-github" type="button"><span class="mono">acme\/site<\/span><\/button>/);
+  const adminBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant");
+  assert.match(adminBare, /id="site-github" type="button">Connect GitHub repo<\/button>/);
+
+  // MEMBER + UNCONNECTED → OMITTED ENTIRELY. D428's ONLY-clause: disable-and-
+  // explain is authorized for the seven instance-detail lifecycle verbs and
+  // nothing else, so a disabled ghost is not authorized here — and no fact is
+  // lost, because there is no repo to name.
+  const memberBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "refuse");
+  assert.doesNotMatch(memberBare, /site-github/);
+  assert.doesNotMatch(memberBare, /Connect GitHub repo/);
+  assert.doesNotMatch(s2Badges(memberBare), /<button|disabled|title=/);
+  // NO SENTENCE AT ANY ARM: this epic's sentences belong to the POST-hoc
+  // refusal; a sentence at a pre-hoc omit invents a refusal never attempted.
+  assert.doesNotMatch(memberBare, /admin on this team|You need the/);
+
+  // MEMBER + CONNECTED → the repo name survives as a NON-INTERACTIVE chip. GET
+  // /v1/sites/:id is require_user, so `github_repo` is ALREADY legally in this
+  // member's hands; omitting it would delete information the payload gave them.
+  const memberConn = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "refuse");
+  assert.doesNotMatch(memberConn, /site-github/);
+  assert.match(memberConn, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  assert.doesNotMatch(s2Badges(memberConn), /<button|disabled|title=/);
+  assert.doesNotMatch(memberConn, /admin on this team|You need the/);
+});
+
+test("cch-w48-s2: siteDetailHtml's authority input FAILS CLOSED — an unknown answer and an absent one both withhold the admin door", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site" };
+  // instanceAdminAuthority() answers "unknown" while /v1/me is in flight or
+  // FAILED. Neither is a grant, and offering the door on either is the
+  // fail-open this epic exists to kill.
+  const unknown = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "unknown");
+  assert.doesNotMatch(unknown, /site-github/);
+  assert.match(unknown, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  // An OMITTED argument is the same class of ignorance — a call site that never
+  // heard about the authority term must not silently re-open the door.
+  const absent = hooks.siteDetailHtml(connected, null, [], "acme.com", []);
+  assert.doesNotMatch(absent, /site-github/);
+  // …and the read-legal fact still survives on both closed arms.
+  assert.match(absent, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  // A garbage authority is not a grant either (only the literal "grant" is).
+  assert.doesNotMatch(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "admin"), /site-github/);
+});
+
+test("cch-w48-s2: siteThemeFailureCopy — no raw slug, no raw `detail`, and no manufactured status sentence", () => {
+  // THE MEASURED LEAK: the handler read `r.data.detail` raw, so a constraint
+  // violation on the theme FK reached a human's toast verbatim.
+  const ecto = hooks.siteThemeFailureCopy({
+    ok: false, status: 500,
+    data: { detail: 'Ecto.ConstraintError: constraint "sites_theme_fkey" ...' },
+  });
+  assert.doesNotMatch(ecto, /Ecto\.ConstraintError|sites_theme_fkey|constraint/);
+  assert.match(ecto, /broke on our side/);
+
+  // THE MANUFACTURED SENTENCE: an empty 403 used to render the literal string
+  // "update failed (403)" — a status code shown to a person as if it were copy.
+  // An EMPTY body is answered by the DESIGNED sentence — copy about this write
+  // — never by a status code dressed up as prose.
+  const bare403 = hooks.siteThemeFailureCopy({ ok: false, status: 403, data: {} });
+  assert.doesNotMatch(bare403, /update failed|403/);
+  assert.match(bare403, /We couldn't set the theme/);
+  // A body that carries only the SLUG renders the curated sentence, not the
+  // literal token `forbidden`.
+  const slug403 = hooks.siteThemeFailureCopy({ ok: false, status: 403, data: { error: "forbidden" } });
+  assert.match(slug403, /don't have permission/);
+  assert.notEqual(slug403, "forbidden");
+
+  // A refusal that CARRIES evidence still renders the evidence (friendly()'s
+  // forbidden fence), and a validation answer still renders the field.
+  const roled = hooks.siteThemeFailureCopy({
+    ok: false, status: 403, data: { error: "forbidden", required: "admin", scope: "team" },
+  });
+  assert.match(roled, /admin/);
+  const invalid = hooks.siteThemeFailureCopy({
+    ok: false, status: 422, data: { error: "invalid", details: { theme: ["is not a known template"] } },
+  });
+  assert.match(invalid, /theme is not a known template/);
+
+  // A body that says nothing at all falls to the DESIGNED sentence, never a
+  // status line and never the empty string.
+  const mute = hooks.siteThemeFailureCopy({ ok: false, status: 409, data: null });
+  assert.match(mute, /We couldn't set the theme/);
+  assert.doesNotMatch(mute, /409/);
 });
 
 test("stw9: siteDetailHtml — the rail reads doc_type back, and a site without one shows an em dash, never an invented default", () => {

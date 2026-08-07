@@ -11452,7 +11452,9 @@
       ].filter(Boolean));
       setShellContextName("site", site.name || domain); // sidebar morph ctx name
       setScopeLabel(parseHash(), shellNavLayer(parseHash()));
-      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews);
+      // cch-w48-s2 (D539): the ONE authority read this screen takes, taken HERE
+      // and threaded in — #site-github is the only admin-gated control on it.
+      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority());
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       var srb = $("#site-rollback");
@@ -11483,8 +11485,7 @@
             });
           } else {
             themeSel.value = site.theme || "";
-            var msg = (r.data && (r.data.error || r.data.detail)) || ("update failed (" + r.status + ")");
-            toast({ kind: "error", title: "Couldn't set theme", body: String(msg) });
+            toast({ kind: "error", title: "Couldn't set theme", body: siteThemeFailureCopy(r) });
           }
         });
       });
@@ -11539,6 +11540,32 @@
     return { theme: value || "" };
   }
 
+  // cch-w48-s2 — THE THEME PATCH'S REFUSAL COPY, and why it is a named helper
+  // rather than the inline expression it replaces. The handler used to read
+  //
+  //   (r.data && (r.data.error || r.data.detail)) || ("update failed (" + r.status + ")")
+  //
+  // which paints THREE things a person cannot use: the raw slug `forbidden` on
+  // a flat 403; a MANUFACTURED status sentence, `update failed (403)`, on an
+  // empty body; and — the one that matters — `r.data.detail` RAW, so a 5xx
+  // carrying `Ecto.ConstraintError ... sites_theme_fkey` renders a database
+  // internal into a human's toast.
+  //
+  // BOTH raw reads are named on purpose. friendly() consults data.error and
+  // data.detailS (plural) — it has never read data.detail — so a fix written
+  // only as "route the 403 through friendly()" leaves the constraint leak
+  // exactly where it was. Neither key is read here; faultCopy() classifies by
+  // STATUS first, so the 5xx arm returns ERRORS.server_error and the detail
+  // string is never reachable. The 4xx arm keeps the caller's designed
+  // sentence, which is copy about THIS write instead of a status code.
+  function siteThemeFailureCopy(r) {
+    return String(faultCopy(
+      (r && r.status) || 0, r && r.data,
+      "We couldn't set the theme. Try again in a moment.",
+      r && r.transport
+    ));
+  }
+
   // gr-p3: the site's honest headline state chip, derived from server truth —
   // the deployment the production pointer names. Live → the ok pill; an
   // in-flight build → Deploying; a failed CURRENT pointer never happens (the
@@ -11573,7 +11600,14 @@
       ' aria-label="Not deployed to production">Not deployed</span>';
   }
 
-  function siteDetailHtml(site, bp, deployments, domain, previews) {
+  // cch-w48-s2 (charter D539): `authority` is instanceAdminAuthority()'s
+  // three-valued answer, threaded in for ONE control — #site-github — because
+  // it is the single admin-gated door on a screen of member-legal ones. It
+  // FAILS CLOSED by construction: only the literal "grant" opens the door, so
+  // "unknown" (/v1/me in flight or failed), a stale answer, and an OMITTED
+  // argument all take the closed arm. That last case matters — a call site
+  // that never heard about this parameter must not silently re-open the door.
+  function siteDetailHtml(site, bp, deployments, domain, previews, authority) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
     // ssw8 (D82): the content binding, derived once for the rail rows below.
@@ -11605,6 +11639,36 @@
     var githubLabel = site.github_repo
       ? '<span class="mono">' + esc(site.github_repo) + "</span>"
       : "Connect GitHub repo";
+    // cch-w48-s2 (D539): THREE ARMS, AND NO SENTENCE AT ANY OF THEM.
+    //
+    // Both of #site-github's outcomes are Auth.require_team_admin (router.ex
+    // :7086 connect, :7116 disconnect) while its five badge/rail siblings are
+    // member-legal — a browser SESSION credential carries ["root"], so
+    // require_ability("write") never refuses one. And the door is worse than a
+    // refusing button: openSiteGithub's first read (GET /v1/github/repos) is
+    // require_user ONLY, so a member gets a SUCCESSFUL repo list and a filled
+    // select, and the 403 lands only after they pick a repo.
+    //
+    //   admin                     → today's control, byte-identical.
+    //   non-admin + connected     → the repo name as a NON-INTERACTIVE chip.
+    //                               GET /v1/sites/:id is require_user, so
+    //                               `github_repo` is ALREADY legally this
+    //                               member's; omitting it would delete
+    //                               information the payload handed them.
+    //   non-admin + unconnected   → OMITTED ENTIRELY. D428's ONLY-clause:
+    //                               disable-and-explain is authorized for the
+    //                               seven instance-detail lifecycle verbs and
+    //                               nothing else, so a disabled ghost is not
+    //                               authorized here — and no fact is lost,
+    //                               there being no repo to name.
+    //
+    // No sentence at any arm: this epic's sentences belong to the POST-hoc
+    // refusal (submitSiteGithub's, which already routes through friendly() ->
+    // forbiddenEvidenceCopy). A sentence at a PRE-hoc omit would invent a
+    // refusal for something the person never attempted.
+    var githubControl = authority === "grant"
+      ? '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>"
+      : (site.github_repo ? '<span class="set-chip">' + githubLabel + "</span>" : "");
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).
@@ -11626,7 +11690,7 @@
         '<div class="fleet-url">' + sub + liveLine + "</div></div>" +
         '<div class="fleet-badges">' +
           (live ? '<a class="btn btn-ghost btn-sm site-open" href="' + esc(live) + '" target="_blank" rel="noopener">Visit&nbsp;&#8599;</a>' : "") +
-          '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>" +
+          githubControl +
           '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
       '<div class="detail-grid">' +
         '<div class="detail-main"><div id="deploy-rail-slot"></div>' + deploysHead + rollbackBanner +
@@ -21536,6 +21600,9 @@
       siteCreateFailureCopy: siteCreateFailureCopy,
       // search-template W8: site theme-edit pure helpers.
       siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
+      // cch-w48-s2: the theme PATCH's refusal copy — pinned so the raw
+      // `detail` leak and the manufactured status sentence stay dead.
+      siteThemeFailureCopy: siteThemeFailureCopy,
       // cch-w10 — the OAuth landing gate. The fragment now carries a ONE-TIME
       // exchange code, not a session token, so the boot path has a network hop in
       // it and is no longer assertable by reading render()'s return. Exported so
