@@ -138,18 +138,25 @@ function balanced(text, open) {
 }
 
 // Split a map body at its TOP-LEVEL commas — the ones outside every nested
-// map, list, tuple and call.
+// map, list, tuple and call. Each segment carries the offset it starts at
+// WITHIN the body, because a later `indexOf(segment)` would find the FIRST
+// textual occurrence and could silently walk the wrong nested map: the one
+// failure a census must never have is a confident wrong answer.
 function topLevelSplit(text) {
   const parts = [];
   let depth = 0, from = 0;
+  const push = (to) => {
+    const slice = text.slice(from, to);
+    if (slice.trim().length) parts.push({ text: slice, at: from });
+  };
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === "{" || c === "[" || c === "(") depth++;
     else if (c === "}" || c === "]" || c === ")") depth--;
-    else if (c === "," && depth === 0) { parts.push(text.slice(from, i)); from = i + 1; }
+    else if (c === "," && depth === 0) { push(i); from = i + 1; }
   }
-  parts.push(text.slice(from));
-  return parts.filter((p) => p.trim().length);
+  push(text.length);
+  return parts;
 }
 
 // Walk a map body into key paths. `blanked` drives the structure, `raw` is read
@@ -158,7 +165,8 @@ function walkMap(blanked, region, prefix, out, trail) {
   const body = blanked.slice(region.start, region.end);
   const segs = topLevelSplit(body);
   if (!segs.length) die2([`FAIL(2): the map at ${trail || "/v1/me"} parsed to ZERO keys — the response map's shape moved.`]);
-  for (const seg of segs) {
+  for (const segment of segs) {
+    const seg = segment.text;
     const m = seg.match(/^\s*([a-z_][A-Za-z0-9_]*):\s*([\s\S]*)$/);
     if (!m) {
       die2([
@@ -177,7 +185,7 @@ function walkMap(blanked, region, prefix, out, trail) {
     // Absolute offset of the first `%{` inside this value, if any.
     const rel = value.indexOf("%{");
     if (rel === -1) continue; // opaque: a call, a variable, a scalar — no claim
-    const absValueStart = region.start + body.indexOf(seg) + seg.indexOf(value);
+    const absValueStart = region.start + segment.at + (seg.length - value.length);
     const nested = balanced(blanked, absValueStart + rel + 1);
     if (!nested) die2([`FAIL(2): the nested map under \`${self}\` is unbalanced — refusing to guess its keys.`]);
     walkMap(blanked, nested, self + (isList ? "[]." : "."), out, self);

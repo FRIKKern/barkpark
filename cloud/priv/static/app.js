@@ -18141,11 +18141,14 @@
     var ta = me.team_authority;
     return {
       teamId: me.team.id,
-      // cch-w43-s1: `|| me.role` is gone. The band above already proved this is
-      // grant-or-refuse, and both of those bands require a non-nil ta, so the
-      // envelope's role string can no longer speak for the server's resolved
-      // authority. "member" stays as the fail-closed floor for a ta with no
-      // role at all (teamless is nil and never reaches here).
+      // cch-w43-s1: `|| me.role` is gone. `grant` requires a non-nil ta by
+      // construction; `refuse` does NOT (a teamless account refuses with ta
+      // nil), but the `me.team && me.team.id` guard above already returned
+      // null for exactly that account — /v1/me builds `team_authority` from
+      // the same resolved team as `team:`, so a present team and a nil
+      // authority is not a shape the route can send. The envelope's role
+      // string therefore no longer speaks for the server's resolved authority,
+      // and "member" is the fail-closed floor for a ta that names no role.
       role: (ta && ta.role) || "member",
       userId: me.user && me.user.id,
     };
