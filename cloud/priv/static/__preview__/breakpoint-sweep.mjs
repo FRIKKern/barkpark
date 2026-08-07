@@ -369,7 +369,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 9 vary binding/verify content inside the same .detail-grid. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
-  "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 7 are member-role and empty-state variants of those same panels.",
+  "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 9 are member-role, ACTOR-IDENTITY and empty-state variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
@@ -381,7 +381,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
 };
 
-// THE RESIDUE — 79 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 83 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
@@ -393,8 +393,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 21-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 104 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 79 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 108 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 83 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -417,12 +417,20 @@ export const RESIDUE_FAMILY_REASONS = {
 // the 79th residue entry, in the family its three siblings already occupy. The
 // sweep exited 2 with `UNLISTED scenario "operator-me-unreadable" (family
 // hash:#operator)` until the entry above was written.
-// `familyOf` over all 104 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 79 is the RESIDUE, not the census.
+// cch-w45-s1 moved it a seventh time, by TWO: `members-admin-actor` and
+// `members-peer-owner` — the first fixtures in which the acting principal is
+// not the roster's row 0, so the first able to ask a rank-relative predicate
+// about a row the actor does NOT outrank — are the 107th and 108th scenarios
+// and the 82nd and 83rd residue entries. The sweep exited 2 with `UNLISTED
+// scenario "members-admin-actor" (family hash:#settings)` (and the twin) until
+// the entries below were written; the four numbers here were then RE-READ from
+// `scenarioReport`, never carried from the brief.
+// `familyOf` over all 108 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 83 is the RESIDUE, not the census.
 // EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED (cch-w18-s4, D213):
 // `scenarioReport({ scenarios: SCENARIOS })` prints
-// {total:104, cells:26, distinctCovered:25, residue:79, families:13, ok:true},
-// `Object.keys(SCENARIO_RESIDUE).length` is 79 and `familyOf` over all 104
+// {total:108, cells:26, distinctCovered:25, residue:83, families:13, ok:true},
+// `Object.keys(SCENARIO_RESIDUE).length` is 83 and `familyOf` over all 108
 // gives 15. The prose said 99/74 while the literal below already held 75 —
 // #8849's `sites-on-instance` moved the census and only the TEST literals
 // (breakpoint-sweep.test.mjs:516-522) were updated. A census that two files
@@ -474,7 +482,9 @@ export const SCENARIO_RESIDUE = {
   "site-binding-bound": "hash:#site",
   "site-binding-unknown": "hash:#site",
   "site-binding-mismatch": "hash:#site",
-  // hash:#settings — 7
+  // hash:#settings — 9
+  "members-admin-actor": "hash:#settings",
+  "members-peer-owner": "hash:#settings",
   "env-write-once-409": "hash:#settings",
   "env-member": "hash:#settings",
   "tokens-empty": "hash:#settings",

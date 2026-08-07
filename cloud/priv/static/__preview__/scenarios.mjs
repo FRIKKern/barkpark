@@ -956,7 +956,19 @@ const accountSessionsRevoke = [
 // Add e.g. `membersDenied`/`envDenied` fixtures + the matching flag branch in the
 // endpoint switch, then set the flag on the member scenario. Keep the DEFAULT
 // path (owner, no flag) so no existing scenario changes behaviour.
-function me(teamName, onb, role) {
+// cch-w45-s1: `actorId` is the fourth parameter because rank is NOT identity.
+// Until this wave `me()` threaded `role` into FOUR authority fields and ZERO
+// identity fields, so a role-only "admin" scenario rendered BYTE-IDENTICALLY to
+// the owner one (4220 vs 4220): every rank-relative predicate in the members
+// panel compares the actor to the ROSTER ROW, and the roster row it was
+// compared against was always the actor's own (teamMembers[0] IS usr_ada).
+// Every guard over that comparison was green by construction. Passing an
+// `actorId` moves `user.id` — and, inseparably, `user.email`, because an actor
+// whose two halves name different people is a fixture that could never exist on
+// the wire. Omit it and the corpus's default actor (usr_ada, the owner) is
+// unmoved: moving that default globally is forbidden (it reds the members
+// remove-click leg and the 2FA/invite copy, which read me().user.email).
+function me(teamName, onb, role, actorId) {
   onb = onb || {};
   const steps = [
     // Every scenario that is logged-in carries a subscription fixture, so the
@@ -982,8 +994,9 @@ function me(teamName, onb, role) {
   // GR39 requires. The census unions over the whole corpus, so those scenarios
   // are what prove the key is served at all.
   const actorRole = role || "owner";
+  const actorUserId = actorId || "usr_ada";
   return {
-    user: { id: "usr_ada", email: "ada@acme.com", confirmed: true, two_factor_enabled: false },
+    user: { id: actorUserId, email: corpusActorEmail(actorUserId), confirmed: true, two_factor_enabled: false },
     team: { id: IDS.team, name: teamName, slug: "acme" },
     // EVERY membership, the server's words. The corpus's actor belongs to the
     // one team it is scoped to — a SECOND team here would be a scenario-level
@@ -1056,6 +1069,26 @@ const teamMembers = [
   { user_id: "usr_lin", email: "lin@acme.com", role: "admin", joined_at: tMinus(120 * 86400) },
   { user_id: "usr_rex", email: "rex@acme.com", role: "member", joined_at: tMinus(20 * 86400) },
 ];
+// cch-w45-s1: a SECOND owner, appended by CONCAT so `teamMembers` — and every
+// count assertion, every residue line and every wire leg standing on its three
+// rows — is byte-for-byte unmoved. This is the one roster cell where the two
+// server verbs DISAGREE: `Accounts.remove_member_as/3` carries an owner escape
+// hatch (`actor_role == "owner" or outranks?/2`, accounts.ex:1722) while
+// `update_member_role_as/4` does not (strict `outranks?`, accounts.ex:1801) —
+// so an owner MAY remove a peer owner and may NOT re-role one. No cell of the
+// corpus could paint that disagreement before, because there was no peer owner.
+const teamMembersPeerOwner = teamMembers.concat([
+  { user_id: "usr_ozz", email: "ozz@acme.com", role: "owner", joined_at: tMinus(200 * 86400) },
+]);
+// The corpus's actors, id → email, read STRAIGHT off the roster fixtures so the
+// two halves of an identity can never be edited apart. Unknown id is FATAL, not
+// a silent fallback to ada: a typo'd actor that quietly renders as the owner is
+// exactly the vacuous green this fixture exists to end.
+function corpusActorEmail(userId) {
+  const row = teamMembersPeerOwner.find((m) => m.user_id === userId);
+  if (!row) throw new Error("preview corpus has no actor " + userId + " — id and email move together");
+  return row.email;
+}
 const teamInvites = [
   { id: "inv_sky", email: "sky@partner.io", role: "member", expires_at: tPlus(6 * 86400), inserted_at: tMinus(86400) },
   { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
@@ -2446,6 +2479,52 @@ export const SCENARIOS = {
       members: teamMembers,
       // A member never fetches invitations (the client skips the admin-gated
       // call), so no fixture — the panel renders the roster alone.
+    },
+  },
+  // cch-w45-s1: THE FRAME NO EXISTING CELL PRODUCED — an actor who is not row 0.
+  // lin is the acting ADMIN, by IDENTITY (usr_lin) and not merely by rank, over
+  // the SAME 3-row roster the owner scenario uses. Three different answers in
+  // one panel, each a different arm of the two server predicates:
+  //   ada  (owner, outranks the actor) → NEITHER Change role NOR Remove,
+  //   lin  (SELF)                      → Change role (the rank arm is bypassed
+  //                                      on your own row — self-demotion is a
+  //                                      409 STATE refusal the server owns, not
+  //                                      an authority one) and NOT Remove,
+  //   rex  (member, outranked)         → BOTH.
+  // Before this scenario, every rank-relative predicate was only ever asked
+  // about rows the actor outranked, so an over-offer on a superior's row could
+  // not be seen by any instrument.
+  "members-admin-actor": {
+    label: "Members (admin actor, not the owner) — the owner's row offers NOTHING, the self row only Change role",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "admin", "usr_lin"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembers,
+      invitations: teamInvites,
+    },
+  },
+  // cch-w45-s1: the acting OWNER against a roster that holds a SECOND owner —
+  // the one cell where the server's two member verbs disagree. Remove is
+  // offered on ozz's row (remove_member_as/3's owner escape hatch) and Change
+  // role is NOT (update_member_role_as/4 has no such hatch), so a panel that
+  // paints both is over-offering a control the server 403s `outranked`.
+  "members-peer-owner": {
+    label: "Members (owner) — a PEER OWNER row: Remove is offered, Change role is not (the two verbs disagree)",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersPeerOwner,
+      invitations: teamInvites,
     },
   },
   // Env-vars (admin): the row grammar end-to-end — team + instance scopes, a
