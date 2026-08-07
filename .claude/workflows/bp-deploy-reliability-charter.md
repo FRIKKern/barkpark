@@ -5174,3 +5174,58 @@ MERGE ORDER FOR THE LEAD: #10399 is CLEAN with zero failing checks — merge it,
 turns #10400's only red green; #10400's Cloud compile and Cloud test already pass. Then #10401 (its sole red is
 `go vet + test`, a NON-required context failing on three 3.00 s deadline assertions in `internal/agent`, a
 package it does not touch — re-fire it, then merge). Then S2, then round 2.
+
+### Wave 2026-08-07 (wave 16) — REVIEWED · Paper `deploy-reliability-wave-16-2026-08-07` · grade **A−**
+
+**Three of seven slices built, reviewed, gate-green on the reviewed state, PUSHED and PR'd. Nothing merged —
+the lead merges.** S4/S5/S6 (round 2) and S7 (round 3) were NOT built by design: all four wait on S2 merging.
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| CLOUD_PATHS declares the census's two producer files | `dr-w16-s1-cloud-paths-declares-census-producers` | `…census-s-two-pr-0` (unchanged) | [#10440](https://github.com/FRIKKern/barkpark/pull/10440) | check rc=0 · `--selftest` **158 passed, 0 failed** |
+| The census names every state a deploy can end in | `dr-w16-s2-census-names-every-state` | `…names-every-state-a-de-1-r` (**reviewer commit**) | [#10442](https://github.com/FRIKKern/barkpark/pull/10442) | **74 Elixir tests, 0 failures** · go build/vet/test ok · format + gofmt clean |
+| The ledger's publics declare their own reachability | `dr-w16-s3-ledger-publics-declare-reachability` | `…public-surface-decla-2` (unchanged) | [#10443](https://github.com/FRIKKern/barkpark/pull/10443) | **10 tests, 0 failures** · `--force --warnings-as-errors` clean |
+
+**What landed.** The wave's spine is S2 and it hits the wish's third clause head-on: *success stops being an
+unnamed residue*. `census/3` now emits `live` (POSITIVE — an `Enum.filter` over the same `settled` cohort
+`failed_rows` comes from, never a subtraction, D257), `in_flight` (keyed on the same literal as the partial
+unique index `deployments_active_site_env_index`), `cancelled`, `residual` and `live_rate` through the existing
+`@min_sample` refusal. `failure_rate` and `volume` do not move, and that is asserted on the pinned 250/150/60.0
+window rather than promised. S3 replaces D245 — a charter law that carried **zero bits**, measured RC=1 on both
+trees for the same wrong reason — with a committed reachability table that reds in BOTH directions, and it
+corrected four rows of the survey's own grep-derived table on the way (`min_sample/0`'s only "caller" is a
+COMMENT at `router.ex:3534`). S1 unblocks #10400's last red without touching the escape floor, and says in the
+code why raising it would break the harness.
+
+**The reporting can lose, and that was re-checked, not accepted.** The reviewer ran two independent mutations
+rather than re-reading the builders': replacing `live` with `volume - failed - deferred` reds both of S2's
+mutation tests by name (left 9, right 6; left 10, right 6); adding a public `reviewer_orphan_probe/0` to
+`deploy_ledger.ex` reds S3 three ways. Both restored. The reachability table was also independently
+re-derived from a qualified-call sweep over `cloud/lib` and reproduces the builder's corrections.
+
+**The one fix the reviewer made, and why it mattered beyond style.** S2 shipped a public
+`in_flight_statuses/0` with ZERO callers anywhere — lib, test or Go. It was born dead on the same day S3
+landed the guard that reds on dead publics, and S3's table asserts set equality over 16 publics: merging both
+would have turned **main red**. Deleted on `…-1-r`; add the accessor in the commit that adds its first caller.
+
+**What did NOT land.** Nothing is merged, so the AFTER number still does not exist. `residual` is computed by
+subtraction over cohorts that are disjoint today but unguarded — filed as
+`dr-w16-bl-residual-cannot-go-negative`. `CLOUD_ESCAPE_MIN` is now a lower bound rather than an equality, so
+once #10400 lands the scanner could lose two of eight reads silently; the fixed-order recipe (widen the fixture,
+THEN raise the floor) is filed as `dr-w16-bl-widen-escape-fixture-then-raise-floor` — the s1 builder named that
+gap and did not file it. `residual` also reaches the wire with no CLI reader, so a rising residue is visible
+only to `-o json` until #10414 lands.
+
+**Merge-order note the lead must not skip.** S3's table pins `delivery/3` and `refusal_phase/1` as
+UNREACHABLE; the moment #10401 merges, that file reds on main until those two rows move to `:reachable`. That
+is the instrument working — the row edit belongs in the merge, same rule as the payload census's "delete the
+row in the same PR as the tag". S2 and S3 also both edit `deploy_ledger.ex` around `:176-191`, so expect a
+small textual conflict whichever merges second.
+
+**What the next wave takes.** Merge round 1 in order — S1 (#10440) first, since it turns #10400's only red
+green; then #10400, #10401 (with S3's two-row table edit), then S2 (#10442) and S3 (#10443). Then dispatch the
+deferred slices strictly as their deps land: `dr-w16-s4-per-site-row-named-producer`,
+`dr-w16-s5-live-per-attempt-co-equal-headline` and `dr-w16-s6-team-scoped-census-returns-200` after **S2
+merges**, and `dr-w16-s7-boundary-and-continuity-gauge` after **S2 AND S4 merge**. S6 stays the epic's real
+frontier and remains HIGH-FLIP-RISK on tenancy: the census is now worth reading and still 403s for every
+account in production, so a taxonomy nobody can reach is the next silent failure.
