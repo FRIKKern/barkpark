@@ -6109,18 +6109,19 @@
     return "";
   }
 
-  // cch-w42-s1: the onboarding write gate now READS the authority the server
-  // states (teamAuthorityState) instead of re-deriving it from role literals.
-  // Still boolean — "grant" is the only true, so loading/failed/stale all fail
+  // cch-w42-s1: the onboarding write gate READS the authority the server states
+  // (teamAuthorityState) instead of re-deriving it from role literals. Still
+  // boolean — "grant" is the only true, so loading/failed/stale/refuse all fail
   // closed exactly as the old meCache-falsy read did.
+  //
+  // cch-w43-s1: the pre-wave-42 role-literal floor beneath this is GONE. It
+  // existed for a control plane that did not yet send team_authority — but
+  // /v1/me has sent it since wave 41 (router.ex, the `team_authority:` key of
+  // the /v1/me response map), and the preview corpus now mints it too, so the
+  // floor's only remaining job was to keep the corpus green while it lied. A
+  // fallback nothing real reaches is a fallback nothing can wrong-proof.
   function canManageOnboarding() {
-    var band = teamAuthorityState();
-    if (band !== "refuse") return band === "grant";
-    // A control plane that does not yet send team_authority answers "refuse"
-    // for every account, teamless or not, so the pre-wave-42 role read stays as
-    // the compatibility floor — never as an override of a stated refusal.
-    if (meCache && meCache.team_authority) return false;
-    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+    return teamAuthorityState() === "grant";
   }
   function firstStudioInstance(list) {
     for (var i = 0; i < (list || []).length; i++) if (attentionCanStudio(list[i])) return list[i];
@@ -18140,7 +18141,12 @@
     var ta = me.team_authority;
     return {
       teamId: me.team.id,
-      role: (ta && ta.role) || me.role || "member", // ta.role is authoritative; the fallback is the pre-wave-42 wire
+      // cch-w43-s1: `|| me.role` is gone. The band above already proved this is
+      // grant-or-refuse, and both of those bands require a non-nil ta, so the
+      // envelope's role string can no longer speak for the server's resolved
+      // authority. "member" stays as the fail-closed floor for a ta with no
+      // role at all (teamless is nil and never reaches here).
+      role: (ta && ta.role) || "member",
       userId: me.user && me.user.id,
     };
   }

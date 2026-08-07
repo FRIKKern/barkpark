@@ -15220,8 +15220,17 @@ async function driveMe(status, payload) {
   } finally { sandbox.fetch = saved; }
 }
 
-const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" } };
-const ME_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" } };
+// cch-w43-s1: these carry `team_authority` because the SERVER carries it —
+// /v1/me has stated it since wave 41 and app.js's pre-wave-42 role-literal
+// floors are gone, so a fixture without it is no longer an account the control
+// plane can mint. This file never imports scenarios.mjs (deliberately: the unit
+// seam pins app.js against hand-cut wire, not against the preview corpus), so
+// it is a SECOND producer of the /v1/me envelope and had to be widened in the
+// same commit — otherwise the floor deletion reds cch-w41-s3 below, whose
+// ME_ADMIN is the only admin fixture in the whole harness. admin/owner mirror
+// Authz: owner is both, admin is admin-not-owner, member is neither.
+const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" }, team_authority: { team_id: "t1", role: "owner", admin: true, owner: true } };
+const ME_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" }, team_authority: { team_id: "t1", role: "member", admin: false, owner: false } };
 const MEMBER_NOTE = "Members can create read-only tokens. Ask an admin for write, deploy, or root.";
 
 test("cch-w36-s3: the /v1/me state trio is hookable (RED on origin/main, where none of it exists)", () => {
@@ -15408,7 +15417,11 @@ test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass ag
 // true, member says false, and BOTH not-a-role states — never loaded, and a
 // /v1/me read that FAILED — say false, fail-closed.
 
-const ME_ADMIN = { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" } };
+// cch-w43-s1: the admin limb, now stated the way the server states it —
+// team_authority.admin true, owner false. This is the ONLY admin fixture in
+// the harness and the only reason the `|| admin` limb of the four predicates
+// can red at all.
+const ME_ADMIN = { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" }, team_authority: { team_id: "t1", role: "admin", admin: true, owner: false } };
 
 test("cch-w41-s3: all four owner|admin predicates hold owner+admin true, member false, and fail CLOSED on both not-a-role states", async () => {
   const predicates = ["providerCanWrite", "notifCanManage", "canMintAnyAbility", "canManageOnboarding"];
@@ -16171,6 +16184,69 @@ test("cch-w42-s1: membersContext sources the role from the SERVER's team_authori
   assert.equal(Object.keys(ctx).length, 3, "and no key more than the shape its callers destructure");
   assert.equal(hooks.assignableRoles(ctx.role).length, 0,
     "so the roster's manage controls stay hidden — the envelope's 'owner' does not open them");
+  hooks.clearMe();
+});
+
+// ── cch-w43-s1 · THE COMPATIBILITY FLOORS ARE GONE, AND THEIR RETURN MUST RED ─
+// Wave 42 routed canManageOnboarding and membersContext through the band but
+// left two role-literal floors underneath, for "a control plane that does not
+// yet send team_authority". No such control plane exists: /v1/me has stated
+// team_authority since wave 41. What the floors actually did was hold the
+// PREVIEW CORPUS up — me() emitted four of /v1/me's six keys, so every rendered
+// scenario took the floor and the `grant` band had never been painted at all.
+// Measured on the shipped bytes: deleting both floors against the unwidened
+// corpus reds smoke by name (members-populated, env-populated, 2 scenario(s)
+// failed) and reds cch-w41-s3 here; widening scenarios.mjs's me() in the same
+// commit greens both. Those two facts are the same fact, which is why they
+// ride together.
+//
+// These two tests pin the DELETION. Re-introducing either floor — the
+// `if (meCache && meCache.team_authority) return false;` guard plus its
+// `role === "owner" || role === "admin"` literal, or membersContext's
+// `|| me.role` — is green against every other test in this file, because every
+// other fixture agrees with itself. Here the wire is made to DISAGREE, which is
+// the only shape a floor is observable in.
+
+test("cch-w43-s1: canManageOnboarding has NO role-literal floor — an envelope with no team_authority is a refusal, whatever its role string says", async () => {
+  // The exact envelope the deleted floor was written for: role "owner", no
+  // team_authority at all. The floor returned TRUE here. The band calls it
+  // refuse (nil authority is a determinate no) and that is now the whole
+  // answer, so restoring the floor reds this line.
+  hooks.clearMe();
+  await driveMe(200, { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" } });
+  assert.equal(hooks.teamAuthorityState(), "refuse", "no team_authority on the wire is a determinate NO");
+  assert.equal(hooks.canManageOnboarding(), false,
+    "MUTATION TARGET: restore the pre-wave-42 role read and this line is the red");
+  // Same for the admin literal, the other half of what was deleted.
+  hooks.clearMe();
+  await driveMe(200, { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" } });
+  assert.equal(hooks.canManageOnboarding(), false, "and the `|| admin` half of the floor is gone too");
+  // The positive control, so an unconditional false cannot ship green here:
+  // a STATED admin still opens the gate.
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.canManageOnboarding(), true, "a stated admin:true still grants — this is not a blanket deny");
+  // D439 holds: still boolean, never the band.
+  assert.equal(typeof hooks.canManageOnboarding(), "boolean", "the predicate stays two-valued");
+  hooks.clearMe();
+});
+
+test("cch-w43-s1: membersContext takes the role from team_authority ALONE — the envelope's role string is not a fallback", async () => {
+  // A determinate band with an authority that names no role. The deleted
+  // `|| me.role` fallback answered "owner" here, from the envelope string the
+  // server itself does not treat as authority; the floor-free read falls to
+  // "member", which is the fail-closed floor and grants nothing.
+  hooks.clearMe();
+  await driveMe(200, {
+    role: "owner",
+    team: { id: "t1", name: "Acme Inc" },
+    user: { id: "u6", email: "roo@acme.com" },
+    team_authority: { team_id: "t1", role: null, admin: false, owner: false },
+  });
+  const ctx = hooks.membersContext();
+  assert.equal(ctx.role, "member",
+    "MUTATION TARGET: restore `|| me.role` and this reads 'owner' — the red");
+  assert.equal(hooks.assignableRoles(ctx.role).length, 0, "so no manage control opens off a role nobody resolved");
   hooks.clearMe();
 });
 

@@ -453,6 +453,55 @@ jobs:
       - name: Refusal reason-arm census (router causes ⊆ console arms)
         run: node cloud/priv/static/__reason_arm_census.mjs
 
+      # ── THE /v1/me ENVELOPE CENSUS (charter D478/D480/D481, wave 43) ────────
+      #
+      # The third sibling in this family, and the one that audits the HARNESS
+      # ITSELF rather than app.js. Everything the two steps above certify, and
+      # everything __app.test.mjs and smoke.mjs certify, is certified against
+      # ONE fixture producer: `me()` in __preview__/scenarios.mjs, the single
+      # builder behind every logged-in scenario's GET /v1/me. If that producer
+      # mints a different account than the route mints, this whole job is a
+      # required context telling every merge the console renders correctly for
+      # an account nobody can ever hold.
+      #
+      # It was: before wave 43 me() emitted FOUR of /v1/me's SIX top-level keys
+      # — no `teams`, no `team_authority` — so all 93 logged-in scenarios took
+      # app.js's pre-wave-42 compatibility floors and the `grant` authority band
+      # had never been painted by any instrument in the repo.
+      #
+      # RUNTIME, NOT A SOURCE SCAN, and that is the load-bearing choice (D480):
+      # it calls the exported route(name, "GET", "/v1/me") over every scenario
+      # and reads the body that comes back, which covers mock.js and smoke.mjs
+      # in one pass (both delegate to that same route()). A scan of me()'s
+      # literal would report `user.platform_operator` as a hole; it is not one —
+      # operatorMe() raises it and the census prints it as served by 5 of 93.
+      #
+      # NOT A COUNT, EITHER SIDE (D383's rule, applied here): both sides are
+      # derived sets — the server's from a brace-balanced walk of the
+      # `get "/v1/me"` response map in router.ex, the corpus's from the served
+      # bodies — and the gate is their symmetric difference, reported by KEY
+      # PATH including nesting. There is no expected total in the file, so a
+      # commit that drops one key and adds another cannot hold the gate green.
+      #
+      # PROVEN ABLE TO LOSE, BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
+      #   rc=1 — against origin/main's corpus it names all TEN missing key paths
+      #          over two subjects (teams + 4 nested, team_authority + 4 nested)
+      #          with INVENTED empty, and clears the moment me() is widened
+      #   rc=1 — a NESTED server key a top-level diff would miss (user.locale
+      #          added inside the `user:` sub-map) reds by name
+      #   rc=2 — it REFUSES to measure rather than pass: an unreadable or
+      #          renamed /v1/me clause, a response map it cannot brace-balance,
+      #          a segment that is not `key: value`, a zero-key parse, or a
+      #          corpus where not one scenario answers 200
+      #
+      # It reads cloud/lib/barkpark_cloud/web/router.ex, already in the console
+      # dispatch set (scripts/console-path-escape-check.sh), so a route edit
+      # that grows or drops an envelope key reaches this step. No new leaf name
+      # in .github/required-checks.json: this job is already in console-gate's
+      # `needs:`, so a failure here fails the one required context.
+      - name: /v1/me envelope census (route keys ≡ preview corpus keys)
+        run: node cloud/priv/static/__me_envelope_census.mjs
+
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
   # app.css, or scans its comment nesting, or reads `--x:` declarations out of
