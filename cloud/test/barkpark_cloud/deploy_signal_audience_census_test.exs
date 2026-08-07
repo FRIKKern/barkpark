@@ -364,6 +364,15 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # it declares today's truth honestly instead of reddening on arrival. When a
   # closer merges, its row goes stale and this file reds IN THE GOOD DIRECTION —
   # the rot assertion below is what makes that happen.
+  #
+  # MERGE ORDER, W18 REVIEW — READ BEFORE MERGING THIS FILE. `fleet_deploy_census`
+  # is closed by dr-w18-s1, which is in flight in the SAME wave. The rot assertion
+  # is therefore ARMED, not hypothetical: whichever of the two merges SECOND takes
+  # the red, and the fix is the same either way — delete the `fleet_deploy_census`
+  # row in that PR. This file and dr-w18-s1 are deliberately NOT co-merged, because
+  # a guard and its fix in one diff can never demonstrate the fail-before state.
+  # The other row is NOT armed: dr-w18-s3 counts the digest's loss but leaves its
+  # AUDIENCE the platform allowlist, so that row's closer is a later slice.
   @empty_audience_allowlist %{
     "fleet_deploy_census" =>
       "EMPTY BY CONSTRUCTION today: its only reader, FleetDeployCensus, sends " <>
@@ -377,9 +386,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
       "EMPTY BY CONSTRUCTION today: `deliver_fleet_digest/1` resolves its recipients " <>
         "through `platform_admin_emails/0`, whose only source is the " <>
         "`:platform_admin_emails` config allowlist intersected with registered users. " <>
-        "On prod that list is `[]`, so the daily digest takes its logged `:no_admins` " <>
-        "no-op arm every single day and nobody has ever received one. CLOSER: dr-w18-s3 " <>
-        "gives the push a team-resolved audience; when it lands, delete this row."
+        "On prod that list is `[]`, so the daily digest takes its `:no_admins` arm " <>
+        "every single day and nobody has ever received one. dr-w18-s3 does NOT close " <>
+        "this: it makes that arm a COUNTED loss (telemetry + a WARNING line) so the " <>
+        "zero can be seen, and deliberately leaves the ADDRESS alone — the audience is " <>
+        "still the same empty allowlist, which is why this row survives that slice. " <>
+        "CLOSER: dr-w19-fleet-digest-audience-still-empty gives fleet-health push a " <>
+        "reachable recipient population; when it lands, delete this row."
   }
 
   # ---------------------------------------------------------------------------
@@ -581,7 +594,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     for {name, reason} <- @empty_audience_allowlist do
       assert byte_size(reason) > 60, "#{name}: a reason this short is not a ruling"
 
-      assert reason =~ ~r/CLOSER: (dr-w\d+-s\d+|PR #\d+)/,
+      # The closer is a bp TASK SLUG or a PR number. The slug pattern is
+      # `dr-w<N>-<rest>` — widened from `dr-w\d+-s\d+` in the w18 review, because
+      # a closer is not always a numbered slice of the wave that found the hole:
+      # `fleet_operator_digest`'s real closer is
+      # `dr-w19-fleet-digest-audience-still-empty`, a filed follow-up. Still
+      # anchored on the epic's own slug prefix, so free prose cannot satisfy it.
+      assert reason =~ ~r/CLOSER: (dr-w\d+-[a-z0-9-]+|PR #\d+)/,
              "#{name}: an empty-audience row must name the task or PR that closes it — " <>
                "an allowlist without closers is a junk drawer"
 
