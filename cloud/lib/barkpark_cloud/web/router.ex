@@ -1397,6 +1397,11 @@ defmodule BarkparkCloud.Web.Router do
     else
       user = conn.assigns.current_user
       team = conn.assigns.current_team
+      # ONE role read, spent by both the top-level `role:` key and
+      # `team_authority.role` — the two state the same fact and a second lookup
+      # would let a future edit desync them (and costs an extra membership read
+      # on every boot).
+      team_role = team && Accounts.team_role(user, team)
 
       json(conn, 200, %{
         # two-factor-auth: the SPA reads two_factor_enabled to render the right
@@ -1427,7 +1432,7 @@ defmodule BarkparkCloud.Web.Router do
           end),
         # The caller's role in their current team — the SPA hides/shows the
         # invite + member-management controls on this. nil when teamless.
-        role: team && Accounts.team_role(user, team),
+        role: team_role,
         # The team authority the GATE will enforce, stated on the wire so the
         # console stops re-deriving `role in ["owner","admin"]` locally (six
         # hand-written copies in app.js, none of which can be wrong-proofed).
@@ -1451,7 +1456,7 @@ defmodule BarkparkCloud.Web.Router do
           team &&
             %{
               team_id: team.id,
-              role: Accounts.team_role(user, team),
+              role: team_role,
               admin: Authz.team_admin?(user, team),
               owner: Authz.team_owner?(user, team)
             },

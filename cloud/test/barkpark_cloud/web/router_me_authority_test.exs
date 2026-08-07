@@ -140,6 +140,11 @@ defmodule BarkparkCloud.Web.RouterMeAuthorityTest do
     assert pinned["owner"] == false
   end
 
+  # HONEST LIMIT: `role` and `team_authority.role` are served from ONE binding
+  # in the handler, so the role half of this test cannot currently lose — it is
+  # a REGRESSION fence against someone re-splitting them into two lookups, not
+  # a live proof. The team_id half is live: it pins the two blocks against the
+  # same resolved team.
   test "team_authority.team_id always equals the team: block's id" do
     {_user, _team, token} = caller_with_role("admin")
 
