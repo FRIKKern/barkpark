@@ -878,9 +878,11 @@ defmodule BarkparkCloud.DeployLedger do
       `min_sample`, `refused` and the refusal `reason` ride INSIDE the number by
       construction and no consumer can print a percentage without its
       denominator.
-    * `absorption` — deferrals over EVERY row in the window. A terminal rate that
-      halves because a busy box started deferring is absorption, not recovery,
-      and the two must never be readable apart.
+    * `absorption` — deferrals over every ATTEMPTED row in the window, the same
+      denominator `census/3` gives its `deferred` line, so the box node and the
+      fleet census mean the same thing by the word. A terminal rate that halves
+      because a busy box started deferring is absorption, not recovery, and the
+      two must never be readable apart.
     * `box_caused` — the box-caused share OF the failure numerator, off the
       agency map above. The price of a raw rate is that it accuses the box for a
       customer's broken build; this is that price, paid out loud.
@@ -943,7 +945,10 @@ defmodule BarkparkCloud.DeployLedger do
     failed_rows = Enum.filter(settled, & &1.class)
 
     failed = total(failed_rows)
-    live = total(Enum.filter(rows, &(&1.status == "live")))
+    # From `settled`, not from `rows`: `not_attempted?/1`'s own contract is that
+    # those classes "never enter a rate denominator" (D19), and reading `live`
+    # off the unfiltered set would only be safe by accident.
+    live = total(Enum.filter(settled, &(&1.status == "live")))
     box_caused = total(Enum.filter(failed_rows, &(agency(&1.class) == :box)))
 
     %{
@@ -963,7 +968,14 @@ defmodule BarkparkCloud.DeployLedger do
       # `rate/2` refuses below `min_sample/0` — so a box that barely deploys
       # answers "we could not measure", never a percentage nobody should act on.
       rate: rate(failed, failed + live),
-      absorption: rate(total(deferred), total(rows)),
+      # Denominated on ATTEMPTED, exactly like `census/3`'s deferred line. Review
+      # fix: this read `total(rows)`, which put NOT-ATTEMPTED rows into a rate
+      # denominator — forbidden by `not_attempted_classes/0`'s own contract, and
+      # in the comforting direction: a box that never even tried would have had
+      # its absorption DILUTED, so a cap quietly swallowing the fleet's rebuilds
+      # would read as less absorption than it is. It also made the box node and
+      # the fleet census answer two different questions under one word.
+      absorption: rate(total(deferred), total(attempted)),
       box_caused: rate(box_caused, failed)
     }
   end

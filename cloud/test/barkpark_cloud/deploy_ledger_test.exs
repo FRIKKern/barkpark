@@ -1242,7 +1242,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert node.sites_deploying == 1
     end
 
-    test "absorption counts deferrals over EVERY row in the window", %{team: team} do
+    test "absorption counts deferrals over every ATTEMPTED row in the window", %{team: team} do
       bp = barkpark_fixture(team)
       site = site_on(bp)
       bulk_deploys!(site, 250, %{status: "deferred", failure_reason: @d_busy})
@@ -1290,6 +1290,34 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # 9 born-failed tombstones (D19) are outside the rate entirely: 0 of 4.
       assert node.rate.sample == 4
       assert node.rate.numerator == 0
+    end
+
+    # Review fix (dr-w10 S1). `not_attempted_classes/0`'s contract is that those
+    # classes "never enter a rate denominator" — ALL of them, not just the
+    # terminal one. `absorption` shipped denominated on every row, which DILUTED
+    # it with tombstones: the comforting direction, since absorption is the
+    # signal that says a falling failure rate is a cap swallowing work rather
+    # than a repair. This probe is the one that can lose — put the tombstones
+    # back in the denominator and 50.0 becomes 33.33.
+    test "not-attempted rows are out of the ABSORPTION denominator too", %{team: team} do
+      bp = barkpark_fixture(team)
+      site = site_on(bp)
+      bulk_deploys!(site, 250, %{status: "deferred", failure_reason: @d_busy})
+      bulk_deploys!(site, 250, %{status: "live"})
+      # …plus a fat tombstone cohort that was never a deploy ATTEMPT.
+      bulk_deploys!(site, 250, %{status: "failed", failure_reason: @gh_push})
+
+      {from, to} = window()
+      node = DeployLedger.box_rates([bp.id], from, to)[bp.id]
+
+      assert node.absorption.sample == 500
+      assert node.absorption.pct == 50.0
+
+      # …and it is the SAME question `census/3` answers by the same word, on the
+      # same rows: one vocabulary across the box node and the fleet census.
+      census = DeployLedger.census(from, to)
+      deferred_line = Enum.find(census.deferred, &(&1.class == "BOX_BUSY_DEFERRED"))
+      assert deferred_line.share.pct == node.absorption.pct
     end
   end
 
