@@ -398,6 +398,24 @@ defmodule BarkparkCloud.FailureCopy do
   # space character, and a space is not a guarantee.
   @dns_step ~r/\b(?:hetzner dns (?:upsert|change-ttl|delete|resolve|list)|hcloud zone rrset (?:set-records|change-ttl|delete|list))\b/
 
+  # A credential rejection, matched against the LOWERED reason. Both tokens are
+  # ordinary English that a producer-controlled PATH carries routinely
+  # (`dist/errors/unauthorized/index.html` is what a framework calls its 401
+  # page), so each side is guarded against `/`, `\`, `-`, `_` and word
+  # characters: the token must stand as its OWN word, never as a path segment or
+  # part of a longer identifier. `401 Unauthorized`, `unauthorized (401)`,
+  # `unauthorized:` and `returned invalid token` all still match — a real
+  # producer always leaves the word standing alone.
+  #
+  # A TRAILING DOT IS NOT A PATH SEPARATOR, and the trailing guard says so
+  # (review of cch-w40-s6). A flat `(?!\.)` also excluded `…said Unauthorized.`
+  # and `…: unauthorized. check the token` — a producer ending a SENTENCE, which
+  # is at least as common as a path — so the token would have passed through
+  # unclassified. The guard is `\.` followed by a NON-SPACE (`unauthorized.html`,
+  # `auth.unauthorized` via the lookbehind); a dot at end-of-capture or before
+  # whitespace still classifies.
+  @credential_rejected ~r{(?<![\w/\\.\-])(?:unauthorized|invalid token)(?:(?![\w/\\\-])(?!\.\S))}
+
   # The fallback-ladder aggregate's TWO markers. BOTH are required: the header
   # phrase alone can appear inside a longer operator note, and the `"\n  - "`
   # separator alone is ordinary list formatting. Requiring both is also what
@@ -583,9 +601,34 @@ defmodule BarkparkCloud.FailureCopy do
           String.contains?(down, "resource_unavailable") ->
         "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
 
-      # Auth / token: the provider rejected our stored credentials.
-      String.contains?(down, "unauthorized") or String.contains?(down, "invalid token") ->
-        "The hosting provider rejected our credentials. We're on it — try again shortly."
+      # Credential rejected: SOMETHING refused SOMEONE'S credential.
+      #
+      # THE COPY NAMES NEITHER A PARTY NOR AN OWNER NOR A REMEDY, for the same
+      # reason the capacity arm above names neither a provider nor a resource:
+      # this is a substring test over a string and `humanize/1` is arity 1. The
+      # copy it used to get — "The hosting provider rejected our credentials.
+      # We're on it — try again shortly." — asserted three things the predicate
+      # cannot see. On the capture the build script actually emits
+      # (`FATAL: 401 Unauthorized from …/w/acme/p/blog — the site read token is
+      # invalid`, deploy/site-deploy.sh, reaching here through
+      # `Sites.Deploy.stage_detail/2`) all three are wrong at once: the rejected
+      # credential is the USER'S OWN site read token, no hosting provider is in
+      # the story, nobody is "on it", and a retry is the one remedy that cannot
+      # work. An arity-2 (provider-aware) seam is buildable but would make this
+      # WORSE — the misattributed axis is WHOSE credential, not WHICH provider,
+      # so it would only upgrade the line to "Hetzner rejected our credentials".
+      # Nothing is lost by saying less: `Sites.Deploy.console_entry/1` folds the
+      # raw capture verbatim (scrubbed) into the console line beside this.
+      #
+      # THE PREDICATE IS PATH-GUARDED. `unauthorized` and `invalid token` are
+      # ordinary words a producer-controlled PATH can carry —
+      # `dist/errors/unauthorized/index.html` is simply what a framework calls
+      # its 401 error page — so a disk-full build was being reported as a
+      # credential rejection. The guard is the same self-satisfaction fix wave
+      # 25 applied to the DNS clause: the token must stand as its OWN word, not
+      # as a segment of a path or a longer identifier.
+      Regex.match?(@credential_rejected, down) ->
+        "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
       # Refused: the peer ANSWERED and said no — an RST, nothing listening on the
       # port we dialled. Split out of the network class in wave 28 (D321(3)),
@@ -719,7 +762,20 @@ defmodule BarkparkCloud.FailureCopy do
   host's certificate is requested on demand by the attach step
   (`/v1/tls/ask` — `registry.ex` `domain_registered?/1` deliberately excludes the
   platform FQDN), so the two `pending` stories point the operator at different
-  things. Every OTHER stage's copy is kind-agnostic. The terminal default clause
+  things.
+
+  `points_here` splits for the same reason, and the split is not cosmetic:
+  `router.ex`'s attach path says it in its own words — "platform hosts: DNS A
+  record + box wiring; external hosts: box wiring only — THE CUSTOMER OWNS
+  DNS." The kind-agnostic copy this stage used to return ("It's pointed
+  automatically when the instance is provisioned; if it persists, re-attach the
+  domain or contact support") is true only of the PLATFORM FQDN. For a custom
+  host it told the one person who can fix the problem that it was handled for
+  them, and offered support as the recourse — and for a SITE it is doubly
+  wrong, since `DomainStatus` maps EVERY site domain to `"custom"` and a site
+  has no "instance provisioned" event at all.
+
+  Every other stage's copy is genuinely kind-agnostic. The terminal default clause
   GUARANTEES no non-ok stage is ever reason-less — the console (S13b) and CLI
   read this one copy through the domain-status envelope, so they can't drift.
   """
@@ -729,8 +785,24 @@ defmodule BarkparkCloud.FailureCopy do
     "This domain isn't resolving publicly yet. If you just launched or attached it, DNS records take up to a minute to propagate — give it a moment and re-check."
   end
 
+  # PLATFORM pointing: the provisioning FQDN's A record is ours to set, and the
+  # provision step sets it. "Automatically" is a true claim here and only here.
+  def domain_stage_remediation("platform", "points_here") do
+    "This domain resolves, but not to this instance's address. The platform sets this record itself when the instance is provisioned; if it persists, re-attach the domain or contact support."
+  end
+
+  # CUSTOM pointing: the customer owns this zone (router.ex attach path —
+  # "external hosts: box wiring only — the customer owns DNS"), so the remedy is
+  # theirs to apply and naming it is the whole value of this line. Every SITE
+  # domain is "custom", and a site has no "instance provisioned" event at all.
+  def domain_stage_remediation("custom", "points_here") do
+    "This domain resolves, but not to this instance's address. DNS for a custom domain stays with you: point its A record at this instance's address (shown on the instance in the console), then re-check once the change propagates."
+  end
+
+  # An unknown kind: say what the stage means and stop — who owns the record is
+  # exactly what an unknown kind cannot tell us.
   def domain_stage_remediation(_kind, "points_here") do
-    "This domain resolves, but not to this instance's address. It's pointed automatically when the instance is provisioned; if it persists, re-attach the domain or contact support."
+    "This domain resolves, but not to this instance's address. Check which address its DNS record points at, then re-check."
   end
 
   # PLATFORM cert: provision-time Caddy issues + renews it automatically.

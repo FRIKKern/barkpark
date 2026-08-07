@@ -2506,17 +2506,33 @@ test("cch-w36-s4: a failed halt/resume stops printing the billing sentence over 
   // The rendered toast body under a 403 — the sentence the operator now reads.
   const body = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } }).text;
   assert.match(body, /platform_operator/);
-  assert.doesNotMatch(body, /billing/i, "a refused halt is not a billing problem");
-  // friendly() is NOT edited here (cch-w35-s4 owns it): the curated map still
-  // maps `forbidden` the way it does, which is exactly why the call site guards.
-  // …and the curated map is NOT edited here (cch-w35-s4 owns friendly()): it
-  // still answers `forbidden` with its team-owner sentence, which is precisely
-  // why the call site has to guard. Asserted UNCONDITIONALLY — a `hooks.friendly
-  // ? … : "team owner"` shape would pass on an absent export, which is the
+  // cch-w40-s1 RE-POINTED (vacuous-green debt). `/billing/i` was the live rival
+  // when the fall-through was the billing sentence; after D447 the fall-through
+  // is FORBIDDEN_GENERIC, which contains no "billing" — so this line alone could
+  // no longer fail for the reason it was written. The generic is now asserted
+  // absent beside it, which IS the live discrimination: delete the call-site
+  // guard and the toast falls through to it.
+  assert.doesNotMatch(body, /billing/i, "RATCHET: a refused halt is not a billing problem");
+  assert.equal(body.indexOf(FORBIDDEN_GENERIC), -1,
+    "LIVE: the operator toast names the platform principal — it never falls through to the generic");
+  // …and the curated map is NOT edited here (cch-w35-s4 owns friendly()): a bare
+  // `forbidden` still resolves out of ERRORS and still beats the caller fallback,
+  // which is precisely why the call site has to guard. Asserted UNCONDITIONALLY —
+  // a `hooks.friendly ? … : …` shape would pass on an absent export, which is the
   // vacuous green this wave exists to kill.
+  //
+  // cch-w40-s1 REWRITTEN, NOT RELIED ON (charter D447). This pin used to read
+  // `assert.match(…, /team owner/)`. D447 inverts ERRORS.forbidden to a generic
+  // that names no role — and a generic that happened to satisfy /team owner/
+  // would have shipped this whole slice with its most intent-laden assertion
+  // silently vacuous. So the pin now asserts the PROPERTY the call-site guard
+  // exists for (the curated entry wins over the caller's fallback) and, ahead of
+  // it, that the operator toast is not a team-role sentence at all.
   assert.equal(typeof hooks.friendly, "function", "friendly() is hook-exported, so this assertion can fail");
-  assert.match(hooks.friendly({ error: "forbidden" }, "x"), /team owner/,
-    "the curated map is untouched — the fix is at the call site");
+  assert.equal(hooks.friendly({ error: "forbidden" }, "x"), FORBIDDEN_GENERIC,
+    "the curated map still beats the caller fallback — the fix is at the call site");
+  assert.doesNotMatch(hooks.friendly({ error: "forbidden" }, "x"), /team owner|billing/i,
+    "…and it no longer sends a refused operator to a team owner about billing (D447)");
 });
 
 test("cch-w36-s4-r: the Halt confirm dialog's OWN failure arm stops printing the billing sentence too", () => {
@@ -7609,7 +7625,21 @@ test("G-06: envVarsFailureCopy + envVarWriteFailureCopy — honest per-status co
   assert.match(hooks.envVarsFailureCopy(403), /permission/i);
   // The write-once 409 is the honest per-row truth — delete + recreate.
   assert.match(hooks.envVarWriteFailureCopy(409, { error: "write_once" }), /write-once.*[Dd]elete/i);
-  assert.match(hooks.envVarWriteFailureCopy(403, {}), /owners and admins/i);
+  // cch-w40-s1 — THE 403 ARM NOW CONSULTS THE SERVER, NOT THE AUTHOR. It used to
+  // return "Only team owners and admins can change environment variables." BEFORE
+  // faultCopy/friendly, shadowing forbiddenEvidenceCopy — and that sentence is
+  // FLATLY FALSE on router.ex:4394, the cross-tenant arm, where the caller IS an
+  // admin. Evidence first; a bare 403 gets the curated generic and names no role.
+  assert.equal(hooks.envVarWriteFailureCopy(403, { error: "forbidden", required: "admin", scope: "team" }),
+    "You need the admin role on this team — an admin on this team can grant it.",
+    "router.ex:4355/4417 send `required: \"admin\"` — the evidence is no longer discarded");
+  for (const bare of [{}, { error: "forbidden" }, null]) {
+    assert.doesNotMatch(hooks.envVarWriteFailureCopy(403, bare), /owners and admins/i,
+      "a bare 403 must not fabricate a role sentence: " + JSON.stringify(bare));
+  }
+  assert.equal(hooks.envVarWriteFailureCopy(403, { error: "forbidden" }),
+    "You don't have permission to do that, and the refusal didn't say which role would allow it.",
+    "the cross-tenant arm (router.ex:4394) states only what a bare 403 proves");
   assert.match(hooks.envVarWriteFailureCopy(422, { error: "key_required" }), /Enter a key/i);
 });
 
@@ -15029,16 +15059,26 @@ test("cch-w34-s1: a 500 on /v1/sites SPEAKS — it never renders 'No sites yet'"
   }
 });
 
-test("cch-w34-s1: a 403 on /v1/sites does NOT render the billing sentence", async () => {
-  // The shared ERRORS map (grep -n 'forbidden:' app.js, inside the ERRORS
-  // object above friendly()) keys the GENERIC `forbidden` slug to "Only the team owner can
-  // manage billing." — friendly()'s curated copy beats any caller fallback, so
-  // bare friendly(r.data) would answer a sites read with billing copy.
+test("cch-w34-s1: a 403 on /v1/sites renders the READ-SCOPED sentence, not the curated generic", async () => {
+  // The shared ERRORS map (grep -n 'forbidden:' app.js, inside the ERRORS object
+  // above friendly()) keys the GENERIC `forbidden` slug to a curated sentence, and
+  // friendly()'s curated copy beats any caller fallback — so bare friendly(r.data)
+  // would answer a sites read with a sentence about a different screen.
+  //
+  // cch-w40-s1 RE-POINTED (vacuous-green debt, charter D447). This used to assert
+  // the BILLING sentence absent. D447 inverted that key, so no friendly() path can
+  // emit that string at all and the assertion could no longer fail for the reason
+  // it was written. The LIVE rival is now the generic — delete readFailureCopy's
+  // scoped arm and this is what surfaces here — so that is what is asserted, with
+  // the retired string kept beside it as a revert ratchet.
+  const CURATED_GENERIC = "You don't have permission to do that, and the refusal didn't say which role would allow it.";
   for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {
     const { html } = await driveSites(403, { error: "forbidden" }, bp);
     assert.match(html(), /Couldn't load sites/);
+    assert.ok(html().indexOf(CURATED_GENERIC) === -1,
+      "LIVE: a sites 403 says WHICH list was refused — it never falls through to the curated generic");
     assert.ok(html().indexOf("Only the team owner can manage billing.") === -1,
-      "a sites 403 must not render copy about the billing screen");
+      "RATCHET: the retired billing sentence must not come back");
     assert.match(html(), /access to the sites on this instance/);
     assert.ok(html().indexOf("No sites yet") === -1);
   }
@@ -15092,7 +15132,14 @@ test("cch-w34-s1: a failed /v1/tokens no longer paints 'No API tokens yet' besid
 test("cch-w34-s1: a tokens 403 is an authority answer, not billing copy", async () => {
   const { dom } = await driveTokens(403, { error: "forbidden" });
   const html = dom.els["token-list"].innerHTML;
-  assert.ok(html.indexOf("Only the team owner can manage billing.") === -1);
+  // cch-w40-s1 RE-POINTED (vacuous-green debt, charter D447) — same reasoning as
+  // the sites twin above: the LIVE rival at this seam is the curated generic, and
+  // the retired billing sentence stays as the revert ratchet.
+  assert.ok(html.indexOf("You don&#39;t have permission to do that") === -1 &&
+    html.indexOf("You don't have permission to do that") === -1,
+    "LIVE: a tokens 403 says WHICH list was refused — never the curated generic");
+  assert.ok(html.indexOf("Only the team owner can manage billing.") === -1,
+    "RATCHET: the retired billing sentence must not come back");
   // esc()'d at the seam, so the apostrophe arrives as an entity.
   assert.match(html, /access to this team&#39;s API tokens/);
   assert.ok(html.indexOf("No API tokens yet") === -1);
@@ -15332,6 +15379,88 @@ test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass ag
       "write/deploy/root are not offered to a member",
     );
   }, /honest copy names the cap/, "the four smoke assertions passed 4/4 against this render on origin/main; the second must now fail");
+  hooks.clearMe();
+});
+
+// ── cch-w41-s3 · THE ADMIN LIMB IS A LIMB, AND DROPPING IT MUST RED ────────
+// Four predicates answer the same question — "may this actor write here?" —
+// each as `role === "owner" || role === "admin"`: providerCanWrite (app.js),
+// notifCanManage, canMintAnyAbility and canManageOnboarding. Measured on the
+// shipped bytes before this block: rewriting ANY of them — or all four at
+// once — to OWNER-ONLY shipped 919/919 app tests + 104/104 smoke scenarios,
+// rc 0. A unification slice could therefore silently DELETE the admin limb and
+// show a perfect board. That green is not general vacuity: the INVERSE
+// mutation (admin-only, dropping the owner limb) reds three of the four by
+// name in smoke. The mechanism is censused — scenarios.mjs:952 defines
+// me(team, onb, role) with `role || "owner"`, and across ~100 me() call sites
+// the third argument is "member" 7x, "owner" 3x and "admin" ZERO times, so no
+// fixture in the whole preview corpus has ever been an admin.
+//
+// canManageOnboarding was worse still: it survived EVERY mutation — owner-only,
+// admin-only, always-false and fail-open ALWAYS-TRUE — fully green. No smoke
+// scenario reaches it (the six plain-member scenarios are all settings pages;
+// there is no onboarding member scenario and no Dismiss assertion anywhere).
+//
+// D439 binds these four to a BOOLEAN return: three-valuedness belongs in NEW
+// siblings (see meState/meFlags above), never by widening one of these to
+// "unknown" — that ships green and makes `if (privileged)` TRUE, the fail-open
+// GR9 forbids. So the domain pinned here is the full one: owner and admin say
+// true, member says false, and BOTH not-a-role states — never loaded, and a
+// /v1/me read that FAILED — say false, fail-closed.
+
+const ME_ADMIN = { role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u3", email: "raj@acme.com" } };
+
+test("cch-w41-s3: all four owner|admin predicates hold owner+admin true, member false, and fail CLOSED on both not-a-role states", async () => {
+  const predicates = ["providerCanWrite", "notifCanManage", "canMintAnyAbility", "canManageOnboarding"];
+  for (const name of predicates) {
+    assert.equal(typeof hooks[name], "function", name + " must be node-pinned — three of these four were exported nowhere");
+  }
+
+  // THE ADMIN LIMB. Every one of these four assertions passes on origin/main
+  // AND passes with the admin limb deleted, which is precisely the hole: no
+  // fixture anywhere else in the harness is ever an admin.
+  hooks.clearMe();
+  await driveMe(200, ME_ADMIN);
+  for (const name of predicates) {
+    assert.equal(hooks[name](), true, name + "(): an ADMIN may write — dropping the `|| admin` limb must red HERE");
+  }
+
+  // The owner limb, so an admin-only rewrite cannot pass either.
+  await driveMe(200, ME_OWNER);
+  for (const name of predicates) {
+    assert.equal(hooks[name](), true, name + "(): an OWNER may write");
+  }
+
+  // The negative control — without it ALWAYS-TRUE ships green, which is exactly
+  // how canManageOnboarding shipped with zero coverage.
+  await driveMe(200, ME_MEMBER);
+  for (const name of predicates) {
+    assert.equal(hooks[name](), false, name + "(): a plain MEMBER may not write — an always-true body must red HERE");
+  }
+
+  // FAIL-CLOSED ARM 1 — never loaded. /v1/me has not answered yet; nothing is
+  // known, so nothing is granted.
+  hooks.clearMe();
+  for (const name of predicates) {
+    assert.equal(hooks[name](), false, name + "(): a role we have not read is not a role that may write");
+  }
+
+  // FAIL-CLOSED ARM 2 — the read FAILED. An unproven actor is not an admin;
+  // the honest-state copy for that case lives in the cch-w36-s3 siblings above,
+  // but the WRITE gate itself stays shut.
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+  for (const name of predicates) {
+    assert.equal(hooks[name](), false, name + "(): a FAILED /v1/me read grants nothing — the gate fails closed");
+  }
+
+  // D439: two-valued, still. A widened "unknown" would satisfy the trues above
+  // and make every `if (privileged)` branch TRUE — the fail-open GR9 forbids.
+  hooks.clearMe();
+  await driveMe(200, ME_ADMIN);
+  for (const name of predicates) {
+    assert.equal(typeof hooks[name](), "boolean", name + "(): stays BOOLEAN — three-valuedness lives in NEW siblings");
+  }
   hooks.clearMe();
 });
 
@@ -15623,7 +15752,7 @@ test("cch-w37-s1 THE FENCE CAN LOSE: no details, empty details, and non-generic 
   assert.equal(hooks.friendly.length, 2, "friendly() takes (data, fallback) — no status argument");
   assert.equal(hooks.friendly({ error: "server_error", details: { name: ["can't be blank"] } }),
     "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.");
-  assert.equal(hooks.friendly({ error: "forbidden", details: { name: ["can't be blank"] } }), FORBIDDEN_BILLING);
+  assert.equal(hooks.friendly({ error: "forbidden", details: { name: ["can't be blank"] } }), FORBIDDEN_GENERIC);
 });
 
 test("cch-w37-s1: creating a site stops rendering the bare token `invalid`", () => {
@@ -15659,22 +15788,53 @@ test("cch-w37-s1: creating a site stops rendering the bare token `invalid`", () 
 // fabricates a role sentence — passed 887/887. The positive control below is
 // what notices.
 
+// cch-w40-s1 (charter D447) — THE DEFAULT INVERTED, SO THIS CONST SPLIT IN TWO.
+//
+// FORBIDDEN_BILLING is now the RETIRED string. Nothing in app.js can produce it
+// through friendly() any more, which is exactly why it stays here NAMED: every
+// assertion below that used to say "the billing sentence is absent" would go
+// permanently vacuous if it kept pointing at a string the code can no longer
+// emit. Each of those has been re-pointed at FORBIDDEN_GENERIC — the sentence
+// the fence must still beat — and keeps the retired-string check beside it as a
+// cheap ratchet against a revert.
 const FORBIDDEN_BILLING = "Only the team owner can manage billing.";
+const FORBIDDEN_GENERIC = "You don't have permission to do that, and the refusal didn't say which role would allow it.";
 const ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
+const OUTRANKED_SENTENCE = "You can only act on members whose role is below your own, and this member's is not.";
+const CANNOT_GRANT_SENTENCE = "You can't grant a role above your own — that has to come from someone who already holds it on this team.";
 const AUDIT_403 = { error: "forbidden", required: "admin", scope: "team" };
 
-test("cch-w35-s4 POSITIVE CONTROL (RED under M1): a bare forbidden STILL reads the billing sentence", () => {
-  // The billing gate (require_primary_team_owner) sends `required: "owner"` on a
-  // member/admin, but a 403 with NO evidence at all — an un-upgraded route, an
-  // edge proxy, an older deploy — must keep resolving to the curated entry.
-  // Delete the `typeof required !== "string"` guard in forbiddenEvidenceCopy and
-  // this test is the one that fails.
-  assert.equal(hooks.friendly({ error: "forbidden" }), FORBIDDEN_BILLING);
-  assert.equal(hooks.friendly({ error: "forbidden" }, "a caller fallback"), FORBIDDEN_BILLING);
-  assert.equal(hooks.faultCopy(403, { error: "forbidden" }, "a caller fallback"), FORBIDDEN_BILLING);
-  // Deliberately asserts NOTHING about evidence: this test must stay green when
-  // the fence is reverted and red ONLY when the guard is deleted, so that a
-  // future reader can tell the two mutations apart by which test speaks.
+test("cch-w35-s4 POSITIVE CONTROL (RED under M1) — RETARGETED by cch-w40-s1: a bare forbidden STILL resolves to the CURATED entry", () => {
+  // ── WHY THIS TEST WAS RETARGETED AND NOT DELETED (charter D447) ────────────
+  //
+  // Its STATED contract was "a bare forbidden STILL reads the billing sentence",
+  // and cch-w40-s1 inverted exactly that sentence — so the wording had to move.
+  // Its REAL contract did not, and is what the assertions below still hold: a 403
+  // with NO evidence must resolve to the CURATED `forbidden` entry, beating the
+  // caller's fallback, at friendly() AND at faultCopy(403, …).
+  //
+  // THE M1/M2 DISCRIMINATION IS INTACT, and it is the reason this test exists:
+  //   M1 — delete the `typeof required !== "string"` guard in
+  //        forbiddenEvidenceCopy, so every bare forbidden fabricates a role
+  //        sentence. THIS test is the one that reds; the fence tests below stay
+  //        green, because they only ever feed evidence-CARRYING payloads.
+  //   M2 — widen the fence to a second slug. The FENCE IS INERT sweep and 12
+  //        named tests red; this one stays green, because it feeds no evidence.
+  // A future reader can still tell the two mutations apart by which test speaks,
+  // which is the whole point — so this test deliberately asserts NOTHING about
+  // evidence, exactly as before.
+  //
+  // What CHANGED with the inversion is the string, not the shape: the curated
+  // entry now claims no role and no remedy, because a bare 403 proves neither.
+  assert.equal(hooks.friendly({ error: "forbidden" }), FORBIDDEN_GENERIC);
+  assert.equal(hooks.friendly({ error: "forbidden" }, "a caller fallback"), FORBIDDEN_GENERIC);
+  assert.equal(hooks.faultCopy(403, { error: "forbidden" }, "a caller fallback"), FORBIDDEN_GENERIC);
+  // …and the RETIRED string is gone from the generic path for good. This arm is
+  // the revert ratchet: restore the old ERRORS.forbidden and it reds here first.
+  assert.equal(hooks.friendly({ error: "forbidden" }).indexOf("billing"), -1,
+    "a refusal that named no authority must not name the billing screen (D447)");
+  assert.equal(hooks.friendly({ error: "forbidden" }).indexOf("team owner"), -1,
+    "…nor send anyone to a person the server never mentioned");
 });
 
 test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read the OWNER sentence", () => {
@@ -15694,9 +15854,19 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
     "You need the owner role on this team — only the team owner can grant it.");
   // It never reads as transient — the GR36 property that entry exists to hold.
   assert.ok(hooks.friendly(portal403, "Please try again in a moment.").indexOf("try again") === -1);
-  // And the static owner-gate copy on the billing SCREEN is untouched (app.js
-  // renders that string as literal markup; smoke.mjs pins it mounted).
-  assert.equal(hooks.friendly({ error: "forbidden" }), FORBIDDEN_BILLING);
+  // cch-w40-s1 — THE SHARPEST ATTACK ON D447'S INVERSION DIES HERE, and this is
+  // the assertion that proves it. All three billing ROUTES (router.ex:5202/5243/
+  // 5278) gate first-statement on require_primary_team_owner, which sends
+  // `required: "owner"` — so forbiddenEvidenceCopy wins and the inverted default
+  // is STRUCTURALLY UNREACHABLE from a billing screen. The arm above is the owner
+  // arm and is untouched; the arm below is the BARE one, which is where the
+  // inversion lands, and it is not a billing path at all.
+  assert.equal(hooks.friendly({ error: "forbidden" }), FORBIDDEN_GENERIC);
+  // And the static owner-gate copy on the billing SCREEN is a SEPARATE literal in
+  // app.js (renderBillingManage renders it as markup; smoke.mjs pins it mounted),
+  // fed by nothing in this map — charter D444's live tripwire, untouched by D447.
+  assert.match(APP_SRC, /'<p class="set-purpose">Only the team owner can manage billing\.<\/p>'/,
+    "the Manage-section literal stays byte-identical — the preview smoke reads it mounted");
 });
 
 test("cch-w35-s4 THE EXHIBIT, BOTH DIRECTIONS: an evidence-carrying 403 names the authority, not billing", () => {
@@ -15715,13 +15885,27 @@ test("cch-w35-s4 THE EXHIBIT, BOTH DIRECTIONS: an evidence-carrying 403 names th
   assert.match(copy, /admin on this team/);
   // ABSENT: the sentence that used to render here. THIS is the arm that can lose
   // — revert the fence in friendly() and it fails.
-  assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1, "the audit log is not the billing screen");
+  //
+  // cch-w40-s1 RE-POINTED (vacuous-green debt, charter D447). This assertion used
+  // to name FORBIDDEN_BILLING only. After the inversion no friendly() path can
+  // produce that string at all, so it could no longer fail for the reason it was
+  // written — a permanently-green decoration. FORBIDDEN_GENERIC is what the fence
+  // must now beat, so that is the LIVE arm; the retired string stays beside it as
+  // a cheap ratchet that reds if ERRORS.forbidden is reverted.
+  assert.ok(copy.indexOf(FORBIDDEN_GENERIC) === -1,
+    "LIVE: the evidence must beat the curated generic — revert the fence and this reds");
+  assert.ok(copy.indexOf("didn't say which role") === -1,
+    "…and the generic's admission of ignorance must never ride over evidence we DID read");
+  assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1, "RATCHET: the retired billing sentence stays retired");
   assert.ok(copy.indexOf("billing") === -1);
   // …and `reason` is never echoed raw, nor does the retired label resurface.
   assert.ok(copy.indexOf("primary_team") === -1 && copy.indexOf("primary team") === -1,
     "the retired label must never appear in copy");
   // This is verbatim what loadActivity's empty state renders: it interpolates
   // esc(friendly(r.data)) under <h2>Couldn't load activity</h2>.
+  // cch-w40-s1 RE-POINTED: same reasoning — the LIVE rival at this seam is the
+  // generic, and the retired string is kept as the ratchet.
+  assert.equal(hooks.esc(copy).indexOf(FORBIDDEN_GENERIC), -1);
   assert.equal(hooks.esc(copy).indexOf(FORBIDDEN_BILLING), -1);
   assert.match(hooks.esc(copy), /admin on this team/);
   // The owner gate's own evidence names the OWNER role — the fence never
@@ -15735,7 +15919,10 @@ test("cch-w35-s4: the no-team arm is MAPPED, never echoed as its slug", () => {
   assert.match(copy, /isn't on a team yet/);
   assert.ok(copy.indexOf("no_team") === -1 && copy.indexOf("no team") === -1,
     "'no_team' is a slug — a human must never read it");
-  assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1);
+  // cch-w40-s1 RE-POINTED: the live rival is the generic; the retired billing
+  // string is the ratchet beside it.
+  assert.ok(copy.indexOf(FORBIDDEN_GENERIC) === -1, "LIVE: a written arm must beat the curated generic");
+  assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1, "RATCHET: the retired billing sentence stays retired");
   // And it does NOT leak into the 422 no_team slug, which is a different answer.
   assert.equal(hooks.friendly({ error: "no_team" }), "Your account has no team yet.");
 });
@@ -15745,7 +15932,7 @@ test("cch-w35-s4: an unwritten `required` renders as a bounded label, and junk f
     'You need the "deploy" permission on this team — an admin on this team can grant it.');
   // Not a label → no interpolation, no markup, back to the curated entry.
   for (const junk of ["<img src=x onerror=alert(1)>", "Admin", "", "  ", "a".repeat(64), 7, null, {}]) {
-    assert.equal(hooks.friendly({ error: "forbidden", required: junk }), FORBIDDEN_BILLING,
+    assert.equal(hooks.friendly({ error: "forbidden", required: junk }), FORBIDDEN_GENERIC,
       "a `required` that is not a label must never reach the copy: " + JSON.stringify(junk));
   }
 });
@@ -15772,7 +15959,7 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     network_error: "Network error — is the control plane running?",
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
-    forbidden: FORBIDDEN_BILLING,
+    forbidden: FORBIDDEN_GENERIC,
     server_error: "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.",
     malformed_body: "We couldn't read that request — reload the page and try again.",
     malformed_request: "We couldn't read that request — reload the page and try again.",
@@ -15804,10 +15991,10 @@ test("cch-w35-s4 FOUR LANES FROM ONE EDIT — two of them are free repairs", () 
   // 3. removeMemberFailureCopy — a member removal refused for lack of authority
   //    used to render the billing sentence into a destroy-modal.
   assert.equal(hooks.removeMemberFailureCopy(403, AUDIT_403), ADMIN_SENTENCE);
-  assert.equal(hooks.removeMemberFailureCopy(403, { error: "forbidden" }), FORBIDDEN_BILLING, "bare stays put");
+  assert.equal(hooks.removeMemberFailureCopy(403, { error: "forbidden" }), FORBIDDEN_GENERIC, "bare falls to the curated generic — no invented authority in a destroy modal");
   // 4. inviteFailureCopy — same, in the invite toast.
   assert.equal(hooks.inviteFailureCopy(AUDIT_403, 403), ADMIN_SENTENCE);
-  assert.equal(hooks.inviteFailureCopy({ error: "forbidden" }, 403), FORBIDDEN_BILLING, "bare stays put");
+  assert.equal(hooks.inviteFailureCopy({ error: "forbidden" }, 403), FORBIDDEN_GENERIC, "bare falls to the curated generic — no invented authority in the invite toast");
   // The lanes' OWN branches are untouched by the fence.
   assert.match(hooks.removeMemberFailureCopy(409, { error: "last_owner" }), /last owner/);
   assert.match(hooks.inviteFailureCopy({ error: "already_member" }, 409), /already on your team/);
@@ -15825,6 +16012,154 @@ test("cch-w35-s4 THE TWIN FENCE (zero reach today, and it CAN lose): evidence be
   // today (GET /v1/tokens is require_user only; GET /v1/sites gives a session
   // the root ability), so this arm buys no user-visible change — it is insurance.
   assert.equal(f({ ok: false, status: 404, data: { error: "nope" } }, "SCOPED", "FB"), "FB");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w40-s1 — THE TWO RANK REFUSALS GET WRITTEN ARMS, AND THE TWO AUTHORED
+// CAUSES STOP SHADOWING THE EVIDENCE SEAM.  (charter D447 / D448 / D449)
+//
+// D449 is why this block exists at all: the two new FORBIDDEN_REASON_COPY arms
+// cost ZERO existing reds — the invert-only and invert+arms red lists are
+// byte-identical, and nothing in this file enumerates that map's key set. They
+// would have shipped with no coverage whatsoever. The cross-file half of the
+// proof (that router.ex cannot emit a `reason:` slug this map has no arm for)
+// lives in __reason_arm_census.mjs, which reds on main today; what is pinned
+// here is the RENDERED SENTENCE each arm produces.
+
+test("cch-w40-s1: the two RANK refusals are MAPPED, never echoed — and neither invents a remedy", () => {
+  // router.ex:4958 (PATCH /v1/teams/:id/members/:user_id) and :4997 (DELETE the
+  // same) send these with NO `required`, on purpose: the caller is already inside
+  // with_team_role(conn, "admin"), so a static authority label would be a fresh
+  // lie. Before these arms landed, forbiddenEvidenceCopy returned null and both
+  // fell through to the curated `forbidden` entry — which is how a plain team
+  // ADMIN clicking Remove on a peer admin came to be told about billing (D448).
+  const outranked = hooks.friendly({ error: "forbidden", reason: "outranked" });
+  assert.equal(outranked, OUTRANKED_SENTENCE);
+  const cannotGrant = hooks.friendly({ error: "forbidden", reason: "cannot_grant_higher_role" });
+  assert.equal(cannotGrant, CANNOT_GRANT_SENTENCE);
+
+  for (const [slug, copy] of [["outranked", outranked], ["cannot_grant_higher_role", cannotGrant]]) {
+    // MAPPED, NOT ECHOED — the payload carries a slug; a human never reads one.
+    assert.equal(copy.indexOf(slug), -1, slug + " is a slug — it must not reach the copy");
+    assert.equal(copy.indexOf(slug.replace(/_/g, " ")), -1,
+      "…nor its humanized form, which is what an unbounded echo would render");
+    // THE DEFECT THIS CLOSES: neither may fall through to the curated generic.
+    assert.equal(copy.indexOf(FORBIDDEN_GENERIC), -1,
+      slug + " has a written arm — falling through to the generic IS the bug");
+    assert.equal(copy.indexOf(FORBIDDEN_BILLING), -1, "RATCHET: and never to the retired billing sentence");
+    assert.doesNotMatch(copy, /billing/i, "a members-screen refusal is not a billing problem");
+  }
+
+  // NO INVENTED REMEDY. `outranked` is reachable by an OWNER acting on a peer
+  // owner (TeamMembership.outranks?/2 is strict `>`), where no higher role exists
+  // to appeal to — "ask an owner" would be the same confidently-wrong remedy this
+  // epic keeps deleting. So the sentence states the relation and stops.
+  assert.doesNotMatch(outranked, /ask (a|an|the|your)/i, "there may be nobody above the person reading this");
+  assert.doesNotMatch(outranked, /try again/i, "a rank determination is permanent, not transient");
+  assert.doesNotMatch(cannotGrant, /try again/i, "…and so is the anti-escalation cap");
+  // `cannot_grant_higher_role` CAN name where the grant has to come from, because
+  // Authz.can_grant?/3 refuses only `rank(target) > rank(actor)` — someone who
+  // already holds that role always exists (an owner, for the only reachable case).
+  assert.match(cannotGrant, /already holds it/, "the one remedy that is actually true here");
+});
+
+test("cch-w40-s1: the members screen's OWN lanes carry the rank sentences end to end", () => {
+  // The two lanes a person actually reaches these through. Both used to render
+  // the billing sentence: removeMemberFailureCopy paints into a DESTROY-CONFIRM
+  // modal, which is the worst place in the console to be confidently wrong.
+  assert.equal(hooks.removeMemberFailureCopy(403, { error: "forbidden", reason: "outranked" }), OUTRANKED_SENTENCE);
+  assert.equal(hooks.faultCopy(403, { error: "forbidden", reason: "outranked" }, "Please try again."), OUTRANKED_SENTENCE);
+  assert.equal(hooks.faultCopy(403, { error: "forbidden", reason: "cannot_grant_higher_role" }, "Please try again."),
+    CANNOT_GRANT_SENTENCE);
+  // The lanes' own non-403 branches are untouched by the arms.
+  assert.match(hooks.removeMemberFailureCopy(409, { error: "last_owner" }), /last owner/);
+  // AN UNWRITTEN reason still falls through to the generic rather than echoing.
+  const unwritten = hooks.friendly({ error: "forbidden", reason: "some_future_slug" });
+  assert.equal(unwritten, FORBIDDEN_GENERIC, "an arm we have not written yet is not an arm");
+  assert.equal(unwritten.indexOf("some_future_slug"), -1, "and it is NEVER echoed");
+  // `required` still wins when the server sent one — the arms did not reorder the
+  // seam, they only widened the reason table (forbiddenEvidenceCopy reads reason
+  // first, and the server never sends both: gate_role() picks one arm).
+  assert.equal(hooks.friendly(AUDIT_403), ADMIN_SENTENCE);
+});
+
+test("cch-w40-s1 (D419(d)): the delivery log stops selling a permanent 403 as 'momentarily unavailable'", () => {
+  // notifDeliveriesErrorHtml was arity-0 and status-BLIND, so GET
+  // /v1/notifications/deliveries' two 403 emitters (router.ex:4704, a user on no
+  // team; :4725, a non-admin with no self-scopable address) both read as a blip.
+  // Retrying does nothing for either.
+  assert.equal(hooks.notifDeliveriesErrorHtml.length, 2, "it takes (status, data) — the facts the call site always had");
+  const refused = hooks.notifDeliveriesErrorHtml(403, { error: "forbidden" });
+  assert.doesNotMatch(refused, /momentarily unavailable/i, "an authority determination is not a hiccup");
+  assert.doesNotMatch(refused, /try again/i, "…and retrying it changes nothing");
+  assert.match(refused, /don&#39;t have access to this team&#39;s delivery log/,
+    "it states the access fact — esc()'d at the seam, so the apostrophe is an entity");
+  // BOTH emitters are deliberately BARE (D396(5)), so no role may be invented.
+  assert.doesNotMatch(refused, /admin|owner/i, "admin is sufficient but NOT necessary here — naming it misdescribes the gate");
+  assert.equal(refused.indexOf(FORBIDDEN_BILLING), -1);
+  // …but evidence, if a future arm ever sends it, is rendered rather than dropped.
+  assert.match(hooks.notifDeliveriesErrorHtml(403, { error: "forbidden", reason: "no_team" }), /isn&#39;t on a team yet/);
+  assert.match(hooks.notifDeliveriesErrorHtml(403, AUDIT_403), /admin role on this team/);
+  // EVERY OTHER STATUS IS BYTE-IDENTICAL TO MAIN — the widening is 403-only, and
+  // the arity-0 call (which this file still makes elsewhere) keeps its answer.
+  const original = '<div class="wh-del-empty dim">Couldn\'t load the delivery log &mdash; it may be momentarily unavailable. Try again shortly.</div>';
+  for (const s of [undefined, 0, 200, 404, 500, 502]) assert.equal(hooks.notifDeliveriesErrorHtml(s, {}), original, "status " + s);
+  assert.equal(hooks.notifDeliveriesErrorHtml(), original);
+  // THE CALL SITE PASSES THE FACTS — a widened signature nobody feeds is a no-op.
+  const loader = APP_SRC.match(/function loadNotifDeliveries\(\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(loader, /notifDeliveriesErrorHtml\(r\.status, r\.data\)/,
+    "r.status/r.data were already in scope in loadNotifDeliveries — the copy just never asked for them");
+  assert.equal((APP_SRC.match(/notifDeliveriesErrorHtml\(\)/g) || []).length, 0,
+    "no arity-0 call site survives in the shipped file");
+});
+
+test("cch-w40-s1: envVarWriteFailureCopy's 403 stops shadowing the evidence seam", () => {
+  // The arm returned BEFORE faultCopy/friendly, so the console's authored guess
+  // structurally outranked the server's own evidence. Two 403s reach it.
+  const f = hooks.envVarWriteFailureCopy;
+  // (a) router.ex:4355 / :4417 — the admin gate. The evidence is now rendered.
+  assert.equal(f(403, { error: "forbidden", required: "admin", scope: "team" }), ADMIN_SENTENCE);
+  // (b) router.ex:4394 — the CROSS-TENANT arm, left bare on purpose (D396(5)):
+  //     an admin of team A writing team B's barkpark_id. The old sentence
+  //     ("Only team owners and admins can change environment variables.") was
+  //     FLATLY FALSE there — the caller IS an admin — and unfixable by the reader,
+  //     because no role grant repairs a wrong-team id.
+  assert.equal(f(403, { error: "forbidden" }), FORBIDDEN_GENERIC);
+  assert.equal(f(403, { error: "forbidden" }).indexOf("owners and admins"), -1);
+  // A malformed/absent body must not fall out of the 403 class into input copy.
+  for (const junk of [{}, null, undefined]) {
+    assert.equal(f(403, junk), FORBIDDEN_GENERIC, "a 403 is never a validation answer: " + JSON.stringify(junk));
+    assert.equal(f(403, junk).indexOf("Check the values"), -1);
+  }
+  // THE OTHER ARMS ARE UNTOUCHED — this widened one branch, not the function.
+  assert.match(f(409, { error: "write_once" }), /write-once/);
+  assert.equal(f(422, { error: "key_required" }), "Enter a key.");
+  assert.match(f(500, { error: "server_error" }), /broke on our side/);
+  assert.match(f(422, {}), /Check the values/);
+});
+
+test("cch-w40-s1 THE INVERSION CANNOT REACH A BILLING SCREEN — proved, not asserted (D444/D447(c))", () => {
+  // The sharpest attack on D447 is "you just deleted the billing refusal copy".
+  // It dies on TWO independent structures, and this test pins both.
+  //
+  // (1) All three billing ROUTES gate first-statement on require_primary_team_owner,
+  //     which sends `required: "owner"` — so forbiddenEvidenceCopy WINS there and
+  //     the inverted default is unreachable from a billing refusal.
+  assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "team" }, "Please try again in a moment."),
+    "You need the owner role on this team — only the team owner can grant it.");
+  // (2) The billing SCREEN's own member copy is a separate literal in
+  //     renderBillingManage (grep -n 'function renderBillingManage' app.js) — fed
+  //     by nothing in the ERRORS map. The preview smoke reads it MOUNTED in the
+  //     plain-member billing scenario; it stays byte-identical.
+  assert.equal((APP_SRC.match(/'<p class="set-purpose">Only the team owner can manage billing\.<\/p>'/g) || []).length, 1,
+    "exactly one Manage-section literal, unmoved — D444's live tripwire");
+  // And GR36's property — the reason ERRORS.forbidden was curated in the first
+  // place — survives the inversion: a 403 still never reads as transient.
+  for (const data of [{ error: "forbidden" }, { error: "forbidden", required: "owner", scope: "team" },
+                      { error: "forbidden", reason: "outranked" }]) {
+    assert.doesNotMatch(hooks.friendly(data, "Try again in a moment."), /try again|moment/i,
+      "gr-backlog-portal-retry-sentence stays closed: " + JSON.stringify(data));
+  }
 });
 
 // ── cch-w37-s6: the Operator console stops checking access it will never check
@@ -15857,6 +16192,167 @@ test("cch-w37-s6: loadOperator's unloaded arm is THREE-valued — failed reports
   assert.ok(!failedArm.includes("operatorRefresh()") && !failedArm.includes("OPERATOR_FLEET"),
     "a WAIT is not a grant — the failed arm reads zero /v1/operator/* routes");
   assert.match(failedArm, /loadMe\(\)\.then\(/, "the retry re-reads /v1/me rather than faking a recheck");
+});
+
+// ── cch-w42-s1 · THE CONSOLE CONSUMES THE AUTHORITY THE SERVER STATES ──────
+// Wave 41 put `team_authority` {team_id, role, admin, owner} on /v1/me — nil
+// exactly when the account is teamless, so a consumer fails closed. Until this
+// group existed `grep -c team_authority app.js` was ZERO: the server stated the
+// authority and the console re-derived it from role strings anyway.
+//
+// teamAuthorityState() is a NEW five-valued sibling, never a widened boolean —
+// D439: widening one of the existing predicates to a string ships green AND
+// makes `if (privileged)` true for "failed"/"loading", the fail-open GR9
+// forbids. The bands: loading · failed · stale · refuse · grant.
+//
+// THE STALENESS ARM IS THE POINT. It compares the pin that was LIVE when the
+// answer was absorbed against the pin live NOW. It deliberately does NOT
+// compare team_authority.team_id to meCache.team.id: /v1/me builds both keys
+// from ONE binding in one map literal (router.ex:1431 / :1462), so that form is
+// true-or-both-nil on every answer the server can give — a tautology at the
+// source that no fixture and no mutation can falsify. And not the live pin
+// against team_authority.team_id either: resolve_team/2 DEGRADES to the primary
+// team when the pin names a non-member team, so a bare mismatch cries wolf.
+
+const ME_TA = {
+  role: "owner",
+  team: { id: "t1", name: "Acme Inc" },
+  user: { id: "u1", email: "ada@acme.com" },
+  team_authority: { team_id: "t1", role: "owner", admin: true, owner: true },
+};
+const ME_TA_MEMBER = {
+  role: "member",
+  team: { id: "t1", name: "Acme Inc" },
+  user: { id: "u4", email: "kim@acme.com" },
+  team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+};
+
+// Drive /v1/me with a REAL localStorage behind it, so the pin the absorb
+// captured is an actual stored value rather than the inert always-null stub.
+async function withTeamPin(run) {
+  const saved = sandbox.localStorage;
+  const store = memStore();
+  sandbox.localStorage = store;
+  try { hooks.clearMe(); await run(store); } finally { sandbox.localStorage = saved; hooks.clearMe(); }
+}
+
+test("cch-w42-s1: the team-authority band is a NEW five-valued sibling — the boolean predicates stay boolean", async () => {
+  assert.equal(typeof hooks.teamAuthorityState, "function", "the band must be node-pinned");
+  assert.equal(typeof hooks.membersContext, "function",
+    "membersContext was pinned by NOTHING, which is how it drifted into inventing the role");
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(typeof hooks.teamAuthorityState(), "string", "the band is a STRING — that is why it is a sibling");
+  // D439: widening an existing predicate instead would ship green here AND make
+  // every `if (predicate)` branch true. The old ones must still be two-valued.
+  for (const name of ["canManageOnboarding", "notifCanManage", "providerCanWrite", "canMintAnyAbility"])
+    assert.equal(typeof hooks[name](), "boolean", name + "() must NOT have been widened to the band");
+  hooks.clearMe();
+});
+
+test("cch-w42-s1: the two not-a-role states stay DISTINCT — loading is not failed, and neither grants", async () => {
+  hooks.clearMe();
+  assert.equal(hooks.teamAuthorityState(), "loading", "never asked: we do not know, and we say so");
+  assert.equal(hooks.membersContext(), null, "an unknown authority is not a team context");
+  assert.equal(hooks.canManageOnboarding(), false, "and it grants nothing");
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.teamAuthorityState(), "failed", "a FAILED read is a different fact from a pending one");
+  assert.equal(hooks.membersContext(), null, "a 500 is not 'you have no team'");
+  assert.equal(hooks.canManageOnboarding(), false, "an unproven actor is not an admin");
+  hooks.clearMe();
+});
+
+test("cch-w42-s1: grant/refuse come from team_authority.admin — an always-grant body must red HERE", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.teamAuthorityState(), "grant", "the server said admin:true");
+  assert.equal(hooks.canManageOnboarding(), true, "so the onboarding write gate opens");
+  // THE NEGATIVE CONTROL. Same team, same wire shape, admin:false — without
+  // this an unconditional "grant" ships green.
+  hooks.clearMe();
+  await driveMe(200, ME_TA_MEMBER);
+  assert.equal(hooks.teamAuthorityState(), "refuse", "admin:false is a DETERMINATE no, not a maybe");
+  assert.equal(hooks.canManageOnboarding(), false, "and the gate stays shut");
+  // Teamless: the server sends nil for exactly this, so absence is refusal —
+  // never a grant, and never an 'unknown' that some caller reads as truthy.
+  hooks.clearMe();
+  await driveMe(200, { role: "owner", user: { id: "u9", email: "solo@acme.com" } });
+  assert.equal(hooks.teamAuthorityState(), "refuse", "no team_authority on the wire is a determinate NO");
+  assert.equal(hooks.membersContext(), null, "and there is no team context to hand a caller");
+  hooks.clearMe();
+});
+
+test("cch-w42-s1: THE STALENESS ARM — the pin moving under a cached answer reads as stale, not as authority", async () => {
+  await withTeamPin(async (store) => {
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.teamAuthorityState(), "grant", "fetched under t1, answered for t1");
+
+    // THE CROSS-TAB RACE, verbatim: another tab writes the pin and reloads
+    // ITSELF. Nothing here listens for `storage` (grep: zero listeners) and
+    // loadMe() is not called on a route change, so this tab would otherwise
+    // keep serving t1's authority for the rest of its page life while api()
+    // (:116) re-reads the pin and sends t2 on EVERY request.
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.teamAuthorityState(), "stale",
+      "MUTATION TARGET: delete the pin comparison and this line is the red");
+    assert.equal(hooks.canManageOnboarding(), false, "a stale authority grants nothing");
+    assert.equal(hooks.membersContext(), null, "and hands out no team context — the callers paint their own state");
+
+    // Putting it back is not a re-fetch, but it does restore the fact the
+    // capture asserts: this answer WAS fetched under the pin that is live now.
+    store.setItem("bp.active-team", "t1");
+    assert.equal(hooks.teamAuthorityState(), "grant", "back under its own pin, the cached answer is current again");
+  });
+});
+
+test("cch-w42-s1: absorbMe RE-TAKES the pin, so a switch that reloads is current and a never-switched console is never stale", async () => {
+  await withTeamPin(async (store) => {
+    // Never-switched: no pin at absorb, no pin now. Null-vs-null is exactly the
+    // cold case, and it must NOT read as stale — a band that cries wolf on
+    // every fresh boot is a band nobody can act on.
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.teamAuthorityState(), "grant", "a console that never switched teams is never stale");
+
+    // The switcher's own tab: it writes the pin and reloads, so the next answer
+    // is absorbed UNDER the new pin. That is current, not stale.
+    hooks.clearMe();
+    store.setItem("bp.active-team", "t7");
+    await driveMe(200, ME_TA);
+    assert.equal(hooks.teamAuthorityState(), "grant", "a re-absorb under the new pin is current, not instantly stale");
+  });
+  // HONEST SCOPE, measured: clearMe() also drops the capture, and that clear is
+  // NOT observable from here — the band short-circuits to loading/failed while
+  // the cache is empty, and the only way back to the staleness arm is through
+  // absorbMe, which overwrites the capture first. Deleting the clearMe line
+  // keeps this file at 931/931. It stays because a capture outliving its cache
+  // is the exact stale-fact class the meError/meErrorFault lockstep above was
+  // built to end — hygiene on the file's own convention, claimed as hygiene and
+  // not as a guard.
+});
+
+test("cch-w42-s1: membersContext sources the role from the SERVER's team_authority, not from the envelope's role string", async () => {
+  hooks.clearMe();
+  // The wire disagrees with itself on purpose: envelope role says owner, the
+  // resolved authority says member. The authority is the one that decides, so
+  // assignableRoles() (the actual control gate) sees an empty list.
+  await driveMe(200, {
+    role: "owner",
+    team: { id: "t1", name: "Acme Inc" },
+    user: { id: "u5", email: "sam@acme.com" },
+    team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+  });
+  const ctx = hooks.membersContext();
+  // Field-wise, not deepEqual: the object is minted inside the vm realm, so a
+  // STRICT deep compare would red on the prototype rather than on the contract.
+  assert.deepEqual({ teamId: ctx.teamId, role: ctx.role, userId: ctx.userId },
+    { teamId: "t1", role: "member", userId: "u5" },
+    "the shape its five callers already handle, with the role the server resolved");
+  assert.equal(Object.keys(ctx).length, 3, "and no key more than the shape its callers destructure");
+  assert.equal(hooks.assignableRoles(ctx.role).length, 0,
+    "so the roster's manage controls stay hidden — the envelope's 'owner' does not open them");
+  hooks.clearMe();
 });
 
 test("cch-w37-s6: the failed-me body REPORTS, and never accuses", async () => {

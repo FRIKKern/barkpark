@@ -129,8 +129,10 @@ defmodule Barkpark.Sites.DeployRunner do
   `BARKPARK_SITE_DEPLOY_APPLY=1`. With the defaults this process can execute
   nothing at all, and the admin endpoint degrades to a clean 503.
 
-  Never-crash contract: `trigger/1` and `status/1` never raise — a dead process
-  degrades to `{:error, :disabled}` / an idle status map, and a command that
+  Never-crash contract: `trigger/1` and `status/1` never raise — a dead or
+  unanswering process degrades to `{:error, :runner_unavailable}` (its OWN
+  value: a wedged Runner is not an unset flag, and the door must never say it
+  is) / an idle status map, and a command that
   cannot start, dies abnormally, or outlives the deadline lands as a `:done`
   state with a non-zero exit code and an honest `failure_reason`.
   """
@@ -182,6 +184,20 @@ defmodule Barkpark.Sites.DeployRunner do
   # caller degrades (never crashes). Distinct from @default_run_deadline_ms,
   # which bounds the BUILD, not the ctl call that launches/reaps it.
   @default_ctl_cmd_timeout_ms 15_000
+
+  # How long a caller waits for the DOOR to answer `{:trigger, req}`.
+  #
+  # This used to be `GenServer.call/2`'s unstated 5_000ms default, which is
+  # indefensible next to @default_ctl_cmd_timeout_ms above: the trigger's own
+  # critical section may run a systemctl round-trip that is ALLOWED to take 15s,
+  # so the caller's budget was shorter than the work it was waiting for. When it
+  # blew, `safe_call/3` converted the exit into `{:error, :disabled}` and the
+  # endpoint told the operator to set a flag that was already set — while the
+  # build it had just accepted ran to completion behind the lie (dr-w8-s2).
+  #
+  # 30s is ctl timeout + spawn grace + slack: a trigger that outlives THIS is a
+  # wedged Runner, not a slow one, and now says so in its own words.
+  @trigger_call_timeout_ms 30_000
 
   # After a launch, systemd may report the unit `inactive` for a beat before it
   # transitions to `active`. Do NOT serve `:done` off an empty fold inside this
@@ -319,10 +335,15 @@ defmodule Barkpark.Sites.DeployRunner do
   """
   @spec trigger(DeployRequest.t()) ::
           {:ok, :started}
-          | {:error, :already_running | :box_at_capacity | :disabled | :start_failed}
+          | {:error,
+             :already_running | :box_at_capacity | :disabled | :runner_unavailable | :start_failed}
           | {:error, {:artifact_rejected, String.t(), String.t()}}
           | {:error, {:provision_failed, String.t()}}
-  def trigger(%DeployRequest{} = req), do: safe_call({:trigger, req}, {:error, :disabled})
+  def trigger(%DeployRequest{} = req),
+    do:
+      safe_call({:trigger, req}, {:error, :runner_unavailable},
+        timeout: trigger_call_timeout_ms()
+      )
 
   @doc """
   The DURABLE per-deployment record for one build — the answer to "what
@@ -408,14 +429,20 @@ defmodule Barkpark.Sites.DeployRunner do
   @spec running?(String.t()) :: boolean()
   def running?(slug) when is_binary(slug), do: match?(%{state: :running}, status(slug))
 
-  defp safe_call(msg, fallback) do
+  # `fallback` is what a caller gets when the Runner cannot answer at all —
+  # never crashed into, never confused with an answer the Runner GAVE. Callers
+  # pass an explicit `:timeout` because the default 5_000ms is shorter than the
+  # work some of these calls are allowed to do.
+  defp safe_call(msg, fallback, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 5_000)
+
     case Process.whereis(__MODULE__) do
       nil ->
         fallback
 
       pid ->
         try do
-          GenServer.call(pid, msg)
+          GenServer.call(pid, msg, timeout)
         catch
           # Runner died between whereis and call (or timed out) — degrade, never
           # propagate the exit to the caller.
@@ -2534,6 +2561,12 @@ defmodule Barkpark.Sites.DeployRunner do
 
   defp ctl_cmd_timeout_ms,
     do: Keyword.get(config(), :ctl_cmd_timeout_ms, @default_ctl_cmd_timeout_ms)
+
+  # Overridable so a test can shrink the door's answer budget below the work the
+  # door actually does, and observe the unanswered-trigger path for real instead
+  # of mocking it.
+  defp trigger_call_timeout_ms,
+    do: Keyword.get(config(), :trigger_call_timeout_ms, @trigger_call_timeout_ms)
 
   # Run a control-plane `System.cmd` under a hard deadline on a SUPERVISED,
   # UNLINKED task so a hung external process cannot wedge the singleton Runner.

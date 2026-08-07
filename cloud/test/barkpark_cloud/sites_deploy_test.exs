@@ -95,6 +95,23 @@ defmodule BarkparkCloud.SitesDeployTest do
      }}
   end
 
+  # THE SECOND AUTHORLESS SHAPE (dr-w8-s2). The box's door emits this when its
+  # DeployRunner did not answer the trigger inside the call budget — busy or
+  # wedged, not a verdict about this build. It used to arrive wearing
+  # `feature_not_configured`, a TYPED refusal, and was therefore terminal on the
+  # first beat: 207 rows in 24h spent a whole build on a box that was merely slow
+  # (and, worse, often on a build that was ALREADY RUNNING behind the answer).
+  defp runner_unavailable_503(request_id \\ "F9-runner-wedged") do
+    {:ok, 503,
+     %{
+       "error" => %{
+         "code" => "deploy_runner_unavailable",
+         "message" => "the deploy runner did not answer in time",
+         "request_id" => request_id
+       }
+     }}
+  end
+
   # Move a row out of the ACTIVE set. deploy-truth W1 re-keyed the active-
   # deployment index onto (site_id, environment), so at most ONE queued/building/
   # pushing production build per site can exist — a test that wants a second one
@@ -699,7 +716,20 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert row.failure_reason =~ "is already running"
       # …plus the promise that makes `deferred` different from `failed`.
       assert row.failure_reason =~ "re-queued"
-      assert row.detail == row.failure_reason
+      # `detail` is the varchar(255) caption, `failure_reason` the whole story.
+      # They were byte-equal until dr-w7 S1 gave the sentence a chain depth (D99,
+      # PR #9905) — now the caption is `short_detail/1`'s clamp of the reason,
+      # which is what keeps an over-long reason from RAISING 22001 mid-transition.
+      assert String.length(row.detail) <= 255
+
+      if String.length(row.failure_reason) <= 255 do
+        assert row.detail == row.failure_reason
+      else
+        assert String.starts_with?(row.failure_reason, String.trim_trailing(row.detail, "…"))
+        # The caption keeps the part an operator needs at a glance.
+        assert row.detail =~ "refusal 1 of 6"
+        assert row.detail =~ "re-queued"
+      end
 
       # THE RE-FIRE, as a real Oban row: a debounced rebuild for THIS site is
       # pending. Nothing about the old path enqueued anything at all.
@@ -830,6 +860,131 @@ defmodule BarkparkCloud.SitesDeployTest do
       # The verdict is DERIVED from the cause, so the busy-box accusation cannot
       # be aimed at a box that was never busy with this site.
       refute last.failure_reason =~ "not busy but stuck"
+    end
+
+    # dr-w7 S1 (deploy-reliability charter D99, PR #9905). The depth was computed
+    # for the threshold, logged once, and DISCARDED: on the production ledger 63
+    # capacity-deferred rows across five sites all carried the SAME sentence, so
+    # refusal 1 and refusal 8 were byte-identical to the operator and the only
+    # moment depth ever reached a human was the instant of the terminal drop.
+    test "consecutive deferrals are no longer byte-identical — each names its own depth, bound, and what is being counted" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "box_at_capacity",
+               "message" => "1 of 1 build slots in use"
+             }
+           }}
+      )
+
+      rows =
+        for _ <- 1..2 do
+          {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+          assert {:ok, :deferred} = Deploy.run(d.id)
+          Repo.get(Deployment, d.id)
+        end
+
+      reasons = Enum.map(rows, & &1.failure_reason)
+      [first, second] = reasons
+
+      # THE WHOLE POINT: two rounds of the same refusal no longer read the same.
+      refute first == second
+      assert first =~ "refusal 1 of 12"
+      assert second =~ "refusal 2 of 12"
+
+      # All three facts, in every round: the depth, the cause's own bound, and
+      # that the counter is a ZERO-PROGRESS guard rather than a countdown — a
+      # bare "2 of 12" would promise a drop a merely-slow box may never reach.
+      for r <- reasons do
+        assert r =~ "in this site's current chain"
+        assert r =~ "zero-progress guard, not a countdown"
+        assert r =~ "any successful deploy resets it to 0"
+        # …and the promise that makes `deferred` different from `failed` still
+        # travels, unshadowed by the new clause.
+        assert r =~ "re-queued"
+      end
+
+      # The clamped varchar(255) caption keeps the DEPTH — the clause sits ahead
+      # of the parenthetical for exactly this reason.
+      second_row = List.last(rows)
+      assert second_row.detail =~ "refusal 2 of 12"
+      assert String.length(second_row.detail) <= 255
+    end
+
+    # The bound is READ FROM THE CAUSE (`max_consecutive_deferrals/1`), never a
+    # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
+    # sentence that hardcoded either would misstate the other cause's whole
+    # budget to the operator reading it.
+    test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "1 of 1 build slots in use"}}}
+      )
+
+      {:ok, capacity} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(capacity.id)
+      capacity_reason = Repo.get(Deployment, capacity.id).failure_reason
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      {:ok, busy} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(busy.id)
+      busy_reason = Repo.get(Deployment, busy.id).failure_reason
+
+      assert capacity_reason =~ "refusal 1 of 12"
+      refute capacity_reason =~ "of 6"
+
+      # A DIFFERENT cause breaks the chain, so this is refusal 1 again — and it
+      # is measured against the busy box's shorter leash.
+      assert busy_reason =~ "refusal 1 of 6"
+      refute busy_reason =~ "of 12"
+    end
+
+    # REVIEW GUARD (dr-w7 S1 review). The depth clause was placed AHEAD of the
+    # re-queue promise precisely because `detail` is `short_detail/1`'s
+    # varchar(255) clamp, so whatever is appended LAST is what the operator-visible
+    # caption loses. Nothing pinned that ordering against a LONG box message,
+    # which is the only case where the budget actually bites — so a future clause
+    # appended in defer/3 could push the depth out of the caption and every
+    # existing assertion (all on short reasons) would stay green. This is that
+    # missing guard: the box says 180 characters about itself, the caption is
+    # forced to clamp, and the DEPTH still survives it.
+    test "the clamped caption keeps the chain depth even when the box's own message is long" do
+      {bp, site} = setup_site()
+
+      long_message =
+        "all 1 of 1 build slots on this instance are in use by site astro-search " <>
+          "(build 0f3c9a12, started 4m ago, stage BUILD) and the queue is not draining"
+
+      FakeBoxRelay.program(
+        start: {:ok, 409, %{"error" => %{"code" => "box_at_capacity", "message" => long_message}}}
+      )
+
+      {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(d.id)
+      row = Repo.get(Deployment, d.id)
+
+      # The clamp genuinely fired — otherwise this test proves nothing.
+      assert String.length(row.failure_reason) > 255
+      assert String.length(row.detail) <= 255
+      assert String.ends_with?(row.detail, "…")
+
+      # …and the depth is still in the part that survived.
+      assert row.detail =~ "refusal 1 of 12"
+
+      # The whole story is never lost: `failure_reason` is uncapped, and it is
+      # what the CLI's deferral render reads first.
+      assert row.failure_reason =~ "zero-progress guard, not a countdown"
     end
 
     # THE FIRST TEST THIS BRANCH HAS EVER HAD. `git grep 'could NOT be
@@ -1192,6 +1347,93 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert length(Registry.list_deployments(site, 10)) == 1
       # …with the debounced rebuild the deferral promises.
       assert [_job] = pending_auto_deploy_jobs(site.id)
+    end
+
+    # dr-w8-s2, THE CO-MERGE. The api door stops calling a wedged Runner an unset
+    # flag — but a rename alone would make deploys WORSE: `feature_not_configured`
+    # and the new `deploy_runner_unavailable` are both TYPED, and a typed 5xx is
+    # terminal here on the first beat. The allowlist arm is what turns the rename
+    # into a recovery. Delete `"deploy_runner_unavailable" -> true` from
+    # `transient_refusal?/1` and these two go red — a lost build wearing a better
+    # name, which is the failure mode charter D114 exists to prevent.
+    test "a wedged-Runner start refusal buys the start retry instead of spending the build" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start: [
+          # The Runner did not answer the trigger — but it may well have TAKEN
+          # the job, which is exactly why the retry is safe by construction.
+          runner_unavailable_503(),
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+        ]
+      )
+
+      assert {:ok, :deferred} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "deferred"
+      assert row.failure_reason =~ "already_running"
+      # One build, two triggers — a retry, never a second build.
+      assert length(Registry.list_deployments(site, 10)) == 1
+      assert [_job] = pending_auto_deploy_jobs(site.id)
+    end
+
+    test "a wedged-Runner poll beat is graced, and the build that then finishes goes live" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          runner_unavailable_503(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "live"
+      assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
+
+    # Grace still has to be able to LOSE: a Runner that never answers is a real
+    # box fault wearing a transient shape, and the row that lands must name the
+    # box's own last words and how many beats were tolerated first.
+    test "a wedged Runner that never clears exhausts the grace and says what it swallowed" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(polls: [runner_unavailable_503("F9-wedged-forever")])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      assert final.failure_reason =~ "deploy_runner_unavailable"
+      assert final.failure_reason =~ "transient box 5xx"
+      # And it never blames the operator's configuration.
+      refute final.failure_reason =~ "BARKPARK_SITE_DEPLOY_APPLY"
+    end
+  end
+
+  # dr-w8-s2 (D). `stage_caption/2`'s non-failed arm was a bare `scrub/1`, and a
+  # scrub alone is not a boundary on build-log bytes: a build tool colourises its
+  # own output, so the ESC runs land INSIDE the shape the scrubber matches and the
+  # credential walks out in cleartext — with raw 0x1B attached, which a console
+  # then interprets. Strip first, then redact.
+  describe "stage_caption/2 — a colourised secret" do
+    test "a colourised credential is redacted, and no ESC byte survives" do
+      raw =
+        "\e[33mBUILD\e[0m env \e[1mBARKPARK_TOKEN\e[22m=\e[31mbppat_9Xq2LmT4vB7nR1zC8kW5\e[0m"
+
+      caption = Deploy.stage_caption("ok", raw)
+
+      assert caption =~ "[redacted]"
+      refute caption =~ "bppat_9Xq2LmT4vB7nR1zC8kW5"
+      refute String.contains?(caption, "\e")
+      # The narration a person needs still survives the fold.
+      assert caption =~ "BUILD env"
     end
   end
 
