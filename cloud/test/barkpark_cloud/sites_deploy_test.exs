@@ -95,6 +95,23 @@ defmodule BarkparkCloud.SitesDeployTest do
      }}
   end
 
+  # THE SECOND AUTHORLESS SHAPE (dr-w8-s2). The box's door emits this when its
+  # DeployRunner did not answer the trigger inside the call budget — busy or
+  # wedged, not a verdict about this build. It used to arrive wearing
+  # `feature_not_configured`, a TYPED refusal, and was therefore terminal on the
+  # first beat: 207 rows in 24h spent a whole build on a box that was merely slow
+  # (and, worse, often on a build that was ALREADY RUNNING behind the answer).
+  defp runner_unavailable_503(request_id \\ "F9-runner-wedged") do
+    {:ok, 503,
+     %{
+       "error" => %{
+         "code" => "deploy_runner_unavailable",
+         "message" => "the deploy runner did not answer in time",
+         "request_id" => request_id
+       }
+     }}
+  end
+
   # Move a row out of the ACTIVE set. deploy-truth W1 re-keyed the active-
   # deployment index onto (site_id, environment), so at most ONE queued/building/
   # pushing production build per site can exist — a test that wants a second one
@@ -1192,6 +1209,93 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert length(Registry.list_deployments(site, 10)) == 1
       # …with the debounced rebuild the deferral promises.
       assert [_job] = pending_auto_deploy_jobs(site.id)
+    end
+
+    # dr-w8-s2, THE CO-MERGE. The api door stops calling a wedged Runner an unset
+    # flag — but a rename alone would make deploys WORSE: `feature_not_configured`
+    # and the new `deploy_runner_unavailable` are both TYPED, and a typed 5xx is
+    # terminal here on the first beat. The allowlist arm is what turns the rename
+    # into a recovery. Delete `"deploy_runner_unavailable" -> true` from
+    # `transient_refusal?/1` and these two go red — a lost build wearing a better
+    # name, which is the failure mode charter D114 exists to prevent.
+    test "a wedged-Runner start refusal buys the start retry instead of spending the build" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start: [
+          # The Runner did not answer the trigger — but it may well have TAKEN
+          # the job, which is exactly why the retry is safe by construction.
+          runner_unavailable_503(),
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+        ]
+      )
+
+      assert {:ok, :deferred} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "deferred"
+      assert row.failure_reason =~ "already_running"
+      # One build, two triggers — a retry, never a second build.
+      assert length(Registry.list_deployments(site, 10)) == 1
+      assert [_job] = pending_auto_deploy_jobs(site.id)
+    end
+
+    test "a wedged-Runner poll beat is graced, and the build that then finishes goes live" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          runner_unavailable_503(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "live"
+      assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
+
+    # Grace still has to be able to LOSE: a Runner that never answers is a real
+    # box fault wearing a transient shape, and the row that lands must name the
+    # box's own last words and how many beats were tolerated first.
+    test "a wedged Runner that never clears exhausts the grace and says what it swallowed" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(polls: [runner_unavailable_503("F9-wedged-forever")])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      assert final.failure_reason =~ "deploy_runner_unavailable"
+      assert final.failure_reason =~ "transient box 5xx"
+      # And it never blames the operator's configuration.
+      refute final.failure_reason =~ "BARKPARK_SITE_DEPLOY_APPLY"
+    end
+  end
+
+  # dr-w8-s2 (D). `stage_caption/2`'s non-failed arm was a bare `scrub/1`, and a
+  # scrub alone is not a boundary on build-log bytes: a build tool colourises its
+  # own output, so the ESC runs land INSIDE the shape the scrubber matches and the
+  # credential walks out in cleartext — with raw 0x1B attached, which a console
+  # then interprets. Strip first, then redact.
+  describe "stage_caption/2 — a colourised secret" do
+    test "a colourised credential is redacted, and no ESC byte survives" do
+      raw =
+        "\e[33mBUILD\e[0m env \e[1mBARKPARK_TOKEN\e[22m=\e[31mbppat_9Xq2LmT4vB7nR1zC8kW5\e[0m"
+
+      caption = Deploy.stage_caption("ok", raw)
+
+      assert caption =~ "[redacted]"
+      refute caption =~ "bppat_9Xq2LmT4vB7nR1zC8kW5"
+      refute String.contains?(caption, "\e")
+      # The narration a person needs still survives the fold.
+      assert caption =~ "BUILD env"
     end
   end
 
