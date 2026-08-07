@@ -2303,6 +2303,72 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-07 — wave 49 REVIEW (5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd; 3 round-2 slices deferred by the sequenced-rounds law — grade A−)
+
+| Slice | Task | Final branch | Reviewer fix |
+|---|---|---|---|
+| CROWN — the money screen stops stating prices and ceilings nothing can support | `cch-w49-s1-money-screen-stops-stating-numerals-it-cannot-support` | `…the-money-screen-stops-stating-three-pri-0-r` | **one fix, and it is the wave's own collision.** The slice deleted `PLAN_CATALOG.instances` outright — the exact key `cch-w49-s3` reads by running and pins to `Billing.limits/0`, built in the SAME wave on a disjoint file fence. Measured: s3's suite goes **4 failures of 5** against s1's `app.js`. Two green PRs; main's Cloud gate reds on whichever merges second. Resolved by separating the two numerals, which are not the same case: **price stays deleted** (no amount exists server-side, so no layer could ever pin it), **the ceiling survives as data and is banned from every screen** (`planInstanceLimit` and `priceFor` stay retired so nothing can format it; smoke's absent-arm guard reds if it reaches a DOM). Unit #710 re-pinned to that property — and it caught a real cross-realm trap: `hooks.planCatalog.map(…)` builds an array on the **vm sandbox's** `Array.prototype`, and `node:assert/strict`'s `deepStrictEqual` compares prototypes, so it reds on identical values (`Array.from` re-homes it) |
+| Checkout refuses BEFORE it charges a card it can never activate | `cch-w49-s2-checkout-refuses-before-it-charges-and-the-plane-declares-its-billing-capability` | `…checkout-refuses-before-it-charges-a-car-1` (unchanged) | **none.** The one assertion that matters was re-derived in review by mutation, not re-read: delete the pre-flight clause and state C reaches `StripeGateway` — the route arm reds with `checkout_failed` where it must say `billing_not_configured`. `configured?/0` is now literally `checkout_capability() == :available`, so the boolean and the enum cannot drift, and `priced_plans/0` is derived by CALLING `price_id/1` over `Subscription.plans() -- ~w(free trial)` |
+| A cross-layer mirror guard reads both sides by running | `cch-w49-s3-cross-layer-mirror-guard-reads-both-sides-by-running` | `…a-cross-layer-mirror-guard-reads-the-ser-2-r` | **one fix, the other half of the collision.** The SCOPE arm asserted every client tier carries a `"$…"` display string — pinning the very fabrication the crown deletes, and reading as the cross-layer guard **endorsing** a figure no server value backs. It is now server-only and says why: there is no client side to compare because there is no server side to compare to (`STRIPE_PRICE_*` are price IDs, not amounts). Whether the console PRINTS a price is owned end-to-end by s1's rendered-bytes guard |
+| §20 — the OVERSTATEMENT half of the merge ledger | `cch-w49-s4-merge-ledger-stops-presenting-checks-that-cannot-block-as-checks-a-pr-must-clear` | `…section-20-the-overstatement-half-of-the-3-r` | **one copy fix.** Verified losable in review by an independent mutation: strip `vendored-assets`' new disclosure and §20 reds **by name** (`OVER vendored-assets roster item`) while still reporting the other names — the flip is one check changing class, not a run that stopped reporting. The fix itself: item 7's new disclosure left `The workflow only plumbs PR context in.` orphaned mid-paragraph with `Four designed behaviours:` alone on its line; one semicolon rejoins them. 151/0 hermetic |
+| The epic's own ledger stops reading open on 25 merged rows | `cch-w49-s5-the-epics-own-ledger-stops-reading-open-on-25-merged-rows` | `…the-epic-s-own-ledger-stops-reading-open-4` (unchanged) | **none.** Gate re-run at review time returns exactly the four honestly-open rows (`cch-w40-s3`, `cch-w40-s4`, `cch-w42-s2`, `cch-w42-s4`), each still at unchanged met/total. The slice went **beyond** its brief in the right direction: three more merge-gated criteria (`cch-w40-s1/s5/s6`) turned out to be CONJUNCTIONS — "…and `task-X` is closed with it" where `task-X` is separate, unbuilt and still open — and were re-worded to the merge half with the companion named, rather than stamped as written. It also refuted two inherited premises by running (#10085/#10086's gates did NOT "silently never run"; they are green and simply unmerged and dirty) |
+
+**WHAT LANDED.** Wave 49 is the money wave, and its subject is the console's most consequential
+sentence: a price. `PLAN_CATALOG`'s three hand-typed figures (`$0/$69/$499`) rendered as fact under a
+button that opens a real Stripe session, with **no amount anywhere server-side** for any guard on any
+layer to check them against — and they are now gone from all three render surfaces, including the
+`launchPlanGridHtml` *blocked* arm that used to quote two prices while withholding the CTA. Under them,
+`Billing.checkout/2` branched solely on `price_id/1`: with prices wired and `STRIPE_WEBHOOK_SECRET`
+unset, a real hosted session opened, **a card was charged**, and `verify_webhook/2` answered
+`{:error, :no_secret}` forever — a customer paying for a subscription that could never activate. That
+state (C) is now refused pre-flight, and `GET /v1/subscription` declares `billing_capability`
+`{checkout, plans}` as a top-level sibling **present in the `{subscription: nil}` arm** — the arm the
+unsubscribed owner actually gets. Nine numeral pins were retired by rewriting them to the honest
+property, including `smoke.mjs:2143`, a **blocking assertion inside the required Console gate** whose
+own comment called the client constant "the real quota-honest ceiling": the gate was certifying the
+fiction. `"No card needed."` is deleted from the trial card while the ratified `"Pick a plan below to
+keep it."` survives verbatim and the four TRUE "no card" sentences are untouched. §20 of
+`required-checks.test.sh` closes the merge ledger's other direction — §19 reds on an UNDERSTATEMENT,
+§20 on an OVERSTATEMENT — and four checks that cannot stop a merge (`plugin-node`, `vendored-assets`,
+`PR task gate self-test`, `doc-gates`) stopped being listed as checks a PR must clear, along with two
+count defects (17 vs the 19 `(blocking)` steps `doc-gates.yml` declares; "two required contexts" vs
+four). And the epic's own ledger stopped lying about itself: 25 rows whose work is merged closed on two
+proofs each, four refused.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+
+1. **MERGE ORDER IS FREE, BUT THE PAIR IS NOT.** The s1/s3 collision is fixed on the `-r` branches and
+   the five-branch integration was verified by running: full cloud suite **3172 tests / 0 failures**,
+   console unit **1001/0**, smoke **110 scenarios**, census **79/79 unchanged**, breakpoint sweep
+   **54/54**, `mix format --check-formatted` and `compile --warnings-as-errors` clean. Merge the
+   ORIGINAL branches for s2 and s5 and the `-r` branches for s1, s3 and s4, or the collision returns.
+2. **THE CONSOLE STUB IS THE NEXT TRIPWIRE.** `cloud/priv/static/__app.test.mjs:757` stubs
+   `/v1/subscription` as `{ subscription: state.subscription }` — it does NOT carry the
+   `billing_capability` s2 now sends. Harmless today (nothing reads it); `cch-w49-s7` MUST update that
+   stub first or its consumer tests against a payload the server no longer emits. This is the
+   split-gate cost s2 disclosed: the declaration is pinned by the Cloud gate, the consumer by the
+   Console gate, and neither alone proves the pair.
+3. **DISPATCH ORDER FOR ROUND 2**, unchanged by review: merge round 1 → `cch-w49-s6` (owner band; needs
+   s1 on main, and the fence must be re-proven by mutation on POST-crown bytes) and `cch-w46-s7`
+   (member-actor rendered-state sweep; needs s1 only for file truth on `smoke.mjs`) in parallel →
+   `cch-w49-s7` (console stops offering a checkout the server can only refuse) once BOTH s2 and s6 are
+   on main.
+4. **THE CROWN IS HONEST, NOT FINISHED.** A pricing grid with no price is not good; the user now learns
+   the figure one click later on Stripe's own checkout page, which is the first surface in the flow that
+   knows one. The real fix is a server-side price read from Stripe — the amount does exist, one API call
+   away — and it is held behind the `cloud-console-billing-live-gate` human gate. Filed as backlog, not
+   silently deferred.
+5. **BACKLOG FILED THIS WAVE:** 8 published `cch-w49-bl-*` rows plus
+   `cch-w49-s1-followup-retire-orphaned-price-css` (8 now-orphaned rules in `app.css`, outside the
+   crown's fence). One ledger dup cancelled in review:
+   `cch-w49-bl-required-checks-drift-workflow-calls-its-own-job-blocking` bundled two findings the s4
+   builder had already filed separately with sharper briefs.
+6. **INDEPENDENT SECOND REVIEW IS OWED ON s2.** Its HIGH-FLIP-RISK judgment — that the pre-flight
+   refusal actually closes the charge path — was re-derived here by mutation and holds, but it has still
+   never been proven against a live Stripe session; nobody charged a card, and nobody should. A human
+   read of that one clause before merge is cheap insurance on the only slice in this epic that can move
+   money.
+
 ### 2026-08-07 — wave 47 REVIEW (5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd; 1 round-2 slice deferred by the sequenced-rounds law — grade A−)
 
 | Slice | Task | Final branch | Reviewer fix |
