@@ -74,6 +74,31 @@ Run the sweep **before** the spec PR merges. After it merges, the sweep short-ci
 no context that origin/main does not already require"* and exits 0 — a vacuous green
 indistinguishable from a real authorization.
 
+**ADDENDUM 2026-08-07 (wave 39 REVIEW) — the trap above stops being prose.** This section had been
+written as a sentence twice (the wave-38 ledger recipe and `cch-w37-bl-register-spec-gate-human-gate`)
+and was still unenforced, so wave 39 shipped it as a mechanism:
+`scripts/registration-deadlock-sweep.sh --require-new-context` routes the identity short-circuit
+through the script's own `fail()` and exits **2**. Without the flag the bare run stays exit 0 (a
+sweep on a spec-untouching branch is a legitimate no-op) but now prints a `NO COVERAGE:` line naming
+what it did not examine. **The flip's step 2 must therefore be run WITH the flag** — the prose above
+is the reason, not the guard.
+
+The flag is inert on a correctly-ordered run, and that is measured, not assumed. Re-run at review
+against the candidate this packet builds, rc read by redirect:
+
+    bash scripts/registration-deadlock-sweep.sh --spec /tmp/_cand5.json --require-new-context
+    → rc 0
+      swept 14 open PR(s); evaluated 2, skipped 12 (draft 1, conflicting 5, already-blocked 6, other 0); casualties: 0
+      NO CASUALTY among the 2 of 14 open PR(s) this sweep could evaluate: each renders every newly proposed context.
+      PARTIAL COVERAGE: 12 PR(s) were skipped and say nothing either way. Quote this line, not just the verdict, wherever the flip is authorized.
+
+Identical to the unflagged row in *Today's integers* — the flag costs a correctly-ordered sweep
+nothing and refuses the out-of-order one. **Ships on a different branch than this file**
+(`loop-epic/the-registration-sweep-stops-returning-a-2-r`, wave 39 S4); until that merges, the flag
+is not yet on `main` and passing it exits 2 with `FAIL: unknown argument`, which is a refusal for the
+wrong reason. Check `grep -c require-new-context scripts/registration-deadlock-sweep.sh` before
+quoting this addendum in an authorization.
+
 ### THE FLIP IS NOT AUTHORIZED, AND THIS PACKET DOES NOT AUTHORIZE IT
 
 The packet is turnkey. It is not permission.
