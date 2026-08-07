@@ -2838,8 +2838,19 @@ func (c *Client) rolloutRequest(ctx context.Context, method, path string) (Rollo
 	return res, nil
 }
 
-// RolloutStatus reads the fleet rollout state via GET /v1/admin/autoupdate
-// (Bearer, admin). Read-only — it never advances or halts anything.
+// RolloutStatus reads the fleet rollout state via GET /v1/admin/autoupdate.
+// Read-only — it never advances or halts anything.
+//
+// THE CREDENTIAL IS THE WORKER TOKEN, NOT AN ADMIN SESSION. This comment used to
+// say "(Bearer, admin)", which is wrong in the way this epic exists to delete:
+// the route calls `Auth.require_worker/2` (router.ex, `GET /v1/admin/autoupdate`),
+// so the only credential that opens it is the shared `WORKER_TOKEN` machine
+// secret. A human's `bp login` token is refused no matter what role they hold on
+// any team, and the "admin" in the old sentence sent a reader looking for a team
+// grant that has no bearing on the answer. dr-w18-s4's audience census derives
+// this independently from source and prints the tier as `worker`. Whether any
+// human-facing verb SHOULD read the brake's position through a machine-only door
+// is dr-w19-rollout-brake-is-machine-only, filed, not answered here.
 func (c *Client) RolloutStatus(ctx context.Context) (RolloutState, error) {
 	return c.rolloutRequest(ctx, "GET", "/v1/admin/autoupdate")
 }
