@@ -5305,3 +5305,282 @@ runs the same three-cohort split per site with no partition guard at all.
 `census/3`'s return map and s8 is the last link. S8 is the one that matters most to the wish: it turns the
 hardcoded ceiling into an emitted `coalesced_attempts`, moving 2026-08-06 from 25.67% to 14.94%. Beside them,
 the per-site partition guard and the still-unrepaired prebuilt dead end are the two unclaimed silences.
+
+---
+
+## Wave 19 — fewer deploys, not better reports (2026-08-07/08)
+
+Wave Paper: `deploy-reliability-wave-19-2026-08-07`. Epic: `task-fb4fb869490b4213`.
+
+**RECONCILIATION WITH WHAT LANDED.** Wave 18's S2 `#10519` (`7f99fde66`), S3 `#10520` (`d0e233ea9`) and
+S4 `#10521` (`3de49fb10`) are on origin/main; S1 `#10518` is OPEN and BLOCKED; S5 was never built.
+Wave 18's charter PR `#10496` is UNMERGED, so **D302–D321 are not on origin/main** and are cited here as
+unmerged rulings. Wave 19 therefore numbers from **D322**, leaving wave 18's block intact — when both PRs
+land the file is resolved by UNION, never by choosing a side.
+
+- **D322 — THE WAVE'S CROWN PREMISE WAS DEAD ON ARRIVAL, AND THE EPIC'S OWN LEDGER MANUFACTURED IT.**
+  Strategize opened on "a repair this epic already wrote, already made reachable, and NEVER RAN" — the
+  `site-autodeploy-*` doc-type filter. It ran at **2026-08-07 03:43:23–03:46:27Z**, ~18 h before survey,
+  and three surveyors plus one verifier killed the premise independently: a live read returns all five rows
+  at `types=["paper"]`, and `bp cloud webhook reconcile guerrilla --dry-run` on an ordinary NON-operator
+  team credential exits 0 with `{ok:5, would_update:0}`. **D139 ordered the run and D207 already retired the
+  `'{}'` fact as dead** — both on origin/main, both read this wave. The effect is pinned: 6,873 deliveries
+  in the 18 h before (**381.8/hr**) vs 417 after (**23.2/hr**) = a **93.9% cut**, cross-checked demand-side
+  (5,729 `task` mutations since the cut produced **2** deliveries where `'{}'` would have produced ~28,645).
+  *Why this is a charter decision and not a footnote:* the belief survived because **four separate open rows
+  still carry the repair as unrun**, and 58 of 74 partly-met rows sit at N-1/N with the merge gate as their
+  only unmet criterion. A ledger that cannot tell a done thing from an undone one re-manufactures the undone
+  belief into the next wave's strategy. **RULING: the headline number that went DOWN already exists; there is
+  no before-window left to create. The wave pivots to the amplifiers that are still live, and it pays the
+  ledger debt in the same wave** (D331).
+
+- **D323 — THE SECOND AMPLIFIER IS THE 60 s REFUSAL BACKOFF; IT IS UNFENCED, UNCLAIMED, REACHABLE — AND
+  `replace:` IS FORBIDDEN.** `AutoDeployWorker.enqueue/1` re-fires a refused deploy on a blind fixed
+  `@schedule_in_default 60` (auto_deploy_worker.ex:110/132) that knows nothing about the in-flight build.
+  Proved against the pinned Oban **2.23.0**: without `:replace`, `Basic.resolve_conflict/4` returns the
+  EXISTING job and a longer window is silently discarded (P1: `scheduled_in=59`). **But the defer path never
+  hits that conflict** — `@unique` states are `[:available, :scheduled]` and the sibling is `:executing`
+  (D44 dropped `:executing` deliberately), so P5 measured `conflict?=false new_id=true scheduled_in=899`:
+  **a depth-derived backoff on the defer path is written verbatim with zero Oban changes.** Adding
+  `replace: [scheduled: [:scheduled_at]]` would be actively harmful — P6 shows an ordinary 60 s publish then
+  drags a 900 s deferral back to 59 s, because `replace` has no max/min semantics and only ever lets the
+  shortest caller win. *Fence check, run:* six charter hits for `backoff|debounce|AUTODEPLOY_DEBOUNCE_S|
+  schedule_in|D44`, **all descriptive**; no decision fences it and no task claims it. **RULING: the refusal
+  backoff is a legitimate wave-20 lever and it is FILED, not built this wave** — see D332(a) for why.
+
+- **D324 — A BACKOFF ABOVE 300 s BREAKS COALESCING OUTRIGHT, AND IT SHIPS GREEN.** `@unique period: 300` is
+  compared against **`inserted_at`**, not `scheduled_at` (`since_period/3`, basic.ex:529-531). P7: a job
+  scheduled 900 s out but inserted 400 s ago is invisible to the unique query and the next enqueue mints a
+  **SECOND** job (`conflict?=false pending_jobs=2`) — the fan-out the change exists to cut, reintroduced by
+  the change. P8 proves the repair: `timestamp: :scheduled_at` on the unique fixes it with no period change.
+  Every existing test still passes at any cap ≤300 s, so this defect only appears at depth, under load,
+  where nobody looks. **RULING: any slice that lengthens the refusal backoff MUST, in the same commit,
+  either cap it at ≤240 s or set `timestamp: :scheduled_at` — and its acceptance criteria must name P7
+  explicitly.** The existing debounce test (auto_deploy_worker_test.exs:180-201) `Repo.delete_all`s the job
+  between grabs and has therefore **never once exercised a conflict**; a test written in its image proves
+  nothing.
+
+- **D325 — THE WISH'S OWN WORDS ARE UNMET INSIDE OUR FENCE, AND THE DELIVERY ENGINE IS ALREADY ON MAIN.**
+  `.github/workflows/deploy.yml` contains **ZERO** `failure()`/`always()`/`notify`/`continue-on-error`
+  across 158 lines (grep rc=1, re-run this wave). Corroborated from the other end: the repository has
+  produced exactly **TWO** human-visible CI-failure issues in its entire history (`#4966`, `#5658`) and
+  neither is a deploy. 30-day census: 1,378 runs, 932 success, 344 cancelled, **102 failure** — and 84 of
+  the 102 (82%) fall in ONE window, **2026-07-21T07:59:48Z → 2026-07-23T08:46:54Z: 121 runs, 84 failure,
+  37 cancelled, ZERO success. Production continuous deployment was dead for 48 h 47 m and nothing said so.**
+  `scripts/file-ci-failure-issue.sh` + `.test.sh` are **already 100755 blobs on origin/main** (23/23 mutation
+  cases pass, re-run this wave), and PR `#10155` already argues the `report-main-failure` shape for two other
+  gates. **RULING: wave 19 wires deploy.yml to the existing engine.** Three constraints, each measured:
+  (a) **`failure()`, never `always()`** — `cancelled` (25% of runs) is DESIGNED coalescing, and the `changes`
+  job anchors its diff base to the last SUCCESSFUL run so no cancelled range is skipped; (b) **NO
+  `continue-on-error` anywhere**, per breakglass-watch.yml's written rule that job-level
+  `continue-on-error` launders the RUN conclusion, which is what notifications read; (c) **`issues: write`
+  is JOB-level, never workflow-level** — deploy.yml's two other jobs hold `DEPLOY_SSH_KEY` and SSH into prod.
+
+- **D326 — `exit 15` HAS NEVER FIRED, AND A REPORTER BUILT AROUND IT WOULD BE A TRIPWIRE OVER AN EMPTY
+  POPULATION.** The direction asserted the gave-up-on-the-deploy-lock exit as "precisely what a fan-out storm
+  produces". Raw job logs for all 18 failing instance jobs give exits **11 (×12), 12, 13, 255, 1** — zero
+  matches for `gave up waiting for the deploy lock`. Charter line 686 and D251(b) already said the same thing
+  from the ledger side. The real code is **11 = fetch/reset failed**, which instance-deploy.sh:297 documents
+  as *"the box silently stops auto-deploying while every run reports green."* Also corrected: the taxonomy is
+  **not** discarded — the runner prints `##[error]Process completed with exit code 11` verbatim. The defect
+  is **delivery, not capture**. **RULING: the reporter is gated by MUTATION (force a job to fail on a scratch
+  branch, assert an issue appears AND the run concludes failure), never by exit-15 traffic** — D8's shape.
+
+- **D327 — THE STATIC DEPLOY ENGINE CAN EXIT 0 OVER A SITE THAT IS NOT PUBLICLY REACHABLE, AND THE FIX IS
+  TWO CHANGES, NOT ONE.** `deploy/site-deploy.sh:2172` is `with_caddy_lock arm_caddy_site_route || true` —
+  the step that inserts the only `handle_path /sites/<slug>/*` block. Mutation-proved: extracted verbatim and
+  run against a rejecting `caddy validate`, the function **returns 0 while the marker is absent and the
+  Caddyfile is byte-identical**. Its twin `disarm_caddy_site_route`, under the identical harness and identical
+  failure, returns **2**, and its caller branches 2-vs-1 into `teardown_failed`/exit 25 — **engine-D77 fixed
+  the teardown direction in both engines and left the arm direction untouched.** The node engine already makes
+  arming fatal (site-deploy-node.sh:1777, exit 16), so the asymmetry is a defect and not a house convention.
+  Consequence: there is **no ROUTE stage** — `emit` speaks only PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE — so a
+  failed arm is structurally invisible to the control plane, HEALTH passes (it proves the BYTES over a
+  throwaway loopback, never the public path), and the run ends `log "HEALTHY — live at https://…/sites/…/"`,
+  `exit 0`. **RULING: (1) `arm_caddy_site_route` is taught to return 2, mirroring its disarm twin exactly;
+  (2) the caller REPORTS the failure and stops advertising a URL it did not verify — and DELIBERATELY KEEPS
+  `exit 0`.** Turning a currently-green path red would convert today-succeeding first deploys into failures
+  and RAISE this epic's own numerator, the trap dr-w8-s2 already recorded. Report first; move the verdict in
+  a later wave with the incidence measured. **Deleting `|| true` alone is a no-op that looks like a fix** —
+  bound honestly: this bites the FIRST deploy of a site only, and its incidence is UNMEASURED.
+
+- **D328 — ENGINE D-NUMBERS ARE A SEPARATE NAMESPACE FROM THIS CHARTER'S, AND ELEVEN OF THEM COLLIDE.**
+  `deploy/site-deploy*.sh` carry their own decision log — D4, D8, D11, D26, D27, D65, D66, D67, D72, D77,
+  D87, D88, D89 — every one of which also exists here meaning something else (charter D11 = the webhook
+  types lever; script D11 = the atomic symlink flip. Charter D77 = drafts twins are discarded; script D77 =
+  the TORN_DOWN teardown ruling). **RULING: any brief citing a D-number for the deploy engines MUST name the
+  namespace ("engine-D77", "charter-D77"). A bare number sends a builder to the wrong ruling.**
+
+- **D329 — THE LIVE-ROW WEBHOOK GUARD METERS FAN-OUT AND NEVER JUDGES IT.** The only regression a guard can
+  honestly red on is `types = []`: `Registry.content_webhook_types/1` (registry.ex:4775-4782, re-read on
+  origin/main this wave) returns `[]` — the box's MATCH-EVERYTHING sentinel — for any blank/absent
+  `doc_type`, a documented fail-OPEN, so one `doc_type` edit silently re-arms the hole and nothing
+  re-asserts it. A `count > 1` verdict is forbidden: all five rows sit on ONE dataset with ONE type, and
+  **D206** rules that population the current state while **D228(f)** rules the cut *"needs a fresh argument,
+  not a label."* A guard that reds on a state two decisions ruled current is an alarm engineered to be
+  silenced. **RULING: print `FAN-OUT (metered, not judged): dataset=… doc_type=… rows=N` on every run and
+  derive NO verdict from it; the wave Paper is its consumer.** Three further rulings, each measured:
+  (a) **a pinned population floor** (`WEBHOOK_FANOUT_EXPECT_MIN`, pinned to 5) — "every row is well-typed"
+  is trivially true of zero rows and of one surviving row after four are deleted, and the guard **cannot**
+  derive the right number because the shipped CLI has no site-list verb (`bp cloud site list` → `unknown
+  site command "list"`), so the pin is a human-moved number whose downward move is a diff a reviewer sees;
+  (b) **it is a shell pair on the `shell-harnesses.yml` lane, NOT a Cloud test and NOT added to
+  `CLOUD_PATHS`** — `scripts/cloud-path-escape-check.sh:115-127` documents the `internal/cli/**` exclusion
+  as DELIBERATE precisely so a guard cannot publish "a GREEN required context on every PR where it never
+  ran"; (c) **the LIVE half cannot be a scheduled workflow today** — `bp` is not on GitHub runners
+  (shell-harnesses.yml:31 says so) and no control-plane session secret is armed, so the hermetic mutation
+  harness rides CI and the live verdict is a **runbook command with a NAMED OPEN HUMAN GATE**, exactly as
+  `BREAKGLASS_TOKEN` was named. The write-side guard already exists and is green
+  (registry_test.exs:1267-1422) — "add a types test" is duplicate work.
+
+- **D330 — `dr-w18-s5` IS UNBUILDABLE AS FILED AND IS RE-BRIEFED: THE PERIOD IS DAILY, THE TERM IS
+  `live_rate`, AND IT SHIPS AS A GAUGE, NOT A FENCE.** Three measurements, each decisive.
+  (i) **The two filed terms do not exist**: `git grep -c 'settled_absorption\|hard_failure' origin/main --
+  cloud internal api` returns rc=1, and a live 200 from the team census door carries 20 keys, neither among
+  them. S2 merged; they still do not ship. (ii) **`@min_sample 200` is unreachable hourly** — 6 of 432
+  hourly buckets meter (1.39%), and in the POST-cut regime **0 of 20** with a max hour of 100, half the
+  floor; 6-hourly is 60/78 and daily 20/21 (95.24%). A daily period yields at most ONE closed period per
+  day, so any inherited hourly K-of-N sustain device silently makes the rung unable to fire for a week.
+  (iii) **Of the candidate terms, `failure_rate` is vacuous by rename** (2026-07-30: failed 2446 / deferred
+  0 / 88.43%; 2026-08-07: failed 18 / deferred 1371 / 0.94%, with failed+deferred roughly conserved) and
+  **`coalesced_attempts` ships, meters, and reads a confident permanent ZERO** (1 non-zero row of 658 since
+  the counter began, total 6, against 1,371 deferrals the same day). **`live_rate` is the only quantity that
+  survives the rename** — 27.4% today (3.65 attempts per live) against 91.7–95.6% on 2026-07-14..21 (1.05–
+  1.40) — so it IS the epic's harm and the honest headline. **It is a BAD FENCE**: any floor calibrated on
+  healthy July makes today permanently red, which is precisely the objection levelled at raw absorption —
+  the over-alarm problem MOVES with the term. **RULING: `bp cloud status` prints `live_rate` with its
+  denominator and its pinned DAILY window, renders `UNMETERED` below `@min_sample`, and carries NO verdict
+  arm, NO new rung and NO hardcoded fence.** Two hard dependencies: the reader must go through the TEAM
+  door (`#10518`), and census `sites[]` rows carry `volume/live/failed/deferred/failure_rate/top_class` but
+  **no per-site `live_rate`** — it is computed client-side from `live/volume` or a builder hunts a key that
+  is not there.
+
+- **D331 — THE SPA LADDER STAYS CEDED (D68 STANDS); THE `__fixtures__` CI PATH HOLE IS OURS AND AMENDS D57.**
+  Go's ladder is ELEVEN rungs, the fixture is ELEVEN, `app.js`'s `ATTENTION_RANK` is **NINE** — `strained`
+  and `filling` do not exist in the SPA, `classifyBp` has no arm for either, and `app.js` carries ZERO
+  occurrences of `pressure`, so a strained box renders **Healthy** to a human. This is not an oversight:
+  **D68** rules *"the ladder lands in Go, the fixture and the Go tests ONLY. The SPA edit is NOT taken this
+  wave and is not ours to take unilaterally"*, pre-states the exact half-landing inversion, and `#9887`'s own
+  body files the cost as a KNOWN COST. Four open rows already own it. **RULING: wave 19 does not touch
+  `app.js`; the four rows are collapsed to one (D333).** Separately and inside our fence: `go-tests.yml`'s
+  seven `pull_request` paths match `cloud/priv/static/__fixtures__/attention_order.json` **NONE** (exhaustive
+  fnmatch, all False), corroborated live — merged PR `#10521`, whose four files are all under `cloud/` +
+  `scripts/`, rendered 32 distinct check names and **not one is `go vet + test`**. Six Go tests read FIVE
+  fixtures under that directory. D57 prescribed a manual workaround (also touch a `.go` file); this upgrades
+  it into a mechanism: **add `cloud/priv/static/__fixtures__/**` to both the `push` and `pull_request` path
+  lists — 2 lines.** **Stated honestly, because the cheap sale is the epic's own disease:** `go-tests.yml`
+  is NOT a required check and is structurally disqualified from becoming one while it keeps a workflow-level
+  `on: paths:`, so this converts a SILENT gap into an ADVISORY red — visible, not blocking.
+
+- **D332 — THE ROLLOUT BRAKE IS A DEPENDENCY, NOT A SLICE; THE DIGEST AND THE BRAKE ARE ONE ROOT CAUSE.**
+  The filed row's premise is corrected: a human-credential door **already exists** on origin/main —
+  `GET/POST /v1/operator/autoupdate[/halt|/resume]` (router.ex:3470/3480/3491), and the console already calls
+  it (`app.js:8321`). Its title's "no human VERB" is false; "no human ACCOUNT" is true, and the cause is the
+  SAME empty `platform_admin_emails/0` allowlist behind the digest. **D30 already ruled that allowlist a
+  PERMANENT HUMAN GATE, ordered the reader over the TEAM-scoped route, and declared any "returns 200"
+  criterion vacuous green by construction.** Repointing the Go client at the operator route was PROVED to be
+  the wrong fix, mechanically: doing so flips the census tier `worker → operator` and **REDS** it
+  (*"1 deploy-health signal(s) have an audience that is EMPTY BY CONSTRUCTION"*). The census itself enforces
+  D30. **RULING: (a) the digest is re-addressed to a team-resolved population and its allowlist row is
+  deleted in the SAME commit** — proved end to end this wave (baseline 9/0 green → re-address REDS the rot
+  assertion in its own words *"This is the GOOD direction: its closer landed. Delete the allowlist row"* →
+  delete the row → 9/0 green), because `ExReader.classify/2` reads the resolver's SOURCE BODY, so the census
+  reclassifies with zero test edits; **(b) the brake is NOT repointed** — instead the census's `empty?`
+  predicate widens from `tier == "operator"` to `tier in ["operator","worker"]` (no human account holds
+  `WORKER_TOKEN`; `bp cloud rollout status` on the real prod owner token 401s today), `fleet_rollout_state`
+  takes an allowlist row naming `gr-ops-platform-admin-emails` as its CLOSER, and the brake's reachability is
+  filed as a DEPENDENCY. This also keeps `map_size(@empty_audience_allowlist) > 0` satisfied when the digest
+  row is deleted — **deleting both rows without adding one REDS that guard.**
+
+- **D333 — 56 EPIC ROWS CLOSE ON MERGE EVIDENCE, WITH THREE CORRECTIONS AND TWO METHOD TRAPS.** Today's
+  census: **334 children, 317 open, 13 done, 4 cancelled, 76 partial, 7 zero-criteria.** All 82 distinct
+  branches were resolved to PRs and every matched merge commit proved an ancestor of origin/main (68/68, zero
+  phantom merges). **56 rows are closable**: merged, on main, single unmet criterion IS the merge/lead-close
+  gate. Three corrections to the naive "58": (a) **`dr-terminal-record-prune-tie-order` is PULLED OUT** — its
+  one unmet criterion is an unbuilt mutation-proved test, and closing it on the merge inference would be a
+  fake-done; (b) `dr-w12-s1` (`#10192`) and `dr-w6-s1` (`#9888`) close on a merge sha belonging to ANOTHER
+  row's PR — legitimate co-landings, but a bulk script keyed "one row, one PR" mis-stamps them; (c) 12 rows
+  are merged with MORE than one unmet criterion and must NOT be closed, and `dr-w2-s6`'s *"the PR body states
+  …"* criterion on already-merged `#9733` is **structurally unsatisfiable** — the class `dr-bl-w5-merge-gated-
+  paperwork-is-unsatisfiable` filed in wave 5 and nobody took the medicine. **TWO METHOD TRAPS, both hit:**
+  `gh` shells out to git, so run from outside the repo it returns an **EMPTY array with exit 0** and the error
+  only on stderr (96/96 false negatives — the vacuous-green shape exactly); and branch names scraped from prose
+  carry sentence-final periods while `head:` is a PREFIX match whose merged PR usually lives on `<branch>-r`
+  (52 more false negatives between them). **RULING: the sweep re-derives its own list at run time and never
+  consumes a frozen roster.** Also settled by this sweep: `dr-w9-s4` is the row that ACTUALLY RAN the
+  reconciler (worker `epic-builder-the-doc-type-filter-reaches-the-five-liv`, 2026-08-07T03:48:50Z, PR
+  `#10082` merged 04:09:13Z), its evidence explains the 03:43-vs-03:46 split (*"the first (buggy) dry run wrote
+  4 of the 5 rows before the global-flag fix; row 9121449d was reset … and re-repaired by the FIXED binary"*),
+  and `dr-w1-s4-followup-repair-live-webhook-types` is a verbatim duplicate of shipped work.
+
+- **D334 — WHAT WAVE 19 DELIBERATELY DOES NOT BUILD, WITH REASONS.**
+  (a) **The refusal-backoff change** — D323/D324. The lever is real and reachable, but its ceiling is
+  measured and narrow: 807 chains carry 2,268 deferral rows, collapsing every chain to one refusal removes
+  **1,461 rows (64.4%)** and moves rows-per-live 3.83 → 2.57 — and it does **NOT** make publishes go live
+  faster, because with 6 active sites × 33 s p50 against ONE build slot the wait is set by the slot, not the
+  clock. It also carries a defect (D324) that ships green. It is filed with its sizing so wave 20 builds it
+  with the trap named, rather than shipped this wave on a freshly-refuted crown.
+  (b) **A CP-side mirrored capacity door** — measured at **6 CP-side coalesces against 450 start-stage 409s
+  (1.3%)** in the only window where both instruments exist, and its whole justification (the W12 migration's
+  4.35:1 from `oban_jobs` minus `deployments`) is an estimator that goes **NEGATIVE** post-migration
+  (651 jobs vs 658 rows). Do not spend a slice on 1.3%.
+  (c) **Anything keyed on `already_running`** — 1,570 `box_at_capacity` vs 698 `already_running` window-wide,
+  and **ZERO** `already_running` since 10:02:23Z. The leak hypothesis is REFUTED: 0 of 698 had an overlapping
+  non-terminal same-site CP row (control: 0 of 1,570). It was a box/CP lock-lifetime divergence under box
+  unreachability, in a regime that has not recurred in 12 h.
+  (d) **A guard over the eternal-queued reaper quadrant** — `status='queued' AND claim_epoch=0` is **n=0**,
+  and the whole 31,346-row table carries only THREE statuses (failed 18,622 / live 10,456 / deferred 2,268);
+  the reaper's own orphan predicate also returns 0. Wave 17's V9 counted it five hours earlier and got the
+  same zero. A guard against an empty set cannot lose. The cheap structural closure — dropping
+  `d.claim_epoch > 0` from `list_orphaned_static_deployments/0` — is FILED with its un-analysed race noted.
+  (e) **`cloud/priv/static/app.js`** — D68/D150 and cloud-console-hardening wave 50's fence.
+  (f) **Raising `@build_slot_capacity`** — D180/D252 stand, and the windowed re-derivation the lead asked for
+  CONFIRMS the fence rather than lifting it (occupancy 0.6–82.8%/hr, and the capacity door made things
+  FASTER across the `box_at_capacity` boundary).
+
+- **D335 — HONESTY CORRECTIONS THIS WAVE MUST CARRY, AND ONE THE STRATEGY GOT WRONG ABOUT ITSELF.**
+  (i) **The failure rail's opening clause has expired, but so has half the cost claim.** `failure_rate` is
+  ~1% today and settled absorption reads 98.79% — publishes REACH LIVE — while over the full window since
+  the taxonomy break 1,005 of 4,426 rows (22.7%) are `failed`. **Both are true; quoting either without its
+  window is the overstatement this epic keeps correcting.**
+  (ii) **The cost claims were overstated in our own direction.** `registry.ex`'s "build p90 15.0s → 144.8s"
+  is **OUT OF RANGE today** (peak 52 builds/hr, never the >120/hr regime; measured p50 33 s / p90 70 s /
+  p99 150 s); the honest slope over the OBSERVED range is **p50 +19%, p90 +25%, p99 +71%** — the tail
+  degrades far faster than the median, which is a congestion collapse in its early leg, and extrapolating it
+  to 120/hr is a PROJECTION, labelled as one. The box is **CPU-starved, not memory-starved**: `/proc/pressure/
+  cpu some avg10=85.89` with `full=0.00`, swap 49% free, **zero OOM kills in 24 h** — so the guerrilla-500
+  swap-thrashing note must not be cited as a CURRENT consequence. API latency collateral is **~2.2×**
+  (0.040–0.054 s at 0 builds → 0.082–0.121 s at 1 build, n=6), not the 5–9× claimed. And **690 DBConnection
+  timeouts ANTI-CORRELATE with build rate** (the three heaviest build hours produced 1/0/0; the 280-timeout
+  hour had 24 builds). The registry.ex "600 ms → 3–5.6 s search latency" line **is not in that file at all.**
+  (iii) **The window you calibrate on decides your answer.** Median build is 135.7 s on 08-06 and 33.6 s on
+  08-07 — a 4× regime change inside 24 h. Any threshold derived from a window-wide p50 is calibrated on a
+  regime that no longer exists. **Pin the day, always.**
+  (iv) **`deferral_cause` covers only 450 of 2,268 rows** (writer shipped 2026-08-07 10:02:23Z). Any guard or
+  Paper aggregating over that column silently drops 80% of the window and reads as a clean small number.
+
+- **D336 — CITATION HYGIENE, THREE CATCHES, BECAUSE THIS EPIC'S OWN INSTRUMENTS FAILED THE SMOKE.**
+  (a) **`D262` DOES NOT EXIST in this charter** (0 hits on origin/main; the repo's only D262 is in the
+  cloud-console-hardening charter, about long strings) and it was cited to the strategist as prod-mutation
+  authority. A phantom wearing a number. **`D211(d)` is real but governs the RENDERER, not mutations.**
+  (b) A verifier cited **"charter D53"** for the SPA-ladder cession; D53 on origin/main is *"`strained` MEANS
+  PRESSURE, NOT SPACE"*. The ruling it meant is **D68**, which does cover it. Existence is not coverage; a
+  git-show that is not READ is a phantom with a line number.
+  (c) **D302–D321 are not on origin/main** (`#10496` unmerged) and every citation of them this wave is
+  marked as an unmerged ruling. **RULING: a brief may cite a D-number only after git-showing it on
+  origin/main AND reading that it authorizes what it is cited for.**
+
+**HIGH-FLIP-RISK JUDGMENTS THIS WAVE (E2).** Two slices carry a judgment whose flip changes the build, and
+each says so in its own brief: **s1** — the `@known_open` vs `@reconciled` classification of the `scope`
+phantom (it IS emitted, by the route, so it is a walker blind spot rather than a dead key; a reviewer could
+argue for `@reconciled` beside `barkpark_json/4`/`team`, the identical shape already blessed); **s5** — the
+TENANCY question in the fleet digest's new audience, since a fleet-wide digest fanned to every team's members
+is a cross-team disclosure the census would go green on just as readily as a correct one. Both warrant a
+genuinely INDEPENDENT second reviewer before merge; that dispatch is a manual lead step.
+
+**WAVE 19 PLAN — 7 slices, 5 in round 1.** s1 unblocks `#10518` (three edits, proven green: `@go_tag_floor`
+222→225 by RE-MEASUREMENT not addition, one `@known_open` row for `scope`, delete the `fleet_deploy_census`
+allowlist row). s2 wires deploy.yml to the on-main failure-issue engine and adds the `__fixtures__` path.
+s3 makes the static engine stop advertising a URL it did not verify. s4 lands the live-row fan-out guard as
+a shell pair with a named human gate. s6 pays the ledger debt. Round 2, after s1 merges: s5 re-addresses the
+digest and rules the brake; s7 gives `bp cloud status` an honest deploy line over the team door.
