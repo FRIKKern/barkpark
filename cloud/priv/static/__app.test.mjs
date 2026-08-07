@@ -17146,8 +17146,15 @@ test("cch-w37-s1 THE FENCE CAN LOSE: no details, empty details, and non-generic 
   // reaches friendly() at all, and every other registered slug keeps its copy
   // even when details rides along.
   assert.equal(hooks.friendly.length, 2, "friendly() takes (data, fallback) — no status argument");
+  // cch-w50-s2 — pin MOVED with the copy, in the same commit. This literal and
+  // the one in "cch-w35-s4 THE FENCE IS INERT" are byte-exact, so there is no
+  // ordering in which the tree is green with only one side moved: change the
+  // copy alone and both reds; change a pin alone and the same two red on the
+  // other side. That makes this a mandatory pin update, not the guard-plus-fix
+  // co-merge hazard (D568) — the guard here is the BAN below, which is new and
+  // can lose on its own.
   assert.equal(hooks.friendly({ error: "server_error", details: { name: ["can't be blank"] } }),
-    "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.");
+    "Something broke on our side — not your input. Try again in a moment.");
   assert.equal(hooks.friendly({ error: "forbidden", details: { name: ["can't be blank"] } }), FORBIDDEN_GENERIC);
 });
 
@@ -17356,7 +17363,9 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
     forbidden: FORBIDDEN_GENERIC,
-    server_error: "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.",
+    // cch-w50-s2 — moved with app.js:231 in the same commit (see the twin pin
+    // in "cch-w37-s1 THE FENCE CAN LOSE").
+    server_error: "Something broke on our side — not your input. Try again in a moment.",
     malformed_body: "We couldn't read that request — reload the page and try again.",
     malformed_request: "We couldn't read that request — reload the page and try again.",
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",
@@ -17377,6 +17386,67 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
   assert.equal(hooks.friendly({ error: "totally_unknown_slug" }), "totally unknown slug");
   assert.equal(hooks.friendly({ error: "x", details: { name: ["is required"] } }, "fb"), "name is required");
   assert.equal(hooks.friendly(null, "fb"), "fb");
+});
+
+test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support channel", () => {
+  // The same enumeration the pin above sweeps — see "cch-w35-s4 THE FENCE IS
+  // INERT". Kept in its own test so this reds BY NAME and FIRST: inside the pin
+  // block a byte-exact equality would fire before it and the record would show
+  // a moved pin rather than the property that was broken.
+  const PINNED_SLUGS = [
+    "invalid_credentials", "email_taken", "email_invalid", "password_invalid",
+    "validation_failed", "name_required", "no_active_subscription", "plan_invalid",
+    "invalid_code", "rate_limited", "no_team", "invalid", "not_live",
+    "no_admin_token", "instance_unreachable", "network_error", "limit_reached",
+    "billing_not_configured", "forbidden", "server_error", "malformed_body",
+    "malformed_request", "unsupported_media_type", "request_too_large",
+  ];
+
+  // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
+  // so it covers every registered ERRORS slug rather than the one sentence that
+  // happened to carry the phrase. `ERRORS` itself is not exported, and this
+  // slice does not own the export block, so `friendly({error: slug})` is the
+  // emission path — which is also the path a person actually reads.
+  //
+  // WHY A BAN AND NOT JUST A PIN: a pin certifies one string. This certifies a
+  // PROPERTY — no curated console sentence may name a support channel — and it
+  // reds on the next slug that adds one, which the pin above cannot do. There
+  // is no support desk on this deployment: no address, no inbox, no route, no
+  // docs page, no nav link. Every "support" in cloud/lib is the fleet SUPPORT
+  // MACHINE role (POST /v1/fleet/supports, /v1/internal/support-jobs/claim).
+  // Charter D438 already lists a newly written "contact support" under MAY NOT;
+  // six assertions already banned it (3 here at ~:12260/:12298/:12330, 2 in
+  // __preview__/smoke.mjs, 1 in domain_status_test.exs:945) while two pinned it
+  // VERBATIM. This closes that contradiction on the JS side; the Elixir twin is
+  // cloud/test/barkpark_cloud/failure_copy_support_channel_test.exs.
+  //
+  // LOSABLE: re-add "; if it keeps happening, contact support." to app.js:231
+  // and this assertion names the slug that carries it.
+  for (const slug of PINNED_SLUGS) {
+    const copy = hooks.friendly({ error: slug }, "a caller fallback");
+    // HONEST LIMIT: this list is a copy of the pin's key set, so a slug added to
+    // ERRORS is banned only once it is added here too — the pin test reds on any
+    // map change, which is what forces that edit. What this DOES guarantee is
+    // that every name here is really registered: an unregistered slug would fall
+    // through to the caller's fallback and quietly sweep nothing.
+    assert.notEqual(copy, "a caller fallback", slug + " is no longer a registered ERRORS slug");
+    assert.ok(!/contact support/i.test(copy),
+      slug + " names a support channel this deployment does not have: " + copy);
+  }
+  // …and through faultCopy, the 5xx path that reaches ERRORS.server_error as a
+  // FALLBACK. Stated honestly: this sentence is not "what every 5xx says" — a
+  // 5xx whose body carries a more specific registered slug (or `details`)
+  // resolves to that instead, which is why most driven status×body combinations
+  // never reach it. It IS what the control plane's own crash envelope renders,
+  // since router.ex's `crash_slug(_reason, status) when status >= 500` sends
+  // exactly `server_error`.
+  for (const status of [500, 502, 503, 504]) {
+    for (const body of [{ error: "server_error" }, {}, null, { message: "" }]) {
+      const copy = hooks.faultCopy(status, body, "Check the details and try again.");
+      assert.ok(!/contact support/i.test(copy),
+        "faultCopy(" + status + ") names a support channel that does not exist: " + copy);
+    }
+  }
 });
 
 test("cch-w35-s4 FOUR LANES FROM ONE EDIT — two of them are free repairs", () => {
