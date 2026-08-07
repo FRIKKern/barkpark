@@ -483,7 +483,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       entry: {:site_deployment_json, 3},
       go: "SiteDeployment"
     },
-    %{name: "DeployLedger.census/3", file: @ledger, entry: {:census, 3}, go: "DeployCensus"},
+    # `also` names the OTHER emitters of one decoder's payload. The wire shape a
+    # Go struct decodes is not always one function: W15 S3 emits `delivery` in
+    # `Web.Router.deploy_census_json/2`, which wraps `census/3` at the ONLY place
+    # the census escapes Elixir, because the delivery estimator is a second
+    # grouped read and folding it into `census/3` would put a censoring policy
+    # inside a counter. Without this, the census would call a key it can see on
+    # the wire a PHANTOM — measuring its own bound rather than the payload.
+    %{
+      name: "DeployLedger.census/3",
+      file: @ledger,
+      entry: {:census, 3},
+      also: [{@router, {:deploy_census_json, 2}}],
+      go: "DeployCensus"
+    },
     %{
       name: "DeployLedger.census/3 window",
       file: @ledger,
@@ -549,8 +562,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w16-bl-emit-terminal-failure-rate — THE EMITTER IS UNBUILT AND NOW OWNED. The row previously read \"PR #10014 carries the emitter\"; #10014 is CLOSED with mergedAt null, so that sentence pointed a reader at a dead branch and this hole had no owner at all. THE HEADLINE CASE: internal/cli/cloud_deploy_census_cmd.go:398 branches on nil here, so `bp cloud deployments` is permanently on its \"older control plane\" arm and cannot tell that from a genuinely older CP."},
     {"DeployLedger.rate/2", :phantom, "basis",
      "dr-w16-bl-emit-rate-basis — THE EMITTER IS UNBUILT AND NOW OWNED, same dead citation as the row above (#10014, CLOSED). This is the D34 convention label that says WHICH denominator a rate was taken over; until it is emitted every rate on the wire decodes basis as \"\". Thread it as a REAL argument, never the stranded branch's default arg (D199)."},
-    {"DeployLedger.census/3", :phantom, "delivery",
-     "PR #10192 ships the Go reader with the estimator (D136); the route that emits it is dr-w11-s4-followup-emit-delivery-on-route. Decodes to nil until that lands, which is exactly what the pointer type is for."}
+    {"site_deployment_json/3", :unread, "refusal_phase",
+     "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."}
   ]
 
   # MERGE-ORDER NOTE (wave-11 review, proved not predicted). Wave 11's slice
@@ -570,8 +583,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ~r/dr-w11-payload-divergence-close|PR #\d+/, so the row's reason OPENS with
   # the PR number. A reason that greens one arm by redding another is not a fix.
   #
-  # Delete the row the moment the route emits the key — the "no longer phantom"
-  # arm reds if you forget, which is the point.
+  # CLOSED, W15 S3. The route emits `delivery` (`Web.Router.deploy_census_json/2`),
+  # so the row is DELETED — and it had to be deleted in the same commit as the
+  # emit, because the "no longer phantom" arm reds on an allowlist row that
+  # stopped diverging. That arm firing is what proved the deletion was owed
+  # rather than optional: it is the only reason a reader ever learns that the
+  # `d == nil` "NOT MEASURED" arm in `renderDeployDelivery` has stopped being the
+  # only arm that executes.
 
   @allowlist @reconciled ++ @known_open
 
@@ -598,8 +616,24 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # fields, and the union only grew by THREE — because `in_flight` was already in
   # it, declared by the unrelated `RolloutState`. That one-tag gap IS charter
   # D260, measured on this tree rather than argued.
-  @emitted_floor 108
-  @go_tag_floor 221
+  #
+  # W15 S3, landing AFTER W16 S2 (this branch rebased onto it): +1 `delivery`
+  # (the census route's wrapper, walked through the census pair's `also`) and +1
+  # `refusal_phase` on `deployment_json/1`. The post-union value is MEASURED on
+  # the merged tree — floor raised to 999 and the failure's own count read back —
+  # never the arithmetic 108+2, because the two slices touch the same walker and
+  # only the walker can say whether their key sets overlap. The go-tag floor does
+  # NOT move: this slice writes no Go, and `refusal_phase` is deliberately UNREAD
+  # for now (allowlisted above) — but the go-tag floor DOES move, 221 -> 222, and
+  # not because of this slice: `internal/cloudclient` is byte-identical to
+  # origin/main on this branch (`git diff origin/main -- internal/cloudclient/`
+  # is empty), so 222 is MAIN'S OWN population and 221 was one tag of slack that
+  # landed without the floor following it. Restored to equality, measured.
+  #
+  # POST-UNION, measured on the rebased tree with both floors probed at 999:
+  # "only 110 emitted key(s) collected" and "only 222 json tag(s) found".
+  @emitted_floor 110
+  @go_tag_floor 222
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 56 keys with the :when unwrap, 42 without.
@@ -609,12 +643,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ---------------------------------------------------------------------------
 
   defp emitted(%{file: file, entry: entry} = pair, opts \\ []) do
-    p = Extract.payload(file, entry, opts)
+    payloads =
+      [{file, entry} | Map.get(pair, :also, [])]
+      |> Enum.map(fn {f, e} -> Extract.payload(f, e, opts) end)
 
-    case Map.get(pair, :nested) do
-      nil -> %{keys: p.top, unresolvable: p.unresolvable}
-      key -> %{keys: Map.get(p.nested, key, MapSet.new()), unresolvable: p.unresolvable}
-    end
+    keys =
+      payloads
+      |> Enum.map(fn p ->
+        case Map.get(pair, :nested) do
+          nil -> p.top
+          key -> Map.get(p.nested, key, MapSet.new())
+        end
+      end)
+      |> Enum.reduce(MapSet.new(), &MapSet.union/2)
+
+    %{keys: keys, unresolvable: Enum.flat_map(payloads, & &1.unresolvable)}
   end
 
   defp total_emitted(opts) do
