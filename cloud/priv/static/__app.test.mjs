@@ -8744,6 +8744,88 @@ test("gr-p4: roster shows kind+label+connected-at, NEVER a live-validity badge; 
   assert.ok(hooks.providerRosterHtml([], true).indexOf("prov-row") === -1);
 });
 
+// ── cch-w48-s3: the GitHub card's authority arm, at a PURE seam ─────────────
+// renderGithub had ZERO test reach before this slice: it was a DOM mount with no
+// exported helper, and it emitted #github-disconnect with no authority input at
+// all while DELETE /v1/github/installation is team-admin-only.
+//
+// THE HONEST LIMIT: this card cannot paint its connected or its configured arm
+// in ANY of the 108 scenarios (scenarios.mjs declares no /v1/github handler, so
+// every actor falls to the catch-all and gets arm 3, "Not configured") or on the
+// live control plane (no ^GITHUB env). A corpus-level guard would therefore pass
+// on an EMPTY DOM. So the guard lives here, on a hand-built payload, where the
+// paired positive control below closes that vacuity at the seam itself.
+
+test("cch-w48-s3: the GitHub card omits Disconnect for a non-admin — and OFFERS it to an admin", () => {
+  assert.equal(typeof hooks.githubCardHtml, "function", "githubCardHtml must be exported");
+  const connected = { connected: true, account_login: "octo-team" };
+
+  // POSITIVE CONTROL — an admin is offered exactly ONE Disconnect. A card that
+  // painted nothing at all would red here, so the negative below cannot pass
+  // vacuously.
+  const admin = hooks.githubCardHtml(connected, true);
+  assert.match(admin, /octo-team/);
+  assert.equal(admin.split('id="github-disconnect"').length - 1, 1);
+
+  // A member / unknown actor: the affordance is OMITTED, never a disabled ghost
+  // and never a title= explanation (D428's disable-and-explain is an only-clause
+  // over the instance-detail lifecycle verbs and does not reach this screen).
+  const member = hooks.githubCardHtml(connected, false);
+  assert.ok(member.indexOf("github-disconnect") === -1, "member must see no Disconnect");
+  assert.ok(member.indexOf("Disconnect") === -1);
+  assert.ok(member.indexOf("disabled") === -1);
+  assert.ok(member.indexOf("title=") === -1);
+  // …but the READ is untouched: the state and the account are still shown.
+  assert.match(member, /octo-team/);
+  assert.match(member, /Connected/);
+
+  // The configured-but-not-connected arm: the Connect anchor carries no id, so
+  // it is pinned by its href and its text.
+  const conf = { configured: true, install_url: "https://github.com/apps/bp/installations/new" };
+  const adminConf = hooks.githubCardHtml(conf, true);
+  assert.match(adminConf, /href="https:\/\/github\.com\/apps\/bp\/installations\/new"/);
+  assert.match(adminConf, /Connect GitHub<\/a>/);
+  const memberConf = hooks.githubCardHtml(conf, false);
+  assert.ok(memberConf.indexOf("installations/new") === -1, "member must get no install link");
+  assert.ok(memberConf.indexOf("<a ") === -1, "member must get no anchor at all");
+  assert.ok(memberConf.indexOf("disabled") === -1 && memberConf.indexOf("title=") === -1);
+  // …and it says what is true and who can act, rather than going silent.
+  assert.match(memberConf, /Not connected/);
+  assert.match(memberConf, /owner or admin/);
+
+  // The not-configured arm is authority-independent — identical bytes either way.
+  assert.equal(hooks.githubCardHtml({}, true), hooks.githubCardHtml({}, false));
+  assert.match(hooks.githubCardHtml({}, false), /Not configured/);
+});
+
+test("cch-w48-s3 (review): a late /v1/me re-enters loadGithub — the new fence must not strand a real admin", () => {
+  // providerCanWrite() is FALSE while meCache is null, which is the correct
+  // direction — but applyRoute paints #providers with TWO mounts (loadProviders
+  // AND loadGithub) and loadMe's success seam only ever re-entered the first.
+  // Without the second, an admin who deep-links to #providers before /v1/me
+  // answers keeps the member card for the whole page life.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const success = appRegion(src, "    return api(\"GET\", \"/v1/me\").then(function (r) {", "      } else {");
+  assert.ok(success.includes('if (currentView() === "providers") loadProviders();'),
+    "the shipped roster seam must still be there");
+  assert.ok(success.includes('if (currentView() === "providers") loadGithub();'),
+    "…and the GitHub card is a separate mount that needs its own re-entry");
+});
+
+test("cch-w48-s3: the disconnect refusal renders friendly()'s sentence, never the slug `forbidden`", () => {
+  const payload = { error: "forbidden", required: "admin", scope: "team" };
+  const t = hooks.githubDisconnectErrorToast(payload);
+  assert.equal(t.kind, "error");
+  assert.equal(t.title, "Couldn't disconnect");
+  assert.equal(t.body, hooks.friendly(payload, "GitHub is still connected — try again in a moment."));
+  assert.notEqual(t.body, "forbidden");
+  assert.ok(t.body.indexOf("forbidden") === -1, "the machine slug must never reach the human");
+  assert.match(t.body, /admin/);
+  // a bodyless / network-dead refusal still gets a designed sentence, not "".
+  assert.ok(hooks.githubDisconnectErrorToast(null).body.length > 0);
+  assert.ok(hooks.githubDisconnectErrorToast(undefined).body.indexOf("undefined") === -1);
+});
+
 // GR44 (.claude/workflows/bp-cloud-gui-remake-charter.md) — the server has been
 // an UPSERT on (team_id, kind) since the unique index landed, so re-connecting a
 // connected kind ROTATES its credential in place. These two tests used to pin the

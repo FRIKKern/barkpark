@@ -3091,6 +3091,75 @@
   // Three states: connected (show login + Disconnect), configured-but-not-
   // connected (a "Connect GitHub" link to the App install URL), and
   // not-configured (a graceful off state, no dead link).
+  //
+  // cch-w48-s3 — THE AUTHORITY ARM, AND WHY IT LIVES AT A PURE SEAM.
+  // Both write affordances on this card are team-admin-only on the server:
+  // DELETE /v1/github/installation and the App install callback both refuse a
+  // plain member. renderGithub took no authority input at all, so a member was
+  // offered a Disconnect the control plane would refuse. The fence is the
+  // SHIPPED providerCanWrite() (:2590 — the same read the roster and the connect
+  // card already take), and it OMITS the affordance rather than ghosting it:
+  // D428's disable-and-explain clause is an only-clause over the seven
+  // instance-detail lifecycle verbs and does not reach this screen.
+  // The card is UNREACHABLE in the scenario corpus today (zero /v1/github
+  // handlers, so every actor falls to the catch-all and paints arm 3), and the
+  // live control plane carries no ^GITHUB env, so arm 1 is unwritable there too.
+  // A corpus guard would therefore pass on an empty DOM. Hence githubCardHtml is
+  // PURE and node-pinned: the fence is losable on a hand-built payload,
+  // independent of any fixture. The corpus fixture is cch-w47-s6's.
+  function githubCardHtml(g, canWrite) {
+    var row;
+    if (g.connected) {
+      row =
+        '<div class="fleet-row"><div class="fleet-main">' +
+          '<div class="fleet-name">GitHub &middot; ' + esc(g.account_login || "connected") + "</div>" +
+          '<div class="dim">Barkpark can create a repo and deploy a template into your GitHub account.</div>' +
+        '</div><div class="fleet-badges">' +
+          '<span class="badge"><span class="dot up"></span>Connected</span>' +
+          (canWrite
+            ? '<button class="btn btn-ghost btn-sm" id="github-disconnect" type="button">Disconnect</button>'
+            : "") +
+        "</div></div>";
+    } else if (g.configured && g.install_url && canWrite) {
+      row =
+        '<div class="fleet-row"><div class="fleet-main">' +
+          '<div class="fleet-name">GitHub</div>' +
+          '<div class="dim">Connect GitHub so Barkpark can create a repo and deploy a template for you.</div>' +
+        '</div><div class="fleet-badges">' +
+          '<a class="btn btn-primary btn-sm" href="' + esc(g.install_url) + '">Connect GitHub</a>' +
+        "</div></div>";
+    } else if (g.configured && g.install_url) {
+      // A member on a Barkpark where GitHub IS configured: the state is real and
+      // worth showing, but connecting is an admin act — so the row states the
+      // state and names who can act, and offers no door that would refuse.
+      row =
+        '<div class="fleet-row"><div class="fleet-main">' +
+          '<div class="fleet-name">GitHub</div>' +
+          '<div class="dim">Not connected yet. An owner or admin on this team can connect GitHub.</div>' +
+        '</div><div class="fleet-badges"><span class="badge">Not connected</span></div></div>';
+    } else {
+      row =
+        '<div class="fleet-row"><div class="fleet-main">' +
+          '<div class="fleet-name">GitHub</div>' +
+          "<div class=\"dim\">GitHub deploys aren't configured on this Barkpark yet.</div>" +
+        '</div><div class="fleet-badges"><span class="badge">Not configured</span></div></div>';
+    }
+    return '<div class="set-section"><h2 class="set-h">GitHub</h2>' + row + "</div>";
+  }
+
+  // cch-w48-s3 (charter D543) — the refusal used to render `r.data.error`
+  // RAW, so a real {error:"forbidden", required:"admin", scope:"team"} painted
+  // the literal bytes `forbidden` at a human. friendly() already turns that same
+  // payload into the evidence sentence, so the toast options are computed here,
+  // purely, and pinned.
+  function githubDisconnectErrorToast(data) {
+    return {
+      kind: "error",
+      title: "Couldn't disconnect",
+      body: friendly(data, "GitHub is still connected — try again in a moment."),
+    };
+  }
+
   function loadGithub() {
     var box = $("#github-card");
     if (!box) return;
@@ -3104,32 +3173,7 @@
   function renderGithub(g) {
     var box = $("#github-card");
     if (!box) return;
-    var row;
-    if (g.connected) {
-      row =
-        '<div class="fleet-row"><div class="fleet-main">' +
-          '<div class="fleet-name">GitHub &middot; ' + esc(g.account_login || "connected") + "</div>" +
-          '<div class="dim">Barkpark can create a repo and deploy a template into your GitHub account.</div>' +
-        '</div><div class="fleet-badges">' +
-          '<span class="badge"><span class="dot up"></span>Connected</span>' +
-          '<button class="btn btn-ghost btn-sm" id="github-disconnect" type="button">Disconnect</button>' +
-        "</div></div>";
-    } else if (g.configured && g.install_url) {
-      row =
-        '<div class="fleet-row"><div class="fleet-main">' +
-          '<div class="fleet-name">GitHub</div>' +
-          '<div class="dim">Connect GitHub so Barkpark can create a repo and deploy a template for you.</div>' +
-        '</div><div class="fleet-badges">' +
-          '<a class="btn btn-primary btn-sm" href="' + esc(g.install_url) + '">Connect GitHub</a>' +
-        "</div></div>";
-    } else {
-      row =
-        '<div class="fleet-row"><div class="fleet-main">' +
-          '<div class="fleet-name">GitHub</div>' +
-          "<div class=\"dim\">GitHub deploys aren't configured on this Barkpark yet.</div>" +
-        '</div><div class="fleet-badges"><span class="badge">Not configured</span></div></div>';
-    }
-    box.innerHTML = '<div class="set-section"><h2 class="set-h">GitHub</h2>' + row + "</div>";
+    box.innerHTML = githubCardHtml(g || {}, providerCanWrite());
     var d = $("#github-disconnect");
     if (d) d.addEventListener("click", disconnectGithub);
   }
@@ -3140,7 +3184,7 @@
         toast({ kind: "success", title: "GitHub disconnected" });
         loadGithub();
       } else {
-        toast({ kind: "error", title: "Couldn't disconnect", body: (r.data && r.data.error) || "" });
+        toast(githubDisconnectErrorToast(r.data));
       }
     });
   }
@@ -14998,6 +15042,13 @@
         // was repainted here, so a promotion (or a demotion) on those two
         // screens was invisible until a full page reload.
         if (currentView() === "providers") loadProviders();
+        // cch-w48-s3 (review) — the GitHub card is a SEPARATE mount on the same
+        // screen (applyRoute calls loadProviders() AND loadGithub()), and this
+        // seam only ever re-entered the first one. Now that githubCardHtml
+        // decides its Disconnect and its Connect anchor from providerCanWrite()
+        // — which is false while meCache is null — a late /v1/me left a real
+        // admin looking at the member card for the rest of the page life.
+        if (currentView() === "providers") loadGithub();
         if (currentView() === "notifications") loadNotifications();
         // cch-w47-s3 — the archives band joins the same list, and it has to:
         // now that Resurrect is offered only on a CONFIRMED grant, a /v1/me
@@ -21849,6 +21900,11 @@
       providerUnknownHtml: providerUnknownHtml,
       providerConnectModel: providerConnectModel, providerConnectCardHtml: providerConnectCardHtml,
       providerIsConnected: providerIsConnected,
+      // cch-w48-s3 — the GitHub card. renderGithub had ZERO test reach before
+      // this seam existed; githubCardHtml is pure so its authority arm is
+      // losable on a hand-built payload (the card paints arm 3 for every actor
+      // in the corpus), and githubDisconnectErrorToast pins the refusal copy.
+      githubCardHtml: githubCardHtml, githubDisconnectErrorToast: githubDisconnectErrorToast,
       // cch wave 13 — WHICH cloud account a connection points at, shown before a
       // rotation is committed. Pure; loadProviderIdentity's fetch is the mount.
       providerIdentityModel: providerIdentityModel, providerIdentityHtml: providerIdentityHtml,
