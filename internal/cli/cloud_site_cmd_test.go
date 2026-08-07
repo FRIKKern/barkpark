@@ -2468,3 +2468,522 @@ func TestSiteStalenessCarriesTheChainBesideTheWait(t *testing.T) {
 		}
 	}
 }
+
+// --- deploy-reliability W14 (charter D213/D214/D220/D221) ---------------------
+//
+// THE READER STOPPED PARSING ENGLISH, THE PARAGRAPH NAMED ITS WINDOW, AND THE ONE
+// CLAUSE THE DATA CONTRADICTED STOPPED BEING ASSERTED.
+//
+// Every human-paragraph proof below is captured with runSite(t, "table", …), and
+// that is load-bearing rather than habit: internal/cli/output.go:74-80 picks the
+// format by TTY when -o is absent, so a piped or agent-captured run gets RAW
+// JSON. A test that captured stdout without pinning "table" would assert against
+// JSON and pass while the paragraph it claims to fix went untouched.
+
+// siteIntPtr is the wire shape of the deferral columns: *int, absent on every row
+// written before 2026-08-07T10:12:35Z.
+func siteIntPtr(v int) *int { return &v }
+
+// TestSiteDeferralChainPrefersTheColumnsOverTheProse is the column-first,
+// prose-fallback contract in one table.
+//
+// THE DISAGREEMENT CASE IS THE POINT. A row whose columns say 9 of 12 while its
+// sentence still says 3 of 6 must render the COLUMN — the sentence is a snapshot
+// the control plane wrote at defer time and the columns are what it computed. If
+// the fallback ever won that tie, this reader would be a regex with extra steps.
+//
+// AND THE NULL CASE IS WHY THE REGEX STAYS. The columns are stamped on 116 of
+// 1,934 post-boundary deferred rows (6.0%), and the boundary is a HARD STEP: NULL
+// is exactly equivalent to "this row predates 2026-08-07T10:12:35Z". A column-only
+// reader over a pre-boundary window reads 100% NULL for the WHOLE window — it
+// loses the window, not a slice of it.
+func TestSiteDeferralChainPrefersTheColumnsOverTheProse(t *testing.T) {
+	const prose36 = "box_at_capacity — deferred: refusal 3 of 6 in this site's current chain"
+	cases := []struct {
+		name               string
+		row                cloudclient.SiteDeployment
+		wantDepth, wantBnd int
+		wantOK             bool
+	}{
+		{
+			name: "columns WIN a disagreement with the prose",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-c", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(9), DeferralBound: siteIntPtr(12),
+			},
+			wantDepth: 9, wantBnd: 12, wantOK: true,
+		},
+		{
+			name: "NULL columns fall back to the prose, which still renders",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-p", Status: "deferred", FailureReason: prose36,
+			},
+			wantDepth: 3, wantBnd: 6, wantOK: true,
+		},
+		{
+			name: "a zero DEPTH column is no chain — and does NOT re-read the prose",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-z", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(0), DeferralBound: siteIntPtr(12),
+			},
+			wantOK: false,
+		},
+		{
+			name: "a zero BOUND column is no chain — and does NOT re-read the prose",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-b", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(4), DeferralBound: siteIntPtr(0),
+			},
+			wantOK: false,
+		},
+		{
+			name: "half a pair is not a pair: depth without bound falls back",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-h", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(9),
+			},
+			wantDepth: 3, wantBnd: 6, wantOK: true,
+		},
+		{
+			name:   "neither columns nor a parseable sentence is honestly nothing",
+			row:    cloudclient.SiteDeployment{ID: "dep-n", Status: "deferred", FailureReason: "box_at_capacity — deferred: a rebuild has been re-queued"},
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			depth, bound, ok := siteDeferralChain(tc.row)
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%v want %v (depth=%d bound=%d)", ok, tc.wantOK, depth, bound)
+			}
+			if !ok {
+				// The zero-guard: a refused read must produce NOTHING, never a
+				// "refusal 0 of 0", which reads as "no chain" — the exact inversion.
+				if depth != 0 || bound != 0 {
+					t.Fatalf("a refused read must return zeros and ok=false, got %d of %d", depth, bound)
+				}
+				return
+			}
+			if depth != tc.wantDepth || bound != tc.wantBnd {
+				t.Fatalf("got %d of %d, want %d of %d", depth, bound, tc.wantDepth, tc.wantBnd)
+			}
+		})
+	}
+}
+
+// TestRunCloudSiteStatusRendersTheColumnDepthOverTheProse carries the same
+// disagreement all the way to the surface an owner actually reads: the columns
+// are on the wire, the sentence contradicts them, and the paragraph prints 9 of 12
+// while -o json carries the same pair as numbers.
+func TestRunCloudSiteStatusRendersTheColumnDepthOverTheProse(t *testing.T) {
+	const prose = "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 6 in this site's current chain — a rebuild carrying this content has been re-queued"
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"deferred","stage":"PLAN",` +
+		`"failure_reason":` + mustJSONString(prose) + `,"failure_class":"BOX_AT_CAPACITY_DEFERRED",` +
+		`"deferral_depth":9,"deferral_bound":12,"deferral_cause":"BOX_AT_CAPACITY_DEFERRED","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "refusal 9 of 12 consecutive") {
+		t.Fatalf("the COLUMN depth must win over the sentence:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "refusal 3 of 6 consecutive") {
+		t.Fatalf("the stale prose pair must not be rendered as the chain:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Latest struct {
+			Depth *int `json:"deferral_depth"`
+			Bound *int `json:"deferral_bound"`
+		} `json:"latest_deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Latest.Depth == nil || *env.Latest.Depth != 9 || env.Latest.Bound == nil || *env.Latest.Bound != 12 {
+		t.Fatalf("the json pair must be the columns' 9 of 12: %+v\n%s", env.Latest, jstdout)
+	}
+}
+
+// TestSiteDeferralBoundIsNeverHardcodedTo12 pins the OTHER bound. The control
+// plane's max_consecutive_deferrals is 12 for BOX_AT_CAPACITY_DEFERRED and 6 for
+// everything else, and prod carries real "of 6" rows — a renderer that assumed 12
+// would print a fence twice as far away as the one the row is measured against.
+func TestSiteDeferralBoundIsNeverHardcodedTo12(t *testing.T) {
+	cause := "BOX_BUSY_DEFERRED"
+	col := cloudclient.SiteDeployment{
+		ID: "dep-busy", Status: "deferred", FailureClass: "BOX_BUSY_DEFERRED",
+		DeferralDepth: siteIntPtr(5), DeferralBound: siteIntPtr(6),
+		DeferralCause: &cause,
+	}
+	if line := siteDeferralLine(col); !strings.Contains(line, "refusal 5 of 6 consecutive") {
+		t.Fatalf("a bound-6 cause must render its own fence: %q", line)
+	}
+	prose := cloudclient.SiteDeployment{
+		ID: "dep-busy-old", Status: "deferred", FailureClass: "BOX_BUSY_DEFERRED",
+		FailureReason: "the instance refused the deploy (HTTP 409): box_busy — deferred: refusal 5 of 6 in this site's current chain",
+	}
+	if line := siteDeferralLine(prose); !strings.Contains(line, "refusal 5 of 6 consecutive") {
+		t.Fatalf("the prose arm must carry the row's own bound too: %q", line)
+	}
+	if strings.Contains(siteDeferralLine(col)+siteDeferralLine(prose), "of 12") {
+		t.Fatalf("no renderer may substitute the capacity bound for this cause's")
+	}
+}
+
+// TestRunCloudSiteStatusNamesTheWindowItRead is the census: the paragraph now says
+// how many attempts it read, over what span, and how many of them the box refused
+// — with a denominator beside every count.
+//
+// The fixture is majority-deferred on purpose, because that is the shape the
+// surface used to render as six green ticks: search-capstone's reachable 200-row
+// window was 148 deferred / 47 live / 5 failed and the header named none of it.
+func TestRunCloudSiteStatusNamesTheWindowItRead(t *testing.T) {
+	ttwFreeze(t)
+	rows := []string{
+		`{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","inserted_at":"2026-08-07T10:29:17Z","became_live_at":"2026-08-07T10:29:48Z"}`,
+	}
+	// 12 refused rounds and one failed round, newest first (the page's own order).
+	stamps := []string{
+		"2026-08-07T10:20:00Z", "2026-08-07T10:10:00Z", "2026-08-07T10:00:00Z",
+		"2026-08-07T09:50:00Z", "2026-08-07T09:40:00Z", "2026-08-07T09:30:00Z",
+		"2026-08-07T09:20:00Z", "2026-08-07T09:10:00Z", "2026-08-07T09:00:00Z",
+		"2026-08-07T08:50:00Z", "2026-08-07T08:40:00Z", "2026-08-07T08:30:00Z",
+	}
+	for i, ts := range stamps {
+		rows = append(rows, fmt.Sprintf(`{"id":"dep-d%d","site_id":"%s","status":"deferred","inserted_at":%q,"failure_class":"BOX_AT_CAPACITY_DEFERRED","deferral_depth":%d,"deferral_bound":12}`,
+			i, testSiteID, ts, len(stamps)-i))
+	}
+	rows = append(rows, `{"id":"dep-f","site_id":"`+testSiteID+`","status":"failed","inserted_at":"2026-08-07T01:32:34Z","failure_class":"BUILD_FAILED"}`)
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[` + strings.Join(rows, ",") + `],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	for _, want := range []string{
+		"recent attempts (the window this status read",
+		"14 attempts read, from 2026-08-07T01:32:34Z to 2026-08-07T10:29:17Z",
+		"12 of 14 deferred by the box",
+		"1 of 14 live",
+		"1 of 14 failed",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the window paragraph must carry %q:\n%s", want, stdout)
+		}
+	}
+	// A count without a denominator is the defect this block exists to fix — and a
+	// derived share is banned outright (charter D174/D142: chains carry no key, so
+	// any percentage over them is unfalsifiable and era-unstable).
+	if strings.Contains(stdout, "%") {
+		t.Fatalf("the window must print counts with denominators, never a rate:\n%s", stdout)
+	}
+	// The census is its OWN block after the KV table, not KV rows — renderKV sorts
+	// alphabetically and pads to the widest key, so census rows would scatter
+	// between `dataset` and `framework` and widen the whole header.
+	kvEnd := strings.Index(stdout, "recent attempts")
+	if kvEnd < 0 {
+		t.Fatalf("no window block at all:\n%s", stdout)
+	}
+	if i := strings.Index(stdout, "dataset"); i < 0 || i > kvEnd {
+		t.Fatalf("the window block must come AFTER the KV table:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	win, ok := env["window"].(map[string]any)
+	if !ok {
+		t.Fatalf("the window must be its OWN sibling node, not a staleness key:\n%s", jstdout)
+	}
+	stale, _ := env["staleness"].(map[string]any)
+	if _, folded := stale["attempts_read"]; folded {
+		t.Fatalf("the census must not be folded into staleness:\n%s", jstdout)
+	}
+	for k, want := range map[string]float64{"attempts_read": 14, "deferred_count": 12, "live_count": 1, "failed_count": 1} {
+		if win[k] != want {
+			t.Fatalf("window.%s = %v want %v\n%s", k, win[k], want, jstdout)
+		}
+	}
+	if win["oldest_inserted_at"] != "2026-08-07T01:32:34Z" || win["newest_inserted_at"] != "2026-08-07T10:29:17Z" {
+		t.Fatalf("the window must name the span it ACTUALLY saw: %+v", win)
+	}
+	// The three substring guards this node has to live under: two enforced on
+	// siteStalenessMap's keys, and `deferral_depth` scanned over the whole
+	// serialized stdout by TestRunCloudSiteStatusDeferralPreD99.
+	for k := range win {
+		for _, banned := range []string{"rate", "percent", "deferral_depth"} {
+			if strings.Contains(k, banned) {
+				t.Fatalf("window key %q carries the banned substring %q", k, banned)
+			}
+		}
+	}
+}
+
+// TestSiteWindowRefusesASpanItCannotProve: a page whose rows carry no readable
+// inserted_at gets NO span rather than a 1970 one, and the rows are counted out
+// loud instead of silently vanishing from the denominator.
+func TestSiteWindowRefusesASpanItCannotProve(t *testing.T) {
+	w, ok := siteReadWindow([]cloudclient.SiteDeployment{
+		{ID: "dep-a", Status: "deferred"},
+		{ID: "dep-b", Status: "deferred", InsertedAt: "not-a-timestamp"},
+	})
+	if !ok {
+		t.Fatal("a page with rows is still a window")
+	}
+	if w.Oldest != "" || w.Newest != "" {
+		t.Fatalf("an unprovable span must stay empty, got %q..%q", w.Oldest, w.Newest)
+	}
+	if w.Rows != 2 || w.Deferred != 2 || w.Stampless != 2 {
+		t.Fatalf("stampless rows must still be counted: %+v", w)
+	}
+	m := siteWindowMap(w)
+	for _, k := range []string{"oldest_inserted_at", "newest_inserted_at"} {
+		if _, present := m[k]; present {
+			t.Fatalf("%s must be ABSENT when unprovable, never a zero instant: %+v", k, m)
+		}
+	}
+	if m["attempts_without_a_stamp"] != 2 {
+		t.Fatalf("the unstamped rows must be reported: %+v", m)
+	}
+	// An EMPTY page is not a window at all — an absent census means "could not
+	// read the ledger", which a zeroed one would hide.
+	if _, ok := siteReadWindow(nil); ok {
+		t.Fatal("an empty ledger must produce no window node")
+	}
+}
+
+// TestSiteWindowSaysThePageRanOut: the page is siteStatusLedgerPage rows, so a
+// full page means older attempts exist that this status never read. Saying so is
+// the difference between a bounded read and an implied history.
+func TestSiteWindowSaysThePageRanOut(t *testing.T) {
+	full := make([]cloudclient.SiteDeployment, siteStatusLedgerPage)
+	for i := range full {
+		full[i] = cloudclient.SiteDeployment{ID: fmt.Sprintf("dep-%d", i), Status: "deferred", InsertedAt: ttwStamp(time.Duration(i) * time.Minute)}
+	}
+	w, _ := siteReadWindow(full)
+	if !w.PageFull {
+		t.Fatalf("a full page must be flagged as full: %+v", w)
+	}
+	var buf bytes.Buffer
+	out := newWriter(&buf, &buf)
+	renderSiteWindow(out, w)
+	if !strings.Contains(buf.String(), "older attempts exist that this status did not read") {
+		t.Fatalf("a full page must say the read ran out:\n%s", buf.String())
+	}
+	short, _ := siteReadWindow(full[:3])
+	if short.PageFull {
+		t.Fatalf("a short page must NOT claim it ran out: %+v", short)
+	}
+}
+
+// TestRunCloudSiteStatusDoesNotPromiseARequeueItCannotSee is charter D213, and it
+// is the sharpest correction in this slice.
+//
+// Both deferred-newest status lines used to end "(a rebuild is already re-queued)"
+// UNCONDITIONALLY. The CLI cannot see that: on site `search`, 47 of 523 content_rev
+// chains are deferred-only with no live and no failed row, and every one of them
+// got that promise. The single most reassuring clause in the owner paragraph was
+// the one the data contradicted.
+//
+// The replacement is a BLIND SPOT, not a loss claim — charter D212 settles the
+// abandonment as benign supersession (227 of 227 settled abandoned chains have a
+// later live row on the same site, ZERO do not), so "your publish was lost" would
+// be a second false claim pointing the other way.
+func TestRunCloudSiteStatusDoesNotPromiseARequeueItCannotSee(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"deferred","stage":"PLAN","inserted_at":"2026-08-07T10:20:00Z",` +
+		`"failure_class":"BOX_AT_CAPACITY_DEFERRED","deferral_depth":4,"deferral_bound":12}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "a rebuild is already re-queued") {
+		t.Fatalf("the CLI must not assert a re-queue no row on the page shows:\n%s", stdout)
+	}
+	for _, want := range []string{
+		"the NEWEST deploy was DEFERRED by the box",
+		"nothing newer than it is on the page this status read",
+		"not visible from here",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the deferred header must name its blind spot (%q):\n%s", want, stdout)
+		}
+	}
+	// The register is "we cannot see one", never a loss claim (charter D212).
+	for _, banned := range []string{"was lost", "dropped your", "abandoned"} {
+		if strings.Contains(stdout, banned) {
+			t.Fatalf("a benign supersession must not be narrated as a loss (%q):\n%s", banned, stdout)
+		}
+	}
+}
+
+// TestSiteRequeueVisibleNeedsANewerUnsettledRow is the other arm of the same
+// predicate: it says YES only on evidence, and the evidence is narrow on purpose.
+// A newer FAILED or LIVE row is not the refused round being retried, and an
+// unparseable stamp on either side proves nothing — refusing to guess here is
+// exactly what the unconditional clause failed to do.
+func TestSiteRequeueVisibleNeedsANewerUnsettledRow(t *testing.T) {
+	refused := cloudclient.SiteDeployment{ID: "dep-d", Status: "deferred", InsertedAt: "2026-08-07T10:00:00Z"}
+	newerQueued := cloudclient.SiteDeployment{ID: "dep-q", Status: "queued", InsertedAt: "2026-08-07T10:05:00Z"}
+	newerLive := cloudclient.SiteDeployment{ID: "dep-l", Status: "live", InsertedAt: "2026-08-07T10:05:00Z"}
+	olderQueued := cloudclient.SiteDeployment{ID: "dep-o", Status: "queued", InsertedAt: "2026-08-07T09:00:00Z"}
+	stampless := cloudclient.SiteDeployment{ID: "dep-s", Status: "queued"}
+
+	if !siteRequeueVisible(refused, []cloudclient.SiteDeployment{newerQueued, refused}) {
+		t.Fatal("a newer unsettled row IS a visible re-queue")
+	}
+	for _, ledger := range [][]cloudclient.SiteDeployment{
+		{newerLive, refused},
+		{refused, olderQueued},
+		{stampless, refused},
+		{refused},
+		nil,
+	} {
+		if siteRequeueVisible(refused, ledger) {
+			t.Fatalf("no evidence of a re-queue in %+v", ledger)
+		}
+	}
+	// A refused row with no stamp of its own can order nothing and must refuse.
+	if siteRequeueVisible(cloudclient.SiteDeployment{ID: "dep-d", Status: "deferred"}, []cloudclient.SiteDeployment{newerQueued}) {
+		t.Fatal("an unstamped refused row cannot prove anything is newer than it")
+	}
+	if c := siteRequeueClause(refused, []cloudclient.SiteDeployment{newerQueued, refused}); !strings.Contains(c, "already on this site's ledger") {
+		t.Fatalf("a proven re-queue may be claimed: %q", c)
+	}
+}
+
+// TestRunCloudSiteStatusWindowOverAFailedNewestFixture proves the census on the
+// newest-failed-over-an-older-live shape BY FIXTURE, and that is deliberate:
+// charter D228h measured the population EMPTY across all 13 sites (the two
+// failed-newest sites have no older live row at all), so a criterion phrased
+// against a live site would have forced a fabricated pass.
+func TestRunCloudSiteStatusWindowOverAFailedNewestFixture(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[` +
+		`{"id":"dep-9","site_id":"` + testSiteID + `","status":"failed","stage":"BUILD","inserted_at":"2026-08-07T11:00:00Z","failure_reason":"the build command exited non-zero — nothing was switched","failure_class":"BUILD_FAILED"},` +
+		`{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","inserted_at":"2026-08-07T09:00:00Z","became_live_at":"2026-08-07T09:01:00Z"}` +
+		`],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The staleness arm is untouched — the census rides BESIDE it, never over it.
+	if !strings.Contains(stdout, "NEWEST deploy FAILED") {
+		t.Fatalf("the failed-newest half-truth must survive the census:\n%s", stdout)
+	}
+	for _, want := range []string{
+		"2 attempts read, from 2026-08-07T09:00:00Z to 2026-08-07T11:00:00Z",
+		"0 of 2 deferred by the box",
+		"1 of 2 live",
+		"1 of 2 failed",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the window must carry %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestSiteWindowAccountsForEveryRowItRead is the review fix (W14): the census's
+// buckets must be EXHAUSTIVE over the page it read.
+//
+// The first cut counted deferred/live/failed/waiting only, so a `cancelled` row
+// landed in no bucket at all: the paragraph printed "12 of 20 deferred · 3 of 20
+// live · 1 of 20 failed", the reader subtracted, and the remaining rows were
+// simply gone with no name and no note. That is the same class of defect as the
+// unnamed window one layer up — a census that cannot account for its own
+// denominator invites the reader to invent the difference.
+//
+// The identity is asserted on the STRUCT (so it holds for every caller) and the
+// unnamed residue is proven to surface in the human block rather than vanish.
+func TestSiteWindowAccountsForEveryRowItRead(t *testing.T) {
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "d1", Status: "deferred", InsertedAt: "2026-08-07T10:00:00Z"},
+		{ID: "d2", Status: "live", InsertedAt: "2026-08-07T09:00:00Z"},
+		{ID: "d3", Status: "failed", InsertedAt: "2026-08-07T08:00:00Z"},
+		{ID: "d4", Status: "building", InsertedAt: "2026-08-07T07:00:00Z"},
+		{ID: "d5", Status: "cancelled", InsertedAt: "2026-08-07T06:00:00Z"},
+		{ID: "d6", Status: "canceled", InsertedAt: "2026-08-07T05:00:00Z"},
+		{ID: "d7", Status: "quiesced-by-a-word-this-cli-has-never-seen", InsertedAt: "2026-08-07T04:00:00Z"},
+		{ID: "d8", Status: "", InsertedAt: "2026-08-07T03:00:00Z"},
+	}
+	w, ok := siteReadWindow(ledger)
+	if !ok {
+		t.Fatal("a page with rows is a window")
+	}
+	sum := w.Deferred + w.Live + w.Failed + w.Waiting + w.Cancelled + w.Other
+	if sum != w.Rows {
+		t.Fatalf("the buckets must account for every row read: %d != %d (%+v)", sum, w.Rows, w)
+	}
+	if w.Cancelled != 2 {
+		t.Fatalf("both spellings of cancelled must be counted: %+v", w)
+	}
+	// A status word this CLI has never seen is still NON-TERMINAL, so it is a wait
+	// — the honest reading, and the reason `other` is a narrow safety net rather
+	// than a catch-all. Only a row carrying no status at all lands there.
+	if w.Waiting != 2 {
+		t.Fatalf("an unrecognised non-terminal status is a wait: %+v", w)
+	}
+	if w.Other != 1 {
+		t.Fatalf("a status-less row must land in the named residue, not in nothing: %+v", w)
+	}
+
+	var buf bytes.Buffer
+	renderSiteWindow(newWriter(&buf, &buf), w)
+	for _, want := range []string{
+		"2 of 8 cancelled",
+		"1 of 8 in another state this CLI does not name",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("the residue must be printed, not dropped (%q):\n%s", want, buf.String())
+		}
+	}
+
+	m := siteWindowMap(w)
+	// Emitted at zero too, or the identity is unwritable by a machine reader.
+	empty, _ := siteReadWindow([]cloudclient.SiteDeployment{{ID: "d1", Status: "live", InsertedAt: "2026-08-07T10:00:00Z"}})
+	for _, k := range []string{"cancelled_count", "other_count"} {
+		if _, present := m[k]; !present {
+			t.Fatalf("%s missing from the json census: %+v", k, m)
+		}
+		if _, present := siteWindowMap(empty)[k]; !present {
+			t.Fatalf("%s must be present even at zero: %+v", k, siteWindowMap(empty))
+		}
+	}
+	// And the census's own key guards still hold for the new keys.
+	for k := range m {
+		for _, banned := range []string{"rate", "percent", "deferral_depth"} {
+			if strings.Contains(k, banned) {
+				t.Fatalf("window key %q carries the banned substring %q", k, banned)
+			}
+		}
+	}
+}
