@@ -1734,3 +1734,374 @@ together are the whole remaining distance between "the instrument measures it" a
 `dr-w5-s3-followup-render-the-space-payload`, `dr-w5-followup-5xx-reaches-no-eyes`, and
 `dr-w5-followup-spa-ladder-two-tier`. (c) The two live proofs, which cost a deploy rather than a wave.
 (d) #9827's human review — the only thing between this epic and the wish's build-cap clause.
+
+---
+
+## Wave 6 decisions — MERGE AND RENDER (2026-08-06)
+
+Wave 6 builds almost nothing new. It lands what four waves already built, opens the one drawer still shut,
+and refuses to let a box wear a green rank it did not earn. Every decision below was re-derived this session
+against `origin/main` = `ef77af2748ceda54fdd6e078f71a6e6044b55439`, with run output, not inherited.
+
+**CITATION NOTICE.** `D67`–`D77` return **zero** hits on `origin/main`'s charter (`grep -cE '^\*\*D(6[7-9]|7[0-7])'`
+→ `0`). They live only in the still-open wave-5 charter PR **#9876**. Any slice citing the `load15` fence
+(D67), the eleven-rung ladder (D68/D69), the multi-root ruling (D71) or the 5xx ring (D75) cites **the PR**,
+never main — a builder who `git show origin/main`s them will re-derive the wrong thing. This wave-6 charter
+PR is **stacked on #9876's head** precisely so that merging it lands both waves' decisions in one act and
+closes that hole; #9876 can then be closed as superseded.
+
+- **D78 — SLICE 1 IS A REPAIR, NOT A RE-RUN: #9888 BREAKS A REQUIRED CONTEXT ON A FILE IT NEVER TOUCHED.**
+  *Why:* the four-PR stack merged onto `ef77af274` builds and vets clean (Go `build`/`vet`/`test ./...` all
+  rc=0; `cloud` 2965 tests 0 failures; 139 files compiled with zero warnings) — with **exactly one**
+  stack-induced red, and it is enforced. `api/test/barkpark_web/controllers/request_stats_controller_test.exs:40`
+  asserts the 3-key wire contract and #9888 widens the payload to four: `left: ["err_5xx_per_s","p95_ms",
+  "req_per_s","window_s"]` vs `right: ["p95_ms","req_per_s","window_s"]`, deterministic, 3 tests / 1 failure.
+  #9888 updated only the UNIT test (`request_stats_test.exs`, 19/19 green); the CONTROLLER test that pins the
+  contract is untouched by the whole stack (`git diff --stat origin/main HEAD` on that path is empty).
+  Probe-reverting the three api files makes it PASS and leaves the other four api failures standing, so
+  exactly 1 of 5 belongs to the stack. **RULING: widen that assertion and update
+  `request_stats_controller.ex:14`'s moduledoc (which still pins the 3-key shape and cites a dangling "OC24")
+  INSIDE #9888's own diff. A builder briefed "just re-run it" will push and watch the same gate go red.**
+
+- **D79 — REPAIR IN PLACE. RE-CUTTING ANY OF THE FOUR PRs TURNS A GREEN REQUIRED CONTEXT GENUINELY RED.**
+  *Why:* `scripts/pr-task-gate.sh` PASSES today for all four against the live guerrilla ledger — but only
+  through D58's grace branch: *"open, but the claim by '…' was still live when this PR was opened (it lapsed
+  909–1976s after, and was reaped 1821–2784s ago)"*. Every claim has since been reaped, and the workflow
+  anchors on `pull_request.created_at`, which its own comment documents does NOT move on `synchronize`.
+  So a **re-run clears it and a push buys nothing** — but a close/re-open, or re-cutting the work onto a
+  fresh PR, moves `created_at` past the lapse and turns a green required context genuinely red.
+
+- **D80 — A RED NAME IS NOT A DIAGNOSIS: THE ACTION-RESOLUTION OUTAGE IS A THIRD RED CLASS.** *Why:* all
+  eight reds on #9887/#9888/#9889/#9890 died inside `Prepare all required actions` — `Getting action download
+  info` → `Failed to resolve action download info. Error: Service Unavailable` → `##[error]Service
+  Unavailable` — **before checkout, before any script ran**. No gate scan exists in any of those logs.
+  I re-ran the eight deciding commands at three tree states per PR (head sha, GitHub's `refs/pull/N/merge`,
+  and the TRUE merge onto `ef77af274`): **96 invocations, zero failures**, and the pass is not vacuous —
+  appending 500 bytes to `docs/cards/cli.md` made budgets rc=1 (`FAIL: docs/cards/cli.md is 2877B, cap is
+  2400B`) and rc=0 again on restore. Three riders: (a) the required **`Cloud gate`** WAS red on `aa19dcca3`,
+  as a correct downstream refusal on outage-`abandoned` upstreams (`FAIL changes (dispatcher): unrecognised
+  result 'abandoned'. Cannot tell, therefore red.`) — so "none of the failing names is required" is FALSE;
+  (b) a check-run's `completed_at` can **lag the job's real death by 42 minutes** (Filebase on `e92cb6fe9`
+  reports 17:46:12Z; its log's last line is 17:04:11Z) — date failures by the LOG's timestamps, never
+  `completed_at`; (c) `gh run rerun --failed` is **REFUSED while any sibling job in the run is queued**
+  (`cannot be rerun; This workflow is already running`), so the re-run is gated on the queue draining, not on
+  the fix.
+
+- **D81 — MERGE DAY CHANGES ONE BOX. THE FLEET IS RELEASE-PINNED AND NO MERGE CAN REACH IT.** *Why:*
+  `deploy/instance-deploy.sh:818` is the **only** line in the repo that rebuilds an existing box's
+  `barkpark-agent` (`grep -rn barkpark-agent scripts/ .githooks/` → zero), and deploy.yml's `instance` job
+  SSHes exactly one host, `$GUERRILLA_HOST`. Every other box updates only through
+  `Barkpark.SelfUpdate.Checker`, which decides `:behind` by comparing **A.B.C semver releases** — and live,
+  all six boxes report `update_state: current` at `0.2.25`, cut **2026-07-08**, `git rev-list --count
+  v0.2.25..origin/main` = **2484**. `AutoupdateRolloutWorker` walks instances reporting `behind`; there are
+  none, so it advances nothing, forever. Confirmed by `strings`: `load15` and `err_5xx_per_s` are on **zero**
+  deployed binaries including guerrilla's newest (Aug 6 14:22); `cpu_cores` is on exactly **one of six**.
+  **RULING: no agent-side criterion may say "the fleet", "the boxes" or "every box". It says "guerrilla
+  (157.180.90.121), the only box deploy.yml's `instance` job reaches", and carries a paired,
+  explicitly-DEFERRED sentence naming the other five and the reason.** Cutting and blessing `v0.2.26` is the
+  sole mechanism that carries anything to **jarl — the 96%-full box the wish is literally about** — and it is
+  a NAMED HUMAN GATE, filed to the backlog, not a slice.
+
+- **D82 — PROVENANCE CLAUSE: THREE QUOTED READS OR THE CRITERION IS STAMPABLE FROM A UNIT TEST.** *Why:*
+  "the beat carries `load15`" is satisfiable by `internal/agent/report_test.go` alone, on a field no deployed
+  binary emits. **RULING: every agent-field criterion quotes, in this order — (i)
+  `ls -l --time-style=+%F /usr/local/bin/barkpark-agent` on the named box, mtime AFTER the slice's merge;
+  (ii) `strings -a /usr/local/bin/barkpark-agent | grep -c '<field>'` ≥ 1 on that same box; (iii) the live
+  `/v1/barkparks` JSON excerpt showing the field non-null.** Companion clauses: **MERGE ≠ DEPLOY** — no live
+  criterion is stamped in the same hour as its merge, and the evidence quotes
+  `gh run list --workflow=deploy.yml --branch=main` reporting `conclusion=success` for that sha (measured:
+  `ef77af274`'s deploy run sat `queued` 50+ minutes behind 49 runs at effective concurrency 1); and **FIXTURE
+  BAN** — `__fixtures__/attention_order.json` and `testdata/attention_order_cases.json` may satisfy a
+  CROSS-SURFACE-AGREEMENT criterion and may never satisfy a SEEING criterion.
+
+- **D83 — THE PRIMARY `strained` ARM IS DEAD CODE ON MERGE DAY; SAY WHICH ARM FIRED.** *Why:* `load15` and
+  `err_5xx_per_s` are absent from main, from every live payload, and from every deployed binary, so the
+  1.75×/core 15-minute fence is unreachable and only the **2.0 `load1` fallback** can fire, on guerrilla
+  alone (live `load 6.3 on 2 cores (3.1x, 1m avg)`). **RULING: any `strained` criterion states WHICH ARM
+  fired with the arithmetic quoted; a fallback pass is stamped MET-BY-FALLBACK and adds "primary arm
+  (load15 ÷ cpu_cores ≥ 1.75) unproven — load15 is on zero deployed binaries". A stamp produced by
+  `unmeteredMarker` is not a `strained` stamp and is its own row.** Rider: **D67's stated rationale is
+  REFUTED** — over 30 live readings guerrilla's `load1` ran 3.27–3.85×/core, consistently HIGHER than its
+  `load15` at 2.775–2.910×/core, so the fallback is not "strictly less sensitive"; it is noisier in both
+  directions and on a rising box it fires FIRST.
+
+- **D84 — THE FENCE ITSELF IS SAFE AND WILL NOT BE RE-DERIVED AGAIN: A 50× CANYON.** *Why:* 30 live readings
+  of real `/proc/loadavg` `fields[2]` across all six boxes (all `nproc` = 2): guerrilla 2.775–2.910×/core
+  firing **5/5** with zero flap, against a healthy ceiling of **0.055×** (jarl). Any threshold in
+  (0.06, 2.77) yields identical verdicts on that window; 1.75 sits 1.59× below guerrilla's floor and 31.8×
+  above the healthy ceiling. Rider, and it is a real tripwire: **`LC_ALL=C` on every load-ratio computation** —
+  under this shell's locale `awk` printed `2,500` for `2.775` and mangled the magnitude while looking
+  plausible.
+
+- **D85 — MULTI-ROOT SPACE MEASURES IN KiB, AND THE OBVIOUS WAY TO DO IT SHIPS A SILENT 1024× LIE.** *Why:*
+  `parseHumanBytes` (`report.go:1023`) falls through to `strconv.ParseInt` and accepts a **bare integer as
+  BYTES**. Flipping `duSitesArgs` from `-hx` to `-kx` without changing `parseDuTree` therefore produces a
+  complete, sorted, error-free list understated by exactly **1024×** — proved on jarl's real rows: total
+  parses as 27.17 **MiB** where the truth is 27.17 **GiB**, containerd "13.2 MiB" for 13.2 GiB. No fixture on
+  main would catch it (every `du` fixture is `-h`). And `-h` is not good enough: on jarl's `/var/lib` it
+  **overstates by 853 MiB (+3.07%)**, which is ~48% of that box's remaining 1.78 GB of headroom.
+  **RULING: take `-kx` AND give `parseDuTree` an explicit unit parameter with fixtures duplicated in both
+  units. This OVERRIDES `dr-w5-s5` criterion 1's "reusing `duSitesArgs` and `parseDuTree` UNCHANGED —
+  generalized by renaming, not rewritten": a rename-only generalization is unsafe here.**
+
+- **D86 — DISCARD ON KILL, LAND ON DEGRADED. A NON-ZERO `du` EXIT DOES NOT IMPLY TRUNCATED OUTPUT.** *Why:*
+  the discard rule HOLDS end-to-end — a REAL `du` killed at a REAL 400 ms deadline on the loaded box returned
+  `(-1, nil, "timed out after 400ms")` through the real `boundedSpaceRunner`, and `gatherSpace` reported
+  `sites_bytes -1 / sites_top nil`. But the OPPOSITE hazard is the live one: an unprivileged `du -hx -d1`
+  over a tree with one unreadable subdir printed **every row including the total** and exited **rc=1**. The
+  current rule would throw away a complete, correct measurement whenever one child is unreadable or vanishes
+  mid-walk — and `/var/lib` is exactly where containerd and barkpark-builder churn. (Mitigating: 10 real runs
+  per box across both roots on guerrilla AND jarl were all rc=0 with empty stderr, so the hazard is
+  demonstrated, not currently firing.) **RULING: discard on kill/timeout/missing-total-row; LAND when the
+  total row is present and every row parsed, and name which roots were degraded.** Two riders: the existing
+  `TestSitesProbeNonZeroExitDiscardsPartialOutput` (`report_test.go:885`) already pins the single-root kill
+  case, including the killed-with-a-parseable-total-row shape, and **PASSES** — do not re-cut it; and it does
+  **not** match `-run 'Space|Du|Tree'`, so that regex "proves" the rule with a run that never executes it.
+
+- **D87 — TWO ROOTS NAME ~85% OF jarl AND ~28% OF guerrilla: THE COVERAGE RULING IS jarl-SPECIFIC.** *Why:*
+  jarl is 96% used (35,516,368 of 39,027,964 KiB, 1.78 GB free), `/opt/barkpark/sites` **DOES NOT EXIST**
+  there, and `/var/lib` is 28,486,324 KiB (containerd 13.8G + barkpark-builder 11.3G + snapd 2.9G) which with
+  `/opt/barkpark` is **82.4%** of used. Guerrilla's same two roots are **28.2%** — the rest is `/var/log`,
+  `/root` and `/tmp`. `/var/lib/docker` is a **2.0M decoy**: docker reports 14.12 GB of images and those bytes
+  physically ARE `/var/lib/containerd` (containerd snapshotter). **Name PATHS, never daemons, and never state
+  the coverage figure fleet-wide.** Cost, re-measured: worst two-root walk **~6.1s** on jarl (the survey's
+  14.6s does not reproduce), ~10% of the 60 s bound against a 15-minute cadence — but the bound is **per
+  shell-out**, so N roots buy N×60 s of worst case in one cycle: bound the SLICE, not just each root.
+
+- **D88 — THE UNMETERED MARKER IS BUILT AND RENDERS LIVE. SLICE 3 IS THE 5xx HALF AND THE `degraded` HOLE.**
+  *Why:* `unmeteredMarker` ships inside #9887 as an explicit DETAIL line ("charter D69 — deliberately NOT a
+  rung"), correctly disjoint from `unreported` by construction (the marker requires a PRESENT `reported_at`;
+  `unreported` requires an EMPTY `last_seen_at`). A `bp` built at `aa19dcca3` and run three times against the
+  REAL fleet printed the finished experience verbatim: `strained Guerrilla … load 6.3 on 2 cores (3.1x, 1m
+  avg) · 1.7 GB in swap`, `filling jarl … disk 96% used (fills at 90%) · vitals unreadable — agent predates
+  the vitals beat`, `unreported muscle-1`, and the HEALTHY bucket **grew a DETAIL column** for dooodo and gyl
+  (`withDetail` is scanned PER BUCKET). **Do not re-cut it.** Two real holes remain: **(a)** `degraded` is
+  rung 4 and `strained` rung 5, and `attentionDetail` has arms for removal_failed/failed/suspended/strained/
+  filling but **none for degraded**, so a degraded box renders `—` and loses its reading exactly when it is
+  most diagnostic — observed live on guerrilla mid-flap at 17:41:23Z, then `strained` with the full sentence
+  two runs later; **(b)** `Err5xxPerS` is decoded by #9887 and read by nothing (zero hits in
+  `cloud_status_cmd.go`). Corrections to the direction: the marker is live-eligible on **four** of six boxes,
+  not five, and only **two** (gyl, dooodo) would otherwise wear a serene `ok`; and the console has **not**
+  shipped `unreported` — main's `classifyBp` and the shared fixture carry eight states.
+
+- **D89 — THE OWNER'S BINARY IS THE LAST MILE, AND `make cli-install` FROM MAIN DOES NOT FIX IT.** *Why:* a
+  clean `make cli-install` from a fresh clone at `ef77af274` produces a binary whose count for
+  `swap_used_percent`, `cpu_cores`, `beam_pss_bytes`, `beam_swap_bytes`, `disk_used_percent`, `load1`,
+  `strained` and `filling` is **0 for every one** — main's `cloudclient.Barkpark` has no `Pressure` field at
+  all. A binary built at #9887's head has 3 and renders the ladder. **The fix is ONE MERGE plus ONE REBUILD**,
+  and it must be an explicit imperative owner-facing line, because three instruments actively say nothing is
+  wrong: `bp doctor --onboarding` returns `"cli":{"installed":"dev","up_to_date":true,"detail":"running a dev
+  build — release comparison skipped"}` with `ok:true` exit 0 (`doctor_onboarding.go:298`); `bp upgrade
+  --check` refuses on the dev ground and exits **2**, not the documented 1-when-behind; and the `cli-v*`
+  channel `bp upgrade` resolves against is tag-driven and 13 days stale (newest `cli-v1.16.0`, 2026-07-24), so
+  merging publishes nothing. The owner's installed `bp` is `f59aaf717`, 2026-07-31, **322 commits behind**.
+  **RULING: a dev build reports UNKNOWN, never up-to-date — honest silence, not a claim. That is this epic's
+  own doctrine, applied to its own instrument.**
+
+- **D90 — THE AFTER-MEASUREMENT PUBLISHES 41.77% → 43.76% AND SAYS THE RATE **ROSE**.** *Why:* taken through
+  `DeployLedger.census/2` on the live node (via `rpc` — `eval` cannot run it: *"could not lookup Ecto repo
+  BarkparkCloud.Repo because it was not started"*), at BEFORE `[2026-08-05T17:00Z, 21:24Z)` / AFTER
+  `[21:24Z, 2026-08-06T17:03Z)`: old convention **89.38 → 74.68**; shipped-as-is **89.38 → 43.76** (that row
+  compares two DIFFERENT conventions and must never be published as repair); shipped **doctrine-matched**
+  **41.77 → 43.76 = +1.99 pp REGRESSION**. Busy-refusal pressure fell (47.6% → 30.9% of volume) while settled
+  failures rose, and `BOX_500` per attempt went **8.67% → 15.31%** — doubled, not "tripled", and the digest's
+  46.41% doctrine-matched BEFORE is **unreproducible through the instrument at this pin**; 41.77% is the
+  derivable value. Census matches the psql pin **exactly** (volume 1947, failed 852, deferred 602, live 493)
+  and reproduces D76 byte-for-byte. There is **no `OTHER_FAIL` bucket**: eight classes sum to exactly 852,
+  `UNCLASSIFIED` 0, `not_attempted` empty. NEW and cheap: **138 rows — 16.2% of the failure numerator — are
+  `the instance refused the deploy (HTTP 503): feature_not_configured — site deploys are not enabled on this
+  instance (set BARKPARK_SITE_DEPLOY_APPLY=1)`** across all five hot sites: a configuration tombstone counted
+  as a deploy failure. Two `dr-w2-s8` criteria are now false as written — search-capstone is **not** 0-live in
+  the AFTER window (12 live), and the source is the instrument via an operator shell, not psql (the HTTP
+  route remains 403-dark), which is a strictly stronger claim than the criterion asks for.
+
+- **D91 — THE CAP IS MERGED, IS NOT RUNNING, AND WOULD BIND HARD.** *Why:* guerrilla's checkout is
+  `33bb65496` and `git merge-base --is-ancestor ef77af274 HEAD` returns **CAP_ABSENT**; `grep -c
+  box_at_capacity api/lib/barkpark/sites/deploy_runner.ex` **on the box** = 0. Zero `box_at_capacity` rows
+  have ever existed in production — that is evidence the cap has not shipped, **not** evidence it is broken.
+  The feared ordering bug does not exist: `running_slug?` is keyed on `req.slug` while `box_at_capacity?`
+  counts `building_slugs(state)` across every deploy-mode run, so the two predicates are **disjoint by
+  construction** and `already_running` can never mask a capacity refusal. Neither upstream lock preempts it
+  (`deployments_active_site_env_index` is same-site; Oban `site_deploy: 1` serializes JOBS not builds, as the
+  code's own moduledoc says). And it will bind broadly: **9,189 of 11,384 non-deferred deployments in 7 days
+  (80.7%)** had a foreign-site deployment start within 60 s, so the deferral rate steps on merge day and any
+  measurement taken across that boundary must be stratified by class. The retry pipe is alive at volume on
+  its sibling path (603 `already_running` deferrals in 2 days; all 5 deferring sites later reached `live`).
+  **RULING: slice 3 publishes the STRUCTURAL proof now and states the live refusal as DEFERRED behind a
+  deploy, quoting the `merge-base` precondition.** Rider: `systemctl is-active barkpark` reads `inactive`
+  **correctly** — that unit is disabled legacy; the live runtime is `barkpark-slot@green` on :4001 and the
+  public API answers 200. Any triage rung reading that unit manufactures a fleet-wide false red.
+
+- **D92 — THE HONEST DENOMINATOR IS 71, AND `dr-w3-s7` IS SUPERSEDED — DO NOT RE-CUT IT.** *Why:* the parent
+  rail carries 98 children = **86 open + 11 done + 1 cancelled**; 86 − 13 (stale-open rows whose PR already
+  MERGED) − 1 (`drafts.*` phantom double-count) − 1 (`dr-w3-s7`) = **71**, of which 4 are BUILT and sitting in
+  #9887–#9890, so **67 unbuilt**. D77's "88 / 77 / eleven phantoms" is stale in both directions: the tree
+  grew and the drafts cleanup already happened — **one** phantom survives. `dr-w3-s7-strained-reaches-triage`
+  (0/11) is superseded by `dr-w5-s1` (11/12, #9887): its own description opens *"THIS SLICE DOES NOT BUILD
+  THIS RUN"* and its `files` list is a strict superset. The "PR body states X" criteria are **five, not
+  four**, and only **three** are dead: `dr-w2-s4` idx 5 is SATISFIED verbatim in #9731's body line 3 and
+  `dr-w2-s6` idx 3 in #9733's body line 7 — both merely unstamped. The phantom
+  `drafts.dr-w5-s4-agent-binary-reaches-the-fleet` holds **2/8** where the published twin holds **4/8**, and
+  the two shared evidences are byte-identical (461 and 1108 bytes, string-equal), so it is a strict SUBSET:
+  copy-before-discard is a **no-op** and discard is safe. Retro-editing a merged PR body to turn a dead
+  criterion green would be exactly the vacuous pass this charter forbids — retire them instead.
+
+- **D93 — THE LEDGER'S OWN INSTRUMENTS LIE, SO EVERY CENSUS READS THE PARENT RAIL.** *Why:* `bp doc get task
+  drafts.<id>` returns `not_found` for a draft that provably exists (`bp task get drafts.<id>` returns it),
+  and `bp doc query task --filter '_id*=agent-binary' --count` returns `total 0` for a document `bp doc get`
+  fetches. `bp search` finds the row only by typo-widening, never by exact id. **Any census built on `_id`
+  filters or on search is silently vacuous; the only reliable enumeration of this epic is
+  `bp task get task-fb4fb869490b4213`.** Filed as an instrument defect.
+
+- **D94 — THE CESSION IS RE-ASSERTED UNILATERALLY, AND THE REAL RACE IS `router.ex`, NOT THE VITALS SEAM.**
+  *Why:* cch's declared fence is the **bare `cloud/` tree**; the vitals cession exists only as one sentence in
+  that charter's **Wave 36** block — *"deploy-reliability wave 4 owns those this round"* — wave-scoped and
+  naming wave 4, hence expired by that charter's own subject-scoping law (D346/D357). Its wave-37 charter
+  (#9857) does not re-issue it and mentions this epic nowhere past wave 4. **Wave 6 re-asserts:
+  `attentionStatus()`, `internal/cli/**`, `internal/cloudclient/**`, `internal/agent/**`, `cmd/**` and the
+  fleet-vitals seam in `registry.ex`/`telemetry.ex`/`metrics.ex` are OURS; `cloud/priv/static/app.js`,
+  `__app.test.mjs` and the console path-escape scripts are THEIRS.** Practically the exposure is nil on the
+  vitals seam — #9857's D418 explicitly defers the CLI change to cch's backlog and D420 measures
+  `primary_team` at **zero files under `internal/`**. The live collision is `cloud/lib/barkpark_cloud/web/
+  router.ex`: cch w37 slice 1 takes 18 route-scope sites in the band 2059–8291 while #9888 sits at 481/8764
+  and #9889 at 58/1319/7776 — **nearest separation 423 lines** (the survey's "~7,400" is wrong; the
+  conclusion survives, the number does not). **Land #9888/#9889 before #9857's builders dispatch.** All ten
+  merge trials are CLEAN against today's tip, and a four-deep SEQUENTIAL stack simulation
+  (main → 9887 → 9889 → 9888 → 9890) is clean at every step, ending at tree `20b3ed45e4`. One stale foreign
+  toucher, #6028, has **no merge base with main at all** and cannot land ahead of the wave.
+
+- **D95 — CI CAPACITY IS THE CONSTRAINT: BUDGET BY PUSH COUNT, NOT RUNNER-MINUTES; FIVE SLICES, TWO NEW PRs.**
+  *Why:* measured at decision time, **59 workflow runs QUEUED with 0 in_progress** — effective concurrency
+  ~1, and a re-run fired earlier sat queued 18+ minutes without starting while the queue deepened 49 → 58.
+  Four workflows have **no path filter at all** (`elixir.yml`, `pr-task-gate.yml`, `reland-check.yml`,
+  `aesthetics-guard.yml`), so even a docs-only PR pays the 9-job Elixir gate; there is no cheap PR in this
+  repo, only cheaper ones. `elixir.yml`'s triggers must NOT be narrowed inside this wave — it is the enforced
+  context, and a non-matching diff reports "expected" forever and deadlocks the merge. **RULING: wave 6 cuts
+  five slices, three in round 1, and spends exactly two new PRs — slice 1 pushes to an existing branch,
+  slices 4 and 5 are round 2 and open nothing this run.** Rider: rapid iterative pushes manufacture a THIRD
+  refusal shape ("… is cancelled.") via `cancel-in-progress`; batch every repair to a PR into ONE push.
+
+### Wave 6 plan — 5 slices, 3 in round 1, 2 new PRs
+
+| # | Slice | Task | Round | Surface | Model |
+|---|---|---|---|---|---|
+| 1 | Land the stack — repair #9888 in place, re-run the rest | `dr-w6-s1-land-the-stack` | 1 | `api/**` (2 files), inside #9888's branch | opus |
+| 2 | The stale binary says so — a dev build reports UNKNOWN | `dr-w6-s2-stale-binary-says-so` | 1 | `internal/cli/doctor_onboarding.go`, `upgrade.go` | opus |
+| 3 | The proofs — after-measurement, the cap, the ledger repair | `dr-w6-s3-the-proofs-and-the-ledger-repair` | 1 | `tooling/grip/ledger/**` + bp ledger writes | opus |
+| 4 | Space reaches eyes — producer and consumer in ONE slice | `dr-w6-s4-space-reaches-eyes` | 2 (after s1) | agent + CP + `bp cloud instance top` + deploy.yml | opus |
+| 5 | The 5xx reaches eyes, and `degraded` keeps its reading | `dr-w6-s5-5xx-and-degraded-keep-the-reading` | 2 (after s1) | `internal/cli/cloud_status_cmd.go` | opus |
+
+**Model note.** Fable is unavailable this cycle, so every slice builds on opus at medium — including slice 4,
+which on merit (cross-surface Go↔Elixir↔CLI coupling, a parser unit trap that fails silently, a deploy-regex
+change with production blast radius) would otherwise be the wave's fable slice. Its brief is written
+correspondingly harder: every trap is named, not left to judgment.
+
+**Where the space render lands — DECIDED.** Fold space into the existing `/metrics` envelope and render it in
+`bp cloud instance top`, NOT a new route plus a new `bp cloud usage` section. Reasons: `Registry.recent_events_
+of_type/3` arrives generic-on-type with #9889, so the fetch half is free; `storageLines`
+(`cloud_instance_top_cmd.go:385`) already implements exactly the three honest states the payload needs
+(absent / nil / `[]` / rows); and `bp cloud usage` renders a **meter table** whose cells are
+value/limit/state/trend fed from a completely different pipeline (`Usage.gather`, cached usage_samples) — a
+named-consumer list has no home in that struct. Four files, zero new routes. The FINISHED EXPERIENCE sentence
+therefore moves from `bp cloud usage jarl` to **`bp cloud instance top jarl`**; `bp cloud usage jarl` already
+answers "disk 96%" today, which is precisely the answer the wish rejects.
+
+**HIGH-FLIP-RISK, slice 4:** the `-kx` unit change to `parseDuTree`. Both failure directions are silent — a
+missed unit parameter understates every consumer by exactly 1024× behind a fully green build, and an
+over-eager discard rule throws away complete measurements on the one box that matters. An independent second
+reviewer is warranted before merge; this workflow spawns one reviewer, so that dispatch is a manual lead step.
+
+**D66 applies to slices 2, 4 and 5** (pure-Go / mixed-with-`cmd`), and #9890 is a pure-deploy diff that
+dispatches **false** on cloud, console and elixir — its green asserts nothing.
+
+**What this wave does NOT take, and says so.** Seven of the ten `dr-bl-w5-*` backlog rows carry forward
+untouched. `MemoryHigh` stays parked — and its stated prerequisite was **wrong**: the bound reads per-slot
+cgroup counters, which are PID-agnostic, so it never depended on the beam-PID pin. The derivable lever is
+**`MemorySwapMax`** (live: the green slot holds 1,307 MB of the box's 1,956 MB of used swap and swapped out
+114 MB in two minutes; `MemorySwapPeak` 1,332.6 MB), and the real unbuilt prerequisites are persisting
+per-slot swap peaks across restarts (systemd resets them) and choosing unit-vs-slice placement. Filed, not
+taken. Also filed: PSI `memory-full avg10` measured **0.60**, not the 4.46 this charter has been quoting —
+do not re-quote it.
+
+---
+
+### Wave 2026-08-06 (wave 6) — REVIEWED · Paper `deploy-reliability-wave-6-2026-08-06` · grade **B+**
+
+**Three of five slices built, reviewed, gate-green on the reviewer's final state, pushed and PR'd. Nothing
+merged — the lead merges.** Slices 4 and 5 are round 2 BY DESIGN, behind s1's stack.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| Land the stack (repair #9888 in place) | `dr-w6-s1-land-the-stack` | `…the-box-a-1` (pushed to, head `754346c0f`) | [#9888](https://github.com/FRIKKern/barkpark/pull/9888) | controller 3/0 · unit 19/0 · `mix format` clean on 4 files · assertion mutation-proven |
+| A dev-built `bp` says UNREPORTED | `dr-w6-s2-stale-binary-says-so` | `…never-up--1-r` | [#9929](https://github.com/FRIKKern/barkpark/pull/9929) | build + vet + `go test ./internal/cli/...` green (23.2s) · `gofmt -l ./internal` empty |
+| The proofs and the ledger repair | `dr-w6-s3-the-proofs-and-the-ledger-repair` | `…after-measuremen-2` (unchanged) | [#9930](https://github.com/FRIKKern/barkpark/pull/9930) | doc-budgets rc=0 · docs-anchors rc=0 · non-ledger files changed = 0 |
+
+**The headline is that the epic measured itself and found a REGRESSION.** `dr-w6-s3` re-derived the
+after-measurement through `DeployLedger.census/2` on the live control plane (`rpc`, not `eval` — `eval`
+boots a VM with no Repo) and published all three conventions side by side rather than the one that
+flatters. Doctrine-matched: **41.77% → 43.96%, +2.19pp worse.** Busy-refusal pressure genuinely fell
+(47.61% → 30.12%) — wave 1's re-key works — but settled failures rose, and `BOX_500` per attempt DOUBLED
+(8.67% → 14.89%; doubled, not tripled — count went 6.1× while volume went 3.5×). The flattering row
+(89.38% → 43.96%) compares two DIFFERENT conventions and is published only as the row that must never be
+called repair. The digest's 46.41% is unreproducible at these pins: reported and dropped. Every number
+carries its re-derivation command, and every disagreement with the brief's figure is printed beside it
+rather than reconciled away.
+
+**The cap's structural verdict is in, and it is stronger than "disjoint".** The feared masking does not
+exist: the two arms' DECIDING sets are disjoint by construction (`already_running` decides iff the
+requesting slug is itself in flight; `box_at_capacity?` is reached only when it is not), the predicates
+DO overlap on a same-slug build, but both arms refuse — so the ordering only decides which LABEL a
+same-slug refusal carries. The reviewer re-derived this independently at `origin/main`
+(`deploy_runner.ex:440-470`, `581`, `721-760`, `@build_slot_capacity 1`) and confirms it, including two
+details the doc omits without changing the conclusion: `box_at_capacity?/2` falls through to
+`foreign_build_in_flight?/1` when `building_slugs/1` is empty, and `takes_build_slot?/1` exempts
+rollback/teardown. Neither upstream lock preempts (the unique partial index is same-site; Oban's
+`site_deploy: 1` serializes JOBS, not builds).
+
+**And the cap is still not on the box.** Re-derived on guerrilla at write time: `CAP_ABSENT` — the commit
+object is not merely un-merged, it is not present; `grep -c box_at_capacity deploy_runner.ex` = 0; zero
+`box_at_capacity` rows have ever existed in the production ledger. Read that correctly — a predicate that
+is not on the box cannot refuse. It is a proof NOT ATTEMPTED, not a failed proof.
+
+**What the wave did NOT deliver, plainly.** Nothing merged, so the wish moved forward on paper only. The
+owner still cannot see space, still cannot see the box's own 5xx rate, and the box still does not cap
+builds in production. The three clauses of the wish are all sitting in open PRs behind a **frozen GitHub
+Actions dispatcher** — 59 queued / 0 in_progress for the whole run, zero workflow runs created for #9888's,
+#9929's, #9930's or this charter PR's heads. That is the same condition D80/D95 name; it is not a defect in
+any of this work, but it means the wave's own definition of done (LAND the stack) was not reachable.
+
+**Reviewer fixes, both of them the epic's own doctrine turned on itself.** (a) `754346c0f` on #9888: the
+`OC24` dangler the builder fixed in the controller survived in TWO more files — `request_stats.ex` and
+`api/lib/barkpark_web/router.ex`. `grep -rn OC24 .claude/workflows/` returns exactly one hit
+(`bp-cloud-console-charter.md:49`, console AUDIT scope), and `D48` in THIS charter (line 828) is the
+journal-cap decision, not an "honest-meters law". All three now cite `BarkparkWeb.RequestStatsTest` and
+`RequestStatsControllerTest` — which move with the code by construction — instead of a charter letter,
+which does not. (b) `b2c9b2541` on #9929: `bp upgrade`'s dev-build refusal said `make cli-build`, which
+builds `dist/bp` and never touches PATH — a user who followed it verbatim re-ran the same stale binary and
+got the identical refusal. It now names `git pull && make cli-install` (Makefile:171), the same remedy the
+doctor's unreported leg names. One fact, one remedy, two surfaces.
+
+**A charter correction, dated 2026-08-06.** D75's own text (line ~1566) says the 5xx ring "reads 0 for the
+first minute after boot". The shipped code does NOT: an empty window returns `nil`, and both the moduledoc
+and the controller test now pin that explicitly, because a `0.0` on an unmeasured box reads "this box is
+serving no errors" — the most reassuring lie a meter can print. The code is right and the charter sentence
+is stale; do not re-quote it.
+
+**Ledger.** All three slice tasks were claimed, stamped as the builders worked, and left `in_progress` with
+only merge-gated criteria open — honest, no fabrication found. Reviewer stamped `dr-w6-s2` idx 7 (the D66
+sentence, now verbatim in #9929's body, with the honest caveat that the dispatch verdicts are DERIVED from
+the file set, not OBSERVED, because no run exists). `dr-w6-followup-reqstats-dangling-oc24` stamped 2/2 and
+left open — it rides #9888 to main. Filed: `dr-w6-followup-whoami-cli-freshness-leg` (the tri-state lives
+on two surfaces, not three — `bp whoami`'s spine carries no CLI leg at all).
+
+**What the next wave takes.** MERGE, in order: **#9887** (the eleven-rung ladder — it is what actually
+changes what the owner sees, and it unblocks `dr-w6-s5`), then **#9889** (CP space ingest — unblocks
+`dr-w6-s4`), then **#9888** and **#9890** in any order, then **#9929**/**#9930**. Get #9888 and #9889 in
+BEFORE cch #9857's builders dispatch — their slice 1 rewrites 18 route-scope sites in
+`cloud/lib/barkpark_cloud/web/router.ex`, 423 lines from our nearest hunk. Then dispatch `dr-w6-s4`
+(space reaches eyes — still HIGH-FLIP-RISK on the `-kx` unit change, still owed an independent second
+reviewer) and `dr-w6-s5` (5xx + degraded keep the reading). Then, and only then, is the live cap refusal
+attemptable: its single unblock condition is `git merge-base --is-ancestor ef77af274 HEAD` returning
+CAP_PRESENT on guerrilla — i.e. the box's pull, not another merge. **Stratify any failure-rate measurement
+taken across that merge boundary** — deferrals sit inside volume and outside the numerator, so the cap will
+step the rate BY DESIGN, and reading that as repair would be the exact error Part A §3 exists to prevent.
