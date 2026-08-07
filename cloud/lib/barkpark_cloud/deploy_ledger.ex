@@ -82,7 +82,7 @@ defmodule BarkparkCloud.DeployLedger do
   alias BarkparkCloud.Registry.Site
   alias BarkparkCloud.Repo
 
-  @typedoc "A failure class name — one of `classes/0` (or `not_attempted_classes/0`)."
+  @typedoc "A failure class name — one of `classes/0` (or a never-attempted class, `not_attempted?/1`)."
   @type class :: String.t()
 
   # The taxonomy, ORDERED most-frequent-first on the 2026-08-05 corpus. Order is
@@ -182,9 +182,11 @@ defmodule BarkparkCloud.DeployLedger do
   @spec classes() :: [class()]
   def classes, do: @classes
 
-  @doc "Classes that were never a deploy ATTEMPT and never enter a rate denominator."
-  @spec not_attempted_classes() :: [class()]
-  def not_attempted_classes, do: @not_attempted_classes
+  # `not_attempted_classes/0` used to sit here: a public accessor for
+  # `@not_attempted_classes`. Deleted by dr-w16-s3 after the reachability census
+  # measured it at ZERO callers in cloud/lib AND zero references in cloud/test —
+  # the only genuinely dead public on this module. The attribute stays; the
+  # membership question is answered by `not_attempted?/1`, which is called.
 
   # No `in_flight_statuses/0` accessor. `@in_flight_statuses` is read by
   # `census/3` in this file and by nobody else, and a public accessor with zero
