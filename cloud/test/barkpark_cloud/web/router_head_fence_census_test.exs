@@ -137,8 +137,26 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # in-memory fold — no row minted, no credential burned, no nonce spent. So a
   # bare HEAD of it is inert and no `side_effecting_get?/1` clause is owed.
   # agent_or_worker and public are unchanged: no existing route changed class.
-  @baseline_total 65
-  @baseline_session 46
+  # 2026-08-07: 66 / 47 / 7 / 12. deploy-reliability dr-w16-s6 added ONE
+  # session-or-PAT GET, `/v1/deploy-ledger/census` — the team-scoped twin of the
+  # operator route above, added because that operator route 403s for every real
+  # account (PLATFORM_ADMIN_EMAILS is unset in production), so the correct number
+  # this epic spent sixteen waves building was unreadable by anyone. It counts as
+  # SESSION because `Auth.require_user_or_pat` is a session wrapper here; the
+  # `Auth.require_ability("read")` beside it narrows a PAT, it does not reclassify
+  # the route. RULED NOT SIDE-EFFECTING by reading the whole path:
+  # `require_ability/2` is a pure map lookup, and the handler is
+  # `Registry.list_sites_for_team/1` (a `Repo.all`), an in-Elixir list
+  # intersection, `DeployLedger.parse_window/2` (string parsing) and
+  # `DeployLedger.census/3` (one grouped `Repo.all` + an in-memory fold) — no row
+  # minted, no credential burned, no nonce spent. The one write anywhere on the
+  # path is the throttled `last_used` bookkeeping `require_user_or_pat/2` defers,
+  # which is not a state change a HEAD could exploit and which every one of the
+  # session GETs already inside this baseline shares. So a bare HEAD is inert and
+  # no `side_effecting_get?/1` clause is owed. machine and public are unchanged:
+  # no existing route changed class.
+  @baseline_total 66
+  @baseline_session 47
   @baseline_machine 7
   @baseline_public 12
 

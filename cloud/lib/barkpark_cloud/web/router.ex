@@ -104,6 +104,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
+      GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
       PATCH   /v1/admin/barkparks/:id/channel worker set one box's release channel
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
@@ -3548,6 +3549,112 @@ defmodule BarkparkCloud.Web.Router do
       end
     end
   end
+
+  # GET /v1/deploy-ledger/census?from=&to=[&site_ids=a,b] → 200 <census + scope>
+  # — THE SAME census, over the CALLER'S OWN sites (dr-w16-s6). The operator
+  # route above is gated by `require_platform_operator`, and PLATFORM_ADMIN_EMAILS
+  # is unset in production: measured live this wave, that route answers
+  # `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
+  # to every real account, in the same minute GET /v1/sites answers 200 to the
+  # same token. Sixteen waves built a correct number nobody could read. This is
+  # the read.
+  #
+  # ONE census computation, never two: `DeployLedger.census/3` is called here
+  # with a `:site_ids` scope and nowhere else re-implemented
+  # (`PublishClock.census/3` is the in-repo precedent for an opt rather than a
+  # second entry point).
+  #
+  # THE CREDENTIAL IS `require_user_or_pat` + `require_ability("read")`, NOT a
+  # session. A session-only gate is PAT-dead (D219), so no CI or automation
+  # credential could ever compute the owner's own number — the same class of
+  # unreadable-by-construction defect the operator route already demonstrates.
+  # The precedents agree: GET /v1/barkparks and GET /v1/sites both gate this way.
+  #
+  # THE SCOPE IS DERIVED, NEVER SUPPLIED. `deployments` has NO `team_id` column
+  # (Registry.Deployment `belongs_to :site` only), so team scope must hop through
+  # `sites.team_id`. `?site_ids=` therefore NARROWS the team's own set — it is
+  # INTERSECTED with it, never used as the source. If it were the source, a
+  # caller naming another team's site id would read that team's rows out of their
+  # own census body.
+  #
+  # THE INTERSECTION IS COMPUTED IN ELIXIR, not in SQL. `sites.id` and
+  # `deployments.site_id` are `binary_id`, so a client-supplied non-UUID reaching
+  # either column raises `Ecto.Query.CastError` → a 500, i.e. a brand-new silent
+  # failure on the route this epic built to END silent failures. Filtering the
+  # OWNED list (always well-formed UUIDs from the DB) drops junk before any query
+  # runs, so `?site_ids=nope` is an honest `200` with `volume: 0`.
+  #
+  # A TEAMLESS CALLER GETS 422 no_team, not 404. Every one of the router's 404
+  # nil-team arms belongs to a PATH-ID route, where 404 correctly conflates
+  # "wrong team" with "no such id". This route has no path id, so a 404 would lie
+  # about a route that exists; a 403 would assert an authority no grant supplies.
+  get "/v1/deploy-ledger/census" do
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      true ->
+        team = conn.assigns.current_team
+        owned = Enum.map(Registry.list_sites_for_team(team), & &1.id)
+        scoped = intersect_owned_sites(owned, conn.query_params["site_ids"])
+
+        case DeployLedger.parse_window(conn.query_params["from"], conn.query_params["to"]) do
+          {:ok, from, to} ->
+            census = DeployLedger.census(from, to, site_ids: scoped)
+            json(conn, 200, Map.put(census, :scope, census_scope(team, scoped)))
+
+          {:error, detail} ->
+            json(conn, 422, %{error: "invalid_window", detail: detail})
+        end
+    end
+  end
+
+  # The scope line the team census prints on EVERY response. It carries the team
+  # SLUG and not the team_id, because the route already holds the whole %Team{}
+  # and a UUID cannot render "team guerrilla — 13 sites".
+  #
+  # AND THE COUNT NAMES ITS POPULATION. `registered_sites` is sites REGISTERED to
+  # the team and inside this request's scope — NOT the number of sites that
+  # deployed in the window, which is smaller and always will be: on the live
+  # control plane the owning team holds 13 sites while only 12 distinct site_ids
+  # appear in `deployments` at all (`auto-proof` has never deployed). An
+  # unlabelled "13" beside a `sites` node of length 12 is the first thing an
+  # operator would have to explain away.
+  defp census_scope(team, site_ids) do
+    %{
+      team: team.slug,
+      site_ids: site_ids,
+      registered_sites: length(site_ids),
+      registered_sites_population:
+        "sites registered to this team and inside this request's scope — not the " <>
+          "number of sites that deployed in the window (a site that has never " <>
+          "deployed is counted here and absent from `sites`)"
+    }
+  end
+
+  # The team's own site ids, optionally NARROWED by `?site_ids=a,b`. The owned
+  # list is the SOURCE and the request is only ever a filter over it, so a
+  # foreign id contributes nothing and a malformed one cannot reach a binary_id
+  # column. Absent/blank param = the team's whole set.
+  defp intersect_owned_sites(owned, raw) when is_binary(raw) do
+    requested =
+      raw
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    case requested do
+      [] -> owned
+      list -> Enum.filter(owned, &(&1 in list))
+    end
+  end
+
+  defp intersect_owned_sites(owned, _raw), do: owned
 
   # GET /v1/operator/deliveries → 200 {deliveries: [<delivery_json>]} — the
   # FLEET-DIGEST send log (team_id nil, event fleet_digest), newest first. These

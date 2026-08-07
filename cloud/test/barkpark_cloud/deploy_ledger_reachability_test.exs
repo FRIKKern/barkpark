@@ -616,7 +616,35 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
     assert {census.arity, census.min_arity} == {3, 2}
 
     {_entries, callers} = measured()
-    assert [%{arity: 2}] = callers[{:census, 3}].external
+
+    # TWO external call sites, and the pair is PINNED — dr-w16-s6 widened this
+    # from the single-element `[%{arity: 2}]` it was, because the operator route
+    # (`census(from, to)`, arity 2) 403s for every real account and the
+    # team-scoped route (`census(from, to, site_ids: …)`, arity 3) is the read a
+    # non-operator can actually reach. Widened by naming the EXACT arity SET, not
+    # by loosening the match: `!= []` or a `>= 1` count would admit a third
+    # entry point silently, and "exactly one census computation" is the property
+    # this row exists to hold. A new caller must edit this line on purpose.
+    arities = census_caller_arities(callers)
+    assert arities == [2, 3]
+
+    # AND THE WIDENED FORM CAN STILL LOSE. The same assertion against the walker
+    # that matches no call shape — a widening that survived a dead extractor
+    # would be a vacuity, which is exactly what this file exists to refuse.
+    broken = Census.callers(publics(), @lib, @ledger, walker: :broken)
+    assert census_caller_arities(broken) == []
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert census_caller_arities(broken) == [2, 3]
+    end
+  end
+
+  defp census_caller_arities(callers) do
+    callers
+    |> Map.get({:census, 3}, %{external: []})
+    |> Map.fetch!(:external)
+    |> Enum.map(& &1.arity)
+    |> Enum.sort()
   end
 
   # ---------------------------------------------------------------------------
