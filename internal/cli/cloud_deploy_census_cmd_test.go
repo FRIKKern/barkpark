@@ -734,6 +734,16 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 		}
 	}
 
+	// dr-w15-s3: the OTHER arm must be gone. `renderDeployDelivery`'s `d == nil`
+	// arm printed "NOT MEASURED — this control plane sends no delivery census" to
+	// every operator forever, because nothing in cloud/lib called
+	// `DeployLedger.delivery/3` and the census route emitted no `delivery` key.
+	// The route emits it now (`Web.Router.deploy_census_json/2`), so an envelope
+	// that CARRIES the node must never render the sentence that says it doesn't.
+	if strings.Contains(stdout, "NOT MEASURED") {
+		t.Fatalf("the delivery node is present, yet the render still claims it was not measured:\n%s", stdout)
+	}
+
 	if !strings.Contains(stdout, "clock: deployment row: inserted_at") {
 		t.Fatalf("the clock must be printed beside the latency:\n%s", stdout)
 	}
@@ -752,6 +762,12 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 	if strings.Contains(stdout, ">= 0s") || strings.Contains(stdout, "p95  0") {
 		t.Fatalf("a refused percentile or an unset bound rendered as zero:\n%s", stdout)
 	}
+
+	// dr-w15-s3 / charter D245: acceptance for the emit is a RUN, not an
+	// assertion. Log what an operator actually sees so `go test -run
+	// TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting -v` IS the evidence,
+	// rather than a green tick that proves only that a matcher matched.
+	t.Logf("`bp cloud deployments` against a control plane that emits `delivery`:\n%s", stdout)
 }
 
 // TestCloudDeploymentsWithoutDeliverySaysNotMeasured: against TODAY's payload,

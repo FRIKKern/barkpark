@@ -3534,6 +3534,10 @@ defmodule BarkparkCloud.Web.Router do
   # "now minus" window silently compares two different populations and reports a
   # volume collapse as a repair. Below `DeployLedger.min_sample/0` attempted rows
   # the rate node REFUSES a percentage and says so instead.
+  #
+  # W15 S3: the envelope also carries `delivery` — the time-to-web census, whose
+  # percentiles REFUSE rather than print a number they cannot identify. See
+  # `deploy_census_json/2`.
   get "/v1/operator/deploy-ledger/census" do
     conn = Auth.require_platform_operator(conn, [])
 
@@ -3542,7 +3546,7 @@ defmodule BarkparkCloud.Web.Router do
     else
       case DeployLedger.parse_window(conn.query_params["from"], conn.query_params["to"]) do
         {:ok, from, to} ->
-          json(conn, 200, DeployLedger.census(from, to))
+          json(conn, 200, deploy_census_json(from, to))
 
         {:error, detail} ->
           json(conn, 422, %{error: "invalid_window", detail: detail})
@@ -9462,6 +9466,29 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  # The census envelope the operator route answers with: `DeployLedger.census/3`
+  # (counts per class, per site, and the rate WITH its denominator) plus the
+  # `delivery` node — how long content WAITED to reach the web.
+  #
+  # deploy-reliability W15 S3. `DeployLedger.delivery/3` shipped in W11 with its
+  # Go reader (`cloudclient.DeployDelivery`, PR #10192) and NO caller anywhere in
+  # `cloud/lib` — proven by MUTATION, not by grep: renaming it left the whole
+  # control plane compiling. The consequence was not "a missing feature": the
+  # CLI's `renderDeployDelivery` `d == nil` arm printed "NOT MEASURED — this
+  # control plane sends no delivery census" to every operator, forever, as the
+  # only arm it had ever executed. This route is the ONLY place the census
+  # escapes Elixir, so this is the one hop that ends that.
+  #
+  # It is a SECOND grouped read over the same window, deliberately not folded
+  # into `census/3`: census/3 groups by [site_id, stage, status, failure_reason]
+  # and carries no time dimension at all, and widening it to carry one would put
+  # a latency estimator's censoring policy inside a counter. Two reads, two
+  # honest shapes, one envelope.
+  defp deploy_census_json(from, to) do
+    DeployLedger.census(from, to)
+    |> Map.put(:delivery, DeployLedger.delivery(from, to))
+  end
+
   defp provider_json(p) do
     # encrypted_token is NEVER serialized — the connected token stays at rest.
     #
@@ -10978,6 +11005,26 @@ defmodule BarkparkCloud.Web.Router do
       #     17,395 failed rows carry real 0x1B bytes from the build PTY.
       failure_class: DeployLedger.classify(d),
       failure_reason_raw: d.failure_reason |> FailureCopy.scrub() |> FailureCopy.strip_ansi(),
+      # deploy-reliability W15 S3 (the dr-w14-s3 follow-up): WHICH PHASE the box
+      # refused in — "start" (the trigger; no build ever began) or "poll" (a beat
+      # of a build already running, killed mid-flight). Same class, very
+      # different blast radius, and the taxonomy deliberately does NOT split on
+      # it, so this is the only way the phase reaches a reader.
+      #
+      # Read off the RAW column, never the humanized prose above: `humanize/1`
+      # folds many causes onto one sentence and the caption the phase lives in is
+      # exactly what it rewrites.
+      #
+      # `nil` on every row that is not a box refusal — never coerced to "start",
+      # because "this was not a refusal" and "this was refused at trigger time"
+      # are different sentences.
+      #
+      # HONEST LIMIT: this is a TRIPWIRE, not a live discriminator. cloud-db-1
+      # holds ZERO poll-phase rows all-time against 14,848 start-phase ones, so
+      # in production today this key answers "start" or nil and nothing else. It
+      # is emitted so the FIRST poll refusal is legible the day it lands, not
+      # because it distinguishes anything in the corpus we have.
+      refusal_phase: DeployLedger.refusal_phase(d.failure_reason),
       # deploy-reliability W13 S3: the WAIT, as data. W12 shipped the writer
       # (`Sites.Deploy.defer/3`) and no reader at all — these three columns
       # populated into a serializer that did not mention them, so the only way
