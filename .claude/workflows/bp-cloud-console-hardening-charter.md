@@ -2154,7 +2154,61 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
-### 2026-08-07 — wave 43 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd; 3 round-2 slices deferred by the sequenced-rounds law — grade A)
+### 2026-08-07 — wave 45 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd; 2 round-2 slices deferred by the sequenced-rounds law — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The preview corpus mints an actor who is not the owner — by IDENTITY | `cch-w45-s1-corpus-mints-an-actor-who-is-not-the-owner` | `…the-preview-corpus-mints-an-actor-who-is-0` | [#10295](https://github.com/FRIKKern/barkpark/pull/10295) | none — correct as built. Reachability (the flagged flip-risk) independently re-derived: making `me()` ignore `actorId` reds `members-admin-actor` with ada's row printed self-tagged; loosening one `deepEqual` reds naming the scenario |
+| The sole owner's own row stops offering a demotion the server 409s | `cch-w45-s2-self-row-stops-offering-a-demotion-the-server-refuses` | `…the-sole-owner-s-own-row-stops-offering--1-r` | [#10296](https://github.com/FRIKKern/barkpark/pull/10296) | **one fix.** The builder named it himself: the guard was proved only in units, with NO live-DOM scenario exercising the withheld state. `members-populated` now deep-equals the set of emails `[data-member-role]` is offered on and asserts the explanatory sentence — mutation-proved (deleting the guard prints `offered on ["ada…","lin…","rex…"]`). Tenancy re-derived independently in both directions, and against the server: `accounts.ex:1801` rank arm, `:1851` last-owner rollback, `:1692` `list_team_members/1` with no limit/offset, `locked_owner_count/1` counting exactly the roster's owner rows |
+| The binding census's pinned predicates must name a real declaration — check (2g) | `cch-w45-s3-census-pinned-predicates-must-name-a-declaration` | `…the-binding-census-s-pinned-predicates-m-2` | [#10297](https://github.com/FRIKKern/barkpark/pull/10297) | none — correct as built, and correctly SMALL. Re-derived at rc 2 twice: a pinned name that does not exist, and the real decay case — renaming `function notifCanManage(` in app.js, which names all five rows that pin it |
+| The control plane owns its own catalog capability | `cch-w45-s4-control-plane-owns-its-catalog-capability` | `…the-control-plane-owns-its-own-catalog-c-3-r` | [#10298](https://github.com/FRIKKern/barkpark/pull/10298) | **one fix.** The builder's named blind spot, closed: after the overlay NO fixture kind is served `catalog:false` at all (hetzner/azure overlaid, `fake` honestly true from the Go seam), so widening `own_catalog_capability/2` to every kind would pass every arm. A labelled decay-protection arm now pins the `@neutral_kinds` fence, mutation-proved by unfencing it. The derivation (flagged flip-risk) re-derived by renaming the azure clause head → the BOTH-WAYS arm reds; and the RED-ON-MAIN proof re-run by removing the overlay → 2 arms red naming both kinds |
+
+**WHAT LANDED.** Four lies, each of a different kind. The console told the **sole owner** it could
+change its own role, in the DEFAULT preview scenario, every in-range choice of which
+`do_update_role` rolls back with `:last_owner` — reachable because `update_member_role_as/4`'s rank
+arm is `not self? and not outranks?(…)`, so a self change skips the authority refusal and walks into
+the state one. The **control plane** told a reader that hetzner and azure publish no size-and-region
+catalog "here" while the same session paints their priced regions two clicks away — the Go seam's
+`false` was honest about Go and dishonest about the CP that forwarded it. The **census** printed a
+predicate name as if it still fenced a call site, with nothing resolving that name against `app.js`.
+And the **corpus** — the instrument every one of those guards is scored on — had never once minted
+an actor who was not roster row 0, so every rank-relative predicate in the members panel was green
+by construction: it was only ever asked about rows the actor outranked.
+
+**THE SHAPE THAT MAKES THIS WAVE WORTH ITS COST.** s1 is the precondition and it landed with the
+rest, not after them. Two new cells — an acting ADMIN by IDENTITY over the unchanged roster, and an
+acting owner against a roster grown by CONCAT to hold a PEER OWNER — paint the one cell where the
+server's two member verbs *disagree* (`remove_member_as/3` has an owner escape hatch,
+`update_member_role_as/4` does not). Both assert by ROW: the exact sorted set of `data-email` values
+each control is offered on. That is what turns "the panel contains `>Change role<`" — true of any
+roster with one manageable row — into an assertion that can lose.
+
+**INTEGRATION, RUN NOT REASONED.** The three console slices were octopus-merged onto `b00d793c0`
+and the whole instrument set re-run on the merge: smoke 108/108 with 0 FAIL, `__app.test.mjs`
+957/957, breakpoint-sweep rc 0 + 51/51, binding census rc 0 (79/79 unmoved), `__css_check.mjs` rc 0.
+s2's guard and s1's new cells are load-bearing on each other and agree: `members-peer-owner` keeps
+its self-row offer (two owners → the guard has no opinion), `members-admin-actor` is untouched (the
+actor is not the sole owner), and only the default scenario loses the button.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+1. **Merge round 1 first, then dispatch round 2 in order.** `cch-w45-s5` (the two member-reachable
+   rail verbs: `attachDomain`, `rollbackInstance`; plus DELETING the dead `#inst-retry` wire) waits
+   on **s2** — same file. `cch-w45-s6` (the lifecycle CLI chip names its provider + the D177 ellipsis
+   tail) waits on **s5**. Both were deferred BY DESIGN under the sequenced-rounds law, not stalled.
+2. **`capability_gap_reason(_kind, "catalog")` is now unreachable for every committed kind.** It is
+   deliberately kept (it stays true for a future catalog-less kind), and the new decay arm is the
+   only thing standing where a behavioural arm cannot. The day a catalog-less connectable kind
+   (cloudflare) gets a capability row, delete the decay arm and let the real one bite.
+3. **s2's premise has no tripwire** — filed as
+   `cch-w45-bl-no-tripwire-on-the-members-roster-completeness-premise`. `isSoleOwnerSelf` is correct
+   only because `GET /v1/teams/:id/members` is complete; that fact lives in a COMMENT, and nothing
+   reds if the route later grows a limit. A predicate that then fails closed withholds a control the
+   server honours — this epic's lie running backwards.
+4. **The wave-44 log entry is missing from this charter.** Wave 45's is the first entry above wave
+   43's. Whoever owns wave 44's paper should backfill it rather than leave the log implying it
+   never ran.
+
+ (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd; 3 round-2 slices deferred by the sequenced-rounds law — grade A)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
 |---|---|---|---|---|
