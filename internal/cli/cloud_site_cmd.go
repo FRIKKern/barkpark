@@ -40,6 +40,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -810,6 +812,91 @@ func siteFailure(d cloudclient.SiteDeployment) (stage, reason string) {
 	return stage, reason
 }
 
+// siteDeployDeferred is the control plane's `deferred` status: a SETTLED row
+// that is not a failure. The box refused this round (its concurrent-build cap is
+// full, or a deploy for this site is already running) and a rebuild carrying the
+// same content was re-queued. It is terminal in the transition table, so a
+// deferred row never becomes anything else — but it is also not a drop, which is
+// exactly why it must not be rendered with the failure vocabulary.
+func siteDeployDeferred(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "deferred")
+}
+
+// siteDeferralChainRe reads the chain depth the control plane writes into a
+// deferred row (deploy-reliability charter D99, PR #9905): "refusal 3 of 12".
+// The producer literal is in cloud/lib/barkpark_cloud/sites/deploy.ex defer/3 —
+// this pattern and that sentence are ONE contract, and a pre-D99 control plane
+// simply has no match, which is why every caller has an honest no-match arm
+// instead of printing a zero.
+var siteDeferralChainRe = regexp.MustCompile(`refusal (\d+) of (\d+)`)
+
+// siteDeferralText is what a DEFERRED row says, in the same order of decreasing
+// truth siteFailure uses — minus its fallback, which names a health gate that a
+// deferred row never reached. Silence stays silence here.
+func siteDeferralText(d cloudclient.SiteDeployment) string {
+	if r := strings.TrimSpace(d.FailureReason); r != "" {
+		return r
+	}
+	for _, st := range d.Stages {
+		if det := strings.TrimSpace(st.Detail); det != "" {
+			return det
+		}
+	}
+	return ""
+}
+
+// siteDeferralChain is the chain's DEPTH and the bound its cause is measured
+// against, parsed out of the row's own words. ok is false against a control
+// plane that predates D99 (or any row whose sentence does not carry the pair).
+func siteDeferralChain(d cloudclient.SiteDeployment) (depth, bound int, ok bool) {
+	m := siteDeferralChainRe.FindStringSubmatch(siteDeferralText(d))
+	if m == nil {
+		return 0, 0, false
+	}
+	depth, derr := strconv.Atoi(m[1])
+	bound, berr := strconv.Atoi(m[2])
+	if derr != nil || berr != nil || depth < 1 || bound < 1 {
+		return 0, 0, false
+	}
+	return depth, bound, true
+}
+
+// siteDeferralLine is the operator's one-line read of a deferral chain.
+//
+// THE HONEST BOUND, and the reason this line spells out what is being counted
+// rather than printing a bare "3 of 12": the depth is the number of CONSECUTIVE
+// deferrals OF THE SAME CAUSE at the head of this site's deployment stream,
+// scanned only @deferral_scan_depth (14) rows deep by the control plane's
+// consecutive_deferrals/2. It is NOT a lifetime count — one successful deploy,
+// or one deferral of a different cause, resets it to zero — so a site that
+// deferred 75 times in 12h can legitimately read 3 here, and one did. A bare
+// "3 of 12" would read as a countdown to a drop a merely-slow box may never
+// reach, which is the opposite of the truth.
+func siteDeferralLine(d cloudclient.SiteDeployment) string {
+	depth, bound, ok := siteDeferralChain(d)
+	if !ok {
+		return "the box refused this deploy and a rebuild was re-queued — this control plane does not report how deep the refusal chain is"
+	}
+	return fmt.Sprintf(
+		"refusal %d of %d consecutive — counts only back-to-back refusals of the SAME cause, so any successful deploy resets it to 0; it is a zero-progress guard, not a countdown",
+		depth, bound,
+	)
+}
+
+// siteDeferredRow picks which row a status header's deferral section describes:
+// the NEWEST one when it deferred (that is the round the operator is waiting
+// on), else the live pointer if it is itself a deferred row. nil when neither
+// deferred — the common case, where nothing is printed at all.
+func siteDeferredRow(dep, newest *cloudclient.SiteDeployment) *cloudclient.SiteDeployment {
+	if newest != nil && siteDeployDeferred(newest.Status) {
+		return newest
+	}
+	if dep != nil && siteDeployDeferred(dep.Status) {
+		return dep
+	}
+	return nil
+}
+
 // runCloudSiteRollback is `bp cloud site rollback <site>` — the sub-second
 // symlink flip to the previous good build.
 func runCloudSiteRollback(out *writer, g globals, args []string) int {
@@ -1412,7 +1499,8 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	// THE STALENESS ARM. The live pointer and the newest ledger row disagree, and
 	// the newest one failed — so "live" alone is a half-truth: it names a build the
 	// box is still serving BECAUSE the next one never got switched in. Say both.
-	if newest != nil && siteDeployFailed(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
+	newestFailedStale := newest != nil && siteDeployFailed(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID))
+	if newestFailedStale {
 		if dep != nil {
 			m["status"] = "live — but the NEWEST deploy FAILED (visitors still see this older build)"
 		} else {
@@ -1431,6 +1519,40 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	// declared it, so it decoded to nothing and printed as nothing.
 	if fc := siteFailureClass(dep, newest); fc != "" {
 		m["failure class"] = hzCell(fc)
+	}
+	// DEFERRED IS NOT FAILED, and until D99 it rendered as NOTHING at all here:
+	// the reason arm above fires only on failed/cancelled, so a settled `deferred`
+	// row printed a bare status word and the operator could not tell a first blip
+	// from a chain eight rounds deep. The chain gets its own row rather than a
+	// sentence buried in prose, because "how deep am I" is the whole question a
+	// deferral raises.
+	//
+	// REVIEW FIX (dr-w7): gated on `!newestFailedStale`. The two arms both write
+	// `reason`, and this one runs SECOND — so when the newest row FAILED while the
+	// live pointer happened to be a deferred row, the header said "the NEWEST
+	// deploy FAILED" and then printed the older deferral's sentence underneath it,
+	// describing a different row than the status line names. The failure is the
+	// louder truth and it wins; the live pointer is only ever written on a `live`
+	// transition today, so this is a defensive ordering guard, not a live bug.
+	if dd := siteDeferredRow(dep, newest); dd != nil && !newestFailedStale {
+		if newest != nil && siteDeployDeferred(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
+			// Same shape as the staleness arm above, for the sibling half-truth:
+			// "live" alone names a build the box is still serving BECAUSE the next
+			// one was refused — the difference being that this one is re-queued,
+			// not lost, and the copy must not scare an operator about a deploy
+			// that is going to run.
+			if dep != nil {
+				m["status"] = "live — the NEWEST deploy was DEFERRED by the box (a rebuild is already re-queued)"
+			} else {
+				m["status"] = "never went live — the newest deploy was DEFERRED by the box (a rebuild is already re-queued)"
+			}
+			m["newest deployment"] = hzCell(newest.ID)
+			m["newest status"] = hzCell(newest.Status)
+		}
+		m["deferral"] = siteDeferralLine(*dd)
+		if txt := siteDeferralText(*dd); txt != "" {
+			m["reason"] = sanitizeCell(txt)
+		}
 	}
 	return m
 }
@@ -1522,6 +1644,17 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.FailureReasonRaw != "" {
 		m["failure_reason_raw"] = d.FailureReasonRaw
+	}
+	// deploy-reliability W7 (charter D99, PR #9905): the deferral chain, as
+	// NUMBERS a script can threshold on rather than a sentence it must grep. Only
+	// on a deferred row, and only when the control plane actually said it — a
+	// pre-D99 box carries no pair and gets no keys, never a zero that would read
+	// as "no chain".
+	if siteDeployDeferred(d.Status) {
+		if depth, bound, ok := siteDeferralChain(d); ok {
+			m["deferral_depth"] = depth
+			m["deferral_bound"] = bound
+		}
 	}
 	if d.Environment != "" {
 		m["environment"] = d.Environment
