@@ -165,7 +165,7 @@ func rollbackCell(s *string) string {
 func rollbackFail(out *writer, ref string, err error) int {
 	var re *cloudclient.RollbackError
 	if errors.As(err, &re) {
-		return useError(out, rollbackErrLabel(re.Code), rollbackMessage(ref, re), rollbackExit(re.HTTPStatus))
+		return useError(out, rollbackErrLabel(re.Code), rollbackMessage(ref, re), rollbackExit(re.HTTPStatus, re.Reason))
 	}
 	return cloudFail(out, "roll instance back", err)
 }
@@ -173,7 +173,21 @@ func rollbackFail(out *writer, ref string, err error) int {
 // rollbackExit maps the refusal's HTTP status onto the CLI's stable exit ladder
 // (charter W6 D23). Mapping by STATUS FAMILY (not by code) keeps a new refusal
 // code the control plane may add exit-coded correctly without a CLI change.
-func rollbackExit(status int) int {
+//
+// The ONE exception is the CAUSE the server explicitly named. This route is gated
+// by require_primary_team_admin/1, whose teamless refusal is being converted from
+// 422 {"error":"no_team"} (exit 1) to 403 {"error":"forbidden","reason":"no_team"}.
+// DECIDED (cch-w40-s4): a no_team refusal stays exitGeneric on BOTH sides of that
+// conversion. Exit 3 means "your credential is bad" — a script retries auth, a
+// user re-runs `bp login` — and that is false here: the credential is fine, the
+// login simply has no active team, and the fix is `bp team use <team>`. A
+// server-side re-classification of the STATUS must not silently change the exit a
+// caller has always seen for the same cause. Only a reason the CLI RECOGNISES may
+// override the status, so an unknown cause can never move an exit code.
+func rollbackExit(status int, reason string) int {
+	if reason == "no_team" {
+		return exitGeneric // 1 — the cause, not the status family
+	}
 	switch {
 	case status == 404:
 		return exitNotFound // 4
@@ -202,6 +216,15 @@ func rollbackErrLabel(code string) string {
 // happened AND that nothing was flipped where that is the truth (a deny path must
 // never read like a partial action), and points at the fix or the next step.
 func rollbackMessage(ref string, re *cloudclient.RollbackError) string {
+	// The CAUSE the server named outranks the code: the team gate refuses a
+	// teamless caller with the bare code "no_team" today and with the generic
+	// "forbidden" + reason "no_team" after #9956. Both must produce the same
+	// sentence and the same fix, or the conversion silently changes what the user
+	// is told — and "forbidden" alone would send them to re-authenticate a
+	// credential that is not the problem.
+	if re.Reason == "no_team" || re.Code == "no_team" {
+		return fmt.Sprintf("your Cloud login has no active team, so the control plane refused the rollback of %q — run `bp team use <team>` and retry. Nothing was flipped.", ref)
+	}
 	switch re.Code {
 	case "no_previous_slot":
 		return fmt.Sprintf("instance %q has no previous slot to roll back to — its idle blue/green slot has no recorded version (a box that has only deployed once, or whose slot stamp is missing). Nothing was flipped.", ref)

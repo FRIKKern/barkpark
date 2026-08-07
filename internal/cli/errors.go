@@ -46,6 +46,13 @@ var codeExit = map[string]int{
 	"forbidden_field": exitAuth,
 	"cors_forbidden":  exitAuth,
 	"csrf_required":   exitAuth,
+	// The cloud control plane's team gate: the caller's login has no ACTIVE TEAM.
+	// Deliberately NOT the auth bucket even though it now arrives as a 403 — exit 3
+	// means "your credential is bad", and here the credential is fine; the fix is
+	// `bp team use <team>`, not a re-login. It kept exit 1 for the whole life of the
+	// 422 shape and must keep it now that the gate answers 403 with
+	// {"error":"forbidden","reason":"no_team"} (cch-w40-s4).
+	"no_team": exitGeneric,
 	"malformed":       exitUsage,
 	// An unknown filter operator (?filter[f][bogus]=x) — a malformed request,
 	// same bucket as `malformed`. Added when the query API began rejecting
@@ -201,6 +208,20 @@ func classifyError(status int, body []byte) apiError {
 		case "invalid", "settings_object_required":
 			return apiError{exit: exitUsage, code: strErr.Error, message: strErr.Error}
 		default:
+			// A refusal that names its CAUSE alongside a generic code — the shape
+			// the cloud control plane's authority gates emit,
+			// {"error":"forbidden","reason":"no_team","scope":"team"} — is classified
+			// by the CAUSE. "forbidden" alone buckets as exit 3 ("your credential is
+			// bad") and prints one word, which is a LIE for a login that merely has
+			// no active team. Only a reason the canonical table KNOWS may re-key the
+			// exit, so an unrecognised cause can never silently move an exit code;
+			// the message keeps BOTH tokens so the machine code the server sent is
+			// never hidden from the user.
+			if strErr.Reason != "" {
+				if e, known := lookupExit(strErr.Reason); known {
+					return apiError{exit: e, code: strErr.Reason, message: strErr.Error + ": " + strErr.Reason}
+				}
+			}
 			// A bare-string error the two branches above don't name (the cloud
 			// router emits {"error":"illegal_transition"} this way). Route it
 			// through the SAME table as the coded envelope so one token cannot
@@ -536,6 +557,8 @@ func (e apiError) hint() string {
 		return "set BARKPARK_API_TOKEN or run `bp setup --target connect`"
 	case "forbidden", "cors_forbidden", "csrf_required":
 		return "token needs write/admin — check `bp whoami`"
+	case "no_team":
+		return "your Cloud login has no active team — run `bp team use <team>`"
 	default:
 		return ""
 	}

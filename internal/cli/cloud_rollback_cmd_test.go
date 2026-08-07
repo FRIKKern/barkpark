@@ -263,3 +263,51 @@ func TestRunCloudRollbackStartedNoTargetSHA(t *testing.T) {
 		t.Fatalf("started envelope sanity: %v", err)
 	}
 }
+
+// TestRunCloudRollbackForbiddenNoTeam is the STATUS-FLIP guard (cch-w40-s4).
+// POST /v1/barkparks/:id/rollback is gated by require_primary_team_admin/1, which
+// today refuses a teamless caller with 422 {"error":"no_team"} and after #9956
+// refuses it with 403 {"error":"forbidden","reason":"no_team","scope":"team"}.
+// A status-only ladder turns that server-side re-classification into a DIFFERENT
+// user experience — exit 3 ("your credential is bad") and the bare word
+// "forbidden" — for a login whose credential is fine and whose fix is one
+// command. The narration and the exit must key on the CAUSE the server named, so
+// both sides of the flip say the same thing.
+func TestRunCloudRollbackForbiddenNoTeam(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"pre-flip 422", 422, `{"error":"no_team"}`},
+		{"post-flip 403", 403, `{"error":"forbidden","reason":"no_team","scope":"team"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newRollbackServer(t, tc.status, tc.body)
+			_, stderr, code := runRollback(t, "table", testInstanceID)
+			if code != exitGeneric {
+				t.Fatalf("exit = %d, want %d (the cause, not the status, decides)\nstderr:\n%s", code, exitGeneric, stderr)
+			}
+			if !strings.Contains(stderr, "no active team") || !strings.Contains(stderr, "bp team use") {
+				t.Fatalf("want the no_team narration + its fix hint:\n%s", stderr)
+			}
+			if !strings.Contains(stderr, "Nothing was flipped") {
+				t.Fatalf("a deny path must say nothing was flipped:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// TestRunCloudRollbackForbiddenRoleKeepsAuthExit: the guard above must not swallow
+// a REAL authority refusal — a 403 whose cause is a missing role stays exit 3 and
+// never offers the `bp team use` fix, which would not help.
+func TestRunCloudRollbackForbiddenRoleKeepsAuthExit(t *testing.T) {
+	newRollbackServer(t, 403, `{"error":"forbidden","reason":"role","required":"team_admin","scope":"team"}`)
+	_, stderr, code := runRollback(t, "table", testInstanceID)
+	if code != exitAuth {
+		t.Fatalf("exit = %d, want %d (auth)\nstderr:\n%s", code, exitAuth, stderr)
+	}
+	if strings.Contains(stderr, "bp team use") {
+		t.Fatalf("a role refusal must not be narrated as a missing team:\n%s", stderr)
+	}
+}
