@@ -547,9 +547,9 @@ console.log("                   (require_ability is NOT elevated for the console
 console.log("                    counting it would give 46, not " + pinnedElevated.length + ". See ruling (a) at the top of this file.)");
 console.log("");
 console.log(`THE ${pinnedUnpredicated.length} UNPREDICATED ELEVATED WRITES — an affordance a plain member can see, click, and be refused for.`);
-console.log("This census does NOT fix them. Fixing them is cch-w36-bl-unpredicated-write-affordances-fix,");
-console.log("which is still open and still the owner — its text says seventeen because it was written before");
-console.log("submitProviderCred was separated from submitInlineProviderCred by call-site keying. The population it owns is these 18.");
+console.log("This census does NOT fix them. Fixing them is cch-w38-bl-three-elevated-verbs-still-unpredicated,");
+console.log("which is still open and still the owner — an earlier owner's text said seventeen because it was written");
+console.log(`before submitProviderCred was separated from submitInlineProviderCred by call-site keying. The population it owns is these ${pinnedUnpredicated.length}.`);
 for (const r of pinnedUnpredicated) {
   const live = liveByKey(r);
   console.log(`  ${pad(`${LABEL}:${live ? live.line : "gone"}`, 34)}${pad(r.verb, 7)}${pad(r.route, 58)}${r.auth_fn || r.context_fn}`);
@@ -709,6 +709,57 @@ if (dupes.length) {
       "  Recorded overlay:",
       ...INLINE_COND_SITES.map((s) => `    router.ex:${s.line}  ${s.route}`),
       `    EXCLUDED router.ex:${INLINE_COND_EXCLUDED.line} — ${INLINE_COND_EXCLUDED.why}`,
+    ]);
+  }
+}
+
+// (2g) EVERY PINNED PREDICATE MUST NAME A REAL DECLARATION IN app.js.
+//
+//      WHAT THIS IS: DECAY PROTECTION. Nothing else. `predicate` is a PINNED
+//      JUDGEMENT (LIMIT 1 at the top of this file), so before this arm existed
+//      a predicate could be renamed or deleted out from under its pin and the
+//      census would keep printing the dead name as if it still guarded the
+//      call site — mutation-proven: `zzzNotARealPredicate`, zero occurrences in
+//      app.js, exited 0. This arm closes exactly that: a pin whose predicate no
+//      longer resolves to a declaration is a pin that has rotted, and typos die
+//      here too.
+//
+//      WHAT THIS IS NOT: it does NOT verify that the predicate FENCES the call
+//      site, and it cannot be read as if it did. It never looks at what the
+//      predicate asks. `function instanceAdminAuthority() { return true }` is
+//      GREEN under this check. Both stronger variants were measured and both
+//      are REFUTED, so do not "upgrade" this arm into them:
+//        · span containment ("the predicate appears inside the enclosing
+//          function") REDS 19 of the 22 true rows — the client predicate almost
+//          always fences the RENDER/WIRE path, not the SUBMIT path; only
+//          renderLaunchPlan, renderNewPricing and openRoleModal evaluate it in
+//          the same function as the write.
+//        · a call-graph hop walk has NO separating threshold: true rows reach at
+//          0..6 hops (one UNREACHABLE at 8) while deliberately-wrong pairings
+//          reach at 2..8, so threshold 4 certifies nonsense (disconnectGithub
+//          "fenced" by operatorRouteAllowed). It can never work here, because
+//          sendTestNotification's real fence is `testBtn.hidden = !canManage` —
+//          a DOM VISIBILITY relation. This console fences by hiding elements,
+//          and a call graph is blind to that by category.
+{
+  const declaresFn = (name) => {
+    const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp("\\bfunction\\s+" + n + "\\s*\\(").test(src) ||
+      new RegExp("\\b(?:const|let|var)\\s+" + n +
+        "\\s*=\\s*(?:async\\s+)?(?:function\\b|\\(|[A-Za-z_$][\\w$]*\\s*=>)").test(src);
+  };
+  const undeclared = PIN
+    .filter((r) => r.predicate && !declaresFn(r.predicate))
+    .map((r) => `  ${keyOf(r)} -> predicate ${r.predicate}`);
+  if (undeclared.length) {
+    die2([
+      "FAIL(2): a pinned predicate names a function that app.js does not declare.",
+      "  `predicate` is a pinned judgement, so a rename or deletion cannot reach it on its",
+      "  own — the pin just keeps printing a dead name as if the affordance were still",
+      "  fenced. Either restore the declaration or re-pin the row (and if the fence really",
+      "  is gone, the row is now UNPREDICATED and EXPECT moves with it).",
+      "",
+      ...undeclared,
     ]);
   }
 }
