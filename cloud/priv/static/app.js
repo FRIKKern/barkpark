@@ -14218,7 +14218,17 @@
   var PLAN_CATALOG = [
     { plan: "free", name: "Free", note: "Get started. No card required.", free: true, instances: 1 },
     { plan: "supporter", name: "Supporter", note: "Managed hosting for your instance.", instances: 3 },
-    { plan: "support_plus", name: "Support++", note: "Priority support and more capacity.", instances: 10 }
+    // cch-w50-s1: the note used to read "Priority support and more capacity."
+    // Half of that sentence named a capability with NO signal anywhere in the
+    // plane — no support route, address, inbox, SLA or docs page exists, and
+    // the plane's only mail identity is a no-reply sender. Deleting the
+    // "Priority support" BULLET and leaving this line would have shipped the
+    // same claim one line up (tierCardHtml renders it as <p class="tier-note">).
+    // What survives is the half the server actually enforces: this tier's
+    // instance ceiling is higher than Supporter's, pinned numerically by
+    // billing_client_mirror_test.exs against Billing.limits/0. No numeral is
+    // printed — the ceiling stays unrendered, per cch-w49-s1.
+    { plan: "support_plus", name: "Support++", note: "Managed hosting with a higher instance ceiling.", instances: 10 }
   ];
 
   var RECOMMENDED = "supporter";
@@ -14227,16 +14237,36 @@
     return PLAN_CATALOG.filter(function (x) { return x.plan === plan; })[0] || null;
   }
 
-  // Per-plan feature bullets. It leads with what this client can actually
-  // stand behind. The old lead bullet was a hand-typed instance ceiling
-  // ("3 managed instances") on a screen that never fetches the quota — see
-  // PLAN_CATALOG; the honest instance count lives on Usage, which asks.
+  // Per-plan feature bullets — rendered with a ✓ under a button that POSTs
+  // /v1/billing/checkout, i.e. sold. EVERY bullet here must name a capability
+  // that some signal in this control plane can be shown to run, and
+  // cloud/test/barkpark_cloud/sold_capability_manifest_test.exs reds if one
+  // does not: it reads this function BY RUNNING (via
+  // __preview__/__plan_features_dump.mjs) and resolves each bullet's backing
+  // signal on a booted BEAM — the Oban crontab from Application.get_env, the
+  // TLS ask-gate by dispatching the route.
+  //
+  // TWO BULLETS WERE DELETED HERE (cch-w50-s1), not reworded:
+  //   * "Daily backups" — no backup worker exists, the crontab has zero backup
+  //     rows, no BackupProbe is wired into the agent (so production's own
+  //     health beats have carried backup_ok=false forever), and the remote
+  //     "backup" verb shells a make target that does not exist.
+  //   * "Priority support" / "Standard support" — no support route, address,
+  //     inbox, SLA or docs page exists anywhere in the plane.
+  // An unbacked bullet is a promise the plane cannot keep; the honest move is
+  // to stop selling it, not to soften the wording.
+  //
+  // The lead bullet used to be a hand-typed instance ceiling ("3 managed
+  // instances") on a screen that never fetches the quota — see PLAN_CATALOG;
+  // the honest instance count lives on Usage, which asks.
+  //
+  // The list is currently tier-INDEPENDENT: `t` is accepted so callers and the
+  // guard read one function per tier, and so a future genuinely per-tier
+  // capability lands here without a signature change.
   function planFeatures(t) {
     return [
       "Automated provisioning & updates",
-      "Daily backups",
-      "Custom domains with automatic TLS",
-      t.plan === "support_plus" ? "Priority support" : "Standard support"
+      "Custom domains with automatic TLS"
     ];
   }
 

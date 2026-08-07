@@ -12211,10 +12211,33 @@ test("PLAN_CATALOG carries no price this tree has no amount for, and no ceiling 
   assert.equal(hooks.priceFor, undefined, "priceFor is retired with the data it read");
 });
 
+// The sold set this unit half agrees with. It is the CLIENT-side echo of
+// cloud/test/barkpark_cloud/sold_capability_manifest_test.exs's @sold, which is
+// where each bullet's backing signal is resolved by running (Oban crontab, the
+// dispatched /v1/tls/ask gate). Here we can only assert the shape: every bullet
+// is a member of a closed, non-empty set. The Elixir guard is what makes
+// membership MEAN something.
+//
+// The assertion this REPLACES was `feats.length >= 3` — a floor that made
+// honest deletion impossible: "Daily backups" and the Priority/Standard support
+// ternary named no signal anywhere in the plane, and removing them dropped the
+// list to two. A count floor cannot tell three true bullets from three lies.
+const SOLD_BULLETS = [
+  "Automated provisioning & updates",
+  "Custom domains with automatic TLS",
+];
+
 test("planFeatures states only what this screen can stand behind — no ceiling, no unlimited fiction", () => {
+  assert.ok(SOLD_BULLETS.length > 0, "the sold set must never be empty — an empty set resolves everything");
   for (const t of hooks.planCatalog) {
     const feats = hooks.planFeatures(t);
-    assert.ok(feats.length >= 3, t.plan + " still describes the plan");
+    assert.ok(feats.length > 0, t.plan + " still describes the plan");
+    for (const f of feats) {
+      assert.ok(
+        SOLD_BULLETS.includes(f),
+        t.plan + " sells " + JSON.stringify(f) + ", which names no backing signal (see sold_capability_manifest_test.exs)",
+      );
+    }
     const joined = feats.join("|");
     assert.ok(!joined.includes("Unlimited"), t.plan + " must never claim unlimited");
     // The old lead bullet was a hand-typed ceiling on a screen that issues no
@@ -12222,10 +12245,12 @@ test("planFeatures states only what this screen can stand behind — no ceiling,
     assert.ok(!/\b\d+\s+managed instances?\b/.test(joined), t.plan + " must not state an unfetched ceiling");
     assert.ok(!/\$\s?\d/.test(joined), t.plan + " must not state a price");
   }
-  // Support tier is still differentiated — omitting numerals did not flatten
-  // the catalog into three identical cards.
-  const plus = hooks.planFeatures(hooks.planCatalog.filter((t) => t.plan === "support_plus")[0]);
-  assert.ok(plus.includes("Priority support"), "Support++ still reads differently from the rest");
+  // The clause that used to live here asserted Support++ still read
+  // "Priority support". It PINNED the lie: no support route, address, inbox,
+  // SLA or docs page exists anywhere in the plane, and the plane's only mail
+  // identity is a no-reply sender. Tier differentiation is carried by the
+  // catalog's own note and by the server-enforced instance ceiling
+  // (billing_client_mirror_test.exs), not by a capability nobody can deliver.
 });
 
 test("planFromSub: a past_due team KEEPS its paid plan (the sidebar-pill fix)", () => {
