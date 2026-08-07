@@ -115,9 +115,9 @@ defmodule BarkparkCloud.Sites.Deploy do
       `merge_provision_steps` / `merge_provision_console`, where it would replace
       the only copy of the narration that exists.
 
-    * **anything else → `FailureCopy.strip_ansi/1 |> FailureCopy.scrub/1`.** A stage detail is a REMOTE
-      capture (an ssh stderr fold, a provider body, a build log line), so it is
-      redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
+    * **anything else → `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+      A stage detail is a REMOTE capture (an ssh stderr fold, a provider body, a
+      build log line), so it is redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
       driven on a detail carrying `Authorization: Bearer <token>`, the HTTP
       console entry returned `Bearer [redacted]` while the SSE frame for the
       same bytes carried the live credential. Same bytes, two channels, one
@@ -135,7 +135,8 @@ defmodule BarkparkCloud.Sites.Deploy do
   # INSIDE the shape the scrubber matches on and the secret walks out in
   # cleartext (with raw 0x1B bytes attached, which a console then interprets).
   # Strip first, then redact — the order is the fix (dr-w8-s2).
-  def stage_caption(_status, detail), do: detail |> FailureCopy.strip_ansi() |> FailureCopy.scrub()
+  def stage_caption(_status, detail),
+    do: detail |> FailureCopy.strip_ansi() |> FailureCopy.scrub()
 
   ## ---------------------------------------------------------------------------
   ## Mint
