@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -249,19 +250,51 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, auth bo
 	return resp.StatusCode, raw, nil
 }
 
-// cloudError turns a non-2xx control-plane response into a one-line error,
-// surfacing the {"error":"<message>"} field the API returns (e.g. "name_required"
-// from a 422 go-live, or an auth message from a 401). When the body carries no
+// CloudRefusal is a control-plane refusal WITH the evidence it carried, instead
+// of the bare slug the CLI used to print. The control plane names four things
+// beyond the machine code: `detail` (the human sentence), `reason` (the CAUSE an
+// authority gate refused for — "no_team", "role"), `required` (the ability or
+// role it wanted) with its `scope`, and `details` (the per-field map a 422
+// validation failure carries). None of them were decoded, so a user got one word
+// and no CLI branch could tell a caller who has NO TEAM from one with the wrong
+// ROLE — which is exactly what breaks when a gate re-classifies a refusal's
+// STATUS (422 {"error":"no_team"} -> 403 {"error":"forbidden","reason":"no_team"}):
+// a status-keyed ladder silently changes both the sentence and the exit code
+// while every test stays green.
+//
+// Error() is the SAME one-line message cloudError has always produced (plus the
+// evidence, when the server sent any), so every existing caller keeps its
+// contract — notably the "unauthorized:" prefix cloudFail keys on. The typed
+// fields are additive and read with errors.As.
+type CloudRefusal struct {
+	HTTPStatus int
+	Code       string // the `error` slug
+	Detail     string // the server's human sentence
+	Reason     string // the CAUSE a gate named (no_team, role, …)
+	Required   string // the ability/role the gate wanted
+	Scope      string // what Required is scoped over (team, instance, …)
+	Details    map[string]string
+	msg        string
+}
+
+func (e *CloudRefusal) Error() string { return e.msg }
+
+// cloudError turns a non-2xx control-plane response into a typed *CloudRefusal
+// whose message is one line, surfacing the {"error":"<message>"} field the API
+// returns (e.g. "name_required" from a 422 go-live, or an auth message from a
+// 401) plus the refusal evidence the body carried. When the body carries no
 // recognisable error field it falls back to "status <code>: <clamped body>" so
 // nothing is ever swallowed. A 401 is prefixed with "unauthorized:" so callers
 // (and users) read the auth failure plainly.
 func cloudError(status int, body []byte) error {
+	ref := &CloudRefusal{HTTPStatus: status}
 	var env struct {
 		Error string `json:"error"`
 	}
 	msg := ""
 	if json.Unmarshal(body, &env) == nil && env.Error != "" {
 		msg = env.Error
+		ref.Code = env.Error
 		// The control plane puts the machine CODE in `error` and the human
 		// SENTENCE in `detail` — which box refused, what it said, and which flag
 		// fixes it ("acme refused to mint the site's read token (HTTP 403):
@@ -275,8 +308,40 @@ func cloudError(status int, body []byte) error {
 		}
 		if json.Unmarshal(body, &det) == nil {
 			if d := strings.TrimSpace(det.Detail); d != "" {
+				ref.Detail = d
 				msg = msg + ": " + d
 			}
+		}
+		// The refusal evidence, each field in its OWN Unmarshal for the SAME
+		// reason `detail` is: one route sending one of them as an object (a
+		// `reason` map, a `details` list) must cost that ONE field, never the
+		// whole decode.
+		var rsn struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(body, &rsn) == nil {
+			ref.Reason = strings.TrimSpace(rsn.Reason)
+		}
+		var req struct {
+			Required string `json:"required"`
+		}
+		if json.Unmarshal(body, &req) == nil {
+			ref.Required = strings.TrimSpace(req.Required)
+		}
+		var scp struct {
+			Scope string `json:"scope"`
+		}
+		if json.Unmarshal(body, &scp) == nil {
+			ref.Scope = strings.TrimSpace(scp.Scope)
+		}
+		var dts struct {
+			Details map[string]json.RawMessage `json:"details"`
+		}
+		if json.Unmarshal(body, &dts) == nil && len(dts.Details) > 0 {
+			ref.Details = flattenDetails(dts.Details)
+		}
+		if ev := ref.evidence(); ev != "" {
+			msg = msg + " (" + ev + ")"
 		}
 	}
 	if msg == "" {
@@ -291,9 +356,60 @@ func cloudError(status int, body []byte) error {
 		}
 	}
 	if status == http.StatusUnauthorized {
-		return fmt.Errorf("unauthorized: %s", msg)
+		msg = "unauthorized: " + msg
 	}
-	return fmt.Errorf("%s", msg)
+	ref.msg = msg
+	return ref
+}
+
+// evidence renders the refusal fields the CODE alone cannot carry, in a stable
+// order (cause, then what was required and over what, then the offending
+// fields). Empty when the server sent none — a body without evidence must read
+// EXACTLY as it always has.
+func (e *CloudRefusal) evidence() string {
+	parts := make([]string, 0, 4+len(e.Details))
+	if e.Reason != "" {
+		parts = append(parts, "reason: "+e.Reason)
+	}
+	if e.Required != "" {
+		parts = append(parts, "required: "+e.Required)
+	}
+	if e.Scope != "" {
+		parts = append(parts, "scope: "+e.Scope)
+	}
+	keys := make([]string, 0, len(e.Details))
+	for k := range e.Details {
+		keys = append(keys, k)
+	}
+	// Sorted so one refusal never prints two ways across runs (Go map order is
+	// deliberately random) — an unstable error line is untestable and unreadable.
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, k+": "+e.Details[k])
+	}
+	return strings.Join(parts, "; ")
+}
+
+// flattenDetails renders the per-field `details` map a 422 carries. A value is
+// a string ("is required") or a LIST of strings (the Ecto changeset shape,
+// {"slug":["is taken","is too long"]}); anything else keeps its compact JSON so
+// an unforeseen shape degrades to something readable rather than vanishing.
+func flattenDetails(raw map[string]json.RawMessage) map[string]string {
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			out[k] = s
+			continue
+		}
+		var list []string
+		if json.Unmarshal(v, &list) == nil {
+			out[k] = strings.Join(list, ", ")
+			continue
+		}
+		out[k] = string(v)
+	}
+	return out
 }
 
 // ok reports whether status is a 2xx.
@@ -2565,10 +2681,17 @@ type RollbackResult struct {
 // server's optional elaboration. A 401 is deliberately NOT a RollbackError — it
 // stays a cloudError so it keeps the "unauthorized:" prefix contract cloudFail
 // keys on (a dead session and a missing one become the same `bp login` hint).
+// Reason is the CAUSE an authority gate named ("no_team", "role") when the code
+// itself is the generic "forbidden". The CLI narrates and exit-codes off it, so
+// the control plane re-classifying a refusal's STATUS cannot change what the
+// user is told: this route is gated by require_primary_team_admin/1, whose
+// teamless refusal moves from 422 {"error":"no_team"} to
+// 403 {"error":"forbidden","reason":"no_team","scope":"team"}.
 type RollbackError struct {
 	HTTPStatus int
 	Code       string
 	Detail     string
+	Reason     string
 }
 
 func (e *RollbackError) Error() string {
@@ -2609,8 +2732,8 @@ func (c *Client) Rollback(ctx context.Context, id string) (RollbackResult, error
 		if status == http.StatusUnauthorized {
 			return RollbackResult{}, cloudError(status, raw)
 		}
-		if code, detail := decodeRollbackError(raw); code != "" {
-			return RollbackResult{}, &RollbackError{HTTPStatus: status, Code: code, Detail: detail}
+		if code, detail, reason := decodeRollbackError(raw); code != "" {
+			return RollbackResult{}, &RollbackError{HTTPStatus: status, Code: code, Detail: detail, Reason: reason}
 		}
 		return RollbackResult{}, cloudError(status, raw)
 	}
@@ -2621,30 +2744,47 @@ func (c *Client) Rollback(ctx context.Context, id string) (RollbackResult, error
 	return res, nil
 }
 
-// decodeRollbackError extracts (code, detail) from a rollback refusal body,
-// tolerating BOTH shapes the route emits: the nested
+// decodeRollbackError extracts (code, detail, reason) from a rollback refusal
+// body, tolerating BOTH shapes the route emits: the nested
 // {"error":{"code":"…","detail":"…"}} the relay uses for instance-relayed refusals
-// and the flat {"error":"not_found"} its top-level team guard uses. It returns ""
-// when neither shape carries a code (the caller then falls back to cloudError).
-func decodeRollbackError(body []byte) (code, detail string) {
+// and the flat {"error":"not_found"} its top-level team guard uses. The reason
+// rides at the TOP level of the flat shape (the authority gates emit
+// {"error":"forbidden","reason":"no_team","scope":"team"}) and inside the object
+// on the nested one, so both are read; it is "" when the body names no cause. The
+// code is "" when neither shape carries one (the caller then falls back to
+// cloudError).
+func decodeRollbackError(body []byte) (code, detail, reason string) {
 	var env struct {
 		Error json.RawMessage `json:"error"`
 	}
 	if json.Unmarshal(body, &env) != nil || len(env.Error) == 0 {
-		return "", ""
+		return "", "", ""
 	}
-	// Nested object shape first ({"error":{"code","detail"}}).
+	// The top-level `reason` in its OWN Unmarshal (the cloudError idiom): a route
+	// sending it as an object must cost that field alone, never the code decode
+	// that drives the whole refusal path.
+	var rsn struct {
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal(body, &rsn) == nil {
+		reason = strings.TrimSpace(rsn.Reason)
+	}
+	// Nested object shape first ({"error":{"code","detail","reason"}}).
 	var obj struct {
 		Code   string `json:"code"`
 		Detail string `json:"detail"`
+		Reason string `json:"reason"`
 	}
 	if json.Unmarshal(env.Error, &obj) == nil && obj.Code != "" {
-		return obj.Code, obj.Detail
+		if r := strings.TrimSpace(obj.Reason); r != "" {
+			reason = r
+		}
+		return obj.Code, obj.Detail, reason
 	}
 	// Flat string shape fallback ({"error":"not_found"}).
 	var s string
 	if json.Unmarshal(env.Error, &s) == nil {
-		return s, ""
+		return s, "", reason
 	}
-	return "", ""
+	return "", "", ""
 }

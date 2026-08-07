@@ -1105,6 +1105,14 @@ func TestCloudSupportAddBindWhichHost(t *testing.T) {
 // TestCloudSupportAddCPRefusalNarrations: the CP's credential-aware refusals
 // each get a NAMED narration — 401 → bp login, 422 no_team → bp team use,
 // 403 → team-admin / deploy-ability (the PAT ruling made explicit).
+//
+// The `403 no_team (post-#9956)` row is the STATUS-FLIP guard (cch-w40-s4): the
+// control plane's team gate is being converted from 422 {"error":"no_team"} to
+// 403 {"error":"forbidden","reason":"no_team","scope":"team"}. Reading the STATUS
+// alone hands a caller who HAS NO TEAM a sentence about a ROLE they cannot be
+// granted without one — so the two no_team rows must stay identical in hint and
+// exit across that flip, while the plain `403 forbidden` row proves a real
+// authority refusal is still narrated as one.
 func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -1115,7 +1123,9 @@ func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
 	}{
 		{"401 dead session", http.StatusUnauthorized, `{"error":"unauthorized"}`, "bp login", exitAuth},
 		{"422 no_team", http.StatusUnprocessableEntity, `{"error":"no_team"}`, "bp team use", exitGeneric},
+		{"403 no_team (post-#9956)", http.StatusForbidden, `{"error":"forbidden","reason":"no_team","scope":"team"}`, "bp team use", exitGeneric},
 		{"403 forbidden", http.StatusForbidden, `{"error":"forbidden"}`, "a session needs team-admin, a PAT needs the deploy ability", exitAuth},
+		{"403 role", http.StatusForbidden, `{"error":"forbidden","reason":"role","required":"team_admin"}`, "a session needs team-admin, a PAT needs the deploy ability", exitAuth},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1134,6 +1144,11 @@ func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
 			}
 			if !strings.Contains(stderr, tc.wantHint) {
 				t.Fatalf("want the named narration %q\nstderr:\n%s", tc.wantHint, stderr)
+			}
+			// A teamless caller must never ALSO be handed the role sentence — the
+			// role is not the problem and cannot be granted without a team.
+			if tc.wantHint == "bp team use" && strings.Contains(stderr, "a session needs team-admin") {
+				t.Fatalf("a no_team refusal was narrated as a role problem\nstderr:\n%s", stderr)
 			}
 			// The honest written-state line still names the minted-but-unbound token.
 			if !strings.Contains(stderr, "NOT registered") {
