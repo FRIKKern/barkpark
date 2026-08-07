@@ -307,4 +307,83 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     refute log =~ "[warning]"
     assert_email_sent()
   end
+
+  ## 6. A PARTIAL send is a LOSS — `sent` is counted, never assumed (w18 review)
+  ##
+  ##    `sent` used to be `length(recipients)`: a digest that failed for two of
+  ##    three admins reported `sent: 3`. dr-w18-s3 derived it from
+  ##    `record_delivery/5`'s own `{:ok, _}` classification instead, which is a
+  ##    real correctness fix — and shipped with NO test over the `sent <
+  ##    recipients` branch, so the only witness of the counter was a run where
+  ##    every send succeeded. That is indistinguishable from `sent =
+  ##    length(recipients)` and leaves the fix unproven.
+  ##
+  ##    This drives a mailer that fails for ONE of two real recipients, so the
+  ##    counter has to disagree with the recipient count to pass.
+
+  test "a partial send counts what actually left: sent=1 of recipients=2, warned as partial_send" do
+    n = System.unique_integer([:positive])
+    good = user("op-good-#{n}@example.com")
+    bad = user("fail-op-#{n}@example.com")
+    t = team(good)
+    {:ok, _} = Accounts.add_member(t, bad, "admin")
+
+    _bp = instance(t, "Prod", "prod-#{n}", %{update_state: "behind"})
+
+    set_admins([good.email, bad.email])
+    swap_mailer_adapter(BarkparkCloud.Workers.DailyDigestWorkerTest.HalfDeadAdapter)
+    ref = attach_digest_probe()
+
+    log =
+      capture_log(fn ->
+        assert {:ok, %{sent: 1, recipients: recipients}} = perform_job(DailyDigestWorker, %{})
+        assert length(recipients) == 2
+      end)
+
+    # THE COUNTER DISAGREES WITH THE RECIPIENT COUNT. This is the assertion the
+    # old `sent = length(recipients)` could not satisfy at any value.
+    assert_received {:fleet_digest, ^ref, %{recipients: 2, sent: 1}, metadata}
+    assert metadata.reason == "partial_send"
+    assert log =~ "fleet_digest phase=settled recipients=2 sent=1"
+    assert log =~ "reason=partial_send"
+    assert log =~ "[warning]"
+
+    # And the Delivery rows agree with the count, because both read the same
+    # `{:ok, _}` classification: one sent, one failed.
+    rows = Repo.all(BarkparkCloud.Notifications.Delivery)
+    digest_rows = Enum.filter(rows, &(&1.event == "fleet_digest"))
+    assert Enum.count(digest_rows, &(&1.status == "sent")) == 1
+    assert Enum.count(digest_rows, &(&1.status == "failed")) == 1
+  end
+
+  # Swap the platform mailer adapter for one test and restore it after. The
+  # Swoosh Test adapter cannot fail, so a partial send is unreachable without
+  # this seam.
+  defp swap_mailer_adapter(adapter) do
+    prior = Application.get_env(:barkpark_cloud, BarkparkCloud.Mailer, [])
+
+    Application.put_env(
+      :barkpark_cloud,
+      BarkparkCloud.Mailer,
+      Keyword.put(prior, :adapter, adapter)
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark_cloud, BarkparkCloud.Mailer, prior) end)
+  end
+
+  # A mailer that refuses any recipient whose local part starts with "fail" and
+  # hands everything else to the ordinary Test adapter, so `assert_email_sent`
+  # still works for the half that got through.
+  defmodule HalfDeadAdapter do
+    use Swoosh.Adapter
+
+    @impl true
+    def deliver(%Swoosh.Email{to: [{_name, address} | _]} = email, config) do
+      if String.starts_with?(address, "fail") do
+        {:error, {:temporary_failure, "450 4.2.1 mailbox busy"}}
+      else
+        Swoosh.Adapters.Test.deliver(email, config)
+      end
+    end
+  end
 end
