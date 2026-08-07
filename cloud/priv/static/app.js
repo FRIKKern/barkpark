@@ -7067,13 +7067,27 @@
         location.hash = "#fleet";
         return;
       }
-      // Rollback the optimistic pill, then offer an in-modal retry.
+      // Rollback the optimistic pill, then offer the recovery that can actually
+      // work. cch-w46-s2: this arm used to wire "Try again" UNCONDITIONALLY, so a
+      // member's permanent 403 re-issued the same DELETE on every click (measured:
+      // 3 DELETEs after 2 more clicks). The SENTENCE was always honest — friendly()
+      // renders the server's own — only the control lied, so no new copy is minted.
+      // SHAPE: DELETE /v1/barkparks/:id refuses FLAT ({error:"forbidden",required,
+      // scope} / {error:"no_team"}), NOT the nested {error:{code}} rollbackInstance
+      // reads; the dual-shape read below covers both so neither can be misclassified.
       var back = $("#inst-lifecycle-actions .inst-life-pill");
       if (back && prev) back.outerHTML = prev;
-      ctl.fail(friendly(r.data, "Please try again."), "Try again", function (c) {
-        c.busy();
-        runDecommission(bp, c);
-      });
+      var derr = (r.data && r.data.error) || {};
+      var dcode = typeof derr === "string" ? derr : derr.code;
+      var dmsg = friendly(r.data, "Please try again.");
+      if (decommissionRefusalTerminal(dcode)) {
+        ctl.fail(dmsg, "Close", function () { closeModal(); });
+      } else {
+        ctl.fail(dmsg, "Try again", function (c) {
+          c.busy();
+          runDecommission(bp, c);
+        });
+      }
     });
   }
 
@@ -7826,6 +7840,18 @@
     return code === "no_previous_slot" || code === "not_supported" ||
       code === "not_enabled" || code === "feature_not_configured" || code === "not_live" ||
       code === "forbidden" || code === "no_team";
+  }
+
+  // cch-w46-s2: which DECOMMISSION refusals are TERMINAL — the same question
+  // rollbackRefusalTerminal answers, over DELETE /v1/barkparks/:id's OWN (flat)
+  // refusal vocabulary. `forbidden` and `no_team` are decided by the caller's
+  // role, and `not_found` by an instance that is already gone; no amount of Try
+  // again moves any of the three, so the modal's single recovery is Close.
+  // `provisioning_in_progress` is genuinely transient (retrying once the provision
+  // lands works, mirroring rollback's already_running), and an UNKNOWN code stays
+  // retryable — unknown fails safe toward the user. Boolean, pure (D439).
+  function decommissionRefusalTerminal(code) {
+    return code === "forbidden" || code === "no_team" || code === "not_found";
   }
 
   // isu-w6: typed, honest copy for a rollback refusal. PURE — maps the charter's
@@ -21248,6 +21274,12 @@
       // Impure (it fetches and paints its inline error), driven the same way
       // loadMembers/loadEnvVars are.
       attachDomain: attachDomain,
+      // cch-w46-s2: the decommission post-click arm had ZERO hook reach, so its
+      // unconditional "Try again" into a permanent 403 could not be seen from the
+      // harness at all. The terminality predicate is pure; runDecommission is the
+      // impure mount, driven here the way attachDomain is (fetch + document swap).
+      decommissionRefusalTerminal: decommissionRefusalTerminal,
+      runDecommission: runDecommission,
       lifecycleOptimistic: lifecycleOptimistic, lifecycleVerbs: LIFECYCLE_VERBS.map(function (v) { return v.verb; }),
       // isu-w5 console operator update panel: the per-instance update-truth
       // derivations + the 409 pin-force flow + the fleet rollout banner. All pure

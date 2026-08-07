@@ -10449,6 +10449,158 @@ test("gr41: rollbackRefusalTerminal splits Close from Try again over the D23 voc
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w46-s2 — DECOMMISSION'S 403 STOPS OFFERING "Try again" INTO A PERMANENT
+// REFUSAL. (charter D520/D439/D428; the wave-46 Paper carries the same text)
+//
+// Measured on origin/main 77cf2060c: runDecommission's failure arm ended with
+// ctl.fail(friendly(...), "Try again", <recurse>) UNCONDITIONALLY, for every
+// status — so a plain member (who reaches instance-detail legitimately: there
+// is no GET /v1/barkparks/:id, the screen is built from the member-legal LIST)
+// clicked Decommission, got a 403 the server will never stop returning, and was
+// handed a live "Try again" that re-issued the same DELETE. Measured: "DELETEs
+// after 2 more 'Try again' clicks: 3". `grep -c decommissionRefusalTerminal`
+// over the whole tree was 0, and `runDecommission` had ZERO references in this
+// harness — the arm could not be seen from node at all.
+//
+// THE SENTENCE WAS NEVER THE LIE (D428): friendly() already renders the server's
+// own repair line. Only the RECOVERY CONTROL lied, so this fix mints NO copy —
+// pinned below by comparing the rendered message to friendly()'s, byte for byte.
+//
+// THE SHAPE THAT WOULD BITE A COPY-PASTE: DELETE /v1/barkparks/:id refuses FLAT
+// ({error:"forbidden",required,scope} / {error:"no_team"}), NOT the nested
+// {error:{code}} rollbackInstance reads. A `r.data.error.code` read gets
+// undefined and calls EVERY refusal transient — the exact opposite of the fix.
+// Both envelopes are driven below.
+
+const W46S2_FORBIDDEN = { error: "forbidden", required: "admin", scope: "team" };
+
+function w46s2Ctl() {
+  const rec = { fails: [], succeeded: 0, busied: 0 };
+  const ctl = {
+    rec,
+    busy() { rec.busied++; },
+    succeed() { rec.succeeded++; },
+    fail(msg, label, handler) { rec.fails.push({ msg, label, handler }); },
+  };
+  return ctl;
+}
+
+// Swap fetch + document into the realm, run runDecommission to completion,
+// restore — then let the caller CLICK the recovery it wired, inside the same
+// stubbed realm, so the follow-on request (if any) lands on the same counter.
+async function driveDecommission(status, payload) {
+  const fetch = fetchStub(status, payload);
+  // No pill in this document: the optimistic-pill DOM is lifecycleOptimistic's
+  // job (pinned elsewhere). This drive is about the RECOVERY the failure arm wires.
+  const doc = {
+    querySelector: () => null, querySelectorAll: () => [],
+    getElementById: () => null, createElement: () => ({ ...inertEl }),
+  };
+  const ctl = w46s2Ctl();
+  const inRealm = async (fn) => {
+    const saved = { fetch: sandbox.fetch, document: sandbox.document };
+    sandbox.fetch = fetch;
+    sandbox.document = doc;
+    try {
+      fn();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+  };
+  await inRealm(() => hooks.runDecommission({ id: "bp-1", name: "web" }, ctl));
+  const last = () => ctl.rec.fails[ctl.rec.fails.length - 1];
+  return {
+    ctl, fetch, last,
+    deletes: () => fetch.calls.filter((c) => c.opts && c.opts.method === "DELETE").length,
+    clickRecovery: () => inRealm(() => last().handler(ctl)),
+  };
+}
+
+test("cch-w46-s2: decommissionRefusalTerminal is hookable and BOOLEAN over DELETE /v1/barkparks/:id's own vocabulary", () => {
+  assert.equal(typeof hooks.decommissionRefusalTerminal, "function",
+    "the terminality predicate must be drivable at all (RED on origin/main, where it does not exist)");
+  assert.equal(typeof hooks.runDecommission, "function",
+    "…and so must the arm it guards (RED on origin/main: zero references in this harness)");
+
+  for (const code of ["forbidden", "no_team", "not_found"]) {
+    const v = hooks.decommissionRefusalTerminal(code);
+    assert.equal(v, true, code + " is terminal — no click repairs your role, or resurrects an instance that is gone");
+    assert.equal(typeof v, "boolean", "D439: predicates stay boolean, never truthy");
+  }
+  for (const code of ["provisioning_in_progress", "server_error", "wat", "", undefined, null]) {
+    const v = hooks.decommissionRefusalTerminal(code);
+    assert.equal(v, false, String(code) + " stays retryable — an UNKNOWN code fails safe toward the user");
+    assert.equal(typeof v, "boolean", "D439: predicates stay boolean, never truthy");
+  }
+});
+
+test("cch-w46-s2: a member's FLAT 403 wires Close, not Try again — and clicking it issues no second DELETE", async () => {
+  const d = await driveDecommission(403, W46S2_FORBIDDEN);
+  assert.equal(d.deletes(), 1, "the click that opened this failure issued exactly one DELETE");
+  const f = d.last();
+  assert.ok(f, "the arm must FAIL the modal, not silently swallow the refusal");
+  assert.equal(f.label, "Close",
+    "a permanent 403 offers the only recovery that can work: dismissing the modal");
+
+  // NO NEW COPY (D428): the rendered sentence is friendly()'s own, byte for byte.
+  assert.equal(f.msg, hooks.friendly(W46S2_FORBIDDEN, "Please try again."),
+    "the modal renders the SERVER's repair sentence, unchanged — this slice minted no copy");
+  assert.match(f.msg, /admin role/, "…and that sentence names the role that repairs it");
+  assert.equal(f.msg.indexOf("Please try again."), -1,
+    "…and never falls through to the transient fallback");
+
+  // THE DEFECT ITSELF: on origin/main this click re-issued the DELETE forever.
+  await d.clickRecovery();
+  assert.equal(d.deletes(), 1, "the terminal recovery issues NO further DELETE — the retry loop is gone");
+  assert.equal(d.ctl.rec.busied, 0, "…and never re-arms the modal's busy state");
+  assert.equal(d.ctl.rec.fails.length, 1, "…nor produces a second failure render");
+});
+
+test("cch-w46-s2: no_team (422) and not_found (404) are terminal too — over the FLAT envelope the route really emits", async () => {
+  for (const [status, payload] of [[422, { error: "no_team" }], [404, { error: "not_found" }]]) {
+    const d = await driveDecommission(status, payload);
+    assert.equal(d.last().label, "Close", status + " " + payload.error + " is terminal");
+    assert.equal(d.last().msg, hooks.friendly(payload, "Please try again."),
+      "…rendered as the server's own sentence");
+    await d.clickRecovery();
+    assert.equal(d.deletes(), 1, status + " " + payload.error + " re-issues nothing");
+  }
+});
+
+test("cch-w46-s2: the NESTED {error:{code}} envelope classifies the same — the dual-shape read cannot be fooled", async () => {
+  // rollbackInstance's routes answer nested. Reading only one shape is how a
+  // copy-paste mis-classifies every refusal; both are pinned so neither can rot.
+  const d = await driveDecommission(403, { error: { code: "forbidden" } });
+  assert.equal(d.last().label, "Close", "a nested forbidden is still forbidden");
+  await d.clickRecovery();
+  assert.equal(d.deletes(), 1);
+});
+
+test("cch-w46-s2: a 409 provisioning_in_progress STILL offers Try again, and still re-DELETEs — the transient path is untouched", async () => {
+  const d = await driveDecommission(409, { error: "provisioning_in_progress" });
+  assert.equal(d.last().label, "Try again",
+    "a refusal that a later click CAN repair keeps the retry that works");
+  assert.equal(d.deletes(), 1);
+  await d.clickRecovery();
+  assert.equal(d.deletes(), 2, "…and the retry genuinely re-issues the DELETE");
+  assert.equal(d.ctl.rec.busied, 1, "…after re-arming the modal's busy state, as it always did");
+
+  // An UNKNOWN failure keeps the retry too — a 500 is not evidence of a permanent no.
+  const boom = await driveDecommission(500, { error: "server_error" });
+  assert.equal(boom.last().label, "Try again");
+  await boom.clickRecovery();
+  assert.equal(boom.deletes(), 2);
+});
+
+test("cch-w46-s2: a 200/202 success arm is untouched — it succeeds, never fails", async () => {
+  for (const status of [200, 202]) {
+    const d = await driveDecommission(status, {});
+    assert.equal(d.ctl.rec.succeeded, 1, status + " still succeeds");
+    assert.equal(d.ctl.rec.fails.length, 0, status + " renders no failure recovery");
+    assert.equal(d.deletes(), 1);
+  }
+});
+
 test("isu-w6: rollbackConflictCopy maps the full W6 refusal vocabulary (D23), no force affordance", () => {
   const noPrev = hooks.rollbackConflictCopy("no_previous_slot", { error: { code: "no_previous_slot" } });
   assert.match(noPrev.title, /Nothing to roll back to/);
