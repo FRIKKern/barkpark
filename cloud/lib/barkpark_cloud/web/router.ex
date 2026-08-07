@@ -9578,13 +9578,15 @@ defmodule BarkparkCloud.Web.Router do
 
   # Build the GET /v1/providers/capabilities body from the committed fixture.
   # For each kind: split the tier (fixture value or the "prod" default) from the
-  # capability bools (every boolean key, generically — no hardcoded list), then
-  # attach a server-owned gap reason for every FALSE capability so no disabled
-  # action is reason-less.
+  # capability bools (every boolean key, generically — no hardcoded list),
+  # overlay the ONE capability this control plane owns rather than reads
+  # (`catalog`, see own_catalog_capability/2), then attach a server-owned gap
+  # reason for every FALSE capability so no disabled action is reason-less.
   defp providers_capabilities_payload do
     providers =
       Map.new(@providers_capabilities, fn {kind, row} ->
         {tier, capabilities} = split_provider_tier(row)
+        capabilities = own_catalog_capability(kind, capabilities)
 
         gaps =
           for {capability, false} <- capabilities, into: %{} do
@@ -9601,6 +9603,36 @@ defmodule BarkparkCloud.Web.Router do
   # without an explicit tier defaults to "prod". capabilities are the row's
   # boolean-valued keys ONLY, so a future non-bool metadata key never leaks in
   # as a capability.
+  # THE CONTROL PLANE STATES ITS OWN CATALOG CAPABILITY.
+  #
+  # `providers_capabilities.json` is the GO SEAM's contract, and its
+  # `catalog: false` for hetzner/azure is HONEST THERE: no Go provider
+  # implements `Catalog(ctx)` (`DetectCapabilities` type-asserts `Cataloger`).
+  # But THIS control plane builds those catalogs itself — see
+  # `build_provider_catalog/2`, served at `GET /v1/providers/:kind/catalog` for
+  # every `@neutral_kinds` kind, and painted as priced regions in the console's
+  # launch wizard. Passing the Go bool through unmodified made the capability
+  # matrix print "doesn't publish a size-and-region catalog HERE yet" about a
+  # menu the same session renders two clicks away.
+  #
+  # So: for the kinds this CP catalogs, `catalog` is answered by the CP, not by
+  # the fixture. @neutral_kinds is the SAME set the catalog route reads, so the
+  # claim and the route can't drift — and `providers_catalog_capability_test.exs`
+  # joins it BOTH ways against the `build_provider_catalog/2` clause heads, so
+  # neither deleting a clause nor widening this list buys a green.
+  #
+  # The overlay is exactly one key, and only where the fixture already declares
+  # it: every other capability (and every other kind) still flows from the Go
+  # seam untouched. NEVER "fix" this by editing the fixture — that would claim a
+  # Go capability that does not exist and reds the Go seam's own honesty tests.
+  defp own_catalog_capability(kind, capabilities) do
+    if kind in @neutral_kinds and Map.has_key?(capabilities, "catalog") do
+      Map.put(capabilities, "catalog", true)
+    else
+      capabilities
+    end
+  end
+
   defp split_provider_tier(row) do
     tier = Map.get(row, "tier", "prod")
     capabilities = for {key, value} <- row, is_boolean(value), into: %{}, do: {key, value}
