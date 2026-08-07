@@ -61,7 +61,10 @@
 //   typed-and-printed router lines were replaced by a resolver over the live
 //   router source. Line numbers rot on any sibling shift — charter D41 /
 //   bp-honest-gates D5 — so the PIN is keyed on the function name, and a
-//   printed numeral is only ever this run's reading of the tree.)
+//   printed numeral is only ever this run's reading of the tree. cch-w47-rv
+//   made that sentence a CHECK rather than a promise: (2h) below reads this
+//   file's own bytes and exits 2 on any typed `<file>:<digits>`. It had to —
+//   D528 left seven of them behind in `note:` prose, all seven already stale.)
 //
 // Route-keyed, those two collapse into one row, the row scores "predicated",
 // and the ONE REAL DEFECT this instrument exists to see becomes structurally
@@ -233,7 +236,7 @@ const PIN = [
   { fn: "submitPasswordChange", verb: "PUT", route: "/v1/account/password", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
 
   // ── instance lifecycle — resurrect stands up (and bills) a real box.
-  { fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: null, auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:8290 refuses non-admins inside a cond; no Auth.* names it" },
+  { fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: null, auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. resurrect/1 refuses non-admins inside a cond; no Auth.* names it — the overlay below derives the line" },
 
   // ── providers — THE DECISIVE PAIR. Same route, opposite verdicts.
   { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. The launch wizard's .launch-connect-provider button renders unconditionally" },
@@ -272,7 +275,7 @@ const PIN = [
   { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
   { fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook" },
   { fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook" },
-  { fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:2058 refuses non-admin sessions inside a cond" },
+  { fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. POST /v1/fleet/supports refuses non-admin sessions inside a cond — the overlay below derives the line" },
   { fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
   { fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
 
@@ -309,7 +312,7 @@ const PIN = [
   { fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
 
   // ── launch + billing
-  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:8082 refuses non-admin sessions inside a cond" },
+  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. go_live/1 refuses non-admin sessions inside a cond — the overlay below derives the line" },
   { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
   { fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
   { fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
@@ -334,8 +337,8 @@ const PIN = [
   { fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
   // ── env vars — elevated, and ONLY the inline cond says so
-  { fn: "submitEnvVar", verb: "POST", route: "/v1/env-vars", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "router.ex:4302 refuses non-admins inside a cond; the form renders only when canWrite" },
-  { fn: "confirmDeleteEnvVar", verb: "DELETE", route: "/v1/env-vars/:*", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "router.ex:4360; the Delete action renders only when canWrite" },
+  { fn: "submitEnvVar", verb: "POST", route: "/v1/env-vars", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "POST /v1/env-vars refuses non-admins inside a cond; the form renders only when canWrite" },
+  { fn: "confirmDeleteEnvVar", verb: "DELETE", route: "/v1/env-vars/:*", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "DELETE /v1/env-vars/:id, same inline cond; the Delete action renders only when canWrite" },
 
   // ── device-link activation
   { fn: "activateInspect", verb: "POST", route: "/v1/auth/device/inspect", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: inspect your own device code" },
@@ -369,7 +372,7 @@ const RESOLVERS = [
   // THE TRAP. A literal PREFIX with a variable last segment. A naive extractor
   // accepts it and mis-routes to "/v1/auth/device/" — a route that does not
   // exist. It is resolved here, by name, rather than silently believed.
-  { fn: "submitActivateDecision", verb: "POST", expr: '"/v1/auth/device/" + decision', route: "/v1/auth/device/approve|/v1/auth/device/deny", why: "decision is 'approve' | 'deny' (router.ex:952 / :974)" },
+  { fn: "submitActivateDecision", verb: "POST", expr: '"/v1/auth/device/" + decision', route: "/v1/auth/device/approve|/v1/auth/device/deny", why: "decision is 'approve' | 'deny' — both routes exist: grep -n 'post \"/v1/auth/device/' router.ex" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -380,8 +383,9 @@ const RESOLVERS = [
 //
 // SIX, NOT SEVEN. cch-w36-s5's brief mandated "the SEVEN post-guard inline-cond
 // routes"; the grep it prescribed returns SIX. The seventh site BY CONTENT is
-// router.ex:4653 — `admin? = Accounts.team_admin?(user, team)` — invisible to
-// that grep because it binds a local. It is EXCLUDED BY NAME, not counted: it
+// the one reading `admin? = Accounts.team_admin?(user, team)` — invisible to
+// that grep because it binds a local; its line is DERIVED and printed as the
+// overlay's EXCLUDED row, never written down here. It is EXCLUDED BY NAME, not counted: it
 // is a self-scope NARROWING on a GET (the notification delivery log fences a
 // member to their own rows), never a refusal. Inventing a seventh row would
 // have made the overlay wrong in the other direction.
@@ -857,6 +861,49 @@ if (dupes.length) {
       "  is gone, the row is now UNPREDICATED and EXPECT moves with it).",
       "",
       ...undeclared,
+    ]);
+  }
+}
+
+// (2h) THE HEADER'S OWN CLAIM, MADE LOSABLE (cch-w47-rv).
+//
+//      The header at the top of this file asserts, flatly, that NO LINE NUMBER
+//      IS WRITTEN DOWN HERE. Charter D528 made that true of the 79 PIN rows and
+//      of the six printed router lines — and left SEVEN behind in prose that
+//      nothing read and nothing could red: five `note:` strings naming
+//      router.ex lines for the inline-cond sites, the excluded local-binding
+//      site, and the two /v1/auth/device routes. Every one of them was already
+//      stale (the notes said 2058/4302/4360/8082/8290 against a router that
+//      derives 2140/4396/4458/8312/8525), which is precisely the defect class
+//      the D528 half-A deletion existed to remove — a claim of derivation with
+//      typed decoys underneath it.
+//
+//      So the claim is now a CHECK. This arm reads THIS file's own bytes and
+//      refuses any `<source file>:<digits>` literal. The derived prints are
+//      untouched by it: they are built at run time from template literals
+//      (`router.ex:${...}`, `${LABEL}:${s.line}`), so the SOURCE carries no
+//      digits for this regex to find. It fails LOUD rather than silently
+//      tolerating the next one somebody types into a comment.
+{
+  const selfSrc = fs.readFileSync(new URL(import.meta.url), "utf8");
+  const written = [];
+  selfSrc.split("\n").forEach((text, i) => {
+    const m = /\b(app\.js|router\.ex|index\.html|app\.css|[A-Za-z0-9_-]+\.mjs):\d+/.exec(text);
+    if (m) written.push(`  __binding_census.mjs:${i + 1}  ${m[0]}   ${text.trim().slice(0, 96)}`);
+  });
+  if (written.length) {
+    die2([
+      "FAIL(2h): a line number is written down in this file.",
+      "",
+      "  The header of this file claims that every line number it prints is DERIVED and that",
+      "  none is recorded here. A typed `file:NNNN` breaks that claim the moment a sibling",
+      "  shifts — and nothing else in this census can red on it, which is how the previous",
+      "  seven survived, all seven of them stale.",
+      "",
+      "  Name the CONTENT instead (a function name, a route, the grep that finds it), or let",
+      "  the derived print own the numeral. Never restate a numeral this file cannot check.",
+      "",
+      ...written,
     ]);
   }
 }
