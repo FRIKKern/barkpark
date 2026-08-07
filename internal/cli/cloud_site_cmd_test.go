@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1216,11 +1217,15 @@ func TestRunCloudSiteStatusFlagsFailedNewestDeployment(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0\n%s", code, stderr)
 	}
-	// The bound really went on the wire — one row is all this read needs.
+	// The bound really went on the wire, and it is still ONE call. W11 raised the
+	// page from 1 to siteStatusLedgerPage (20) inside that same call so the
+	// censored "still waiting" bound can be taken from the OLDEST pending row
+	// instead of the newest (= shortest) one; row [0] is still the newest, so this
+	// test's subject is unchanged.
 	if cp.listHits != 1 {
 		t.Fatalf("status must read the deployments list exactly once, got %d hits", cp.listHits)
 	}
-	if !strings.Contains(cp.listQuery, "limit=1") {
+	if !strings.Contains(cp.listQuery, fmt.Sprintf("limit=%d", siteStatusLedgerPage)) {
 		t.Fatalf("status must bound the newest-deployment read, query=%q", cp.listQuery)
 	}
 	// The header no longer says a bare "live" and nothing else.
