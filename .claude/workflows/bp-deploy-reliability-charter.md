@@ -5244,3 +5244,64 @@ sends a builder after `@go_tag_floor` slack that `#10442` already closed (both f
 a red that will catch you). `dr-w15-s5-capability-reaches-bp-cloud-status` is HELD: its dep `dr-w15-s3` is
 `#10401`, unmerged and CONFLICTING — and a conflicted PR runs NO workflows at all, so its greens are stale by
 construction.
+
+### Wave 2026-08-07 (wave 17) — REVIEWED · Paper `deploy-reliability-wave-17-2026-08-07` · grade **A**
+
+**All five round-1 slices built, reviewed, gate-green on their final state, PUSHED and PR'd. Nothing merged —
+the lead merges.** The three round-≥2 slices were withheld BY DESIGN (sequenced-rounds law): they contend
+`census/3`'s return map, `@pairs` and the Go `DeployCensus` family, and are mutually exclusive in every ordering.
+
+| Slice | Task | Final branch | PR | Gate re-run on final state |
+|---|---|---|---|---|
+| Team-scoped census a non-admin can read | `dr-w16-s6-team-scoped-census-returns-200` | `…real-non-admin-oper-0` | [#10472](https://github.com/FRIKKern/barkpark/pull/10472) | 3121 tests, 0 failures |
+| Live-per-attempt leads the headline | `dr-w16-s5-live-per-attempt-co-equal-headline` | `…co-equal-head-1` | [#10473](https://github.com/FRIKKern/barkpark/pull/10473) | build 0 · vet 0 · `ok internal/cli` |
+| Site-outcome cohort on `bp sites` | `dr-w17-s3-site-outcome-cohort-reaches-bp-sites` | `…reaches-a-human--2-r` | [#10474](https://github.com/FRIKKern/barkpark/pull/10474) | build 0 · vet 0 · `ok internal/cli` |
+| The census cohorts PARTITION volume | `dr-w17-s4-census-cohorts-partition-volume` | `…partition-volume-and--3` | [#10475](https://github.com/FRIKKern/barkpark/pull/10475) | 66 tests, 0 failures |
+| `Deploy.start/1` deleted, four blind callers | `dr-w17-s5-deploy-start-stops-laundering-refusals` | `…all-four-b-4-r` | [#10476](https://github.com/FRIKKern/barkpark/pull/10476) | full cloud suite 3135/0 · `--warnings-as-errors` exit 0 |
+
+**The number that moved: the census stopped being unreadable, and the deploy route stopped reporting a build
+it never started.** Wave 16 proved the instrument correct to the row and simultaneously proved it 403s for
+every account that exists. Leg 1 gives it a team-scoped twin on a credential a CI token can hold, fail-closed
+by an Elixir-side intersection over the team's OWN site ids, with a `scope` line that names its population
+(13 registered vs 12 ever-deployed) instead of leaving an operator to explain the discrepancy away.
+`Deploy.start/1` — `_ = start_reported(row); :ok`, spec'd `:: :ok` — is deleted, so the MatchError meant to
+signal a refused driver spawn stops being structurally unreachable; both router arms answer `503
+deploy_not_started`, the freshness sweep counts `:failed`, and `resume_orphaned/0`'s `resumed:` metric stops
+counting rows FOUND. That last one is the wave's sharpest find: the reaper's own recovery metric reported
+success on a sweep in which every rescue was refused.
+
+**Reviewer fixes, in place.** (a) `bp sites -h` never mentioned the new cohort or the breaking list-view
+`last_deployment` keyset change — both now documented. (b) A refused driver spawn skipped its
+`push_event("deployments"/"audit")`, so the 503 left a real committed `queued` row the live console never heard
+about; both router sites now announce before attempting the start. (c) `auto_deploy_worker.ex:38` stopped
+naming the deleted `Deploy.start/1` (the builder correctly obeyed its FILES fence and filed it; the reviewer is
+not fenced).
+
+**Independently re-derived, not re-read.** The high-flip-risk tenancy judgement: `sites.team_id` is
+`validate_required` on the Site changeset and `GET /v1/sites` (`router.ex:6425`) scopes by the identical
+`Registry.list_sites_for_team(conn.assigns.current_team)` hop under the identical credential — the derivation
+is precedented, not novel. The reviewer also re-ran slice 4's deferred-overlap mutation from scratch: 66 tests
+/ 2 failures, both the new guard's, with all 62 existing ledger tests green in the same run. **A genuinely
+independent SECOND reviewer on the tenancy route is still owed before merge — that dispatch is a manual lead
+step**, because no production-drawn fixture can exhibit the IDOR (26 of 27 teams own zero sites).
+
+**What the lead must close on merge.** Every slice leaves its merge-gated criterion open by design.
+`dr-w16-s6` additionally leaves criterion 10 an honest `--miss`: the live 200 needs the deploy that merging
+causes (`cloud/**` auto-deploys), and the post-merge curl — paired with the `403` on the operator route that
+makes the 200 mean something — is stamped in the task's miss note. `dr-w17-s3` ships a **breaking** JSON
+change: `bp sites -o json` list rows no longer carry `last_deployment.id` / `.image_tag`, because the wire
+does not carry them.
+
+**What is still silent, named honestly.** The basis line's coalesced-attempt numbers are hardcoded dated prose
+and nothing reds when they age — `dr-w17-s8` is the fix. A refused PREBUILT row is now a VISIBLE dead end
+(`queued`, `claim_epoch` 0, covered by no reaper pass) rather than a silent lie — visible is better, and it is
+not a repair (`task-c4c9a54cd073e011`). The partition guard proves the census is self-consistent; it still
+cannot lose on UNDER-collection, because every count comes from the same grouped query. And `site_rows/2`
+runs the same three-cohort split per site with no partition guard at all.
+
+**What the next wave should take.** The dispatch order is fixed by the map: merge round 1, then
+`dr-w16-s4-per-site-row-named-producer` (needs `dr-w16-s6` merged), then `dr-w16-s7-boundary-and-continuity-gauge`
+(needs s4), then `dr-w17-s8-census-names-its-basis-rows-not-attempts` (needs s7) — four slices contend
+`census/3`'s return map and s8 is the last link. S8 is the one that matters most to the wish: it turns the
+hardcoded ceiling into an emitted `coalesced_attempts`, moving 2026-08-06 from 25.67% to 14.94%. Beside them,
+the per-site partition guard and the still-unrepaired prebuilt dead end are the two unclaimed silences.
