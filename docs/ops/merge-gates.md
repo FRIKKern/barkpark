@@ -38,13 +38,22 @@ A PR targeting `main` must clear:
 5. **`plugin-node` CI job** — `.github/workflows/plugin-node.yml`. Discovers
    plugins under `api/priv/plugins/` whose `plugin.json` declares a top-level
    `"node"` object and runs `npm ci` + lint + typecheck per plugin. Emits a
-   no-op success when no plugin declares Node, so the workflow is always
-   present in the required-status list.
+   no-op success when no plugin declares Node, so the check is always
+   *present on the PR*. Present is not required: it **cannot stop a merge** —
+   it is none of the four required contexts and no required aggregator lists
+   it in `needs:`, which is the same reading §"Blocking, required, and the
+   difference" gives it below ("blocking nothing today"). Until 2026-08-07
+   this item ended "…so the workflow is always present in the required-status
+   list", contradicting that section 380 lines further down the same page.
 6. **`vendored-assets` CI job** — `.github/workflows/vendored-assets.yml`,
    path-triggered on `deploy.sh` / `internal/cli/setup/assets/**`. Runs
    `make cli-assets-check` so the go:embedded deploy.sh copy can never drift
    from the root copy again (it diverged both ways on main, fixed 2026-07-02).
-   Edit the ROOT deploy.sh, then `make cli-assets-sync`.
+   Edit the ROOT deploy.sh, then `make cli-assets-sync`. It carries a
+   workflow-level `on: … paths:` filter, is none of the four required
+   contexts, and is in no required aggregator's `needs:`, so a red one **does
+   not block merge**. It is on this list because a PR that trips it is broken,
+   not because the merge button waits for it.
 
 7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. Enforces
    task-obsession layer 1: every PR must carry a `Task: <doc_id>` trailer in its
@@ -54,7 +63,12 @@ A PR targeting `main` must clear:
    (`bash scripts/pr-task-gate.test.sh`, hermetic, and run in CI by this same
    workflow's **`PR task gate self-test`** job — deliberately not in
    `shell-harnesses.yml`, which is paths-filtered and so can never carry a
-   required name); the workflow only plumbs PR context in. Four designed
+   required name). The `PR task gate self-test` job does not carry a required
+   name either and **cannot block a merge**; it lives in this path-unfiltered
+   workflow so that it runs on the same trigger as the gate it tests. The only
+   name this workflow contributes to the required set is
+   `PR references an active task`, the job described in this item.
+   The workflow only plumbs PR context in. Four designed
    behaviours:
    **merge-base cutoff, three-state** — the base COMMIT is resolved first; base
    resolves + this workflow absent = grandfathered (so turning the gate on did
@@ -385,8 +399,10 @@ run them, cannot run them locally, and cannot fix them in a PR.
 
 ### Making `pr-task-gate` binding (required-by-name)
 
-**This gate is now BINDING** — `PR references an active task` is one of the two
-required contexts live on `main` (2026-07-28; see *Pre-merge gates*). The
+**This gate is now BINDING** — `PR references an active task` is one of the four
+required contexts live on `main` (2026-07-28; see *Pre-merge gates*; it read
+"two" until 2026-08-07, stale since `Cloud gate` and `Console gate` were
+registered, and contradicting this page's own count 100 lines earlier). The
 bootstrap below is kept as the account of how a context becomes required, not
 as pending work. A check becomes binding only when added to the
 required-status-checks list **by name**. Required-by-name is load-bearing (D3):
@@ -617,12 +633,23 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is seventeen)
+### The doc-gates roster (it is not two scripts — it is nineteen)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **17 steps labelled `(blocking)`** plus 6 `(tripwire)`
+undersells it: it runs **19 steps labelled `(blocking)`** plus 6 `(tripwire)`
 self-tests that prove a scanner still reds on a planted defect. A PR touching
-one `.ex` file runs all of them. In workflow order:
+one `.ex` file runs all of them. **`(blocking)` there means blocking inside the
+job, not on the merge**: this workflow carries a workflow-level `on: … paths:`
+filter, so on a PR touching none of those paths the check is simply ABSENT —
+which is why `.github/required-checks.json` files `Doc budgets + anchors` under
+**S4 PATHS-FILTERED** and why `doc-gates` is not a required context and **cannot
+block a merge** by itself. A red step reds the job on the PRs where it runs;
+that is the whole of its authority. (The count read 17 until 2026-08-07 —
+`Never-cancel-main concurrency ratchet` and `Nil-polarity fail-closed gate` were
+missing from the table below; the number is now derived by
+`grep -c '(blocking)' .github/workflows/doc-gates.yml` and §20 of
+`scripts/required-checks.test.sh` reds if the two drift apart.) In workflow
+order:
 
 | # | Step | Runs |
 |---|------|------|
@@ -630,19 +657,21 @@ one `.ex` file runs all of them. In workflow order:
 | 2 | Doc anchors + headers | `scripts/docs-anchors-check.sh` (routing/INDEX targets, card Code anchors, G1 doc-tier headers, `canonical-for` uniqueness, `@canonical capability:` slug uniqueness + public-entry-point placement, ARCHIVED banners) |
 | 3 | Connectors DDL drift | `scripts/connectors-ddl-drift-check.sh` (+ `--selftest`) |
 | 4 | Connectors catalog drift | `scripts/connectors-catalog-drift-check.sh` (+ `--selftest`) |
-| 5 | Paper-editor style mirror | `scripts/paper-editor-mirror-check.sh` |
-| 6 | Status manifest drift | `scripts/status-manifest-check.sh` |
-| 7 | Preview parity + no-oEmbed | `scripts/preview-parity-check.sh` |
-| 8 | Design-token drift | `node design/validate.mjs` · `design/check.mjs` · `derive.test.mjs` · `theme-emit.test.mjs` |
-| 9 | Studio literal-color | `scripts/studio-literal-check.sh` |
-| 10 | Studio link/path | `scripts/studio-link-lint.sh` (+ `--selftest`) |
-| 11 | Web literal-color | `scripts/web-literal-check.sh` |
-| 12 | Go literal-color | `scripts/go-literal-check.sh` (+ `--selftest`) |
-| 13 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` |
-| 14 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
-| 15 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
-| 16 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
-| 17 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
+| 5 | Never-cancel-main concurrency ratchet | `scripts/never-cancel-main-check.sh` (+ `--selftest`) |
+| 6 | Paper-editor style mirror | `scripts/paper-editor-mirror-check.sh` |
+| 7 | Status manifest drift | `scripts/status-manifest-check.sh` |
+| 8 | Preview parity + no-oEmbed | `scripts/preview-parity-check.sh` |
+| 9 | Design-token drift | `node design/validate.mjs` · `design/check.mjs` · `derive.test.mjs` · `theme-emit.test.mjs` |
+| 10 | Studio literal-color | `scripts/studio-literal-check.sh` |
+| 11 | Studio link/path | `scripts/studio-link-lint.sh` (+ `--selftest`) |
+| 12 | Web literal-color | `scripts/web-literal-check.sh` |
+| 13 | Go literal-color | `scripts/go-literal-check.sh` (+ `--selftest`) |
+| 14 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` |
+| 15 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
+| 16 | Nil-polarity fail-closed gate | `scripts/nil-polarity-check.sh` (+ `--selftest`) |
+| 17 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
+| 18 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
+| 19 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
@@ -655,19 +684,19 @@ The Studio shell is the single most gate-dense file in the repo — **four**
 of the steps above read it, and no card names them all, which is how a
 one-line CSS edit turns into three surprise reds:
 
-- **9 · `scripts/studio-literal-check.sh`** — no new hand-stamped hex/hsl
+- **10 · `scripts/studio-literal-check.sh`** — no new hand-stamped hex/hsl
   colour in Studio chrome; `var(--…)` only.
-- **8 · `design/check.mjs` Part E** — the exemption **ratchet**. It counts
+- **9 · `design/check.mjs` Part E** — the exemption **ratchet**. It counts
   colour literals per file against a frozen baseline in
   `design/exemptions.json` (`root.html.heex` is entry #1).
-- **5 · `scripts/paper-editor-mirror-check.sh`** — the reader→editor style
+- **6 · `scripts/paper-editor-mirror-check.sh`** — the reader→editor style
   mirror. When the surface legitimately changes, re-stamp it with
   `bash scripts/paper-editor-mirror-check.sh --write` in the same diff.
-- **10 · `scripts/studio-link-lint.sh`** — no hand-built, interpolated
+- **11 · `scripts/studio-link-lint.sh`** — no hand-built, interpolated
   scope/dataset Studio URL literal; build paths through
   `StudioLive.Paths`.
 
-**D53 — the inverse blind spot (the expensive one).** Steps 9 and 8 do *not*
+**D53 — the inverse blind spot (the expensive one).** Steps 10 and 9 do *not*
 cover the same thing; each is blind exactly where the other bites:
 
 - `rgba(0,0,0,.55)` **passes** the literal gate (it does not scan `rgb()`/
