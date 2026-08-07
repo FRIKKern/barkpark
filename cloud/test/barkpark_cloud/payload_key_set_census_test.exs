@@ -504,7 +504,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       nested: "window",
       go: "DeployCensusWindow"
     },
-    %{name: "DeployLedger.rate/2", file: @ledger, entry: {:rate, 2}, go: "DeployRate"}
+    %{name: "DeployLedger.rate/2", file: @ledger, entry: {:rate, 2}, go: "DeployRate"},
+    # dr-w18-s2. The per-site row was an INLINE anonymous fn inside
+    # `site_rows/2` — a wire shape this census structurally could not walk, so
+    # `DeployCensusSite` was paired with NOTHING and a key added to (or dropped
+    # from) the site row diverged from its decoder in silence. Extracting a
+    # named single-clause `site_row/2` is what makes the pair possible at all.
+    %{
+      name: "DeployLedger.site_row/2",
+      file: @ledger,
+      entry: {:site_row, 2},
+      go: "DeployCensusSite"
+    }
   ]
 
   # ---------------------------------------------------------------------------
@@ -560,11 +571,36 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"DeployLedger.census/3", :phantom, "terminal_failure_rate",
      "dr-w16-bl-emit-terminal-failure-rate — THE EMITTER IS UNBUILT AND NOW OWNED. The row previously read \"PR #10014 carries the emitter\"; #10014 is CLOSED with mergedAt null, so that sentence pointed a reader at a dead branch and this hole had no owner at all. THE HEADLINE CASE: internal/cli/cloud_deploy_census_cmd.go:398 branches on nil here, so `bp cloud deployments` is permanently on its \"older control plane\" arm and cannot tell that from a genuinely older CP."},
-    {"DeployLedger.rate/2", :phantom, "basis",
-     "dr-w16-bl-emit-rate-basis — THE EMITTER IS UNBUILT AND NOW OWNED, same dead citation as the row above (#10014, CLOSED). This is the D34 convention label that says WHICH denominator a rate was taken over; until it is emitted every rate on the wire decodes basis as \"\". Thread it as a REAL argument, never the stranded branch's default arg (D199)."},
     {"site_deployment_json/3", :unread, "refusal_phase",
-     "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."}
+     "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
+    {"DeployLedger.census/3", :unread, "boundaries",
+     "dr-w18-s5 — the vocabulary-boundary LIST. Emitted by census/3 as of dr-w18-s2; the Go decode and render ride the round-2 slice, which is fenced out of this file. Until then a reader of `bp cloud deployments` sees the refusal but not the instant that caused it."},
+    {"DeployLedger.census/3", :unread, "coalesced_attempts",
+     "dr-w18-s5 — the gauge for attempts that minted NO row, with its refusing coverage floor. Same round-2 fence as `boundaries`; the value is on the wire and in `-o json` (census.Raw is verbatim) before any struct field exists."},
+    {"DeployLedger.census/3", :unread, "completeness",
+     "dr-w18-s5 — the second independent count reconciled against volume + not_attempted. It reds IN THE ENVELOPE today; the Go reader must learn to print `unaccounted` rather than a balanced-looking number."},
+    {"DeployLedger.census/3", :unread, "total_sites",
+     "dr-w18-s5 — the population behind a site list the server cut at 50. The Go side's existing marker is over its OWN 10-row clamp and is structurally blind to the server cut."},
+    {"DeployLedger.census/3", :unread, "truncated",
+     "dr-w18-s5 — the server-side cut marker, twin of total_sites above."}
   ]
+
+  # MERGE RESOLUTION (wave-18 review, dr-w18-s2 rebased onto origin/main).
+  # Two rows that existed on ONE side each are deliberately absent above, and
+  # each absence is a deletion the merge OWES rather than a row lost in a
+  # conflict:
+  #
+  #   - `{"DeployLedger.rate/2", :phantom, "basis"}` — s2 threads `basis`
+  #     through `rate_basis/3` as a REAL argument, so the tag stopped
+  #     diverging. Keeping the row would red the "no longer phantom" arm.
+  #     s2's own commit deleted it; the rebase had to re-apply that deletion
+  #     over main's copy of the row.
+  #   - `{"DeployLedger.census/3", :phantom, "delivery"}` — main deleted it in
+  #     W15 S3 when the census route began emitting `delivery`. s2 branched
+  #     before that and still carried it. Main's deletion wins.
+  #
+  # `refusal_phase` (main, W15 S3) is KEPT and the five `census/3` `:unread`
+  # rows (s2) are ADDED: the union, not either side.
 
   # MERGE-ORDER NOTE (wave-11 review, proved not predicted). Wave 11's slice
   # `dr-w11-s4-delivery-census-refuses` declares `Delivery *DeployDelivery
@@ -632,7 +668,32 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #
   # POST-UNION, measured on the rebased tree with both floors probed at 999:
   # "only 110 emitted key(s) collected" and "only 222 json tag(s) found".
-  @emitted_floor 110
+  #
+  # W18 S2: MEASURED by the 999-technique (set both to 999, read the two
+  # refusal lines, commit the numbers they printed) — never derived from a field
+  # count. The arithmetic guess is wrong in both directions here: this slice
+  # adds SEVEN emitted census keys but the emitted total also gains the whole
+  # `site_row/2` pair, and it adds ZERO go tags because it emits no Go at all
+  # while `live`, `total_sites` and friends are either already declared or not
+  # yet declared anywhere.
+  #
+  # AND BOTH ARE NOW `==`, NOT `>=`. origin/main committed 221 against a real
+  # population of 222 — one tag of SLACK, minted by this epic's own #10474,
+  # whose `json:"last_deployment"` was the one new name not already in the
+  # union and passed silently because `>=` cannot see a population that GREW.
+  # Equality turns "remember to bump the floor" from a convention into a red.
+  #
+  # W18 REVIEW, POST-REBASE: s2 measured 121 on ITS base (which predated main's
+  # W15 S3 `refusal_phase` and `delivery` keys), so 121 is stale by
+  # construction and under `==` it reds LOUDLY rather than passing — the
+  # intended behaviour of the `>=` -> `==` change, and the reason the builder
+  # stamped this as a merge hazard. RE-MEASURED here on the rebased tree by the
+  # same 999-technique, never by adding s2's delta to main's number: both floors
+  # set to 999, and the two refusal lines printed "123 emitted key(s)
+  # collected" and "222 json tag(s) found". 123 is neither main's 110 + s2's
+  # delta nor s2's 121 — the arithmetic guess would have been wrong in both
+  # directions, which is exactly why the technique is measurement.
+  @emitted_floor 123
   @go_tag_floor 222
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
@@ -707,8 +768,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   end
 
   test "ANTI-VACUITY FLOOR: a neutered walker REFUSES rather than reporting a clean tree" do
-    assert total_emitted([]) >= @emitted_floor,
-           "only #{total_emitted([])} emitted key(s) collected, floor is #{@emitted_floor} — " <>
+    assert total_emitted([]) == @emitted_floor,
+           "#{total_emitted([])} emitted key(s) collected, floor is EXACTLY #{@emitted_floor} — " <>
              "the EXTRACTOR is broken, not the payload shrunk. Check Extract.clauses/4 " <>
              "(a new def syntax it does not match) before touching the floor."
 
@@ -717,8 +778,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     assert_raise ExUnit.AssertionError, fn ->
       broken = total_emitted(walker: :broken)
 
-      assert broken >= @emitted_floor,
-             "only #{broken} emitted key(s) collected, floor is #{@emitted_floor}"
+      assert broken == @emitted_floor,
+             "#{broken} emitted key(s) collected, floor is EXACTLY #{@emitted_floor}"
     end
 
     assert total_emitted(walker: :broken) == 0
@@ -774,9 +835,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       assert MapSet.size(tags) > 0, "#{name} carries no json tags"
     end
 
-    assert MapSet.size(Go.all_tags(src)) >= @go_tag_floor,
-           "only #{MapSet.size(Go.all_tags(src))} json tag(s) found in internal/cloudclient, " <>
-             "floor is #{@go_tag_floor} — the TAG SCANNER is broken, not the package empty."
+    assert MapSet.size(Go.all_tags(src)) == @go_tag_floor,
+           "#{MapSet.size(Go.all_tags(src))} json tag(s) found in internal/cloudclient, " <>
+             "floor is EXACTLY #{@go_tag_floor} — either the TAG SCANNER is broken (fewer) or " <>
+             "a tag landed without the floor following it (more, which is how #10474 shipped " <>
+             "one tag of slack under the old `>=`)."
   end
 
   # THE UNREAD ARM'S MEASURED BLIND SPOT (charter D260). `Go.all_tags/1` is

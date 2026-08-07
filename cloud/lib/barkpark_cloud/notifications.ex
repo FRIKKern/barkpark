@@ -374,6 +374,34 @@ defmodule BarkparkCloud.Notifications do
   `team_id: nil` — a platform-operator email belongs to no team, exactly like the
   user-scoped identity emails). Returns `{:ok, :no_admins}` or
   `{:ok, %{sent: n, recipients: [...]}}`.
+
+  ## dr-w18-s3 — every outcome is ACCOUNTED, so the zero can be seen
+
+  Both arms call `account_fleet_digest/2` before returning: `recipients=N sent=M`
+  as a `:telemetry` event AND one key=value log line. The zero-recipient arm is
+  the reason the seam exists — `PLATFORM_ADMIN_EMAILS` is unset on prod, so the
+  recipient population is empty BY CONSTRUCTION, the arm returned `{:ok,
+  :no_admins}`, `DailyDigestWorker` matched it as `:ok`, and Oban recorded a
+  COMPLETED job. Measured: 5 of 5 digest jobs `completed`, zero `fleet_digest`
+  rows in `notification_deliveries` across 37 unpruned days. The one push channel
+  for fleet health had been succeeding at sending nothing for its whole recorded
+  life, and nothing anywhere counted it.
+
+  What the accounting is NOT: it writes no `Delivery` row and invents no
+  recipient — charter D362 names this digest verbatim as a consented
+  recipient-less withhold, and `Delivery.changeset/2` requires a recipient. It is
+  also not a new alert PRODUCER (D14): it is one counted record on an existing
+  rail, at WARNING when the rail lost, so `journalctl -u barkpark-cloud | grep
+  fleet_digest` answers "did anyone get today's digest?" without a metrics
+  pipeline and without an operator-gated read route (of which there is none for
+  this event — the only reader of a `fleet_digest` Delivery row is
+  `GET /v1/operator/deliveries`, gated on the SAME empty population).
+
+  Scope, stated so it is not overclaimed: this fixes the ADDRESS, not the
+  PAYLOAD. `DigestEmail.summary/1` carries release-freshness only (total /
+  current / behind / paused / latest) and zero deploy-health data — re-addressing
+  it delivers a report that still says nothing about deploy failures. The payload
+  half is `dr-w10-bl-digest-email-calls-a-sick-fleet-healthy`.
   """
   @spec deliver_fleet_digest([term()]) ::
           {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
@@ -387,23 +415,96 @@ defmodule BarkparkCloud.Notifications do
       # level up. `Delivery.changeset/2` requires a recipient (delivery.ex:78)
       # and this arm has none; charter D362 forbids a synthetic one. This is not
       # the system deciding against a person, it is the absence of a person.
+      #
+      # dr-w18-s3: consented is not the same as UNCOUNTED. The `Logger.info` that
+      # used to stand here was the entire record of a digest that never left, and
+      # nothing — not Oban, not the delivery log, not a metric — could tell this
+      # day apart from a day the fleet was mailed. The row stays forbidden; the
+      # COUNT does not need a recipient.
       [] ->
-        Logger.info(
-          "Notifications.deliver_fleet_digest: no platform admins configured/registered — " <>
-            "skipping the daily fleet digest (#{summary.total} instance(s))"
+        account_fleet_digest(
+          %{recipients: 0, sent: 0},
+          %{instances: summary.total, reason: "no_platform_admins"}
         )
 
         {:ok, :no_admins}
 
       recipients ->
-        for recipient <- recipients do
-          email = DigestEmail.build(summary, recipient)
-          result = Mailer.deliver(email)
-          record_delivery(nil, recipient, "fleet_digest", "transactional", result)
-        end
+        results =
+          for recipient <- recipients do
+            email = DigestEmail.build(summary, recipient)
+            result = Mailer.deliver(email)
+            record_delivery(nil, recipient, "fleet_digest", "transactional", result)
+            result
+          end
 
-        {:ok, %{sent: length(recipients), recipients: recipients}}
+        # `{:ok, _}` is `record_delivery/5`'s own "sent" classification, reused so
+        # the count and the Delivery rows can never disagree. A digest that failed
+        # for two of three admins used to return `sent: 3`.
+        sent = Enum.count(results, &match?({:ok, _}, &1))
+        reason = if sent < length(recipients), do: "partial_send"
+
+        account_fleet_digest(
+          %{recipients: length(recipients), sent: sent},
+          %{instances: summary.total, reason: reason}
+        )
+
+        {:ok, %{sent: sent, recipients: recipients}}
     end
+  end
+
+  # THE ACCOUNTING RECORD for one digest run — transposed from the webhook
+  # fan-out's settled record (`Barkpark.Webhooks.Dispatcher.account/3`), which
+  # solved this exact shape for a different zero-audience event.
+  #
+  # Two observable seams, neither of which needs a read route or a metrics
+  # pipeline: a `:telemetry` event (a test, or a future reporter, can attach) and
+  # one key=value line that `grep fleet_digest` finds in journald. WARNING when
+  # the run lost anyone — `recipients=0` is the loss this slice exists to make
+  # visible, and a partial send is the same class one degree softer.
+  #
+  # `safely/1`: accounting is a side path on a best-effort operator email. It
+  # must never be able to break the send it is counting.
+  defp account_fleet_digest(measurements, metadata) do
+    metadata = Map.put(metadata, :phase, :settled)
+
+    safely(fn ->
+      :telemetry.execute(
+        [:barkpark_cloud, :notifications, :fleet_digest, :settled],
+        measurements,
+        metadata
+      )
+    end)
+
+    safely(fn -> log_fleet_digest(measurements, metadata) end)
+
+    :ok
+  end
+
+  defp log_fleet_digest(m, meta) do
+    line =
+      "fleet_digest phase=#{meta.phase} recipients=#{m.recipients} sent=#{m.sent} " <>
+        "instances=#{meta.instances}" <>
+        if(is_nil(meta.reason), do: "", else: " reason=#{meta.reason}")
+
+    if m.sent < m.recipients or m.recipients == 0 do
+      # THE LOSS CLASS: nobody was mailed, or somebody was not. Warning, because
+      # the whole defect was that this outcome read as a success everywhere.
+      Logger.warning(line)
+    else
+      Logger.info(line)
+    end
+  end
+
+  # A trace must not be able to break the branch it is tracing (the same
+  # discipline `Withhold.record/4` rescues into).
+  defp safely(fun) do
+    fun.()
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   @doc """
