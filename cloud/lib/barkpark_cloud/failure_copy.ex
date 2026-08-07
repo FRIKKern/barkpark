@@ -724,6 +724,14 @@ defmodule BarkparkCloud.FailureCopy do
 
   # Catalog: the provider doesn't publish a normalized size-and-region catalog
   # here, so provisioning falls back to fixed defaults (generic across kinds).
+  #
+  # "HERE" means THIS control plane, so this sentence may only reach a kind the
+  # CP does NOT catalog. The kinds it DOES catalog (a `build_provider_catalog/2`
+  # clause, routed for `@neutral_kinds`) never carry this gap: the conduit's
+  # `own_catalog_capability/2` answers `catalog` itself, so the reason is not
+  # generated for them at all. `providers_catalog_capability_test.exs` holds that
+  # line — this clause stays for the kinds it is still true about (and any
+  # future provider that connects without a catalog).
   def capability_gap_reason(_kind, "catalog") do
     "This provider doesn't publish a size-and-region catalog here yet, so provisioning uses fixed defaults."
   end
