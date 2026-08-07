@@ -95,6 +95,8 @@ defmodule BarkparkCloud.DeployLedger do
     "BOX_500",
     "FORBIDDEN_403",
     "BUILD_FAILED",
+    "BOX_DEPLOY_DISABLED_503",
+    "BOX_RUNNER_UNAVAILABLE_503",
     "BOX_UNAVAILABLE_503",
     "BOX_UNREACHABLE",
     "HEALTH_GATE_FAILED",
@@ -147,7 +149,9 @@ defmodule BarkparkCloud.DeployLedger do
     "BOX_500" => "the box errored on the deploy (HTTP 500)",
     "FORBIDDEN_403" => "the build could not read its content (403)",
     "BUILD_FAILED" => "the site build exited non-zero",
-    "BOX_UNAVAILABLE_503" => "the box was unavailable (HTTP 503)",
+    "BOX_DEPLOY_DISABLED_503" => "site deploys are switched off on this instance",
+    "BOX_RUNNER_UNAVAILABLE_503" => "the instance's deploy runner did not answer in time",
+    "BOX_UNAVAILABLE_503" => "the box refused with a 503 it did not name a cause for",
     "BOX_UNREACHABLE" => "the instance could not be reached at all",
     "HEALTH_GATE_FAILED" => "HEALTH gate failed — not switched",
     "BOX_RATE_LIMITED_429" => "the box rate-limited the deploy (HTTP 429)",
@@ -309,6 +313,32 @@ defmodule BarkparkCloud.DeployLedger do
     if abandoned?(reason), do: abandoned_class(reason), else: "BOX_BUSY_409"
   end
 
+  # The 503 splits the same way, and for a harder reason: `BOX_UNAVAILABLE_503`
+  # had EXACTLY ONE distinct `failure_reason` in its entire life on cloud-db-1 —
+  # 265 rows, all `feature_not_configured`, all written by a box that was UP (in
+  # one hour, 15 deploys went LIVE on the same box while 44 were refused as "not
+  # enabled", a live deploy and a refusal four seconds apart). "The box was
+  # unavailable" was not mostly wrong; it was wrong of every row it ever named,
+  # and it sent the operator to check a box's health instead of a feature flag.
+  #
+  # dr-w8-s2 then put a SECOND cause on the same status on purpose — a wedged
+  # runner, kept on the 503 so it would not refile rows — so the class became a
+  # UNION of two causes with OPPOSITE instructions ("you switched deploys off"
+  # vs "your runner was slow") behind one name that fits neither. The status
+  # alone cannot tell them apart. The box's own code word can, through the SAME
+  # `deferral_code/1` reader the 409 arm uses.
+  #
+  # A 503 the ledger cannot read a NAMED code word out of keeps the status-only
+  # name (D8, again): an unnamed cause must not be promoted into whichever of
+  # the two it happens to sit next to.
+  defp refusal_class("503", reason) do
+    case deferral_code(reason) do
+      {:code, "feature_not_configured"} -> "BOX_DEPLOY_DISABLED_503"
+      {:code, "deploy_runner_unavailable"} -> "BOX_RUNNER_UNAVAILABLE_503"
+      _unnamed -> "BOX_UNAVAILABLE_503"
+    end
+  end
+
   defp refusal_class(code, _reason), do: refusal_class(code)
 
   # `Sites.Deploy.abandonment_reason/3` writes this clause, and nothing else in
@@ -407,7 +437,17 @@ defmodule BarkparkCloud.DeployLedger do
   #   `:prose`        there IS a detail, and its first segment is not a code —
   #                   an unnamed cause, which must rise in the tail rather than
   #                   inherit `:none`'s busy-slug fallback.
-  @deferral_prefix ~r/^the instance refused the deploy \((?:HTTP )?409\):\s*(.+)$/s
+  #
+  # The status capture is ANY three digits, not a pinned 409: the 503 arm reads
+  # its cause through this same parser, and one parser for one code is the whole
+  # point (a chain, a deferral, a refusal and a census must never disagree about
+  # what the box said). Widening is safe because every caller is status-gated
+  # UPSTREAM — `abandoned_class/1` only runs inside `refusal_class("409", _)`,
+  # `refusal_class("503", _)` only sees a 503, and `classify_deferred/2` returns
+  # the tail before it reads unless `refusal_code/1` already said "409" — and
+  # that safety is pinned by mutation over BOTH 409 shapes in
+  # `deploy_ledger_test.exs`, not by this comment.
+  @deferral_prefix ~r/^the instance refused the deploy \((?:HTTP )?\d{3}\):\s*(.+)$/s
 
   # `Sites.Deploy.box_refusal/3` stamps the box's request id AFTER the detail —
   # `"#{base} [box request_id: #{rid}]"` — while `refusal_detail/1` returns the
