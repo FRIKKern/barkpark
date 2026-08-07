@@ -621,25 +621,81 @@ func TestDeployOmitsEmptyFields(t *testing.T) {
 	}
 }
 
-// TestListDeployments: GET /v1/sites/:id/deployments newest-first.
+// TestListDeployments: GET /v1/sites/:id/deployments newest-first, with no
+// query string when the caller asks for no window.
 func TestListDeployments(t *testing.T) {
-	var gotPath string
+	var gotPath, gotQuery string
 	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
 		_, _ = io.WriteString(w, `{"deployments":[
 			{"id":"dep-2","site_id":"site-1","status":"live","image_tag":"sha:b","inserted_at":"2026-06-26T02:00:00Z"},
 			{"id":"dep-1","site_id":"site-1","status":"failed","failure_reason":"boom","inserted_at":"2026-06-26T01:00:00Z"}
 		]}`)
 	})
-	ds, err := c.ListDeployments(context.Background(), "site-1")
+	page, err := c.ListDeployments(context.Background(), "site-1", DeploymentQuery{})
 	if err != nil {
 		t.Fatalf("ListDeployments: %v", err)
 	}
 	if gotPath != "/v1/sites/site-1/deployments" {
 		t.Fatalf("hit %q, want /v1/sites/site-1/deployments", gotPath)
 	}
-	if len(ds) != 2 || ds[0].Status != "live" || ds[1].FailureReason != "boom" {
+	if gotQuery != "" {
+		t.Fatalf("zero-value query must send NO query string; got %q", gotQuery)
+	}
+	ds := page.Deployments
+	if len(ds) != 2 || ds[0].Status != "live" {
 		t.Fatalf("decoded deployments = %+v", ds)
+	}
+	if ds[1].FailureReason == nil || *ds[1].FailureReason != "boom" {
+		t.Fatalf("failure_reason not decoded: %+v", ds[1])
+	}
+	// The absent key must stay absent — a nil, not an empty string that a
+	// render path would print as a measured value.
+	if ds[0].FailureReason != nil {
+		t.Fatalf("a row with no failure_reason must decode nil, got %q", *ds[0].FailureReason)
+	}
+	if page.NextCursor != "" {
+		t.Fatalf("no next_cursor on the wire must be \"\", got %q", page.NextCursor)
+	}
+}
+
+// TestListDeploymentsWindowAndCursor: deploy-reliability W9. The call used to
+// send no query at all, so it could never page past the server's default 100 —
+// and every rate computed from those rows was a rate over an unstated window.
+func TestListDeploymentsWindowAndCursor(t *testing.T) {
+	var gotQuery string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = io.WriteString(w, `{"deployments":[
+			{"id":"dep-9","site_id":"site-1","status":"failed","failure_class":"BOX_AT_CAPACITY_DEFERRED","stage":"queue","trigger":"push","content_rev":"rev-7","inserted_at":"2026-06-26T02:00:00Z"}
+		],"next_cursor":"cur-abc"}`)
+	})
+	page, err := c.ListDeployments(context.Background(), "site-1", DeploymentQuery{Limit: 250, Before: "cur-prev"})
+	if err != nil {
+		t.Fatalf("ListDeployments: %v", err)
+	}
+	if gotQuery != "before=cur-prev&limit=250" {
+		t.Fatalf("query = %q, want before=cur-prev&limit=250", gotQuery)
+	}
+	if page.NextCursor != "cur-abc" {
+		t.Fatalf("next_cursor = %q, want cur-abc", page.NextCursor)
+	}
+	d := page.Deployments[0]
+	for name, got := range map[string]*string{
+		"failure_class": d.FailureClass,
+		"stage":         d.Stage,
+		"trigger":       d.Trigger,
+		"content_rev":   d.ContentRev,
+	} {
+		if got == nil {
+			t.Fatalf("%s decoded nil — the key was on the wire", name)
+		}
+	}
+	if *d.FailureClass != "BOX_AT_CAPACITY_DEFERRED" {
+		t.Fatalf("failure_class = %q", *d.FailureClass)
+	}
+	if d.BecameLiveAt != nil {
+		t.Fatalf("became_live_at absent on the wire must be nil, got %q", *d.BecameLiveAt)
 	}
 }
 

@@ -10,6 +10,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,7 @@ type scriptedRoute struct {
 type scriptedRequest struct {
 	method string
 	path   string
+	query  string
 	auth   string
 	body   map[string]any
 }
@@ -52,7 +54,7 @@ func (s *scriptedCloud) route(method, path string, status int, body string) *scr
 
 func (s *scriptedCloud) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rec := scriptedRequest{method: r.Method, path: r.URL.Path, auth: r.Header.Get("Authorization")}
+		rec := scriptedRequest{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, auth: r.Header.Get("Authorization")}
 		if r.Body != nil {
 			raw, _ := io.ReadAll(r.Body)
 			if len(raw) > 0 {
@@ -524,10 +526,243 @@ func TestSitesDeploymentsTable(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
 	}
-	for _, want := range []string{"STATUS", "IMAGE_TAG", "GIT_REF", "STARTED", "live", "failed", "sha:bbbb"} {
+	for _, want := range []string{"STATUS", "CAUSE", "TRIGGER", "STARTED", "live", "failed"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("deployments table missing %q:\n%s", want, stdout)
 		}
+	}
+}
+
+// deploymentsFixture builds a `{"deployments":[...]}` body with the given mix.
+// The rows are stamped an hour apart ascending so the window edges are
+// predictable, and returned newest-first the way the control plane returns them.
+func deploymentsFixture(live, failed, deferred int) string {
+	type row struct{ status, class string }
+	var rows []row
+	for i := 0; i < live; i++ {
+		rows = append(rows, row{"live", ""})
+	}
+	for i := 0; i < failed; i++ {
+		rows = append(rows, row{"failed", "BUILD_FAILED"})
+	}
+	for i := 0; i < deferred; i++ {
+		rows = append(rows, row{"failed", "BOX_AT_CAPACITY_DEFERRED"})
+	}
+	var b strings.Builder
+	b.WriteString(`{"deployments":[`)
+	for i, r := range rows {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		// Newest first: row 0 gets the LATEST timestamp.
+		ts := fmt.Sprintf("2026-08-%02dT00:00:00Z", 28-((len(rows)-1-i)%28))
+		b.WriteString(fmt.Sprintf(
+			`{"id":"dep-%d","site_id":"site-1","status":%q,"trigger":"push","inserted_at":%q`,
+			i, r.status, ts))
+		if r.class != "" {
+			b.WriteString(fmt.Sprintf(`,"failure_class":%q,"failure_reason":"detail %d"`, r.class, i))
+		}
+		b.WriteString("}")
+	}
+	b.WriteString(`]}`)
+	return b.String()
+}
+
+// runDeploymentsFixture wires a scripted control plane serving `body` and runs
+// `bp sites deployments blog <extraArgs...>` in table mode.
+func runDeploymentsFixture(t *testing.T, body string, extraArgs ...string) (*scriptedCloud, string, int) {
+	t.Helper()
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).
+		route("GET", "/v1/sites", http.StatusOK, `{"sites":[
+			{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":[],"scale_mode":"always_on"}
+		]}`).
+		route("GET", "/v1/sites/site-1/deployments", http.StatusOK, body)
+	srv := httptest.NewServer(s.handler())
+	t.Cleanup(srv.Close)
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSites(out, append([]string{"deployments", "blog"}, extraArgs...))
+	})
+	return s, stdout, code
+}
+
+// TestSitesDeploymentsTableCarriesCause: deploy-reliability W9. The old table's
+// IMAGE_TAG and GIT_REF columns are "—" on every guerrilla row, so three of four
+// columns carried nothing. The table now leads with the row's NAMED cause, and a
+// key the control plane never sent renders as an explicit dash — never a blank
+// cell, which reads as a measured empty value.
+func TestSitesDeploymentsTableCarriesCause(t *testing.T) {
+	body := `{"deployments":[
+		{"id":"dep-3","site_id":"site-1","status":"failed","failure_class":"BOX_AT_CAPACITY_DEFERRED","failure_reason":"box full","trigger":"push","stage":"queue","inserted_at":"2026-08-07T03:00:00Z"},
+		{"id":"dep-2","site_id":"site-1","status":"failed","failure_class":"BUILD_FAILED","trigger":"manual","inserted_at":"2026-08-07T02:00:00Z"},
+		{"id":"dep-1","site_id":"site-1","status":"live","inserted_at":"2026-08-07T01:00:00Z"}
+	]}`
+	_, stdout, code := runDeploymentsFixture(t, body)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	// Two summary lines, one blank, then the header and three rows.
+	if len(lines) != 7 {
+		t.Fatalf("want 7 output lines, got %d:\n%s", len(lines), stdout)
+	}
+	header := lines[3]
+	for _, gone := range []string{"IMAGE_TAG", "GIT_REF"} {
+		if strings.Contains(header, gone) {
+			t.Fatalf("header still carries the causeless column %q: %q", gone, header)
+		}
+	}
+	if !strings.HasPrefix(header, "STATUS  CAUSE") || !strings.Contains(header, "TRIGGER") || !strings.HasSuffix(header, "STARTED") {
+		t.Fatalf("header = %q, want STATUS · CAUSE · TRIGGER · STARTED", header)
+	}
+	if !strings.Contains(lines[4], "BOX_AT_CAPACITY_DEFERRED") || !strings.Contains(lines[5], "BUILD_FAILED") {
+		t.Fatalf("cause column missing its classes:\n%s", stdout)
+	}
+	// The live row sent neither failure_class nor trigger: BOTH must be dashes.
+	live := lines[6]
+	if strings.Count(live, "—") != 2 {
+		t.Fatalf("the live row must render two explicit dashes (no cause, no trigger), got %q", live)
+	}
+	// Columns must still line up: the em dash is multi-byte, and byte-width
+	// padding would shear the table.
+	if strings.Index(lines[5], "manual") != strings.Index(header, "TRIGGER") {
+		t.Fatalf("TRIGGER column misaligned:\n%s", stdout)
+	}
+}
+
+// TestSitesDeploymentsSummaryCarriesItsDenominator: the summary line prints its
+// counts and BOTH rates with the denominator each rate was computed over, on the
+// same line, and names the window it was computed from. A bare percentage is
+// exactly the mis-report this epic exists to remove.
+func TestSitesDeploymentsSummaryCarriesItsDenominator(t *testing.T) {
+	_, stdout, code := runDeploymentsFixture(t, deploymentsFixture(20, 3, 77))
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	lines := strings.Split(stdout, "\n")
+	wantSummary := "20 live, 3 failed, 77 deferred — 13.0% failed of 23 terminal outcomes, 77.0% of 100 rows absorbed by the build cap"
+	if lines[0] != wantSummary {
+		t.Fatalf("summary line\n got: %q\nwant: %q", lines[0], wantSummary)
+	}
+	wantWindow := "window: 2026-08-01T00:00:00Z → 2026-08-28T00:00:00Z (100 rows fetched)"
+	if lines[1] != wantWindow {
+		t.Fatalf("window line\n got: %q\nwant: %q", lines[1], wantWindow)
+	}
+}
+
+// TestSitesDeploymentsUnmeteredBelowSample: MUTATION proof for the sample floor.
+// Four rows cannot support a percentage, so the summary must say UNMETERED and
+// carry NO percent sign at all — this assertion fails the moment the floor is
+// removed and a "25.0%" over four rows comes back.
+func TestSitesDeploymentsUnmeteredBelowSample(t *testing.T) {
+	_, stdout, code := runDeploymentsFixture(t, deploymentsFixture(2, 1, 1))
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	summary := strings.Split(stdout, "\n")[0]
+	if strings.Contains(summary, "%") {
+		t.Fatalf("a 4-row window must not print a percentage at all, got: %q", summary)
+	}
+	want := "2 live, 1 failed, 1 deferred — failure rate UNMETERED (3 terminal outcomes, need 10), absorbed rate UNMETERED (4 rows, need 10)"
+	if summary != want {
+		t.Fatalf("summary\n got: %q\nwant: %q", summary, want)
+	}
+}
+
+// TestSitesDeploymentsPagesWithLimitAndCursor: the window is requestable and the
+// cursor that reaches past it is PRINTED. Before W9 the call sent no query at
+// all and silently took whatever the server's default page was.
+func TestSitesDeploymentsPagesWithLimitAndCursor(t *testing.T) {
+	body := `{"deployments":[
+		{"id":"dep-1","site_id":"site-1","status":"live","trigger":"push","inserted_at":"2026-08-07T01:00:00Z"}
+	],"next_cursor":"cur-next"}`
+	s, stdout, code := runDeploymentsFixture(t, body, "--limit", "250", "--before", "cur-prev")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	reqs := s.requestsFor("GET", "/v1/sites/site-1/deployments")
+	if len(reqs) != 1 || reqs[0].query != "before=cur-prev&limit=250" {
+		t.Fatalf("wire query = %+v, want before=cur-prev&limit=250", reqs)
+	}
+	if !strings.Contains(stdout, "older rows exist — '--before cur-next'") {
+		t.Fatalf("a truncated window must say so and name the cursor:\n%s", stdout)
+	}
+}
+
+// TestSitesDeploymentsRejectsBadLimit: a limit that isn't a positive number is a
+// usage error, not a silently-dropped flag that would leave the caller reading a
+// window they didn't ask for.
+func TestSitesDeploymentsRejectsBadLimit(t *testing.T) {
+	withTempConfigHome(t)
+	_, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSites(out, []string{"deployments", "blog", "--limit", "0"})
+	})
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want exitUsage", code)
+	}
+}
+
+// TestSitesDeploymentsJSONKeepsAbsenceAbsent: -o json still carries image_tag /
+// git_ref (nothing was taken away from machines), and a cause key the control
+// plane never sent marshals as null — distinguishable from a measured "".
+func TestSitesDeploymentsJSONKeepsAbsenceAbsent(t *testing.T) {
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).
+		route("GET", "/v1/sites", http.StatusOK, `{"sites":[
+			{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":[],"scale_mode":"always_on"}
+		]}`).
+		route("GET", "/v1/sites/site-1/deployments", http.StatusOK, `{"deployments":[
+			{"id":"dep-2","site_id":"site-1","status":"failed","failure_class":"BUILD_FAILED","failure_reason":"","image_tag":"sha:bbbb","git_ref":"main","inserted_at":"2026-08-07T02:00:00Z"},
+			{"id":"dep-1","site_id":"site-1","status":"live","image_tag":"sha:aaaa","git_ref":"main","inserted_at":"2026-08-07T01:00:00Z"}
+		]}`)
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "json"
+		return runSites(out, []string{"deployments", "blog"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	var env struct {
+		Deployments []map[string]any `json:"deployments"`
+		Summary     map[string]any   `json:"summary"`
+		NextCursor  *string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout)
+	}
+	if env.Deployments[0]["image_tag"] != "sha:bbbb" || env.Deployments[0]["git_ref"] != "main" {
+		t.Fatalf("json lost image_tag/git_ref: %+v", env.Deployments[0])
+	}
+	if env.Deployments[0]["failure_class"] != "BUILD_FAILED" {
+		t.Fatalf("json lost failure_class: %+v", env.Deployments[0])
+	}
+	// Sent-but-empty stays "", never-sent stays null. The whole point of the
+	// pointer decode is that these two are not the same answer.
+	if fr, present := env.Deployments[0]["failure_reason"]; !present || fr != "" {
+		t.Fatalf("a measured-empty failure_reason must stay \"\", got %#v", fr)
+	}
+	if fc := env.Deployments[1]["failure_class"]; fc != nil {
+		t.Fatalf("an absent failure_class must marshal null, got %#v", fc)
+	}
+	if env.NextCursor != nil {
+		t.Fatalf("no next_cursor on the wire must be null, got %q", *env.NextCursor)
+	}
+	// The machine surface carries the same denominators the human line does.
+	for _, k := range []string{"rows", "terminal", "deferred", "window_oldest", "window_newest", "min_sample"} {
+		if _, ok := env.Summary[k]; !ok {
+			t.Fatalf("summary missing %q: %+v", k, env.Summary)
+		}
+	}
+	if env.Summary["failed_pct"] != nil {
+		t.Fatalf("a 2-row window must not carry a failed_pct, got %#v", env.Summary["failed_pct"])
 	}
 }
 

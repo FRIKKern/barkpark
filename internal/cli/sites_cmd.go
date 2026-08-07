@@ -13,7 +13,8 @@ package cli
 //   bp sites create --barkpark <slug> --name <name> — create a site
 //                   [--framework nextjs] [--domain <d>] [--scale-mode always_on|zero]
 //   bp deploy <site> [--artifact-url <url>] [--git-ref <ref>]  — enqueue a build
-//   bp sites deployments <site>                     — list site's deployments
+//   bp sites deployments <site> [--limit N] [--before <cursor>] — list a window
+//                                                   of the site's deployments
 //   bp sites env set <site> KEY=VAL [KEY=VAL...]    — replace the env blob
 //   bp sites domain add <site> <domain>             — add a domain
 //   bp sites github connect <site> --repo owner/r   — link GitHub for auto-deploy (P7)
@@ -31,6 +32,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -144,11 +146,31 @@ type Deployment = cloudclient.Deployment
 // them newest-first). A 404 / empty / error is treated as "no deployment yet" —
 // a missing status column is normal for a freshly-created site.
 func latestDeployment(client *cloudclient.Client, siteID string) (Deployment, bool) {
-	ds, err := client.ListDeployments(cloudCtx(), siteID)
-	if err != nil || len(ds) == 0 {
+	page, err := client.ListDeployments(cloudCtx(), siteID, cloudclient.DeploymentQuery{Limit: 1})
+	if err != nil || len(page.Deployments) == 0 {
 		return Deployment{}, false
 	}
-	return ds[0], true
+	return page.Deployments[0], true
+}
+
+// depStr flattens one of Deployment's POINTER cause fields to a string. nil —
+// "the control plane did not send this key" — becomes "", which every render
+// path below turns into an explicit dash. Never invent a value for a nil.
+func depStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+// dashOr is the one place a missing value becomes visible. An empty string on a
+// human surface reads as a measured blank; a dash reads as "not reported",
+// which is what it actually is.
+func dashOr(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }
 
 // statusColor wraps a deployment status in a Vercel-parity ANSI color — green
@@ -320,8 +342,11 @@ func renderSiteDetail(out *writer, s cloudclient.Site, dep Deployment) {
 		if dep.BuildLogURL != "" {
 			out.outf("  log:       %s", dep.BuildLogURL)
 		}
-		if dep.FailureReason != "" {
-			out.outf("  failure:   %s", dep.FailureReason)
+		if fc := depStr(dep.FailureClass); fc != "" {
+			out.outf("  cause:     %s", fc)
+		}
+		if fr := depStr(dep.FailureReason); fr != "" {
+			out.outf("  failure:   %s", fr)
 		}
 	}
 }
@@ -521,15 +546,29 @@ func deploymentRow(d Deployment) map[string]any {
 		"artifact_url":   d.ArtifactURL,
 		"image_tag":      d.ImageTag,
 		"build_log_url":  d.BuildLogURL,
-		"failure_reason": d.FailureReason,
-		"became_live_at": d.BecameLiveAt,
 		"inserted_at":    d.InsertedAt,
 		"updated_at":     d.UpdatedAt,
+		// The POINTER fields stay pointers here: a nil marshals to JSON null,
+		// which a machine consumer can tell apart from "" the way a human
+		// consumer tells the table's dash apart from a value.
+		"failure_class":  d.FailureClass,
+		"failure_reason": d.FailureReason,
+		"content_rev":    d.ContentRev,
+		"trigger":        d.Trigger,
+		"stage":          d.Stage,
+		"became_live_at": d.BecameLiveAt,
 	}
 }
 
-// runSitesDeployments renders `bp sites deployments <site>` — newest-first.
-// Columns: STATUS · IMAGE_TAG · GIT_REF · STARTED.
+// runSitesDeployments renders `bp sites deployments <site> [--limit N]
+// [--before <cursor>]` — newest-first, with a summary line that carries its own
+// denominator and names its window.
+//
+// Columns: STATUS · CAUSE · TRIGGER · STARTED. IMAGE_TAG and GIT_REF are gone
+// from the human table on purpose (deploy-reliability W9): on guerrilla both are
+// empty on every row, so three of the old four columns were dashes and the
+// fourth was a timestamp — a table that could not report a failure. Both keys
+// are still in `-o json`.
 func runSitesDeployments(out *writer, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -537,12 +576,12 @@ func runSitesDeployments(out *writer, args []string) int {
 			return exitOK
 		}
 	}
-	if len(args) == 0 {
-		return useError(out, "usage", "missing <site> — bp sites deployments <site>", exitUsage)
+	handle, q, perr := parseDeploymentsArgs(args)
+	if perr != nil {
+		return useError(out, "usage", perr.Error(), exitUsage)
 	}
-	handle := args[0]
-	if len(args) > 1 {
-		return useError(out, "usage", "too many arguments — bp sites deployments <site>", exitUsage)
+	if handle == "" {
+		return useError(out, "usage", "missing <site> — bp sites deployments <site> [--limit N] [--before <cursor>]", exitUsage)
 	}
 
 	cfg, ok := requireCloud(out)
@@ -554,74 +593,282 @@ func runSitesDeployments(out *writer, args []string) int {
 	if err != nil {
 		return useError(out, "failed", "resolve site: "+err.Error(), exitGeneric)
 	}
-	ds, err := client.ListDeployments(cloudCtx(), site.ID)
+	page, err := client.ListDeployments(cloudCtx(), site.ID, q)
 	if err != nil {
 		return useError(out, "failed", "list deployments: "+err.Error(), exitGeneric)
 	}
+	ds := page.Deployments
 
 	if out.output == "json" || out.output == "yaml" {
 		rows := make([]map[string]any, 0, len(ds))
 		for _, d := range ds {
 			rows = append(rows, deploymentRow(d))
 		}
-		out.emitStructured(map[string]any{"deployments": rows})
+		payload := map[string]any{"deployments": rows, "summary": summarizeDeployments(ds).row()}
+		if page.NextCursor != "" {
+			payload["next_cursor"] = page.NextCursor
+		} else {
+			payload["next_cursor"] = nil
+		}
+		out.emitStructured(payload)
 		return exitOK
 	}
 	if len(ds) == 0 {
 		out.outf("no deployments for %q yet — 'cd ~/your-project && bp deploy %s'", site.Name, site.Slug)
 		return exitOK
 	}
+	renderDeploymentSummary(out, summarizeDeployments(ds), page.NextCursor)
+	out.outf("")
 	renderDeploymentsTable(out, ds)
 	return exitOK
 }
 
-// renderDeploymentsTable prints STATUS · IMAGE_TAG · GIT_REF · STARTED.
+// parseDeploymentsArgs splits `bp sites deployments <site> [--limit N]
+// [--before <cursor>]`. The first positional is the site handle; a second
+// positional is a usage error, same as before the flags existed.
+func parseDeploymentsArgs(args []string) (handle string, q cloudclient.DeploymentQuery, err error) {
+	setLimit := func(v string) error {
+		n, cerr := strconv.Atoi(strings.TrimSpace(v))
+		if cerr != nil || n <= 0 {
+			return fmt.Errorf("--limit wants a positive whole number, got %q", v)
+		}
+		q.Limit = n
+		return nil
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--limit" || a == "-n":
+			var v string
+			v, i, err = nextFlagValue(args, i)
+			if err == nil {
+				err = setLimit(v)
+			}
+		case strings.HasPrefix(a, "--limit="):
+			err = setLimit(a[len("--limit="):])
+		case a == "--before" || a == "--cursor":
+			q.Before, i, err = nextFlagValue(args, i)
+		case strings.HasPrefix(a, "--before="):
+			q.Before = a[len("--before="):]
+		case strings.HasPrefix(a, "--cursor="):
+			q.Before = a[len("--cursor="):]
+		case strings.HasPrefix(a, "-"):
+			return "", cloudclient.DeploymentQuery{}, fmt.Errorf("unknown flag %q (usage: bp sites deployments <site> [--limit N] [--before <cursor>])", a)
+		case handle == "":
+			handle = a
+		default:
+			return "", cloudclient.DeploymentQuery{}, fmt.Errorf("too many arguments — bp sites deployments <site> [--limit N] [--before <cursor>]")
+		}
+		if err != nil {
+			return "", cloudclient.DeploymentQuery{}, err
+		}
+	}
+	return handle, q, nil
+}
+
+// minDeploymentSample is the smallest window this command will compute a
+// PERCENTAGE from. Below it the rate is printed as UNMETERED with the raw
+// counts — a rate over four rows is noise wearing a decimal point, and this
+// epic exists because deploy reporting kept dressing noise as measurement.
+const minDeploymentSample = 10
+
+// deferredMarker names the control plane's "we never even tried" failure
+// classes (BOX_AT_CAPACITY_DEFERRED and friends). A deferred row is NOT a
+// terminal outcome: nothing was built, so it cannot be counted as a success or
+// a failure without lying in one direction or the other. It gets its own
+// bucket and its own denominator.
+const deferredMarker = "DEFERRED"
+
+// deploymentSummary is the counted shape behind the summary line. Every field
+// here appears in the rendered output — there is no number computed and hidden.
+type deploymentSummary struct {
+	Rows     int // rows in the fetched window
+	Live     int
+	Failed   int
+	Deferred int
+	Pending  int // still in flight: queued/building/pushing — not yet an outcome
+	OldestAt string
+	NewestAt string
+}
+
+// Terminal is the denominator a success/failure rate is honest over: rows that
+// actually reached an outcome. Deferred and in-flight rows are excluded.
+func (s deploymentSummary) Terminal() int { return s.Live + s.Failed }
+
+// row is the -o json projection of the summary, carrying the same denominators
+// the human line prints so a machine reader cannot get a bare rate either.
+func (s deploymentSummary) row() map[string]any {
+	m := map[string]any{
+		"rows":            s.Rows,
+		"live":            s.Live,
+		"failed":          s.Failed,
+		"deferred":        s.Deferred,
+		"pending":         s.Pending,
+		"terminal":        s.Terminal(),
+		"window_oldest":   nil,
+		"window_newest":   nil,
+		"min_sample":      minDeploymentSample,
+		"failed_pct":      nil,
+		"deferred_pct":    nil,
+		"failed_metered":  s.Terminal() >= minDeploymentSample,
+		"deferred_metered": s.Rows >= minDeploymentSample,
+	}
+	if s.OldestAt != "" {
+		m["window_oldest"] = s.OldestAt
+	}
+	if s.NewestAt != "" {
+		m["window_newest"] = s.NewestAt
+	}
+	if s.Terminal() >= minDeploymentSample {
+		m["failed_pct"] = pct(s.Failed, s.Terminal())
+	}
+	if s.Rows >= minDeploymentSample {
+		m["deferred_pct"] = pct(s.Deferred, s.Rows)
+	}
+	return m
+}
+
+// pct is the only place a percentage is computed. It never divides by zero and
+// it is never called without its denominator being printed alongside it.
+func pct(n, d int) float64 {
+	if d <= 0 {
+		return 0
+	}
+	return float64(n) * 100 / float64(d)
+}
+
+// classifyDeployment buckets one row. DEFERRED wins over status: a deferred row
+// is usually recorded with status "failed", and counting a build that never ran
+// as a build failure is exactly the mis-reporting this slice removes.
+func classifyDeployment(d Deployment) string {
+	if strings.Contains(strings.ToUpper(depStr(d.FailureClass)), deferredMarker) {
+		return "deferred"
+	}
+	switch strings.ToLower(strings.TrimSpace(d.Status)) {
+	case "live", "running", "ready", "active":
+		return "live"
+	case "failed", "error":
+		return "failed"
+	default:
+		return "pending"
+	}
+}
+
+// summarizeDeployments counts the fetched window and records its edges. The
+// window is taken from the rows themselves (oldest/newest inserted_at), not
+// from what the caller asked for — a window that names a request instead of the
+// data is how an unstated denominator sneaks back in.
+func summarizeDeployments(ds []Deployment) deploymentSummary {
+	s := deploymentSummary{Rows: len(ds)}
+	for _, d := range ds {
+		switch classifyDeployment(d) {
+		case "live":
+			s.Live++
+		case "failed":
+			s.Failed++
+		case "deferred":
+			s.Deferred++
+		default:
+			s.Pending++
+		}
+		when := strings.TrimSpace(d.InsertedAt)
+		if when == "" {
+			continue
+		}
+		if s.OldestAt == "" || when < s.OldestAt {
+			s.OldestAt = when
+		}
+		if s.NewestAt == "" || when > s.NewestAt {
+			s.NewestAt = when
+		}
+	}
+	return s
+}
+
+// renderDeploymentSummary prints the two-line honest header:
+//
+//	20 live, 3 failed, 77 deferred — 13.0% failed of 23 terminal outcomes, 77.0% of 100 rows absorbed by the build cap
+//	window: 2026-08-06T21:10:04Z → 2026-08-07T02:58:11Z (100 rows fetched)
+//
+// Both rates carry their denominator ON THE SAME LINE as the counts, and a
+// window too small to divide honestly prints UNMETERED instead of a number.
+// The window line exists because a rate whose window is unstated is the
+// vacuous green this epic refuses.
+func renderDeploymentSummary(out *writer, s deploymentSummary, nextCursor string) {
+	counts := fmt.Sprintf("%d live, %d failed, %d deferred", s.Live, s.Failed, s.Deferred)
+	if s.Pending > 0 {
+		counts += fmt.Sprintf(", %d in flight", s.Pending)
+	}
+
+	var failedPart string
+	if s.Terminal() >= minDeploymentSample {
+		failedPart = fmt.Sprintf("%.1f%% failed of %d terminal outcomes", pct(s.Failed, s.Terminal()), s.Terminal())
+	} else {
+		failedPart = fmt.Sprintf("failure rate UNMETERED (%d terminal outcomes, need %d)", s.Terminal(), minDeploymentSample)
+	}
+
+	var deferredPart string
+	if s.Rows >= minDeploymentSample {
+		deferredPart = fmt.Sprintf("%.1f%% of %d rows absorbed by the build cap", pct(s.Deferred, s.Rows), s.Rows)
+	} else {
+		deferredPart = fmt.Sprintf("absorbed rate UNMETERED (%d rows, need %d)", s.Rows, minDeploymentSample)
+	}
+
+	out.outf("%s — %s, %s", counts, failedPart, deferredPart)
+
+	window := fmt.Sprintf("window: %s → %s (%d rows fetched)", dashOr(s.OldestAt), dashOr(s.NewestAt), s.Rows)
+	if nextCursor != "" {
+		window += fmt.Sprintf("; older rows exist — '--before %s' to walk past this window", nextCursor)
+	}
+	out.outf("%s", window)
+}
+
+// renderDeploymentsTable prints STATUS · CAUSE · TRIGGER · STARTED. A field the
+// control plane did not send renders as an explicit dash — never as a blank
+// cell, which reads as a measured empty value.
 func renderDeploymentsTable(out *writer, ds []Deployment) {
 	const (
 		hStat = "STATUS"
-		hImg  = "IMAGE_TAG"
-		hRef  = "GIT_REF"
+		hCaus = "CAUSE"
+		hTrig = "TRIGGER"
 		hWhen = "STARTED"
 	)
-	statW, imgW, refW := len(hStat), len(hImg), len(hRef)
+	cause := func(d Deployment) string { return dashOr(depStr(d.FailureClass)) }
+	trigger := func(d Deployment) string { return dashOr(depStr(d.Trigger)) }
+
+	statW, causW, trigW := len(hStat), len(hCaus), len(hTrig)
 	for _, d := range ds {
-		if n := len(d.Status); n > statW {
+		if n := len([]rune(d.Status)); n > statW {
 			statW = n
 		}
-		img := d.ImageTag
-		if img == "" {
-			img = "—"
+		if n := len([]rune(cause(d))); n > causW {
+			causW = n
 		}
-		if n := len(img); n > imgW {
-			imgW = n
-		}
-		ref := d.GitRef
-		if ref == "" {
-			ref = "—"
-		}
-		if n := len(ref); n > refW {
-			refW = n
+		if n := len([]rune(trigger(d))); n > trigW {
+			trigW = n
 		}
 	}
-	out.outf("%-*s  %-*s  %-*s  %s", statW, hStat, imgW, hImg, refW, hRef, hWhen)
+	out.outf("%-*s  %-*s  %-*s  %s", statW, hStat, causW, hCaus, trigW, hTrig, hWhen)
 	for _, d := range ds {
-		img := d.ImageTag
-		if img == "" {
-			img = "—"
-		}
-		ref := d.GitRef
-		if ref == "" {
-			ref = "—"
-		}
-		when := d.InsertedAt
-		if when == "" {
-			when = "—"
-		}
 		// Pad the raw status to the column width FIRST, then colorize, so the
 		// ANSI escape bytes never count toward statW and misalign the table.
-		stat := statusColor(out, fmt.Sprintf("%-*s", statW, d.Status))
-		out.outf("%s  %-*s  %-*s  %s", stat, imgW, img, refW, ref, when)
+		stat := statusColor(out, padRunes(d.Status, statW))
+		out.outf("%s  %s  %s  %s",
+			stat,
+			padRunes(cause(d), causW),
+			padRunes(trigger(d), trigW),
+			dashOr(strings.TrimSpace(d.InsertedAt)))
 	}
+}
+
+// padRunes right-pads to a RUNE width. The dash this table leans on is a
+// multi-byte em dash, so %-*s (which counts bytes) would over-pad every column
+// that contains one and shear the table.
+func padRunes(s string, w int) string {
+	if n := len([]rune(s)); n < w {
+		return s + strings.Repeat(" ", w-n)
+	}
+	return s
 }
 
 // runSitesEnv handles `bp sites env <verb> <site> …`. Today the only verb is
@@ -938,7 +1185,9 @@ USAGE
   bp sites show <site-or-slug>                      show one site
   bp sites create --barkpark <slug> --name <name>   create a site under a Barkpark
                   [--framework nextjs] [--domain <d>] [--scale-mode always_on|zero]
-  bp sites deployments <site>                       list a site's deployments (newest first)
+  bp sites deployments <site> [--limit N] [--before <c>]  list a window of a site's deployments
+                                                    (newest first; STATUS/CAUSE/TRIGGER/STARTED
+                                                     plus a summary carrying its denominator)
   bp sites env set <site> KEY=VAL [KEY=VAL...]      replace the encrypted env blob
   bp sites domain add <site> <domain>               add a domain to a site
   bp sites github connect <site> --repo owner/repo  link a GitHub repo + branch
