@@ -103,6 +103,16 @@ defmodule Barkpark.Content.Errors do
                          # this box is not running answers an honest 404, never a
                          # stale slug-keyed ghost.
                          "build_id_mismatch",
+                         # Site-deploy trigger — site_deploy_controller.ex
+                         # `runner_unavailable/1`: a 503 (with `retry-after`)
+                         # for a deploy runner that did not answer in time. It
+                         # is deliberately NOT `feature_not_configured`: the box
+                         # is busy or wedged, and an operator sent to "set the
+                         # apply flag" is sent to a flag that is already set.
+                         # PUBLIC, so it is declared here rather than excluded —
+                         # a spec-generated SDK must expect this variant on a
+                         # deploy trigger.
+                         "deploy_runner_unavailable",
                          # Papers ingest / block-ops / proposals — bulldocs_ingest_controller.ex
                          "invalid_paper",
                          "invalid_text",

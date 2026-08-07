@@ -114,6 +114,7 @@
                   "constraint",
                   "cors_forbidden",
                   "csrf_required",
+                  "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",
                   "event_not_found",
