@@ -5485,7 +5485,7 @@ defmodule BarkparkCloud.Registry do
     # redelivery race (rolled back) emails nobody. No edge guard is needed: the
     # row did not exist a moment ago, so this is always an edge.
     with {:ok, %Deployment{} = failed} <- result do
-      dispatch_deployment_failed(failed.site_id, failed.failure_reason)
+      dispatch_deployment_failed(failed)
     end
 
     result
@@ -6858,7 +6858,7 @@ defmodule BarkparkCloud.Registry do
       {pushing_rows, @instance_unreachable_reason}
     ]
     |> Enum.flat_map(fn {rows, reason} ->
-      Enum.map(rows || [], fn {_id, site_id} -> {site_id, reason} end)
+      Enum.map(rows || [], fn {id, site_id} -> {site_id, reason, %{deployment_id: id}} end)
     end)
     |> dispatch_reaped_deployment_alerts()
 
@@ -6881,18 +6881,71 @@ defmodule BarkparkCloud.Registry do
   defp maybe_dispatch_deployment_failed("failed", _updated), do: :ok
 
   defp maybe_dispatch_deployment_failed(_prior, %Deployment{status: "failed"} = updated),
-    do: dispatch_deployment_failed(updated.site_id, updated.failure_reason)
+    do: dispatch_deployment_failed(updated)
 
   defp maybe_dispatch_deployment_failed(_prior, _updated), do: :ok
+
+  # wave 15 S4 (charter D248): the alert says WHICH deployment failed. Until now
+  # the payload was exactly `%{detail: failure_reason}` plus the site name added
+  # by `dispatch_site_event/3` — a cause with no subject, so three alerts in an
+  # hour could not be told apart from three attempts at one push.
+  defp dispatch_deployment_failed(%Deployment{} = deployment) do
+    dispatch_deployment_failed(
+      deployment.site_id,
+      deployment.failure_reason,
+      deployment_identity(deployment)
+    )
+  end
 
   # Site-keyed, because a Deployment only `belongs_to :site` and the alert's team
   # lives one hop further out. `Notifications.dispatch_site_event/3` resolves the
   # team through the site and names the site in the alert; it never raises.
-  defp dispatch_deployment_failed(site_id, failure_reason) do
-    Notifications.dispatch_site_event(site_id, :deployment_failed, %{
-      detail: failure_reason || ""
-    })
+  #
+  # `identity` is whatever the call site actually HOLDS — the two struct-bearing
+  # sites carry the full identity, the reaper carries the id its `select:`
+  # already named. Nothing is synthesized to fill a gap.
+  defp dispatch_deployment_failed(site_id, failure_reason, identity) when is_map(identity) do
+    payload = Map.put(identity, :detail, failure_reason || "")
+
+    Notifications.dispatch_site_event(site_id, :deployment_failed, payload)
   end
+
+  # The deployment's own identity, and ONLY facts that are columns.
+  #
+  #   * `deployment_id` — actionable on its own: `GET
+  #     /v1/sites/:id/deployments/:dep_id` is a real ability-gated read.
+  #   * `stage` — nullable telemetry (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE);
+  #     omitted when the row never reported one.
+  #   * ONE code identity under its REAL column name — `git_ref` for a
+  #     repo-driven build, else `content_rev` for a content-bound static one,
+  #     else the `build_id` hash. There is no commit-sha column; a key named
+  #     `commit` would be an invention.
+  #
+  # NO DURATION, deliberately. `deployments` has no started_at/finished_at,
+  # `became_live_at` is NULL on every failed row, and `updated_at - inserted_at`
+  # is not build time (`Sites.Deploy.record_stage/2` writes RETIRE-skipped
+  # console entries onto rows that are already failed — measured median drift
+  # 65s, max 2,270s). A fabricated number is worse than an absent one.
+  defp deployment_identity(%Deployment{} = deployment) do
+    %{deployment_id: deployment.id}
+    |> put_present(:stage, deployment.stage)
+    |> put_code_identity(deployment)
+  end
+
+  defp put_code_identity(identity, %Deployment{git_ref: ref}) when is_binary(ref) and ref != "",
+    do: Map.put(identity, :git_ref, ref)
+
+  defp put_code_identity(identity, %Deployment{content_rev: rev})
+       when is_binary(rev) and rev != "",
+       do: Map.put(identity, :content_rev, rev)
+
+  defp put_code_identity(identity, %Deployment{build_id: id}) when is_binary(id) and id != "",
+    do: Map.put(identity, :build_id, id)
+
+  defp put_code_identity(identity, %Deployment{}), do: identity
+
+  defp put_present(identity, _key, value) when value in [nil, ""], do: identity
+  defp put_present(identity, key, value), do: Map.put(identity, key, value)
 
   # The capped fan-out described at `@reap_alert_cap`.
   defp dispatch_reaped_deployment_alerts([]), do: :ok
@@ -6900,7 +6953,9 @@ defmodule BarkparkCloud.Registry do
   defp dispatch_reaped_deployment_alerts(alerts) do
     {send_now, dropped} = Enum.split(alerts, @reap_alert_cap)
 
-    Enum.each(send_now, fn {site_id, reason} -> dispatch_deployment_failed(site_id, reason) end)
+    Enum.each(send_now, fn {site_id, reason, identity} ->
+      dispatch_deployment_failed(site_id, reason, identity)
+    end)
 
     if dropped != [] do
       # The Logger line stays — operators read logs during an incident — but it is
@@ -6924,14 +6979,14 @@ defmodule BarkparkCloud.Registry do
   # exactly the moment not to fire N queries. A since-deleted site simply has no
   # team and drops out of the map.
   defp record_withheld_reap_alerts(dropped) do
-    site_ids = dropped |> Enum.map(fn {site_id, _reason} -> site_id end) |> Enum.uniq()
+    site_ids = dropped |> Enum.map(fn {site_id, _reason, _identity} -> site_id end) |> Enum.uniq()
 
     teams_by_site =
       from(s in Site, where: s.id in ^site_ids, select: {s.id, s.team_id})
       |> Repo.all()
       |> Map.new()
 
-    Enum.each(dropped, fn {site_id, _reason} ->
+    Enum.each(dropped, fn {site_id, _reason, _identity} ->
       case Map.get(teams_by_site, site_id) do
         team_id when is_binary(team_id) ->
           Withhold.record(team_id, "deployment_failed", :reap_alert_cap)

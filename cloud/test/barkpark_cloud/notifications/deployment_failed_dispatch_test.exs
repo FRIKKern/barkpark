@@ -326,4 +326,86 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
       assert email.text_body =~ "no build source (upload an artifact"
     end)
   end
+
+  ## 7. WHICH DEPLOYMENT (wave 15 S4, charter D248) — the alert used to be a
+  ##    site name plus a cause, so three alerts in an hour were indistinguishable
+  ##    from three attempts at one push. All THREE producer paths now name the
+  ##    deployment, and each is driven here through a real write to `failed`.
+
+  test "the FENCED writer's alert names the deployment id, stage and git_ref" do
+    {site, _owner} = setup_site(%{github_repo: "octo/shop"})
+    {:ok, _d} = Registry.create_deployment(site, %{git_ref: "refs/heads/main"})
+    {:ok, claimed} = Registry.claim_next_deployment("builder-1")
+
+    assert {:ok, failed} =
+             Registry.transition_deployment_fenced(
+               claimed.id,
+               "builder-1",
+               claimed.claim_epoch,
+               %{status: "failed", failure_reason: "unauthorized: invalid token", stage: "BUILD"}
+             )
+
+    assert Repo.get(Deployment, claimed.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      assert email.text_body =~
+               "Deployment #{failed.id} · stage BUILD · git_ref refs/heads/main"
+
+      # The identity leads, the cause follows it.
+      assert email.text_body =~ "A deployment for #{site.name} failed.\n\nDeployment #{failed.id}"
+    end)
+  end
+
+  test "the BORN-FAILED webhook alert names the deployment it just minted" do
+    {site, _owner} = setup_site(%{github_repo: "octo/shop"})
+
+    assert {:ok, d} =
+             Registry.create_failed_deployment(
+               site,
+               %{git_ref: "main", delivery_id: "delivery-#{System.unique_integer([:positive])}"},
+               "github push builds are not available yet"
+             )
+
+    assert Repo.get(Deployment, d.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      assert email.text_body =~ "Deployment #{d.id} · git_ref main"
+    end)
+  end
+
+  test "the REAPER's fan-out names the deployment its select already held" do
+    # The id was SELECTED at the sweep and thrown away as `_id`; it now rides the
+    # payload. The reaper holds no struct, so stage/code identity are absent
+    # rather than filled in — the alert claims only what the producer had.
+    {site, _owner} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+
+    assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, d.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      refute email.text_body =~ "stage "
+      refute email.text_body =~ "git_ref"
+      assert email.text_body =~ "Deployment #{d.id}"
+    end)
+  end
+
+  test "the alert invents no link and no build duration" do
+    {site, _owner} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+
+    assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, d.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      # `deployments` carries no started_at/finished_at, and `became_live_at` is
+      # NULL on every failed row — any duration here would be fabricated.
+      for word <- ~w(duration took elapsed lasted commit) do
+        refute email.text_body =~ word
+      end
+
+      refute email.text_body =~ "http"
+      assert email.text_body =~ "Deployment #{d.id}"
+    end)
+  end
 end
