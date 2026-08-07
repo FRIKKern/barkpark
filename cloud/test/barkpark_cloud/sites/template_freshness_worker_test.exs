@@ -445,6 +445,36 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     end
   end
 
+  # deploy-reliability W17 S5: the supervisor refuses the child, so nothing
+  # builds. The sweep used to run this through `:ok = Deploy.start(row)` — a
+  # wrapper spec'd `:: :ok`, i.e. a match that could not fail — so a tick in
+  # which EVERY spawn was refused still reported `enqueued: N`.
+  defmodule RefusingStarter do
+    @moduledoc false
+    @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+    @impl true
+    def start(_deployment_id), do: {:error, :max_children}
+  end
+
+  describe "deploy-reliability W17 S5: a sweep that started no build says so" do
+    test "a refused driver spawn counts `failed`, never `enqueued`, and leaves the row queued" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      site = site_fixture(bp, "static", "astro") |> deployed(bp)
+
+      Process.put(:site_deploy_starter, RefusingStarter)
+
+      assert {:ok, %{enqueued: 0, failed: 1, duplicate: 0, skipped: 0}} = sweep()
+
+      # The row IS minted (so the next tick collapses to `duplicate` rather than
+      # storming) but nothing drove it — it is still queued, and the sweep's
+      # counters say a build did not happen.
+      assert [%Deployment{status: "queued"}] =
+               deployments(site) |> Enum.filter(&(&1.trigger == "template-auto"))
+    end
+  end
+
   describe "the trigger enum" do
     test "template-auto passes the Deployment changeset (an unlisted trigger is rejected)" do
       StudioLinkFakeHttpClient.program(%{})

@@ -491,9 +491,12 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       assert {:error, :max_children} = Deploy.start_reported(deployment)
       assert Registry.get_deployment(deployment.id).status == "queued"
 
-      # …and the fire-and-forget wrapper still answers `:ok` for the call sites
-      # that match on it (the deploy route, the template sweep).
-      assert :ok = Deploy.start(deployment)
+      # …and there is NO fire-and-forget wrapper left to launder that refusal.
+      # This assertion used to be `assert :ok = Deploy.start(deployment)` — a
+      # test whose entire content was that a refused spawn reads as success for
+      # the call sites matching on it. `start/1` is deleted; every caller sees
+      # the error arm or does not compile.
+      refute function_exported?(Deploy, :start, 1)
     end
   end
 
