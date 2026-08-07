@@ -38,6 +38,14 @@ on:
       # diff, so the suite must run on THIS PR — same #963→#969-class gap as the
       # templates/** carve-out above.
       - "docs/cli/fixtures/**"
+      # Cloud attention/deploy-health fixtures (cloud/priv/static/__fixtures__/*.json).
+      # Six Go tests read five fixtures under this directory, so a FIXTURE-ONLY
+      # edit changes what the Go suite asserts with no .go diff — and today that
+      # edit runs no Go job at all (merged PR #10521 touched only cloud/ +
+      # scripts/ and rendered 32 check names, none of them `go vet + test`).
+      # Same #963->#969-class gap as the carve-outs above; amends charter D57,
+      # which prescribed a manual workaround instead.
+      - "cloud/priv/static/__fixtures__/**"
   pull_request:
     paths:
       - "**/*.go"
@@ -47,6 +55,7 @@ on:
       - "templates/**"
       - "internal/pdrender/testdata/**"
       - "docs/cli/fixtures/**"
+      - "cloud/priv/static/__fixtures__/**"
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded

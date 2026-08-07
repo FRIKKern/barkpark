@@ -156,3 +156,96 @@ jobs:
           code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
+
+  report-deploy-failure:
+    # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
+    #
+    # Continuous deployment to production failed 102 times in a 30-day window
+    # and told nobody. 84 of those failures fall inside ONE stretch —
+    # 2026-07-21T07:59:48Z .. 2026-07-23T08:46:54Z, 121 runs, 84 failure,
+    # 37 cancelled, ZERO success: production CD was dead for 48h47m and the
+    # only record of it was a red X on a tab nobody had open. The repository
+    # has produced exactly TWO "CI failure" issues in its entire history
+    # (#4966, #5658) and neither one is a deploy.
+    #
+    # This job is the record. Same shape (and same reasoning) as the
+    # report-main-failure jobs in cloud.yml / console-harness.yml:
+    #
+    #   * `needs: [changes, control-plane, instance]` — every job that can fail
+    #     in this file. A deploy job that is legitimately not dispatched
+    #     (`needs.changes.outputs.* == 'false'`) is SKIPPED, and a skipped
+    #     ancestor does not make `failure()` true, so a docs-shaped merge that
+    #     deploys nothing reports nothing.
+    #
+    #   * `failure()` NOT `always()`. `failure()` is FALSE for `cancelled`, and
+    #     that is deliberate: 344 of the window's 1,378 runs were cancelled, and
+    #     cancellation here is DESIGNED coalescing, not loss — `concurrency` has
+    #     `cancel-in-progress: false`, and the `changes` job anchors its diff
+    #     base to the last SUCCESSFUL run, so the surviving run deploys the
+    #     UNION of every push since. Filing for those is the noise that trains
+    #     people to ignore the real ones.
+    #
+    #   * NO `continue-on-error`, here or anywhere in this file. A job-level
+    #     `continue-on-error` still paints a red check but LAUNDERS THE RUN
+    #     CONCLUSION into success — and the run conclusion is what
+    #     notifications read (breakglass-watch.yml states the rule verbatim).
+    #     A reporter that cannot lose is a reporter that never says it lost.
+    #
+    #   * `permissions:` is JOB-LEVEL and must stay that way. The two deploy
+    #     jobs above hold DEPLOY_SSH_KEY and SSH into production as root;
+    #     widening the WORKFLOW-level block (`contents: read` + `actions: read`)
+    #     to carry `issues: write` would re-scope THEIR tokens too. That is a
+    #     security regression, not a style note.
+    #
+    #   * `CI_FAILURE_KEY: deploy-production` is distinct from every other
+    #     caller's key (cloud.yml uses `cloud-main`, console-harness.yml its
+    #     own). The script keeps ONE open issue per key — a shared key would
+    #     comment a production deploy blackout onto an unrelated gate's issue.
+    #
+    # scripts/file-ci-failure-issue.sh exits 1 when the alert was NOT delivered
+    # (empty token, unreachable API, non-2xx), loudly, with `::error::`. So this
+    # job cannot warn-and-pass: a red here means "prod did not deploy AND nobody
+    # was told", which is worse than the failure it was reporting and is worth
+    # its own red. It runs after both deploy jobs have already published theirs.
+    name: Report deploy failure to a human
+    needs: [changes, control-plane, instance]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: deploy-production
+          # Which job failed, so the issue body says what to look at without
+          # opening the run. `needs.<job>.result` is the job's own conclusion:
+          # success / failure / cancelled / skipped.
+          CI_FAILURE_DETAIL: |
+            **Continuous deployment to production FAILED.** The merged commit is
+            on `main` but the affected host was NOT updated — production is
+            running older code than the default branch until this is resolved.
+
+            Job results for this run:
+
+            - `changes` (path filter + deploy-target assertion): ${{ needs.changes.result }}
+            - `control-plane` (barkpark.cloud, cp-deploy.sh): ${{ needs.control-plane.result }}
+            - `instance` (guerrilla, instance-deploy.sh): ${{ needs.instance.result }}
+
+            `skipped` means that target was legitimately not dispatched for this
+            diff; `failure` is the one to open. The deploy scripts are
+            build-before-swap with a health check and auto-rollback, so a failed
+            deploy means prod is STALE, not broken — but the exit code is what
+            names the stage. Read the failing job's last step: the deploy scripts
+            exit with a distinct non-zero code per stage — for instance-deploy.sh,
+            11 = fetch/ref refused, 12 = compile, 13 = migrate, 14 = health check
+            after the swap; 255 means SSH itself never landed. Grep the script for
+            the code you see rather than guessing from the job name.
+
+            This issue is idempotent per key (`deploy-production`): a continuing
+            outage appends a comment rather than opening a new issue. CLOSE IT
+            once a deploy succeeds again — the next failure opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
