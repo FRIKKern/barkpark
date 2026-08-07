@@ -2389,6 +2389,67 @@ shapes and the counter-argument stated: the fix is **not** "make refusals green"
 quietly stops gating. Not re-run by the reviewer — a `gh run rerun --failed` has previously *deleted* a
 required context on this repo, and that is the lead's call, not a reviewer's.
 
+### Wave 2026-08-07 (wave 11) — REVIEWED · Paper `deploy-reliability-wave-11-2026-08-07` · grade **A−**
+
+**Six of seven slices built, reviewed, fixed in place, re-gated, PUSHED and PR'd. Nothing merged — the lead
+merges.** The seventh (`dr-w11-s5-waiting-alert`) is round 2, deferred by the sequenced-rounds law behind
+S4's still-waiting cohort. That is by design, not a stall.
+
+| Slice | Task | Final branch | PR | Gate on the FINAL state |
+|---|---|---|---|---|
+| The control plane records the publish instant | `dr-w11-s1-record-the-publish-instant` | `…records-the-publish-in-0-r` | [#10187](https://github.com/FRIKKern/barkpark/pull/10187) | 1133 tests, 0 failures (cloud) |
+| `bp cloud site status` learns to tell time | `dr-w11-s2-site-status-tells-time` | `…learns-to-tell-time-1-r` | [#10189](https://github.com/FRIKKern/barkpark/pull/10189) | `go build`+`vet`+`test ./internal/cli/...` ok · gofmt clean |
+| Bidirectional payload key-set guard | `dr-w10-s4-payload-key-set-guard` | `…gets-a-bidirectiona-2-r` | [#10190](https://github.com/FRIKKern/barkpark/pull/10190) | escape-check rc 0 · selftest 123/0 · 11 tests, 0 failures |
+| The delivery census refuses an unidentifiable percentile | `dr-w11-s4-delivery-census-refuses` | `…refuses-an-unidentif-3-r` | [#10192](https://github.com/FRIKKern/barkpark/pull/10192) | 46 tests, 0 failures · `go build`+`test ./internal/cli/...` ok |
+| The census index becomes declared schema | `dr-w11-s6-declare-the-live-index` | `…becomes-declared-schema-4-r` | [#10193](https://github.com/FRIKKern/barkpark/pull/10193) | `PARSE_OK` **plus a real apply/rollback/re-apply on Postgres** |
+| Seventeen children get acceptance criteria | `dr-w11-s7-zero-criteria-backfill` | `…get-acceptance-criter-5` | [#10194](https://github.com/FRIKKern/barkpark/pull/10194) | `LIVE ZERO-CRITERIA: 0 []` at 202 children · self-test 8/8 |
+
+**WHAT LANDED.** The wave did the thing D162 said was the crown: it STARTED THE CLOCK. `content_publishes`
+is the first row that exists for a publish which mints no deployment — the 26–35 % population that was
+invisible in both the numerator and the denominator of every instrument this epic has ever built. Beside it,
+`DeployLedger.delivery/3` is the epic's first estimator that measures a clock rather than a fraction of
+attempt rows, and it REFUSES rather than flatters: on today's corpus p95 refuses at every window width, and
+the PR body says so out loud instead of letting review discover it. `bp cloud site status` finally tells a
+human how long their build took and names whose clock it is. The undeclared 498x index became declared
+schema. And the reporting learned to lose in a new direction: the payload key-set census reds in BOTH
+directions, independently re-verified in review by injecting a probe key into the real serializer (UNREAD
+fires by name) and a probe tag into the real decoder (PHANTOM fires by name).
+
+**REVIEWER FIXES, all re-gated.** (1) S1: an over-length payload `type` rejected the WHOLE row through
+`validate_length`, silently deleting the one fact the table exists to record; the receiver now refuses the
+FIELD, so the instant always lands. (2) S2: the `-o json` censored bound shipped as an undated duration
+against D163's explicit as-of rule (the same pinned window measured 3 → 2 → 0 waiters in five minutes);
+added `latest_waiting_as_of`, proved able to lose. (3) S4: the THIRD refusal policy — the row at `ceil(n*q)`
+is itself censored — was implemented, reachable and never exercised, because both fixtures trip the
+fraction policy first; added the construction where the fraction policy PASSES and the empirical one still
+fires, proved able to lose. (4) S6: the shipped gate is a PARSER, so the migration was actually applied,
+rolled back and re-applied against Postgres — the object it creates matches the live `tmp_dep_site_live`
+column-for-column and predicate-for-predicate. (5) S3: a cross-slice merge hazard, PROVED not predicted.
+
+**THE ONE THING THE LEAD MUST NOT MISS.** S4's `json:"delivery"` tag on `DeployCensus` reds S3's census
+(PHANTOM arm, naming `delivery`) the moment both are on one tree, because nothing routes `delivery/3` yet so
+`census/3` emits no such key. Verified by injection on S3's branch and reverted. The guard is RIGHT. The
+remedy is ONE allowlist row, written verbatim into the header of `payload_key_set_census_test.exs`, and
+because the census asserts SET EQUALITY it must be added by whichever PR merges SECOND and must not be added
+earlier. Filed as `dr-w11-bl-delivery-phantom-merge-order`.
+
+**LEDGER.** Honest, and the best of any wave so far: all six built slices sit `in_progress` with claims,
+per-criterion evidence stamped as the work happened, and merge-gated criteria left OPEN for the lead. S5 is
+`open` at 0/9, unclaimed — correct for a deferred round-2 slice. No task outside this wave was touched. The
+only writes the reviewer made were two new backlog rows.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** Round 2 (`dr-w11-s5-waiting-alert`) once S4 merges, and then the thing
+this wave built but did not connect: `content_publishes` has no reader and `delivery/3` has no route, so the
+true publish-keyed clock is STORED and MEASURED and still not published to anyone. Two filed rows are the
+spine of that — `dr-w11-followup-publish-instant-has-no-reader` and
+`dr-w11-s4-followup-emit-delivery-on-route` — and the second must MEASURE the query cost before shipping a
+7-day default, because `delivery/3` selects rows, not groups, and was never profiled against cloud-db-1.
+
+**Wave 11 also owes itself two honest asterisks.** `scripts/epic-zero-criteria-census.sh` is a committed
+instrument wired to NOBODY — exactly the shape this epic keeps finding in other people's code
+(`dr-w11-bl-zero-criteria-census-has-no-caller`). And the zero-criteria class reproduced 196 → 202 children
+during the wave itself: green today is a snapshot, not a property, until the authoring-time wall exists.
+
 ## Wave 8 decisions — NAME THE CAUSE, PUT THE NUMBER IN FRONT OF A HUMAN, LET BOTH SURFACES REFUSE (2026-08-07)
 
 Paper `deploy-reliability-wave-8-2026-08-07`. Epic task `task-fb4fb869490b4213`.
