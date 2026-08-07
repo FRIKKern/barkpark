@@ -89,6 +89,8 @@ defmodule BarkparkCloud.DeployLedger do
   # presentation only; `classify/2`'s own arms are ordered by specificity.
   @classes [
     "BOX_BUSY_409",
+    "ABANDONED_AT_CAPACITY",
+    "ABANDONED_BOX_STUCK",
     "DOC_ID_EMPTY",
     "BOX_500",
     "FORBIDDEN_403",
@@ -138,6 +140,10 @@ defmodule BarkparkCloud.DeployLedger do
 
   @labels %{
     "BOX_BUSY_409" => "the box was already deploying (HTTP 409)",
+    "ABANDONED_AT_CAPACITY" =>
+      "the box stayed at its concurrent-build cap and the publish was given up on",
+    "ABANDONED_BOX_STUCK" =>
+      "the box kept refusing this site and the publish was given up on",
     "DOC_ID_EMPTY" => "HEALTH gate: the bp-doc-id marker was empty",
     "BOX_500" => "the box errored on the deploy (HTTP 500)",
     "FORBIDDEN_403" => "the build could not read its content (403)",
@@ -235,7 +241,7 @@ defmodule BarkparkCloud.DeployLedger do
       # the anchored prefix — never from a substring search over the whole capture
       # (a build log that prints "500" is not a box 500).
       code = refusal_code(reason) ->
-        refusal_class(code)
+        refusal_class(code, reason)
 
       stage == "HEALTH" and String.contains?(reason, "bp-doc-id marker is empty") ->
         "DOC_ID_EMPTY"
@@ -278,6 +284,57 @@ defmodule BarkparkCloud.DeployLedger do
     case Regex.run(@refusal, reason) do
       [_, code] -> code
       nil -> nil
+    end
+  end
+
+  # A 409 the driver GAVE UP ON is not the transient 409 that class name promises.
+  # `Sites.Deploy.defer/3` bounds a refusal chain — 6 rounds for a busy box, 12
+  # for the concurrent-build cap — and the LAST round settles the row `failed`,
+  # appending its own abandonment clause to the box's words. Those rows are the
+  # most severe outcome the fleet produces (a publish that never happened and
+  # never will), and every one of them classified as `BOX_BUSY_409`, whose label
+  # reads "the box was already deploying (HTTP 409)". For a CAPACITY abandonment
+  # that label is affirmatively false: the box was not deploying this site at
+  # all, it had no free slot — which is the opposite operator instruction.
+  #
+  # So the terminal round gets its own name, split the way the DEFERRED arm
+  # already splits, by the box's own code word and through the SAME
+  # `deferral_code/1` reader: one parser for one code, so a chain, a deferral and
+  # a census can never disagree about what refused.
+  #
+  # Only the ANCHORED terminal clause promotes. A 409 that is not chain-terminal
+  # keeps its ordinary name (D8 — no catch-all), and a terminal 409 whose code
+  # word the ledger has never named rises in `UNCLASSIFIED` rather than being
+  # absorbed by whichever abandonment bucket it most resembles.
+  defp refusal_class("409", reason) do
+    if abandoned?(reason), do: abandoned_class(reason), else: "BOX_BUSY_409"
+  end
+
+  defp refusal_class(code, _reason), do: refusal_class(code)
+
+  # `Sites.Deploy.abandonment_reason/3` writes this clause, and nothing else in
+  # the tree does. It is PROSE, so it is anchored on the producer's own template
+  # AND guarded from the producer side: `deploy_ledger_test.exs` builds the
+  # sentence through that public producer, so rewording it reds at edit time
+  # instead of silently degrading every abandoned row back to `BOX_BUSY_409` —
+  # the exact disease this epic exists to refuse.
+  @abandoned ~r/ — and it has now refused \d+ rebuilds in a row for this site,/
+
+  defp abandoned?(reason), do: Regex.match?(@abandoned, reason)
+
+  defp abandoned_class(reason) do
+    case deferral_code(reason) do
+      {:code, "box_at_capacity"} ->
+        "ABANDONED_AT_CAPACITY"
+
+      # `already_running` — and D7's codeless 409, which predates the cap
+      # entirely and can therefore only be the busy slug, read exactly as the
+      # deferred arm reads it.
+      code when code in [:none, {:code, "already_running"}] ->
+        "ABANDONED_BOX_STUCK"
+
+      _unnamed ->
+        "UNCLASSIFIED"
     end
   end
 
