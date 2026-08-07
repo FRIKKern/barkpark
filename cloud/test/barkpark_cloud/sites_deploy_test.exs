@@ -915,6 +915,76 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert String.length(second_row.detail) <= 255
     end
 
+    # dr-w12 S6. The depth the previous test proves is REACHABLE ONLY THROUGH
+    # ENGLISH: it lives inside `failure_reason`, and the Go CLI reads it back
+    # with `siteDeferralChainRe` — a regex over a sentence. So every aggregate
+    # over chain depth is a regex too, and one reworded clause zeroes them all
+    # with nothing failing. This test reads the SAME three facts as data and
+    # never touches `failure_reason` at all.
+    #
+    # IT CAN LOSE: delete the `deferral_depth:`/`deferral_bound:`/
+    # `deferral_cause:` keys from the transition in `Deploy.defer/3` and every
+    # assertion below reds on nil, while the prose assertions above stay green —
+    # which is exactly the asymmetry that made the prose the only truth.
+    test "the chain is READABLE AS DATA — depth, bound and cause come off the columns, with no regex over prose" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "1 of 1 build slots in use"}}}
+      )
+
+      rows =
+        for _ <- 1..3 do
+          {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+          assert {:ok, :deferred} = Deploy.run(d.id)
+          Repo.get(Deployment, d.id)
+        end
+
+      # The chain COUNTS, in a column an aggregate can sum — 1, 2, 3 — without
+      # anyone parsing "refusal 2 of 12" out of a sentence.
+      assert Enum.map(rows, & &1.deferral_depth) == [1, 2, 3]
+
+      # The bound is the CAUSE's own budget on every row (capacity gets 12), and
+      # the cause is the chain's identity: depth without it is meaningless,
+      # because two deferrals of different causes are not one chain.
+      assert Enum.map(rows, & &1.deferral_bound) == [12, 12, 12]
+      assert Enum.map(rows, & &1.deferral_cause) == List.duplicate("BOX_AT_CAPACITY_DEFERRED", 3)
+
+      # A DIFFERENT cause starts a NEW chain — and the columns say so on their
+      # own, with its own shorter leash.
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      {:ok, busy} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(busy.id)
+      busy_row = Repo.get(Deployment, busy.id)
+
+      assert busy_row.deferral_depth == 1
+      assert busy_row.deferral_bound == 6
+      assert busy_row.deferral_cause == "BOX_BUSY_DEFERRED"
+
+      # THE SENTENCE SURVIVES. The columns are the aggregate's; the prose is the
+      # operator's, and it says the thing no integer can — that this is a
+      # zero-progress guard, not a countdown. Replacing one with the other would
+      # be a regression in either direction.
+      last = List.last(rows)
+      assert last.failure_reason =~ "refusal 3 of 12 in this site's current chain"
+      assert last.failure_reason =~ "zero-progress guard, not a countdown"
+
+      # And the columns agree with the sentence beside them, because ONE write
+      # produced both.
+      assert last.failure_reason =~ "refusal #{last.deferral_depth} of #{last.deferral_bound}"
+
+      # Structure is for DEFERRALS ONLY: a row that never deferred carries no
+      # chain, so `deferral_depth IS NOT NULL` is itself a truthful predicate.
+      {:ok, clean} = Deploy.enqueue(site, bp, true, "manual")
+      assert Repo.get(Deployment, clean.id).deferral_depth == nil
+    end
+
     # The bound is READ FROM THE CAUSE (`max_consecutive_deferrals/1`), never a
     # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
     # sentence that hardcoded either would misstate the other cause's whole
