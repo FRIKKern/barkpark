@@ -9620,6 +9620,82 @@ test("S14: a client transport failure never surfaces a raw internal token as a s
   assert.match(m.message, /try again/i);
 });
 
+// ── cch-w47-s3: the Archives band's Resurrect is decided at OFFER time ───────
+// POST /v1/resurrect is refused for every non-team-admin (router.ex resurrect/1
+// ends in Auth.forbidden(required:"admin", scope:"team")), yet the button was
+// drawn on SLUG PRESENCE ALONE — a plain member on #fleet got a live
+// destroy-tier affordance and a 403 on confirm. The contract, three-valued:
+//   grant   → byte-identical to what shipped (the live .archive-resurrect-btn)
+//   refuse  → NO button at all. Not disabled, not titled — OMITTED. D428's
+//             disable-and-explain is an ONLY-clause over seven named
+//             instance-detail lifecycle verbs and resurrect is not among them.
+//   unknown → also omitted: an unanswered /v1/me may not authorise a verb that
+//             stands up and BILLS a real box.
+// The copy-paste CLI chip survives every arm — it is a copy affordance.
+const CCH_W47_S3_PAYLOAD = {
+  ok: true,
+  archives: [
+    { fqdn: "shop.barkpark.cloud", slug: "shop-9f2c1", source_provider: "hetzner",
+      created_at: "2026-07-02T00:00:00Z", bundle_ref: "s3://bundles/shop.tar.zst",
+      spec: { region: "nbg1", server_type: "cax11" } },
+    { fqdn: "docs.barkpark.cloud", slug: "docs-11", source_provider: "azure",
+      created_at: "2026-07-03T00:00:00Z", bundle_ref: "s3://bundles/docs.tar.zst",
+      spec: { region: "westeurope", server_type: "B2s" } },
+  ],
+};
+
+test("cch-w47-s3: the archives panel offers Resurrect on GRANT — byte-identical to the shipped render", () => {
+  const grant = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "grant"));
+  assert.equal((grant.match(/archive-resurrect-btn/g) || []).length, 2, "one live Resurrect per bundle");
+  assert.match(grant, /data-resurrect-ref="s3:\/\/bundles\/shop\.tar\.zst"/);
+  // Absent authority is the shipped panel, byte for byte — this stays an ADD.
+  assert.equal(hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD)), grant);
+  // …and so is the row helper, called the way every pre-existing test calls it.
+  const rows = hooks.archivesModel(CCH_W47_S3_PAYLOAD, "grant").rows;
+  assert.equal(hooks.archiveRowHtml(rows[0]), hooks.archiveRowHtml(rows[0], "grant"));
+});
+
+test("cch-w47-s3: a REFUSED actor is offered no Resurrect at all — omitted, never a disabled ghost", () => {
+  const refuse = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse"));
+  // The rows themselves are unharmed — this hides an ACTION, not the archives.
+  assert.equal((refuse.match(/class="archive-row"/g) || []).length, 2, "a member still sees their team's bundles");
+  assert.match(refuse, /shop\.barkpark\.cloud/);
+  // The destroy-tier affordance is GONE, in every spelling of "present".
+  assert.ok(refuse.indexOf("archive-resurrect-btn") === -1, "no Resurrect button element");
+  assert.ok(refuse.indexOf("data-resurrect-ref") === -1, "no wiring hook for a refused click");
+  assert.doesNotMatch(refuse, /<button[^>]*disabled/, "no disabled ghost (D428 is an ONLY-clause; resurrect is not one of its seven verbs)");
+  assert.doesNotMatch(refuse, />Resurrect</, "the word is not rendered as a control");
+  // The CLI command still teaches — it is a copy affordance, not a write.
+  assert.match(refuse, /data-copy="bp cloud instance resurrect shop-9f2c1 --provider hetzner"/);
+});
+
+test("cch-w47-s3: an UNKNOWN /v1/me fails CLOSED — resurrect bills a real box, so silence is not consent", () => {
+  const unknown = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "unknown"));
+  assert.ok(unknown.indexOf("archive-resurrect-btn") === -1, "an unanswered role authorises nothing");
+  assert.equal((unknown.match(/class="archive-row"/g) || []).length, 2);
+  // Every non-grant answer renders the same way — one rule, not a per-value fork.
+  assert.equal(unknown, hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse")));
+});
+
+test("cch-w47-s3: the authority reaches EVERY row, not just the first — .map's index argument cannot leak in", () => {
+  // A `.map(archiveRowHtml)` regression passes the row INDEX as the authority;
+  // index 0 is falsy (→ default "grant"), every later index is truthy and !==
+  // "grant", so the FIRST row would keep its button and the rest would lose
+  // theirs. Both arms are asserted on a TWO-row payload for that reason.
+  const grant = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "grant"));
+  assert.equal((grant.match(/archive-resurrect-btn/g) || []).length, 2, "row 2 keeps its Resurrect on grant");
+  const refuse = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse"));
+  assert.equal((refuse.match(/archive-resurrect-btn/g) || []).length, 0, "row 1 loses its Resurrect on refuse");
+});
+
+test("cch-w47-s3: the archives model carries the answer it was handed (loading and error arms included)", () => {
+  assert.equal(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse").authority, "refuse");
+  assert.equal(hooks.archivesModel(undefined, "refuse").authority, "refuse");
+  assert.equal(hooks.archivesModel({ ok: false, error: "boom" }, "refuse").authority, "refuse");
+  // Default stays "grant" so every legacy call site renders what it always did.
+  assert.equal(hooks.archivesModel(CCH_W47_S3_PAYLOAD).authority, "grant");
+});
+
 // ── azh-w7: the console Resurrect flow (pure request/outcome/sheet builders) ──
 test("azh-w7: the resurrect helpers are exported", () => {
   for (const name of ["resurrectRequestBody", "resurrectOutcome", "resurrectModalHtml"]) {

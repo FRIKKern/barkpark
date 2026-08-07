@@ -316,9 +316,13 @@
           <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
 
           <!-- S14 portable archives: a team's archived-instance bundles, read
-               straight from object storage. The console shows each bundle + a
-               copy-paste `bp cloud instance resurrect` affordance (it does not
-               execute resurrect this wave). loadArchives() fills #archives-body. -->
+               straight from object storage. Every reader gets each bundle + a
+               copy-paste `bp cloud instance resurrect` affordance; a team admin
+               or owner ALSO gets a live Resurrect button that POSTs
+               /v1/resurrect. cch-w47-s3: that button used to render for anyone
+               who could see the row, including a plain member the route refuses
+               — it is now omitted unless /v1/me has confirmed the authority.
+               loadArchives() fills #archives-body. -->
           <section class="archives-panel" aria-labelledby="archives-heading">
             <h2 id="archives-heading" class="archives-title">Archives</h2>
             <p class="dim archives-sub">Portable bundles you can resurrect on Hetzner or Azure.</p>

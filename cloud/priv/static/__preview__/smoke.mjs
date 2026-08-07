@@ -1562,13 +1562,29 @@ const EXPECTATIONS = {
     },
   },
   "fleet-archives-stored": {
-    what: "the Archives panel lists portable bundles, each with a per-provider resurrect",
-    check(reg) {
+    what: "the Archives panel lists portable bundles, each with its CLI command — and a live Resurrect only for an actor the route will accept",
+    check(reg, hooks) {
       const arch = (reg.get("archives-body") || {}).innerHTML || "";
       assert.ok(arch.includes("archive-list"), "the populated archive list renders");
       assert.ok(countMatches(arch, 'class="archive-row"') >= 2, "one row per bundle");
       assert.ok(arch.includes("shop-9f2c1"), "a bundle is named by its fqdn");
-      assert.ok(arch.includes("archive-resurrect-btn"), "each row offers Resurrect");
+      // cch-w47-s3 — THIS ASSERTION USED TO BE A CONSTANT ("each row offers
+      // Resurrect") and it passed for a reason it never named: this scenario's
+      // actor is the DEFAULT OWNER (me() defaults role to "owner"), and the
+      // button was drawn on slug presence alone, so it would have passed just
+      // the same for the plain member the route refuses with a 403. The offer
+      // is now decided by instanceAdminAuthority, so the expectation is DERIVED
+      // from the actor this scenario actually boots with: an owner still MUST
+      // see it (the grant arm is not weakened), and if a future corpus edit
+      // demotes this actor, the button must vanish with it.
+      const granted = hooks.meState() === "loaded" &&
+        (hooks.meFlags().role === "owner" || hooks.meFlags().role === "admin");
+      assert.equal(granted, true,
+        "fleet-archives-stored boots the DEFAULT OWNER — got " + hooks.meState() + "/" + JSON.stringify(hooks.meFlags().role));
+      assert.equal(arch.includes("archive-resurrect-btn"), granted,
+        "the live Resurrect is offered exactly to an actor holding team-admin authority");
+      // The CLI command is NOT authority-gated — it teaches, it does not write.
+      assert.ok(arch.includes("bp cloud instance resurrect"), "every reader keeps the copy-paste CLI affordance");
       assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
     },
   },

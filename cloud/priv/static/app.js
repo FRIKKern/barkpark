@@ -1948,10 +1948,31 @@
   // ---- S14 portable-archives pure helpers (azure-hetzner hosting) ------------
   // The console makes a team's archived-instance bundles VISIBLE (charter S14 /
   // D39). GET /v1/archives serves the manifests straight from object storage;
-  // this is a pure PROJECTION of that envelope — the console does NOT execute
-  // resurrect this wave, it hands the operator the exact CLI command (the S11b
-  // CLI-affordance precedent). Every rule is a node-pinned pure function; the
-  // DOM mount (loadArchives) is browser-verified.
+  // the model is a pure PROJECTION of that envelope. The panel hands every
+  // reader the exact CLI command (the S11b CLI-affordance precedent) AND — for
+  // an actor who holds team-admin authority — a live Resurrect button that
+  // really does POST /v1/resurrect (openResurrectModal, below).
+  //
+  // cch-w47-s3 — THIS COMMENT USED TO SAY "the console does NOT execute
+  // resurrect this wave", and it had been false since azh-w7 shipped
+  // openResurrectModal. Worse than stale prose: the Resurrect button was drawn
+  // on SLUG PRESENCE ALONE, so a plain member on #fleet got a live destroy-tier
+  // affordance, typed the slug to arm it, and was handed a 403 — router.ex's
+  // resurrect/1 refuses every non-team-admin (`Auth.forbidden(required:
+  // "admin", scope: "team")`). Offer-time authority input: NONE. So the OFFER
+  // now consumes the epic's three-valued answer (instanceAdminAuthority), read
+  // once at the loadArchives render site and threaded through the pure helpers.
+  //
+  // THE REMEDY IS OMIT, NOT DISABLE-AND-EXPLAIN. D428 authorises the disabled
+  // ghost + server sentence "concretely and only" for the seven named
+  // instance-detail lifecycle verbs; resurrect is not one of them, and a
+  // disabled ghost here would trip the plain-member absence assertions. The
+  // unknown arm omits too: resurrect stands up (and bills) a real box, so an
+  // unanswered /v1/me fails CLOSED. The copy-paste CLI chip is untouched in
+  // every arm — it teaches the command, it does not fire a write.
+  //
+  // Every rule is a node-pinned pure function; the DOM mount (loadArchives) is
+  // browser-verified.
 
   // Pure model for the archives panel from the GET /v1/archives payload
   // {ok, archives:[{fqdn, slug, source_provider, created_at, bundle_ref,
@@ -1968,8 +1989,13 @@
   // DISTINCT storage-unconfigured panel state; a changed server string degrades
   // safely to the generic transient-outage error.
   var ARCHIVES_UNCONFIGURED_MSG = "Archive storage isn't configured for this deployment.";
-  function archivesModel(payload) {
-    if (payload === undefined) return { loading: true, error: false, rows: [] };
+  // `authority` is the three-valued offer-time answer for POST /v1/resurrect
+  // ("grant" | "refuse" | "unknown"). Absent it defaults to "grant" — the
+  // twice-shipped convention (instanceDetailHtml / updatePanelHtml) that keeps
+  // every existing pure call site byte-identical to what shipped.
+  function archivesModel(payload, authority) {
+    authority = authority || "grant";
+    if (payload === undefined) return { loading: true, error: false, rows: [], authority: authority };
     if (!payload || payload.ok !== true) {
       // Server-owned copy ONLY when the server explicitly said {ok:false,error}
       // (the 502 degrade). A client-side transport failure (api()'s
@@ -1981,10 +2007,12 @@
       // not a "try again shortly" outage — matched on the exact backend copy so it
       // reads honestly. Any other error stays the generic transient branch.
       if (serverMsg === ARCHIVES_UNCONFIGURED_MSG) {
-        return { loading: false, error: true, notConfigured: true, message: serverMsg, rows: [] };
+        return { loading: false, error: true, notConfigured: true, message: serverMsg, rows: [],
+          authority: authority };
       }
       return { loading: false, error: true,
-        message: serverMsg || "Couldn't load your archives — try again shortly.", rows: [] };
+        message: serverMsg || "Couldn't load your archives — try again shortly.", rows: [],
+        authority: authority };
     }
     var archives = Array.isArray(payload.archives) ? payload.archives : [];
     var rows = archives.map(function (a) {
@@ -2008,14 +2036,20 @@
           : "",
       };
     });
-    return { loading: false, error: false, rows: rows };
+    return { loading: false, error: false, rows: rows, authority: authority };
   }
 
   // One archive row: identity (fqdn + provider chip), when, region · size, and
   // the resurrect CLI chip. Provider chip is IDENTITY only (Decision 7); it
   // renders nothing for an unknown kind rather than faking one.
-  function archiveRowHtml(row) {
+  //
+  // `authority` decides the LIVE Resurrect button only, and only in the "grant"
+  // direction (see the band comment above): "refuse" and "unknown" emit no
+  // .archive-resurrect-btn at all — not a disabled ghost, not a title. The CLI
+  // chip stays in every arm; it is a copy affordance, not a write.
+  function archiveRowHtml(row, authority) {
     if (!row) return "";
+    authority = authority || "grant";
     var meta = [];
     if (row.region) meta.push(esc(row.region));
     if (row.serverType) meta.push(esc(row.serverType));
@@ -2031,8 +2065,10 @@
       "</div>" +
       (row.resurrectCommand
         ? '<div class="archive-resurrect">' +
-            '<button class="btn btn-primary btn-sm archive-resurrect-btn" type="button" data-resurrect-ref="' +
-              esc(row.bundleRef) + '">Resurrect</button>' +
+            (authority === "grant"
+              ? '<button class="btn btn-primary btn-sm archive-resurrect-btn" type="button" data-resurrect-ref="' +
+                  esc(row.bundleRef) + '">Resurrect</button>'
+              : "") +
             cliChipHtml(row.resurrectCommand) +
           "</div>"
         : "") +
@@ -2189,7 +2225,12 @@
         cliChipHtml("bp cloud instance archive <name>") +
         " to keep a portable, cross-provider bundle you can resurrect on Hetzner or Azure.</p></div>";
     }
-    return '<div class="archive-list">' + model.rows.map(archiveRowHtml).join("") + "</div>";
+    // NOT `.map(archiveRowHtml)` — map would hand the row's INDEX in as the
+    // authority argument, and any index but 0 is truthy, so every row past the
+    // first would render its live Resurrect regardless of the answer.
+    var authority = model.authority || "grant";
+    return '<div class="archive-list">' +
+      model.rows.map(function (row) { return archiveRowHtml(row, authority); }).join("") + "</div>";
   }
 
   // Azure four-field validator: every service-principal field must be a non-empty
@@ -5988,7 +6029,14 @@
     api("GET", "/v1/archives").then(function (r) {
       // The route emits {ok, archives|error} in the body on BOTH 200 and 502;
       // api() surfaces that body as r.data, so the model reads it uniformly.
-      var model = archivesModel(r.data);
+      //
+      // cch-w47-s3: the ONE authority read for this band, taken HERE — at the
+      // only paint that can emit a row — rather than at function entry, so a
+      // /v1/me still in flight when loadFleet fired does not cost an owner
+      // their Resurrect. The loading shell above emits no rows, so it needs no
+      // answer; a still-unknown answer at this point omits the button (fail
+      // closed on a destroy-tier verb).
+      var model = archivesModel(r.data, instanceAdminAuthority());
       panel.innerHTML = archivesPanelHtml(model);
       var retry = panel.querySelector("[data-archives-retry]");
       if (retry) retry.addEventListener("click", loadArchives);
@@ -14851,6 +14899,13 @@
         // screens was invisible until a full page reload.
         if (currentView() === "providers") loadProviders();
         if (currentView() === "notifications") loadNotifications();
+        // cch-w47-s3 — the archives band joins the same list, and it has to:
+        // now that Resurrect is offered only on a CONFIRMED grant, a /v1/me
+        // that lands AFTER GET /v1/archives would leave an owner looking at
+        // rows with no Resurrect until they navigated away and back. Fail
+        // closed, then re-decide the moment the answer arrives. loadArchives
+        // no-ops when its mount is absent, so the guard is belt-and-braces.
+        if (currentView() === "fleet") loadArchives();
         // cch-w46-s3 — THE SIXTH TWIN, and the one nobody had filed: a /v1/me
         // that succeeds LATE strands the instance rail exactly as a failed one
         // does. See repaintLifecycleAuthority for why this is not
