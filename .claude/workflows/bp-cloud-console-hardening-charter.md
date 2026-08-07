@@ -2167,6 +2167,74 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-07 — wave 44 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd; 2 round-2 slices deferred by the sequenced-rounds law — grade A)
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The members row reads the target's rank, per verb (THE CROWN) | `cch-w42-s3-members-row-reads-the-targets-rank` | `…the-members-row-reads-the-target-s-rank--0-r` | [#10250](https://github.com/FRIKKern/barkpark/pull/10250) | **two fixes.** The pre-existing C10 test named `"…role-gated and self-hidden"` asserted only the Remove half of the self row, so it stayed GREEN through an authority rewrite that changed the other half — a test name claiming more than it checks, this epic's class inside its own harness. Renamed and now asserts BOTH per-verb answers. `openRoleModal`'s `roles` binding survived as a bare length check after the option list moved into `roleModalOptionsHtml`; inlined with the reason it is still there |
+| The `/v1/me` census resolves bare local builders instead of calling them opaque | `cch-w43-bl-me-census-onboarding-subtree` | `…the-v1-me-envelope-census-stops-comparin-1-r` | [#10251](https://github.com/FRIKKern/barkpark/pull/10251) | **one fix + the builder's own named gap closed by run.** The multi-clause detector matched only `defp foo(`, so a helper with one paren'd clause and one `defp foo, do: …` clause counted as SINGLE and the census walked one of two and called it the shape — the confident wrong answer the file's own header forbids. Both head shapes now counted; paren-less heads counted, never walked. Separately, the builder's mutation proofs edited COPIES passed as `argv[2]`, so the Console gate's OWN default-`ROUTER` invocation was never proved to red; re-run at review against the REAL `router.ex`: drop `last_step` → `INVENTED` rc 1, add `blocked_reason` → `MISSING` rc 1, rename the helper → rc 2, delete `is_nil` from `KERNEL_BARE` → rc 2 on unmodified main |
+| The crux disagreement gets an Elixir pin | `cch-w44-s5-server-crux-disagreement-gets-an-elixir-pin` | `…the-owner-on-peer-owner-disagreement-bet-2-r` | [#10252](https://github.com/FRIKKern/barkpark/pull/10252) | **one addition.** The slice pinned three of the four cells the console mirrors; the fourth — owner-on-SELF, where BOTH verbs allow and the console withholds `Remove` by ruling (D492 variant B) — was carried as a belief plus a backlog ticket. Now a test, so if the server ever moves TOWARD the console the pin reds and the crown's matrix cell and the backlog task get revisited together instead of drifting apart. 31 → **32 tests, 0 failures**, `mix format` clean |
+
+**WHAT LANDED.** The lie this wave killed is the plainest one the epic has found in a while, and it
+was rendered on every members screen: `memberRowHtml` gated BOTH manage controls on
+`assignableRoles(ctx.role).length > 0` — an **actor-only** boolean — in front of a question the
+server answers **rank-relatively**, and answers **differently for the two verbs**. So an acting
+admin was offered `Change role` and `Remove` on the team owner's row and on every peer-admin row:
+four controls the server 403s `outranked`. The fix is two uniquely-named siblings, because one
+predicate provably cannot be both: `remove_member_as/3` opens with `actor_role == "owner" or …`
+(the OWNER ESCAPE HATCH), `update_member_role_as/4` has no hatch and a `self?` bypass. They give
+OPPOSITE answers on owner-vs-owner. Refused controls are OMITTED, never disabled ghosts.
+
+Two more silent controls in the same file rode along and both were real: `#members-invite` had NO
+else arm, so a visible button under a band that went stale between paint and press produced
+literally nothing — no modal, no toast, no console write; and `openRoleModal` silently preselected
+the FIRST option when none matched `currentRole`, so an admin opening the owner's row saw "Admin"
+pre-picked, one Save from a demotion nobody chose. The false D448 sentence at `app.js:264-266` — a
+comment a builder would read as law three lines above the map the crown opens — is corrected in
+place (D495).
+
+**BOTH HIGH-FLIP-RISK JUDGMENTS RE-DERIVED INDEPENDENTLY AND BOTH HELD.** D493 (off-ladder
+comparator direction) confirmed from `team_membership.ex:42` `Map.get(@ranks, role, 0)` plus the
+strict `>` at `:48`: an unknown role ranks 0, `outranks?("admin", <unknown>)` is TRUE, the server
+ACCEPTS — so the survey's "fail closed on the target" instruction would have shipped a FALSE
+refusal, this epic's class running backwards. D492 (self row) confirmed from `accounts.ex:1801`:
+the `self?` branch bypasses the rank arm on PATCH only, and `remove_member_as/3` has no `self?`
+branch at all. **A genuinely independent second reviewer on those two remains owed before merge —
+this workflow spawns exactly one.**
+
+**THE PATTERN THE INSTRUMENT SLICES SHARE, AND IT IS THE WAVE'S REAL LESSON.** Both non-crown
+slices fixed a gate that printed a confident PASS over something it had never measured. The
+`/v1/me` census marked `onboarding` OPAQUE because its value carries no `%{`, so SEVEN key paths
+were compared in NEITHER direction — MISSING vacuous, INVENTED suppressed by `underOpaque` — while
+the report printed a clean `ok  onboarding` row. **22 → 29 key paths.** And on the server side, ten
+of twenty-one relation×verb cells were true-but-unguarded, including the exact cell that makes two
+console predicates necessary: a server change adding the hatch to `update_member_role_as/4` would
+have shipped GREEN on all of `cloud/test/**` and silently converted the crown's new omission into a
+NEW lie. Both are now guards that can lose, and both were proved by mutation rather than by
+reading.
+
+**WHAT STALLED.** Nothing. Both round-2 slices are deferred BY DESIGN behind the crown's merge and
+that ordering is load-bearing, not cosmetic: `cch-w43-bl-binding-census-arity-arm` REDS `main` by
+construction (`assignableRoles` is arity 1 today), it is step 10 of twelve in `console-unit`, and
+NO step carries `if:`/`continue-on-error` — so dispatching it early hides steps 11 and 12,
+including the reason-arm census, which is green on main and must stay green.
+
+**LEDGER.** Clean, and unusually so — all three builders claimed, stamped as they worked (the
+timestamps prove it, not batched), left lifecycle `in_progress`, and left exactly the merge-gated
+criterion open for the lead. No lies, no omissions, nothing to repair. One new backlog row filed at
+review: `cch-w44-bl-init-wiring-is-unpinned` — the crown's `#members-invite` handler is now pinned
+as a FUNCTION, but `init()`'s `addEventListener` edge is pinned by nothing, and deleting it ships
+green on the whole console gate. That hole sits under every listener in `app.js`, not just this
+one.
+
+**WHAT THE NEXT WAVE MUST KNOW.** Dispatch order is: merge round 1 (#10250 first — both round-2
+slices name it), then `cch-w43-bl-binding-census-arity-arm`, then
+`cch-no-admin-fixture-in-the-preview-corpus`. #10252 touches `.exs` and WAITS for the Elixir Test
+gate, not just Cloud/Console. Baselines on `46b5373ed`, re-derive rather than quote:
+`__app.test.mjs` **943** (→ 950 with the crown), smoke **106**, sweep **81 residue / 13 families**,
+sweep tests **51**, binding census **79/40/22/18**, me-envelope census **22** (→ 29 with #10251).
+
+
 ### 2026-08-07 — wave 43 REVIEW (3/3 round-1 slices built, gated, reviewed, PUSHED and PR'd; 3 round-2 slices deferred by the sequenced-rounds law — grade A)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
