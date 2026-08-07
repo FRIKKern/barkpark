@@ -77,6 +77,15 @@ set -euo pipefail
 #   scripts/async_env_seam_scan.exs
 #       cloud/test/…/async_global_seam_guard_test.exs Code.require_file()s the
 #       scanner and drives it. The scanner IS the code under test there.
+#   internal/cloudclient/** — dr-w10-s4.
+#       cloud/test/…/payload_key_set_census_test.exs reads the Go package's
+#       `json:"…"` struct tags and censuses them AGAINST the Elixir serializers'
+#       emitted key sets, in both directions. The Go side is half the contract,
+#       so a Go-only edit is a change to the thing under test: adding a struct
+#       field there without an emitter, or deleting one that had an emitter,
+#       moves the census — and unfiltered, the census would never run on the PR
+#       that moved it. Declared as a DIRECTORY because the census reads the whole
+#       package (every non-test .go), not one pinned file.
 #
 # js/packages/create-barkpark-app/templates/** is the VENDORED-TEMPLATE DRIFT
 # TRIPWIRE, inherited verbatim from the workflow-level filter this shim
@@ -106,6 +115,7 @@ CLOUD_PATHS='cloud/**
 .github/workflows/cloud.yml
 deploy/site-deploy.sh
 internal/cli/cloud/providers_capabilities.json
+internal/cloudclient/**
 js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
 scripts/cloud-path-escape-check.sh
@@ -125,11 +135,13 @@ scripts/cloud-path-escape-check.test.sh'
 # literal's REAL target is itself covered by the declared set.
 CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin_env_test.exs:189 reads Path.join(__DIR__, "../../docker-compose.yml"), which is cloud/docker-compose.yml (covered by cloud/**). The repo-root file of the same name is reached only by the `cloud/` cwd base, and that base does not apply to a __DIR__-anchored literal.'
 
-# The census floor. The measured population is 5 resolved repo-root reads: the
+# The census floor. The measured population is 6 resolved repo-root reads: the
 # two cross-tree reads above, the vendored-template directory, the one EXEMPT
-# phantom above, and (cch-w27-s2) the box engine `deploy/site-deploy.sh` that
-# `sites_deploy_stage_caption_test.exs` derives its failure corpus from; the
-# floor is 5. Its job is to catch a NEUTERED SCANNER:
+# phantom above, (cch-w27-s2) the box engine `deploy/site-deploy.sh` that
+# `sites_deploy_stage_caption_test.exs` derives its failure corpus from, and
+# (dr-w10-s4) `internal/cloudclient/` that `payload_key_set_census_test.exs`
+# reads the decoder half of the payload contract from; the floor is 6.
+# Its job is to catch a NEUTERED SCANNER:
 # a regex or find that silently stopped matching would otherwise report "0
 # uncovered reads" and exit 0 — clean-looking, and completely blind.
 #
@@ -141,7 +153,7 @@ CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin
 # It is a CONSTANT on purpose. An env-var override would be a one-line CI bypass
 # of the only check that can tell "clean" from "blind", and the harness asserts
 # that setting CLOUD_ESCAPE_MIN changes nothing.
-CLOUD_ESCAPE_MIN=5
+CLOUD_ESCAPE_MIN=6
 
 # CLOUD_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
@@ -342,7 +354,7 @@ echo "cloud-path-escape-check: $count distinct repo-root read(s) resolved from c
 # FAIL-CLOSED on a neutered scanner. "Nothing found" is never good news here.
 if [ "$count" -lt "$CLOUD_ESCAPE_MIN" ]; then
   echo "::error::cloud-path-escape-check: only $count repo-root read(s) found, floor is $CLOUD_ESCAPE_MIN." >&2
-  echo "  The SCANNER is broken, not the repo clean — the measured population is 4." >&2
+  echo "  The SCANNER is broken, not the repo clean — the measured population is 6." >&2
   echo "  Check the grep/find in list_escapes before touching the floor." >&2
   exit 1
 fi
