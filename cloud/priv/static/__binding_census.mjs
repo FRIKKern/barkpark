@@ -249,8 +249,8 @@ const PIN = [
   { line: 6776, fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
   { line: 6794, fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6750" },
   { line: 6830, fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6893, fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6954, fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
+  { line: 6893, fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook" },
+  { line: 6954, fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: "instanceAdminAuthority", auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook" },
   { line: 7245, fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:2058 refuses non-admin sessions inside a cond" },
   { line: 7270, fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
   { line: 7637, fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
@@ -599,7 +599,13 @@ if (unresolved.length) {
 
 // (2b) PIN SELF-CONSISTENCY. A pin that no longer sums to its own doctrine is a
 //      pin someone edited without reading it.
-const EXPECT = { total: 79, elevated: 40, predicated: 22, unpredicated: 18 };
+// cch-w45-s5 MOVED THIS: predicated 22 → 24, unpredicated 18 → 16. The two
+// member-REACHABLE elevated writes on the instance screen (attachDomain,
+// rollbackInstance) are now decided at OFFER time by instanceAdminAuthority()
+// — a refused caller is served a disabled control with no mount hook, so the
+// call site is unreachable rather than a 403 waiting to happen. The population
+// itself did not move (79 rows, 40 elevated); only where two of them sit.
+const EXPECT = { total: 79, elevated: 40, predicated: 24, unpredicated: 16 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

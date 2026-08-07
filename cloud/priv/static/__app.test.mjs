@@ -10287,6 +10287,95 @@ test("isu-w5: updatePanelHtml escapes a hostile channel value (no markup injecti
   assert.match(html, /&lt;img/);
 });
 
+// ── cch-w45-s5: the two member-reachable instance writes are decided at OFFER
+// time ────────────────────────────────────────────────────────────────────────
+// BOTH routes are require_primary_team_admin server-side while every read this
+// screen makes is `user`, so a plain member painted the whole instance and got a
+// 403 on click. Re-derived on the PRE-FIX tree by booting the committed
+// panel-overview-member scenario: #instance-body carried a LIVE
+// `id="inst-domain"` button and a LIVE `data-rollback="1"` button.
+//
+// The contract asserted here, per verb, three-valued (D428/D439):
+//   grant   → the live control, byte-identical to what shipped (mount hook present)
+//   refuse  → disabled, NO mount hook, carrying FORBIDDEN_ROLE_COPY.admin — the
+//             server's own bytes — in the shipped .inst-life-reason span
+//   unknown → disabled, EMPTY reason (nothing claimed) + the shipped checking note
+// The reason is compared by EQUALITY against the literal below, so a single
+// character of fresh copy reds this file.
+const CCH_W45_S5_ADMIN_SENTENCE =
+  "You need the admin role on this team — an admin on this team can grant it.";
+const CCH_W45_S5_LIVE = {
+  id: "b-1", name: "Gyldendal", host: "5.75.169.183", url: "https://g.barkpark.cloud",
+  health_status: "up", agent_status: "online", version: "0.2.25",
+  provision_status: "succeeded", update_state: "current", provider: "hetzner",
+};
+// The reason span's TEXT, or null when no reason was rendered at all.
+function cchW45S5Reason(html) {
+  const m = html.match(/<span class="inst-life-reason">([^<]*)<\/span>/);
+  return m ? m[1] : null;
+}
+
+test("cch-w45-s5: attachDomain's OFFER is authority-aware — grant live, refuse disabled in the server's own sentence, unknown claims nothing", () => {
+  const grant = hooks.instanceHeaderHtml(CCH_W45_S5_LIVE, "grant");
+  assert.match(grant, /id="inst-domain"/);                 // the live mount hook
+  assert.doesNotMatch(grant, /inst-life-disabled/);
+  assert.equal(cchW45S5Reason(grant), null);
+  // Absent authority is the shipped header, byte for byte — this stays an ADD.
+  assert.equal(hooks.instanceHeaderHtml(CCH_W45_S5_LIVE), grant);
+
+  const refuse = hooks.instanceHeaderHtml(CCH_W45_S5_LIVE, "refuse");
+  assert.match(refuse, /Attach domain/);                   // never hidden (D428)
+  assert.match(refuse, /inst-life-disabled/);
+  assert.match(refuse, /<button[^>]*disabled/);
+  assert.doesNotMatch(refuse, /id="inst-domain"/);         // no hook for a refused click
+  assert.equal(cchW45S5Reason(refuse), CCH_W45_S5_ADMIN_SENTENCE);
+  assert.doesNotMatch(refuse, /Checking capabilities/);    // an ANSWERED /v1/me is not checking
+
+  const unknown = hooks.instanceHeaderHtml(CCH_W45_S5_LIVE, "unknown");
+  assert.match(unknown, /Attach domain/);
+  assert.match(unknown, /<button[^>]*disabled/);
+  assert.doesNotMatch(unknown, /id="inst-domain"/);
+  assert.equal(cchW45S5Reason(unknown), null);             // nothing claimed
+  assert.match(unknown, /Checking capabilities/);
+  assert.match(unknown, /data-me-retry/);                  // D437: the state has an exit
+});
+
+test("cch-w45-s5: rollbackInstance is no longer appended unconditionally — the Updates panel's OFFER is authority-aware too", () => {
+  const grant = hooks.updatePanelHtml(CCH_W45_S5_LIVE, "grant");
+  assert.match(grant, /data-rollback="1"/);                // the live mount hook
+  assert.doesNotMatch(grant, /inst-life-disabled/);
+  // Absent authority is the shipped panel, byte for byte.
+  assert.equal(hooks.updatePanelHtml(CCH_W45_S5_LIVE), grant);
+
+  const refuse = hooks.updatePanelHtml(CCH_W45_S5_LIVE, "refuse");
+  assert.match(refuse, /Roll back/);                       // still visible
+  assert.match(refuse, /<button[^>]*disabled/);
+  assert.doesNotMatch(refuse, /data-rollback/);             // the click hook is GONE
+  assert.equal(cchW45S5Reason(refuse), CCH_W45_S5_ADMIN_SENTENCE);
+
+  const unknown = hooks.updatePanelHtml(CCH_W45_S5_LIVE, "unknown");
+  assert.match(unknown, /<button[^>]*disabled/);
+  assert.doesNotMatch(unknown, /data-rollback/);
+  assert.equal(cchW45S5Reason(unknown), null);
+  assert.match(unknown, /Checking capabilities/);
+  // The page's ONE exit lives in the header; a second [data-me-retry] here
+  // would be a DEAD control (wireMeRetry binds the first match only).
+  assert.doesNotMatch(unknown, /data-me-retry/);
+});
+
+test("cch-w45-s5: the answer reaches BOTH verbs through the one render seam (instanceDetailHtml)", () => {
+  const refused = hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {}, "refuse");
+  assert.doesNotMatch(refused, /id="inst-domain"/);
+  assert.doesNotMatch(refused, /data-rollback/);
+  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 4, // 2 verbs × (title + reason span)
+    "both refused verbs carry the server's sentence on the same screen");
+  // The default is the shipped screen, unchanged.
+  const plainGrant = hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {});
+  assert.equal(plainGrant, hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {}, "grant"));
+  assert.match(plainGrant, /id="inst-domain"/);
+  assert.match(plainGrant, /data-rollback="1"/);
+});
+
 test("isu-w5: fleetRolloutBanner — halted → warn+Resume, live → base+Halt, absent → null", () => {
   assert.equal(hooks.fleetRolloutBanner(null), null);
   assert.equal(hooks.fleetRolloutBanner("nope"), null);
@@ -16892,6 +16981,37 @@ test("cch-w39-s1: there is exactly ONE retry control, in the shipped grammar, on
   assert.ok(/loadMe\(\)\.then\(function \(\) \{/.test(wire), "it re-reads /v1/me, it does not fake a state");
   assert.ok(wire.includes('meState() !== "loaded"'), "…and only repaints when the read STILL did not land");
   assert.ok(wire.includes("btn.disabled = true"), "the press has an answer immediately");
+});
+
+// cch-w45-s5 (review): THE EXIT ONLY EXITS IF THE SURFACE HAS A SEAM.
+// wireMeRetry's `selfHealing` default is TRUE, and it means "loadMe's own arms
+// repaint this surface when the read lands" — so on a SUCCESSFUL retry the
+// wirer deliberately does NOT repaint. loadMe has such a seam for billing,
+// providers, notifications, activity and operator; it has NONE for the instance
+// view. A default-selfHealing retry on the instance header would therefore
+// re-read /v1/me, get "loaded", skip the repaint, and leave the control reading
+// "Checking capabilities…" forever — an exit that cannot exit.
+//
+// This is a SOURCE-TEXT pin because wireMeRetry is a DOM wirer with no export;
+// it is the same region-scan shape the seam tests above already use. It fails
+// in BOTH directions: drop the `false` and it reds, and add an instance seam to
+// loadMe without revisiting this call site and it reds too (at which point the
+// `false` becomes the double-paint and the fix is to delete both).
+test("cch-w45-s5: the instance view's /v1/me retry is NOT self-healing, because loadMe has no seam for it", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  const call = src.match(/wireMeRetry\(box, function \(\) \{ loadInstance\([^)]*\); \}(,\s*false)?\)/);
+  assert.ok(call, "the instance render site still wires the shipped exit");
+  assert.ok(call[1], "…and passes selfHealing=false, so a SUCCESSFUL re-read repaints the header");
+
+  const load = appRegion(src, "  function loadMe(", "\n  }\n");
+  assert.ok(!/currentView\(\)\s*===\s*"instance"/.test(load),
+    "loadMe still has no instance seam — the moment it grows one, drop the `false` above or the view paints twice");
+  // The surfaces loadMe DOES heal, so the asymmetry above is a fact and not a
+  // guess about which arms exist.
+  for (const view of ["billing", "providers", "notifications", "activity", "operator"]) {
+    assert.ok(load.includes('"' + view + '"'), "loadMe repaints " + view + " itself");
+  }
 });
 
 test("cch-w39-s1: the shared unknown block reports, never accuses, and names no cause the read did not return", async () => {
