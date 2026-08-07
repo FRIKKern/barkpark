@@ -480,6 +480,8 @@ defmodule BarkparkCloud.Web.Router do
     mem_used_percent: nil,
     load1: nil,
     load15: nil,
+    req_per_s: nil,
+    p95_ms: nil,
     err_5xx_per_s: nil,
     disk_used_percent: nil,
     swap_used_percent: nil,
@@ -8869,6 +8871,21 @@ defmodule BarkparkCloud.Web.Router do
       # scalar. `load1` stays for the reason string's present-tense colour: a box
       # can read load1 0.64/core (idle-looking) while load15 reads 1.89/core.
       load15: measured_or_nil(Map.get(payload, "load15")),
+      # THE DENOMINATOR (charter D103). `err_5xx_per_s` is a rate whose severity
+      # cannot be read without the volume it came out of: 0.22 5xx/s is 14.4% of
+      # traffic at the median observed n and 2.0% at the max — a 7x severity
+      # spread from one unchanged number. So the request rate rides WITH the
+      # error rate, always, and a consumer that prints a share without it is
+      # printing a number it cannot bound. Same honesty law as every vital
+      # above: absent key or the agent's -1 sentinel renders nil, and a
+      # genuinely idle box (a measured 0.0 req/s) survives as a measured zero.
+      req_per_s: measured_or_nil(Map.get(payload, "req_per_s")),
+      # p95 request latency, and it lands here as a VITAL — colour for a reason
+      # string — and is REFUSED as a fence (charter D131). The beat carries ONE
+      # p95 off a 60s per-slot ring that dies on every blue/green flip, so it is
+      # a small-sample lottery; most boxes in the field still report the -1
+      # unwired sentinel, which renders nil rather than "0ms — instant".
+      p95_ms: measured_or_nil(Map.get(payload, "p95_ms")),
       # 5xx per second off the instance's own 60s ring (D75). Same law as every
       # vital above: an absent key (an agent predating the field) and the -1
       # sentinel (probe unwired, instance too old, or an EMPTY window) both
