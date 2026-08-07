@@ -132,25 +132,55 @@
 // Exit codes:
 //   0 — the derived call-site set EQUALS the pin, and every invariant holds
 //   1 — ADD and/or REMOVE: the set differs from the pin, both named
+//       (in a fixture mode: the declared arms fired, exactly as declared)
 //   2 — the instrument lost its footing: an unresolved path, a broken
 //       discrimination control, a pin that no longer sums, a vanished
-//       context_fn target, or a changed inline-cond overlay
+//       context_fn target, a changed inline-cond overlay — or a fixture whose
+//       observations do not match what it declares about itself
 //
 // Run: node cloud/priv/static/__binding_census.mjs
 //      node cloud/priv/static/__binding_census.mjs <app.js> <router.ex> <accounts.ex>
 //   (the argv overrides exist so a mutation driver can point the census at a
 //    patched COPY without writing inside this slice's fence)
+//
+//      node cloud/priv/static/__binding_census.mjs --add-check    <fixture.js>
+//      node cloud/priv/static/__binding_census.mjs --remove-check <fixture.js>
+//   THE FIXTURE CONTROL (charter D452) — the committed proof that the arm which
+//   actually GATES can lose. Both exit 1 when the fixture's declared arms fire.
+//   See THE FIXTURE CONTROL below for why it is a fixture and not a mutant of
+//   the live tree, and why its expectations live in the fixture files.
 
 import fs from "node:fs";
 import path from "node:path";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-const APP = process.argv[2] || path.join(here, "app.js");
-const ROUTER = process.argv[3] || path.join(here, "../../lib/barkpark_cloud/web/router.ex");
-const ACCOUNTS = process.argv[4] || path.join(here, "../../lib/barkpark_cloud/accounts.ex");
+
+// ── THE FIXTURE MODE FLAG IS RESOLVED HERE, AT THE `APP` BINDING ────────────
+// Not downstream, and this placement is load-bearing rather than tidy. `src` is
+// read at module scope, four lines below, from whatever `APP` says — so a mode
+// block placed after that read never runs: `--add-check` IS argv[2], and the
+// process dies first with `ENOENT: no such file or directory, open
+// '--add-check'`. __css_check.mjs's targeted modes sit far down its file and do
+// not hit this, because each of them reads its own subject INSIDE the mode
+// block; this census reads its subject once, at the top, for everything.
+const FIXTURE_FLAGS = ["--add-check", "--remove-check"];
+const fixtureFlagAt = process.argv.findIndex((a) => FIXTURE_FLAGS.includes(a));
+const FIXTURE_MODE = fixtureFlagAt === -1 ? null : process.argv[fixtureFlagAt];
+const FIXTURE_FILE = FIXTURE_MODE ? process.argv[fixtureFlagAt + 1] : null;
+if (FIXTURE_MODE && !FIXTURE_FILE) {
+  console.error(`FAIL(2): ${FIXTURE_MODE} needs a fixture file argument.`);
+  console.error("  e.g. node cloud/priv/static/__binding_census.mjs --add-check cloud/priv/static/__binding_census.add.fixture.js");
+  process.exit(2);
+}
+
+const APP = FIXTURE_FILE || process.argv[2] || path.join(here, "app.js");
+// In a fixture mode argv[3]/argv[4] are the flag's own operands, never the
+// Elixir sources — bind the defaults so a stray path cannot be silently read.
+const ROUTER = (FIXTURE_MODE ? null : process.argv[3]) || path.join(here, "../../lib/barkpark_cloud/web/router.ex");
+const ACCOUNTS = (FIXTURE_MODE ? null : process.argv[4]) || path.join(here, "../../lib/barkpark_cloud/accounts.ex");
 // Report against a stable repo-relative label so the output reads the same from
 // any cwd; a mutant copy passed as argv[2] keeps its own path.
-const LABEL = process.argv[2] || "cloud/priv/static/app.js";
+const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : APP;
 
 const src = fs.readFileSync(APP, "utf8");
 
@@ -494,6 +524,209 @@ const pinByKey = new Map(PIN.map((r) => [keyOf(r), r]));
 const seenByKey = new Map();
 for (const s of sites) if (!seenByKey.has(keyOf(s))) seenByKey.set(keyOf(s), s);
 
+// The rule check (2d-ii) enforces, named here because THE FIXTURE CONTROL below
+// must exercise the very same function the live check runs. A control that
+// re-implements the rule it is proving has proven its own copy and nothing else.
+const verdictContrastLost = (pair) => pair.length > 1 && pair.every((r) => r.predicate === null);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE FIXTURE CONTROL (charter D452) — `--add-check` / `--remove-check`.
+//
+// WHY IT EXISTS. (2d) below proves the census can SEE the decisive pair. It has
+// never proven the arm that actually GATES can lose. The gate is the ADD/REMOVE
+// set diff at the bottom of this file, and until this block landed there was no
+// fixture, no self-test and no mutant showing either arm fire. A gate never
+// observed losing is a gate being trusted, not one that has been measured.
+//
+// WHY IT SHORT-CIRCUITS HERE — after `seenByKey`, before every check below. A
+// fixture is not app.js, and the checks are statements ABOUT app.js: (2b)'s
+// EXPECT {79, 40, …} is nonsense against four hundred bytes of fixture, and
+// (2e)/(2f) read Elixir the fixture has nothing to do with. Measured before this
+// block existed: handing a fixture to the bare census resolves cleanly through
+// (2a) and then dies at (2d) with `submitProviderCred → MISSING` — a red that
+// says nothing about the fixture. Everything above this line — the extractor,
+// `resolveLiteral`, RESOLVERS, `keyOf`, `seenByKey` — is the REAL machinery,
+// unmodified, so the fixture is measured by the instrument, not beside it.
+//
+// THE FIXTURES DECLARE THEIR OWN EXPECTATIONS. `@must-flag <ARM> <key>` and
+// `@must-clear <ARM> <key>` directives are read out of the fixture's own source
+// text, so what a fixture is FOR lives in the bytes it is made of instead of in
+// a table here that can drift away from them. The observed set must EQUAL the
+// declared must-flag set: a control that fires for a reason other than the one
+// it claims is not a control, so an unexplained observation exits 2 exactly
+// like a missing one. And every must-clear key must be REAL — present in both
+// the fixture's derived sites and FIXTURE_PIN — because a negative control
+// naming a key that does not exist is the vacuous green this epic removes.
+//
+// ONE MODE RUNS ONE ARM, so the two fixtures CROSS-CHECK: the add fixture under
+// `--remove-check` and the remove fixture under `--add-check` must both exit 0.
+// That 2x2 is what separates "the control can shout" from "the control can tell
+// things apart" — a mode that ran every arm would fire on either fixture and the
+// pair would prove nothing about which arm saw what. console-harness.yml runs
+// all four cells for exactly that reason.
+//
+// VERDICT-COLLAPSE RIDES `--add-check`, and the asymmetry is deliberate, not an
+// oversight. That arm is PIN-side: it needs a `@pin-override` to drive it, so it
+// needs exactly one driving fixture, and the fixture that drives it can no
+// longer be silent under any mode that evaluates it. Parking it on one flag
+// keeps the 2x2 above intact. Its silent side is not lost — the remove fixture
+// declares `@must-clear VERDICT-COLLAPSE`, evaluated in the cross cell.
+// ═══════════════════════════════════════════════════════════════════════════
+
+if (FIXTURE_MODE) {
+  // A pin small enough to read in one glance. It is NOT the real PIN and never
+  // shares a row with it: this block is proving the ARMS, and a control keyed to
+  // the live population would go stale on every honest console change — the
+  // failure mode of cch-w38-bl, whose control needed a real defect to stay
+  // unfixed forever. `fixtureBareProvider`/`fixtureGatedProvider` mirror the
+  // POST /v1/providers pair's SHAPE (one route, two call sites, opposite
+  // verdicts) so the verdict-contrast arm has something to lose on.
+  const FIXTURE_PIN = [
+    { fn: "fixtureSelfWrite", verb: "POST", route: "/v1/fixture/self", predicate: null },
+    { fn: "fixtureTeamWrite", verb: "DELETE", route: "/v1/fixture/team/:*", predicate: "fixtureCanManage" },
+    { fn: "fixtureBareProvider", verb: "POST", route: "/v1/fixture/providers", predicate: null },
+    { fn: "fixtureGatedProvider", verb: "POST", route: "/v1/fixture/providers", predicate: "fixtureCanWrite" },
+    { fn: "fixtureDepartedWrite", verb: "POST", route: "/v1/fixture/departed", predicate: null },
+    { fn: "fixtureDepartedTeam", verb: "DELETE", route: "/v1/fixture/departed/:*", predicate: "fixtureCanManage" },
+  ];
+  const ARMS = ["ADD", "REMOVE", "VERDICT-COLLAPSE"];
+  const IN_SCOPE = FIXTURE_MODE === "--add-check" ? ["ADD", "VERDICT-COLLAPSE"] : ["REMOVE"];
+  const inScope = (row) => IN_SCOPE.includes(row.split(" ")[0]);
+
+  const dieFixture = (lines) => {
+    console.error("");
+    console.error("FAIL(2): the fixture control lost its footing — " + LABEL);
+    for (const l of lines) console.error(l);
+    console.error("");
+    console.error("  This is NOT the census failing on the console. It is the control that proves the");
+    console.error("  census can fail failing to behave as its own fixture declares. Fix the fixture or");
+    console.error("  the arm, never the declaration alone.");
+    process.exit(2);
+  };
+
+  // ── the declarations, read from the fixture's own bytes ───────────────────
+  const flags = [];
+  const clears = [];
+  const overrides = [];
+  for (const m of src.matchAll(/^[ \t]*\/\/[ \t]*@(must-flag|must-clear|pin-override)[ \t]+(.+?)[ \t]*$/gm)) {
+    const [, kind, rest] = m;
+    if (kind === "pin-override") {
+      const om = rest.match(/^(.+?)[ \t]+predicate=(null|[A-Za-z_$][A-Za-z0-9_$]*)$/);
+      if (!om) dieFixture(["  unparseable @pin-override: " + JSON.stringify(rest),
+        "  shape: @pin-override <fn>|<VERB> <route> predicate=<name|null>"]);
+      overrides.push({ key: om[1].trim(), predicate: om[2] === "null" ? null : om[2] });
+      continue;
+    }
+    const am = rest.match(/^([A-Z-]+)[ \t]+(.+)$/);
+    if (!am || !ARMS.includes(am[1])) {
+      dieFixture(["  unparseable @" + kind + ": " + JSON.stringify(rest),
+        "  shape: @" + kind + " <" + ARMS.join("|") + "> <key>"]);
+    }
+    (kind === "must-flag" ? flags : clears).push(am[1] + " " + am[2].trim());
+  }
+
+  // D442's shape, enforced rather than hoped for: a one-row fixture proves the
+  // wiring and nothing about discrimination, so the floor is TWO of each.
+  if (flags.length < 2 || clears.length < 2) {
+    dieFixture([`  declares ${flags.length} @must-flag and ${clears.length} @must-clear row(s); the floor is 2 and 2.`,
+      "  One must-flag row proves the mode is wired. It does not prove the arm discriminates —",
+      "  for that the same run has to leave known-good rows alone (charter D442)."]);
+  }
+
+  // ── the observations, computed from the fixture, never from the declarations ─
+  // Only the arms this mode runs. A cross cell (the add fixture under
+  // `--remove-check`) therefore observes nothing and exits 0 — that silence IS
+  // the discrimination proof, and it is only available because the arms are
+  // separable here.
+  const fixturePinByKey = new Map(FIXTURE_PIN.map((r) => [keyOf(r), r]));
+  const observed = new Set();
+  if (IN_SCOPE.includes("ADD")) {
+    for (const k of seenByKey.keys()) if (!fixturePinByKey.has(k)) observed.add("ADD " + k);
+  }
+  if (IN_SCOPE.includes("REMOVE")) {
+    for (const k of fixturePinByKey.keys()) if (!seenByKey.has(k)) observed.add("REMOVE " + k);
+  }
+
+  // The verdict arm, over a COPY of FIXTURE_PIN with the fixture's declared
+  // `@pin-override`s applied — a pin-side property no source file can express,
+  // so the fixture drives it as a mutant. Same rule the live (2d-ii) runs.
+  const overridden = FIXTURE_PIN.map((r) => {
+    const o = overrides.find((x) => x.key === keyOf(r));
+    return o ? { ...r, predicate: o.predicate } : r;
+  });
+  for (const o of overrides) {
+    if (!fixturePinByKey.has(o.key)) dieFixture(["  @pin-override names a key FIXTURE_PIN does not carry: " + o.key]);
+  }
+  const pairGroups = new Map();
+  for (const r of overridden) {
+    const rk = `${r.verb} ${r.route}`;
+    if (!pairGroups.has(rk)) pairGroups.set(rk, []);
+    pairGroups.get(rk).push(r);
+  }
+  if (IN_SCOPE.includes("VERDICT-COLLAPSE")) {
+    for (const [rk, group] of pairGroups) if (verdictContrastLost(group)) observed.add("VERDICT-COLLAPSE " + rk);
+  }
+
+  // ── every must-clear key must be REAL, or the negative control is theatre ──
+  const unreal = [];
+  for (const c of clears.filter(inScope)) {
+    const [arm, ...restParts] = c.split(" ");
+    const key = restParts.join(" ");
+    if (arm === "VERDICT-COLLAPSE") {
+      if (!pairGroups.has(key) || pairGroups.get(key).length < 2) unreal.push(`  ${c} — no multi-site FIXTURE_PIN group on that route`);
+    } else if (!fixturePinByKey.has(key)) {
+      unreal.push(`  ${c} — FIXTURE_PIN carries no such row, so nothing could have cleared`);
+    } else if (!seenByKey.has(key)) {
+      unreal.push(`  ${c} — the fixture has no such call site, so nothing was exercised`);
+    }
+  }
+  if (unreal.length) {
+    dieFixture(["  a @must-clear row names something that does not exist:", ...unreal,
+      "  A negative control over an absent subject is green by construction."]);
+  }
+
+  // ── the verdict ───────────────────────────────────────────────────────────
+  const scopedFlags = flags.filter(inScope);
+  const scopedClears = clears.filter(inScope);
+  const flagSet = new Set(scopedFlags);
+  const missing = scopedFlags.filter((f) => !observed.has(f));
+  const unexpected = [...observed].filter((o) => !flagSet.has(o));
+  const firedClear = scopedClears.filter((c) => observed.has(c));
+
+  console.log("fixture          :", LABEL);
+  console.log("mode             :", FIXTURE_MODE, "· arms in scope:", IN_SCOPE.join(", "),
+    "(pin: " + FIXTURE_PIN.length + " rows · fixture sites: " + sites.length + ")");
+  console.log("");
+  console.log("  declared must-flag :" + (scopedFlags.length ? "" : " (none in scope — this is a CROSS cell)"));
+  for (const f of scopedFlags) console.log("    " + (observed.has(f) ? "FIRED   " : "SILENT  ") + f);
+  console.log("  declared must-clear:" + (scopedClears.length ? "" : " (none in scope)"));
+  for (const c of scopedClears) console.log("    " + (observed.has(c) ? "FIRED   " : "clear   ") + c);
+  const outOfScope = [...flags, ...clears].filter((r) => !inScope(r));
+  if (outOfScope.length) console.log("  out of scope here  : " + outOfScope.length + " row(s) — " + IN_SCOPE.join("/") + " only");
+
+  if (missing.length || unexpected.length || firedClear.length) {
+    dieFixture([
+      ...missing.map((f) => "  DECLARED BUT SILENT   " + f + "  — the arm did not fire on a case built to make it fire"),
+      ...firedClear.map((c) => "  FIRED BUT MUST CLEAR  " + c + "  — the arm fires on a known-good row; it does not discriminate"),
+      ...unexpected.map((o) => "  FIRED UNDECLARED      " + o + "  — the control fired for a reason it does not claim"),
+    ]);
+  }
+
+  console.log("");
+  if (observed.size) {
+    console.log(`OK(1): all ${scopedFlags.length} declared arm(s) fired and all ${scopedClears.length} known-good row(s) stayed clear.`);
+    console.log("       Exiting 1 — the same code the live ADD/REMOVE arm uses when it loses. 2 is reserved");
+    console.log("       for an instrument that lost its footing, and a control that borrowed it would be");
+    console.log("       indistinguishable from a broken one.");
+    process.exit(1);
+  }
+  console.log(`OK(0): no ${IN_SCOPE.join("/")} observation on this fixture, and none was declared.`);
+  console.log("       This is a CROSS cell of the 2x2: the fixture built to fire the OTHER arm leaves");
+  console.log("       this one silent. Without that silence, exit 1 on the matching cell would only show");
+  console.log("       the control shouting, never that it can tell the two arms apart.");
+  process.exit(0);
+}
+
 const rows = sites
   .map((s) => ({ ...s, pin: pinByKey.get(keyOf(s)) || null }))
   .sort((a, b) => a.line - b.line);
@@ -596,23 +829,56 @@ if (dupes.length) {
   die2(["FAIL(2): duplicate PIN keys — a call site is hiding behind another:", ...new Set(dupes.map((d) => "  " + d))]);
 }
 
-// (2d) THE DISCRIMINATION CONTROL. The two POST /v1/providers call sites must
-//      stay TWO rows with OPPOSITE verdicts. If they ever collapse to one key,
-//      the census has stopped being able to see the defect it exists to see and
-//      must say so rather than going green.
+// (2d) THE DISCRIMINATION CONTROL, IN TWO PARTS — and they are two, because the
+//      single fused predicate this check shipped with FROZE A LIVE DEFECT
+//      (charter D452). It read:
+//
+//        if (!bare || !gated || keyOf(bare) === keyOf(gated) || !bp || !gp ||
+//            bp.predicate !== null || gp.predicate === null)
+//
+//      The last two terms are DIRECTIONAL. They demand that submitProviderCred
+//      stay UNPREDICATED forever and that submitInlineProviderCred stay
+//      predicated forever — so the fix this census exists to motivate, putting a
+//      client predicate in front of the launch wizard's provider button, reds
+//      its own instrument. Measured on main: predicating that PIN row AND moving
+//      EXPECT to {79, 40, 23, 17} in the same commit still exits 2. A guard that
+//      can only stay green while the disease stays untreated is not a guard, and
+//      it is the same failure mode as a positive control anchored to a real
+//      defect (cch-w38-bl). Both directional terms are RETIRED here.
+//
+//      (2d-i) KEYING — permanent, and the reason the key is a call site at all.
+//      (2d-ii) VERDICT CONTRAST — NON-directional, and the honest residue of the
+//              retired terms: the pair may not go BOTH unpredicated.
+//              submitInlineProviderCred IS fenced by providerCanWrite in the
+//              tree, so a pin recording no predicate on either row has forgotten
+//              a fence that exists — the pin has been flattened, not the tree
+//              fixed. Predicating the bare row leaves one predicate standing and
+//              passes; blanket-nulling the pair reds. THE FIXTURE CONTROL above
+//              is what proves this arm can lose: the add fixture declares a
+//              VERDICT-COLLAPSE must-flag row (its `@pin-override` nulls the
+//              gated verdict), and the remove fixture — run through
+//              `--add-check`, the 2x2's cross cell — declares the same key
+//              must-clear. Measured firing AND measured staying silent.
 {
   const bare = sites.find((s) => s.fn === "submitProviderCred" && s.route === "/v1/providers");
   const gated = sites.find((s) => s.fn === "submitInlineProviderCred" && s.route === "/v1/providers");
   const bp = bare && pinByKey.get(keyOf(bare));
   const gp = gated && pinByKey.get(keyOf(gated));
-  if (!bare || !gated || keyOf(bare) === keyOf(gated) || !bp || !gp || bp.predicate !== null || gp.predicate === null) {
+  const keyingLost = !bare || !gated || keyOf(bare) === keyOf(gated) || !bp || !gp;
+  if (keyingLost || verdictContrastLost([bp, gp])) {
     die2([
       "FAIL(2): the POST /v1/providers discrimination control is broken.",
-      "  Both call sites must be present as TWO keys with OPPOSITE predicate verdicts:",
-      `    submitProviderCred       (expect predicate null)  → ${bare ? LABEL + ":" + bare.line : "MISSING"}${bp ? " predicate=" + bp.predicate : ""}`,
-      `    submitInlineProviderCred (expect a predicate)     → ${gated ? LABEL + ":" + gated.line : "MISSING"}${gp ? " predicate=" + gp.predicate : ""}`,
-      "  Route-keyed, these collapse into one 'predicated' row and the one real defect on",
-      "  this route becomes invisible. This control is the proof they have not collapsed.",
+      keyingLost
+        ? "  (2d-i) KEYING: both call sites must be present as TWO distinct keys."
+        : "  (2d-ii) VERDICT CONTRAST: the pair is pinned BOTH unpredicated. renderConnectCard",
+      keyingLost
+        ? "  Route-keyed, they collapse into one 'predicated' row and the one real defect on"
+        : "  mounts only when providerCanWrite(), so a pin with no predicate on either row has",
+      keyingLost
+        ? "  this route becomes invisible. This control is the proof they have not collapsed."
+        : "  forgotten a fence that exists. Predicating the BARE row is the fix and passes here.",
+      `    submitProviderCred       → ${bare ? LABEL + ":" + bare.line : "MISSING"}${bp ? " predicate=" + bp.predicate : ""}`,
+      `    submitInlineProviderCred → ${gated ? LABEL + ":" + gated.line : "MISSING"}${gp ? " predicate=" + gp.predicate : ""}`,
     ]);
   }
 }

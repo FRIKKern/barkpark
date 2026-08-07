@@ -415,6 +415,60 @@ jobs:
       - name: Elevated-write binding census (ADD + REMOVE)
         run: node cloud/priv/static/__binding_census.mjs
 
+      # THE CENSUS'S FIXTURE CONTROL (cch-w40-s3, charter D452).
+      #
+      # The step above is the gate. Until this one landed, nothing showed that
+      # gate LOSING. Its only committed control was (2d), which proves the census
+      # can SEE the decisive POST /v1/providers pair — not that the ADD/REMOVE
+      # set diff, the arm that actually reds a merge, can fire at all. A gate
+      # never observed losing is a gate being trusted.
+      #
+      # AND (2d)'s two DIRECTIONAL verdict sub-clauses are retired in the same
+      # commit, because they froze a live defect: they required
+      # submitProviderCred to stay UNPREDICATED forever, so the fix the census
+      # exists to motivate red its own instrument (measured: predicating that
+      # PIN row and correctly moving EXPECT to {79,40,23,17} still exited 2).
+      # What replaces them is (2d-ii), the non-directional rule that the pair may
+      # not go BOTH unpredicated — and the add fixture's VERDICT-COLLAPSE
+      # must-flag row is what proves THAT arm can lose, so the split is not a net
+      # loss of coverage.
+      #
+      # SEPARATE STEPS, NOT CASES IN __app.test.mjs — the same reason the census
+      # step above states in its own comment, and it is true again this wave:
+      # other slices are editing that file, and a census that has to merge with
+      # them is a census that gets weakened to land.
+      #
+      # THE FULL 2x2, NOT JUST THE TWO FIRING CELLS. Each fixture is also run
+      # through the OTHER flag and must exit 0. Without those two cells the pair
+      # would only show the control shouting; with them it shows the control
+      # telling the two arms apart. `set -e` is on by default, so each `test`
+      # below is itself the assertion — an exit code that drifts fails the step
+      # by name rather than being swallowed by a pipeline.
+      - name: Binding census fixture control — ADD arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__binding_census.mjs --add-check \
+            cloud/priv/static/__binding_census.add.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Binding census fixture control — REMOVE arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__binding_census.mjs --remove-check \
+            cloud/priv/static/__binding_census.remove.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Binding census fixture control — the cross cells stay silent (exit 0)
+        run: |
+          node cloud/priv/static/__binding_census.mjs --remove-check \
+            cloud/priv/static/__binding_census.add.fixture.js && rc=0 || rc=$?
+          echo "add fixture under --remove-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
+          node cloud/priv/static/__binding_census.mjs --add-check \
+            cloud/priv/static/__binding_census.remove.fixture.js && rc=0 || rc=$?
+          echo "remove fixture under --add-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
+
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
   # app.css, or scans its comment nesting, or reads `--x:` declarations out of
