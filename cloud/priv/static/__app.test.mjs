@@ -12169,29 +12169,47 @@ test("stepRingProgress fills a mid-BUILD deploy stage (was flat 0 without the es
 
 // ── gr-p2 plan & dunning (GR17/GR19/GR20): catalog, dunning, trial, chip ─────
 
-test("PLAN_CATALOG is the one quota-honest source: USD placeholders + real 1/3/10 ceilings", () => {
+// cch-w49-s1 — this test used to be named "PLAN_CATALOG is the one quota-honest
+// source: USD placeholders + real 1/3/10 ceilings", and it PINNED the defect as
+// a property: it asserted the three hand-typed placeholder prices and the three
+// hand-typed ceilings the console then stated to users as fact. It now pins the
+// opposite, which is the only thing this client can support — the catalog
+// carries identity and copy, and no numeral at all.
+test("PLAN_CATALOG carries no numeral: no price this tree has no amount for, no ceiling this screen never fetches", () => {
   const cat = hooks.planCatalog;
   assert.equal(cat.length, 3, "exactly the three real plans");
   const by = {};
   for (const t of cat) by[t.plan] = t;
-  // The REAL enforced ceilings (server Billing @default_limits) — never unlimited.
-  assert.equal(by.free.instances, 1);
-  assert.equal(by.supporter.instances, 3);
-  assert.equal(by.support_plus.instances, 10);
-  // USD placeholders held until the cloud-console-billing-live-gate human gate.
-  assert.equal(by.free.price, "$0");
-  assert.equal(by.supporter.price, "$69");
-  assert.equal(by.support_plus.price, "$499");
+  assert.deepEqual(Object.keys(by).sort(), ["free", "support_plus", "supporter"], "the three plan ids survive");
+  // Identity + copy survive; every numeral-bearing key is GONE, so no render
+  // path can resurrect a figure by reaching back into the constant.
+  for (const t of cat) {
+    assert.ok(t.name && t.note, t.plan + " keeps its name and its sentence");
+    for (const dead of ["price", "per", "instances"]) {
+      assert.equal(t[dead], undefined, t.plan + " must carry no " + dead + " — nothing server-side backs one");
+    }
+    assert.ok(!/\$\s?\d/.test(JSON.stringify(t)), t.plan + " must state no currency amount");
+    assert.ok(!/\b\d+\s+managed instances?\b/.test(JSON.stringify(t)), t.plan + " must state no instance ceiling");
+  }
+  // The formatter that turned the ceiling into prose is gone with the data.
+  assert.equal(hooks.planInstanceLimit, undefined, "planInstanceLimit is retired, not merely unused");
 });
 
-test("planFeatures leads with the real ceiling — the unlimited fiction is gone", () => {
-  const names = { free: "1 managed instance", supporter: "3 managed instances", support_plus: "10 managed instances" };
+test("planFeatures states only what this screen can stand behind — no ceiling, no unlimited fiction", () => {
   for (const t of hooks.planCatalog) {
     const feats = hooks.planFeatures(t);
-    assert.equal(feats[0], names[t.plan], t.plan + " must state its real ceiling first");
-    assert.ok(!feats.join("|").includes("Unlimited"), t.plan + " must never claim unlimited");
+    assert.ok(feats.length >= 3, t.plan + " still describes the plan");
+    const joined = feats.join("|");
+    assert.ok(!joined.includes("Unlimited"), t.plan + " must never claim unlimited");
+    // The old lead bullet was a hand-typed ceiling on a screen that issues no
+    // usage/summary call for ANY billing actor — true-sounding, never asked.
+    assert.ok(!/\b\d+\s+managed instances?\b/.test(joined), t.plan + " must not state an unfetched ceiling");
+    assert.ok(!/\$\s?\d/.test(joined), t.plan + " must not state a price");
   }
-  assert.equal(hooks.planInstanceLimit({ instances: 1 }), "1 managed instance", "singular at 1");
+  // Support tier is still differentiated — omitting numerals did not flatten
+  // the catalog into three identical cards.
+  const plus = hooks.planFeatures(hooks.planCatalog.filter((t) => t.plan === "support_plus")[0]);
+  assert.ok(plus.includes("Priority support"), "Support++ still reads differently from the rest");
 });
 
 test("planFromSub: a past_due team KEEPS its paid plan (the sidebar-pill fix)", () => {
@@ -12232,8 +12250,15 @@ test("dunningBannerHtml: GR17 strings verbatim, portal CTA, dead promises stay d
 
 test("trialCardHtml carries the RATIFIED CTA verbatim and never the teardown-dishonest promise", () => {
   const html = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 14 });
-  assert.ok(html.includes("Pick a plan below to keep it. No card needed."),
+  assert.ok(html.includes("Pick a plan below to keep it."),
     "the ratified CTA (task-2ed0ea068f37345d), verbatim");
+  // cch-w49-s1: the second sentence, "No card needed.", is retired. The
+  // ratification's honesty warrant covered teardown and the T-3/T-1 reminders;
+  // it never covered card collection, and the buttons this sentence sat above
+  // open a mode=subscription checkout with no payment_method_collection
+  // override and no trial_period_days — a card is exactly what is needed.
+  assert.ok(!html.includes("No card needed"),
+    "the trial card must not promise a card-free path into a real checkout");
   assert.ok(html.includes("14 days left"), "the countdown chip");
   assert.ok(!html.includes("suspended — not deleted"), "trial expiry is a real teardown");
   // The final days flip the chip to the low state; singular reads correctly.
@@ -12242,10 +12267,15 @@ test("trialCardHtml carries the RATIFIED CTA verbatim and never the teardown-dis
   assert.ok(low.includes("1 day left"), "singular day");
 });
 
-test("tierCardHtml: quota line always; portal button for subscribed, checkout otherwise", () => {
+test("tierCardHtml: no price and no ceiling; portal button for subscribed, checkout otherwise", () => {
   const supporter = hooks.planCatalog.filter((t) => t.plan === "supporter")[0];
   const fresh = hooks.tierCardHtml(supporter, "free", false);
-  assert.ok(fresh.includes("3 managed instances"), "the quota line renders");
+  // cch-w49-s1 — this used to assert "the quota line renders". The tier card
+  // states the tier, its sentence and its action; the two numerals are gone.
+  assert.ok(fresh.includes(">Supporter<"), "the tier is named");
+  assert.ok(fresh.includes("Managed hosting for your instance."), "the tier's sentence renders");
+  assert.ok(!/\$\s?\d/.test(fresh), "no price — no amount exists server-side to state");
+  assert.ok(!/\b\d+\s+managed instances?\b/.test(fresh), "no ceiling — this screen never fetches the quota");
   assert.ok(fresh.includes('data-plan="supporter"'), "unsubscribed → checkout");
   const paid = hooks.tierCardHtml(supporter, "support_plus", true);
   assert.ok(paid.includes('data-portal-plan="supporter"'), "subscribed → portal, self-serve");
@@ -13845,7 +13875,12 @@ test("billingCanManage / billingHasPaidPlan: owner-honest gate + paid-plan test 
 test("readOnlyPlanCardHtml: the non-owner view is a button-free summary reusing the pure models (GR36 plain-member law)", () => {
   const paid = hooks.readOnlyPlanCardHtml({ plan: "supporter", status: "active", current_period_end: "2026-08-01T12:00:00.000Z" });
   assert.ok(paid.includes(">Supporter<"), "reads the real plan name");
-  assert.ok(paid.includes("3 managed instances"), "reuses the quota-honest features verbatim");
+  assert.ok(paid.includes("Automated provisioning &amp; updates"), "reuses the shared features verbatim");
+  // cch-w49-s1: the non-owner twin printed the same .plan-price as the owner
+  // card, so a fix scoped to the owner view would have left the member reading
+  // a price nothing backs. Both twins now state none.
+  assert.ok(!/\$\s?\d/.test(paid), "the read-only card states no price either");
+  assert.ok(!/\b\d+\s+managed instances?\b/.test(paid), "and no unfetched ceiling");
   assert.ok(paid.includes("Renews "), "reuses billingPeriodLine");
   // Never a write affordance — no buttons, no grid toggle, no portal copy.
   assert.ok(!/<button/i.test(paid), "no buttons in the read-only card");
@@ -18591,4 +18626,40 @@ test("cch-w48-s1: the unanswered /new step asks ONCE, and its exit re-asks", asy
     Object.assign(sandbox, saved);
     hooks.clearMe();
   }
+});
+
+// ── cch-w49-s1 · THE TWO CORPUS-DARK LAUNCH SURFACES ────────────────────────
+// launchPlanGridHtml serves BOTH the dashboard's 402 plan fold (renderLaunchPlan)
+// and the /new signup funnel's pricing step (renderNewPricing) — the first money
+// screen a new signup ever reaches. It used to print two prices from the client
+// catalog, and its BLOCKED arm printed them while withholding the CTA: the money
+// claim without even the affordance behind it.
+//
+// WHY THESE ARE NODE PINS AND NOT SMOKE SCENARIOS, stated rather than papered
+// over: the 402 fold is CORPUS-DARK. Not one of the 110 committed scenarios
+// reaches it — the status histogram over the whole corpus is {"200":104,"401":6},
+// there is no 402 anywhere, and POST /v1/launch has no route arm in
+// scenarios.mjs at all. So the smoke absent-arm guard (which covers the six
+// #billing actors) structurally CANNOT see this surface, and a pin over the
+// exported bytes is the only instrument that can. Both authorities are covered
+// because they render different markup and only one of them was ever reasoned
+// about.
+test("cch-w49-s1: the launch plan grid states no price — on the GRANT arm and the BLOCKED arm alike", () => {
+  for (const authority of ["owner", "unknown", "blocked"]) {
+    const html = hooks.launchPlanGridHtml(authority);
+    assert.ok(html.includes(">Supporter<") && html.includes(">Support++<"),
+      authority + ": the paid tiers are still named");
+    assert.ok(!/\$\s?\d/.test(html), authority + ": no price — this tree holds no amount to state");
+    assert.ok(!/\b\d+\s+managed instances?\b/.test(html), authority + ": no ceiling either");
+    assert.ok(!html.includes("new-tier-price"), authority + ": the price slot is gone, not merely emptied");
+  }
+  // The authority split itself survives the edit — the grant arms offer the
+  // CTA, the blocked arm offers the sentence naming who can pay and NO button
+  // (never a disabled ghost).
+  const owner = hooks.launchPlanGridHtml("owner");
+  assert.ok(owner.includes('data-plan="supporter"'), "an owner still gets the choose-plan CTA");
+  const blocked = hooks.launchPlanGridHtml("blocked");
+  assert.ok(!/<button/i.test(blocked), "a refused principal gets no button at all");
+  assert.ok(blocked.includes("Only the team owner can start a paid plan"),
+    "…and the one sentence naming who can");
 });

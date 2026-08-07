@@ -1309,25 +1309,33 @@ const EXPECTATIONS = {
 
   // ── gr-p2 plan & dunning (C-03/C-04): trial CTA, GR17 dunning, portal return ─
   "billing-trial": {
-    what: "the trial billing state — countdown chip, the RATIFIED CTA verbatim, quota-honest open plan grid, trial topbar chip",
+    what: "the trial billing state — countdown chip, the warranted CTA verbatim, open plan grid, trial topbar chip",
     check(reg) {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
       // The ratified CTA (task-2ed0ea068f37345d), VERBATIM — never the
-      // prototype's superseded draft.
-      assert.ok(box.includes("Pick a plan below to keep it. No card needed."),
-        "the ratified trial CTA must render verbatim");
+      // prototype's superseded draft. cch-w49-s1 retired the second sentence
+      // ("No card needed."): the ratification warranted teardown + the T-3/T-1
+      // reminders, never card collection, and checkout does collect a card.
+      assert.ok(box.includes("Pick a plan below to keep it."),
+        "the warranted trial CTA must render verbatim");
+      assert.ok(!box.includes("No card needed"),
+        "the trial card must not promise a card-free path into a mode=subscription checkout");
       assert.ok(box.includes('class="trial-chip"'), "the countdown chip must render");
       assert.ok(box.includes("14 days left"), "the chip must carry the server's days-remaining");
       // Trial expiry is a real teardown — the dunning suspend promise must NOT
       // leak into trial copy.
       assert.ok(!box.includes("suspended — not deleted"), "trial copy must never borrow the dunning suspend promise");
-      // The plan grid opens right below the CTA ("below" must be true) and is
-      // quota-honest: real ceilings, no unlimited fiction.
+      // The plan grid opens right below the CTA ("below" must be true) and
+      // still names all three tiers with their actions. It states no ceiling
+      // and no price — this actor is on plan "trial", which the catalog has no
+      // card for, and nothing on this screen ever asks the server for a quota.
+      // The numeral absence itself is guarded corpus-wide by
+      // assertBillingStatesNoNumeralItCannotSupport().
       assert.equal(reg.get("billing-tiers").hidden, false, "the plan grid must be open under the CTA");
       const grid = reg.get("billing-tiers").innerHTML || "";
-      for (const q of ["1 managed instance", "3 managed instances", "10 managed instances"]) {
-        assert.ok(grid.includes(q), "tier cards must state the real ceiling " + JSON.stringify(q));
+      for (const q of ["Free", "Supporter", "Support++"]) {
+        assert.ok(grid.includes(">" + q + "<"), "tier cards must name the tier " + JSON.stringify(q));
       }
       assert.ok(!grid.includes("Unlimited managed instances"), "the unlimited fiction must be gone");
       // GR20: the topbar chip reads trial (XOR — never the past-due skin).
@@ -1384,7 +1392,9 @@ const EXPECTATIONS = {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
       assert.ok(box.includes(">Supporter<"), "the current plan card must render after the round-trip");
-      assert.ok(box.includes("3 managed instances"), "the features must state the real Supporter ceiling");
+      // cch-w49-s1: the card states the plan and its features, never a ceiling
+      // this screen never fetched (Usage.instance_quota is not read here at all).
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "the features must render");
       // G-01 anatomy: the portal CTA rides the Manage-billing .set-section now.
       assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");
       assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage-billing section shows for the active plan");
@@ -2137,9 +2147,13 @@ const EXPECTATIONS = {
     check(reg) {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
-      // The plan STATE reads honestly (real name + real ceiling) …
+      // The plan STATE reads honestly (the real plan name, and the features) …
+      // cch-w49-s1 retired the ceiling pin that used to sit here: it called a
+      // hand-typed client constant "the real quota-honest ceiling" inside the
+      // required Console gate, which made this gate certify the fiction. The
+      // member's screen issues no usage/summary call, so it states no ceiling.
       assert.ok(box.includes(">Supporter<"), "the member sees the real plan name");
-      assert.ok(box.includes("3 managed instances"), "the member sees the real quota-honest ceiling");
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "the member sees the plan features");
       // … but with ZERO write affordances — never a disabled ghost (GR36).
       assert.ok(!/<button/i.test(box), "the read-only plan card renders NO button");
       assert.ok(!box.includes("plan-more") && !box.includes("plan-continue"), "no grid-toggle / subscribe CTA for a member");
@@ -3460,6 +3474,93 @@ function assertFixtureShapePins() {
     "changed. Fix the reader or restore the shape — do not delete the pin:\n  " + broken.join("\n  ") + "\n");
   return false;
 }
+
+// ── cch-w49-s1 · THE MONEY SCREEN'S ABSENT-ARM GUARD ─────────────────────────
+// An ABSENT-arm assertion, not a presence one: it asserts the billing surface
+// states NO currency numeral and NO instance-count numeral, on every actor who
+// can reach it. It exists because the console used to state $0/$69/$499 and
+// 1/3/10 managed instances as FACT under a button that opens a real Stripe
+// session, with nothing server-side those numbers could ever be checked against
+// — no amount exists in the tree at all (STRIPE_PRICE_* are price IDs, not
+// amounts), and the ceiling is not fetched on this screen by ANY billing actor.
+// The remedy was to OMIT, so the guard that can lose is one that reds the
+// moment a numeral comes back.
+//
+// WHY IT IS A GUARD AND NOT A NEW SCENARIO: it needs no fixture — it re-reads
+// the corpus that already exists. The scenario set is DERIVED from the corpus
+// (`deepLink === "#billing"`), so a seventh billing actor is covered on the day
+// it is minted rather than on the day someone remembers this file.
+//
+// THE TWO WAYS THIS COULD HAVE BEEN A FALSE GREEN, both refused below:
+//   • an EMPTY corpus slice — if a deepLink is renamed the filter would answer
+//     [] and an assertion over nothing passes, so the count is floored (6, the
+//     set derived by running: billing-trial, billing-past-due,
+//     billing-portal-return, billing-member, billing-me-unreadable,
+//     billing-cancelling);
+//   • an EMPTY container — a mount that moved would leave both ids blank and
+//     "no numeral" would be trivially true, so the union must be non-empty for
+//     every actor.
+// The container union {#billing-recommended, #billing-tiers} was derived by
+// scanning the ENTIRE registry of all six booted actors for either numeral, not
+// from a named list: billing-trial carries it in #billing-tiers, the other five
+// in #billing-recommended, and NO third id carries one. A guard scoped to
+// #billing-tiers alone would have covered 1 actor of 6.
+//
+// It reads innerHTML STRINGS deliberately: this shim's parse is FLAT and its
+// document-level querySelectorAll hard-returns [], so a selector-shaped
+// assertion here matches nothing and passes vacuously. And it does NOT open the
+// grid with a #plan-more click: renderBilling repaints #billing-recommended
+// 4-5x per boot while the registry hands back the same node, so listeners
+// accumulate and an even count makes the toggle dead — a click-opened grid
+// measures the harness, not the app.
+const MONEY_CURRENCY_RE = /\$\s?\d[\d,]*/;
+const MONEY_CEILING_RE = /\b\d+\s+managed instances?\b/;
+const MONEY_CONTAINERS = ["billing-recommended", "billing-tiers"];
+
+async function assertBillingStatesNoNumeralItCannotSupport() {
+  const names = SCENARIO_NAMES.filter((n) => (SCENARIOS[n].deepLink || "") === "#billing");
+  const broken = [];
+  if (names.length < 6) {
+    broken.push("only " + names.length + " scenario(s) deep-link #billing (6 are committed) — the corpus slice this " +
+      "guard reads has shrunk, and an assertion over a shrunken slice is a false green, not a pass");
+  }
+  for (const name of names) {
+    const boot = bootScenario(name, {});
+    await flush();
+    // The parts are filtered BEFORE joining, deliberately: joining two empty
+    // strings yields "\n", which is truthy, and an emptiness test against that
+    // can never fire — measured, by moving both ids and watching this guard
+    // pass. The vacuity arm below only works over the filtered union.
+    const parts = MONEY_CONTAINERS.map((id) => {
+      const el = boot.registry.get(id);
+      return (el && typeof el.innerHTML === "string" ? el.innerHTML : "") || "";
+    }).filter(Boolean);
+    const union = parts.join("\n");
+    if (!union) {
+      broken.push(name + ": both " + MONEY_CONTAINERS.map((i) => "#" + i).join(" and ") + " rendered EMPTY — the " +
+        "billing surface moved, so \"states no numeral\" is vacuously true here rather than proven");
+      continue;
+    }
+    const cur = union.match(MONEY_CURRENCY_RE);
+    const ceil = union.match(MONEY_CEILING_RE);
+    if (cur || ceil) {
+      broken.push(name + ": the billing surface STATES " +
+        [cur ? "a price " + JSON.stringify(cur[0]) : null,
+         ceil ? "a ceiling " + JSON.stringify(ceil[0]) : null].filter(Boolean).join(" and ") +
+        " — no server value backs either one (no amount exists in the tree; the ceiling is never fetched on this " +
+        "screen), so the console must state the tier, the features and the CTA, and state no number");
+    }
+  }
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " billing-numerals — " + names.length +
+    " #billing actor(s) × " + MONEY_CONTAINERS.length + " container(s): " +
+    (broken.length ? broken.length + " stating a numeral no server value supports" : "no unsupported numeral stated") + "\n");
+  if (broken.length) {
+    process.stdout.write("\nbilling absent-arm guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+await assertBillingStatesNoNumeralItCannotSupport();
 
 async function main() {
   if (!assertCensus()) {
