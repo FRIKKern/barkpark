@@ -2909,51 +2909,228 @@ Coverage: every survey and verify agent reported; there is no coverage deficit t
 
 Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
 
-### Wave 2026-08-07 (wave 9) — REVIEWED · Paper `deploy-reliability-wave-9-2026-08-07` · grade **A−**
+## Wave 10 — the box can be called sick by a number that cannot be window-shopped
 
-**Five of seven slices built, reviewed, gate-green on the final state, PUSHED and PR'd. Nothing merged — the lead merges.**
-The other two (`dr-w9-s6`, `dr-w9-s7`) are round 2 BY DESIGN, each behind a round-1 dep.
+Wave 10 Paper: `deploy-reliability-wave-10-2026-08-07`. Twelve verify assignments, every one reported;
+**no coverage deficit in either round.** Every number below was re-derived at 2026-08-07 04:20–05:00Z
+against `origin/main`, cloud-db-1 (178.105.92.191) and guerrilla (157.180.90.121). Where a wave-10
+verifier contradicted the wave-10 direction, the verifier wins and the contradiction is recorded by name.
 
-| Slice | Task | Final branch | PR | Gate on final state |
-|---|---|---|---|---|
-| The pressure block carries its denominator | `dr-bl-w7-req-volume-joins-the-pressure-block` | `…the-pressure-block-carries-latency-and-i-0` | [#10079](https://github.com/FRIKKern/barkpark/pull/10079) | 140 tests, 0 failures |
-| Abandoned is not a transient 409 | `dr-w9-s2-abandoned-is-not-a-transient-409` | `…giving-up-on-a-publish-stops-wearing-the-1-r` | [#10080](https://github.com/FRIKKern/barkpark/pull/10080) | 37 tests, 0 failures |
-| The deployments table carries its cause | `dr-w9-s3-deployments-table-carries-its-cause` | `…a-team-s-deployments-table-carries-its-c-2-r` | [#10081](https://github.com/FRIKKern/barkpark/pull/10081) | go build/vet/test ./internal/cli/… ok |
-| The doc-type filter reaches the live rows | `dr-w9-s4-webhook-doctype-filter-reaches-live-rows` | `…the-doc-type-filter-reaches-the-five-liv-3` | [#10082](https://github.com/FRIKKern/barkpark/pull/10082) | go build/vet/test ./internal/cli/… ok |
-| The beat dates its own producer | `dr-w9-s5-the-beat-dates-its-own-producer` | `…the-health-beat-dates-its-own-producer-s-4` | [#10084](https://github.com/FRIKKern/barkpark/pull/10084) | go build/vet/test ./internal/agent/… ok |
+- **D147 — THE `unmetered → ok` CITATION IS MISFILED, NOT PHANTOM: THE RULING IS **D42**, IT IS LANDED, AND
+  THIS WAVE ROUTES AROUND IT BY SCOPE RATHER THAN REVERSING IT.** *Why:* `cloud_status_cmd.go:239` (inside
+  unmerged #9887) cites "charter D69 — deliberately NOT a rung", but landed D69 (charter line 1416) is
+  *"AMENDS D53 NARROWLY: THE DISK GETS ITS OWN RUNG `filling`"* and contains no word about absence. The
+  ruling it MEANS is **D42** (line 735), landed: *"NO NEW `unmetered` ATTENTION STATE … a nil or `-1` vital
+  NEVER produces `strained`."* Briefing a builder "the citation is phantom, just fix the comment" would
+  have INVERTED the governance: they would add the rung believing nothing opposed it. But D42, D74 and D88
+  are all about the **agent PRESSURE beat**, where "unmetered" means a stale agent binary — a rollout gap.
+  Wave 10's vital is the **deploy outcome rate**, computed control-plane-side with no agent in the path;
+  `grep -in 'deploy rate|deploy_rate|rung.*deploy'` over the landed charter returns **ZERO**. No landed
+  decision covers a deploy-rate rung at all. Therefore: the tri-state arm is scoped to the DEPLOY vital,
+  the D88 pressure marker is left exactly as shipped, **#9887 needs no edit whatsoever**, and D42 stands
+  untouched on its own subject. (Recorded for the record: D42's stated rationale — "vocabulary for a
+  population of zero" — is already contradicted by the later landed D88, which counts the marker
+  live-eligible on four of six boxes with two wearing a serene `ok`. That reversal is available if a later
+  wave wants the pressure rung; this wave does not need it.)
 
-**WHAT LANDED.** The wave's through-line is the wish's second clause — *make the reporting able to lose*.
-S2 takes the most severe outcome the fleet produces (a publish abandoned after 12 rounds) out of the mildest
-name in the taxonomy, and does it by calling a reader the module already owned and had wired only to the less
-severe path. S3 turns `bp sites deployments` — the ONE deploy surface a non-platform-admin reaches, with the
-crown dark — from three-dashes-and-a-timestamp into a table that names each row's cause and a summary that
-cannot print a bare percentage. S4 ships a REPEATABLE verb for the 93.1% delivery cut and, in running it live
-as the brief demanded, found that `--dry-run` was a global flag its own green unit tests could not see — it
-wrote to production on a "dry" run. S5 gives the beat a producer stamp so an absent vital stops being
-indistinguishable from a healthy one. S1 puts the denominator beside the 5xx rate.
+- **D148 — THE RUNG READS THE **RAW** TERMINAL RATE, WITH `box_caused` AS A MANDATORY COMPANION KEY —
+  NEVER A REGEX-DERIVED SUBSET AS THE NUMERATOR.** *Why:* the decisive experiment (leave-one-site-out over
+  guerrilla's 24 h window, n=1,275) was run and the intuition lost. Composition-shopping hits the
+  box-caused subset HARDER than the raw rate: LOO span raw **1.343x** vs graph-substring **1.730x**, and
+  retiring the three `search*` sites takes the graph-substring rate to **1.79%** (a 10.7x collapse) while
+  raw only falls 46.43% → 25.58% (1.82x). A rung on the substring is a rung that can be silenced by
+  decommissioning three sites. It is also 52.6% recall (structurally blind to all 196
+  `feature_not_configured` rows) and 4.1% contaminated by BUILD-stage rows — a technique `classify/2`'s own
+  landed comment forbids verbatim: *"never from a substring search over the whole capture (a build log that
+  prints \"500\" is not a box 500)"*. Deeper reason: **raw depends only on `deployments.status`, an enum.**
+  Every subset depends on a regex over operator-authored prose, so a reworded error message silently
+  returns the rung to `ok` — a NEW silent-failure class manufactured inside the fix. The price of raw is
+  that it accuses the box for a customer's broken Turbopack build (22.6% of rows are `^BUILD failed`); that
+  is paid by emitting `box_caused` beside the rate, derived from `classify/2`'s **closed class enum** by a
+  pure class→agency map (never a new regex), failing to AMBIGUOUS and never to SITE.
 
-**WHAT THE REVIEWER FIXED IN PLACE.** S3 carried three real defects, all of them the epic's own disease one
-surface further out: a `cancelled` deploy (a real terminal state in the CP's transition map) rendered as
-"in flight"; a `status:"deferred"` row with no `DEFERRED_*` class was counted as neither attempt nor deferral;
-and the summary blamed EVERY deferral on the build cap when `BOX_BUSY_DEFERRED` is a busy box, not a full one
-— the identical label-lies-about-cause defect S2 fixes server-side. Mutation-proved: with the two classifier
-arms removed the new test reds with `1 live, 1 failed, 0 deferred, 2 in flight`. S2 needed `mix format` only.
+- **D149 — TRI-STATE, AND A **THIRD** ABSENCE CLASS: "NO DEPLOY SURFACE" IS NOT "COULD NOT MEASURE".**
+  *Why:* the fleet is degenerate past the point where "6-of-8 UNMETERED" is the right framing. Measured:
+  **8 barkparks, 13 sites over 2 barkpark_ids, SIX barkparks with ZERO sites**; only guerrilla (28,698
+  lifetime terminal) and jarl (55 lifetime, last 2026-08-03) have ever owned a deployment, and jarl is
+  below `@min_sample 200` **forever, in any window**. Fold all of that into one `unmetered` and 7 of 8 rows
+  wear a permanent alarm nobody reads — the always-on objection, arriving by a new route. The ruling:
+  a box with **no sites at all** has nothing to deploy, so its verdict stays `ok` and it wears a DETAIL
+  MARKER (the D74/D88 marker doctrine, applied to a new vital); a box **with sites** whose sample is below
+  `@min_sample` classifies **`unmetered`**, ranked below every real-problem rung and above `ok`. The refusal
+  reuses `rate/2`'s existing node verbatim — `%{sample, pct: nil, refused: true, reason}` — so "never asked
+  to deploy" and "asked too little to score" stay readable without a second mechanism. `attentionStatus`
+  must compute the deploy verdict as an EXPLICIT three-way match, so `ok` is returned by a matched clause
+  and never again by `default:`.
 
-**WHAT DID NOT GET PROVEN, and belongs in the next wave's mouth.** Three slices land a value nobody reads yet:
-`p95_ms` joins `err_5xx_per_s` as a landed-and-unread vital (its reader IS `dr-w9-s7`), and `agent_version`
-ships the ABILITY to date a beat while every box in the fleet keeps emitting nothing until
-`dr-bl-w6-cut-and-bless-v0-2-26` fires. The reviewer closed S5's biggest blind spot by RUN rather than read —
-`go build ./cmd/barkpark-agent` here embeds `vcs.revision=a31faa52dc75` with `vcs.modified=true`, i.e. the
-fallback yields `git-a31faa52dc75-dirty` and not `unknown`, from exactly the command both on-box rebuild
-scripts use. S2's fixtures remain RECONSTRUCTED, not dumped: no DB reach from the worktree, so a reviewer with
-`cloud-db-1` access should replay the four actual rows before sealing.
+- **D150 — RENUMBER THE LADDER; DO NOT APPEND. THE FENCE IS 20.0%. THE SPA HALF IS FENCED OUT OF THIS
+  WAVE.** *Why:* "append as rank 12" was proven cheaper only by accepting the wrong semantics. Mutation
+  probe on origin/main: appending `deploy_failing` to `attentionRankOrder` yields `rank=9, bucket="attention"`
+  — bucket fails safe, **rank fails unsafe**: rank 9 sorts BELOW `ok` (8), so the box the epic exists to
+  call sick renders last, under every healthy box. Any semantically-correct placement renumbers by
+  definition. Landed ladder on origin/main is EIGHT rungs (the eleven-rung D69 ladder is unmerged #9887),
+  so wave 10 builds on the 8-rung basis and states it: **1 removal_failed · 2 failed · 3 suspended ·
+  4 degraded · 5 deploys_failing · 6 behind · 7 removing · 8 provisioning · 9 unmetered · 10 ok.** The fence
+  is **20.0%** — above the site-caused floor (9.5% on the retired-search-sites fleet) and below the raw rate
+  with the three `search*` sites removed (25.58%), so it survives the composition crack in both directions.
+  THE SPA IS FENCED: cloud-console-hardening wave 41 owns `cloud/priv/static/app.js`, so this wave does NOT
+  touch it, and the console's ninth-rung drift (`unreported: 5 … ok: 9`, citing D332(b)) is handed over as a
+  filed backlog row rather than fixed under a foreign epic's fence.
 
-**ORDERED MERGE, and it is not optional.** #10080 (S2) conflicts TEXTUALLY with #10014 in four points in
-`deploy_ledger.ex` and is semantically disjoint from it. Merge #10014 first, then rebase #10080. #10079 (S1)
-auto-deploys the control plane on merge.
+- **D151 — THE ATTACK FAILED AND ITS PREMISE WAS INVERTED; THE RUNG STAYS A **BOX** RUNG.** *Why:* the
+  partition of the 597-row numerator is **BOX 447 (74.9%) / SITE 138 (23.1%) / AMBIGUOUS 11 / CAUSELESS 1 —
+  3.24:1**, independently re-derived at 3.34:1. The two classes offered AS PROOF of site-causation are box
+  symptoms: **236 of 237** bp-doc-id rows carry a box-side status in the same string (`graph 500`=124,
+  `graph 0`=58, `graph 503`=54), and D113 is now proven **by running**, not by reading — all 86 deploy-route
+  503s in 12 h took **≥5,000 ms** (zero fast ones; an env hole answers in ~10 ms), the flag
+  `BARKPARK_SITE_DEPLOY_APPLY=1` IS set, and the build started anyway for **84 of 86** refusals against a
+  MEASURED 13.1% coincidence floor. Structural finding nobody had: `bounded_cmd/3` bounds `systemd-run` at
+  **15,000 ms INSIDE** a `GenServer.call` whose implicit budget is **5,000 ms** — the callee's budget is 3x
+  the caller's, so the 503 is reachable deterministically and no test on origin/main pins the caller's
+  budget. Consequence: **`dr-bl-w6-site-deploy-apply-unset-costs-16pct-of-failures` carries a disproven
+  premise and must not be built as written.**
 
-**NEXT WAVE takes the readers.** Dispatch order: merge round 1 (with #10014 before #10080), then
-`dr-w9-s6-the-rate-names-its-absorption` once #10080 lands, then `dr-w9-s7-verdict-reads-a-sustained-vital`
-once #10079 lands. S7 is the wave's real prize — it turns the tri-state verdict on and finally READS a vital
-this wave landed. Both are already filed with full briefs and disjoint file sets.
+- **D152 — THE WINDOW SWING IS **8.6x**, NOT 7x, AND IT IS ABSORPTION, NOT RECOVERY.** *Why:* re-taken on a
+  quiet host at 04:27Z: 24 h = **46.28% of n=1,290** (46.67% absorbed); 6 h = **5.38% of n=279** (75.29%
+  absorbed). The per-hour table shows why it is not noise — from 22:00Z failures collapse to 0–7/hr while
+  deferrals go from 0–2/hr to **137–171/hr**. The box did not recover; the cap started ABSORBING. A rate
+  published without its absorption here does not merely lose precision, **it inverts the verdict**. The
+  deploy vital therefore ships as an inseparable node carrying `pct`, `sample`, `refused`, `absorption` and
+  `box_caused` — a bare percentage is structurally unconstructible, exactly as `rate/2` already guarantees.
 
+- **D153 — THE WEBHOOK FAN-OUT CUT IS REAL AND LARGER THAN CHARTED, AND IT DID **NOT** STOP THE TIMEOUTS.
+  DO NOT SELL IT AS A FIX.** *Why:* amplification per document write fell **31.7x → 1.84x** (1,132/hr →
+  45/hr) over like-for-like 47-minute windows — a 25x cut, bigger than the charted 14x — and the filter
+  landed 03:43:23–03:46:27Z, i.e. **23 minutes BEFORE #10082 merged**, so #10082 did not apply it and,
+  because `runWebhookReconcile` writes only on difference, "ran, no-op" and "never ran" are
+  indistinguishable in the database. The causal claim is refuted three ways: the post-cut quiet (~61 min) is
+  SHORTER than three earlier gaps in the same 12 h (127.6 / 69.2 / 58.0 min); hour 21:00Z served 4,300
+  requests with ZERO timeouts **six hours before the filter existed**; and r(webhook deliveries, timeouts)
+  = **−0.139**. The real correlate, found while testing this: **r(/v1/graph calls, timeouts) = +0.900**
+  (13 h) / +0.912 (same 11 h), with mediation refuted (r(webhooks, graph) = 0.061). That matches landed
+  prior art (`dr-bl-w9-graph-corpus-materialization-is-the-oom`, +0.6 GB BEAM RSS per `/v1/graph` call).
+  The survey-gated question is hereby ANSWERED OUT LOUD: the fan-out lever was worth pulling, it is already
+  pulled, and it is not the mechanism.
+
+- **D154 — #9887 IS **ZOMBIED**, NOT RE-RUN-DELETED, AND D102's MECHANISM IS THE WRONG DIAGNOSIS FOR IT.**
+  *Why:* the required set on main is exactly four (`Elixir gate`, `PR references an active task`,
+  `Cloud gate`, `Console gate`); #9887's head `aa19dcca3` carries 27 check-runs, all success or skipped, and
+  no `Console gate` at all. Its `console-harness` run **31120806862** is `status=queued`, `run_attempt=1`,
+  **ZERO jobs**, created 2026-08-06T16:43:08Z — it never dispatched. A re-run bumps the attempt counter;
+  this one is at 1. (A re-run DID happen on that head, on the `cloud` workflow, attempt 2, success.) Two
+  more workflows on the same sha and three on another are equally stuck, and one `pr-task-gate` run has been
+  queued since **2026-07-23 at run_attempt=9 — fifteen days.** This is runner/queue starvation across shas,
+  not per-workflow deletion. Remedy is unchanged (a fresh head sha; never another re-run), but the
+  instrument must carry BOTH classes and the discriminator is one API call: `run_attempt` and jobs-length.
+  #9887 legitimately owes the gate — it touches `cloud/priv/static/__fixtures__/attention_order.json`.
+
+- **D155 — MOVEMENT 3 SHIPS **DISJOINT**; honest-gates **D76** IS NOT REVERSED, AND D120 IS VOID.** *Why:*
+  a zombied run renders NO check-run at all (`jobs.total_count = 0`; zero non-completed check-runs on
+  #9887's head), so it is the **ABSENT** class, not D76's PENDING class — D76's subject never arises and a
+  builder told to "fix pending" would collide head-on with the still-open honest-gates backlog row
+  `hgw5-bl-deadlock-pending-informational`. The detector already exists and already says the right words:
+  origin/main's `required-checks-verify.sh --deadlock --sha aa19dcca3` exits **3** printing
+  `missing: Console gate`. It is silent only because `required-checks-drift.yml` deliberately passes no
+  `--sha` and samples a settled MERGED head. What genuinely does not exist anywhere on origin/main is a
+  live queued-run query (`select(.status=="queued")` → rc=1). So the buildable residue is: enumerate queued
+  runs with the paginated form, date the absent class, discriminate zombied from rerun-deleted, and ship it
+  as a NEW script plus a NEW schedule-only workflow — the honest-gates **D61** shape, whose live instance is
+  `breakglass-watch.yml`. Proven inert: planting a schedule-only workflow into origin/main's real 43-workflow
+  tree and re-running `required-checks-generate.sh` produces a spec **byte-identical to baseline**, and the
+  floor says `FLOOR OK … 4 context(s), identical on context AND app_id` — and that green is able to fail
+  (a catch-all job name is refused by name, exit 1). **Zero honest-gates files are touched.** Separately:
+  the unmerged D120 ("DR OWNS `console-harness.yml` … by this charter's own D101") is VOID — landed D101's
+  FENCE clause authorizes exactly `cssom-parity.mjs` and says nothing about `console-harness.yml`.
+  Also void as a diagnostic: the queue-diagnostic acceptance criterion must be a **strict inequality**
+  (paginated > unpaginated), never a pinned pair — four independent samples gave 0-vs-6, 0-vs-6, 1-vs-7 and
+  0-vs-7 within one night.
+
+- **D156 — LOAD IS DEAD AS AN AXIS, MEASURED TWICE MORE.** *Why:* guerrilla's load15 read **1.20/core** at
+  04:11Z and **0.92/core** at 04:29Z against the chartered **1.75** fence, on a box carrying 218
+  DBConnection timeouts in the preceding 6 h and failing 46% of its terminal deploys. Wave 9's chartered S7
+  fence would have called this box healthy tonight. The declined item stands as REFUTED, not merely
+  argued: load is the wrong axis, not a mis-tuned one. `p95_ms` stays a vital and does NOT get a rung
+  (D131/D132 stand).
+
+- **D157 — THE EPIC'S OWN LEDGER IS THE LARGEST UNREPORTED FAILURE ON THIS BOARD, AND THE REPAIR HAS BEEN
+  FILED TWICE AND NEVER RUN.** *Why:* the epic carries **166 children — 152 open / 12 done / 2 cancelled,
+  in_progress ZERO** (not 164/145/5). Thirty open rows are named in a PR merged since 2026-08-04 with
+  met>0, carrying **45 unstamped criteria, 20 of them exactly one criterion short**; **41 of the 45 are
+  lead-owned merge paperwork** and all 32 named PRs are MERGED with their merge commits ancestors of
+  origin/main (32/32 verified). **16 rows close outright; 10 get one criterion stamped and stay open; 4 are
+  genuinely blocked.** Do NOT bulk-stamp: `dr-w2-s6` owes "the PR body states that dr-w2-s2 and this slice
+  are two halves of one repair" and #9733's 4,028-char body contains **zero** occurrences of "s2". Two
+  structural traps: (a) criteria live at `doc.content.acceptance_criteria` — `doc['acceptance_criteria']` is
+  `null`, so a naive extractor reads all 166 tasks as fully met; (b) ten criteria demand "all four required
+  contexts green **on the merge commit**", which is **unsatisfiable by construction** because
+  `pr-task-gate.yml` is `on: pull_request` only and is absent from all 19 merge commits queried (six of
+  which carry no check-runs at all). Both prior repair rows — `dr-bl-w8-stamp-sixteen-merged-and-unstamped-tasks`
+  and `dr-bl-w5-merge-gated-paperwork-is-unsatisfiable` — are OPEN at **0/5** and **0/4**. Also newly
+  named: **15 children carry ZERO acceptance criteria**, so every percent-complete instrument scores them
+  vacuously complete.
+
+- **D158 — ERRATA WAVE 10 OWES ITSELF (each one would have mis-briefed a builder).** (a) "189 timeouts on
+  the ACTIVE green slot" is WRONG twice over: BLUE is active, and the split is **blue 129 / green 89 = 218
+  union** — the hourly series 100/5/11/112/2/88 reproduces exactly as the UNION, and the worst hour (112)
+  is on blue. The slot flipped mid-window (green served until 04:13:46, blue started 04:13:20), so any
+  journal claim must carry its timestamp AND its slot, and only unit-agnostic reads are valid. (b) `Sent
+  500` is **113**, not 161. (c) "72.2% of the numerator has fixes already built and stuck" re-derives to
+  **69.0% (412 of 597)**, and the doc-id class splits across **TWO literal prefixes (216 + 21 = 237)** — a
+  census keying on the raw string reports one cause as two. (d) The repo slug is **FRIKKern/barkpark**;
+  `repos/barkpark/barkpark` 404s. (e) The mandated `gh pr diff <n> -- <paths>` cannot run (gh's `pr diff`
+  takes no pathspec). (f) The primary checkout is **534 commits behind origin/main** and its
+  `console-harness.yml` is 136 lines against origin/main's 926 — one survey's "Console gate is templated /
+  not found" was purely that staleness; every CI fact must be re-derived with `git show origin/main:`.
+  (g) The wave-9 `pressure` block's `p95_ms`/`req_per_s` DID land (#10079), but `git grep -c Pressure
+  origin/main -- internal/cloudclient` still returns **nothing**: the Go client has no field for any of the
+  14 pressure keys, so the vitals never reach the verdict. Confirmed independently by four verifiers.
+  (h) An **INVERSE** class exists that no wave had named: three Go fields (`DeployCensus.Live`,
+  `DeployCensus.TerminalFailureRate`, `DeployRate.Basis`) decode keys the control plane has **never**
+  emitted, alongside 48 landed-and-unread payload keys across four serializers.
+
+- **D159 — DECLINED OUT LOUD.** (a) A `p95_ms` rung — D131/D132 stand, and D156 adds a second refutation of
+  the whole latency-fence family. (b) Lowering the 1.75 load fence — 0.92/core on a visibly sick box.
+  (c) Chasing this hour's biggest failure class — they rotate. (d) `PLATFORM_ADMIN_EMAILS` — untouched, the
+  lead owns it; note that the deploy vital rides `GET /v1/barkparks`, which is role-scoped and NOT
+  platform-gated, so it reaches an owner's eye without the crown. (e) Automatic REGIME SEGMENTATION of the
+  rate — the only available boundary marker (`agent_events.payload->>'git_commit'`, 14-day retention,
+  ±1 beat) provably UNDER-counts regimes (four slot flips in 4.2 h need not change HEAD), and a rate that
+  silently splits itself on an under-counting boundary is a new window-shopping surface with a machine doing
+  the shopping. A pinned window with its absorption is the honest answer; a regime annotation is filed as
+  backlog, advisory only. (f) A standalone `(inserted_at)` index on `deployments` — measured, not reasoned:
+  planner cost falls 5.1x but real execution only **5.220 ms → 4.484 ms (14%)** while shared buffers TRIPLE
+  (631 → 2,274). Filed as a watch item with a ~10x-row-count trigger. (g) Re-cutting #10014/#10015/#9887 —
+  all three are built and correct against tonight's rows; #10014's conflict is ONE file and three
+  additive-vs-additive hunks caused by #10080 merging out of the order its own task text specified.
+
+- **D160 — WAVE 10 IS ALL OPUS; TWO SLICES ARE HIGH-FLIP-RISK.** Fable remains unavailable fleet-wide.
+  **S1** (the rung: a new attention state, a renumbered cross-surface ladder, and a tri-state whose
+  UNMETERED arm is the D149 law) and **S3** (an instrument whose whole value is discriminating ABSENT from
+  RED from PENDING beside another epic's live ruling) would both be fable on the difficulty axis. They are
+  flagged HIGH-FLIP-RISK instead and the lead is owed an **independent second reviewer** on both before
+  merge.
+
+### Wave 10 plan — 4 slices, 2 in round 1, file sets disjoint within a round
+
+| # | Round | Slice | task | Surface | Size | Model |
+|---|---|---|---|---|---|---|
+| 1 | 1 | The verdict reads the deploy rate, and can say `deploys_failing` or `unmetered` | `dr-w10-s1-verdict-reads-the-deploy-rate` | `cloud/**` + `internal/**` | large | opus |
+| 2 | 1 | An absent required context becomes a dateable class with a queue query that can lose | `dr-w10-s3-absent-required-context-is-dateable` | `scripts/**` + `.github/workflows/**` | medium | opus |
+| 3 | 2 (after S1) | The rate names its absorption, on both sides of the wire | `dr-w9-s6-the-rate-names-its-absorption` | `cloud/**` + `internal/**` | medium | opus |
+| 4 | 2 (after S1, S3-independent) | The payload contract gets a key-set guard in both directions | `dr-w10-s4-payload-key-set-guard` | `cloud/**` + `internal/**` | medium | opus |
+
+Rounds are law. S2 (`dr-w9-s6`) and S4 both edit `deploy_ledger.ex` and `client.go`, which S1 also edits;
+they are sequenced behind S1's merge rather than dispatched beside it — the epic already paid for the
+alternative once, when #10080 merged ahead of #10014 and left it CONFLICTING. S1 is scoped to ADD a new
+public `box_rates/3` at the end of `deploy_ledger.ex` and must NOT touch `census/3`, `rate/2`, `@classes`,
+`@labels` or `classify/2`; S2 owns exactly those regions afterwards.
+
+HIGH-FLIP-RISK (D160): **S1** — whether a raw box rate is defensible as a BOX verdict given 23.1% site-caused
+mass, and whether the three-way absence split (no-sites → `ok`+marker, below-sample → `unmetered`, measured →
+rung) is genuinely tri-state rather than a fallthrough by a new route. **S3** — whether the ABSENT/PENDING
+discrimination is correct beside honest-gates D76, and whether the new workflow is truly inert against the
+required-check spec.
+
+Coverage: every survey and verify agent reported; there is no coverage deficit this wave.
+
+Charter published as a docs-only PR, not pushed to main (D39, honest-gates).

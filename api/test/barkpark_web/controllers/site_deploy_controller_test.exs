@@ -133,6 +133,78 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
     end
   end
 
+  # ── the Runner that did not answer (dr-w8-s2) ───────────────────────────
+
+  # THE CONFLATION, measured on the fleet: a 503 `feature_not_configured` at
+  # 5039ms on a box whose BEAM had carried BARKPARK_SITE_DEPLOY_APPLY=1 for 75
+  # minutes — and the build it names as never-configured RAN TO COMPLETION. The
+  # door's `GenServer.call/2` used the unstated 5_000ms default and converted the
+  # resulting exit into `{:error, :disabled}`, the same value the flag-off guard
+  # produces, rendered by the same renderer. 207 rows in 24h, wrong about the
+  # cause AND the outcome.
+  #
+  # This exercises the REAL Runner, not a stub: the answer budget is shrunk below
+  # the work the door genuinely does (provision + spawn), so the trigger really
+  # does outrun its caller.
+  describe "POST — the Runner did not answer" do
+    setup do
+      put_runner_cfg(
+        enabled: true,
+        trigger_call_timeout_ms: 1,
+        command: stub("echo 'BPSTAGE name=PLAN status=ok build_id=b1'\nexit 0")
+      )
+    end
+
+    test "an unanswered trigger is its OWN 503 — it never blames a flag that is set", %{
+      conn: conn
+    } do
+      # The half that makes the old message a lie: the flag IS on.
+      assert DeployRunner.enabled?()
+
+      res =
+        conn
+        |> admin_conn()
+        |> post("/v1/admin/site-deploy", body("slow-blog"))
+
+      assert %{"error" => %{"code" => "deploy_runner_unavailable", "message" => message}} =
+               json_response(res, 503)
+
+      # The accusation is gone: this refusal says nothing about configuration.
+      refute message =~ "BARKPARK_SITE_DEPLOY_APPLY"
+      refute message =~ "not enabled"
+      assert message =~ "did not answer"
+      # And it is retryable, in the header a client actually honours.
+      assert [retry_after] = get_resp_header(res, "retry-after")
+      assert {n, ""} = Integer.parse(retry_after)
+      assert n > 0
+
+      # THE SECOND HALF, and the reason the old row was wrong twice: the deploy
+      # the door refused to admit to was ALREADY RUNNING, and it finishes.
+      done = await_done("slow-blog")
+      assert done["state"] == "done"
+      assert done["exit_code"] == 0
+    end
+
+    test "the flag-off refusal is untouched — the two paths are now distinguishable", %{
+      conn: conn
+    } do
+      # Same shrunken budget, flag off: the guard answers before the call, so
+      # this must still be the configuration message, byte for byte.
+      put_runner_cfg(enabled: false)
+      refute DeployRunner.enabled?()
+
+      assert %{"error" => %{"code" => "feature_not_configured", "message" => message}} =
+               conn
+               |> admin_conn()
+               |> post("/v1/admin/site-deploy", body("off-blog"))
+               |> json_response(503)
+
+      assert message ==
+               "site deploys are not enabled on this instance " <>
+                 "(set BARKPARK_SITE_DEPLOY_APPLY=1)"
+    end
+  end
+
   # ── validation (nothing reaches argv or the child env unvalidated) ──────
 
   describe "POST — validation" do

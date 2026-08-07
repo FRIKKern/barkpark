@@ -415,6 +415,44 @@ jobs:
       - name: Elevated-write binding census (ADD + REMOVE)
         run: node cloud/priv/static/__binding_census.mjs
 
+      # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
+      #
+      # Sibling to the binding census above, and the same shape of instrument:
+      # it reads a fact out of the ELIXIR tree that the console's own harness is
+      # structurally incapable of seeing.
+      #
+      # Auth.forbidden/2 can merge a `reason:` CAUSE around a 403 — for refusals
+      # where no static authority label would be true (a rank-relative member
+      # refusal: the SAME admin refused on a peer admin succeeds on a plain
+      # member). The console maps those through FORBIDDEN_REASON_COPY. A cause
+      # with no arm there does NOT degrade to silence: forbiddenEvidenceCopy
+      # returns null, friendly() falls through, and the person reads the curated
+      # `forbidden` entry — a sentence written for a different refusal entirely.
+      # That is exactly how a plain team admin clicking Remove on a peer admin
+      # came to read "Only the team owner can manage billing." (charter D448).
+      #
+      # WHY IT CANNOT BE A CASE IN __app.test.mjs, and this is not a merge-window
+      # convenience: the bug is a key that was NEVER WRITTEN, so there is nothing
+      # in app.js to diff and no drift to detect — the map is complete with
+      # respect to itself. The only oracle for "which causes exist" is the
+      # EMITTER, in another language in another tree. Measured (D449): adding the
+      # two missing arms to app.js alone ships 919/919 green and smoke 104/104.
+      #
+      # PROVEN ABLE TO LOSE, IN BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
+      #   rc=1 — against origin/main's app.js it names all three emission sites
+      #          (router.ex:4958 twice, via the dynamic binding it resolves one
+      #          hop back, and :4997 literal), and clears the moment the arms land
+      #   rc=2 — it REFUSES to measure rather than pass on an input it cannot
+      #          read: an unresolvable `reason:` binding, a renamed/removed
+      #          FORBIDDEN_REASON_COPY, an unrecognised evidence key, or a
+      #          zero-emission census (a broken extractor is not a clean tree)
+      #
+      # It reads cloud/lib/barkpark_cloud/web/router.ex, which is already in the
+      # console dispatch set (scripts/console-path-escape-check.sh), so a router
+      # edit that grows a new cause reaches this step.
+      - name: Refusal reason-arm census (router causes ⊆ console arms)
+        run: node cloud/priv/static/__reason_arm_census.mjs
+
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
   # app.css, or scans its comment nesting, or reads `--x:` declarations out of

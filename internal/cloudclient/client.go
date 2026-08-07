@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -153,6 +154,51 @@ type Barkpark struct {
 	//     emits it.
 	VerifiedReachable *bool  `json:"verify_reachable"`
 	LastVerifiedAt    string `json:"last_verified_at"`
+
+	// Pressure is the host's LIVE resource pressure off the latest health beat
+	// (dr-w4-s4 put it on the wire; this field is what finally CONSUMES it).
+	// A POINTER because a control plane that predates the block omits the key
+	// entirely — nil means "this CP does not speak vitals", which is a different
+	// fact from "the CP spoke and every vital was nil" (a box that has never
+	// beaten, or an agent that predates the vitals beat). Neither may ever be
+	// read as "measured, and it is fine".
+	Pressure *Pressure `json:"pressure"`
+}
+
+// Pressure is the host-pressure block a fleet row carries (`pressure` in
+// GET /v1/barkparks). It is FLAT and every field is a POINTER: the control
+// plane's honesty law (router.ex merge_pressure/2) renders an absent key and the
+// agent's `-1` "probe not wired" sentinel ALIKE as null — UNMETERED — never 0,
+// because a fabricated 0 reads as a perfectly idle machine. So nil here means
+// exactly one thing: WE DID NOT MEASURE. A consumer branches on the values.
+//
+// The JSON tags are router.ex's `@unmetered_pressure` keys VERBATIM. Two of them
+// — Load15 and Err5xxPerS — are landed by the sibling dr-w5-s2 slice and are
+// absent from the payload until it merges; they decode to nil, which is already
+// the correct reading (UNKNOWN), so this struct is forward-compatible with that
+// merge and needs no change when it lands. That is a WIRE relationship, not a
+// code dependency.
+//
+// Numeric fields are float64 across the board, including the byte counts and
+// the core count: the control plane emits JSON numbers off agent-shaped jsonb,
+// and an integer-typed field would hard-fail decoding on a `2.0` where a float
+// silently accepts both.
+type Pressure struct {
+	CPUPercent      *float64 `json:"cpu_percent"`
+	CPUCores        *float64 `json:"cpu_cores"`
+	MemUsedPercent  *float64 `json:"mem_used_percent"`
+	Load1           *float64 `json:"load1"`
+	Load15          *float64 `json:"load15"`
+	DiskUsedPercent *float64 `json:"disk_used_percent"`
+	SwapUsedPercent *float64 `json:"swap_used_percent"`
+	SwapTotalBytes  *float64 `json:"swap_total_bytes"`
+	BeamPSSBytes    *float64 `json:"beam_pss_bytes"`
+	BeamSwapBytes   *float64 `json:"beam_swap_bytes"`
+	Err5xxPerS      *float64 `json:"err_5xx_per_s"`
+	// ReportedAt is the BEAT's own timestamp (RFC3339), a pointer for the same
+	// reason: null means the box has never phoned home at all, which is not the
+	// same as "beat, but told us nothing readable".
+	ReportedAt *string `json:"reported_at"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane
@@ -1077,18 +1123,62 @@ type Site struct {
 // queued → building → pushing → live (or failed). `BuildLogURL` is opaque to
 // the control plane — `bp sites logs <site>` prints it as a best-effort
 // pointer at the builder's log surface.
+//
+// deploy-reliability W9: the control plane has always serialized the row's
+// CAUSE — failure_class, failure_reason, stage, trigger, content_rev — and this
+// struct decoded almost none of it, so the only cause-bearing keys on the wire
+// were dropped on the floor before any human surface could print them.
+//
+// The six cause/lifecycle fields below are POINTERS on purpose. A `string` zero
+// value cannot tell "the control plane did not send this key" apart from "the
+// control plane measured it as empty", and this epic exists because
+// deployment reporting kept presenting the first as the second. nil MUST render
+// as an explicit dash, never as a value.
 type Deployment struct {
-	ID            string `json:"id"`
-	SiteID        string `json:"site_id"`
-	Status        string `json:"status"`
-	GitRef        string `json:"git_ref"`
-	ArtifactURL   string `json:"artifact_url"`
-	ImageTag      string `json:"image_tag"`
-	BuildLogURL   string `json:"build_log_url"`
-	FailureReason string `json:"failure_reason"`
-	BecameLiveAt  string `json:"became_live_at"`
-	InsertedAt    string `json:"inserted_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID          string `json:"id"`
+	SiteID      string `json:"site_id"`
+	Status      string `json:"status"`
+	GitRef      string `json:"git_ref"`
+	ArtifactURL string `json:"artifact_url"`
+	ImageTag    string `json:"image_tag"`
+	BuildLogURL string `json:"build_log_url"`
+	InsertedAt  string `json:"inserted_at"`
+	UpdatedAt   string `json:"updated_at"`
+
+	// FailureClass is the control plane's NAMED cause, e.g. "BUILD_FAILED" or
+	// "BOX_AT_CAPACITY_DEFERRED" — the single most load-bearing key a human
+	// reading a failing site needs, and the one `bp sites deployments` printed
+	// nowhere before W9.
+	FailureClass *string `json:"failure_class"`
+	// FailureReason is the free-text detail behind FailureClass.
+	FailureReason *string `json:"failure_reason"`
+	// ContentRev is the content revision the build was cut from.
+	ContentRev *string `json:"content_rev"`
+	// Trigger is what asked for this deploy (push, manual, api, …).
+	Trigger *string `json:"trigger"`
+	// Stage is how far the row got before it stopped.
+	Stage *string `json:"stage"`
+	// BecameLiveAt is set only on rows that actually reached live.
+	BecameLiveAt *string `json:"became_live_at"`
+}
+
+// DeploymentQuery narrows GET /v1/sites/:id/deployments to one window. Zero
+// values mean "server default" — which is a page of 100, the reason the CLI
+// could never see past the newest hundred rows before W9.
+//
+//	Limit  — how many rows to ask for (omitted from the wire when <= 0).
+//	Before — an opaque cursor from a previous page's NextCursor.
+type DeploymentQuery struct {
+	Limit  int
+	Before string
+}
+
+// DeploymentPage is one window of a site's deployments plus the cursor that
+// reaches the window behind it. NextCursor is "" when the server did not send
+// one — i.e. this window is the whole tail.
+type DeploymentPage struct {
+	Deployments []Deployment
+	NextCursor  string
 }
 
 // SiteCreate is the body the CLI POSTs to /v1/sites. Pointer-ish optionality
@@ -1191,23 +1281,46 @@ func (c *Client) Deploy(ctx context.Context, siteID, gitRef, artifactURL string)
 	return out.Deployment, nil
 }
 
-// ListDeployments returns a site's deployments newest-first via
+// ListDeployments returns one window of a site's deployments, newest-first, via
 // GET /v1/sites/:id/deployments (Bearer).
-func (c *Client) ListDeployments(ctx context.Context, siteID string) ([]Deployment, error) {
-	status, body, err := c.do(ctx, "GET", "/v1/sites/"+esc(siteID)+"/deployments", true, nil)
+//
+// deploy-reliability W9: the call used to send no query string at all, so it
+// took whatever the server's default page was (100) and had no way to ask for
+// anything else. A caller that wanted a bigger sample, or the rows BEHIND the
+// newest hundred, silently got the same hundred — and any rate computed from
+// them was a rate over an unstated window. `q` names the window; the returned
+// NextCursor is how the caller walks past it.
+func (c *Client) ListDeployments(ctx context.Context, siteID string, q DeploymentQuery) (DeploymentPage, error) {
+	path := "/v1/sites/" + esc(siteID) + "/deployments"
+	vals := url.Values{}
+	if q.Limit > 0 {
+		vals.Set("limit", strconv.Itoa(q.Limit))
+	}
+	if q.Before != "" {
+		vals.Set("before", q.Before)
+	}
+	if len(vals) > 0 {
+		path += "?" + vals.Encode()
+	}
+	status, body, err := c.do(ctx, "GET", path, true, nil)
 	if err != nil {
-		return nil, err
+		return DeploymentPage{}, err
 	}
 	if !ok(status) {
-		return nil, cloudError(status, body)
+		return DeploymentPage{}, cloudError(status, body)
 	}
 	var out struct {
 		Deployments []Deployment `json:"deployments"`
+		NextCursor  *string      `json:"next_cursor"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("decode deployments response: %w", err)
+		return DeploymentPage{}, fmt.Errorf("decode deployments response: %w", err)
 	}
-	return out.Deployments, nil
+	page := DeploymentPage{Deployments: out.Deployments}
+	if out.NextCursor != nil {
+		page.NextCursor = *out.NextCursor
+	}
+	return page, nil
 }
 
 // SetEnv REPLACES the encrypted env blob via POST /v1/sites/:id/env (Bearer).
