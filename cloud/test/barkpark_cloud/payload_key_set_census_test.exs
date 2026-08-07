@@ -688,8 +688,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # construction and under `==` it reds LOUDLY rather than passing — the
   # intended behaviour of the `>=` -> `==` change, and the reason the builder
   # stamped this as a merge hazard. RE-MEASURED here on the rebased tree by the
-  # same 999-technique, never by adding s2's delta to main's number.
-  @emitted_floor 128
+  # same 999-technique, never by adding s2's delta to main's number: both floors
+  # set to 999, and the two refusal lines printed "123 emitted key(s)
+  # collected" and "222 json tag(s) found". 123 is neither main's 110 + s2's
+  # delta nor s2's 121 — the arithmetic guess would have been wrong in both
+  # directions, which is exactly why the technique is measurement.
+  @emitted_floor 123
   @go_tag_floor 222
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

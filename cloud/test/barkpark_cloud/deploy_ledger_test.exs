@@ -1741,13 +1741,31 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert straddle.failure_rate.reason =~ "schema_commit"
       assert straddle.failure_rate.reason =~ "#9615"
 
-      # `classes` is a REFUSAL NODE, never an empty list — an empty list reads
-      # as "this fleet had no failures".
-      assert is_map(straddle.classes)
-      assert straddle.classes.refused
-      assert is_nil(straddle.classes.value)
-      assert straddle.classes.reason =~ "2026-08-05T21:13:50Z"
-      assert straddle.classes.boundary.source == "#9615"
+      # `classes` STAYS A LIST — the wire shape does not switch under a
+      # straddling window, because the only reader of this envelope declares
+      # `Classes []DeployCensusClass` and an object there is a decode ERROR, not
+      # a refusal (w18 review). The counts are real rows and stay; the SHARES
+      # refuse, carrying the boundary verbatim, exactly as `failure_rate` does
+      # one level up.
+      assert is_list(straddle.classes)
+      assert straddle.classes != [], "the class rows are real counts and must not vanish"
+
+      for row <- straddle.classes do
+        assert row.count > 0
+        assert row.share.refused, "every class share must refuse across the boundary"
+        assert is_nil(row.share.pct)
+        assert row.share.reason =~ "STRADDLES"
+        assert row.share.reason =~ "2026-08-05T21:13:50Z"
+        assert row.share.reason =~ "#9615"
+      end
+
+      # AND NOTHING IN THE ENVELOPE MAY BE A MAP WHERE A LIST IS DECLARED. This
+      # is the assertion that would have caught the shape switch: the three
+      # cohort keys are lists on EVERY path this census can take.
+      for key <- [:classes, :deferred, :not_attempted, :sites] do
+        assert is_list(Map.fetch!(straddle, key)),
+               "#{key} must be a list on every path — the Go reader declares a slice"
+      end
 
       # AND THE HALF THAT MUST NOT REFUSE (D229). A comparator that refuses
       # everything is an outage a reader routes around; `live_rate`'s numerator

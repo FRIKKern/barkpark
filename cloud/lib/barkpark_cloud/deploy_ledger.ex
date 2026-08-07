@@ -103,10 +103,14 @@ defmodule BarkparkCloud.DeployLedger do
   Only the REFUSAL-VOCABULARY boundary (the `deferred` settle status) refuses
   anything, and only for a window that STRADDLES it: inside such a window the
   same physical box refusal is written `failed` on one side and `deferred` on
-  the other, so `failure_rate` and `classes` are a blend of two taxonomies and
-  come back refused. A window wholly on one side is internally consistent and is
-  NOT refused — the boundary list is emitted so a reader can see the
-  cross-window comparison hazard for themselves.
+  the other, so every RATIO over that window is a blend of two taxonomies:
+  `failure_rate` and every class row's `share` come back refused, carrying the
+  boundary verbatim. The COUNTS do not — `volume`, `failed`, `live` and each
+  class's `count` are real counts of real rows, and `classes` stays a LIST on
+  every path (the shape must not switch: the reader declares a slice, and an
+  object there is a decode error rather than a refusal). A window wholly on one
+  side is internally consistent and is NOT refused — the boundary list is
+  emitted so a reader can see the cross-window comparison hazard for themselves.
 
   `live_rate` NEVER refuses across a boundary (D229): it is the one quantity
   whose numerator and denominator are both label-independent — a deploy that
@@ -272,7 +276,7 @@ defmodule BarkparkCloud.DeployLedger do
     method: "schema_commit",
     source: "#9615",
     voids:
-      "before this instant no row could settle `deferred`: every box-busy refusal was written `failed`. A window that STRADDLES it counts the same physical event under two names, so `classes` and `failure_rate` are refused across it. `live_rate` is not — its numerator and denominator are both label-independent (D229)."
+      "before this instant no row could settle `deferred`: every box-busy refusal was written `failed`. A window that STRADDLES it counts the same physical event under two names, so every RATIO over it is refused — `failure_rate` and each class row's `share`. The COUNTS stay (they are real rows) and `classes` stays a list. `live_rate` is not refused — its numerator and denominator are both label-independent (D229)."
   }
 
   # The corroborating twin, and the two `deferral_cause` events. Emitted so a
@@ -916,18 +920,34 @@ defmodule BarkparkCloud.DeployLedger do
   defp refuse_across_boundary(node, boundary),
     do: %{node | pct: nil, refused: true, reason: boundary_reason(boundary)}
 
-  # `classes` is a LIST when it is an answer and a REFUSAL NODE when it is not.
-  # It is deliberately NOT an empty list: an empty list reads as "this fleet had
-  # no failures", which is the comforting zero this whole module refuses.
+  # `classes` IS A LIST ON EVERY PATH, and the boundary refusal lands on each
+  # row's SHARE — exactly where `failure_rate` takes it one level up.
+  #
+  # W18 REVIEW, CHANGED FROM A SHAPE-SWITCHING REFUSAL NODE. As first built this
+  # returned `%{value: nil, refused: true, …}` — a MAP where the key is
+  # otherwise a LIST. That is a wire-shape change, and the only reader of this
+  # envelope declares `Classes []DeployCensusClass`
+  # (internal/cloudclient/client.go). `encoding/json` cannot put an object into
+  # a slice, so `FleetDeployCensus` would have returned
+  # "decode deploy census response: json: cannot unmarshal object into Go struct
+  # field DeployCensus.classes" — and `bp cloud deployments`' DEFAULT window is
+  # the last 7 days, which straddles the 2026-08-05 boundary. The flagship human
+  # reader this same wave repointed at a door that opens would have died on its
+  # default invocation, with a decoder's error text, the moment both slices
+  # merged. A refusal a reader cannot parse is not a refusal.
+  #
+  # SO THE COUNTS STAY AND THE RATIOS GO, which is also what this module already
+  # does one level up: `volume`, `failed` and `live` survive a straddling window
+  # and only `failure_rate` refuses. A class COUNT is a real count of real rows;
+  # a class SHARE across the boundary is a ratio of two taxonomies, and it is the
+  # ratio that lies. Each refused share carries the boundary reason verbatim, and
+  # `failure_rate.reason` names it in the headline besides — so nothing here can
+  # be read as "this population had no failures", the risk the refusal node was
+  # reaching for.
   defp refuse_class_rows(rows, nil), do: rows
 
-  defp refuse_class_rows(_rows, boundary) do
-    %{
-      value: nil,
-      refused: true,
-      reason: boundary_reason(boundary),
-      boundary: boundary
-    }
+  defp refuse_class_rows(rows, boundary) do
+    Enum.map(rows, &%{&1 | share: refuse_across_boundary(&1.share, boundary)})
   end
 
   # The migration's applied instant. Config-overridable because it is a fact
