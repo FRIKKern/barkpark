@@ -186,9 +186,11 @@ defmodule BarkparkCloud.DeployLedger do
   @spec not_attempted_classes() :: [class()]
   def not_attempted_classes, do: @not_attempted_classes
 
-  @doc "Statuses that mean ATTEMPTED BUT NOT SETTLED — the census's `in_flight` cohort."
-  @spec in_flight_statuses() :: [String.t()]
-  def in_flight_statuses, do: @in_flight_statuses
+  # No `in_flight_statuses/0` accessor. `@in_flight_statuses` is read by
+  # `census/3` in this file and by nobody else, and a public accessor with zero
+  # callers is exactly the dead-public shape dr-w16-s3's reachability census
+  # exists to red on — born dead in the same wave that built the guard. Add the
+  # accessor in the commit that adds its first caller, not before (dr-w16 review).
 
   @doc "The minimum ATTEMPTED sample below which a rate is refused rather than reported."
   @spec min_sample() :: pos_integer()
