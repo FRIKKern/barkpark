@@ -96,13 +96,19 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   #
   # WAVE 29 CORRECTION: `Notifications.Render.render/2` DOES read `:detail` now —
   # the chat arm was telling the same person a cause-free story the inbox already
-  # explained. It reads it through `FailureCopy.humanize/1` (classify |> scrub)
-  # and renders the CLASS ONLY, never the raw capture this line appends, so the
-  # boundary the sentence above protects still holds: the verbatim provider bytes
-  # remain an email-only courtesy for a reader forwarding them to support.
+  # explained. It reads it through `FailureCopy.humanize/1` (classify |> strip_ansi
+  # |> scrub) and renders the CLASS ONLY, never the raw capture this line appends,
+  # so the boundary the sentence above protects still holds: the verbatim provider
+  # bytes remain an email-only courtesy for a reader forwarding them to support.
+  #
+  # WAVE 8 S6 (deploy-reliability): `FailureCopy.raw/1`, not a bare `scrub/1`.
+  # This is a raw-log path — it never classifies — and it stripped NOTHING, so a
+  # colourised `\e[31mapi_key=…\e[0m` from the build PTY reached a customer's
+  # inbox with the secret in cleartext AND raw 0x1B bytes rendering as mojibake.
+  # `raw/1` is strip-then-scrub; see its doc for why the order is the whole bug.
   defp detail(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
-      d when is_binary(d) and d != "" -> "\n\n#{FailureCopy.scrub(d)}"
+      d when is_binary(d) and d != "" -> "\n\n#{FailureCopy.raw(d)}"
       _ -> ""
     end
   end
@@ -127,18 +133,25 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   # render the capture "to a PERSON"; leading with the cause is the intent this
   # COMPLETES.
   #
-  # `FailureCopy.humanize/1` is `classify() |> scrub()` — classification first,
-  # then the very scrub `detail/1` already applies — so routing through it cannot
-  # weaken the secret boundary; the class arms return literals, which carry no
-  # secret shape.
+  # `FailureCopy.humanize/1` is `classify() |> strip_ansi() |> scrub()` —
+  # classification first, then exactly the transform `raw/1` applies below — so
+  # routing through it cannot weaken the secret boundary; the class arms return
+  # literals, which carry no secret shape.
   #
-  # An unclassified reason humanizes to the scrubbed reason itself. Emitting both
-  # would print the same paragraph twice, so in that case the capture stands
+  # WAVE 8 S6 (deploy-reliability): `capture` is `FailureCopy.raw/1`, not a bare
+  # `scrub/1`. Same defect as `detail/1` above — nothing stripped, so a colourised
+  # key-shaped secret survived the scrub and shipped to the inbox. Keeping it
+  # identical to `humanize/1`'s pass-through arm is ALSO what makes the equality
+  # test below still detect "unclassified": `classify/1` returns the reason itself
+  # on that arm, so `humanize(d) == raw(d)` exactly when nothing classified.
+  #
+  # An unclassified reason humanizes to the raw-boundary reason itself. Emitting
+  # both would print the same paragraph twice, so in that case the capture stands
   # alone exactly as it does today.
   defp cause_then_capture(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
       d when is_binary(d) and d != "" ->
-        capture = FailureCopy.scrub(d)
+        capture = FailureCopy.raw(d)
 
         case FailureCopy.humanize(d) do
           ^capture -> "\n\n#{capture}"

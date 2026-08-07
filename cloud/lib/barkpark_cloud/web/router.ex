@@ -10690,7 +10690,7 @@ defmodule BarkparkCloud.Web.Router do
       #     unscrubbed and nothing reds"). Scrubbed, then ANSI-stripped: 1,366 of
       #     17,395 failed rows carry real 0x1B bytes from the build PTY.
       failure_class: DeployLedger.classify(d),
-      failure_reason_raw: d.failure_reason |> FailureCopy.scrub() |> FailureCopy.strip_ansi(),
+      failure_reason_raw: FailureCopy.raw(d.failure_reason),
       became_live_at: d.became_live_at,
       # gh-6: branch-preview identity. `environment` is "production"|"preview";
       # for a preview, `branch` + `preview_host` + `preview_url` describe the

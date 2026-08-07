@@ -110,7 +110,8 @@ defmodule BarkparkCloud.Notifications.Render do
   #
   # `TrialExpiryWorker` supplies both a `days` integer and a first-party `detail`
   # sentence, and this arm reads only the integer. `detail` would have to travel
-  # through `cause/1`, i.e. `FailureCopy.humanize/1` = `classify() |> scrub()` —
+  # through `cause/1`, i.e. `FailureCopy.humanize/1` =
+  # `classify() |> strip_ansi() |> scrub()` —
   # a FAILURE taxonomy plus a credential redactor. There is nothing to classify
   # in control-plane-authored prose and nothing to scrub in an integer, and a
   # future `@scrub_rules` pattern would then silently rewrite customer copy.
@@ -142,6 +143,11 @@ defmodule BarkparkCloud.Notifications.Render do
   # and was stopped", and there is no forwarding-to-support role on this channel
   # that the raw capture would serve. The payload reaching here is the Oban args
   # map, so the key is read under both a string and an atom.
+  #
+  # This call site is UNCHANGED by deploy-reliability W8 S6 and fixed by it
+  # anyway: `humanize/1`'s pass-through arm returns the reason itself, so an
+  # UNCLASSIFIED detail is a raw capture on this channel too, and W8 S6 moved the
+  # strip ahead of the scrub inside `humanize/1` (see `FailureCopy.raw/1`).
   defp cause(payload) do
     case Map.get(payload, "detail") || Map.get(payload, :detail) do
       d when is_binary(d) and d != "" -> "\n\n#{clamp(FailureCopy.humanize(d))}"

@@ -150,7 +150,7 @@ defmodule BarkparkCloud.FailureCopy do
   Three properties, each of which is a test in `failure_copy_test.exs`:
 
     * **Post-classification, never pre.** `humanize/1` is
-      `reason |> classify() |> scrub()`. Scrubbing FIRST would shift
+      `reason |> classify() |> strip_ansi() |> scrub()`. Scrubbing FIRST would shift
       classification — `"client_secret=timeout"` loses its `timeout` token to the
       redaction and stops reading as the network class. Scrubbing LAST is also
       free of risk over a matched class, because every class arm returns a
@@ -171,25 +171,40 @@ defmodule BarkparkCloud.FailureCopy do
   The DB stays RAW by design: only the JSON/email boundary scrubs, so ops
   recovery via `Repo.get(ProvisionJob, id).console` and the logs is unaffected.
 
-  ## Two orders, and which path owns which (deploy-reliability W2 S4)
+  ## ONE order, and `raw/1` is the only way to spell it (deploy-reliability W8 S6)
 
-  `humanize/1` is `classify |> scrub |> strip_ansi` and MUST stay that way: its
-  first step matches producer-anchored prefixes, and an escape run can sit
-  between the prefix and the text, so stripping first changes what the
-  classifier reads.
+  `scrub/1`'s key clause keeps the key and redacts up to the NEXT DELIMITER, and
+  a colour code parks a non-delimiter byte (`m`) immediately left of the key, so
+  over a colourised `\\e[31mapi_key=…\\e[0m` the clause never fires at all.
+  Measured on 2,000 fresh 24-char alnum secrets (the SUB-32-CHAR stratum — the
+  bare-entropy clause catches 32+ regardless of order, where the same experiment
+  leaks only 2/2000):
 
-  A RAW-LOG path has no classify step, and for it that order is WRONG.
-  `scrub/1`'s key clause keeps the key and redacts up to the next delimiter, so
-  a colourised `\\e[31mclient_secret=…\\e[0m` hides its value behind bytes the
-  scrub then leaves in place — measured 2000/2000 leaked under
-  `scrub |> strip_ansi` and 0/2000 under `strip_ansi |> scrub`. Any path that
-  renders a raw capture without classifying it must be
-  `strip_ansi() |> scrub()`. Pinned by
-  "raw-log order: strip_ansi BEFORE scrub…" in `failure_copy_test.exs`.
+      scrub |> strip_ansi  →  LEAKED 2000/2000
+      strip_ansi |> scrub  →  LEAKED 0/2000
+
+  So the strip ALWAYS precedes the scrub. `raw/1` is that composition and is THE
+  raw-log boundary: every path that renders a capture verbatim calls it rather
+  than hand-rolling the pipe, because a hand-rolled pipe is exactly what shipped
+  backwards at `router.ex`'s `failure_reason_raw` and at
+  `notifications/event_email.ex` (which stripped nothing at all).
+
+  `humanize/1` is `classify |> strip_ansi |> scrub` — the strip sits BETWEEN, not
+  before, so the classifier still reads the producer-anchored prefix with its
+  escape run intact while the terminal pass-through arm (UNCLASSIFIED is a
+  designed, COUNTED bucket in this ledger, not a corner) gets the same
+  strip-then-scrub protection `raw/1` gives. W2 S4's `classify |> scrub |>
+  strip_ansi` was safe for a MATCHED class — the arms return literals — and
+  leaked identically on the arm that returns the reason itself.
 
   Provider-prefixed credentials (including our own `bppat_`/`bpcs_`) are
   order-INDEPENDENT — that clause matches the token itself — so the order only
-  decides whether the key-shaped secrets survive.
+  decides whether the key-shaped secrets survive. Never use a `bppat_`, a
+  `BARKPARK_TOKEN=` (the `_` satisfies the key clause's lookbehind) or a
+  trailing-ANSI shape as evidence about the order: all three close either way.
+  Pinned end-to-end, through the real route, by `failure_raw_boundary_test.exs`;
+  a unit test over `scrub`/`strip_ansi` cannot tell a fixed call site from a
+  broken one.
   """
 
   # An extractor refusal code: `E_` followed by SCREAMING_SNAKE. Anchored on a
@@ -360,6 +375,23 @@ defmodule BarkparkCloud.FailureCopy do
   def strip_ansi(other), do: other
 
   @doc """
+  THE raw-log boundary: `strip_ansi/1` then `scrub/1`, in that order, for every
+  path that renders a capture VERBATIM without classifying it first.
+
+  Call this instead of composing the two by hand. The composition is not
+  commutative and the wrong way round is silently safe-LOOKING: `scrub |>
+  strip_ansi` returns a field with no escape bytes in it and the secret still
+  in cleartext, because `scrub/1`'s key clause redacts up to the next delimiter
+  and a colour code parks a non-delimiter byte immediately left of the key. Over
+  2,000 fresh sub-32-char colourised `api_key=` values that order leaked
+  2000/2000 and this one leaked 0/2000.
+
+  Non-binaries pass through unchanged (both steps no-op). Idempotent.
+  """
+  @spec raw(term()) :: term()
+  def raw(text), do: text |> strip_ansi() |> scrub()
+
+  @doc """
   Map a raw internal deploy/provision failure string to human-facing copy, with
   secret-shaped substrings redacted.
 
@@ -368,18 +400,23 @@ defmodule BarkparkCloud.FailureCopy do
   non-binary reasons through unchanged; unrecognized reasons pass through
   scrubbed.
 
-  deploy-reliability W1 S2: `strip_ansi/1` runs LAST, after the scrub, for the
-  same ordering reason the scrub runs after `classify/1` — the classifier's
-  prefixes are anchored on the producer's template and an escape run can sit
-  between the prefix and the text (`BUILD failed (exit 12): \\e[22m`), so
-  stripping first would change what the classifier reads. Stripping last only
-  ever removes bytes no reader wanted.
+  deploy-reliability W8 S6: `strip_ansi/1` runs BETWEEN `classify/1` and
+  `scrub/1`, not after both. It cannot run FIRST — the classifier's prefixes are
+  anchored on the producer's template and an escape run can sit between the
+  prefix and the text (`BUILD failed (exit 12): \\e[22m`), so stripping first
+  would change what the classifier reads. It cannot run LAST either, which is
+  what W1 S2 shipped: this function's TERMINAL arm returns the reason itself
+  ("unrecognized reasons pass through scrubbed"), so on that arm the scrub was
+  facing colourised bytes and a colourised `api_key=` reached the reader in
+  cleartext with the escapes tidied off it. Between is the only position that is
+  right on BOTH arms — a matched class returns a literal, over which every step
+  is a no-op, and the pass-through arm gets exactly `raw/1`'s protection.
   """
   @spec humanize(term()) :: term()
   def humanize(nil), do: nil
 
   def humanize(reason) when is_binary(reason),
-    do: reason |> classify() |> scrub() |> strip_ansi()
+    do: reason |> classify() |> strip_ansi() |> scrub()
 
   def humanize(other), do: other
 

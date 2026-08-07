@@ -913,29 +913,72 @@ defmodule BarkparkCloud.FailureCopyTest do
                "Authorization: Bearer [redacted]"
     end
 
-    # THE ORDER, for a path that does NOT classify. `humanize/1` must stay
-    # `classify |> scrub |> strip_ansi` (the classifier reads producer-anchored
-    # prefixes and an escape run can sit inside them). A RAW capture has no
-    # classify step, and there the shipped order LEAKS: the key clause redacts
-    # up to the next delimiter, and a colour code parks a non-delimiter byte
-    # (`m`) immediately before the key, so the clause never fires. Measured over
-    # 2,000 random values: `scrub |> strip_ansi` 2000/2000 leaked,
-    # `strip_ansi |> scrub` 0/2000.
+    # THE ORDER, for a path that does NOT classify — and since W8 S6 this test
+    # pins THE FIX, not the defect.
+    #
+    # Its first assertion used to read
+    #
+    #     assert line |> FailureCopy.scrub() |> FailureCopy.strip_ansi() =~ secret
+    #
+    # — GREEN BY ASSERTING THE LEAK. That was honest documentation while a
+    # production call site still shipped that order (`router.ex`'s
+    # `failure_reason_raw`, and `event_email.ex`, which stripped nothing at all).
+    # W8 S6 closed both, so the leak no longer reaches a screen and the leading
+    # assertion is now the one that matters: `FailureCopy.raw/1` — THE raw-log
+    # boundary every such path calls — closes on this shape.
+    #
+    # The wrong-order composition is kept below as a RATIONALE assertion: it is
+    # why `raw/1` exists as a named function instead of a convention, and if
+    # `scrub/1` ever grows ANSI awareness of its own this line should red and be
+    # rewritten consciously rather than quietly deleted.
+    #
+    # Measured over 2,000 fresh 24-char values (the SUB-32-CHAR stratum; at 32-48
+    # chars the bare-entropy clause catches them and the leak is only 2/2000):
+    # `scrub |> strip_ansi` 2000/2000 leaked, `strip_ansi |> scrub` 0/2000.
     #
     # `bppat_`/`bpcs_` are order-INDEPENDENT (the provider-prefix clause matches
     # the token itself), which is precisely why this test uses a NON-prefixed
     # `api_key=` secret — otherwise the wrong order would look safe.
-    test "raw-log order: strip_ansi BEFORE scrub — the shipped order leaks a colourised api_key" do
+    test "raw-log order: FailureCopy.raw/1 closes on a colourised api_key the flipped order leaks" do
       secret = "Qp9vR4tZ7wN1cB6yH3sD5fG0"
       line = "\e[31mapi_key=#{secret}\e[0m"
 
-      # WRONG for a raw log — the colour code hides the key from the scrub.
-      assert line |> FailureCopy.scrub() |> FailureCopy.strip_ansi() =~ secret
+      # THE FIX, pinned: the named boundary redacts.
+      refute FailureCopy.raw(line) =~ secret
+      assert FailureCopy.raw(line) == "api_key=[redacted]"
 
-      # RIGHT for a raw log.
-      refute line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() =~ secret
+      # …and it is exactly strip-then-scrub, spelled out once.
+      assert FailureCopy.raw(line) == line |> FailureCopy.strip_ansi() |> FailureCopy.scrub()
 
-      assert line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() == "api_key=[redacted]"
+      # WHY THE FUNCTION EXISTS: hand-rolling the pipe the other way round still
+      # leaks — and returns an ESC-free string, so it LOOKS clean.
+      leaky = line |> FailureCopy.scrub() |> FailureCopy.strip_ansi()
+      assert leaky =~ secret
+      refute String.contains?(leaky, "\e")
+    end
+
+    # `humanize/1`'s terminal arm returns the reason itself, so it IS a raw-log
+    # path and it leaked identically until W8 S6 moved the strip between the
+    # classify and the scrub. UNCLASSIFIED is a designed, counted bucket in this
+    # ledger — not a corner.
+    test "humanize/1's pass-through arm does not leak a colourised api_key" do
+      secret = "Qp9vR4tZ7wN1cB6yH3sD5fG0"
+      reason = "deploy step failed: \e[31mapi_key=#{secret}\e[0m"
+
+      # Nothing classifies this string…
+      assert FailureCopy.humanize(reason) == "deploy step failed: api_key=[redacted]"
+      refute FailureCopy.humanize(reason) =~ secret
+
+      # …and the pass-through arm agrees byte-for-byte with the raw boundary,
+      # which is what `event_email.ex`'s "did it classify?" equality relies on.
+      assert FailureCopy.humanize(reason) == FailureCopy.raw(reason)
+    end
+
+    # The strip must stay AFTER classify, never before: the classifier is
+    # anchored on the producer's template and an escape run can sit inside it.
+    test "humanize/1 still classifies a colourised producer capture" do
+      assert FailureCopy.humanize("hcloud: \e[31mSERVER_LIMIT_EXCEEDED\e[0m") =~
+               "capacity or quota limit"
     end
 
     # Order-INDEPENDENCE of the prefix clause, stated as a test so the claim in
