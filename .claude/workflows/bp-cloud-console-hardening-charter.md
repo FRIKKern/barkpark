@@ -2270,6 +2270,67 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-07 — wave 47 REVIEW (5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd; 1 round-2 slice deferred by the sequenced-rounds law — grade A−)
+
+| Slice | Task | Final branch | Reviewer fix |
+|---|---|---|---|
+| CROWN — the console stops selling Launch to a member the server always refuses | `cch-w47-s1-launch-stops-selling-a-refusal-on-the-first-screen` | `…crown-the-console-stops-selling-launch-t-0-r` | **one fix.** `repaintLaunchAuthority` repainted `#overview-sub` from `(overviewData.list \|\| [])`. `/v1/me` is the cheaper read and normally lands while `GET /v1/barkparks` is still in flight, so on a cold boot an owner with twelve instances got "Ready when you are — launch your first Barkpark." written over the loading dashboard until the fleet arrived — a fresh false statement introduced inside the honesty fix. The head now repaints only once the list is known (the loader owns that paint). Mutation-proven: restoring the unconditional repaint reds the new assertion |
+| The member's own instance screen stops selling two 403s | `cch-w47-s2-the-members-own-instance-screen-stops-selling-two-403s` | `…the-member-s-own-instance-screen-stops-s-1` (unchanged) | **none.** All three parts land as briefed. Part B is the one to notice: without the `bpBase` fixture correction the Part A guard rendered in ZERO scenarios — a guard that structurally could not fail — and the builder proved that by mutation rather than citing green gates. The 2 → 4 smoke integer was derived from the run |
+| The Archives panel stops offering a plain member a destroy-tier 403 | `cch-w47-s3-archives-resurrect-stops-offering-a-member-a-destroy-tier-403` | `…the-archives-panel-stops-offering-a-plai-2` (unchanged) | **none.** The `.map(archiveRowHtml)` trap (index-as-authority: row 0 loses its button, every later row keeps one) is real, is avoided, and is pinned by a two-row test. Both console prose sites that denied the defect were corrected in the SAME commit as the predicate |
+| The sweep's 21 unguarded family numerals become losable | `cch-w47-s4-the-sweeps-twenty-one-unguarded-family-numerals-become-losable` | `…the-breakpoint-sweep-s-21-unguarded-fami-3` (unchanged) | **none.** Re-verified by mutation in review: flipping `// hash:#billing — 4` to 5 reds arm 47 with `breakpoint-sweep.mjs:538 types \`// hash:#billing — 5\` over 4 entries`. The reformat tripwire (`headers.length === derived.size`) is asserted FIRST so a shrunk parse range fails by name instead of going vacuous-green. Deriving the five-integer title deletes the second copy outright rather than building the `t.name` parser D519 prescribed |
+| The binding census stops printing numbers nothing can red | `cch-w47-s5-the-binding-census-stops-printing-numbers-nothing-can-red` | `…the-binding-census-deletes-79-inert-line-4-r` | **one fix, and it is this epic's own class inside its own instrument.** HALF C made the header assert flatly that NO line number is written down in this file — and left SEVEN behind in prose nothing reads and nothing can red: five `note:` strings on the inline-cond PIN rows (2058/4302/4360/8082/8290), the excluded local-binding site (4653) and the two device routes (952/974). Every one was already stale; the overlay the SAME commit derives prints 2140/4396/4458/8312/8525 and EXCLUDED 4751, and the device routes are at 965/987. All seven re-stated by CONTENT, and the header's claim turned into check **(2h)**, which reads the census's own bytes and exits 2 on any typed `<file>:<digits>`. Mutation-proven: a planted `router.ex:1234` exits 2 naming its own line |
+
+**WHAT LANDED.** Wave 47 is the reachability wave. Three slices remove offers a member's own first
+screens make and the server always refuses — the empty-fleet Launch runway plus its head and its four
+header/palette/scope doors (`go_live/1` refuses a session member `required:"admin"` BEFORE the entitlement
+check, so the reward for filling the form is a 403, never a 402), the four autoupdate policy toggles and
+Add support on the instance screen, and the destroy-tier Resurrect in Archives. Two slices turn the
+harness's own typed numerals into guards that can lose: 21 family numerals in the breakpoint sweep (two of
+them FALSE on `main` before the wave touched anything) and the binding census's 79 inert `line:` fields plus
+its seven printed router lines.
+
+**THE INTEGRATION PROOF, and it is the number the lead should trust.** All five branches were merged
+together in a probe off `origin/main` — **clean auto-merge, zero conflicts**, including the three that all
+edit `app.js` and `__app.test.mjs` and the two (s1, s3) that both edit `loadMe`'s success arm. The COMBINED
+tree is green on every instrument: **988 pass / 0 fail**, `all 108 scenarios rendered`, sweep
+`108 · 25 distinct covered by 26 cells · 83 residue over 13 families` with `54 / 0` on its test file, census
+`79 sites / 40 elevated / 16 unpredicated` rc 0. **Merge order is free.**
+
+**HIGH-FLIP-RISK, independently re-derived (not re-read).** Both flagged judgments hold, derived from
+`cloud/lib/barkpark_cloud/web/router.ex` rather than from the briefs. *s1 reachability*: `go_live/1`'s
+session branch is `Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team)` with the
+`true ->` arm emitting `Auth.forbidden(required: "admin")`, and the ROLE check precedes the entitlement
+check exactly as its own comment claims. The four offer sites are member-reachable, and `#overview-launch` /
+`#fleet-launch` are reachable for a member on a NON-empty team too — a wider win than the zero-instance
+framing. *s3 reachability and blast radius*: `resurrect/1` is `Auth.require_user` then `not
+Accounts.team_admin?(…) -> Auth.forbidden(required: "admin", scope: "team")`, above the 402 and every 422 —
+so the refusal is unconditional for a member, and OMIT (not D428's disable-and-explain, whose ONLY-clause
+covers seven named instance-detail lifecycle verbs) is the right remedy, consistent with D514's ruling on
+`#fleet-add-support`. **A genuinely independent second reviewer is still owed on both before merge** — this
+workflow spawns exactly one reviewer, so that dispatch is a manual lead step.
+
+**TWO VOCABULARIES FOR "UNKNOWN", AND IT IS DELIBERATE.** `launchAuthority()` is four-valued
+(`loading|failed|grant|refuse`); `instanceAdminAuthority()` stays three-valued (`unknown|grant|refuse`).
+D439 mutation-proved that widening a shipped predicate ships green while every caller that never heard about
+the change reads `if (predicate)` as true for the new value, so the split is correct — but it IS a
+divergence a cold reader will trip on, and a future wave that unifies them must do it by adding a fourth
+value to a NEW sibling, never by widening the old one.
+
+**RESIDUE FILED, NOT SWEPT UNDER.** Five backlog rows now sit under the epic: the builders' own
+(`cch-w47-s1-fu-launch-band-ignores-the-stale-team-pin`,
+`cch-w47-bl-census-pin-openresurrectmodal-now-predicated`,
+`cch-w47-bl-inline-cond-overlay-pairs-route-to-line-by-source-order`) and the reviewer's two
+(`cch-w47-rv-bl-the-admin-refusal-sentence-repeats-up-to-nine-times-on-one-screen` — after s2, a refused
+member's live policy-bearing instance screen says the server's admin sentence NINE times, which is honest
+and unreadable; `cch-w47-rv-bl-the-archives-cli-chip-still-teaches-a-refused-member-a-403`).
+
+**WHAT THE NEXT WAVE MUST KNOW.** Dispatch `cch-w47-s6` (the member × empty-fleet mint) only after s1, s2
+and s4 are on `main`, and RE-DERIVE all five sweep integers from `scenarioReport` on the merged tip — the
+mint moves `total` and `residue`, and two mints making the identical 108→109 edit auto-merge with rc 0 and
+break `main` on the second. `/new`'s `#new-launch-btn` is still the eleventh launch door (D524), and the
+census still reports 16 unpredicated elevated writes — that number is the wave's own scoreboard and it did
+NOT move, by design (D430: the census is blind to render-time fences).
+
 ### 2026-08-07 — wave 46 REVIEW (4/4 round-1 slices built, gated, reviewed, PUSHED and PR'd; 4 round-2 slices deferred by the sequenced-rounds law — grade A−)
 
 | Slice | Task | Final branch | PR | Reviewer fix |
