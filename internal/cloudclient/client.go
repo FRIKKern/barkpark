@@ -154,6 +154,51 @@ type Barkpark struct {
 	//     emits it.
 	VerifiedReachable *bool  `json:"verify_reachable"`
 	LastVerifiedAt    string `json:"last_verified_at"`
+
+	// Pressure is the host's LIVE resource pressure off the latest health beat
+	// (dr-w4-s4 put it on the wire; this field is what finally CONSUMES it).
+	// A POINTER because a control plane that predates the block omits the key
+	// entirely — nil means "this CP does not speak vitals", which is a different
+	// fact from "the CP spoke and every vital was nil" (a box that has never
+	// beaten, or an agent that predates the vitals beat). Neither may ever be
+	// read as "measured, and it is fine".
+	Pressure *Pressure `json:"pressure"`
+}
+
+// Pressure is the host-pressure block a fleet row carries (`pressure` in
+// GET /v1/barkparks). It is FLAT and every field is a POINTER: the control
+// plane's honesty law (router.ex merge_pressure/2) renders an absent key and the
+// agent's `-1` "probe not wired" sentinel ALIKE as null — UNMETERED — never 0,
+// because a fabricated 0 reads as a perfectly idle machine. So nil here means
+// exactly one thing: WE DID NOT MEASURE. A consumer branches on the values.
+//
+// The JSON tags are router.ex's `@unmetered_pressure` keys VERBATIM. Two of them
+// — Load15 and Err5xxPerS — are landed by the sibling dr-w5-s2 slice and are
+// absent from the payload until it merges; they decode to nil, which is already
+// the correct reading (UNKNOWN), so this struct is forward-compatible with that
+// merge and needs no change when it lands. That is a WIRE relationship, not a
+// code dependency.
+//
+// Numeric fields are float64 across the board, including the byte counts and
+// the core count: the control plane emits JSON numbers off agent-shaped jsonb,
+// and an integer-typed field would hard-fail decoding on a `2.0` where a float
+// silently accepts both.
+type Pressure struct {
+	CPUPercent      *float64 `json:"cpu_percent"`
+	CPUCores        *float64 `json:"cpu_cores"`
+	MemUsedPercent  *float64 `json:"mem_used_percent"`
+	Load1           *float64 `json:"load1"`
+	Load15          *float64 `json:"load15"`
+	DiskUsedPercent *float64 `json:"disk_used_percent"`
+	SwapUsedPercent *float64 `json:"swap_used_percent"`
+	SwapTotalBytes  *float64 `json:"swap_total_bytes"`
+	BeamPSSBytes    *float64 `json:"beam_pss_bytes"`
+	BeamSwapBytes   *float64 `json:"beam_swap_bytes"`
+	Err5xxPerS      *float64 `json:"err_5xx_per_s"`
+	// ReportedAt is the BEAT's own timestamp (RFC3339), a pointer for the same
+	// reason: null means the box has never phoned home at all, which is not the
+	// same as "beat, but told us nothing readable".
+	ReportedAt *string `json:"reported_at"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane

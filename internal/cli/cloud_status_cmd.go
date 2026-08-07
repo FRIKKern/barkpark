@@ -17,6 +17,8 @@ package cli
 // ranking itself.
 
 import (
+	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -24,29 +26,69 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+// --- the vitals fences (charter D67) -----------------------------------------
+//
+// strainedLoad15PerCore is the PRIMARY strained fence: sustained load per core
+// over the 15-minute average. 1.75 is deliberately above 1.0 — a box at exactly
+// one runnable task per core is busy, not in trouble — and the 15m window means
+// a burst cannot trip it.
+//
+// strainedLoad1PerCore is the FALLBACK, used only when the beat carries no
+// load15 (an agent that predates dr-w5-s2). It is deliberately HIGHER: over a
+// 1-minute window the same box reads noisier, so a coarser predicate at 2.0 can
+// only UNDER-report strain, never over-report it. This is not the fence D52
+// refused — D52 refused a HARDCODED CORE COUNT (a fabricated denominator); both
+// arms here divide by the box's own reported cpu_cores or do not fire at all.
+const (
+	strainedLoad15PerCore = 1.75
+	strainedLoad1PerCore  = 2.0
+)
+
+// fillingDiskPercent is the `filling` fence — the SAME number the usage meter
+// already ships as its disk over_limit ceiling, cloud/lib/barkpark_cloud/usage.ex:
+//
+//	meter(value, @src_disk, measured_at, 100, 70, 90)
+//
+// It is duplicated here only because Go cannot read an Elixir module attribute;
+// TestFillingThresholdMatchesUsageMeter reads that line out of usage.ex and
+// fails if the two ever drift, which is the entire point of the rung: the
+// verdict surface must stop saying HEALTHY about a box the meter surface is
+// already calling over_limit.
+const fillingDiskPercent = 90.0
+
 // attentionStatus classifies one Barkpark into its charter-decision-15 status
-// label. The eight labels, MOST URGENT FIRST, are:
+// label. The ELEVEN labels (charter D69), MOST URGENT FIRST, are:
 //
 //  1. removal_failed — deprovision_status = "failed"
 //  2. failed         — no host && provision_status = "failed"
 //  3. suspended      — suspended = true (and not removing)
 //  4. degraded       — live && (health_status != "up" || agent_status != "online")
-//  5. behind         — live && update_state = "behind"
-//  6. removing       — deprovision_status ∈ {pending, claimed}
-//  7. provisioning   — no host, nothing failed
-//  8. ok             — live, healthy, current
+//  5. strained       — live && sustained load per core over the D67 fence
+//  6. filling        — live && disk_used_percent >= 90
+//  7. unreported     — live && the CP has never heard a byte from the box
+//  8. behind         — live && update_state = "behind"
+//  9. removing       — deprovision_status ∈ {pending, claimed}
+//  10. provisioning  — no host, nothing failed
+//  11. ok            — live, healthy, current
 //
-// where "live" = a host is set with nothing in-flight/failed/suspended. The
-// cases are evaluated in rank order and the first match wins, so the precedence
-// (a removing box that is also suspended is "removing"; a live box that is both
-// degraded and behind is "degraded") falls out of the ordering itself.
+// where "live" = a host is set with nothing in-flight/failed/suspended.
+//
+// EVALUATION ORDER IS NOT RANK ORDER for one arm, and that is deliberate: like
+// the shipped console (app.js classifyBp), `unreported` is tested BEFORE
+// `degraded`, because health_status/agent_status are CACHED last-reported
+// columns — with last_seen_at null they were never measured and so cannot rank
+// the box. Its URGENCY (rank 7) is expressed in the ladder, not in the switch.
+// Every other arm is evaluated in rank order and the first match wins, so the
+// remaining precedence (a removing box that is also suspended is "removing"; a
+// live box that is both strained and behind is "strained") falls out of the
+// ordering itself.
 //
 // Charter edge left as specified: a box with a host SET and provision_status =
-// "failed" matches no decision-15 rule (rank 2 requires no host; degraded/
-// behind require live, which a failed provision is not) and falls through to
-// "ok". Both surfaces implement the charter verbatim, so changing it here alone
-// would create exactly the drift D32 exists to prevent — if this state is
-// reachable, amend decision 15 first, then both implementations together.
+// "failed" matches no decision-15 rule (rank 2 requires no host; the live arms
+// require live, which a failed provision is not) and falls through to "ok".
+// Both surfaces implement the charter verbatim, so changing it here alone would
+// create exactly the drift D32 exists to prevent — if this state is reachable,
+// amend decision 15 first, then both implementations together.
 func attentionStatus(b cloudclient.Barkpark) string {
 	host := strings.TrimSpace(b.Host)
 	removing := b.DeprovisionStatus == "pending" || b.DeprovisionStatus == "claimed"
@@ -60,8 +102,16 @@ func attentionStatus(b cloudclient.Barkpark) string {
 		return "failed"
 	case b.Suspended && !removing:
 		return "suspended"
+	// Console precedence (app.js classifyBp): never-reported outranks the cached
+	// health columns as an EXPLANATION, even though it ranks below them.
+	case live && strings.TrimSpace(b.LastSeenAt) == "":
+		return "unreported"
 	case live && (b.HealthStatus != "up" || b.AgentStatus != "online"):
 		return "degraded"
+	case live && strained(b):
+		return "strained"
+	case live && filling(b):
+		return "filling"
 	case live && b.UpdateState == "behind":
 		return "behind"
 	case removing:
@@ -73,21 +123,144 @@ func attentionStatus(b cloudclient.Barkpark) string {
 	}
 }
 
-// attentionRankOrder is the decision-15 ordering, most urgent first. Index+1 is
-// the charter rank (1–8), exactly as the decision-32 fixture pins it.
+// loadPerCore returns the sustained load-per-core reading the strained fence
+// judges, WITH the fence it must clear and a human name for the averaging
+// window it came from. ok is false whenever the box did not give us enough to
+// judge — that is D42's factual arm, verbatim: a nil vital never strains.
+//
+// Preference is load15 (the 15-minute average, the honest "sustained" signal);
+// an agent that predates it falls back to load1 against a HIGHER fence.
+func loadPerCore(b cloudclient.Barkpark) (perCore, fence float64, window string, ok bool) {
+	p := b.Pressure
+	if p == nil || p.CPUCores == nil || *p.CPUCores <= 0 {
+		return 0, 0, "", false
+	}
+	switch {
+	case p.Load15 != nil:
+		return *p.Load15 / *p.CPUCores, strainedLoad15PerCore, "15m avg", true
+	case p.Load1 != nil:
+		return *p.Load1 / *p.CPUCores, strainedLoad1PerCore, "1m avg", true
+	default:
+		return 0, 0, "", false
+	}
+}
+
+// strained reports whether the box's sustained load per core is over the D67
+// fence. Swap NEVER triggers this — it only enriches the reason string — and an
+// unmeasured box is NEVER strained.
+func strained(b cloudclient.Barkpark) bool {
+	perCore, fence, _, ok := loadPerCore(b)
+	return ok && perCore >= fence
+}
+
+// filling reports whether the box's disk is at or past the usage meter's own
+// over_limit ceiling. A nil reading is never filling.
+func filling(b cloudclient.Barkpark) bool {
+	p := b.Pressure
+	return p != nil && p.DiskUsedPercent != nil && *p.DiskUsedPercent >= fillingDiskPercent
+}
+
+// strainedReason renders the WHY for a strained row. It says LOAD and never
+// CPU: load1/load15 count uninterruptible sleep, so a box stalled on I/O is
+// honestly under load while its CPU sits idle — naming it "CPU" would send an
+// operator to the wrong instrument. It also names WHICH average it used, so a
+// reading taken through the less-sensitive fallback is legible as such.
+//
+// Swap, when the box reported it, is APPENDED as evidence — a box paging itself
+// to death is the story behind the load — but it can never produce this string
+// on its own.
+func strainedReason(b cloudclient.Barkpark) string {
+	perCore, _, window, ok := loadPerCore(b)
+	if !ok {
+		return ""
+	}
+	// Which raw load produced perCore — the SAME preference loadPerCore made, so
+	// the number and the window it is labelled with can never disagree.
+	p := b.Pressure
+	var load float64
+	if p.Load15 != nil {
+		load = *p.Load15
+	} else {
+		load = *p.Load1
+	}
+	reason := fmt.Sprintf("load %s on %s cores (%.1fx, %s)",
+		trimFloat(round1(load)), trimFloat(*p.CPUCores), perCore, window)
+	if swap := swapInUse(p); swap != "" {
+		reason += " · " + swap + " in swap"
+	}
+	return reason
+}
+
+// swapInUse renders how many bytes the box is actually paging, or "" when it
+// did not report enough to say. swap_used_percent travels WITH swap_total_bytes
+// on purpose (router.ex): a bare percent cannot separate a swapless box from an
+// idle one, so both are required before we claim anything.
+func swapInUse(p *cloudclient.Pressure) string {
+	if p == nil || p.SwapUsedPercent == nil || p.SwapTotalBytes == nil {
+		return ""
+	}
+	used := *p.SwapTotalBytes * *p.SwapUsedPercent / 100
+	if used <= 0 {
+		return ""
+	}
+	return humanBytes(used)
+}
+
+// fillingReason renders the WHY for a filling row, naming the fence it crossed
+// so the number is not just an assertion.
+func fillingReason(b cloudclient.Barkpark) string {
+	if b.Pressure == nil || b.Pressure.DiskUsedPercent == nil {
+		return ""
+	}
+	return fmt.Sprintf("disk %s%% used (fills at %s%%)",
+		trimFloat(round1(*b.Pressure.DiskUsedPercent)), trimFloat(fillingDiskPercent))
+}
+
+// unmeteredMarker is the DETAIL LINE (charter D69 — deliberately NOT a rung; a
+// rung for it would be vocabulary for a state that is really a rollout gap).
+// A box whose pressure block carries a reported_at — it IS beating — but a null
+// cpu_cores is definitionally running an agent that predates the vitals beat:
+// we can see it alive and cannot read a single vital off it. An operator should
+// SEE that, rather than infer it from an absence and read the row as ordinary.
+//
+// It is keyed on the PRESENCE of reported_at, not on its age: no measurement in
+// this wave justifies a staleness window, and inventing one would be exactly the
+// fabricated number the honesty law exists to refuse.
+func unmeteredMarker(b cloudclient.Barkpark) string {
+	p := b.Pressure
+	if p == nil || p.ReportedAt == nil || strings.TrimSpace(*p.ReportedAt) == "" {
+		return "" // never beat at all — that is `unreported`, a different fact
+	}
+	if p.CPUCores != nil {
+		return "" // vitals readable
+	}
+	return "vitals unreadable — agent predates the vitals beat"
+}
+
+// round1 rounds to one decimal so a rendered load reads like an instrument, not
+// like a float dump.
+func round1(n float64) float64 { return math.Round(n*10) / 10 }
+
+// attentionRankOrder is the decision-15 / D69 ordering, most urgent first.
+// Index+1 is the charter rank (1–11), exactly as the decision-32 fixture pins
+// it. The eight pre-existing states keep their RELATIVE order and every one of
+// them keeps its bucket — only the integers moved.
 var attentionRankOrder = []string{
 	"removal_failed", // 1
 	"failed",         // 2
 	"suspended",      // 3
 	"degraded",       // 4
-	"behind",         // 5
-	"removing",       // 6
-	"provisioning",   // 7
-	"ok",             // 8
+	"strained",       // 5
+	"filling",        // 6
+	"unreported",     // 7
+	"behind",         // 8
+	"removing",       // 9
+	"provisioning",   // 10
+	"ok",             // 11
 }
 
 // attentionRank is the sort key for a status label — its charter rank, 1 (most
-// urgent) through 8 (ok), matching the decision-32 fixture byte-for-byte. An
+// urgent) through 11 (ok), matching the decision-32 fixture byte-for-byte. An
 // unknown label ranks past the end (never panics) and so sorts last.
 func attentionRank(status string) int {
 	for i, s := range attentionRankOrder {
@@ -99,9 +272,14 @@ func attentionRank(status string) int {
 }
 
 // attentionBucket groups a status into the three charter buckets: attention
-// (ranks 1–5: removal_failed…behind), in-flight (6–7: removing/provisioning),
-// healthy (8: ok). The bucket strings are the decision-32 fixture's, verbatim —
+// (ranks 1–8: removal_failed…behind), in-flight (9–10: removing/provisioning),
+// healthy (11: ok). The bucket strings are the decision-32 fixture's, verbatim —
 // note "in-flight" is hyphenated there, so it is hyphenated here and in -o json.
+//
+// The boundary is stated as a MEMBERSHIP switch, not as a rank comparison, so a
+// new state that someone forgets to rank cannot silently land in HEALTHY — the
+// exact inversion this epic exists to kill. Anything unrecognised surfaces in
+// attention.
 func attentionBucket(status string) string {
 	switch status {
 	case "removing", "provisioning":
@@ -109,8 +287,9 @@ func attentionBucket(status string) string {
 	case "ok":
 		return "healthy"
 	default:
-		// removal_failed, failed, suspended, degraded, behind — and any unknown
-		// label defensively surfaces in the attention bucket rather than hiding.
+		// removal_failed, failed, suspended, degraded, strained, filling,
+		// unreported, behind — and any unknown label defensively surfaces in the
+		// attention bucket rather than hiding.
 		return "attention"
 	}
 }
@@ -118,18 +297,34 @@ func attentionBucket(status string) string {
 // attentionDetail is the one-line WHY behind an attention status — the reason
 // the control plane already told us, surfaced instead of hoarded: the
 // deprovision error for removal_failed, the provision error for failed, the
-// suspension reason for suspended. States whose row already explains itself
-// (degraded shows health/agent, behind IS the message) yield "".
+// suspension reason for suspended, the measured vitals for strained/filling.
+// States whose row already explains itself (degraded shows health/agent, behind
+// IS the message) yield "".
+//
+// The UNMETERED MARKER rides on top of whatever the status said, on ANY row: a
+// box we cannot read is a fact about the reading, not about the verdict.
 func attentionDetail(b cloudclient.Barkpark, status string) string {
+	var reason string
 	switch status {
 	case "removal_failed":
-		return strings.TrimSpace(b.DeprovisionError)
+		reason = strings.TrimSpace(b.DeprovisionError)
 	case "failed":
-		return strings.TrimSpace(b.ProvisionError)
+		reason = strings.TrimSpace(b.ProvisionError)
 	case "suspended":
-		return strings.TrimSpace(b.SuspendedReason)
+		reason = strings.TrimSpace(b.SuspendedReason)
+	case "strained":
+		reason = strainedReason(b)
+	case "filling":
+		reason = fillingReason(b)
+	}
+	marker := unmeteredMarker(b)
+	switch {
+	case reason == "":
+		return marker
+	case marker == "":
+		return reason
 	default:
-		return ""
+		return reason + " · " + marker
 	}
 }
 
@@ -460,12 +655,28 @@ USAGE
 WHAT IT SHOWS
   every Barkpark in your team's fleet, ranked most-urgent first and bucketed:
 
-    ATTENTION   removal_failed · failed · suspended · degraded · behind
+    ATTENTION   removal_failed · failed · suspended · degraded · strained ·
+                filling · unreported · behind
     IN-FLIGHT   removing · provisioning
     HEALTHY     ok
 
+  Two of those rungs read the box's own vitals off its latest health beat:
+
+    strained    sustained load per core over the fence (15m average; a box
+                whose agent predates load15 falls back to the 1m average
+                against a higher, less sensitive one). Says LOAD, not CPU —
+                load counts I/O wait, so a stalled box counts even at 0% CPU.
+    filling     disk at or past 90% used — the SAME ceiling 'bp cloud usage'
+                already calls over_limit, so the two views cannot disagree.
+
+  A box that reports nothing measurable is NEVER strained or filling: an
+  unmeasured vital reads "we did not measure", never "measured, and it is fine".
+  A box that is beating but whose agent predates the vitals beat says so on its
+  own row rather than passing silently as healthy.
+
   Attention rows carry a DETAIL column with the control plane's own reason
-  (provision error, deprovision error, suspension reason) when it has one.
+  (provision error, deprovision error, suspension reason, the measured load or
+  disk reading) when it has one.
   Status cells are colored by role (red = danger, yellow = warn, cyan = info,
   green = ok) on a tty; piped or --no-color output is plain text. Requires
   'bp login'. The states, ranks and colors are the cloud dashboard's own
