@@ -206,6 +206,89 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
   defp usec(%DateTime{microsecond: {_, 6}} = dt), do: dt
   defp usec(%DateTime{microsecond: {us, _}} = dt), do: %{dt | microsecond: {us, 6}}
+  defp maybe_usec(nil), do: nil
+  defp maybe_usec(%DateTime{} = dt), do: usec(dt)
+
+  # BULK rows for the delivery fixtures. The estimator refuses below
+  # `min_sample` 200, so its fixtures are 1,000 rows — and 1,000 `Repo.insert!`
+  # round-trips would be seconds of test time for no extra truth.
+  defp deployments!(site, rows) do
+    entries =
+      Enum.map(rows, fn r ->
+        at = usec(r.inserted_at)
+
+        %{
+          id: Ecto.UUID.generate(),
+          site_id: site.id,
+          status: Map.get(r, :status, "failed"),
+          environment: Map.get(r, :environment, "production"),
+          content_rev: Map.get(r, :content_rev),
+          became_live_at: r |> Map.get(:became_live_at) |> maybe_usec(),
+          inserted_at: at,
+          updated_at: at
+        }
+      end)
+
+    Repo.insert_all(Deployment, entries)
+  end
+
+  # ── The delivery fixtures ────────────────────────────────────────────────
+  #
+  # `@dw_as_of` is PINNED like the window is: a still-waiting lower bound is
+  # `as_of - inserted_at`, so a floating clock would make the same fixture
+  # answer differently on every run — the exact defect the epic found live (the
+  # same pinned window returned stranded 3 → 2 → 0 in five minutes).
+  @dw_from ~U[2026-08-01 00:00:00Z]
+  @dw_to ~U[2026-08-02 00:00:00Z]
+  @dw_as_of ~U[2026-08-02 00:00:00Z]
+
+  # 600 DELIVERED rows (waits 30-90s, all inside the window's first 700s) and
+  # 400 STILL WAITING rows inserted 10,000s later — after the last live mark, so
+  # nothing can resolve them. 40.0% censored: the shape the live corpus shows at
+  # EVERY window width, which is why narrowing the window is not the fix.
+  defp delivery_40pct!(site) do
+    delivered =
+      for i <- 1..600 do
+        at = DateTime.add(@dw_from, i, :second)
+
+        %{
+          status: "live",
+          inserted_at: at,
+          became_live_at: DateTime.add(at, delivered_wait(i), :second)
+        }
+      end
+
+    waiting =
+      for i <- 1..400 do
+        %{status: "failed", inserted_at: DateTime.add(@dw_from, 10_000 + i, :second)}
+      end
+
+    deployments!(site, delivered ++ waiting)
+  end
+
+  defp delivered_wait(i), do: 30 + rem(i, 61)
+
+  # The seconds the fixture ABOVE puts in front of the estimator, rebuilt here so
+  # a test can compute the floored and the DROPPED answer from the same numbers
+  # the ledger sees.
+  defp delivery_40pct_seconds do
+    delivered = Enum.sort(for i <- 1..600, do: delivered_wait(i) * 1.0)
+    # as_of - (from + 10_000 + i) for i in 1..400 → 76,399 down to 76,000.
+    waiting = Enum.sort(for i <- 1..400, do: (86_400 - 10_000 - i) * 1.0)
+    {delivered, waiting}
+  end
+
+  # The MUTANT: the estimator this slice exists to refuse — it drops the
+  # still-waiting rows and reports a confident number off what is left.
+  defp drop_quantile(delivered_sorted, q) do
+    n = length(delivered_sorted)
+    Enum.at(delivered_sorted, min(n, max(trunc(Float.ceil(n * q)), 1)) - 1)
+  end
+
+  defp floor_quantile(all_sorted, q) do
+    n = length(all_sorted)
+    Enum.at(all_sorted, min(n, max(trunc(Float.ceil(n * q)), 1)) - 1)
+  end
 
   defp login_token(user) do
     {:ok, token} = Accounts.create_user_session_token(user)
@@ -843,6 +926,356 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert sites[other.id].volume == 1
       # A one-row site gets a refusal, not a 100%.
       assert sites[other.id].failure_rate.refused
+    end
+  end
+
+  ## ── 5. The delivery clock ────────────────────────────────────────────────
+
+  describe "delivery/3 — a percentile that can refuse, and a cohort still waiting" do
+    setup do
+      {_user, team} = user_team()
+      %{site: site_fixture(team)}
+    end
+
+    test "every percentile node is INSEPARABLE: value, window width, sample and censored count in ONE map",
+         %{site: site} do
+      delivery_40pct!(site)
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      assert d.window.width_seconds == 86_400
+      assert d.sample == 1000
+
+      for node <- [d.p50, d.p95, d.max] do
+        # No caller can lift the number out of the map and leave the population
+        # behind: the width, the denominator and the still-waiting count are IN
+        # the same node as `seconds`.
+        assert node.window_seconds == 86_400
+        assert node.sample == 1000
+        assert node.censored == 400
+        assert node.censored_fraction == 0.4
+        assert node.basis =~ "floored"
+        assert Map.has_key?(node, :seconds)
+      end
+    end
+
+    test "p95 REFUSES an unidentifiable percentile — 40% still waiting exceeds its 5% headroom",
+         %{site: site} do
+      delivery_40pct!(site)
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      assert d.p95.refused
+      assert d.p95.seconds == nil
+      assert d.p95.headroom == 0.05
+
+      assert d.p95.reason ==
+               "p95 is UNIDENTIFIABLE: 40.0% are still waiting, exceeding the 5.0% headroom p95 needs"
+
+      # THE STEP FUNCTION AT 1 - q. p50 needs 50% of headroom and has it, so it
+      # answers — with a floored number. The refusal is about identifiability,
+      # not about the window being wide or the sample being small: n = 1,000,
+      # ten times min_sample, and the same window answers p50.
+      refute d.p50.refused
+      assert d.p50.seconds > 0
+      assert d.p50.sample == 1000
+    end
+
+    test "MUTATION: dropping the still-waiting rows publishes a confident number where the guard refuses",
+         %{site: site} do
+      delivery_40pct!(site)
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      {delivered, waiting} = delivery_40pct_seconds()
+      all = delivered ++ waiting
+
+      # What the DROPPER would publish, off the same corpus.
+      drop_p95 = drop_quantile(delivered, 0.95)
+      drop_p50 = drop_quantile(delivered, 0.5)
+      floor_p95 = floor_quantile(all, 0.95)
+      floor_p50 = floor_quantile(all, 0.5)
+
+      # The dropper is not merely wrong — it is CONFIDENT: it has a number for
+      # the very quantile the guard says nobody can know.
+      assert drop_p95 == 87.0
+      assert floor_p95 == 76_349.0
+      assert Float.round(floor_p95 / drop_p95, 1) == 877.6
+
+      # …and it CANNOT be caught by watching p50: below 50% censoring the two
+      # estimators land in the same delivered mass, so the divergence is a step
+      # function at exactly 1 - q. A fixture aimed at p50 could never satisfy a
+      # >10x spec.
+      assert drop_p50 == 60.0
+      assert floor_p50 == 80.0
+      assert Float.round(floor_p50 / drop_p50, 2) == 1.33
+
+      # THE STRUCTURAL TELL, asserted separately from the reason string: a
+      # dropping estimator's own SAMPLE shrinks to the delivered rows. The
+      # refusal string could be faked; a sample of 1,000 with 400 censored
+      # cannot be, and this assertion is what fails when the estimator is
+      # mutated to drop.
+      assert d.p95.sample == 1000
+      assert d.p95.censored == 400
+      assert d.p95.refused
+      assert length(delivered) == 600
+      assert d.p95.sample != length(delivered)
+    end
+
+    test "FLOOR NEVER DROP: a still-waiting row contributes its lower bound and moves the quantile position",
+         %{site: site} do
+      # 800 delivered with distinct waits 1s..800s, then 200 still waiting with
+      # bounds far above them. 20% censored — inside p50's 50% headroom, so p50
+      # ANSWERS, and the answer proves the censored rows are in the sample.
+      delivered =
+        for i <- 1..800 do
+          at = DateTime.add(@dw_from, i, :second)
+          %{status: "live", inserted_at: at, became_live_at: DateTime.add(at, i, :second)}
+        end
+
+      waiting =
+        for i <- 1..200 do
+          %{status: "failed", inserted_at: DateTime.add(@dw_from, 5_000 + i, :second)}
+        end
+
+      deployments!(site, delivered ++ waiting)
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      refute d.p50.refused
+      assert d.p50.sample == 1000
+      assert d.p50.censored == 200
+      # Position 500 of 1,000 — the 500th delivered wait. A dropping estimator
+      # would take position 400 of 800 and answer 400.0s, 20% lower, off a
+      # corpus where one row in five has not been delivered at all.
+      assert d.p50.seconds == 500.0
+      assert drop_quantile(Enum.sort(for(i <- 1..800, do: i * 1.0)), 0.5) == 400.0
+
+      # The lower bounds themselves are real seconds, not zeros: as_of is
+      # 86,400s into the window and the oldest waiter arrived at 5,001s.
+      assert d.censored.count == 200
+      assert d.censored.as_of == @dw_as_of
+      assert d.censored.still_waiting_at_least_seconds == 81_399.0
+    end
+
+    test "max refuses while ANYONE is still waiting, and the cohort says how long, as of when",
+         %{site: site} do
+      delivery_40pct!(site)
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      # max is q = 1.0: its headroom is zero, so a single unfinished row makes
+      # the maximum unknowable. The honest answer is the still-waiting bound.
+      assert d.max.refused
+      assert d.max.reason =~ "UNIDENTIFIABLE"
+      assert d.censored.count == 400
+      assert d.censored.still_waiting_at_least_seconds == 76_399.0
+      assert d.censored.as_of == @dw_as_of
+
+      # Never a bare zero: the count travels with the instant it was taken.
+      site_row = Enum.find(d.sites, &(&1.site_id == site.id))
+      assert site_row.still_waiting
+      assert site_row.oldest_waiting_seconds == 76_399.0
+      assert site_row.as_of == @dw_as_of
+    end
+
+    test "production only, and rows the clock cannot reach are UNMETERED — never filtered away",
+         %{site: site} do
+      {_user, team} = user_team()
+      jarl = site_fixture(team)
+
+      # The jarl-website shape: live deliveries, ZERO non-null content_rev. A
+      # census keyed on the revision would omit this customer site entirely;
+      # keying on the deployment ROW keeps it visible.
+      deployments!(jarl, [
+        %{
+          status: "live",
+          content_rev: nil,
+          inserted_at: DateTime.add(@dw_from, 10, :second),
+          became_live_at: DateTime.add(@dw_from, 70, :second)
+        },
+        %{status: "failed", content_rev: nil, inserted_at: DateTime.add(@dw_from, 80, :second)},
+        %{
+          status: "live",
+          content_rev: nil,
+          inserted_at: DateTime.add(@dw_from, 90, :second),
+          became_live_at: DateTime.add(@dw_from, 150, :second)
+        }
+      ])
+
+      deployments!(site, [
+        # A preview row: out of scope, and it must not enter any denominator.
+        %{
+          status: "live",
+          environment: "preview",
+          inserted_at: DateTime.add(@dw_from, 10, :second),
+          became_live_at: DateTime.add(@dw_from, 20, :second)
+        },
+        # A row OUTSIDE the pinned window.
+        %{status: "failed", inserted_at: DateTime.add(@dw_to, 10, :second)},
+        # UNKEYABLE: live, but the ledger cannot name when it went live. Counted
+        # and reported — never a WHERE clause.
+        %{status: "live", became_live_at: nil, inserted_at: DateTime.add(@dw_from, 30, :second)},
+        %{
+          status: "live",
+          inserted_at: DateTime.add(@dw_from, 40, :second),
+          became_live_at: DateTime.add(@dw_from, 100, :second)
+        }
+      ])
+
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      assert d.environment == "production"
+      # 3 jarl rows + 1 in-window production row with a live mark = 4 metered;
+      # the preview row and the out-of-window row are out of scope entirely.
+      assert d.sample == 4
+      assert d.unmetered == 1
+
+      ids = Enum.map(d.sites, & &1.site_id)
+      assert jarl.id in ids, "a site with live deliveries and no content_rev must still appear"
+      assert site.id in ids
+
+      jarl_row = Enum.find(d.sites, &(&1.site_id == jarl.id))
+      assert jarl_row.sample == 3
+      # The failed attempt is DELIVERED by the site's next live mark (60s later),
+      # not dropped and not counted as zero.
+      assert jarl_row.delivered == 3
+      refute jarl_row.still_waiting
+      assert jarl_row.oldest_waiting_seconds == nil
+
+      site_row = Enum.find(d.sites, &(&1.site_id == site.id))
+      assert site_row.sample == 1
+      assert site_row.unmetered == 1
+
+      # Under min_sample, so every quantile refuses on the SAMPLE — the first
+      # policy, still carrying its denominator.
+      assert d.p50.refused
+      assert d.p50.reason == "sample 4 below min_sample 200"
+    end
+
+    test "the failed row's wait is the site's NEXT live mark, not zero", %{site: site} do
+      # D142 reports 0.0s for site d8e9c2c7's 6h17m outage because a failed row
+      # CLOSES a run. Here the failed attempt waits until content actually
+      # reached the web — one long wait, not 80 singletons at 0.0s.
+      deployments!(site, [
+        %{status: "failed", inserted_at: DateTime.add(@dw_from, 100, :second)},
+        %{status: "failed", inserted_at: DateTime.add(@dw_from, 200, :second)},
+        %{
+          status: "live",
+          inserted_at: DateTime.add(@dw_from, 300, :second),
+          became_live_at: DateTime.add(@dw_from, 22_938, :second)
+        }
+      ])
+
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      assert d.sample == 3
+      assert d.censored.count == 0
+      # The floored max would be 22,838s (the first failed attempt's wait) — but
+      # every row is delivered here, so nothing is censored and the refusal is
+      # the sample policy alone.
+      assert d.max.refused
+      assert d.max.reason =~ "below min_sample"
+      assert d.sites |> hd() |> Map.get(:delivered) == 3
+    end
+
+    test "THE THIRD REFUSAL FIRES ALONE: the row AT the quantile is itself still waiting",
+         %{site: site} do
+      # The two headline fixtures both trip the censored-fraction policy first, so
+      # the empirical policy — "the row at ceil(n*q) is itself censored" — was
+      # implemented, reachable, and never actually exercised. It is the arm that
+      # survives when the fraction test AGREES the sample is identifiable, which is
+      # exactly the case a future re-key onto the publish clock will produce, so it
+      # must not merge unproven.
+      #
+      # The construction: 200 rows (min_sample passes), only TWO still waiting
+      # (1.0% against p50's 50.0% headroom, so the fraction policy does NOT fire) —
+      # but their bounds sit at 100s and 101s, right where p50 lands, because the
+      # censored rows here are SHORT waits rather than the long tail. Sorted
+      # ascending the 100th of 200 is a censored 100.0s.
+      delivered =
+        for i <- 1..198 do
+          at = DateTime.add(@dw_from, i, :second)
+          wait = if i <= 99, do: i, else: 101 + i
+
+          %{status: "live", inserted_at: at, became_live_at: DateTime.add(at, wait, :second)}
+        end
+
+      # as_of - inserted_at = 100s and 101s. Inserted last, after every live mark,
+      # so nothing can resolve them.
+      waiting =
+        for bound <- [100, 101] do
+          %{status: "failed", inserted_at: DateTime.add(@dw_as_of, -bound, :second)}
+        end
+
+      deployments!(site, delivered ++ waiting)
+
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      assert d.sample == 200
+      assert d.censored.count == 2
+
+      # The fraction policy is SATISFIED — this is not the arm under test.
+      assert d.p50.censored_fraction == 0.01
+      assert d.p50.headroom == 0.5
+      refute d.p50.reason =~ "UNIDENTIFIABLE"
+
+      # …and p50 still refuses, on the empirical policy alone, naming the position
+      # and the lower bound rather than printing the 100s it cannot vouch for.
+      assert d.p50.refused
+      assert is_nil(d.p50.seconds)
+      assert d.p50.reason =~ "lands ON a still-waiting row (position 100 of 200)"
+      assert d.p50.reason =~ "at least 100.0s"
+    end
+
+    test "the emitted key set is PINNED — the Go reader decodes every key", %{site: site} do
+      delivery_40pct!(site)
+      d = DeployLedger.delivery(@dw_from, @dw_to, as_of: @dw_as_of)
+
+      assert Enum.sort(Map.keys(d)) == [
+               :as_of,
+               :censored,
+               :clock,
+               :delivered,
+               :environment,
+               :max,
+               :min_sample,
+               :p50,
+               :p95,
+               :sample,
+               :sites,
+               :unmetered,
+               :window
+             ]
+
+      assert Enum.sort(Map.keys(d.window)) == [:from, :to, :width_seconds]
+      assert Enum.sort(Map.keys(d.censored)) == [:as_of, :count, :still_waiting_at_least_seconds]
+
+      assert Enum.sort(Map.keys(d.p95)) == [
+               :basis,
+               :censored,
+               :censored_fraction,
+               :headroom,
+               :label,
+               :min_sample,
+               :quantile,
+               :reason,
+               :refused,
+               :sample,
+               :seconds,
+               :window_seconds
+             ]
+
+      assert Enum.sort(Map.keys(hd(d.sites))) == [
+               :as_of,
+               :censored,
+               :delivered,
+               :oldest_waiting_seconds,
+               :sample,
+               :site_id,
+               :still_waiting,
+               :unmetered
+             ]
+
+      # The clock NAMES itself in the payload — a latency number whose t0 is not
+      # printed beside it cannot be audited.
+      assert d.clock =~ "inserted_at"
+      assert d.clock =~ "became_live_at"
     end
   end
 
