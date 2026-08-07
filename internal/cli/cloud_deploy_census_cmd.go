@@ -346,6 +346,8 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("")
 	}
 
+	renderDeployDelivery(out, census.Delivery, siteLimit)
+
 	rows := census.Sites
 	if siteLimit > 0 && len(rows) > siteLimit {
 		rows = rows[:siteLimit]
@@ -474,6 +476,150 @@ func deployCensusWidth(d time.Duration) string {
 	}
 }
 
+// renderDeployDelivery prints the DELIVERY census: how long content waited to
+// reach the web, every percentile beside the window width and the sample that
+// produced it, and the still-waiting cohort named.
+//
+// THE THREE WAYS THIS SECTION REFUSES, and none of them is a zero:
+//
+//   - the control plane sends no `delivery` node at all (today's payload) — the
+//     section says NOT MEASURED rather than printing nothing, because a missing
+//     latency line reads as an absent problem;
+//   - a percentile REFUSED (below min_sample, or more of the sample is still
+//     waiting than the quantile has headroom for, or the row at the quantile is
+//     itself still waiting) — it prints NO NUMBER and the control plane's own
+//     reason, never a percentile;
+//   - rows the clock could not reach at all — printed as their own UNMETERED
+//     count, so the denominator can be audited.
+//
+// The still-waiting cohort NEVER prints as a bare count. It prints
+// "STILL WAITING >= <bound>" beside the instant it was taken, because the same
+// pinned window answered 3 → 2 → 0 in five minutes: a bare number there is
+// reporting the measurement's own latency as a fact about the fleet.
+func renderDeployDelivery(out *writer, d *cloudclient.DeployDelivery, siteLimit int) {
+	if d == nil {
+		out.outf("delivery — how long content waited to reach the web")
+		out.outf("  NOT MEASURED — this control plane sends no delivery census. Nothing was read: this is NOT a fleet that delivers instantly.")
+		out.outf("")
+		return
+	}
+
+	scope := strings.TrimSpace(d.Environment)
+	if scope == "" {
+		scope = "unscoped"
+	}
+	out.outf("delivery — how long content waited to reach the web (%s · %s only)",
+		deployCensusWidth(time.Duration(d.Window.WidthSeconds)*time.Second), sanitizeCell(scope))
+	if clock := strings.TrimSpace(d.Clock); clock != "" {
+		out.outf("  clock: %s", sanitizeCell(clock))
+	}
+	for _, q := range []cloudclient.DeployDeliveryQuantile{d.P50, d.P95, d.Max} {
+		label := strings.TrimSpace(q.Label)
+		if label == "" {
+			label = fmt.Sprintf("q%.2f", q.Quantile)
+		}
+		out.outf("  %-4s %s", sanitizeCell(label), deployDeliveryValue(q))
+	}
+	out.outf("  %s", deployDeliveryWaiting(d.Censored))
+	if d.Unmetered > 0 {
+		out.outf("  %d row(s) the clock could not reach (live, with no became_live_at) — counted here, never dropped from the denominator", d.Unmetered)
+	}
+
+	waiting := make([]cloudclient.DeployDeliverySite, 0, len(d.Sites))
+	for _, s := range d.Sites {
+		if s.StillWaiting {
+			waiting = append(waiting, s)
+		}
+	}
+	if len(waiting) > 0 {
+		shown := waiting
+		if siteLimit > 0 && len(shown) > siteLimit {
+			shown = shown[:siteLimit]
+		}
+		out.outf("  sites still waiting (who is waiting, and since when)")
+		for _, s := range shown {
+			out.outf("    %-38s %s  · %d measured · %d still waiting · %d delivered",
+				sanitizeCell(s.SiteID), deployDeliverySiteWaiting(s), s.Sample, s.Censored, s.Delivered)
+		}
+		if n := len(waiting) - len(shown); n > 0 {
+			out.outf("    … and %d more site(s) still waiting (raise the display clamp with --sites 0)", n)
+		}
+	}
+	out.outf("")
+}
+
+// deployDeliveryValue renders ONE percentile INSEPARABLY: the value (or the
+// refusal) always followed by the sample, the still-waiting share and the window
+// width that produced it. There is no branch of this function that prints a bare
+// number.
+func deployDeliveryValue(q cloudclient.DeployDeliveryQuantile) string {
+	population := fmt.Sprintf("(n=%d · %d still waiting · window %s)",
+		q.Sample, q.Censored, deployCensusWidth(time.Duration(q.WindowSeconds)*time.Second))
+
+	if q.Refused || q.Seconds == nil {
+		reason := strings.TrimSpace(q.Reason)
+		if reason == "" {
+			reason = fmt.Sprintf("the control plane sent no value for a sample of %d", q.Sample)
+		}
+		return "NO NUMBER — " + sanitizeCell(reason) + " " + population
+	}
+	return deployDeliveryDuration(*q.Seconds) + " " + population
+}
+
+// deployDeliveryWaiting renders the fleet still-waiting cohort. A zero count is
+// stated as a reading taken at an instant, never as the standing fact "nobody is
+// waiting" — and a non-zero one is always a LOWER BOUND with its as-of.
+func deployDeliveryWaiting(c cloudclient.DeployDeliveryCensored) string {
+	asOf := deployDeliveryAsOf(c.AsOf)
+	if c.Count == 0 {
+		return "nothing was still waiting " + asOf + " — a reading taken at that instant, not a standing fact"
+	}
+	bound := "an unstated bound"
+	if c.StillWaitingAtLeastSeconds != nil {
+		bound = deployDeliveryDuration(*c.StillWaitingAtLeastSeconds)
+	}
+	return fmt.Sprintf("STILL WAITING >= %s · %d row(s) not delivered %s", bound, c.Count, asOf)
+}
+
+// deployDeliverySiteWaiting is one site's still-waiting line — the same
+// "STILL WAITING >= X (as of …)" shape as the fleet cohort, so a site row can
+// never be read as a bare zero either.
+func deployDeliverySiteWaiting(s cloudclient.DeployDeliverySite) string {
+	bound := "an unstated bound"
+	if s.OldestWaitingSeconds != nil {
+		bound = deployDeliveryDuration(*s.OldestWaitingSeconds)
+	}
+	return "STILL WAITING >= " + bound + " " + deployDeliveryAsOf(s.AsOf)
+}
+
+// deployDeliveryAsOf renders the instant a still-waiting reading was taken,
+// normalised to RFC3339 UTC where it parses and passed through verbatim where it
+// does not — an unparseable stamp is still evidence and is never dropped.
+func deployDeliveryAsOf(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "(as of an instant the control plane did not name)"
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return "(as of " + t.UTC().Format(time.RFC3339) + ")"
+	}
+	return "(as of " + sanitizeCell(s) + ")"
+}
+
+// deployDeliveryDuration renders a wait in the largest honest unit, at
+// second resolution — 22638s reads as 6h17m18s, which is the sentence this
+// epic needed and could not say.
+func deployDeliveryDuration(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	d := (time.Duration(seconds * float64(time.Second))).Round(time.Second)
+	if d < time.Second {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	return d.String()
+}
+
 // printCloudDeploymentsHelp writes `bp cloud deployments` usage.
 func printCloudDeploymentsHelp(out *writer) {
 	const help = `bp cloud deployments — the FLEET deploy rate, with the denominator it was taken over.
@@ -487,7 +633,14 @@ WHAT IT PRINTS
     37.6% of 2216 attempted (832 failed · 793 deferred · 591 live) · 58.5% of 1423 terminal
 
   then the failure classes, the deferrals (counted in the volume, never in the
-  failure numerator) and the sites, worst-volume first.
+  failure numerator), the DELIVERY census (how long content waited to reach the
+  web, each percentile beside the sample and window width that produced it) and
+  the sites, worst-volume first.
+
+  A percentile that cannot be identified prints NO NUMBER and the reason — on a
+  fleet where 40% of rows are still waiting, no p95 exists to report. The
+  still-waiting cohort prints as "STILL WAITING >= <bound> (as of <instant>)",
+  never as a bare count.
 
 FLAGS
   --days N            window width ending now (default 7)

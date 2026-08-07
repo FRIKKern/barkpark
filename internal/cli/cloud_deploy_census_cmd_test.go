@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
 // censusTodayEnvelope is the payload the DEPLOYED control plane sends: one rate
@@ -410,4 +412,199 @@ func censusLineContaining(t *testing.T, out, needle string) string {
 	}
 	t.Fatalf("no line contains %q:\n%s", needle, out)
 	return ""
+}
+
+// censusDeliveryEnvelope is the census WITH dr-w11-s4's `delivery` node. Its key
+// set is the one `DeployLedger.delivery/3` emits, pinned on the Elixir side by
+// "the emitted key set is PINNED — the Go reader decodes every key" in
+// deploy_ledger_test.exs. The two pins are the contract: add a key there without
+// adding it here and the Elixir test moves; add it here without a reader and the
+// strict decode below fails.
+//
+// The numbers are the 40%-censored fixture the estimator refuses on: n=1000 with
+// 400 rows still waiting, so p95 and max have no identifiable value and p50 does.
+const censusDeliveryEnvelope = `{
+  "window": {"from": "2026-08-01T00:00:00Z", "to": "2026-08-02T00:00:00Z"},
+  "volume": 1000,
+  "failed": 400,
+  "failure_rate": {"sample": 1000, "pct": 40.0, "numerator": 400, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200,
+  "delivery": {
+    "window": {"from": "2026-08-01T00:00:00Z", "to": "2026-08-02T00:00:00Z", "width_seconds": 86400},
+    "as_of": "2026-08-02T00:00:00Z",
+    "environment": "production",
+    "clock": "deployment row: inserted_at → became_live_at (row-keyed proxy; the publish-keyed clock lands with dr-w11-s1)",
+    "sample": 1000,
+    "delivered": 600,
+    "p50": {"quantile": 0.5, "label": "p50", "seconds": 80.0, "sample": 1000, "censored": 400,
+            "censored_fraction": 0.4, "headroom": 0.5, "window_seconds": 86400, "min_sample": 200,
+            "refused": false, "reason": null, "basis": "floored: a still-waiting row contributes its lower bound"},
+    "p95": {"quantile": 0.95, "label": "p95", "seconds": null, "sample": 1000, "censored": 400,
+            "censored_fraction": 0.4, "headroom": 0.05, "window_seconds": 86400, "min_sample": 200,
+            "refused": true,
+            "reason": "p95 is UNIDENTIFIABLE: 40.0% are still waiting, exceeding the 5.0% headroom p95 needs",
+            "basis": "floored: a still-waiting row contributes its lower bound"},
+    "max": {"quantile": 1.0, "label": "max", "seconds": null, "sample": 1000, "censored": 400,
+            "censored_fraction": 0.4, "headroom": 0.0, "window_seconds": 86400, "min_sample": 200,
+            "refused": true,
+            "reason": "max is UNIDENTIFIABLE: 40.0% are still waiting, exceeding the 0.0% headroom max needs",
+            "basis": "floored: a still-waiting row contributes its lower bound"},
+    "censored": {"count": 400, "as_of": "2026-08-02T00:00:00Z", "still_waiting_at_least_seconds": 76399.0},
+    "unmetered": 7,
+    "min_sample": 200,
+    "sites": [
+      {"site_id": "site-alpha", "sample": 1000, "delivered": 600, "censored": 400, "unmetered": 7,
+       "still_waiting": true, "oldest_waiting_seconds": 76399.0, "as_of": "2026-08-02T00:00:00Z"},
+      {"site_id": "jarl-website", "sample": 23, "delivered": 23, "censored": 0, "unmetered": 0,
+       "still_waiting": false, "oldest_waiting_seconds": null, "as_of": "2026-08-02T00:00:00Z"}
+    ]
+  }
+}`
+
+// TestCloudDeploymentsDeliveryEveryEmittedKeyIsRead: the payload key-set guard.
+// Every key `DeployLedger.delivery/3` emits decodes into a field this CLI reads —
+// a strict decode (DisallowUnknownFields) fails on any key the Go side does not
+// know, and the per-field assertions fail on any key that decodes into a field
+// nobody looks at. A latency census whose reader silently drops half the payload
+// is the same silence this epic exists to end.
+func TestCloudDeploymentsDeliveryEveryEmittedKeyIsRead(t *testing.T) {
+	var envelope struct {
+		Delivery json.RawMessage `json:"delivery"`
+	}
+	if err := json.Unmarshal([]byte(censusDeliveryEnvelope), &envelope); err != nil {
+		t.Fatalf("fixture is not JSON: %v", err)
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(envelope.Delivery))
+	dec.DisallowUnknownFields()
+	var d cloudclient.DeployDelivery
+	if err := dec.Decode(&d); err != nil {
+		t.Fatalf("an emitted delivery key is UNREAD by cloudclient: %v", err)
+	}
+
+	if d.Window.From != "2026-08-01T00:00:00Z" || d.Window.To != "2026-08-02T00:00:00Z" || d.Window.WidthSeconds != 86400 {
+		t.Fatalf("window decoded wrong: %+v", d.Window)
+	}
+	if d.AsOf != "2026-08-02T00:00:00Z" || d.Environment != "production" || !strings.Contains(d.Clock, "became_live_at") {
+		t.Fatalf("as_of/environment/clock decoded wrong: %q %q %q", d.AsOf, d.Environment, d.Clock)
+	}
+	if d.Sample != 1000 || d.Delivered != 600 || d.Unmetered != 7 || d.MinSample != 200 {
+		t.Fatalf("counts decoded wrong: sample=%d delivered=%d unmetered=%d min_sample=%d", d.Sample, d.Delivered, d.Unmetered, d.MinSample)
+	}
+	if d.P50.Seconds == nil || *d.P50.Seconds != 80.0 || d.P50.Refused {
+		t.Fatalf("p50 decoded wrong: %+v", d.P50)
+	}
+	// The refusing node's `seconds` MUST stay nil — a float64 field would have
+	// turned this null into 0.0s, the comforting zero in its purest form.
+	if d.P95.Seconds != nil || !d.P95.Refused || d.P95.Headroom != 0.05 || d.P95.CensoredFraction != 0.4 ||
+		d.P95.Quantile != 0.95 || d.P95.Label != "p95" || d.P95.Sample != 1000 || d.P95.Censored != 400 ||
+		d.P95.WindowSeconds != 86400 || d.P95.MinSample != 200 || !strings.Contains(d.P95.Reason, "UNIDENTIFIABLE") ||
+		!strings.Contains(d.P95.Basis, "floored") {
+		t.Fatalf("p95 decoded wrong: %+v", d.P95)
+	}
+	if d.Max.Seconds != nil || !d.Max.Refused || d.Max.Quantile != 1.0 {
+		t.Fatalf("max decoded wrong: %+v", d.Max)
+	}
+	if d.Censored.Count != 400 || d.Censored.AsOf != "2026-08-02T00:00:00Z" ||
+		d.Censored.StillWaitingAtLeastSeconds == nil || *d.Censored.StillWaitingAtLeastSeconds != 76399.0 {
+		t.Fatalf("censored cohort decoded wrong: %+v", d.Censored)
+	}
+	if len(d.Sites) != 2 {
+		t.Fatalf("sites decoded wrong: %+v", d.Sites)
+	}
+	alpha, jarl := d.Sites[0], d.Sites[1]
+	if alpha.SiteID != "site-alpha" || alpha.Sample != 1000 || alpha.Delivered != 600 || alpha.Censored != 400 ||
+		alpha.Unmetered != 7 || !alpha.StillWaiting || alpha.OldestWaitingSeconds == nil ||
+		*alpha.OldestWaitingSeconds != 76399.0 || alpha.AsOf != "2026-08-02T00:00:00Z" {
+		t.Fatalf("site row decoded wrong: %+v", alpha)
+	}
+	// The jarl-website shape: live deliveries, nothing waiting — and its
+	// oldest-waiting bound is ABSENT, not zero.
+	if jarl.SiteID != "jarl-website" || jarl.StillWaiting || jarl.OldestWaitingSeconds != nil {
+		t.Fatalf("a site with nothing waiting must carry a nil bound, never 0: %+v", jarl)
+	}
+}
+
+// TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting: the human render. The
+// unidentifiable percentiles print NO NUMBER with the control plane's reason, the
+// identifiable one prints beside its sample and window width, and the
+// still-waiting cohort prints as a LOWER BOUND with an as-of — never as a count
+// alone, and never as a duration of zero.
+func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
+	newCensusServer(t, 200, censusDeliveryEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-01", "--to", "2026-08-02")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+
+	p95 := censusLineContaining(t, stdout, "p95 ")
+	for _, want := range []string{
+		"NO NUMBER",
+		"p95 is UNIDENTIFIABLE: 40.0% are still waiting, exceeding the 5.0% headroom p95 needs",
+		"n=1000", "400 still waiting", "window 24 hours",
+	} {
+		if !strings.Contains(p95, want) {
+			t.Fatalf("p95 line %q missing %q — the refusal, its reason and its population ride the SAME line", p95, want)
+		}
+	}
+
+	p50 := censusLineContaining(t, stdout, "p50 ")
+	for _, want := range []string{"1m20s", "n=1000", "400 still waiting", "window 24 hours"} {
+		if !strings.Contains(p50, want) {
+			t.Fatalf("p50 line %q missing %q — a value may never travel without its population", p50, want)
+		}
+	}
+
+	waiting := censusLineContaining(t, stdout, "STILL WAITING >=")
+	for _, want := range []string{"STILL WAITING >= 21h13m19s", "400 row(s)", "(as of 2026-08-02T00:00:00Z)"} {
+		if !strings.Contains(waiting, want) {
+			t.Fatalf("still-waiting line %q missing %q — a bare count reports the measurement's own latency as fact", waiting, want)
+		}
+	}
+
+	if !strings.Contains(stdout, "clock: deployment row: inserted_at") {
+		t.Fatalf("the clock must be printed beside the latency:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "7 row(s) the clock could not reach") {
+		t.Fatalf("the unmetered cohort must be reported, never dropped:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "site-alpha") || !strings.Contains(stdout, "sites still waiting") {
+		t.Fatalf("the still-waiting sites must be NAMED:\n%s", stdout)
+	}
+	// jarl-website has nothing waiting, so it must not appear in the
+	// still-waiting list at all — and it must certainly not appear with a 0.
+	if strings.Contains(stdout, "jarl-website") {
+		t.Fatalf("a site with nothing waiting must not be listed as waiting:\n%s", stdout)
+	}
+	// No percentile anywhere rendered as a zero duration.
+	if strings.Contains(stdout, ">= 0s") || strings.Contains(stdout, "p95  0") {
+		t.Fatalf("a refused percentile or an unset bound rendered as zero:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsWithoutDeliverySaysNotMeasured: against TODAY's payload,
+// which carries no `delivery` node at all, the reader says NOT MEASURED. Silence
+// there would read as "delivery is fine", which is exactly the failure — silent
+// and mis-reported — this epic exists to end.
+func TestCloudDeploymentsWithoutDeliverySaysNotMeasured(t *testing.T) {
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "NOT MEASURED")
+	if !strings.Contains(line, "NOT a fleet that delivers instantly") {
+		t.Fatalf("a missing delivery census must refuse out loud, not print nothing:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "STILL WAITING") {
+		t.Fatalf("nothing may be claimed about waiting when no delivery census was sent:\n%s", stdout)
+	}
 }

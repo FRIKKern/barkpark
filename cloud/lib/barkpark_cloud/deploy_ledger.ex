@@ -672,6 +672,258 @@ defmodule BarkparkCloud.DeployLedger do
     |> elem(0)
   end
 
+  ## ── The delivery clock ────────────────────────────────────────────────────
+
+  # The clock's own name, carried IN the payload. A latency number whose t0 is
+  # not printed beside it is a number nobody can audit, and this t0 is a proxy:
+  # the attempt row, not the publish (dr-w11-s1 starts the true one).
+  @delivery_clock "deployment row: inserted_at → became_live_at (row-keyed proxy; the publish-keyed clock lands with dr-w11-s1)"
+
+  # What the value IS when it is a value: floored, never trimmed, never dropped.
+  @delivery_basis "floored: a still-waiting row contributes its lower bound (as_of - inserted_at) and is never dropped; no trimming — the long waits are the signal"
+
+  @doc """
+  How long content WAITED to reach the web over a PINNED window — an estimator
+  that REFUSES a percentile it cannot identify, plus the cohort that is STILL
+  WAITING, named.
+
+  Ten waves of this epic measured what FRACTION of attempt rows settle failed.
+  Nobody measured how LONG. `census/3` groups by `[site_id, stage, status,
+  failure_reason]` and carries no time dimension at all, so a fleet whose rate
+  improves while every publish waits six hours reads as a fleet getting better.
+
+  ## The clock, named honestly (D161/D162)
+
+  This keys on the DEPLOYMENT ROW: `inserted_at` (the attempt was written) →
+  `became_live_at` (bytes answered on the web). It is NOT the publish-keyed
+  clock — slice dr-w11-s1 starts that one, and a later wave re-keys this
+  estimator onto it. It is deliberately NOT keyed on `content_rev` either: that
+  column is `sha256([doc_type, published_count, published_events])` over a
+  DATASET-WIDE last-50 activity window, so it moves without a publish and 1,474
+  of 3,106 `(site, rev)` groups repeat (one spanning 29.2h). Singleton rev groups
+  read p50 108s — indistinguishable from the per-attempt distribution — while
+  collapsed groups read 152s/693s, so 100% of the inflation revision-keying
+  produces is its own collapse artefact.
+
+  And it is not D142's run-keyed journey: there a failed row is TERMINAL and
+  CLOSES a run, so consecutive failures become singleton runs of identically
+  0.0s (393 of 647 live journeys). Site d8e9c2c7's 6h17m wait decomposes into 82
+  such runs, 80 of them 0.0s. Here a row that did NOT reach live is resolved by
+  the site's next live mark — so that outage stays ONE 22,638s wait.
+
+  ## Censoring is FLOORED, never dropped
+
+  A row with no live mark at or after it has not been delivered YET. Its wait is
+  a LOWER BOUND (`as_of - inserted_at`), and it enters the sample carrying that
+  bound. Dropping it is the failure mode this function exists to refuse: the
+  dropped estimator sits flat at 94-150s at EVERY window width — structurally
+  incapable of ever showing delay — while the floored one swings 829x.
+
+  ## The identifiability refusal — NOT a width guard
+
+  Narrowing the window is not the fix (p95 already diverges 11.0x at the
+  narrowest width) and `min_sample` does not catch it either (a 6h window passes
+  at n=217 with 36.9% censored). The predicate that discriminates is
+  `censored_fraction > (1 - q)`: a quantile needs `1 - q` of the mass ABOVE it,
+  and if more than that is still running the true value is unknowable. It agreed
+  14/14 with the empirical test — whether the row AT `ceil(n*q)` is itself
+  censored — which is applied as a third policy anyway.
+
+  ON TODAY'S CORPUS p95 REFUSES AT EVERY WIDTH. That is the true answer, not a
+  broken feature: 40%+ of rows in any window are still waiting, and no estimator
+  can name a 95th percentile of a distribution whose top 40% has not finished.
+
+  ## Scope (D163)
+
+  `production` only — `census/3` applies no environment predicate at all while
+  `list_page/2` one function away has `filter_environment/2`. The column is NOT
+  NULL DEFAULT `production`, so every pre-gh-6 row is already in scope. Rows the clock
+  CANNOT reach — a `live` row with no `became_live_at` — are reported as an
+  explicit `unmetered` count, never a WHERE clause: jarl-website has 55 rows, 23
+  live deliveries and ZERO non-null `content_rev`, so a naive key filter would
+  silently omit an entire customer site.
+
+  Every percentile is an INSEPARABLE node — the value cannot travel without its
+  window width, its sample and its censored count:
+
+      %{quantile: 0.95, label: "p95", seconds: nil, sample: 1000, censored: 400,
+        censored_fraction: 0.4, headroom: 0.05, window_seconds: 86_400,
+        min_sample: 200, refused: true, basis: "…",
+        reason: "p95 is UNIDENTIFIABLE: 40.0% are still waiting, exceeding the 5.0% headroom p95 needs"}
+
+  Options: `:as_of` (the still-waiting clock, default now), `:site_limit`
+  (default 50).
+  """
+  @spec delivery(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def delivery(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
+    site_limit = Keyword.get(opts, :site_limit, 50)
+    as_of = opts |> Keyword.get(:as_of, DateTime.utc_now()) |> DateTime.truncate(:microsecond)
+
+    rows =
+      Repo.all(
+        from(d in Deployment,
+          where: d.inserted_at >= ^from and d.inserted_at < ^to,
+          # PRODUCTION only. Safe as a WHERE because the column is NOT NULL
+          # DEFAULT 'production' (20260702170000_add_branch_previews) — every
+          # pre-gh-6 row is already production, so nothing is silently dropped.
+          # The rows that CANNOT be dropped by a predicate are the unkeyable
+          # ones, and those are counted in `unmetered` below.
+          where: d.environment == "production",
+          select: %{
+            site_id: d.site_id,
+            status: d.status,
+            inserted_at: d.inserted_at,
+            became_live_at: d.became_live_at
+          }
+        )
+      )
+
+    site_nodes =
+      rows
+      |> Enum.group_by(& &1.site_id)
+      |> Enum.map(fn {site_id, site_rows} -> site_delivery(site_id, site_rows, as_of) end)
+
+    # Sorted ONCE, ascending, over the FLOORED seconds — censored rows included,
+    # carrying their lower bound. Every quantile below indexes into this list.
+    observations =
+      site_nodes |> Enum.flat_map(& &1.observations) |> Enum.sort_by(& &1.seconds)
+
+    censored = Enum.filter(observations, & &1.censored)
+    width = DateTime.diff(to, from)
+
+    %{
+      window: %{from: from, to: to, width_seconds: width},
+      as_of: as_of,
+      environment: "production",
+      clock: @delivery_clock,
+      sample: length(observations),
+      delivered: length(observations) - length(censored),
+      p50: delivery_quantile(observations, 0.5, "p50", width),
+      p95: delivery_quantile(observations, 0.95, "p95", width),
+      max: delivery_quantile(observations, 1.0, "max", width),
+      censored: %{
+        count: length(censored),
+        as_of: as_of,
+        still_waiting_at_least_seconds:
+          censored |> Enum.map(& &1.seconds) |> Enum.max(fn -> nil end)
+      },
+      unmetered: Enum.reduce(site_nodes, 0, &(&1.unmetered + &2)),
+      min_sample: @min_sample,
+      sites:
+        site_nodes
+        |> Enum.map(&Map.delete(&1, :observations))
+        |> Enum.sort_by(&{&1.sample, &1.site_id}, :desc)
+        |> Enum.take(site_limit)
+    }
+  end
+
+  # One site's rows folded into observations. `live_marks` is that site's ordered
+  # list of "content answered on the web at" instants; a row that did not itself
+  # reach live is DELIVERED by the first mark at or after it (that is when the
+  # site's content did reach the web) and CENSORED when there is no such mark.
+  defp site_delivery(site_id, rows, as_of) do
+    live_marks =
+      rows
+      |> Enum.filter(&(&1.status == "live" and &1.became_live_at != nil))
+      |> Enum.map(& &1.became_live_at)
+      |> Enum.sort(DateTime)
+
+    # UNMETERED, not filtered: a `live` row with no `became_live_at` reached the
+    # web at a time this ledger cannot name. It is counted and reported; it is
+    # never quietly deleted from the denominator.
+    {unmetered, keyed} =
+      Enum.split_with(rows, &(&1.status == "live" and is_nil(&1.became_live_at)))
+
+    observations = Enum.map(keyed, &observe(&1, live_marks, as_of))
+    still_waiting = Enum.filter(observations, & &1.censored)
+
+    %{
+      site_id: site_id,
+      sample: length(observations),
+      delivered: length(observations) - length(still_waiting),
+      censored: length(still_waiting),
+      unmetered: length(unmetered),
+      still_waiting: still_waiting != [],
+      oldest_waiting_seconds: still_waiting |> Enum.map(& &1.seconds) |> Enum.max(fn -> nil end),
+      as_of: as_of,
+      observations: observations
+    }
+  end
+
+  defp observe(%{status: "live", became_live_at: %DateTime{} = live} = row, _marks, _as_of),
+    do: %{site_id: row.site_id, seconds: waited(row.inserted_at, live), censored: false}
+
+  defp observe(row, marks, as_of) do
+    case Enum.find(marks, &(DateTime.compare(&1, row.inserted_at) != :lt)) do
+      %DateTime{} = live ->
+        %{site_id: row.site_id, seconds: waited(row.inserted_at, live), censored: false}
+
+      nil ->
+        %{site_id: row.site_id, seconds: waited(row.inserted_at, as_of), censored: true}
+    end
+  end
+
+  defp waited(t0, t1), do: max(DateTime.diff(t1, t0, :millisecond), 0) / 1000
+
+  # The estimator, with rate/2's refusal shape and rate/2's promise that the
+  # denominator rides IN the node.
+  #
+  # NO TRIM. `Registry.stage_verdict/1` is the right refusal SHAPE but trims the
+  # tails first; for time-to-web the long waits ARE the signal this epic exists
+  # to expose, so trimming here would delete the finding.
+  defp delivery_quantile(observations, q, label, window_seconds) do
+    n = length(observations)
+    censored = Enum.count(observations, & &1.censored)
+    fraction = if n == 0, do: 0.0, else: censored / n
+    headroom = 1.0 - q
+    at = Enum.at(observations, quantile_index(n, q))
+
+    node = %{
+      quantile: q,
+      label: label,
+      sample: n,
+      censored: censored,
+      censored_fraction: Float.round(fraction, 4),
+      headroom: Float.round(headroom, 4),
+      window_seconds: window_seconds,
+      min_sample: @min_sample,
+      basis: @delivery_basis
+    }
+
+    cond do
+      n < @min_sample ->
+        refused(node, "sample #{n} below min_sample #{@min_sample}")
+
+      fraction > headroom ->
+        refused(
+          node,
+          "#{label} is UNIDENTIFIABLE: #{pct(fraction)}% are still waiting, " <>
+            "exceeding the #{pct(headroom)}% headroom #{label} needs"
+        )
+
+      at.censored ->
+        refused(
+          node,
+          "#{label} lands ON a still-waiting row (position #{quantile_index(n, q) + 1} of #{n}) — " <>
+            "its true value is at least #{at.seconds}s and cannot be named"
+        )
+
+      true ->
+        Map.merge(node, %{seconds: at.seconds, refused: false, reason: nil})
+    end
+  end
+
+  # 1-based `ceil(n * q)`, expressed 0-based. q = 1.0 is the max.
+  defp quantile_index(0, _q), do: 0
+
+  defp quantile_index(n, q),
+    do: n |> Kernel.*(q) |> Float.ceil() |> trunc() |> max(1) |> min(n) |> Kernel.-(1)
+
+  defp refused(node, reason),
+    do: Map.merge(node, %{seconds: nil, refused: true, reason: reason})
+
+  defp pct(fraction), do: Float.round(fraction * 100, 1)
+
   ## ── The cursor ────────────────────────────────────────────────────────────
 
   @doc """

@@ -1944,7 +1944,102 @@ type DeployCensus struct {
 	NotAttempted        []DeployCensusClass `json:"not_attempted"`
 	Sites               []DeployCensusSite  `json:"sites"`
 	MinSample           int                 `json:"min_sample"`
-	Raw                 []byte              `json:"-"`
+	// Delivery is the dr-w11-s4 addition: the time-to-web census. A POINTER
+	// because today's control plane sends no `delivery` key at all, and "the
+	// control plane does not measure delivery yet" must not decode to "delivery
+	// took zero seconds".
+	Delivery *DeployDelivery `json:"delivery"`
+	Raw      []byte          `json:"-"`
+}
+
+// DeployDeliveryWindow is the delivery census's PINNED window WITH its width —
+// the width is part of the payload because a latency swings 829x with it, so a
+// reader that prints the number without the width is quoting an unfalsifiable
+// figure.
+type DeployDeliveryWindow struct {
+	From         string `json:"from"`
+	To           string `json:"to"`
+	WidthSeconds int    `json:"width_seconds"`
+}
+
+// DeployDeliveryQuantile is ONE percentile of the time content waited to reach
+// the web — and it is INSEPARABLE: the value cannot travel without the window
+// width, the sample, and how much of that sample is STILL WAITING.
+//
+// Seconds is a pointer for the same reason DeployRate.Pct is: a refused node
+// sends null, and a float64 would decode that as 0.0 — a fleet that looks
+// instant because nobody could measure it. Three refusals reach here (below
+// min_sample; censored_fraction above the 1-q headroom; the row AT the quantile
+// is itself still waiting) and every one of them means NO NUMBER, never zero.
+type DeployDeliveryQuantile struct {
+	Quantile         float64  `json:"quantile"`
+	Label            string   `json:"label"`
+	Seconds          *float64 `json:"seconds"`
+	Sample           int      `json:"sample"`
+	Censored         int      `json:"censored"`
+	CensoredFraction float64  `json:"censored_fraction"`
+	Headroom         float64  `json:"headroom"`
+	WindowSeconds    int      `json:"window_seconds"`
+	MinSample        int      `json:"min_sample"`
+	Refused          bool     `json:"refused"`
+	Reason           string   `json:"reason"`
+	Basis            string   `json:"basis"`
+}
+
+// DeployDeliveryCensored is the STILL-WAITING cohort: how many rows have not
+// been delivered, the lower bound on the longest of those waits, and the instant
+// the bound was taken.
+//
+// AsOf is not decoration. The same pinned window answered stranded 3 → 2 → 0
+// within five minutes, so a bare count is printing its own measurement latency;
+// this reader prints "STILL WAITING >= X" beside the instant, never a bare 0.
+type DeployDeliveryCensored struct {
+	Count                      int      `json:"count"`
+	AsOf                       string   `json:"as_of"`
+	StillWaitingAtLeastSeconds *float64 `json:"still_waiting_at_least_seconds"`
+}
+
+// DeployDeliverySite is one site's slice of the delivery window: how many rows
+// were measured, how many were delivered, how many are still waiting, how many
+// the clock could not reach at all, and the oldest wait still running.
+type DeployDeliverySite struct {
+	SiteID               string   `json:"site_id"`
+	Sample               int      `json:"sample"`
+	Delivered            int      `json:"delivered"`
+	Censored             int      `json:"censored"`
+	Unmetered            int      `json:"unmetered"`
+	StillWaiting         bool     `json:"still_waiting"`
+	OldestWaitingSeconds *float64 `json:"oldest_waiting_seconds"`
+	AsOf                 string   `json:"as_of"`
+}
+
+// DeployDelivery is `delivery` on the census envelope: how long content WAITED
+// to reach the web, with an estimator that can refuse and a cohort that names
+// who is still waiting (DeployLedger.delivery/3).
+//
+// Clock is the payload's own statement of what t0 is — today the deployment ROW
+// (inserted_at → became_live_at), a proxy for the publish-keyed clock dr-w11-s1
+// starts. A reader that prints a latency without printing its clock is asking to
+// be believed.
+//
+// Unmetered is the cohort the clock could NOT reach (a live row with no
+// became_live_at). It is reported, never subtracted in silence: the whole reason
+// this node exists is that a number which improves because rows stopped being
+// counted is the vacuous green this epic refuses.
+type DeployDelivery struct {
+	Window      DeployDeliveryWindow   `json:"window"`
+	AsOf        string                 `json:"as_of"`
+	Environment string                 `json:"environment"`
+	Clock       string                 `json:"clock"`
+	Sample      int                    `json:"sample"`
+	Delivered   int                    `json:"delivered"`
+	P50         DeployDeliveryQuantile `json:"p50"`
+	P95         DeployDeliveryQuantile `json:"p95"`
+	Max         DeployDeliveryQuantile `json:"max"`
+	Censored    DeployDeliveryCensored `json:"censored"`
+	Unmetered   int                    `json:"unmetered"`
+	MinSample   int                    `json:"min_sample"`
+	Sites       []DeployDeliverySite   `json:"sites"`
 }
 
 // DeployCensusError is a census the control plane REFUSED to answer, with the
