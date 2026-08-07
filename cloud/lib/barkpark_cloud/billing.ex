@@ -216,10 +216,19 @@ defmodule BarkparkCloud.Billing do
     end
   end
 
-  # The configured per-plan ceilings, read at call time. Falls back to
-  # @default_limits when nothing is configured.
+  @doc """
+  The configured per-plan managed-instance ceilings, read at call time. Falls
+  back to `@default_limits` when nothing is configured.
+
+  PUBLIC because the ceiling is mirrored OUTSIDE this module: the Cloud console
+  re-declares the same numerals in `app.js`'s `PLAN_CATALOG`, where they drive
+  the tier cards' feature copy. `cch-w49-s3`'s cross-layer mirror guard
+  (`test/barkpark_cloud/billing_client_mirror_test.exs`) calls this from the
+  booted BEAM and compares it against the console's own exported constant, so
+  the two sides cannot drift silently. Read-only; no caller mutates the map.
+  """
   @spec limits() :: %{optional(String.t()) => non_neg_integer()}
-  defp limits do
+  def limits do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:limits, @default_limits)
   end
