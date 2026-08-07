@@ -708,4 +708,94 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert :not_found = SiteDeployController.resolve_status_match(%{build_id: nil}, "b1")
     end
   end
+
+  # ── the call budgets are PINNED, not merely configured (dr-w15-s1) ───────
+  #
+  # Every existing reference to `trigger_call_timeout_ms` OVERRIDES it (25ms,
+  # above) — so nothing observed the DEFAULT, and a regression from 30_000 back
+  # to the 5_000 that produced 265 wrong `feature_not_configured` rows would
+  # have shipped GREEN. These two tests are the guard that can lose: mutate the
+  # module attribute and they RED.
+  describe "call budgets — the defaults, observed without overriding them" do
+    test "the trigger budget default is 30_000ms, longer than the ctl round-trip it waits on" do
+      # The pin is meaningless if config is supplying the number: assert we are
+      # reading the ATTRIBUTE, then assert the attribute.
+      refute Keyword.has_key?(DeployRunner.config(), :trigger_call_timeout_ms),
+             "this test observes the DEFAULT — an override in config would make it vacuous"
+
+      assert DeployRunner.trigger_call_timeout_ms() == 30_000
+
+      # The invariant underneath the number: the caller's budget must outlast a
+      # control-plane systemctl round-trip (@default_ctl_cmd_timeout_ms, 15s),
+      # which the trigger's critical section is ALLOWED to make. The old 5_000
+      # violated this, and that is what made the door lie.
+      assert DeployRunner.trigger_call_timeout_ms() > 15_000
+    end
+
+    test "the status budget default is 20_000ms, and is the one `trigger/1` does NOT share" do
+      refute Keyword.has_key?(DeployRunner.config(), :status_call_timeout_ms),
+             "this test observes the DEFAULT — an override in config would make it vacuous"
+
+      assert DeployRunner.status_call_timeout_ms() == 20_000
+      # Same invariant as the trigger: longer than the ctl round-trip
+      # `{:status, slug}` may make. `status/1` used to take safe_call's unstated
+      # 5_000 default.
+      assert DeployRunner.status_call_timeout_ms() > 15_000
+    end
+  end
+
+  # ── status/1 no longer answers a silent :idle for a wedged Runner ────────
+  #
+  # A 5_000ms budget with an `idle_status/1` fallback meant a Runner wedged for
+  # >5s reported `state: :idle` — byte-identical to "this slug has never run",
+  # on the very read a control plane polls to decide a deploy finished. The
+  # wedge here is produced BY CONSTRUCTION (a process parked on a message nobody
+  # sends), so this can only fail for the right reason.
+  describe "status/1 — an unread status is not an empty one" do
+    test "a genuine idle and an unreachable Runner are DIFFERENT answers" do
+      genuine = DeployRunner.status("never-ran-anywhere")
+      assert genuine.state == :idle
+      assert genuine.log_state == :never_recorded
+      assert is_nil(genuine.failure_reason)
+
+      # Shrink the budget so the wedge is observed in milliseconds; the door is
+      # silent by construction, so no budget could have been long enough.
+      put_runner_cfg(status_call_timeout_ms: 100)
+      intercept_with_silent_door()
+
+      degraded = DeployRunner.status("never-ran-anywhere")
+
+      assert degraded.state == :unknown
+      refute degraded.state == genuine.state
+      assert degraded.log_state == :unknown
+      assert degraded.failure_reason =~ "did not answer"
+      assert degraded.failure_reason =~ "NOT idle"
+      # Same keys as every other status map — callers match the shape.
+      assert Map.keys(degraded) |> Enum.sort() == Map.keys(genuine) |> Enum.sort()
+      # And `running?/1` still answers false, never crashes, on that map.
+      refute DeployRunner.running?("never-ran-anywhere")
+    end
+  end
+
+  # A door that answers NOTHING — the same name takeover as
+  # `intercept_with_unanswering_door/0`, but it does not proxy status either, so
+  # `{:status, slug}` expires too.
+  defp intercept_with_silent_door do
+    real = Process.whereis(DeployRunner)
+    assert is_pid(real), "the DeployRunner singleton must be alive to be intercepted"
+
+    door = spawn(fn -> receive do: (:never -> :ok) end)
+    Process.unregister(DeployRunner)
+    Process.register(door, DeployRunner)
+
+    on_exit(fn ->
+      if Process.whereis(DeployRunner) == door, do: Process.unregister(DeployRunner)
+      Process.exit(door, :kill)
+
+      if Process.alive?(real) and is_nil(Process.whereis(DeployRunner)),
+        do: Process.register(real, DeployRunner)
+    end)
+
+    door
+  end
 end

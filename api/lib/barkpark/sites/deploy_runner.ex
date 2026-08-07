@@ -199,6 +199,20 @@ defmodule Barkpark.Sites.DeployRunner do
   # wedged Runner, not a slow one, and now says so in its own words.
   @trigger_call_timeout_ms 30_000
 
+  # How long a caller waits for the door to answer `{:status, slug}`.
+  #
+  # Same defect class as the trigger's old 5_000ms, on the read the operator
+  # trusts MOST: `{:status, slug}` may run a `systemctl is-active` round-trip
+  # that is ALLOWED to take @default_ctl_cmd_timeout_ms (15s), so a 5_000ms
+  # caller budget was shorter than the work it waited for — and `safe_call/3`
+  # then served `idle_status/1`, i.e. a wedged Runner reported `state: :idle`,
+  # byte-identical to "this slug has never run". A false NEGATIVE on the exact
+  # read a control plane polls to decide a deploy finished.
+  #
+  # 20s is the ctl budget plus slack: a status that outlives THIS is a wedged
+  # Runner, and `unreachable_status/1` now says `:unknown` instead of `:idle`.
+  @status_call_timeout_ms 20_000
+
   # After a launch, systemd may report the unit `inactive` for a beat before it
   # transitions to `active`. Do NOT serve `:done` off an empty fold inside this
   # grace — an observer that flickers to done between spawn and start would race
@@ -237,9 +251,11 @@ defmodule Barkpark.Sites.DeployRunner do
   there used to be one. `:available` the bytes are on the box; `:evicted`
   retention removed them and a terminal record survives to say so; `:missing` a
   record exists but its log never appeared (the unit died before writing);
-  `:never_recorded` nothing was ever written for this deployment at all.
+  `:never_recorded` nothing was ever written for this deployment at all;
+  `:unknown` NOTHING WAS READ — the Runner did not answer, so this says nothing
+  about the bytes either way (see `status/1`'s degraded answer).
   """
-  @type log_state :: :available | :evicted | :missing | :never_recorded
+  @type log_state :: :available | :evicted | :missing | :never_recorded | :unknown
   # How many trailing meaningful lines a failure_reason carries. The engine's own
   # "BUILD failed …" line is usually last; the REAL cause (npm's 401, the HEALTH
   # marker miss) is the line or two above it.
@@ -415,26 +431,35 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   @doc """
-  The run status for `slug`: `state` (`:idle` | `:running` | `:done`), the parsed
+  The run status for `slug`: `state` (`:idle` | `:running` | `:done` |
+  `:unknown`), the parsed
   `stages` (never evicted), `exit_code`, an honest `failure_reason`, the bounded
   `log` tail (oldest line first), and timestamps. A slug that has never run
   reports `:idle`. On a systemd box the status is RECONSTRUCTED from the transient
   unit's durable status + log files, so it survives a BEAM restart. Never raises.
+
+  A Runner that does not answer inside `status_call_timeout_ms/0` does NOT get
+  reported as idle — the degraded answer is `state: :unknown` with a
+  `failure_reason` naming the unanswered call (`unreachable_status/1`). "I could
+  not read this" and "this slug has never run" used to be the same map.
   """
   @spec status(String.t()) :: map()
   def status(slug) when is_binary(slug),
-    do: safe_call({:status, slug}, idle_status(slug))
+    do: safe_call({:status, slug}, unreachable_status(slug), timeout: status_call_timeout_ms())
 
   @doc "Whether a run for `slug` is currently in flight."
   @spec running?(String.t()) :: boolean()
   def running?(slug) when is_binary(slug), do: match?(%{state: :running}, status(slug))
 
   # `fallback` is what a caller gets when the Runner cannot answer at all —
-  # never crashed into, never confused with an answer the Runner GAVE. Callers
-  # pass an explicit `:timeout` because the default 5_000ms is shorter than the
-  # work some of these calls are allowed to do.
-  defp safe_call(msg, fallback, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, 5_000)
+  # never crashed into, never confused with an answer the Runner GAVE.
+  #
+  # `:timeout` is MANDATORY (dr-w15-s1): there is no implicit budget any more.
+  # The silent 5_000ms default this used to carry is what let `status/1` serve
+  # `idle_status/1` for a Runner that was merely wedged, so the number is now a
+  # decision each caller has to make and a test can pin.
+  defp safe_call(msg, fallback, opts) do
+    timeout = Keyword.fetch!(opts, :timeout)
 
     case Process.whereis(__MODULE__) do
       nil ->
@@ -2562,11 +2587,32 @@ defmodule Barkpark.Sites.DeployRunner do
   defp ctl_cmd_timeout_ms,
     do: Keyword.get(config(), :ctl_cmd_timeout_ms, @default_ctl_cmd_timeout_ms)
 
-  # Overridable so a test can shrink the door's answer budget below the work the
-  # door actually does, and observe the unanswered-trigger path for real instead
-  # of mocking it.
-  defp trigger_call_timeout_ms,
+  @doc """
+  How long `trigger/1` waits for the door to answer, in ms — the DEFAULT is
+  `#{@trigger_call_timeout_ms}` and must stay longer than the ctl round-trip the
+  trigger's critical section is allowed to make (a shorter budget is the dr-w8-s2
+  defect: 265 rows of `feature_not_configured` for builds that ran fine).
+
+  PUBLIC so the default can be OBSERVED by a test without overriding it — this
+  is the same expression `trigger/1` passes to `safe_call/3`, so a pin on it
+  cannot pass while the door uses a different number. Overridable via config
+  `:trigger_call_timeout_ms` so a test can shrink the budget below the work the
+  door actually does and observe the unanswered-trigger path for real.
+  """
+  @spec trigger_call_timeout_ms() :: pos_integer()
+  def trigger_call_timeout_ms,
     do: Keyword.get(config(), :trigger_call_timeout_ms, @trigger_call_timeout_ms)
+
+  @doc """
+  How long `status/1` waits for the door to answer, in ms — default
+  `#{@status_call_timeout_ms}`. Same public-for-observation contract as
+  `trigger_call_timeout_ms/0`, and the same invariant: longer than the ctl
+  round-trip `{:status, slug}` may make, or a slow box reads as `:unknown` when
+  it is merely busy.
+  """
+  @spec status_call_timeout_ms() :: pos_integer()
+  def status_call_timeout_ms,
+    do: Keyword.get(config(), :status_call_timeout_ms, @status_call_timeout_ms)
 
   # Run a control-plane `System.cmd` under a hard deadline on a SUPERVISED,
   # UNLINKED task so a hung external process cannot wedge the singleton Runner.
@@ -2674,6 +2720,24 @@ defmodule Barkpark.Sites.DeployRunner do
 
   defp run_finished_at(%{finished_at: %DateTime{} = dt}), do: dt
   defp run_finished_at(_), do: ~U[1970-01-01 00:00:00Z]
+
+  # The answer when the door could not be READ at all — the Runner is gone or
+  # did not reply inside `status_call_timeout_ms/0`. Deliberately NOT
+  # `idle_status/1`: an unread status is not an empty one, and a control plane
+  # polling for a build's outcome must be able to tell "nothing here" from "I
+  # cannot see". Same keys as every other status map (callers pattern-match the
+  # shape), with `state: :unknown` and a `failure_reason` that names the cause.
+  defp unreachable_status(slug) do
+    %{
+      idle_status(slug)
+      | state: :unknown,
+        log_state: :unknown,
+        failure_reason:
+          "deploy runner unreachable — it is not registered, or it did not " <>
+            "answer {:status, #{slug}} within #{status_call_timeout_ms()}ms; " <>
+            "status unknown (NOT idle)"
+    }
+  end
 
   defp idle_status(slug) do
     %{
