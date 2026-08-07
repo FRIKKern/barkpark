@@ -201,4 +201,33 @@ defmodule BarkparkCloud.ProvidersCatalogCapabilityTest do
       end
     end
   end
+
+  # DECAY PROTECTION, and honestly nothing more — the same framing cch-w45-s3
+  # gave the census's check (2g). It does not prove the overlay behaves; the
+  # arms above do that for the kinds that exist. It exists because the
+  # BEHAVIOURAL proof of the LEAK direction is unreachable today: after the
+  # overlay, no fixture kind is served `catalog: false` at all (hetzner/azure
+  # are overlaid, `fake` is honestly true from the Go seam), so a widening of
+  # `own_catalog_capability/2` to EVERY kind would pass every arm above. The
+  # day a catalog-less connectable kind gets a capability row, the arm directly
+  # overhead bites for real and this one becomes redundant — delete it then.
+  test "the overlay stays FENCED on @neutral_kinds (decay protection, not a behaviour proof)" do
+    src = router_source()
+
+    body =
+      case Regex.run(~r/defp own_catalog_capability\(.*?\n  end\n/s, src) do
+        [match] -> match
+        nil -> nil
+      end
+
+    assert is_binary(body),
+           "`defp own_catalog_capability(` was not found in #{@router_source} — the overlay " <>
+             "was renamed or removed. Re-derive this arm; do not delete it."
+
+    assert String.contains?(body, "@neutral_kinds"),
+           "own_catalog_capability/2 no longer fences on @neutral_kinds. Unfenced, it would " <>
+             "claim `catalog: true` for a kind neither the Go seam nor this control plane " <>
+             "catalogs — and no other arm in this file can see that today, because no " <>
+             "fixture kind is left serving catalog=false. Body was:\n#{body}"
+  end
 end
