@@ -577,10 +577,20 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // 82nd and 83rd residue entries. It refused exactly as designed: the bare sweep
 // exited 2 with `UNLISTED scenario "members-admin-actor" (family hash:#settings)`
 // (and the twin on the next line) and this test exited 1 on 106/81 before the
-// five numbers below — and the TITLE above them, which no assertion can red —
-// were RE-READ from `scenarioReport` on THIS merge base (origin/main b00d793c0),
-// never carried from the brief.
-test("the census reconciles: 108 scenarios, 25 distinct covered by 26 cells, 83 residue over 13 families", () => {
+// five numbers below were RE-READ from `scenarioReport` on that slice's own
+// merge base, never carried from the brief. (That sha is deliberately not
+// spelled here: a merge base is stale the day after it is written, and this is
+// the file that exists to stop typed numerals rotting.)
+//
+// cch-w47-s4 (D527) DERIVED THE TITLE. It used to carry the same five integers
+// as a second copy that "no assertion can red" — true, and the reason the
+// prescribed fix was a test that parses its own `t.name`. Building the title
+// from `scenarioReport` instead DELETES the copy: there is no integer left to
+// parse, no parser to maintain, and the harness prints the identical line. The
+// five asserts below stay — they are what makes the derived title mean
+// something rather than merely echo itself.
+const census = scenarioReport({ scenarios: SCENARIOS });
+test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
   assert.equal(r.total, 108);
@@ -608,6 +618,120 @@ test("every residue family has a written reason, and no reason outlives its fami
   assert.equal(used.size, 13);
   for (const f of used) assert.ok(RESIDUE_FAMILY_REASONS[f] && RESIDUE_FAMILY_REASONS[f].length > 60, `family ${f} needs a written reason`);
   assert.deepEqual(Object.keys(RESIDUE_FAMILY_REASONS).filter((f) => !used.has(f)), []);
+});
+
+// ── the residue's TYPED numerals: 21 of them, none of which could lose ───────
+//
+// WHAT THESE THREE ARMS OWN (charter D527). The census five (108/25/26/83/13)
+// were already asserted above; what was NOT asserted is every OTHER typed
+// number the residue carries — the 13 `// <family> — N` group headers inside
+// the SCENARIO_RESIDUE literal, the 8 `These N` clauses inside
+// RESIDUE_FAMILY_REASONS, and the two ZERO-residue family names in
+// breakpoint-sweep.mjs's own header prose. TWO OF THEM WERE FALSE ON MAIN when
+// these arms were written, and both were found BY these arms, not by reading:
+// `// hash:#billing — 3` sat over FOUR entries (the sibling reason 142 lines
+// above already said "These 4"), and the `hash:#overview` reason said "These 9"
+// over TEN. The sweep RUNNER exits 0 under both — it derives its own report
+// from the object, never from the comments above it, so it structurally cannot
+// own this. Console gate runs THIS file, which is why the arms live here.
+//
+// WHY PARSE THE COMMITTED BYTES AT ALL. A comment is invisible to the module
+// system: importing SCENARIO_RESIDUE gives the 83 pairs and nothing about the
+// headers. The only way a header can be made to lose is to read the file as
+// text — which is why the range clamp below is load-bearing rather than
+// decorative.
+
+const SWEEP_SRC = fs.readFileSync(path.join(HERE, "breakpoint-sweep.mjs"), "utf8");
+
+// The bytes of the SCENARIO_RESIDUE literal, with each family header carried
+// alongside its 1-based line number in breakpoint-sweep.mjs so a failure names
+// the line to open.
+function residueGroupHeaders(src = SWEEP_SRC) {
+  const start = src.indexOf("export const SCENARIO_RESIDUE");
+  assert.ok(start >= 0, "breakpoint-sweep.mjs no longer exports SCENARIO_RESIDUE as a literal — this parser has no range to read");
+  const end = src.indexOf("\n};", start);
+  assert.ok(end > start, "the SCENARIO_RESIDUE literal has no bare `};` terminator — the parse range is unbounded");
+  const body = src.slice(start, end);
+  const lineBase = src.slice(0, start).split("\n").length;
+  const headers = [];
+  for (const line of body.split("\n").entries()) {
+    const [i, text] = line;
+    const m = /^\s*\/\/\s+(\S+)\s+—\s+(\d+)\s*$/.exec(text);
+    if (m) headers.push({ family: m[1], typed: Number(m[2]), line: lineBase + i });
+  }
+  return headers;
+}
+
+function derivedFamilyCounts(residue = SCENARIO_RESIDUE) {
+  const counts = new Map();
+  for (const family of Object.values(residue)) counts.set(family, (counts.get(family) || 0) + 1);
+  return counts;
+}
+
+test("every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from the literal itself", () => {
+  const headers = residueGroupHeaders();
+  const derived = derivedFamilyCounts();
+  // THE REFORMAT TRIPWIRE, AND IT IS NOT DECORATION. The parser reads the bytes
+  // between `export const SCENARIO_RESIDUE` and the FIRST bare `};`. A prettier
+  // pass that collapses the object, or a nested literal that introduces an
+  // earlier `};`, silently SHRINKS that range — every surviving header still
+  // agrees, the loop still runs, and the arm goes vacuous-green over a fraction
+  // of the file. Pinning the header COUNT against the derived family count is
+  // what makes a shrunk range fatal instead of quiet. IF THIS REDS, the fix is
+  // never to delete it: either a family lost its header, or the range moved.
+  assert.equal(headers.length, derived.size,
+    `parsed ${headers.length} group headers but the literal holds ${derived.size} families — ` +
+    "either a family has no `// <family> — N` header, or the parse range shrank " +
+    "(a reformat, or a nested `};` inside the literal) and this arm is reading a fraction of the file");
+  for (const h of headers) {
+    assert.ok(derived.has(h.family),
+      `breakpoint-sweep.mjs:${h.line} heads a group for family ${h.family}, which no residue entry uses`);
+    assert.equal(h.typed, derived.get(h.family),
+      `breakpoint-sweep.mjs:${h.line} types \`// ${h.family} — ${h.typed}\` over ${derived.get(h.family)} entries`);
+  }
+  const summed = headers.reduce((a, h) => a + h.typed, 0);
+  assert.equal(summed, Object.keys(SCENARIO_RESIDUE).length,
+    `the ${headers.length} typed group headers sum to ${summed} against a literal of ${Object.keys(SCENARIO_RESIDUE).length} entries`);
+  // and every family the literal uses is headed exactly once
+  assert.deepEqual([...new Set(headers.map((h) => h.family))].sort(), [...derived.keys()].sort());
+});
+
+test("every `These N` clause in RESIDUE_FAMILY_REASONS is recounted from the literal", () => {
+  const derived = derivedFamilyCounts();
+  // HONEST COVERAGE, STATED RATHER THAN IMPLIED: this arm checks only the
+  // reasons that actually SPELL a count. Five families phrase their reason
+  // without one ("Routes whose head is a bare `#`…", the modal family,
+  // /activate, /new, #signup) and are SKIPPED here — untouched by this arm, not
+  // proven by it. Their membership is still pinned, but by the header arm
+  // above, which covers all 13. A reason that GAINS a `These N` joins this arm
+  // automatically; one that loses it silently leaves — which is the honest cost
+  // of guarding prose, and the reason the header arm is the one that counts
+  // families.
+  const checked = [];
+  const skipped = [];
+  for (const [family, reason] of Object.entries(RESIDUE_FAMILY_REASONS)) {
+    const m = /These (\d+)/.exec(reason);
+    if (!m) { skipped.push(family); continue; }
+    checked.push(family);
+    assert.equal(Number(m[1]), derived.get(family),
+      `RESIDUE_FAMILY_REASONS["${family}"] says "These ${m[1]}" over ${derived.get(family)} entries`);
+  }
+  assert.equal(checked.length + skipped.length, Object.keys(RESIDUE_FAMILY_REASONS).length);
+  assert.ok(checked.length > 0, "no reason spells a count any more — this arm has gone vacuous and should be retired, not kept green");
+});
+
+test("the two ZERO-residue families are named, and 15 families over all scenarios is not 13", () => {
+  // breakpoint-sweep.mjs's header prose is the ONE place a reader learns that
+  // `familyOf` over all scenarios gives 15 while the residue spans 13. It was
+  // asserted by nothing. These three lines are that assertion.
+  const allFamilies = new Set(Object.values(SCENARIOS).map((s) => familyOf(s)));
+  const residueFamilies = derivedFamilyCounts();
+  assert.equal(allFamilies.size, 15, "familyOf over every committed scenario");
+  const zeroResidue = [...allFamilies].filter((f) => !residueFamilies.has(f)).sort();
+  assert.deepEqual(zeroResidue, ["hash:#activity", "hash:#sites"],
+    "the families every one of whose scenarios is rendered by a cell");
+  // the relation, derived rather than typed: 15 - 13 IS the two above
+  assert.equal(allFamilies.size - residueFamilies.size, zeroResidue.length);
 });
 
 test("A 101st SCENARIO IS REFUSED BY NAME — and a self-derived allowlist would not have", () => {
