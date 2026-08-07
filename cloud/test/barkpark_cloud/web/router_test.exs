@@ -2144,7 +2144,7 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert json_body(checkout) == %{
                "error" => "forbidden",
                "required" => "owner",
-               "scope" => "primary_team"
+               "scope" => "team"
              }
     end
 

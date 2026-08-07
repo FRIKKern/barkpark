@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/subscription     user      {subscription | nil} — current plan
       GET     /v1/events           user*     Server-Sent-Events live stream (*ticket= or Bearer)
       POST    /v1/agent/report     agent     land a health report (health + events)
+      POST    /v1/agent/space      agent     land the disk-consumption payload (event only)
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
       POST    /v1/agent/results    agent     ack command results
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
@@ -268,7 +269,7 @@ defmodule BarkparkCloud.Web.Router do
     Webhooks
   }
 
-  alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
+  alias BarkparkCloud.Accounts.{Authz, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
@@ -478,6 +479,8 @@ defmodule BarkparkCloud.Web.Router do
     cpu_cores: nil,
     mem_used_percent: nil,
     load1: nil,
+    load15: nil,
+    err_5xx_per_s: nil,
     disk_used_percent: nil,
     swap_used_percent: nil,
     swap_total_bytes: nil,
@@ -1315,6 +1318,43 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/agent/space — body is the agent's SpaceReport (see
+  # internal/agent/report.go): root used/total bytes, journal bytes, PG size +
+  # its biggest named relations, and the sites tree + its biggest slugs. Lands
+  # ONE append-only `space` AgentEvent and answers 200 {ok: true}. This is the
+  # ingest half of "what is taking up space"; `Telemetry.normalize_space/1` is
+  # the read half.
+  #
+  # STRICTLY SMALLER THAN /v1/agent/report — the same agent auth, and then five
+  # deliberate NON-actions, each a decision rather than an omission:
+  #
+  #   * NO record_agent_report. A space post must never move health_status /
+  #     last_seen_at / version / agent_status: a box whose disk probe still
+  #     succeeds while its BEAT is dead must keep reading as stale. This is the
+  #     most important negative in the design.
+  #   * NO maybe_dispatch_health_flip — a disk reading is not a health signal
+  #     and must not email anyone that a box came back.
+  #   * NO push_event(team_id, "fleet") — a 15-minute disk row does not justify
+  #     waking every open dashboard.
+  #   * NO dispatch on the body's `type` field. The agent carries `type:
+  #     "space"` inline so a landing site records it verbatim rather than
+  #     guessing, but the TYPE THIS ROUTE WRITES IS HARDCODED; the schema's
+  #     validate_inclusion is the second fence, never the first.
+  #   * NO retention change. AgentRetentionWorker prunes agent_events on
+  #     inserted_at with no type predicate, so space rows inherit the 14-day
+  #     window for free (+96 rows/day/box against ~1440 health beats, +6.7%).
+  post "/v1/agent/space" do
+    conn = Auth.require_agent(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      _ = Registry.record_event(conn.assigns.current_barkpark, "space", conn.body_params)
+
+      json(conn, 200, %{ok: true})
+    end
+  end
+
   # GET /v1/agent/commands — the approved-command queue. Empty for now: the
   # command-queue source is a later concern (cloud-13). Returns [] so the Go
   # agent's `len(cmds) == 0` fast-path is exercised. Shape: a JSON array of
@@ -2056,7 +2096,12 @@ defmodule BarkparkCloud.Web.Router do
         conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
         is_nil(conn.assigns[:current_team]) -> conn
         Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
-        true -> conn |> json(403, %{error: "forbidden"}) |> halt()
+        # cch-w37-s2: NAME THE AUTHORITY. This refusal shipped as a bare
+        # %{error: "forbidden"}, which the console's friendly() resolves to the
+        # owner-only BILLING sentence — so a plain member who clicks the rendered
+        # "Add support server" CTA was told, confidently, about billing. Adding a
+        # support machine needs ADMIN on the resolved team; paying needs OWNER.
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
     cond do
@@ -2220,7 +2265,11 @@ defmodule BarkparkCloud.Web.Router do
         conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
         is_nil(conn.assigns[:current_team]) -> conn
         Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
-        true -> conn |> json(403, %{error: "forbidden"}) |> halt()
+        # cch-w37-s2: SHAPE PARITY with POST /v1/fleet/supports above — a
+        # credential that can BIND can UNBIND, so its refusal must read the same.
+        # This one is CLI-only today (zero console call sites), so no user reads
+        # it yet; it is labelled anyway so the pair cannot drift apart.
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
     cond do
@@ -4299,8 +4348,11 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 
+      # cch-w37-s2: NAME THE AUTHORITY — writing an env var is admin-gated on the
+      # resolved team. Bare, this refusal read to the console as the owner-only
+      # billing one.
       not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        json(conn, 403, %{error: "forbidden"})
+        Auth.forbidden(conn, required: "admin", scope: "team")
 
       not is_binary(conn.body_params["key"]) or conn.body_params["key"] == "" ->
         json(conn, 422, %{error: "key_required"})
@@ -4335,6 +4387,9 @@ defmodule BarkparkCloud.Web.Router do
           {:error, :write_once} ->
             json(conn, 409, %{error: "write_once"})
 
+          # LEFT BARE ON PURPOSE — charter D396(5). This is the CROSS-TENANT arm:
+          # an ADMIN of team A is refused here on team B's barkpark_id, so it is
+          # not a role refusal at all and `required: "admin"` would be a NEW lie.
           {:error, :barkpark_not_in_team} ->
             json(conn, 403, %{error: "forbidden"})
 
@@ -4357,8 +4412,9 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 
+      # cch-w37-s2: NAME THE AUTHORITY — the delete twin of POST /v1/env-vars.
       not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        json(conn, 403, %{error: "forbidden"})
+        Auth.forbidden(conn, required: "admin", scope: "team")
 
       true ->
         # activity-audit-log: the env-var delete + an `env_var.deleted` audit
@@ -4660,6 +4716,11 @@ defmodule BarkparkCloud.Web.Router do
         # and be handed the whole team's log. The router owns the self-scope
         # decision, so the router owns its failure mode: no address, no read.
         cond do
+          # LEFT BARE ON PURPOSE — charter D396(5). Admin is sufficient but NOT
+          # necessary here (a member WITH a usable address reads their own rows),
+          # so `required: "admin"` would misdescribe the gate. It is additionally
+          # unreachable in practice: `self_scopable_address?/1` is true for any
+          # non-blank email and `users.email` is `null: false`.
           not admin? and not self_scopable_address?(user) ->
             json(conn, 403, %{error: "forbidden"})
 
@@ -4871,11 +4932,33 @@ defmodule BarkparkCloud.Web.Router do
             member_json(%{user: target, role: membership.role, joined_at: membership.inserted_at})
         })
       else
-        nil -> json(conn, 404, %{error: "not_found"})
-        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
-        {:error, :invalid_role} -> json(conn, 422, %{error: "invalid_role"})
-        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
-        {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
+        nil ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :invalid_role} ->
+          json(conn, 422, %{error: "invalid_role"})
+
+        # cch-w37-s2: A CAUSE, NEVER AN AUTHORITY. The caller is ALREADY inside
+        # with_team_role(conn, "admin", …), so `required: "admin"` would be a new
+        # lie — and no static authority label is sound here anyway: the SAME
+        # admin refused on a peer admin succeeds on a plain member. The refusal
+        # is RANK-RELATIVE, so it names the relation instead. Re-deriving
+        # can_grant?/3 (total, no side effects) separates the two arms
+        # `update_member_role_as/4` collapses into one `{:error, :forbidden}`:
+        # granting ABOVE your own rank vs. targeting someone you do not outrank.
+        {:error, :forbidden} ->
+          reason =
+            if Authz.can_grant?(conn.assigns.current_user, team, to_string(role)) == :ok,
+              do: "outranked",
+              else: "cannot_grant_higher_role"
+
+          Auth.forbidden(conn, reason: reason)
+
+        {:error, :last_owner} ->
+          json(conn, 409, %{error: "last_owner"})
       end
     end)
   end
@@ -4907,7 +4990,11 @@ defmodule BarkparkCloud.Web.Router do
       else
         nil -> json(conn, 404, %{error: "not_found"})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
-        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
+        # cch-w37-s2: A CAUSE, NEVER AN AUTHORITY — same reasoning as the PATCH
+        # above. `remove_member_as/3` refuses on ONE relation only (the actor
+        # does not out-rank the target), so the cause is always `outranked`; the
+        # caller is already an admin, and the same admin succeeds on a member.
+        {:error, :forbidden} -> Auth.forbidden(conn, reason: "outranked")
         {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
       end
     end)
@@ -5052,8 +5139,10 @@ defmodule BarkparkCloud.Web.Router do
 
           # A plain member may mint only a `read` PAT — minting deploy/root/write
           # is owner/admin-only (anti-escalation, see create_personal_access_token).
+          # cch-w37-s2: NAME THE AUTHORITY, so the console can say "minting this
+          # ability needs admin" instead of the owner-only billing sentence.
           {:error, :forbidden} ->
-            json(conn, 403, %{error: "forbidden"})
+            Auth.forbidden(conn, required: "admin", scope: "team")
 
           {:error, cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -7735,7 +7824,15 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 404, %{error: "not_found"})
 
           %Barkpark{} = bp ->
-            events = Registry.recent_events(bp, points)
+            # TYPE-FILTERED at the FETCH, not just at the fold: `points` is the
+            # number of HEALTH beats the caller asked to chart, so the LIMIT has
+            # to be applied to health rows. A type-blind read hands the window
+            # `points` rows of the MIXED stream and Metrics then drops the
+            # non-health ones — at the shipped cadence (60s health beside a
+            # 15-minute `space` row) that renders 188 of a requested 200 while
+            # the envelope still says 200 (D58's separation was enforced at
+            # WRITE and at FOLD, never at FETCH).
+            events = Registry.recent_events_of_type(bp, "health", points)
             json(conn, 200, Metrics.build(bp, events, points: points))
         end
     end
@@ -8287,8 +8384,13 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns[:current_team]) ->
         json(conn, 422, %{error: "no_team"})
 
+      # cch-w37-s2: NAME THE AUTHORITY. The rendered "Resurrect" CTA sends a
+      # member's refusal through resurrectOutcome → friendly(), where a bare body
+      # resolves to the owner-only BILLING sentence — and the very next branch
+      # here is a REAL billing refusal (402), so the two were indistinguishable
+      # to the user. Resurrecting needs ADMIN; paying needs OWNER.
       not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        json(conn, 403, %{error: "forbidden"})
+        Auth.forbidden(conn, required: "admin", scope: "team")
 
       # A resurrect stands up — and bills — a real box, so it honors the SAME
       # entitlement gate as launch (an active subscription, or the one auto-started
@@ -8759,6 +8861,20 @@ defmodule BarkparkCloud.Web.Router do
       cpu_cores: measured_or_nil(Map.get(payload, "cpu_cores")),
       mem_used_percent: measured_or_nil(Map.get(payload, "mem_used_percent")),
       load1: measured_or_nil(Map.get(payload, "load1")),
+      # The SUSTAIN signal (charter D67), and the reason the fence is evaluatable
+      # from this payload at all: this row is ONE beat
+      # (`latest_health_payload_map/1` is a DISTINCT ON … ORDER BY inserted_at
+      # DESC), so a "2 of the last 3 beats" rule has no window to read here.
+      # load15 is a 15-minute kernel EWMA — sustained, and delivered as one
+      # scalar. `load1` stays for the reason string's present-tense colour: a box
+      # can read load1 0.64/core (idle-looking) while load15 reads 1.89/core.
+      load15: measured_or_nil(Map.get(payload, "load15")),
+      # 5xx per second off the instance's own 60s ring (D75). Same law as every
+      # vital above: an absent key (an agent predating the field) and the -1
+      # sentinel (probe unwired, instance too old, or an EMPTY window) both
+      # render nil. A fabricated 0 here would read "this box is serving no
+      # errors" about a box nobody measured — the most reassuring lie available.
+      err_5xx_per_s: measured_or_nil(Map.get(payload, "err_5xx_per_s")),
       disk_used_percent: measured_or_nil(Map.get(payload, "disk_used_percent")),
       swap_used_percent: measured_or_nil(Map.get(payload, "swap_used_percent")),
       swap_total_bytes: measured_or_nil(Map.get(payload, "swap_total_bytes")),

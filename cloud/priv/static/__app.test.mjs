@@ -2468,11 +2468,30 @@ test("cch-w36-s4 (D411): the fail-closed bounce EMITS one refusal — routing un
 
   // THE UNLOADED-ROLE ARM STILL WAITS: a real operator whose /v1/me has not
   // landed is told we are checking, and is never accused.
+  //
+  // cch-w37-s6 — THE FENCE MOVED, AND THE CARVE-OUT IS THE POINT. This pin used
+  // to spell the arm as `if (!meCache) { …checking line…; return; }`, which made
+  // ANY failed-branch insertion a red. But `!meCache` is TWO-valued over a
+  // THREE-valued fact: it folded "the answer hasn't arrived" together with "the
+  // answer FAILED", and loadMe's failure arm deliberately does not re-enter this
+  // loader — so a real operator whose /v1/me answered 500 sat on the checking
+  // line for the rest of the session. The fence's INTENT survives verbatim and
+  // is asserted below: the LOADING arm still renders exactly the checking line,
+  // still returns immediately, and still precedes every refusal. Its LETTER does
+  // not, because "we couldn't check your account" is a report, not an accusation
+  // — it names no role, refuses nothing, and reads zero operator routes.
   const loader = APP_SRC.match(/function loadOperator\(\) \{[\s\S]*?\n  \}\n/)[0];
-  assert.match(loader, /if \(!meCache\) \{\s*\n\s*body\.innerHTML = '<div class="loading">Checking operator access&hellip;<\/div>';\s*\n\s*return;/,
-    "the unloaded-me arm renders the checking line and returns, ahead of any refusal");
+  assert.match(loader, /if \(state === "loading"\) \{\s*\n\s*body\.innerHTML = '<div class="loading">Checking operator access&hellip;<\/div>';\s*\n\s*return;/,
+    "the LOADING arm renders the checking line and returns, ahead of any refusal");
   assert.ok(loader.indexOf("Checking operator access") < loader.indexOf("toast({"),
     "nothing can accuse a session whose role has not loaded");
+  // …and the arm above it — the one the fence now makes room for — is a REPORT,
+  // never an accusation: it names no role and it refuses nothing.
+  const failedCopy = hooks.operatorMeFailedHtml();
+  assert.match(failedCopy, /We couldn't check your account/, "the failed arm says what actually happened");
+  for (const accusation of [/not an operator/i, /platform-gated/i, /platform_operator/, /don't have access/i])
+    assert.doesNotMatch(failedCopy, accusation, "an unread answer is not a refusal");
+  assert.match(failedCopy, /id="operator-me-retry"/, "…and it offers the retry the old spinner never did");
 
   // GR9: the predicate family is untouched — the route gate still delegates.
   assert.match(APP_SRC, /function operatorRouteAllowed\(me\) \{\s*\n\s*return operatorVisible\(me\);/,
@@ -15222,11 +15241,19 @@ test("cch-w36-s3: loadMe's FAILURE arm carries its own repaint seams — they we
     assert.ok(failureArm.includes('currentView() === "' + view + '"'),
       "the failure arm must repaint " + view + " — a provisional render must not outlive the answer");
   }
-  // loadOperator() is deliberately NOT re-entered here: the operator view's own
-  // copy belongs to the operator band (cch-w36-s4). Pinned so a later widening
-  // is a decision, not a drift.
-  assert.ok(!failureArm.includes("loadOperator()"),
-    "the operator view's failure copy is cch-w36-s4's, not this slice's");
+  // cch-w37-s6 — THE DEFERRAL IS TAKEN, AND THAT IS WHY THIS LINE INVERTED.
+  // cch-w36-s3 pinned `!failureArm.includes("loadOperator()")` explicitly "so a
+  // later widening is a DECISION, not a drift" — deferring the operator view's
+  // failure copy to the operator band. This slice IS that band, and the seam is
+  // load-bearing: a deep-linked #operator paints its checking line from
+  // applyRoute before /v1/me answers, so with no re-entry here the console
+  // claimed to be checking access for the whole session. The pin therefore
+  // becomes its positive twin — the seam must EXIST, and the fail-closed
+  // guarantee it rides on is asserted here rather than assumed.
+  assert.ok(failureArm.includes('currentView() === "operator"') && failureArm.includes("loadOperator()"),
+    "the failure arm re-enters the operator loader — the deferral cch-w36-s3 pinned is now taken");
+  assert.ok(failureArm.indexOf("applyOperatorGate()") < failureArm.indexOf("loadOperator()"),
+    "…and the sidebar entry is re-hidden BEFORE the loader runs: the re-entry never grants, it reports");
 });
 
 test("cch-w36-s3: a good answer clears the fault, and clearMe drops the trio in lockstep", async () => {
@@ -15532,6 +15559,89 @@ test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (it
   assert.equal(taken.textContent, "That domain is already in use.");
 });
 
+// cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
+//
+// friendly() resolved the curated ERRORS map BEFORE it ever read data.details.
+// Two of those keys carry no information — `invalid` and `validation_failed` —
+// and they are precisely the two the router sends WITH a per-field map. So a
+// person who typed a taken slug read "That didn't work — check your input."
+// while the answer ("slug has already been taken") sat unread in the payload.
+//
+// THIS BLOCK IS THE POSITIVE CONTROL, and it exists because the rest of the
+// gate is BLIND to the fix: it scores 914/914 identical before and after. The
+// only shipped details assertion uses the UNREGISTERED slug "x", so it pins the
+// FALL-THROUGH and never the overwrite. Every assertion in the first test below
+// fails against unmodified main.
+//
+// The fence must be able to LOSE — the second test is the one that reds if it
+// widens: no details, empty details, and every non-generic slug keep main's
+// byte-identical copy.
+
+test("cch-w37-s1: a generic slug WITH details renders the field the server named", () => {
+  // The exact shape POST /v1/sites answers with (router.ex:6181).
+  assert.equal(hooks.friendly({ error: "invalid", details: { slug: ["has already been taken"] } }),
+    "slug has already been taken");
+  assert.equal(hooks.friendly({ error: "validation_failed", details: { name: ["can't be blank"] } }),
+    "name can't be blank");
+  // A caller fallback does NOT outrank the server's own answer.
+  assert.equal(hooks.friendly({ error: "invalid", details: { framework: ["is invalid"] } }, "Check the form and try again."),
+    "framework is invalid");
+  // Underscored field names are humanized by the details ladder, unchanged.
+  assert.equal(hooks.friendly({ error: "invalid", details: { doc_type: ["is invalid"] } }),
+    "doc type is invalid");
+  // A bare string value (not a changeset list) renders too.
+  assert.equal(hooks.friendly({ error: "invalid", details: { name: "is required" } }),
+    "name is required");
+});
+
+test("cch-w37-s1 THE FENCE CAN LOSE: no details, empty details, and non-generic slugs keep main's copy", () => {
+  const INVALID = "That didn't work — check your input.";
+  const VALIDATION = "Please check the form and try again.";
+  // The no-details path IS these two keys' path — neither is deleted from ERRORS.
+  assert.equal(hooks.friendly({ error: "invalid" }), INVALID);
+  assert.equal(hooks.friendly({ error: "validation_failed" }), VALIDATION);
+  assert.equal(hooks.friendly({ error: "invalid" }, "a caller fallback"), INVALID);
+  // details present but carrying nothing → the curated sentence, never "".
+  for (const empty of [{}, null, undefined, "not an object", 7, true]) {
+    assert.equal(hooks.friendly({ error: "invalid", details: empty }), INVALID,
+      "an empty or non-object details must not unseat the curated copy: " + JSON.stringify(empty));
+  }
+  // REVIEW (cch-w37 review): an ARRAY details keys to "0", so the ladder would
+  // render "0 has already been taken". It must not unseat the curated copy.
+  assert.equal(hooks.friendly({ error: "invalid", details: ["has already been taken"] }), INVALID,
+    "an array details must not unseat the curated copy — Object.keys() yields \"0\"");
+  // D412's three exclusions, rendered byte-identically WITH details attached.
+  assert.equal(hooks.friendly({ error: "password_invalid", details: { password: ["is too short"] } }),
+    "Password is too short (12+ characters).");
+  assert.equal(hooks.friendly({ error: "email_invalid", details: { email: ["is invalid"] } }),
+    "Enter a valid email address.");
+  assert.equal(hooks.inviteFailureCopy({ error: "already_invited", details: { email: ["has already been taken"] } }, 409),
+    "There's already a pending invitation for that address — revoke it first to re-send.");
+  // The fence is keyed on the SLUG SET by name, never on a status — no status
+  // reaches friendly() at all, and every other registered slug keeps its copy
+  // even when details rides along.
+  assert.equal(hooks.friendly.length, 2, "friendly() takes (data, fallback) — no status argument");
+  assert.equal(hooks.friendly({ error: "server_error", details: { name: ["can't be blank"] } }),
+    "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.");
+  assert.equal(hooks.friendly({ error: "forbidden", details: { name: ["can't be blank"] } }), FORBIDDEN_BILLING);
+});
+
+test("cch-w37-s1: creating a site stops rendering the bare token `invalid`", () => {
+  const f = hooks.siteCreateFailureCopy;
+  const taken = { ok: false, status: 422, data: { error: "invalid", details: { slug: ["has already been taken"] } } };
+  // The worst string in the epic: the person read the literal slug.
+  assert.equal(f(taken), "slug has already been taken");
+  assert.ok(f(taken).indexOf("invalid") === -1, "the raw token never reaches the error box");
+  // The known_templates hint is the one thing friendly() cannot know — kept.
+  assert.equal(f({ ok: false, status: 422, data: { error: "invalid", details: { template: ["is invalid"] }, known_templates: ["next-starter", "astro-starter"] } }),
+    "template is invalid — templates: next-starter, astro-starter");
+  // Unchanged shapes: a curated slug, a message-only body, and a silent failure.
+  assert.equal(f({ ok: false, status: 402, data: { error: "no_active_subscription" } }),
+    "You need an active subscription to launch.");
+  assert.equal(f({ ok: false, status: 500, data: { message: "upstream exploded" } }), "upstream exploded");
+  assert.equal(f({ ok: false, status: 502, data: null }), "create failed (502)");
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // cch-w35-s4 — THE 403 STOPS BEING A BILLING SENTENCE.
 //
@@ -15551,7 +15661,7 @@ test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (it
 
 const FORBIDDEN_BILLING = "Only the team owner can manage billing.";
 const ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
-const AUDIT_403 = { error: "forbidden", required: "admin", scope: "primary_team" };
+const AUDIT_403 = { error: "forbidden", required: "admin", scope: "team" };
 
 test("cch-w35-s4 POSITIVE CONTROL (RED under M1): a bare forbidden STILL reads the billing sentence", () => {
   // The billing gate (require_primary_team_owner) sends `required: "owner"` on a
@@ -15573,13 +15683,13 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   // ERRORS.forbidden verbatim, "because the owner gate's evidence is
   // billing-scoped or absent". It is neither: Auth.require_primary_team_owner
   // (cloud/lib/barkpark_cloud/web/auth.ex, the `forbidden(conn, required:
-  // "owner", scope: "primary_team")` arm) ships evidence, so the fence DOES fire
+  // "owner", scope: "team")` arm) ships evidence, so the fence DOES fire
   // on POST /v1/billing/{checkout,portal,cancel} and they now read the owner
   // ROLE sentence instead of the owner BILLING sentence. Both are true on that
   // screen; the role sentence is additionally true on the OTHER owner gate
   // (Auth.require_team_owner → team deletion), where "manage billing" would be a
   // second confidently-wrong sentence. That is why the arm is not special-cased.
-  const portal403 = { error: "forbidden", required: "owner", scope: "primary_team" };
+  const portal403 = { error: "forbidden", required: "owner", scope: "team" };
   assert.equal(hooks.friendly(portal403, "Please try again in a moment."),
     "You need the owner role on this team — only the team owner can grant it.");
   // It never reads as transient — the GR36 property that entry exists to hold.
@@ -15591,6 +15701,15 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
 
 test("cch-w35-s4 THE EXHIBIT, BOTH DIRECTIONS: an evidence-carrying 403 names the authority, not billing", () => {
   const copy = hooks.friendly(AUDIT_403);
+  // `scope` is NEVER interpolated. cch-w37-s3 renamed the shipped label to
+  // "team" (the gate reads the SELECTED team, not the primary one), which makes
+  // a negative assert on the shipped value vacuous — the sentence legitimately
+  // contains "team". So this probe carries a scope value nothing else can
+  // produce, and it runs FIRST so it is the arm that speaks when scope leaks.
+  assert.ok(
+    hooks.friendly({ error: "forbidden", required: "admin", scope: "zz_probe_scope" })
+      .indexOf("zz_probe_scope") === -1,
+    "scope is evidence for a log, never copy — the sentence says 'this team'");
   // PRESENT: the authority the gate actually wanted.
   assert.equal(copy, ADMIN_SENTENCE);
   assert.match(copy, /admin on this team/);
@@ -15598,17 +15717,16 @@ test("cch-w35-s4 THE EXHIBIT, BOTH DIRECTIONS: an evidence-carrying 403 names th
   // — revert the fence in friendly() and it fails.
   assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1, "the audit log is not the billing screen");
   assert.ok(copy.indexOf("billing") === -1);
-  // `scope` is NEVER interpolated (it says primary_team even when the team
-  // switcher made a SECOND team refuse you), and `reason` is never echoed raw.
+  // …and `reason` is never echoed raw, nor does the retired label resurface.
   assert.ok(copy.indexOf("primary_team") === -1 && copy.indexOf("primary team") === -1,
-    "scope is a misnomer under the team switcher — the sentence says 'this team'");
+    "the retired label must never appear in copy");
   // This is verbatim what loadActivity's empty state renders: it interpolates
   // esc(friendly(r.data)) under <h2>Couldn't load activity</h2>.
   assert.equal(hooks.esc(copy).indexOf(FORBIDDEN_BILLING), -1);
   assert.match(hooks.esc(copy), /admin on this team/);
   // The owner gate's own evidence names the OWNER role — the fence never
   // fabricates an admin for a refusal that wanted an owner.
-  assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "primary_team" }),
+  assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "team" }),
     "You need the owner role on this team — only the team owner can grant it.");
 });
 
@@ -15666,7 +15784,7 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     // …and the evidence keys are INERT on every slug but `forbidden`. (`required`
     // and `reason` are never sent together — gate_role() picks one arm — so the
     // sweep uses the shape the server actually emits.)
-    const withEvidence = { error: slug, required: "admin", scope: "primary_team" };
+    const withEvidence = { error: slug, required: "admin", scope: "team" };
     assert.equal(hooks.friendly(withEvidence, "a caller fallback"),
       slug === "forbidden" ? ADMIN_SENTENCE : copy,
       slug + " must ignore evidence it was not sent for");
@@ -15707,4 +15825,55 @@ test("cch-w35-s4 THE TWIN FENCE (zero reach today, and it CAN lose): evidence be
   // today (GET /v1/tokens is require_user only; GET /v1/sites gives a session
   // the root ability), so this arm buys no user-visible change — it is insurance.
   assert.equal(f({ ok: false, status: 404, data: { error: "nope" } }, "SCOPED", "FB"), "FB");
+});
+
+// ── cch-w37-s6: the Operator console stops checking access it will never check
+// SOURCE-TEXT, deliberately. loadOperator is not exported to __bpTestHook and
+// this sandbox's getElementById returns null, so the loader's `if (!body)`
+// fires — a node-only "drive" would be vacuously green. The RUN proof that a
+// real 500 lands on the failed arm is smoke's `operator-me-unreadable`
+// scenario, which is RED against origin/main's app.js (verbatim: `the console
+// must not claim to be checking access it will never check; got: <div
+// class="loading">Checking operator access&hellip;</div>`) and green after.
+// What is pinned here is the SHAPE the arm must keep, plus the pure copy.
+test("cch-w37-s6: loadOperator's unloaded arm is THREE-valued — failed reports, loading waits", () => {
+  const loader = APP_SRC.match(/function loadOperator\(\) \{[\s\S]*?\n  \}\n/)[0];
+  // The two-valued read is GONE: `!meCache` folded "the answer hasn't arrived"
+  // together with "the answer FAILED", and meState() is the seam next door that
+  // already tells them apart (cch-w36-s3).
+  assert.ok(!/if \(!meCache\) \{/.test(loader),
+    "the arm no longer branches on meCache's falsiness — that is the two-valued read of a three-valued fact");
+  assert.match(loader, /var state = meState\(\);/, "it reads the three-valued state");
+  assert.match(loader, /if \(state === "failed"\) \{/, "…and has a FAILED arm");
+  assert.match(loader, /if \(state === "loading"\) \{/, "…and a LOADING arm");
+  // ORDER IS THE FAIL-CLOSED GUARANTEE: both unloaded arms return before the
+  // route gate, so an unknown role can never reach operatorRouteAllowed.
+  assert.ok(loader.indexOf('state === "failed"') < loader.indexOf("operatorRouteAllowed"),
+    "the failed arm returns ahead of the route gate");
+  assert.ok(loader.indexOf('state === "loading"') < loader.indexOf("operatorRouteAllowed"),
+    "so does the loading arm");
+  // THE FAILED ARM READS NOTHING: no operator route is issued from it.
+  const failedArm = loader.slice(loader.indexOf('if (state === "failed")'), loader.indexOf('if (state === "loading")'));
+  assert.ok(!failedArm.includes("operatorRefresh()") && !failedArm.includes("OPERATOR_FLEET"),
+    "a WAIT is not a grant — the failed arm reads zero /v1/operator/* routes");
+  assert.match(failedArm, /loadMe\(\)\.then\(/, "the retry re-reads /v1/me rather than faking a recheck");
+});
+
+test("cch-w37-s6: the failed-me body REPORTS, and never accuses", async () => {
+  const html = hooks.operatorMeFailedHtml();
+  assert.match(html, /We couldn't check your account/, "it names what actually happened");
+  assert.match(html, /id="operator-me-retry"/, "and offers the recovery the spinner never did");
+  // The classification comes from the RETAINED fault (meFailureCopy →
+  // faultCopy), so the sentence tracks the fault class rather than being one
+  // fixed apology: a 5xx reads as ours, and a status-0 read as transport.
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+  assert.match(hooks.operatorMeFailedHtml(), /broke on our side/, "a 5xx is ours, not the person's input");
+  hooks.clearMe();
+  assert.match(hooks.operatorMeFailedHtml(), /Network error/,
+    "and with a status-0 fault it reads as transport — never silence");
+  // NOT A REFUSAL: no role is named, nothing is denied, nobody is sent to a
+  // team owner (charter D386's wrong remedy, and D411's intent carried over).
+  for (const wrong of [/platform_operator/, /platform-gated/i, /not an operator/i, /ask (your|the) team owner/i])
+    assert.doesNotMatch(html, wrong, "an unread answer is not a refusal");
 });

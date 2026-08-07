@@ -243,12 +243,13 @@
   // Returns a sentence ONLY when the 403 carried evidence; otherwise null, so
   // every caller falls through to exactly what it renders today. Deliberately
   // NOT composed from two other keys the payload also carries:
-  //   • `scope` is NEVER interpolated. require_primary_team_admin reads
-  //     conn.assigns[:current_team], which resolve_team fills from the
-  //     x-barkpark-team header — so an owner of their primary team who is
-  //     refused on a SECOND team is still answered scope: "primary_team",
-  //     naming a team where they ARE the owner as the team that refused them.
-  //     "this team" is true under the team switcher; "your primary team" is not.
+  //   • `scope` is NEVER interpolated. It is evidence for a log, not copy.
+  //     require_primary_team_admin reads conn.assigns[:current_team], which
+  //     resolve_team fills from the x-barkpark-team header — so the label used
+  //     to say "primary_team" even when a SECOND team refused an owner of their
+  //     primary team. cch-w37-s3 renamed it to `scope: "team"`, which is what
+  //     the gate actually consulted; "this team" is what the sentence says
+  //     either way, and it stays true under the team switcher.
   //   • `reason` is a SLUG ("no_team"). It is MAPPED through a written arm,
   //     never echoed — echoing it renders the literal string "no team" at a
   //     human.
@@ -284,7 +285,33 @@
       var proved = forbiddenEvidenceCopy(data);
       if (proved) return proved;
     }
-    if (key && ERRORS[key]) return ERRORS[key];
+    // cch-w37-s1 — THE EXACT ANSWER BEATS THE CURATED GENERIC.
+    //
+    // Two ERRORS keys carry no information: `invalid` ("That didn't work —
+    // check your input.") and `validation_failed` ("Please check the form and
+    // try again."). The router computes a per-field map and sends it as
+    // `details` on exactly those two slugs — and the curated map used to win
+    // first, so the client threw the answer away. 32 real details payloads
+    // built from the emitters' own changesets render as ONE distinct string
+    // today; there is no WORSE class, because nothing can lose information
+    // against a sentence that carries none.
+    //
+    // The fence is keyed on the SLUG SET by name, NEVER on an HTTP status —
+    // friendly() takes no status argument, and a status-422 rival was measured
+    // dead three times (charter D412). It fires ONLY when details is a
+    // non-empty object, so a bare `{error: "invalid"}` — which is what any
+    // un-upgraded emitter sends — still resolves to ERRORS.invalid
+    // byte-identically, and every other slug never reaches this branch.
+    // Neither key is deleted from ERRORS: the no-details path IS their path.
+    // An ARRAY details is excluded: Object.keys() on one yields "0", so the
+    // ladder below would render "0 has already been taken" — a worse sentence
+    // than the curated generic it unseated. Under main an array could only
+    // reach the ladder on an UNREGISTERED slug, so excluding it here keeps the
+    // fence from inventing that string on the two keys it newly routes.
+    var generic = (key === "invalid" || key === "validation_failed");
+    var hasDetails = !!data.details && typeof data.details === "object" &&
+      !Array.isArray(data.details) && Object.keys(data.details).length > 0;
+    if (key && ERRORS[key] && !(generic && hasDetails)) return ERRORS[key];
     if (data.details && typeof data.details === "object") {
       var first = Object.keys(data.details)[0];
       if (first) {
@@ -8094,18 +8121,65 @@
 
   // ---- DOM mounts -----------------------------------------------------------
 
-  // Fail-CLOSED entry point (GR49). Three outcomes:
+  // cch-w37-s6 — the FAILED-me copy, PURE so its bytes are node-assertable.
+  // It is deliberately NOT an accusation and NOT a refusal: we do not know
+  // whether this account is an operator, and the sentence says exactly that.
+  // meFailureCopy() classifies the retained fault the same way the token
+  // picker's unknown arm does — a 500 reads "something broke on our side", an
+  // offline read reads "you're offline", never "you are not an operator".
+  function operatorMeFailedHtml() {
+    return '<div class="empty-state"><h2>We couldn\'t check your account</h2>' +
+      "<p>" + esc(meFailureCopy()) + "</p>" +
+      '<p class="muted">Until it answers we can\'t tell whether this account may open the ' +
+      "Operator console, so nothing was read and nothing was refused.</p>" +
+      '<p><button class="btn btn-primary btn-sm" id="operator-me-retry" type="button">Retry</button></p></div>';
+  }
+
+  // Fail-CLOSED entry point (GR49). FOUR outcomes — the unloaded arm is
+  // three-valued as of cch-w37-s6, over the meState() seam next door:
   //   • /v1/me hasn't answered yet  → an honest "checking" line; loadMe re-enters
   //     here the moment it lands, so a real operator's deep link is never bounced
   //     by a boot race.
+  //   • /v1/me FAILED               → say so, and offer the retry. This arm used
+  //     to be folded into the one above (`if (!meCache)`), and loadMe's failure
+  //     arm deliberately does not re-enter this loader, so a real operator whose
+  //     /v1/me answered 500 sat on "Checking operator access…" for the rest of
+  //     the session — terminal, because navigating away and back repaints the
+  //     same spinner. A spinner that outlives its request is a claim we are
+  //     still checking, and we are not.
   //   • answered, not an operator   → BOUNCE to #overview. Registering "operator"
   //     in VIEWS made init()'s validator accept the deep link for anybody, so the
   //     sidebar gate alone is no longer enough.
   //   • answered, operator          → paint the shell and read the four routes.
+  //
+  // D411'S FENCE, CARVED OUT DELIBERATELY. __app.test.mjs pinned the SOURCE TEXT
+  // of the `if (!meCache)` arm — the checking line immediately followed by
+  // `return;` — so that an unloaded role could never be accused. That INTENT is
+  // untouched and still pinned (the LOADING arm below is byte-identical, and
+  // still precedes every refusal); only the fence's LETTER moved, because
+  // "we couldn't check your account" is not an accusation. Fail-closed is
+  // unweakened: the failed arm reads zero operator routes and applyOperatorGate
+  // keeps the sidebar entry hidden.
   function loadOperator() {
     var body = $("#operator-body");
     if (!body) return;
-    if (!meCache) {
+    var state = meState(); // "loaded" iff meCache is set — the same fact, told three-valued
+    if (state === "failed") {
+      body.innerHTML = operatorMeFailedHtml();
+      var retryBtn = $("#operator-me-retry");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", function () {
+          body.innerHTML = '<div class="loading">Checking operator access&hellip;</div>';
+          // loadMe's SUCCESS arm re-enters this loader itself; its failure arm
+          // deliberately does not (app.js loadMe's else), so re-enter here ONLY
+          // when the read did not land — otherwise the page would paint twice
+          // and issue the four operator reads twice.
+          loadMe().then(function () { if (meState() !== "loaded") loadOperator(); });
+        });
+      }
+      return;
+    }
+    if (state === "loading") {
       body.innerHTML = '<div class="loading">Checking operator access&hellip;</div>';
       return;
     }
@@ -8394,6 +8468,23 @@
     return body;
   }
 
+  // cch-w37-s1 — Pure: the create-site error line. The router answers a failed
+  // create with `%{error: "invalid", details: <per-field map>}`, and this branch
+  // used to render `r.data.error` RAW — so the person reads the literal token
+  // `invalid` while the server holds the exact field that failed. friendly()
+  // now prefers those details, and the `known_templates` hint (the one thing
+  // the payload carries that friendly() cannot know) is kept as the suffix.
+  function siteCreateFailureCopy(r) {
+    var data = r && r.data;
+    // The caller's designed fallback keeps the old second choice: a payload
+    // that carries only a `message` still renders that message, and only a
+    // payload that says nothing at all falls to the status line.
+    var fallback = (data && typeof data.message === "string" && data.message) ||
+      ("create failed (" + ((r && r.status) || 0) + ")");
+    var known = data && data.known_templates;
+    return String(friendly(data, fallback)) + (known ? " \u2014 templates: " + known.join(", ") : "");
+  }
+
   function siteTemplateLabel(t) {
     if (t === "") return "Auto (framework default)";
     if (t === "search-starter") return "\u2605 Search Starter \u2014 flagship: live search + corpus graph + PortableDoc";
@@ -8480,9 +8571,7 @@
             loadInstanceSites(bp);
           }
         } else {
-          var msg = (r.data && (r.data.error || r.data.message)) || ("create failed (" + r.status + ")");
-          var known = r.data && r.data.known_templates;
-          errBox.textContent = String(msg) + (known ? " \u2014 templates: " + known.join(", ") : "");
+          errBox.textContent = siteCreateFailureCopy(r);
           errBox.hidden = false;
         }
       });
@@ -14045,13 +14134,24 @@
         // painted while me was unknown sat on its provisional render forever.
         // Billing and Activity re-render here so they re-derive from the failed
         // state. applyOperatorGate() re-runs to keep the sidebar entry hidden
-        // (fail-closed, GR9) — the operator VIEW's own copy belongs to the
-        // operator band (cch-w36-s4), so the operator loader is deliberately
-        // NOT re-entered here.
+        // (fail-closed, GR9) — the operator VIEW's own copy was left to the
+        // operator band, and cch-w37-s6 is that band: the loader is re-entered
+        // below, now that it HAS a failed arm to re-enter into.
         absorbMe(r); // records {status, data, transport} — the fault faultCopy() needs
         applyOperatorGate();
         if (currentView() === "billing") renderBilling();
         if (currentView() === "activity") paintActivityFilters();
+        // cch-w37-s6 — THE MIRROR OF THE SUCCESS ARM'S OPERATOR SEAM, and
+        // without it the failed arm is unreachable on the path that matters. A
+        // deep-linked #operator paints its "Checking operator access…" line
+        // from applyRoute BEFORE /v1/me answers; when the answer FAILED nothing
+        // ever repainted, so the console claimed to be checking for the rest of
+        // the session (navigating away and back only repaints the same line).
+        // Re-entering here is fail-CLOSED by construction: meState() is
+        // "failed", so loadOperator takes its report-and-retry arm — it reads
+        // zero /v1/operator/* routes, grants nothing, and the sidebar entry
+        // above stays hidden.
+        if (currentView() === "operator") loadOperator();
       }
     });
   }
@@ -20411,6 +20511,8 @@
       // search-template W2 (D8): create-site modal pure helpers.
       siteKindFor: siteKindFor, siteTemplateOptions: siteTemplateOptions,
       siteCreateBody: siteCreateBody,
+      // cch-w37-s1 — the create-site error line (was a RAW `r.data.error` render).
+      siteCreateFailureCopy: siteCreateFailureCopy,
       // search-template W8: site theme-edit pure helpers.
       siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
       // cch-w10 — the OAuth landing gate. The fragment now carries a ONE-TIME
@@ -20889,6 +20991,12 @@
       // state is DISTINGUISHABLE from the cold one — on origin/main both are
       // {role:null, loaded:false, error:false}.
       loadMe: loadMe, clearMe: clearMe, meState: meState, meFailureCopy: meFailureCopy,
+      // cch-w37-s6 — the Operator console's FAILED-me body. Pure, so the node
+      // harness can pin its bytes; the reachability proof (that a real 500 on
+      // /v1/me actually lands here) belongs to smoke's operator-me-unreadable
+      // scenario, because loadOperator itself is not exported and this sandbox's
+      // getElementById returns null.
+      operatorMeFailedHtml: operatorMeFailedHtml,
       meFlags: function () {
         return {
           role: (meCache && meCache.role) || null,

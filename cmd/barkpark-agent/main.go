@@ -314,21 +314,49 @@ func memProcProbe() (int, error) {
 	return clampPercent(float64(total-avail) / float64(total) * 100), nil
 }
 
-// loadProcProbe reports the 1-minute load average (first field of /proc/loadavg).
-func loadProcProbe() (float64, error) {
+// loadProcProbe reports the 1-minute AND 15-minute load averages from
+// /proc/loadavg. Like swapProcProbe below, the file read is separated from the
+// parse on purpose: parseLoadAvg is pure and table-tested against a REAL
+// captured kernel line, which the sibling cpu/mem probes still are not.
+func loadProcProbe() (load1 float64, load15 float64, err error) {
 	data, err := os.ReadFile("/proc/loadavg")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
+	return parseLoadAvg(data)
+}
+
+// parseLoadAvg extracts the 1-minute and 15-minute load averages from
+// /proc/loadavg content — fields[0] and fields[2] of the kernel's line
+// (`0.64 1.50 1.89 3/382 67892`).
+//
+// THE 15-MINUTE FIELD IS THE POINT (charter D67). `/v1/barkparks` serves exactly
+// ONE beat — Registry.latest_health_payload_map/1 is a DISTINCT ON … ORDER BY
+// inserted_at DESC and merge_pressure/2 folds that single row — so a "2 of the
+// last 3 beats" sustain rule is NOT COMPUTABLE by any consumer of the payload
+// the console and `bp cloud status` both read. load15 IS a sustained
+// measurement: a 15-minute EWMA the kernel already maintains, delivered as one
+// scalar, needing no window, no client state and no new syscall. This function
+// reads the same bytes the old one-minute-only parser already had in memory.
+//
+// BOTH FIELDS OR NEITHER: a short/garbled line errors rather than landing a
+// half-measurement, because the caller maps an error to the -1 sentinel and a
+// load1 landed beside a fabricated load15 would be indistinguishable from a
+// quiet box.
+func parseLoadAvg(data []byte) (load1 float64, load15 float64, err error) {
 	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("loadavg: empty")
+	if len(fields) < 3 {
+		return 0, 0, fmt.Errorf("loadavg: want >=3 fields, got %d", len(fields))
 	}
-	l, err := strconv.ParseFloat(fields[0], 64)
+	l1, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
-		return 0, fmt.Errorf("loadavg: %w", err)
+		return 0, 0, fmt.Errorf("loadavg: load1: %w", err)
 	}
-	return l, nil
+	l15, err := strconv.ParseFloat(fields[2], 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("loadavg: load15: %w", err)
+	}
+	return l1, l15, nil
 }
 
 // swapProcProbe reports (swap used percent, swap total bytes) from

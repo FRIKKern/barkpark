@@ -2689,6 +2689,33 @@ const EXPECTATIONS = {
         assert.ok(!html.includes("Loading"), "no card is left spinning after its request settles");
     },
   },
+  "operator-me-unreadable": {
+    what: "Operator console — /v1/me 500s: the body REPORTS the failed check with a retry, instead of claiming forever that it is checking",
+    check(reg) {
+      const body = reg.get("operator-body").innerHTML || "";
+      // THE DEFECT, DRIVEN. On origin/main this string is the whole body, for
+      // the rest of the session: loadOperator branched on `!meCache` alone, and
+      // loadMe's failure arm never re-enters it, so navigating away and back
+      // repaints the same spinner. A spinner that outlives its request claims we
+      // are still checking; we are not.
+      assert.ok(!body.includes("Checking operator access"),
+        "the console must not claim to be checking access it will never check; got: " + body);
+      assert.ok(body.includes("We couldn't check your account"), "it says what actually happened; got: " + body);
+      assert.ok(body.includes("operator-me-retry"), "…and offers the retry the spinner never did");
+      // HONEST ABOUT THE FAULT CLASS: a 500 is ours, not the person's input.
+      assert.ok(body.includes("broke on our side"), "a 5xx is reported as a 5xx; got: " + body);
+      // NOT AN ACCUSATION (the D411 intent, carried into this arm): an unread
+      // answer is not a refusal, so no role is named and nothing is denied.
+      assert.ok(!body.includes("platform_operator") && !/platform-gated/i.test(body),
+        "an unread /v1/me is not a platform refusal");
+      assert.ok(!/ask (your|the) team owner/i.test(body), "and it is certainly not a team-owner errand");
+      // FAIL-CLOSED IS UNWEAKENED (GR9): the sidebar entry stays hidden while
+      // the role is unknown, and this is a WAIT — not a false grant.
+      assert.equal(reg.get("nav-operator").hidden, true, "an unknown role never reveals the sidebar entry");
+      // …and no operator route was read: the four cards were never painted.
+      assert.equal(reg.get("op-brake-body"), undefined, "no operator card is mounted while the role is unknown");
+    },
+  },
   // ── MVP-0 Personal Dev Fleet (pdf-mvp0-fleet-card-spa): the fleet card ─────
   "fleet-support-provisioning": {
     what: "the fleet card with a support mid-provision — the 6-rung SUPPORT theater, secure included, never a freshen rung",

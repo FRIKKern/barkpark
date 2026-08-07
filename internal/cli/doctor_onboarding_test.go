@@ -115,8 +115,11 @@ func TestOnboardingReceiptShape(t *testing.T) {
 		t.Fatalf("path check = %+v, want resolved /usr/local/bin/bp", r.Path)
 	}
 	// (b) CLI freshness — installed behind latest
-	if r.CLI.Installed != "1.14.0" || r.CLI.Latest != "1.15.0" || r.CLI.UpToDate {
-		t.Fatalf("cli check = %+v, want installed 1.14.0 latest 1.15.0 up_to_date=false", r.CLI)
+	if r.CLI.Installed != "1.14.0" || r.CLI.Latest != "1.15.0" || r.CLI.Status != onbCLIBehind {
+		t.Fatalf("cli check = %+v, want installed 1.14.0 latest 1.15.0 status behind", r.CLI)
+	}
+	if r.CLI.UpToDate == nil || *r.CLI.UpToDate {
+		t.Fatalf("cli check up_to_date = %v, want a taken reading of false", r.CLI.UpToDate)
 	}
 	// (c) Cloud session — present, url + team, no token field on the struct
 	if !r.CloudSession.Present || r.CloudSession.Team != "gyldendal" {
@@ -508,5 +511,119 @@ func TestWhoamiInstanceTeamFallsBackToCloudTeam(t *testing.T) {
 	}
 	if inst.Team != "active-team" {
 		t.Fatalf("instance team = %q, want the cfg.CloudTeam fallback", inst.Team)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The dev-build tri-state: this epic's doctrine applied to the CLI's own
+// instrument. A dev build cannot be compared against the cli-v* channel, so the
+// receipt must report UNREPORTED — never a green it did not earn, and never a
+// "behind" false alarm either. These tests assert on the RENDERED bytes (JSON
+// and human), so they compile against the pre-change tree too and FAIL on it.
+// ---------------------------------------------------------------------------
+
+// TestOnboardingDevBuildFreshnessIsUnreported: the JSON leg for a dev build is
+// status "unreported" with a NULL up_to_date. Fail-before on origin/main, which
+// emits "up_to_date":true.
+func TestOnboardingDevBuildFreshnessIsUnreported(t *testing.T) {
+	withCLIVersion(t, "dev")
+
+	b, err := json.Marshal(onboardingCLIFreshness())
+	if err != nil {
+		t.Fatalf("marshal cli leg: %v", err)
+	}
+	got := string(b)
+
+	if strings.Contains(got, `"up_to_date":true`) {
+		t.Fatalf("a dev build claimed up_to_date:true — a green it cannot earn:\n%s", got)
+	}
+	if strings.Contains(got, `"up_to_date":false`) {
+		t.Fatalf("a dev build claimed up_to_date:false — a false alarm, equally unearned:\n%s", got)
+	}
+	if !strings.Contains(got, `"up_to_date":null`) {
+		t.Fatalf("a dev build must render up_to_date as null (no reading taken):\n%s", got)
+	}
+	if !strings.Contains(got, `"status":"unreported"`) {
+		t.Fatalf("a dev build must carry status \"unreported\":\n%s", got)
+	}
+	// The detail names the ONE command that fixes it.
+	if !strings.Contains(got, "make cli-install") {
+		t.Fatalf("the dev-build detail must name the literal remedy `git pull && make cli-install`:\n%s", got)
+	}
+}
+
+// TestOnboardingDevBuildHumanRenderSaysUnreported: the human receipt marks the
+// CLI leg "?" (not ✓, not ✗), names the remedy, and — because the aggregate ok
+// deliberately stays true for an unknown leg — the READY verdict itself carries
+// the UNREPORTED caveat so nobody reads the green as verified freshness.
+func TestOnboardingDevBuildHumanRenderSaysUnreported(t *testing.T) {
+	_, ctx, _ := onbTestFixture(t)
+	withCLIVersion(t, "dev")
+
+	out, buf, _ := newTestWriter()
+	out.output = "table" // the human render
+	code := runDoctorOnboarding(out, globals{yes: true}, ctx, []string{"--onboarding"})
+	stdout := buf.String()
+
+	// DECIDED: an unknown leg is not a failure — ok stays true, exit stays 0.
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0: an unreported leg must not sink readiness\n%s", code, stdout)
+	}
+	if strings.Contains(stdout, "✓ CLI") {
+		t.Fatalf("a dev build was marked ✓ CLI — a green it cannot earn:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "✗ CLI") {
+		t.Fatalf("a dev build was marked ✗ CLI — a false alarm:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "? CLI") {
+		t.Fatalf("a dev build must render the CLI leg as \"?\" (no reading taken):\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "make cli-install") {
+		t.Fatalf("the human CLI line must name the literal remedy:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "READY") || !strings.Contains(stdout, "UNREPORTED: CLI freshness") {
+		t.Fatalf("the READY verdict must name the unreported leg:\n%s", stdout)
+	}
+}
+
+// TestDevBuildVerdictAgreesAcrossDoctorAndUpgrade: the SAME fact (this binary is
+// a dev build) must not produce contradicting verdicts on two surfaces. Both
+// `bp doctor --onboarding` and `bp upgrade --check` report "unreported" and both
+// exit 0. Fail-before on origin/main, where upgrade --check exits 2 while the
+// doctor reports up-to-date and exits 0.
+func TestDevBuildVerdictAgreesAcrossDoctorAndUpgrade(t *testing.T) {
+	withCLIVersion(t, "dev")
+
+	var doctorLeg struct {
+		Status   string `json:"status"`
+		UpToDate *bool  `json:"up_to_date"`
+	}
+	b, _ := json.Marshal(onboardingCLIFreshness())
+	if err := json.Unmarshal(b, &doctorLeg); err != nil {
+		t.Fatalf("decode doctor cli leg: %v (%s)", err, b)
+	}
+
+	upgradeOut, _, code := runCloudCapture(t, true, func(out *writer) int {
+		return runUpgrade(out, globals{}, []string{"--check"})
+	})
+	if code != exitOK {
+		t.Fatalf("bp upgrade --check on a dev build = %d, want 0 — the doctor calls the same fact a non-failure\n%s", code, upgradeOut)
+	}
+	var upgradeLeg struct {
+		Status string `json:"status"`
+		Behind *bool  `json:"behind"`
+	}
+	if err := json.Unmarshal([]byte(upgradeOut), &upgradeLeg); err != nil {
+		t.Fatalf("decode upgrade --check json: %v (%s)", err, upgradeOut)
+	}
+
+	if doctorLeg.Status != upgradeLeg.Status {
+		t.Fatalf("surfaces disagree: doctor status %q vs upgrade --check status %q", doctorLeg.Status, upgradeLeg.Status)
+	}
+	if doctorLeg.Status != "unreported" {
+		t.Fatalf("shared status = %q, want \"unreported\"", doctorLeg.Status)
+	}
+	if doctorLeg.UpToDate != nil || upgradeLeg.Behind != nil {
+		t.Fatalf("neither surface may claim a reading: up_to_date=%v behind=%v", doctorLeg.UpToDate, upgradeLeg.Behind)
 	}
 }

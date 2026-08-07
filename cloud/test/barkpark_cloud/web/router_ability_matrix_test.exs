@@ -377,7 +377,10 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
              }
     end
 
-    test "require_primary_team_admin names admin on the primary team (the audit-trail exhibit)" do
+    # cch-w37-s3: the label is "team", not "primary_team" — the gate reads
+    # conn.assigns[:current_team], which resolve_team/2 fills from the
+    # x-barkpark-team header, so it judges the SELECTED team, not the primary one.
+    test "require_primary_team_admin names admin on the current team (the audit-trail exhibit)" do
       user = user_fixture()
       team = team_fixture()
       {:ok, _} = Accounts.add_member(team, user, "member")
@@ -389,7 +392,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       assert Jason.decode!(conn.resp_body) == %{
                "error" => "forbidden",
                "required" => "admin",
-               "scope" => "primary_team"
+               "scope" => "team"
              }
     end
 
@@ -405,7 +408,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       assert Jason.decode!(conn.resp_body) == %{
                "error" => "forbidden",
                "required" => "owner",
-               "scope" => "primary_team"
+               "scope" => "team"
              }
     end
 
