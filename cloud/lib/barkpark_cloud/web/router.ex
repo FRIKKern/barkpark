@@ -11393,11 +11393,16 @@ defmodule BarkparkCloud.Web.Router do
             # against a wrapper spec'd `:: :ok`, i.e. a match that could not
             # fail, so a deploy the control plane never started was reported to
             # the operator as `201 created` with a row that would sit `queued`.
+            # The row is committed and audited BEFORE the driver is asked to
+            # start, so the live console is told about it either way. A refused
+            # spawn leaves a real `queued` row on the record, and a console that
+            # never heard about it is the same blindness one layer up: the
+            # operator would read the 503 and see nothing to go look at.
+            push_event(site.team_id, "deployments")
+            push_event(site.team_id, "audit")
+
             case start_box_build(prebuilt, deployment) do
               :ok ->
-                push_event(site.team_id, "deployments")
-                push_event(site.team_id, "audit")
-
                 json(
                   conn,
                   201,
@@ -13020,13 +13025,17 @@ defmodule BarkparkCloud.Web.Router do
         # is answerable. It used to be `:ok = Sites.Deploy.start(stamped)`, a
         # match that could not fail: the artifact landed, nothing built, and the
         # uploader was told `201`.
+        #
+        # The console is told BEFORE the start is attempted, for the same reason
+        # as the box-build arm above: the artifact is stored and the row is
+        # stamped, so the console must learn about the row whether or not a
+        # build follows it.
+        push_event(site.team_id, "deployments")
+        push_event(site.team_id, "audit")
+        bp = Registry.get_barkpark(site.barkpark_id)
+
         case Sites.Deploy.start_reported(stamped) do
           {:ok, _outcome} ->
-            push_event(site.team_id, "deployments")
-            push_event(site.team_id, "audit")
-
-            bp = Registry.get_barkpark(site.barkpark_id)
-
             json(conn, 201, %{
               deployment: site_deployment_json(stamped, site, bp),
               artifact_sha256: sha,
@@ -13041,8 +13050,6 @@ defmodule BarkparkCloud.Web.Router do
             # upload would send them into a 200 that builds nothing, which is the
             # same lie in a new costume. THIS row is now a dead end: `queued`,
             # `claim_epoch` 0, covered by no reaper pass.
-            bp = Registry.get_barkpark(site.barkpark_id)
-
             json(conn, 503, %{
               error: "deploy_not_started",
               detail:

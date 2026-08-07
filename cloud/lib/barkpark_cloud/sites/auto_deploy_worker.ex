@@ -35,8 +35,10 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   what prevents the race, not the `(site_id, build_id)` index). Fail-closed HEALTH
   + the force nonce then inherit for free from the proven manual deploy path.
 
-  The build itself runs the SAME way a manual deploy does — `Deploy.start/1`
-  spawns the supervised, claim-fenced, reaper-recoverable driver — so a crashed
+  The build itself runs the SAME way a manual deploy does — `Deploy.start_reported/1`
+  spawns the supervised, claim-fenced, reaper-recoverable driver AND reports whether
+  the spawn happened (the fire-and-forget `Deploy.start/1` that used to be named here
+  was deleted in deploy-reliability W17: it laundered a refusal into `:ok`) — so a crashed
   auto-rebuild is swept exactly like a crashed manual one. The `:site_deploy`
   queue is concurrency-1 so the enqueue+start step is serial per box, and the box
   itself flock-serializes the build.
