@@ -11387,19 +11387,38 @@ defmodule BarkparkCloud.Web.Router do
             # A box build is unchanged: the row is handed to the driver AFTER it
             # is committed and audited, so the deploy the box is asked to run is
             # one the control plane can already see, reap, and report on.
-            if not prebuilt do
-              :ok = Sites.Deploy.start(deployment)
+            # THE 201 IS DOWNSTREAM OF THIS. Nothing has been written to the
+            # socket yet, so a refused driver spawn can still be ANSWERED rather
+            # than laundered: this used to be `:ok = Sites.Deploy.start(row)`
+            # against a wrapper spec'd `:: :ok`, i.e. a match that could not
+            # fail, so a deploy the control plane never started was reported to
+            # the operator as `201 created` with a row that would sit `queued`.
+            case start_box_build(prebuilt, deployment) do
+              :ok ->
+                push_event(site.team_id, "deployments")
+                push_event(site.team_id, "audit")
+
+                json(
+                  conn,
+                  201,
+                  %{deployment: site_deployment_json(deployment, site, bp)}
+                  |> maybe_put_upload_instruction(prebuilt, site, deployment)
+                )
+
+              {:error, reason} ->
+                # The row is minted and audited, so the attempt is on the record
+                # and reapable — but no build is running, and saying otherwise is
+                # the failure this route exists to stop reporting.
+                json(conn, 503, %{
+                  error: "deploy_not_started",
+                  detail:
+                    "the deployment row was created but the build driver could not be started" <>
+                      " — nothing is building. Retry the deploy; if it keeps failing the control" <>
+                      " plane is out of build capacity.",
+                  reason: inspect(reason),
+                  deployment: site_deployment_json(deployment, site, bp)
+                })
             end
-
-            push_event(site.team_id, "deployments")
-            push_event(site.team_id, "audit")
-
-            json(
-              conn,
-              201,
-              %{deployment: site_deployment_json(deployment, site, bp)}
-              |> maybe_put_upload_instruction(prebuilt, site, deployment)
-            )
 
           # Same code + same content + same config = the same build. The box's PLAN
           # stage would no-op on it anyway (build_id is already live), so answer
@@ -11410,6 +11429,18 @@ defmodule BarkparkCloud.Web.Router do
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
         end
+    end
+  end
+
+  # MINT-THEN-UPLOAD (charter D86): a prebuilt row deliberately starts NO driver
+  # here — it waits for its artifact, and the upload route hands it over. That is
+  # a success, not a skipped start. A box build starts now and reports.
+  defp start_box_build(true = _prebuilt, _deployment), do: :ok
+
+  defp start_box_build(false = _prebuilt, deployment) do
+    case Sites.Deploy.start_reported(deployment) do
+      {:ok, _outcome} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -12982,18 +13013,48 @@ defmodule BarkparkCloud.Web.Router do
         # ONLY NOW. The digest is committed, so the row can already name the
         # bytes it is about to serve; a driver started before this could reach
         # the box with a deployment the control plane could not describe.
-        :ok = Sites.Deploy.start(stamped)
+        #
+        # And the 201 below is DOWNSTREAM of this call — no byte of this
+        # request's response has been sent (the earlier 201 the caller saw
+        # belonged to the MINT request, a different exchange), so a refused spawn
+        # is answerable. It used to be `:ok = Sites.Deploy.start(stamped)`, a
+        # match that could not fail: the artifact landed, nothing built, and the
+        # uploader was told `201`.
+        case Sites.Deploy.start_reported(stamped) do
+          {:ok, _outcome} ->
+            push_event(site.team_id, "deployments")
+            push_event(site.team_id, "audit")
 
-        push_event(site.team_id, "deployments")
-        push_event(site.team_id, "audit")
+            bp = Registry.get_barkpark(site.barkpark_id)
 
-        bp = Registry.get_barkpark(site.barkpark_id)
+            json(conn, 201, %{
+              deployment: site_deployment_json(stamped, site, bp),
+              artifact_sha256: sha,
+              bytes: byte_size(bytes)
+            })
 
-        json(conn, 201, %{
-          deployment: site_deployment_json(stamped, site, bp),
-          artifact_sha256: sha,
-          bytes: byte_size(bytes)
-        })
+          {:error, reason} ->
+            # THE RETRY INSTRUCTION IS "MINT A NEW DEPLOYMENT", NOT "RE-POST".
+            # The bytes ARE stored, so `settle_deployment_artifact/5` above
+            # answers a same-sha re-POST `200 already_uploaded` and explicitly
+            # does NOT re-start the driver — telling the caller to retry the
+            # upload would send them into a 200 that builds nothing, which is the
+            # same lie in a new costume. THIS row is now a dead end: `queued`,
+            # `claim_epoch` 0, covered by no reaper pass.
+            bp = Registry.get_barkpark(site.barkpark_id)
+
+            json(conn, 503, %{
+              error: "deploy_not_started",
+              detail:
+                "the artifact was stored but the build driver could not be started" <>
+                  " — nothing is building, and re-uploading these bytes will answer" <>
+                  " `already_uploaded` without starting one. Mint a NEW prebuilt deployment" <>
+                  " and upload again.",
+              reason: inspect(reason),
+              artifact_sha256: sha,
+              deployment: site_deployment_json(stamped, site, bp)
+            })
+        end
 
       {:error, cs} ->
         json(conn, 422, %{error: "invalid", details: errors(cs)})

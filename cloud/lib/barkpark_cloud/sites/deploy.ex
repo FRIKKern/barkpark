@@ -555,19 +555,11 @@ defmodule BarkparkCloud.Sites.Deploy do
   ## ---------------------------------------------------------------------------
 
   @doc """
-  Kick the driver for a minted deployment. Asynchronous by contract — the caller
-  (the deploy route) has already answered 201, and the build takes tens of
-  seconds. The spawn itself is a config seam (`:site_deploy_starter`) so tests can
-  drive `run/1` synchronously and deterministically instead of racing a Task.
-  """
-  @spec start(Deployment.t()) :: :ok
-  def start(%Deployment{} = deployment) do
-    _ = start_reported(deployment)
-    :ok
-  end
+  Kick the driver for a minted deployment, AND SAY WHAT HAPPENED (deploy-truth
+  W1, charter D9).
 
-  @doc """
-  `start/1`, but the outcome TRAVELS (deploy-truth W1, charter D9).
+  The spawn is a config seam (`:site_deploy_starter`) so tests can drive `run/1`
+  synchronously and deterministically instead of racing a Task.
 
   The old seam was spec'd `:: :ok` and the production starter returned a LITERAL
   `:ok` after `Task.Supervisor.start_child` — it discarded the spawn result AND
@@ -586,9 +578,15 @@ defmodule BarkparkCloud.Sites.Deploy do
       child, or the row could not be claimed). Nothing recorded the build, so the
       caller MUST NOT treat this as success.
 
-  `start/1` is kept as the fire-and-forget wrapper because several call sites
-  match `:ok = Deploy.start(row)`; new callers that can act on the outcome should
-  use this.
+  THIS IS THE ONLY SEAM. There used to be a fire-and-forget `start/1` beside it —
+  spec'd `:: :ok`, it called this function, DISCARDED the `{:error, reason}` and
+  returned a literal, so every `:ok = Deploy.start(row)` in the tree was a match
+  that COULD NOT FAIL: the MatchError meant to signal a refused driver spawn was
+  structurally unreachable. Four callers were blind through it — the manual deploy
+  route, the prebuilt artifact-upload route, the hourly freshness sweep, and,
+  worst, `resume_orphaned/0`, the reaper's own recovery pass, whose `resumed:`
+  metric counted rows FOUND rather than rows restarted. It is deleted; a caller
+  that cannot act on the outcome must at least SAY it did not happen.
   """
   @spec start_reported(Deployment.t()) ::
           {:ok, :started | :live | :failed | :deferred} | {:error, term()}
@@ -1682,14 +1680,34 @@ defmodule BarkparkCloud.Sites.Deploy do
   the eternal spinner in a new costume.
 
   A row is an orphan (not a fresh mint) when it has been claimed before
-  (`claim_epoch > 0`). Fresh rows are driven by the deploy route itself. Returns
-  the number of rows re-driven.
+  (`claim_epoch > 0`). Fresh rows are driven by the deploy route itself.
+
+  Returns the number of rows ACTUALLY RE-DRIVEN — not the number found. This
+  counts because the value IS the reaper's recovery metric:
+  `StaleDeploymentReaper` puts it in the Oban job meta as `resumed`. It used to
+  be `length(orphans)` over a fire-and-forget `start/1` that could not fail, so a
+  sweep in which EVERY rescue was refused still reported `resumed: N` — the
+  recovery mechanism failing looked exactly like the recovery mechanism working.
+  A refusal is now counted out and logged; the rows it names stay `queued` for
+  the next sweep.
   """
   @spec resume_orphaned() :: non_neg_integer()
   def resume_orphaned do
-    orphans = Registry.list_orphaned_static_deployments()
-    Enum.each(orphans, &start/1)
-    length(orphans)
+    Registry.list_orphaned_static_deployments()
+    |> Enum.count(fn %Deployment{} = orphan ->
+      case start_reported(orphan) do
+        {:ok, _outcome} ->
+          true
+
+        {:error, reason} ->
+          Logger.warning(
+            "deploy resume could not re-drive orphaned deployment #{orphan.id} " <>
+              "(site #{orphan.site_id}): #{inspect(reason)} — the row is left queued for the next sweep"
+          )
+
+          false
+      end
+    end)
   end
 
   ## ---------------------------------------------------------------------------

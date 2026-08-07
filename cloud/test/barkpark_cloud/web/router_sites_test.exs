@@ -2669,4 +2669,98 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 200
     end
   end
+
+  ## ---------------------------------------------------------------------------
+  ## deploy-reliability W17 S5: a driver that never started is not a 201
+  ## ---------------------------------------------------------------------------
+
+  # The supervisor refuses the child. Both deploy arms used to run this through
+  # `:ok = Sites.Deploy.start(row)` — a wrapper spec'd `:: :ok`, so the match
+  # could not fail and the refusal became a `201 created` for a build that does
+  # not exist.
+  defmodule RefusingStarter do
+    @moduledoc false
+    @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+    @impl true
+    def start(_deployment_id), do: {:error, :max_children}
+  end
+
+  describe "deploy-reliability W17 S5: a refused driver spawn answers 503, not 201" do
+    test "POST /v1/sites/:id/deploy (box build) → 503 deploy_not_started, row left queued" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      Process.put(:site_deploy_starter, RefusingStarter)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{}, token)
+
+      # The 201 is DOWNSTREAM of the start call, so nothing had been sent and the
+      # route can still tell the truth.
+      assert conn.status == 503
+      body = json_body(conn)
+      assert body["error"] == "deploy_not_started"
+      assert body["detail"] =~ "nothing is building"
+      assert body["reason"] =~ "max_children"
+
+      # The row IS minted and audited — the attempt is on the record, reapable,
+      # and named in the body so the operator can go look at it.
+      assert dep_id = body["deployment"]["id"]
+      assert Registry.get_deployment(dep_id).status == "queued"
+    end
+
+    test "POST …/deployments/:dep_id/artifact → 503 telling the caller to MINT A NEW deployment" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      # The mint itself starts no driver (mint-then-upload, charter D86), so it
+      # still answers 201 even with a refusing starter installed.
+      dep = mint_prebuilt(site, token)
+      Process.put(:site_deploy_starter, RefusingStarter)
+
+      payload = :crypto.strong_rand_bytes(1024)
+      sha = sha256_hex(payload)
+
+      conn =
+        call_binary(
+          :post,
+          "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact",
+          payload,
+          token
+        )
+
+      assert conn.status == 503
+      body = json_body(conn)
+      assert body["error"] == "deploy_not_started"
+      assert body["artifact_sha256"] == sha
+      assert body["reason"] =~ "max_children"
+
+      # THE INSTRUCTION MUST NOT BE "RE-POST". The bytes are stored, so the
+      # retry the caller would reach for is answered `already_uploaded` WITHOUT
+      # starting a driver — proven below.
+      assert body["detail"] =~ "Mint a NEW prebuilt deployment"
+      refute body["detail"] =~ "retry the upload"
+
+      # The stored bytes are retained (that is why the re-POST is a dead end).
+      assert Sites.Deploy.artifact_for(dep["id"]).sha256 == sha
+
+      # Proof the copy is honest: the same bytes again → 200 already_uploaded,
+      # and the row is STILL queued. Nothing was started by the retry.
+      retry =
+        call_binary(
+          :post,
+          "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact",
+          payload,
+          token
+        )
+
+      assert retry.status == 200
+      assert json_body(retry)["status"] == "already_uploaded"
+      assert Registry.get_deployment(dep["id"]).status == "queued"
+    end
+  end
 end
