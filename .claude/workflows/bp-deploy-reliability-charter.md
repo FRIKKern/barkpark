@@ -2908,3 +2908,52 @@ with exactly one sick box discriminates at all, and whether its UNMETERED arm is
 Coverage: every survey and verify agent reported; there is no coverage deficit this wave.
 
 Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
+
+### Wave 2026-08-07 (wave 9) — REVIEWED · Paper `deploy-reliability-wave-9-2026-08-07` · grade **A−**
+
+**Five of seven slices built, reviewed, gate-green on the final state, PUSHED and PR'd. Nothing merged — the lead merges.**
+The other two (`dr-w9-s6`, `dr-w9-s7`) are round 2 BY DESIGN, each behind a round-1 dep.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The pressure block carries its denominator | `dr-bl-w7-req-volume-joins-the-pressure-block` | `…the-pressure-block-carries-latency-and-i-0` | [#10079](https://github.com/FRIKKern/barkpark/pull/10079) | 140 tests, 0 failures |
+| Abandoned is not a transient 409 | `dr-w9-s2-abandoned-is-not-a-transient-409` | `…giving-up-on-a-publish-stops-wearing-the-1-r` | [#10080](https://github.com/FRIKKern/barkpark/pull/10080) | 37 tests, 0 failures |
+| The deployments table carries its cause | `dr-w9-s3-deployments-table-carries-its-cause` | `…a-team-s-deployments-table-carries-its-c-2-r` | [#10081](https://github.com/FRIKKern/barkpark/pull/10081) | go build/vet/test ./internal/cli/… ok |
+| The doc-type filter reaches the live rows | `dr-w9-s4-webhook-doctype-filter-reaches-live-rows` | `…the-doc-type-filter-reaches-the-five-liv-3` | [#10082](https://github.com/FRIKKern/barkpark/pull/10082) | go build/vet/test ./internal/cli/… ok |
+| The beat dates its own producer | `dr-w9-s5-the-beat-dates-its-own-producer` | `…the-health-beat-dates-its-own-producer-s-4` | [#10084](https://github.com/FRIKKern/barkpark/pull/10084) | go build/vet/test ./internal/agent/… ok |
+
+**WHAT LANDED.** The wave's through-line is the wish's second clause — *make the reporting able to lose*.
+S2 takes the most severe outcome the fleet produces (a publish abandoned after 12 rounds) out of the mildest
+name in the taxonomy, and does it by calling a reader the module already owned and had wired only to the less
+severe path. S3 turns `bp sites deployments` — the ONE deploy surface a non-platform-admin reaches, with the
+crown dark — from three-dashes-and-a-timestamp into a table that names each row's cause and a summary that
+cannot print a bare percentage. S4 ships a REPEATABLE verb for the 93.1% delivery cut and, in running it live
+as the brief demanded, found that `--dry-run` was a global flag its own green unit tests could not see — it
+wrote to production on a "dry" run. S5 gives the beat a producer stamp so an absent vital stops being
+indistinguishable from a healthy one. S1 puts the denominator beside the 5xx rate.
+
+**WHAT THE REVIEWER FIXED IN PLACE.** S3 carried three real defects, all of them the epic's own disease one
+surface further out: a `cancelled` deploy (a real terminal state in the CP's transition map) rendered as
+"in flight"; a `status:"deferred"` row with no `DEFERRED_*` class was counted as neither attempt nor deferral;
+and the summary blamed EVERY deferral on the build cap when `BOX_BUSY_DEFERRED` is a busy box, not a full one
+— the identical label-lies-about-cause defect S2 fixes server-side. Mutation-proved: with the two classifier
+arms removed the new test reds with `1 live, 1 failed, 0 deferred, 2 in flight`. S2 needed `mix format` only.
+
+**WHAT DID NOT GET PROVEN, and belongs in the next wave's mouth.** Three slices land a value nobody reads yet:
+`p95_ms` joins `err_5xx_per_s` as a landed-and-unread vital (its reader IS `dr-w9-s7`), and `agent_version`
+ships the ABILITY to date a beat while every box in the fleet keeps emitting nothing until
+`dr-bl-w6-cut-and-bless-v0-2-26` fires. The reviewer closed S5's biggest blind spot by RUN rather than read —
+`go build ./cmd/barkpark-agent` here embeds `vcs.revision=a31faa52dc75` with `vcs.modified=true`, i.e. the
+fallback yields `git-a31faa52dc75-dirty` and not `unknown`, from exactly the command both on-box rebuild
+scripts use. S2's fixtures remain RECONSTRUCTED, not dumped: no DB reach from the worktree, so a reviewer with
+`cloud-db-1` access should replay the four actual rows before sealing.
+
+**ORDERED MERGE, and it is not optional.** #10080 (S2) conflicts TEXTUALLY with #10014 in four points in
+`deploy_ledger.ex` and is semantically disjoint from it. Merge #10014 first, then rebase #10080. #10079 (S1)
+auto-deploys the control plane on merge.
+
+**NEXT WAVE takes the readers.** Dispatch order: merge round 1 (with #10014 before #10080), then
+`dr-w9-s6-the-rate-names-its-absorption` once #10080 lands, then `dr-w9-s7-verdict-reads-a-sustained-vital`
+once #10079 lands. S7 is the wave's real prize — it turns the tri-state verdict on and finally READS a vital
+this wave landed. Both are already filed with full briefs and disjoint file sets.
+
