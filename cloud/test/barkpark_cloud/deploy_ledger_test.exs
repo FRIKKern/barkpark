@@ -69,6 +69,45 @@ defmodule BarkparkCloud.DeployLedgerTest do
   # refused. Real 0x1B bytes, exactly as captured from the build PTY.
   @build_403 "BUILD failed (exit 12): \e[31m\e[1m04:34:24\e[22m [ERROR] [build]\e[39m Caught error rendering /graph.json: Error: graph corpus fetch failed: 403"
   @build_plain "BUILD failed (exit 12): at async #getPathsForRoute (file:///opt/barkpark/sites/demo/node_modules/astro/dist/core/build.js:12:3)"
+  # ── The CONTENT API's own status, in BOTH dialects (dr-w15 S2 / D238) ─────
+  #
+  # 277 graph-coded rows on cloud-db-1: 500/HEALTH 132, 0/HEALTH 62, 503/HEALTH
+  # 62, 500/BUILD 10, 403/HEALTH 8, 403/BUILD 3. Every BUILD row is
+  # `astro-search-starter` and every HEALTH row is `search-starter`, because the
+  # two templates fail DIFFERENTLY on the same read:
+  #
+  #   HEALTH — Next's `fetchCorpusGraph` DEGRADES and records the cause in the
+  #   `bp-corpus-status` marker; `deploy/site-deploy-node.sh:492` reads it back.
+  #   BUILD  — Astro's `graphCorpus` THROWS (`src/lib/bp.ts:94`), so the same
+  #   sentence arrives inside an ANSI-escaped Astro stack trace at exit 12.
+  #
+  # A HEALTH-only split leaves the whole astro/static fleet in BUILD_FAILED, so
+  # both shapes are fixtures here and both are re-derived from their producers in
+  # "both anchors are the PRODUCERS' own bytes" below.
+  @g500_health "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — the SSR could not read a content document: graph 500: internal server error"
+  @g503_health "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — the SSR could not read a content document: graph 503: service unavailable"
+  # Status 0 is the fetch that never got an HTTP answer at all (`graph.ts:246`).
+  @g0_health "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — the SSR could not read a content document: graph 0: fetch failed"
+  # The API's own sentence, verbatim from `public_read.ex:134` — the eleven-row
+  # visibility window of 2026-08-05 20:53-21:13.
+  @g403_health "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — the SSR could not read a content document: graph 403: public-read tokens may only read published public documents"
+  # Zero rows all-time (D244): the corpus read SUCCEEDED and had nothing to
+  # anchor. Unnamed on purpose — it rises in UNCLASSIFIED (D8).
+  @g200_health "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — the SSR could not read a content document: graph 200: corpus read OK but carried 0 node(s), none usable as a content anchor"
+  # The astro arm, with the real 0x1B bytes exactly as captured from the build
+  # PTY (same shape as @build_403 below, which is the LEGACY pre-shared-sentence
+  # wording and must keep its own class).
+  @g500_build "BUILD failed (exit 12): \e[31m\e[1m04:34:24\e[22m [ERROR] [build]\e[39m Caught error rendering /graph.json: Error: graph 500: internal server error"
+  @g403_build "BUILD failed (exit 12): \e[31m\e[1m21:02:11\e[22m [ERROR] [build]\e[39m Caught error rendering /graph.json: Error: graph 403: public-read tokens may only read published public documents"
+  # The em-dash BUILD prefix: 2 rows, which sat in UNCLASSIFIED because the arm
+  # only read `BUILD failed (exit`.
+  @g500_build_emdash "BUILD failed — \e[31m\e[1m04:34:24\e[22m [ERROR] [build]\e[39m Caught error rendering /graph.json: Error: graph 500: internal server error"
+  @build_emdash "BUILD failed — the site build exited non-zero before any log was captured"
+  # The RESIDUE, byte-shaped from `deploy/site-deploy-node.sh:494`: an empty
+  # marker with no `bp-corpus-status` beside it. 3,617 rows, and structurally the
+  # whole static-engine fleet from here on (D112).
+  @doc_id_no_marker "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — the SSR rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract, so the upstream cause went unrecorded)"
+
   @unreachable "instance guerrilla is unreachable — the deploy could not be delivered; check instance health"
   @timeout "the build did not finish in time — the box is still working, or it stalled; deploy again to retry"
   @stale_lease "exceeded max deploy claim attempts (stale builder lease)"
@@ -646,6 +685,300 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
   end
 
+  ## ── 1a2. The content API's own status, in BOTH dialects (D238) ────────────
+  #
+  # `classify/2`'s HEALTH arm matched "bp-doc-id marker is empty" FIRST and
+  # answered DOC_ID_EMPTY, throwing away the upstream status sitting in the same
+  # string — the status the producer had already gone to the trouble of reading
+  # back out of the SSR's `bp-corpus-status` marker. The number-one failure class
+  # on the fleet was therefore both silent (nobody could see the cause) and
+  # mis-reported (the row named a symptom).
+  #
+  # And the BUILD arm was the same defect wearing a different template: astro's
+  # `graphCorpus` THROWS the identical `graph <status>: <message>` sentence, so
+  # thirteen rows carrying a fully-readable content-API cause wore BUILD_FAILED,
+  # "the site build exited non-zero" — which blames the site owner for an
+  # instance-side condition.
+
+  # THE STATUS SET IS DECLARED, NOT SCRAPED (D244). The honest scrape target,
+  # `templates/search-starter/lib/markers.corpus-status.test.ts`, yields exactly
+  # graph 0/200/401/403/500 — it MISSES 503, which is 62 live rows and the
+  # second-largest status. Both producers interpolate a pass-through
+  # `res.status` (`graph.ts:92`, `bp.ts:94`), so the vocabulary is UNBOUNDED and
+  # a scrape cannot fail closed the way the snake_case producer scrape does.
+  #
+  # {status, live rows, class} — counts re-measured on cloud-db-1 2026-08-07
+  # across BOTH arms. They are pinned so a re-measurement is a diff, not a
+  # rewrite, and so `@graph_population` below cannot drift away from them.
+  @graph_statuses [
+    {"500", 142, "CONTENT_API_500"},
+    {"503", 62, "CONTENT_API_503"},
+    {"0", 62, "CONTENT_API_UNREACHABLE"},
+    {"403", 11, "CONTENT_API_403"},
+    # Zero rows all-time: the read succeeded and had nothing to anchor. Unnamed
+    # on purpose (D8) — it must RISE rather than be named on speculation.
+    {"200", 0, "UNCLASSIFIED"}
+  ]
+
+  # The per-arm split, which is what makes a HEALTH-only fix visibly incomplete.
+  @graph_population %{
+    {"500", "HEALTH"} => 132,
+    {"0", "HEALTH"} => 62,
+    {"503", "HEALTH"} => 62,
+    {"500", "BUILD"} => 10,
+    {"403", "HEALTH"} => 8,
+    {"403", "BUILD"} => 3
+  }
+
+  # Read at runtime so a producer reflow reds HERE instead of silently degrading
+  # every row back to DOC_ID_EMPTY / BUILD_FAILED.
+  @health_producer "../deploy/site-deploy-node.sh"
+  @build_producer "../templates/astro-search-starter/src/lib/bp.ts"
+  @scrape_target "../templates/search-starter/lib/markers.corpus-status.test.ts"
+
+  describe "classify/2 — the content API's own status stops being thrown away" do
+    test "BOTH arms split on the row's own graph code" do
+      # HEALTH — the Next template's degraded render, exit 14.
+      assert DeployLedger.classify("HEALTH", @g500_health) == "CONTENT_API_500"
+      assert DeployLedger.classify("HEALTH", @g503_health) == "CONTENT_API_503"
+      assert DeployLedger.classify("HEALTH", @g0_health) == "CONTENT_API_UNREACHABLE"
+      assert DeployLedger.classify("HEALTH", @g403_health) == "CONTENT_API_403"
+
+      # BUILD — the astro template's throw, ANSI escapes and all. These are the
+      # thirteen rows a HEALTH-only split would have left in BUILD_FAILED.
+      assert DeployLedger.classify("BUILD", @g500_build) == "CONTENT_API_500"
+      assert DeployLedger.classify("BUILD", @g403_build) == "CONTENT_API_403"
+
+      # The escapes really are in the fixture — this is not a sanitised string
+      # that quietly dropped the thing under test.
+      assert String.contains?(@g500_build, "\e[31m")
+
+      # …and through the arm the census actually folds over.
+      assert DeployLedger.classify(%{
+               status: "failed",
+               stage: "BUILD",
+               failure_reason: @g403_build
+             }) == "CONTENT_API_403"
+    end
+
+    test "the declared status set is COMPLETE over the live population, and the scrape is not" do
+      # Every declared status classifies to its declared class, in whichever arm
+      # can produce it — the declaration and the classifier cannot drift apart.
+      for {status, _count, class} <- @graph_statuses do
+        assert DeployLedger.classify("HEALTH", health_graph_line(status)) == class
+        assert DeployLedger.classify("BUILD", build_graph_line(status)) == class
+      end
+
+      # The counts add up to the measured population, per arm and in total.
+      assert Enum.sum(Map.values(@graph_population)) == 277
+
+      for {status, count, _class} <- @graph_statuses do
+        arms =
+          @graph_population
+          |> Enum.filter(fn {{s, _stage}, _n} -> s == status end)
+          |> Enum.map(fn {_k, n} -> n end)
+          |> Enum.sum()
+
+        assert arms == count, "#{status}: per-arm rows #{arms} but declared #{count}"
+      end
+
+      # WHY DECLARED AND NOT SCRAPED: the scrape target omits 503 outright — 62
+      # live rows, the second-largest status. If this stops being true the
+      # declaration can be revisited; until then a scrape would fail OPEN.
+      scraped =
+        @scrape_target
+        |> File.read!()
+        |> then(&Regex.scan(~r/graph (\d+)/, &1))
+        |> Enum.map(fn [_, s] -> s end)
+        |> MapSet.new()
+
+      refute "503" in scraped
+      assert "403" in scraped
+      # …and it also carries a status the ledger does not name, which is exactly
+      # why the unnamed arm must rise rather than absorb.
+      assert "401" in scraped
+      assert DeployLedger.classify("HEALTH", health_graph_line("401")) == "UNCLASSIFIED"
+    end
+
+    test "both anchors are the PRODUCERS' own bytes, read from the producers" do
+      # `deploy/site-deploy-node.sh:492` writes the HEALTH sentence. Reword it and
+      # this reds instead of every HEALTH row silently degrading.
+      health = File.read!(@health_producer)
+
+      assert health =~
+               "bp-doc-id marker is empty — the SSR could not read a content document: $got_corpus"
+
+      # `templates/astro-search-starter/src/lib/bp.ts:94` throws the BUILD one.
+      build = File.read!(@build_producer)
+      assert build =~ "throw new Error(`graph ${res.status}: ${upstreamMessage(body, res)}`)"
+
+      # And the fixtures really are built on those shapes.
+      assert @g500_health =~ "could not read a content document: graph 500:"
+      assert @g500_build =~ "Error: graph 500:"
+    end
+
+    test "an unnamed graph status RISES (D8) — it is not absorbed by the nearest class" do
+      assert DeployLedger.classify("HEALTH", @g200_health) == "UNCLASSIFIED"
+      assert DeployLedger.classify("HEALTH", health_graph_line("418")) == "UNCLASSIFIED"
+      assert DeployLedger.classify("BUILD", build_graph_line("418")) == "UNCLASSIFIED"
+      # Not DOC_ID_EMPTY: the cause WAS recorded, the ledger simply has no name
+      # for it, and those are different facts (D112).
+      refute DeployLedger.classify("HEALTH", @g200_health) == "DOC_ID_EMPTY"
+    end
+
+    test "the split PARTITIONS DOC_ID_EMPTY — the coded rows LEAVE it" do
+      # A coded row is no longer in the class at all…
+      refute DeployLedger.classify("HEALTH", @g500_health) == "DOC_ID_EMPTY"
+
+      # …and what stays is exactly the rows that recorded no cause: the fleet
+      # that runs `deploy/site-deploy.sh`, which has ZERO bp-corpus-status
+      # readers. 3,617 "the SSR rendered no content document" rows and 3 "the
+      # build rendered no content document" rows, with no residue.
+      assert DeployLedger.classify("HEALTH", @doc_id) == "DOC_ID_EMPTY"
+      assert DeployLedger.classify("HEALTH", @doc_id_alt) == "DOC_ID_EMPTY"
+
+      assert DeployLedger.classify("HEALTH", @doc_id_no_marker) == "DOC_ID_EMPTY"
+      assert File.read!(@health_producer) =~ "no bp-corpus-status marker: this build predates"
+      refute File.read!("../deploy/site-deploy.sh") =~ "bp-corpus-status"
+
+      # D112: the LABEL says what the class now means. "the marker was empty" is
+      # true of every class in this family; "and the cause went unrecorded" is
+      # true only of what is left.
+      assert DeployLedger.label("DOC_ID_EMPTY") =~ "unrecorded"
+
+      # PARTITION, not an addition beside it (D43/D241): every new name is in
+      # `@classes`, which IS the failure numerator, so the rows moved rather than
+      # being counted twice.
+      for {_status, _count, class} <- @graph_statuses do
+        assert class in DeployLedger.classes()
+        refute DeployLedger.deferred?(class)
+        refute DeployLedger.not_attempted?(class)
+      end
+    end
+
+    test "FORBIDDEN_403 is untouched — @corpus_403's 1,095 rows do not move (D239)" do
+      # The LEGACY astro wording (`graph corpus fetch failed: 403`) is what
+      # `@corpus_403` matches, and it keeps its class. The new anchor requires
+      # digits immediately after `graph `, so the two shapes cannot collide.
+      assert DeployLedger.classify("BUILD", @build_403) == "FORBIDDEN_403"
+      assert @build_403 =~ "fetch failed: 403"
+      refute @build_403 =~ ~r/graph \d+:/
+      assert DeployLedger.classify("BUILD", @build_plain) == "BUILD_FAILED"
+
+      # …and the two 403 classes are DIFFERENT names with different owners: one
+      # is a site's own read token, one is a fleet-wide API-side condition.
+      refute DeployLedger.classify("BUILD", @g403_build) ==
+               DeployLedger.classify("BUILD", @build_403)
+
+      assert DeployLedger.agency("FORBIDDEN_403") == :site
+      assert DeployLedger.agency("CONTENT_API_403") == :ambiguous
+    end
+
+    test "the graph code is ANCHORED — a build log that merely prints one is not one" do
+      # The HEALTH phrase belongs to one producer branch. A row that quotes those
+      # bytes at another stage is a shape this ledger has never seen.
+      assert DeployLedger.classify("BUILD", @g500_health) == "UNCLASSIFIED"
+      assert DeployLedger.classify("PLAN", @g500_health) == "UNCLASSIFIED"
+
+      # A BUILD capture that prints `graph 500` WITHOUT the thrown-Error prefix
+      # is a log line, not a corpus failure.
+      printed = "BUILD failed (exit 12): fetched graph 500 nodes in 1.2s, then OOMed"
+      assert DeployLedger.classify("BUILD", printed) == "BUILD_FAILED"
+
+      # And the BUILD anchor only fires inside a capture the driver declared
+      # failed — the same discipline every other rule here has.
+      assert DeployLedger.classify("BUILD", "Error: graph 500: internal server error") ==
+               "UNCLASSIFIED"
+    end
+
+    # ZERO-POPULATION TRIPWIRE (D251). `build_class/1` was reached only through
+    # `String.starts_with?(reason, "BUILD failed (exit")`, so the two live
+    # `BUILD failed — …` rows never reached it and sat in the tail with a
+    # readable cause in the string.
+    test "the em-dash BUILD prefix reaches build_class too" do
+      assert DeployLedger.classify("BUILD", @build_emdash) == "BUILD_FAILED"
+      assert DeployLedger.classify("BUILD", @g500_build_emdash) == "CONTENT_API_500"
+      # The fixture really is the em-dash shape and not the paren one.
+      refute @build_emdash =~ "BUILD failed (exit"
+      assert @build_emdash =~ "BUILD failed — "
+
+      # Still anchored: only at position 0, and only at BUILD.
+      assert DeployLedger.classify("HEALTH", @build_emdash) == "UNCLASSIFIED"
+
+      assert DeployLedger.classify("BUILD", "a log line quoting BUILD failed — nope") ==
+               "UNCLASSIFIED"
+    end
+  end
+
+  # The producer sentences, parameterised, so a declared status can be driven
+  # through BOTH arms without a fixture per status.
+  defp health_graph_line(status) do
+    "HEALTH gate failed — not switched (exit 14): bp-doc-id marker is empty — " <>
+      "the SSR could not read a content document: graph #{status}: upstream said so"
+  end
+
+  defp build_graph_line(status) do
+    "BUILD failed (exit 12): \e[31m\e[1m04:34:24\e[22m [ERROR] [build]\e[39m " <>
+      "Caught error rendering /graph.json: Error: graph #{status}: upstream said so"
+  end
+
+  ## ── 1a3. The agency map (D148/D242) ──────────────────────────────────────
+  #
+  # `@agency` exists nowhere on origin/main; it is minted here, in the same
+  # commit as the four classes above, because a class that lands without an
+  # agency key is exactly how an 18-class taxonomy and a 17-key map merged past
+  # each other with a green suite.
+
+  describe "agency/1 — who a class accuses, and the map that cannot go stale" do
+    # THE ASSERTION IS KEYED OFF THE ENUM, NEVER A HAND-LIST. A hand-listed set
+    # is a second place to forget: add a class upstream, forget the key here, and
+    # the suite stays green while `agency/1` silently answers `:ambiguous` for a
+    # class somebody meant to be `:box`.
+    test "the map is EXHAUSTIVE over classes/0 ++ not_attempted_classes/0" do
+      for class <- DeployLedger.classes() ++ DeployLedger.not_attempted_classes() do
+        assert Map.has_key?(DeployLedger.agency_map(), class),
+               "#{class} has no agency — the map is not exhaustive"
+
+        assert DeployLedger.agency(class) in [:box, :site, :ambiguous]
+      end
+
+      # …and nothing EXTRA: a key for a class that no longer exists is a stale
+      # opinion the enum cannot correct.
+      known = MapSet.new(DeployLedger.classes() ++ DeployLedger.not_attempted_classes())
+
+      for class <- Map.keys(DeployLedger.agency_map()) do
+        assert MapSet.member?(known, class), "#{class} has an agency but is not a class"
+      end
+
+      # The gauge must be able to lose: if the enum were empty the loop above
+      # would assert nothing at all.
+      assert length(DeployLedger.classes()) >= 18
+    end
+
+    test "an unknown class is :ambiguous, NEVER :site" do
+      # Failing to `:site` would shrink a box numerator — the comforting
+      # direction, and therefore the forbidden one (D148).
+      assert DeployLedger.agency("A_CLASS_NOBODY_HAS_NAMED") == :ambiguous
+      assert DeployLedger.agency(nil) == :ambiguous
+    end
+
+    test "the content API classes accuse the instance, and the 403 accuses nobody" do
+      assert DeployLedger.agency("CONTENT_API_500") == :box
+      assert DeployLedger.agency("CONTENT_API_503") == :box
+      assert DeployLedger.agency("CONTENT_API_UNREACHABLE") == :box
+
+      # D239: eleven rows, three sites, two templates, one 20-minute window, two
+      # sites' first rows 0.25s apart. That is not eleven misconfigured tokens
+      # and it is not one sick box.
+      assert DeployLedger.agency("CONTENT_API_403") == :ambiguous
+
+      # DOC_ID_EMPTY now MEANS "no cause was recorded", and a class defined by
+      # the absence of a cause cannot name an owner.
+      assert DeployLedger.agency("DOC_ID_EMPTY") == :ambiguous
+      assert DeployLedger.label("DOC_ID_EMPTY") =~ "unrecorded"
+    end
+  end
+
   ## ── 1b. The 503 reads the box's own code word ─────────────────────────────
   #
   # `BOX_UNAVAILABLE_503` was labelled "the box was unavailable (HTTP 503)" and
@@ -795,7 +1128,9 @@ defmodule BarkparkCloud.DeployLedgerTest do
     "internal_error" =>
       "the AUTHORLESS crash constant. `Barkpark.Content.Errors` collapses ANY unhandled fault to it (Sites.Deploy's own grace arm keys on that), so it names a fault nobody chose and BOX_500's status-only label is the honest report of it.",
     "runner_start_failed" =>
-      "a cause the box DID author (its runner would not spawn), but it arrives on a 500 at the poll phase and folds into BOX_500 with the authorless crash. Naming it in that label would put a specific accusation on rows that mostly are not it. Silent, not wrong — and now written down rather than accidental."
+      "a cause the box DID author (its runner would not spawn), but it arrives on a 500 at the poll phase and folds into BOX_500 with the authorless crash. Naming it in that label would put a specific accusation on rows that mostly are not it. Silent, not wrong — and now written down rather than accidental.",
+    "graph_200" =>
+      "the corpus read SUCCEEDED and carried nothing anchorable — ZERO rows all-time (D244), and the only graph status that is not an upstream failure at all. D8 governs: it rises in UNCLASSIFIED rather than being given a name on speculation, and this entry is the decision that says so out loud."
   }
 
   # What it takes for a LABEL to name a cause: the code word itself, or a
@@ -813,7 +1148,17 @@ defmodule BarkparkCloud.DeployLedgerTest do
     # NOT "runner" — that word belongs to the wedged-runner cause, and letting it
     # count here would make BOX_RUNNER_UNAVAILABLE_503 "claim" a cause it is
     # never fed, which is a red the gauge would have deserved to be deleted for.
-    "runner_start_failed" => ~w(spawn start)
+    "runner_start_failed" => ~w(spawn start),
+    # The stage-axis causes. NOT the bare status digits: "500" is already in
+    # BOX_500's label and "403" in FORBIDDEN_403's, so a digit cannot say WHICH
+    # 500 a sentence is about — the generic-token derivation would strip it, and
+    # rightly. Each label must earn its cause with a word only it uses.
+    "graph_500" => ~w(faulted),
+    "graph_503" => ~w(overloaded shut),
+    "graph_0" => ~w(dns tls),
+    "graph_403" => ~w(forbidden judged),
+    "graph_200" => ~w(anchor anchorable),
+    "no_corpus_status_marker" => ~w(unrecorded)
   }
 
   # The producer's own test file, read at runtime. See (a).
@@ -825,6 +1170,19 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @producer_code ~r/"code" => "([a-z][a-z0-9_]*)"/
 
   # The (phase, status) shapes the producer can actually write. See (b).
+  #
+  # THE STAGE AXIS (D243). Everything above this line drives `classify/2` through
+  # PLAN and BUILD box refusals only, so `label/1` was NEVER CALLED on any
+  # stage-guarded class. Measured on origin/main: relabelling `DOC_ID_EMPTY` with
+  # `BOX_RUNNER_UNAVAILABLE_503`'s sentence VERBATIM left 60 tests / 0 failures —
+  # the gauge could not catch a class wearing another class's words. The control
+  # that makes that a finding and not a broken harness: mutating
+  # `BOX_DEPLOY_DISABLED_503`'s label reds ASSERTION A by name, then and now.
+  #
+  # So the matrix grows a second axis over STAGES. Its vocabulary is not the
+  # producer scrape — graph statuses are an unbounded pass-through vocabulary
+  # (D244) and are DECLARED in `@graph_statuses` — so each declared status enters
+  # the gauge as its own cause word, driven through BOTH arms.
   @probe_matrix [
     {:start, 503},
     {:start, 500},
@@ -833,8 +1191,18 @@ defmodule BarkparkCloud.DeployLedgerTest do
     {:poll, 500},
     {:poll, 503},
     {:abandoned, 409},
-    {:deferred, 409}
+    {:deferred, 409},
+    # The stage axis: the same declared status through each dialect.
+    {:health, :graph},
+    {:build, :graph},
+    # …and the residue, whose whole cause is that no cause was recorded.
+    {:health, :no_marker}
   ]
+
+  # The stage-axis cause words. A graph status is a cause the same way a
+  # snake_case code word is: `graph_503` is the box's answer, read off the row.
+  defp graph_word(status), do: "graph_#{status}"
+  @no_marker_word "no_corpus_status_marker"
 
   describe "the label gauge — a class must wear a name its rows earn" do
     test "the wire vocabulary is scraped from the PRODUCER, never from the classifier" do
@@ -872,6 +1240,51 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
     test "ASSERTION B — a class fed two or more causes names NONE of them" do
       assert collapse_violations(probe_vocabulary(), &DeployLedger.label/1) == []
+    end
+
+    # ASSERTION C (dr-w15 S2). A and B both reason about which CAUSE a sentence
+    # points at, so neither of them notices two classes wearing the SAME
+    # sentence: measured on origin/main, giving `DOC_ID_EMPTY` the
+    # `BOX_RUNNER_UNAVAILABLE_503` label verbatim left 60 tests / 0 failures.
+    # A split that collapses in the UI is not a split — the operator reads the
+    # sentence, not the class name.
+    test "ASSERTION C — no two classes the gauge reaches wear the SAME sentence" do
+      assert duplicate_labels(probe_vocabulary(), &DeployLedger.label/1) == []
+    end
+
+    # …and C can lose: two classes handed one sentence red BY NAME.
+    test "the gauge can LOSE: one sentence on two classes reds C, naming both" do
+      collision = fn
+        "DOC_ID_EMPTY" -> DeployLedger.label("BOX_RUNNER_UNAVAILABLE_503")
+        class -> DeployLedger.label(class)
+      end
+
+      [dup] = duplicate_labels(probe_vocabulary(), collision)
+      assert dup =~ "BOX_RUNNER_UNAVAILABLE_503"
+      assert dup =~ "DOC_ID_EMPTY"
+      assert dup =~ DeployLedger.label("BOX_RUNNER_UNAVAILABLE_503")
+
+      # The reconstruction is honest: the same inputs on the REAL labels are
+      # clean, so the red is the collision and not the harness.
+      assert duplicate_labels(probe_vocabulary(), &DeployLedger.label/1) == []
+    end
+
+    # THE STAGE AXIS REACHES WHAT IT CLAIMS TO (D243). Without this the axis
+    # could be quietly dropped — every assertion above would keep passing over a
+    # smaller world, which is how the gauge got blind in the first place.
+    test "the gauge REACHES every class this split mints, plus the residue" do
+      reached = probe_vocabulary() |> Map.keys() |> MapSet.new()
+
+      for class <- ~w(CONTENT_API_500 CONTENT_API_503 CONTENT_API_UNREACHABLE
+                      CONTENT_API_403 DOC_ID_EMPTY) do
+        assert MapSet.member?(reached, class),
+               "#{class} is never probed — label/1 is not called on it and its sentence is unguarded"
+      end
+
+      # And it reaches them THROUGH BOTH ARMS: a HEALTH-only axis would leave the
+      # astro fleet's sentences unguarded exactly as its rows were unnamed.
+      assert class_of(:health, :graph, graph_word("500")) == "CONTENT_API_500"
+      assert class_of(:build, :graph, graph_word("500")) == "CONTENT_API_500"
     end
 
     # THE GAUGE CAN LOSE. Both assertions are replayed against the pre-#10300
@@ -927,7 +1340,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
     test "@deliberately_unnamed carries a REASON per entry, and emptying it reds A" do
       assert Map.keys(@deliberately_unnamed) |> Enum.sort() ==
-               ["internal_error", "runner_start_failed"]
+               ["graph_200", "internal_error", "runner_start_failed"]
 
       for {word, reason} <- @deliberately_unnamed do
         assert is_binary(reason) and String.length(reason) > 40,
@@ -938,12 +1351,13 @@ defmodule BarkparkCloud.DeployLedgerTest do
       undeclared = naming_violations(probe_vocabulary(), &DeployLedger.label/1, %{})
       assert Enum.any?(undeclared, &(&1 =~ "internal_error"))
       assert Enum.any?(undeclared, &(&1 =~ "runner_start_failed"))
+      assert Enum.any?(undeclared, &(&1 =~ "graph_200"))
       # …and the two words are the ONLY silences on this tree — a count would
       # also red for any OTHER violation, which is not what this test is about,
       # so it names them instead.
       assert Enum.all?(
                undeclared,
-               &(&1 =~ "internal_error" or &1 =~ "runner_start_failed" or
+               &(&1 =~ "internal_error" or &1 =~ "runner_start_failed" or &1 =~ "graph_200" or
                    &1 =~ "feature_not_configured" or &1 =~ "deploy_runner_unavailable")
              )
     end
@@ -960,15 +1374,36 @@ defmodule BarkparkCloud.DeployLedgerTest do
     |> MapSet.new()
   end
 
-  # class => the set of code words the PRODUCER can drive into it.
+  # class => the set of cause words the PRODUCERS can drive into it. Two
+  # vocabularies, and they are sourced differently ON PURPOSE (D244): the
+  # snake_case wire codes are SCRAPED from the producer's own test file (a closed
+  # set the box emits), while the graph statuses are DECLARED (an unbounded
+  # pass-through set a scrape cannot fail closed over).
   defp probe_vocabulary do
-    words = producer_vocabulary()
+    wire = producer_vocabulary()
 
-    for {phase, status} <- @probe_matrix, word <- words, reduce: %{} do
+    for {phase, status} <- @probe_matrix, word <- probe_words(status, wire), reduce: %{} do
       acc ->
         Map.update(acc, class_of(phase, status, word), MapSet.new([word]), &MapSet.put(&1, word))
     end
   end
+
+  defp probe_words(:graph, _wire), do: for({s, _n, _c} <- @graph_statuses, do: graph_word(s))
+  defp probe_words(:no_marker, _wire), do: [@no_marker_word]
+  defp probe_words(_status, wire), do: wire
+
+  defp graph_status(word), do: String.replace_prefix(word, "graph_", "")
+
+  # THE STAGE AXIS, driven through the real producer sentences of both dialects —
+  # so `label/1` is called on every class this split mints, and on the residue.
+  defp class_of(:health, :graph, word),
+    do: DeployLedger.classify("HEALTH", health_graph_line(graph_status(word)))
+
+  defp class_of(:build, :graph, word),
+    do: DeployLedger.classify("BUILD", build_graph_line(graph_status(word)))
+
+  defp class_of(:health, :no_marker, _word),
+    do: DeployLedger.classify("HEALTH", @doc_id_no_marker)
 
   # A chain-terminal 409, built through the PUBLIC producer with the cause the
   # driver itself derives — never a literal, so a reworded verdict reds here.
@@ -1087,6 +1522,17 @@ defmodule BarkparkCloud.DeployLedgerTest do
       ~s|#{class} ("#{label_fun.(class)}") claims "#{claim_token(label_fun.(class), generic, word)}" | <>
         ~s|(the label's word for #{word}) — but also holds | <>
         ~s|#{Enum.join(others, ", ")} and #{length(others)} other cause(s)|
+    end
+  end
+
+  # ASSERTION C. Two classes the gauge reaches may not carry the same sentence.
+  # Only reached classes take part, for the same reason B only counts reached
+  # ones: a label no probe can produce makes no claim about any row.
+  defp duplicate_labels(vocab, label_fun) do
+    for {label, classes} <- Enum.group_by(Map.keys(vocab), label_fun),
+        length(classes) >= 2 do
+      ~s|#{Enum.join(Enum.sort(classes), " and ")} wear the SAME sentence ("#{label}") — | <>
+        ~s|a split the operator cannot see is not a split|
     end
   end
 
@@ -1393,6 +1839,58 @@ defmodule BarkparkCloud.DeployLedgerTest do
       deployment!(site, %{stage: "PLAN", failure_reason: @r409_bare, inserted_at: to})
 
       assert DeployLedger.census(from, to).volume == 1
+    end
+
+    # ZERO-POPULATION TRIPWIRE (D251). `classify/1`'s `%{status: _other}` arm
+    # answers `nil`, which is the "did not fail" default — so a status the ledger
+    # has never seen lands in the DENOMINATOR and outside the numerator, and the
+    # published failure rate falls with nothing having improved. There are zero
+    # `cancelled` rows today; this pins the arithmetic so the FIRST one is
+    # arithmetic somebody chose rather than a rate that quietly got better.
+    test "a cancelled row is never scored as a success — it is not in the numerator, and it is visible",
+         %{site: site} do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for i <- 1..3 do
+        deployment!(site, %{
+          stage: "PLAN",
+          failure_reason: @r409_bare,
+          inserted_at: DateTime.add(from, i, :second)
+        })
+      end
+
+      deployment!(site, %{
+        status: "cancelled",
+        stage: "PLAN",
+        failure_reason: "the operator cancelled the deploy",
+        inserted_at: DateTime.add(from, 100, :second)
+      })
+
+      census = DeployLedger.census(from, to)
+
+      # It is NOT a failure — the taxonomy must not invent one for a status it
+      # has never been told about…
+      assert DeployLedger.classify(%{
+               status: "cancelled",
+               stage: "PLAN",
+               failure_reason: "the operator cancelled the deploy"
+             }) == nil
+
+      refute Enum.any?(census.classes, &(&1.count == 4))
+      assert census.failed == 3
+
+      # …and it is NOT counted as a deploy that worked either: it appears in no
+      # class row at all, so no line of this census reports it as a success.
+      assert Enum.sum(Enum.map(census.classes, & &1.count)) == 3
+      refute Enum.any?(census.deferred, &(&1.class == "UNCLASSIFIED"))
+
+      # THE HOLE, PINNED: it does sit in `volume`, so it dilutes the rate. 4
+      # attempted, 3 failed = 75%, not 100%. The day cancelled rows appear, this
+      # number moves and this assertion is what says so.
+      assert census.volume == 4
+      assert census.failure_rate.numerator == 3
+      assert census.failure_rate.sample == 4
     end
 
     test "GITHUB_PUSH_UNBUILDABLE is OUT of the denominator and in its own bucket", %{site: site} do
