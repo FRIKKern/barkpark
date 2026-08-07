@@ -153,13 +153,36 @@ is_transport_blip() { # body
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
-      --rows-file) ROWS_FILE="${2:-}"; shift 2 ;;
-      --prefix) PREFIX="${2:-}"; shift 2 ;;
-      --expect-min) EXPECT_MIN="${2:-}"; shift 2 ;;
+      # A flag whose VALUE is missing is a configuration fault, not a hang.
+      # `shift 2` with one argument left FAILS (and, without `set -e`, does not
+      # shift) — the loop then spins on the same argv forever. A watch that
+      # never returns is worse than one that reds: nothing downstream ever
+      # learns anything. So the arity is checked before the shift.
+      --rows-file|--prefix|--expect-min)
+        if [ $# -lt 2 ]; then
+          red "CONFIGURATION FAULT — $1 needs a value."
+          return "$EXIT_FAULT"
+        fi
+        case "$1" in
+          --rows-file) ROWS_FILE="$2" ;;
+          --prefix) PREFIX="$2" ;;
+          --expect-min) EXPECT_MIN="$2" ;;
+        esac
+        shift 2 ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; return "$EXIT_OK" ;;
       *) red "unknown argument: $1"; return "$EXIT_FAULT" ;;
     esac
   done
+
+  # The floor is the anti-vacuity guard, so a floor that is not a number must
+  # not be allowed to sail past it. `[ 0 -lt "" ]` and `[ 0 -lt abc ]` both make
+  # `test` exit 2 with an error on stderr, and a bare `if` reads that as FALSE —
+  # i.e. "the floor is met". That is the vacuous green this file exists against.
+  if ! printf '%s' "$EXPECT_MIN" | grep -qE '^[0-9]+$'; then
+    red "CONFIGURATION FAULT — the floor must be a non-negative integer, got '$EXPECT_MIN'."
+    red "Set it with --expect-min <n> or WEBHOOK_FANOUT_EXPECT_MIN=<n>; the runbook pins 5."
+    return "$EXIT_FAULT"
+  fi
 
   if ! command -v jq >/dev/null 2>&1; then
     red "CONFIGURATION FAULT — jq is not on PATH, so the webhook rows cannot be parsed."

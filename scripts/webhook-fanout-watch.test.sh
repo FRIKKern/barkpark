@@ -162,6 +162,29 @@ expect_rc 3 "no --rows-file at all → fault (never a green default)"
 OUT="$(bash "$WATCH" --nonsense 2>&1)"; RC=$?
 expect_rc 3 "an unknown argument → fault"
 
+# A flag with no value used to HANG: `shift 2` on a one-element argv fails, does
+# not shift, and the parse loop spins forever. A watch that never returns tells
+# nobody anything — strictly worse than a red. Run it under a hard alarm so the
+# regression re-appears as a FAILURE here rather than as a wedged CI job.
+for flag in --rows-file --prefix --expect-min; do
+  OUT="$(perl -e 'alarm 10; exec("bash", @ARGV)' "$WATCH" "$flag" 2>&1)"; RC=$?
+  expect_rc 3 "$flag with no value → fault (and TERMINATES: 142 would mean it hung)"
+done
+
+# A non-numeric floor must not sail past the anti-vacuity check. `[ 0 -lt "" ]`
+# makes `test` exit 2 with an error, and a bare `if` reads that as "floor met" —
+# a green derived from a broken comparison.
+OUT="$(env WEBHOOK_FANOUT_EXPECT_MIN=abc bash "$WATCH" --rows-file "$TMP/five-typed.json" 2>&1)"; RC=$?
+expect_rc 3 "a non-numeric floor is a FAULT, never a silently-met floor"
+OUT="$(bash "$WATCH" --expect-min "" --rows-file "$TMP/five-typed.json" 2>&1)"; RC=$?
+expect_rc 3 "an EMPTY --expect-min is a FAULT too (the shape [ 5 -lt \"\" ] would have greened)"
+# An empty ENV var is the one case that legitimately reads as "unset" (`:-`), so
+# it falls back to the documented default of 1 instead of faulting. Pinned so the
+# two paths cannot silently swap behaviours.
+OUT="$(env WEBHOOK_FANOUT_EXPECT_MIN= bash "$WATCH" --rows-file "$TMP/five-typed.json" 2>&1)"; RC=$?
+expect_rc 0 "an empty WEBHOOK_FANOUT_EXPECT_MIN means UNSET → the documented default floor of 1"
+grep -q "floor 1 met" <<<"$OUT" && ok "…and the met floor is printed, so a near-vacuous green stays legible" || bad "the met floor is not printed"
+
 OUT="$(printf '%s' "$(cat "$TMP/five-typed.json")" | env WEBHOOK_FANOUT_EXPECT_MIN=5 bash "$WATCH" --rows-file - 2>&1)"; RC=$?
 expect_rc 0 "stdin (--rows-file -) is the runbook's one-pipe form"
 
