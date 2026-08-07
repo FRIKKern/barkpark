@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -1264,5 +1265,104 @@ func TestSpaceProbeTimeoutsAreShortAndSeparate(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("boundedSpaceRunner did not return promptly after its deadline elapsed")
+	}
+}
+
+// buildInfoWith returns a ReadBuildInfo stand-in carrying the given vcs
+// settings — the shape `go build` embeds when it builds from a git checkout,
+// which is exactly how the fleet's agent is (re)built on-box.
+func buildInfoWith(mainVersion string, settings map[string]string) func() (*debug.BuildInfo, bool) {
+	return func() (*debug.BuildInfo, bool) {
+		bi := &debug.BuildInfo{}
+		bi.Main.Version = mainVersion
+		for k, v := range settings {
+			bi.Settings = append(bi.Settings, debug.BuildSetting{Key: k, Value: v})
+		}
+		return bi, true
+	}
+}
+
+// TestAgentVersionBothArms proves the beat dates its own producer in BOTH
+// directions: a build that carries a stamp emits that stamp, and a build that
+// carries none emits the explicit unknown marker — never "" and never a value
+// a reader could mistake for a measured version.
+func TestAgentVersionBothArms(t *testing.T) {
+	noBuildInfo := func() (*debug.BuildInfo, bool) { return nil, false }
+
+	for _, tc := range []struct {
+		name     string
+		injected string
+		read     func() (*debug.BuildInfo, bool)
+		want     string
+	}{
+		// STAMPED arm — a blessed release injects -X agentVersion.
+		{"ldflags stamp wins", "v0.2.26", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890"}), "v0.2.26"},
+		{"ldflags stamp is trimmed", "  v0.2.26\n", noBuildInfo, "v0.2.26"},
+		// STAMPED arm — a plain on-box `go build` from the checkout.
+		{"vcs revision, clean", "", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890abcd", "vcs.modified": "false"}), "git-abc123def456"},
+		{"vcs revision, dirty tree is carried", "", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890abcd", "vcs.modified": "true"}), "git-abc123def456-dirty"},
+		{"tagged module build", "", buildInfoWith("v0.2.26", nil), "v0.2.26"},
+		// UNSTAMPED arm — every route to an identity is closed.
+		{"no build info at all", "", noBuildInfo, AgentVersionUnknown},
+		{"nil reader", "", nil, AgentVersionUnknown},
+		{"build info with nothing to say", "", buildInfoWith("(devel)", nil), AgentVersionUnknown},
+		{"blank revision is not a stamp", "", buildInfoWith("", map[string]string{"vcs.revision": "   "}), AgentVersionUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveAgentVersion(tc.injected, tc.read)
+			if got != tc.want {
+				t.Errorf("resolveAgentVersion = %q, want %q", got, tc.want)
+			}
+			if got == "" {
+				t.Error("resolveAgentVersion returned \"\" — an empty string reads as a measured value; the unknown arm must be explicit")
+			}
+		})
+	}
+
+	// The live resolver used by the real binary is held to the same floor.
+	if AgentVersion() == "" {
+		t.Error("AgentVersion() = \"\" — the agent must always date its own beat, even unstamped")
+	}
+}
+
+// TestReportCarriesAgentVersion proves the key the control plane reads out of
+// the raw jsonb payload — agent_version — is present on every beat with a
+// non-empty value, so a missing vital stops being indistinguishable from a
+// healthy one.
+func TestReportCarriesAgentVersion(t *testing.T) {
+	r := gatherReport(ReportConfig{})
+	if r.AgentVersion == "" {
+		t.Error("Report.AgentVersion = \"\" — never empty; unknown is spelled explicitly")
+	}
+	if r.AgentVersion != AgentVersion() {
+		t.Errorf("Report.AgentVersion = %q, want the binary's own stamp %q", r.AgentVersion, AgentVersion())
+	}
+
+	blob, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal Report: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(blob, &payload); err != nil {
+		t.Fatalf("unmarshal Report: %v", err)
+	}
+	v, ok := payload["agent_version"]
+	if !ok {
+		t.Fatalf("Report JSON missing \"agent_version\" — the CP reads this key verbatim out of raw jsonb; payload=%s", blob)
+	}
+	s, isString := v.(string)
+	if !isString {
+		t.Fatalf("agent_version = %T, want a string", v)
+	}
+	if s == "" {
+		t.Error("agent_version marshalled as \"\" — an absent-or-empty key means two things at once")
+	}
+
+	// The pre-existing version field is untouched by this addition.
+	if r.Version != Version {
+		t.Errorf("Report.Version = %q, want the unchanged %q", r.Version, Version)
+	}
+	if payload["version"] != Version {
+		t.Errorf("JSON version = %v, want the unchanged %q", payload["version"], Version)
 	}
 }
