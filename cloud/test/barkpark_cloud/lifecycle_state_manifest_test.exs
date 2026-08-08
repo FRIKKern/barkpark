@@ -231,8 +231,7 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
     # calls the private `maybe_enforce/1` itself.
     elapsed = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
 
-    {team, bp,
-     fn -> {:ok, _} = Billing.mark_past_due(sub, %{current_period_end: elapsed}) end}
+    {team, bp, fn -> {:ok, _} = Billing.mark_past_due(sub, %{current_period_end: elapsed}) end}
   end
 
   defp seed(:quota_reconcile) do
@@ -477,7 +476,8 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
       |> Enum.map(&Map.fetch!(&1, "state"))
       |> MapSet.new()
 
-    refute MapSet.size(actual) == 0, "the console painted NOTHING — an unreadable console is a red"
+    refute MapSet.size(actual) == 0,
+           "the console painted NOTHING — an unreadable console is a red"
 
     added = MapSet.difference(actual, @painted_states)
     stale = MapSet.difference(@painted_states, actual)
