@@ -377,8 +377,28 @@ func rankBarkparks(list []cloudclient.Barkpark) []rankedBarkpark {
 // checked, the full autoupdate policy, and the channel. autoupdate_enabled is a
 // tri-state — true/false when the control plane reported it, absent entirely when
 // it didn't (an older CP) so a script never mistakes "unknown" for "off".
+//
+// git_commit is the SERVING COMMIT (dr-w21-s3). It was missing here for a plain
+// reason: this map is hand-built, and the key was simply never typed. The wire
+// type decodes it (cloudclient.Barkpark.GitCommit), `GET /v1/barkparks` emits it,
+// and cloudBarkparkRow (cloud12_cmd.go) — the SAME struct off the SAME endpoint —
+// has always projected it, which is why `bp barkparks -o json` prints real shas
+// while `bp cloud status -o json` printed nothing. A projection gap, not a decode
+// gap and not a route gap. The key is ALWAYS present (empty string when the
+// control plane has no commit for the box) so a consumer can tell "we asked and
+// the plane does not know" from "this CLI never asked" — the table renders that
+// empty as UNMETERED rather than a blank.
+//
+// The registry `version` field is deliberately NOT here under any name. It is the
+// AGENT BINARY version (internal/agent/report.go `const Version = "0.1.0"`), a
+// compile-time constant that reads 0.1.0 fleet-wide while the boxes serve app
+// versions 0.2.25.164 … 0.2.25.2628. Emitting it beside the commit would put a
+// number that can never move next to one that does, and it would read as
+// freshness. If it is ever wanted it ships as `agent_version`, named for what it
+// is.
 func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	row := map[string]any{
+		"git_commit":             r.BP.GitCommit,
 		"name":                   r.BP.Name,
 		"slug":                   r.BP.Slug,
 		"id":                     r.BP.ID,
@@ -454,6 +474,52 @@ func policyCell(b cloudclient.Barkpark) string {
 	return ""
 }
 
+// commitUnmetered is what the COMMIT column prints for a box whose serving
+// commit the control plane does not know. It is LOUD on purpose and it is the
+// deploy line's own word (statusDeployWindow's refusal vocabulary): the box that
+// forced it is muscle-1, whose registry git_commit is "" because its agent is
+// offline — and which still reads update_state `current`. A blank cell or an em
+// dash there would read as "fine", which is exactly the unearned green this epic
+// exists to kill.
+const commitUnmetered = "UNMETERED"
+
+// commitCell renders one row's serving commit for the table: the short sha when
+// the control plane knows it, the loud sentinel when it does not. It never
+// fabricates and it never returns "" — a row in this column always says
+// something.
+//
+// It is a LABEL, not a verdict: a sha alone cannot say whether the box is behind.
+// The commit-distance verdict is computed on the control plane (dr-w21-s2) and
+// reaches this surface in dr-w21-s4. Nothing here feeds attentionStatus,
+// attentionRank or the sort, so an unknown commit cannot ride to the top of a
+// bucket NOR be sorted as fresh — it simply stands there saying UNMETERED.
+func commitCell(b cloudclient.Barkpark) string {
+	sha := strings.TrimSpace(b.GitCommit)
+	if sha == "" {
+		return commitUnmetered
+	}
+	return sanitizeCell(shortSha(sha))
+}
+
+// fleetKnowsCommit reports whether ANY row in the whole fleet carries a serving
+// commit — the switch for the COMMIT column.
+//
+// It is measured fleet-wide and not per bucket on purpose. Per bucket, a lone
+// unknown box sitting by itself in ATTENTION (muscle-1's exact shape) would turn
+// the column OFF and silence the very row the column exists for. Fleet-wide, one
+// box that knows its commit makes every bucket accountable for saying whether it
+// knows its own. A control plane that reports no commit at all still renders
+// byte-identical to before — the older-CP honesty rule the neighbouring
+// conditional columns already follow.
+func fleetKnowsCommit(ranked []rankedBarkpark) bool {
+	for _, r := range ranked {
+		if strings.TrimSpace(r.BP.GitCommit) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // bucketCounts tallies a ranked fleet into the three buckets.
 func bucketCounts(ranked []rankedBarkpark) (attention, inFlight, healthy int) {
 	for _, r := range ranked {
@@ -521,9 +587,12 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 
 	out.outf("%d barkpark(s) · %d need attention · %d in-flight · %d healthy",
 		len(ranked), attention, inFlight, healthy)
-	renderStatusBucket(out, "ATTENTION", "attention", ranked)
-	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
-	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
+	// Decided ONCE, over the whole fleet, so every bucket answers the same
+	// question (see fleetKnowsCommit).
+	withCommit := fleetKnowsCommit(ranked)
+	renderStatusBucket(out, "ATTENTION", "attention", ranked, withCommit)
+	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked, withCommit)
+	renderStatusBucket(out, "HEALTHY", "healthy", ranked, withCommit)
 	renderStatusDeploy(out, cfg, ranked)
 	return exitOK
 }
@@ -531,7 +600,10 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 // renderStatusBucket prints one bucket section (header + painted table) when it
 // has rows, in the already-sorted order. Silent for an empty bucket so the view
 // stays lean.
-func renderStatusBucket(out *writer, title, bucket string, ranked []rankedBarkpark) {
+//
+// withCommit is passed IN rather than derived from this bucket's rows, so the
+// COMMIT column is decided once over the whole fleet (see fleetKnowsCommit).
+func renderStatusBucket(out *writer, title, bucket string, ranked []rankedBarkpark, withCommit bool) {
 	rows := make([]rankedBarkpark, 0)
 	for _, r := range ranked {
 		if r.Bucket == bucket {
@@ -543,7 +615,7 @@ func renderStatusBucket(out *writer, title, bucket string, ranked []rankedBarkpa
 	}
 	out.outf("")
 	out.outf("%s (%d)", title, len(rows))
-	renderStatusRows(out, rows)
+	renderStatusRowsWith(out, rows, withCommit)
 }
 
 // statusDash renders an empty status field as an em dash so columns stay
@@ -571,10 +643,22 @@ func statusDash(s string) string {
 //   - POLICY  compact autoupdate flag (pin@tag / paused / off / auto)
 //   - DETAIL  the control plane's own reason for a failure/suspension
 //
-// Column order keeps the urgent identity left (STATUS · NAME · UPDATE · CHANNEL ·
-// HEALTH · AGENT · POLICY) and the long URL + optional DETAIL last, so the common
-// case stays readable at 80 columns.
+// COMMIT (dr-w21-s3) is a FIFTH conditional column, and the one column whose
+// switch is NOT read off this row-set: it is decided fleet-wide by the caller, so
+// a bucket holding only unknown-commit rows still prints UNMETERED rather than
+// dropping the column and going quiet. Once on, every row says something —
+// commitCell never returns "".
+//
+// Column order keeps the urgent identity left (STATUS · NAME · UPDATE · COMMIT ·
+// CHANNEL · HEALTH · AGENT · POLICY) and the long URL + optional DETAIL last, so
+// the common case stays readable at 80 columns. COMMIT sits beside UPDATE because
+// they answer the same question — what code is this box running.
 func renderStatusRows(out *writer, rows []rankedBarkpark) {
+	renderStatusRowsWith(out, rows, fleetKnowsCommit(rows))
+}
+
+// renderStatusRowsWith is renderStatusRows with the COMMIT switch supplied.
+func renderStatusRowsWith(out *writer, rows []rankedBarkpark, withCommit bool) {
 	// Decide which conditional columns this bucket needs.
 	withUpdate, withChannel, withPolicy, withDetail := false, false, false, false
 	for _, r := range rows {
@@ -595,6 +679,9 @@ func renderStatusRows(out *writer, rows []rankedBarkpark) {
 	headers := []string{"STATUS", "NAME"}
 	if withUpdate {
 		headers = append(headers, "UPDATE")
+	}
+	if withCommit {
+		headers = append(headers, "COMMIT")
 	}
 	if withChannel {
 		headers = append(headers, "CHANNEL")
@@ -617,6 +704,10 @@ func renderStatusRows(out *writer, rows []rankedBarkpark) {
 		row := []string{r.Status, statusDash(r.BP.Name)}
 		if withUpdate {
 			row = append(row, statusDash(updateCell(r.BP)))
+		}
+		if withCommit {
+			// NOT statusDash: an unknown commit is UNMETERED, never an em dash.
+			row = append(row, commitCell(r.BP))
 		}
 		if withChannel {
 			row = append(row, statusDash(r.BP.Channel))
