@@ -300,6 +300,32 @@ defmodule Barkpark.Sites.DeployRunner do
   # it is, as the last-resort correctness barrier.
   @build_slot_capacity 1
 
+  # ── the door's census (deploy-reliability D8) ────────────────────────────
+  #
+  # `@build_slot_capacity` is a CONSTANT: it has no ignorance to report and no
+  # worse value to reach, so a box that renders only it can never say the door
+  # is saturated, or that it refused anybody. The one real measurement in this
+  # module — `length(building_slugs(state))` — was computed at the refusal site
+  # and thrown into an English log line. This table keeps it.
+  #
+  # It is an ETS table and NOT a `GenServer.call` on purpose. The reader is
+  # `GET /v1/instance/site-deploy`, whose entire justification is that it still
+  # answers when the Runner is WEDGED (D113) — a census that called the Runner
+  # would re-import the bug it exists to report. The Runner is the only writer;
+  # readers take no lock and cannot block.
+  #
+  # The table is owned by the Runner process, so a Runner crash takes the
+  # counters with it and the next `init/1` mints a FRESH `refusals_since`. That
+  # is why the count is never rendered bare: a total without its window is a
+  # number nobody can check.
+  @census_table :barkpark_site_deploy_door_census
+
+  # How often the census is refreshed on its own, on top of the writes at every
+  # trigger and every run completion. The backstop exists for the state changes
+  # this BEAM does not get a message for: a transient systemd unit that finishes
+  # outside the Runner's view stays counted as in-flight until something looks.
+  @default_census_interval_ms 10_000
+
   # The lock the engine actually takes. NOT /run/lock. `build_gate_acquire`
   # resolves it as $BARKPARK_BUILD_GATE_LOCK, else this path, else
   # ${TMPDIR:-/tmp}/barkpark-site-build.lock when the lock dir cannot be made —
@@ -484,41 +510,57 @@ defmodule Barkpark.Sites.DeployRunner do
     # death becomes a :done run instead of taking the Runner (and every other
     # slug) down.
     Process.flag(:trap_exit, true)
+    ensure_census_table()
+    schedule_census_tick()
     state = %{runs: %{}, ports: %{}, units: %{}, timers: %{}}
-    {:ok, reattach_units(state)}
+    {:ok, publish_census(reattach_units(state))}
   end
 
   @impl true
   def handle_call({:trigger, %DeployRequest{} = req}, _from, state) do
-    cond do
-      not enabled?() ->
-        {:reply, {:error, :disabled}, state}
+    # The census is republished on EVERY reply — including the refusals — so the
+    # numbers the door reports move at the moment the door moves, not one tick
+    # later.
+    {:reply, reply, state} =
+      cond do
+        not enabled?() ->
+          {:reply, {:error, :disabled}, state}
 
-      true ->
-        state = drop_stale(state, req.slug)
+        true ->
+          state = drop_stale(state, req.slug)
 
-        cond do
-          running_slug?(state, req.slug) ->
-            {:reply, {:error, :already_running}, state}
+          cond do
+            running_slug?(state, req.slug) ->
+              {:reply, {:error, :already_running}, state}
 
-          # THE DOOR. This is one serialized GenServer critical section:
-          # drop_stale → running_slug? → box_at_capacity? → start_run all run
-          # without interleaving, so two concurrent triggers can NEVER both
-          # observe a free slot. The census touches no lock, so — unlike a
-          # `flock -n` probe — it cannot steal one from a unit already blocked
-          # in `flock -w 900`, and it cannot leak an inherited fd that would
-          # hold the box's only build slot with no reaper.
-          #
-          # It sits BEFORE start_run/2 deliberately (charter D86/D87): a
-          # refused deploy must cost nothing, and start_run's first act is
-          # ingest_prebuilt/1, which extracts the caller's artifact to disk.
-          box_at_capacity?(state, req) ->
-            {:reply, {:error, :box_at_capacity}, state}
+            # THE DOOR. This is one serialized GenServer critical section:
+            # drop_stale → running_slug? → box_at_capacity? → start_run all run
+            # without interleaving, so two concurrent triggers can NEVER both
+            # observe a free slot. The census touches no lock, so — unlike a
+            # `flock -n` probe — it cannot steal one from a unit already blocked
+            # in `flock -w 900`, and it cannot leak an inherited fd that would
+            # hold the box's only build slot with no reaper.
+            #
+            # It sits BEFORE start_run/2 deliberately (charter D86/D87): a
+            # refused deploy must cost nothing, and start_run's first act is
+            # ingest_prebuilt/1, which extracts the caller's artifact to disk.
+            box_at_capacity?(state, req) ->
+              {:reply, {:error, :box_at_capacity}, state}
 
-          true ->
-            start_run(state, req)
-        end
-    end
+            true ->
+              start_run(state, req)
+          end
+      end
+
+    {:reply, reply, publish_census(state)}
+  end
+
+  # A SYNCHRONOUS census refresh — for a caller that needs the numbers as of NOW
+  # rather than as of the last door event or tick. The HTTP reader deliberately
+  # does NOT use this; see `door_census/0`.
+  def handle_call(:refresh_door_census, _from, state) do
+    state = publish_census(state)
+    {:reply, door_census(), state}
   end
 
   def handle_call({:status, slug}, _from, state) do
@@ -560,7 +602,8 @@ defmodule Barkpark.Sites.DeployRunner do
     {:noreply,
      state
      |> update_run(port, &finish_run(&1, code))
-     |> release_port(port)}
+     |> release_port(port)
+     |> publish_census()}
   end
 
   # Abnormal port death without an exit_status — record a failure, never crash.
@@ -573,7 +616,8 @@ defmodule Barkpark.Sites.DeployRunner do
          |> ingest_line("[runner] deploy port closed: #{inspect(reason)}")
          |> finish_run(-1)
        end)
-       |> release_port(port)}
+       |> release_port(port)
+       |> publish_census()}
     else
       {:noreply, state}
     end
@@ -593,7 +637,8 @@ defmodule Barkpark.Sites.DeployRunner do
          |> ingest_line("[runner] run exceeded #{ms}ms deadline — force-closed")
          |> finish_run(-2)
        end)
-       |> release_port(port)}
+       |> release_port(port)
+       |> publish_census()}
     else
       {:noreply, state}
     end
@@ -617,11 +662,20 @@ defmodule Barkpark.Sites.DeployRunner do
             failure_reason: exit_label(-2) <> " (#{ms}ms)"
           })
 
-        {:noreply, cache_and_cleanup(state, slug, manifest, render)}
+        {:noreply, publish_census(cache_and_cleanup(state, slug, manifest, render))}
 
       :error ->
         {:noreply, state}
     end
+  end
+
+  # The census backstop. Every door event republishes synchronously; this tick
+  # covers the state changes nothing sends this BEAM a message about — chiefly a
+  # transient systemd unit that finished outside the Runner's view, which would
+  # otherwise read as in-flight until the next trigger.
+  def handle_info(:census_tick, state) do
+    schedule_census_tick()
+    {:noreply, publish_census(state)}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -681,6 +735,142 @@ defmodule Barkpark.Sites.DeployRunner do
   """
   @spec build_slot_capacity() :: pos_integer()
   def build_slot_capacity, do: @build_slot_capacity
+
+  @typedoc """
+  What the door knows about itself. `capacity` is the CONSTANT
+  `@build_slot_capacity`; everything else is a MEASUREMENT, and every
+  measurement can be `nil` — which means NOTHING WAS READ (the Runner has never
+  booted in this BEAM, or it crashed and took its table with it), never "zero".
+  """
+  @type door_census :: %{
+          capacity: pos_integer(),
+          observed_in_flight: non_neg_integer() | nil,
+          in_flight_slugs: [String.t()] | nil,
+          refusals_total: non_neg_integer() | nil,
+          refusals_since: DateTime.t() | nil,
+          measured_at: DateTime.t() | nil
+        }
+
+  @doc """
+  What the box's build-slot door is actually doing — as opposed to
+  `build_slot_capacity/0`, which is a compile-time constant and therefore
+  cannot report saturation, refusals, or its own ignorance.
+
+  Three facts, each a real measurement:
+
+    * `observed_in_flight` / `in_flight_slugs` — `building_slugs(state)`, the
+      SAME census `box_at_capacity?/2` admits or refuses on. Before this it was
+      computed at the refusal site and interpolated into an English log line;
+      nothing kept it.
+    * `refusals_total` — how many deploys this door has turned away, counted at
+      the refusal itself. Guerrilla's door refused 1,810 times in ~34h and the
+      box could not state that number about itself.
+    * `refusals_since` — when that counter started, i.e. the current Runner's
+      start. The count is USELESS without it and must never be rendered alone:
+      the table is owned by the Runner, so a crash resets both together and a
+      reader that saw only a small total would misread a fresh window as a quiet
+      door.
+
+  Reads take NO lock and make NO `GenServer.call`. That is the point: the one
+  HTTP reader of this exists to describe a box whose Runner may be WEDGED
+  (D113), and a census that called the Runner would hang exactly when it
+  mattered. The cost is staleness, which is why `measured_at` is rendered too —
+  every value here is "as of" that instant, not "as of now".
+  """
+  @spec door_census() :: door_census()
+  def door_census do
+    %{
+      capacity: build_slot_capacity(),
+      observed_in_flight: census_get(:observed_in_flight),
+      in_flight_slugs: census_get(:in_flight_slugs),
+      refusals_total: census_get(:refusals_total),
+      refusals_since: census_get(:refusals_since),
+      measured_at: census_get(:measured_at)
+    }
+  end
+
+  @doc """
+  Recompute the census SYNCHRONOUSLY inside the Runner and return it. Degrades
+  to the ETS reading (never blocks past `timeout`) when the Runner cannot
+  answer, on the same `safe_call/3` seam as `status/1`.
+  """
+  @spec refresh_door_census(keyword()) :: door_census()
+  def refresh_door_census(opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 1_000)
+    safe_call(:refresh_door_census, door_census(), timeout: timeout)
+  end
+
+  # Owned by the Runner process, so its lifetime IS the counter's window — see
+  # `refusals_since`. `:public` because the writer is the Runner and the readers
+  # are web request processes.
+  defp ensure_census_table do
+    case :ets.whereis(@census_table) do
+      :undefined ->
+        :ets.new(@census_table, [:named_table, :public, :set, read_concurrency: true])
+        :ets.insert(@census_table, {:refusals_total, 0})
+        :ets.insert(@census_table, {:refusals_since, DateTime.utc_now()})
+        :ok
+
+      _tid ->
+        # A previous Runner in this BEAM already owns it (test restarts). Keep
+        # its window rather than silently resetting the count to zero.
+        :ok
+    end
+  end
+
+  defp schedule_census_tick do
+    Process.send_after(self(), :census_tick, census_interval_ms())
+  end
+
+  defp census_interval_ms do
+    case Keyword.get(config(), :census_interval_ms, @default_census_interval_ms) do
+      ms when is_integer(ms) and ms > 0 -> ms
+      _ -> @default_census_interval_ms
+    end
+  end
+
+  # The ONE place the real concurrency number is kept instead of being thrown
+  # into a log line.
+  defp publish_census(state) do
+    in_flight = Enum.sort(building_slugs(state))
+
+    census_write([
+      {:observed_in_flight, length(in_flight)},
+      {:in_flight_slugs, in_flight},
+      {:measured_at, DateTime.utc_now()}
+    ])
+
+    state
+  end
+
+  # Counted AT the refusal, in the same breath as the log line that announces
+  # it — so the count cannot drift from the thing it counts.
+  defp note_refusal do
+    try do
+      :ets.update_counter(@census_table, :refusals_total, 1)
+    rescue
+      # No table (no Runner in this BEAM) — nothing to count on, and a refusal
+      # is never worth crashing the door over.
+      ArgumentError -> :no_table
+    end
+  end
+
+  defp census_write(rows) do
+    try do
+      :ets.insert(@census_table, rows)
+    rescue
+      ArgumentError -> false
+    end
+  end
+
+  defp census_get(key) do
+    case :ets.lookup(@census_table, key) do
+      [{^key, value}] -> value
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
 
   @doc """
   Every path the engine's `build_gate_acquire` could have resolved the fleet
@@ -774,6 +964,8 @@ defmodule Barkpark.Sites.DeployRunner do
     if takes_build_slot?(req) do
       case building_slugs(state) do
         [_ | _] = in_flight ->
+          _ = note_refusal()
+
           Logger.info(
             "[site-deploy] REFUSED #{inspect(req.slug)} at the door: the box's build slot is " <>
               "in use (#{length(in_flight)} of #{build_slot_capacity()}, in flight: " <>
@@ -830,6 +1022,11 @@ defmodule Barkpark.Sites.DeployRunner do
           end)
 
         if held do
+          # Also a refusal at this door, and counted here for the same reason:
+          # a total that omitted foreign-lock refusals would understate exactly
+          # the case an operator cannot see from the BEAM.
+          _ = note_refusal()
+
           Logger.info(
             "[site-deploy] REFUSED #{inspect(req.slug)} at the door: the box's build lock #{held} " <>
               "is held by a build this instance did not launch (#{build_slot_capacity()} of " <>
@@ -1901,10 +2098,18 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # ── manifests + run-state dir ─────────────────────────────────────────────
 
-  # A config-injectable dir under which every run's manifest + status + log +
-  # env files live. Must SURVIVE a BEAM restart (it is how init/1 re-attaches),
-  # so it defaults under the repo root, not a per-boot tmp.
-  defp run_state_dir do
+  @doc """
+  A config-injectable dir under which every run's manifest + status + log + env
+  files live. Must SURVIVE a BEAM restart (it is how `init/1` re-attaches), so
+  it defaults under the repo root, not a per-boot tmp.
+
+  Public because that survival property is the reason
+  `Barkpark.Sites.ServingMemory` sites its record here rather than in journald:
+  the dir is bounded by COUNT only (`@default_max_terminal_records`, no age
+  term) and is not wiped, whereas journald is age- and volume-bounded.
+  """
+  @spec run_state_dir() :: String.t()
+  def run_state_dir do
     Keyword.get(config(), :run_state_dir) || Path.join(run_cd(), ".bp-site-deploy-runs")
   end
 

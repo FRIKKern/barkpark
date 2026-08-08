@@ -15,8 +15,12 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
   Never unauthenticated: build capacity and runner health are
   instance-operational data.
 
-  Wire contract — FOUR keys: `200 {"configured": bool, "runner_alive": bool,
-  "runner_queue_len": int|null, "build_slots": int}`.
+  Wire contract — SIX keys: `200 {"configured": bool, "runner_alive": bool,
+  "runner_queue_len": int|null, "build_slots": int, "door": {…},
+  "serving": {…}}`. The first four are the original capability record and are
+  unchanged in name, type and value; `door` and `serving` were added beside them
+  (dr-w22-s2), never on top of them, because a released `bp` may already read
+  `build_slots`.
 
   ## Why these four producers, and no others
 
@@ -40,6 +44,21 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
     * `runner_queue_len` — `Process.info(pid, :message_queue_len)`, non-blocking
       (same prior art as `ListenController`). `null` when there is no pid.
     * `build_slots` — `DeployRunner.build_slot_capacity/0`, a module attribute.
+      A CONSTANT. It is the capacity column and nothing more: it cannot report
+      that the door is saturated, that it refused anybody, or that it does not
+      know. That is what `door` is for, and it is why `build_slots` was kept
+      rather than redefined.
+    * `door` — `DeployRunner.door_census/0`, an ETS read (no `GenServer.call`,
+      same rule as everything else here). Carries `observed_in_flight` —
+      `length(building_slugs(state))`, the SAME census the door admits or
+      refuses on, which until now was interpolated into a log line and
+      discarded — plus `refusals_total` ALWAYS beside `refusals_since`, and
+      `measured_at` so the staleness is stated rather than implied. Any of them
+      may be `null`: that means nothing was read, never zero.
+    * `serving` — `ServingMemory.read/1`: the sha this box is serving and when
+      it FIRST saw that sha, off a durable record in the run-state dir. Not a
+      process uptime — a restart with an unchanged sha does not move it, which
+      is the whole reason it exists (charter D404).
 
   ## Honest limit (do not read more into this than it says)
 
@@ -53,6 +72,7 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Sites.DeployRunner
+  alias Barkpark.Sites.ServingMemory
 
   def show(conn, _params) do
     pid = Process.whereis(DeployRunner)
@@ -61,7 +81,9 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
       configured: DeployRunner.enabled?(),
       runner_alive: is_pid(pid),
       runner_queue_len: message_queue_len(pid),
-      build_slots: DeployRunner.build_slot_capacity()
+      build_slots: DeployRunner.build_slot_capacity(),
+      door: DeployRunner.door_census(),
+      serving: ServingMemory.read()
     })
   end
 
