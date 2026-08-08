@@ -4452,8 +4452,20 @@ defmodule BarkparkCloud.Registry do
   team-scoped vars, with the instance's own `barkpark`-scoped vars layered on top
   (most-specific-wins). Keys are env var names, values are plaintext.
 
-  This is the injection payload — called at provision-claim time and folded into
-  the Go worker's `claim_json` so the values reach the box's runtime env. ALWAYS
+  Called at provision-claim time and folded into the Go worker's `claim_json`
+  under the `env` key.
+
+  RETRACTED ON REVIEW (wave 56): this paragraph used to open "This is the
+  injection payload" and end "so the values reach the box's runtime env". It is
+  not an injection payload and the values reach nothing.
+  `internal/provisioner.JobSpec` declares no `env` field and every claim decode
+  is a bare `json.Unmarshal`, so the key is silently dropped by the only process
+  that could act on it. The console retracted the same claim in cch-w53-s1
+  ("Values are not delivered to any instance yet"); `lib` was still asserting the
+  opposite in two places, of which this was one. Building delivery is filed
+  separately — until it exists, this function resolves a map nobody consumes.
+
+  ALWAYS
   team-filtered (the never-leak-across-tenants invariant); a barkpark belongs to
   exactly one team, so resolution can only ever surface that team's secrets.
 

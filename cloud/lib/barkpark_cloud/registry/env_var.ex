@@ -1,7 +1,7 @@
 defmodule BarkparkCloud.Registry.EnvVar do
   @moduledoc """
   A user-managed environment variable / secret, scoped on Barkpark Cloud's
-  tenancy ladder and injected into a Team's provisioned instances. The Cloud
+  tenancy ladder and STORED for a Team's provisioned instances. The Cloud
   adaptation of Coolify's `SharedEnvironmentVariable` — collapsed from Coolify's
   four PaaS scopes (team/project/environment/server) onto the only two tenancy
   units Cloud actually has.
@@ -13,8 +13,18 @@ defmodule BarkparkCloud.Registry.EnvVar do
 
   At provision-claim time `Registry.resolved_env_for_barkpark/1` merges the
   team-scoped rows with the instance's own overrides (instance shadows team for
-  the same key) and decrypts them into the claim payload, so the values reach
-  the box's runtime env.
+  the same key) and decrypts them into the claim payload.
+
+  RETRACTED ON REVIEW (wave 56): that sentence used to end "…so the values reach
+  the box's runtime env". They do not. `internal/provisioner.JobSpec` declares no
+  `env` field and every claim decode is a bare `json.Unmarshal`, so the `env` key
+  the control plane sends is DROPPED on the floor — nothing running or newly
+  provisioned reads it. The console's own panel copy has said so since cch-w53-s1
+  ("Values are not delivered to any instance yet"); this moduledoc and
+  `Registry.resolved_env_for_barkpark/1`'s `@doc` were the two places in `lib`
+  still claiming delivery. Storage, encryption and tenancy scoping below are all
+  real; DELIVERY is the part that does not exist, and building it is filed
+  separately.
 
   ## The value is encrypted at rest
 

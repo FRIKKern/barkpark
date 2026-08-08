@@ -11062,12 +11062,26 @@ defmodule BarkparkCloud.Web.Router do
       # exists to prevent.
       region: claim_region(barkpark),
       server_type: claim_server_type(barkpark),
-      # The decrypted team + instance env, merged most-specific-wins. The worker
-      # bakes these into the box's runtime env at provision time. Resolved at
-      # CLAIM time so a retry / stale-claim re-pick carries rotated values. Sent
-      # ONLY over the worker-token-authed internal channel (TLS in prod) — the
-      # one place the plaintext must exist so the values can reach the instance.
-      # Additive: an OLD worker simply ignores the key.
+      # The decrypted team + instance env, merged most-specific-wins, sent ONLY
+      # over the worker-token-authed internal channel (TLS in prod). Resolved at
+      # CLAIM time so a retry / stale-claim re-pick would carry rotated values.
+      #
+      # RETRACTED ON REVIEW (wave 56): this comment used to say "The worker bakes
+      # these into the box's runtime env at provision time" and called this "the
+      # one place the plaintext must exist so the values can reach the instance".
+      # NO WORKER READS THIS KEY, and this repo already proves it mechanically:
+      # `cloud/test/barkpark_cloud/web/claim_payload_manifest_test.exs` (ARM 1)
+      # shows the worker DISCARDS `env` on all three claim shapes, because
+      # `internal/provisioner.JobSpec` declares no `env` field and every claim
+      # decode is a bare `json.Unmarshal`. So this comment asserted a delivery a
+      # merged guard in the same tree refutes — "an OLD worker simply ignores the
+      # key" is in fact EVERY worker. The console has said so since
+      # cch-w53-s1 ("Values are not delivered to any instance yet"); this comment
+      # and two moduledocs in cloud/lib were the last places claiming delivery.
+      # The key still ships (removing it is a contract change a future delivery
+      # slice would only have to re-add), but this is plaintext crossing a wire
+      # for nobody — which is its own reason to build delivery or drop the key.
+      # Filed separately.
       env: Registry.resolved_env_for_barkpark(barkpark),
       # dwb-4: the content-template slug picked at launch (validated then). nil →
       # no bootstrap; an OLD worker ignores the key.
