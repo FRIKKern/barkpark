@@ -422,8 +422,9 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Schema do
   NEITHER set, so no arm built from those two inputs can address it. That is not
   a gap in the two arms — it is a class of hole outside their axes, and it is the
   shape of this epic's headline defect: `commit_distance`, `commit_ancestry` and
-  `commit_distance_checked_at` are written hourly on prod by `UpdateStatusWorker`
-  and read by nobody, and the census was `13 tests, 0 failures` the whole time.
+  `commit_distance_checked_at` were written hourly on prod by
+  `UpdateStatusWorker` and read by nobody (dr-w24-s2 has since emitted them),
+  and the census was `13 tests, 0 failures` the whole time.
 
   ## What it collects, and what it refuses
 
@@ -630,10 +631,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       serializer never writes. Side A and Side B share one coordinate system (a
       key is on the wire or it is not), so a column no serializer emits is in
       NEITHER input set and no arm built from those two can address it. This
-      epic's headline defect is exactly that shape: `commit_distance`,
-      `commit_ancestry` and `commit_distance_checked_at` are written hourly on
+      epic's headline defect was exactly that shape: `commit_distance`,
+      `commit_ancestry` and `commit_distance_checked_at` were written hourly on
       prod and read by nobody, and this file was `13 tests, 0 failures`
-      throughout. Side C names all three.
+      throughout. Side C named all three — and then dr-w24-s2 EMITTED them in
+      the same wave, so the arm refused until their allowlist rows were deleted
+      and `@schema_unserialized_floor` fell 26 -> 23. The hole it was built to
+      find is closed; 23 columns remain, `suspended_at` among them.
 
   A GREEN SCHEMA ARM DOES NOT MEAN THE WIRE IS CONNECTED. `PlatformDelivery`
   scores GREEN — it has a schema, a serializer that writes nine of its eleven
@@ -1232,13 +1236,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # again. The rule is applied over the schema's OWN fields, so if an
   # `*_encrypted` column ever becomes EMITTED the set-equality below reds
   # ("no longer unserialized") rather than blessing a credential onto the wire.
+  #
+  # THE THREE COMMIT_* ROWS THAT USED TO OPEN THIS LIST ARE GONE, and their
+  # absence is the arm's first receipt. `commit_distance`, `commit_ancestry` and
+  # `commit_distance_checked_at` were the headline hole this arm was built to
+  # name; dr-w24-s2 wired all three into `barkpark_json/4` in the SAME WAVE, so
+  # the rows died in the same commit as the emit, exactly as the arm's own
+  # refusal text demands ("no longer unserialized … DELETE the allowlist row").
+  # The arm closed a hole and then deleted its own paperwork; that is what it is
+  # supposed to do.
   @schema_allowlist [
-    {"barkpark_json/4", "commit_distance",
-     "dr-w24-s4 KNOWN OPEN — THE HEADLINE HOLE. Written hourly on prod by UpdateStatusWorker through commit_distance_changeset/2; no serializer emits it, so no Go tag can name it and no operator can see the fleet's real drift. This row exists to be DELETED by the slice that emits it."},
-    {"barkpark_json/4", "commit_ancestry",
-     "dr-w24-s4 KNOWN OPEN — the ahead/behind/diverged/unknown verdict that makes commit_distance readable. Same writer, same silence."},
-    {"barkpark_json/4", "commit_distance_checked_at",
-     "dr-w24-s4 KNOWN OPEN — the measurement's own timestamp. Without it a rendered distance cannot be told from a stale one, which is the same unearned-green shape the column's comment forbids."},
     {"barkpark_json/4", "template",
      "RULED — bootstrap custody. The schema comment states these ride the Vault encrypt-at-rest seam and are NEVER serialized in barkpark_json; they are revealed only through the team-admin-gated /bootstrap route."},
     {"barkpark_json/4", "bootstrap_workspace",
@@ -1295,8 +1302,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #     included. It moves DOWN when a hole is closed, which is the point: wiring
   #     one commit_* column into `barkpark_json/4` moves it and forces the
   #     allowlist row's deletion in the SAME commit.
+  #
+  # @schema_unserialized_floor MOVED 26 -> 23 when dr-w24-s2's three commit_*
+  # keys landed in `barkpark_json/4` — DOWN, because a hole closed. Re-measured
+  # by the file's own refusal line ("23 unserialized column(s), floor is EXACTLY
+  # 26"), not by subtracting three.
   @schema_field_floor 95
-  @schema_unserialized_floor 26
+  @schema_unserialized_floor 23
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
@@ -1385,20 +1397,42 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     for pair <- @schema_pairs, do: assert_schema_arm!(pair, [])
   end
 
-  test "SIDE C NAMES THE THREE COLUMNS THE WIRE ARMS STRUCTURALLY CANNOT SEE" do
-    unread = unserialized(barkpark())
+  test "SIDE C's HEADLINE HOLE IS CLOSED — the three commit_* columns reach the wire" do
+    # The arm was built to name `commit_distance`, `commit_ancestry` and
+    # `commit_distance_checked_at`: written hourly on prod by UpdateStatusWorker,
+    # read by nobody, and INVISIBLE to both wire arms (not emitted, so UNREAD
+    # could not see them; not declared in Go, so PHANTOM could not either).
+    # dr-w24-s2 emitted all three in this same wave. This test is the receipt,
+    # and it is a TRIPWIRE, not a memorial: delete the emission and it reds.
+    emitted_keys = emitted(barkpark()).keys
+    unserialized_now = unserialized(barkpark())
+    go_tags = Go.all_tags(Go.source(@cloudclient))
 
     for column <- ~w(commit_distance commit_ancestry commit_distance_checked_at) do
-      assert column in unread,
-             "`#{column}` is a barkparks column written hourly by UpdateStatusWorker. If it is " <>
-               "no longer unserialized, DELETE its @schema_allowlist row — the hole closed."
+      assert column in emitted_keys,
+             "`#{column}` left the wire. It is written hourly by UpdateStatusWorker and was " <>
+               "unreadable by any operator until dr-w24-s2 emitted it; re-emit it, or " <>
+               "re-open its @schema_allowlist row with a reason."
 
-      # And it is invisible to BOTH wire arms, which is the whole reason this arm
-      # exists: it is neither emitted (so UNREAD cannot see it) nor declared in
-      # Go (so PHANTOM cannot see it).
-      refute column in emitted(barkpark()).keys
-      refute column in Go.all_tags(Go.source(@cloudclient))
+      refute column in unserialized_now
+      assert column in go_tags, "`#{column}` is emitted but no Go struct decodes it any more"
     end
+  end
+
+  test "SIDE C STILL NAMES A HOLE THE WIRE ARMS STRUCTURALLY CANNOT SEE" do
+    # The arm is only worth its floors if it is still measuring something. A
+    # column no serializer writes is in NEITHER wire input set, so neither UNREAD
+    # nor PHANTOM can address it — `suspended_at` is the live example: `bp` can
+    # say a box is suspended and why, but never SINCE WHEN.
+    column = "suspended_at"
+
+    assert column in unserialized(barkpark()),
+           "`#{column}` is no longer unserialized — DELETE its @schema_allowlist row, the hole " <>
+             "closed. If Side C has run out of holes entirely, say so deliberately rather than " <>
+             "letting this test rot into a tautology."
+
+    refute column in emitted(barkpark()).keys
+    refute column in Go.all_tags(Go.source(@cloudclient))
   end
 
   test "SCHEMA-SIDE ANTI-VACUITY FLOOR: an extractor that stops collecting columns REFUSES" do
@@ -1447,16 +1481,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   test "THE FIX DIRECTION REDS TOO: emitting an allowlisted column forces its row's deletion" do
     # Not hypothetical and not a synthetic fixture: this runs the REAL assertion
     # over the REAL payload plus one key, which is exactly what wiring
-    # `commit_distance` into `barkpark_json/4` looks like from Side C. The
-    # allowlist row must die in the same commit as the emit.
+    # `suspended_at` into `barkpark_json/4` would look like from Side C. The
+    # allowlist row must die in the same commit as the emit — and it already
+    # happened for real once in this wave: dr-w24-s2 emitted the three commit_*
+    # columns and this arm refused until their three rows were deleted.
     error =
       assert_raise ExUnit.AssertionError, fn ->
-        assert_schema_arm!(barkpark(), extra_emitted: ["commit_distance"])
+        assert_schema_arm!(barkpark(), extra_emitted: ["suspended_at"])
       end
 
     message = Exception.message(error)
     assert message =~ "no longer unserialized"
-    assert message =~ "commit_distance"
+    assert message =~ "suspended_at"
     assert message =~ "DELETE the allowlist"
   end
 
