@@ -710,13 +710,26 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # THREE. Note which two rode free — it is NOT the pair a reader would
   # guess, which is the whole reason this number is measured and not derived.
   # The emitted floor does NOT move: this branch writes no serializer.
-  @emitted_floor 123
-  @go_tag_floor 225
+  # W24 S2 (commit distance reaches the CLI): `barkpark_json/4` gains THREE keys
+  # (commit_distance, commit_ancestry, commit_distance_checked_at) and
+  # `cloudclient.Barkpark` gains the three matching json tags. Every number below
+  # RE-MEASURED by the 999-technique on this branch — the four refusals printed
+  # "126 emitted key(s) collected", "228 json tag(s) found", "left: 45" and
+  # "left: 59" — never by adding 3 to main's numbers. That the arithmetic happens
+  # to agree here is a coincidence of these three names being new EVERYWHERE
+  # (Go.all_tags/1 is a file-global union of NAMES, so a name already declared
+  # anywhere in client.go would have ridden free, as `team` and `scope` did in
+  # W19 S1). MERGE HAZARD, unchanged: these floors are `==`, so any other PR that
+  # also moves them must be re-measured after this one lands, not summed with it.
+  @emitted_floor 126
+  @go_tag_floor 228
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
-  # measured: 56 keys with the :when unwrap, 42 without.
-  @barkpark_family_keys 56
-  @barkpark_family_keys_blind 42
+  # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
+  # still worth exactly the same 14 vitals — the three new keys are in the base
+  # literal, so they are visible to both walkers).
+  @barkpark_family_keys 59
+  @barkpark_family_keys_blind 45
 
   # ---------------------------------------------------------------------------
 
@@ -758,9 +771,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
     assert p.unresolvable == []
 
-    # The base literal is 35 keys — what a regex would report. The pipeline adds
+    # The base literal is 38 keys — what a regex would report. The pipeline adds
     # the four job-status keys, the two list keys, and `pressure`.
-    assert MapSet.size(p.top) == 42
+    assert MapSet.size(p.top) == 45
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure) do

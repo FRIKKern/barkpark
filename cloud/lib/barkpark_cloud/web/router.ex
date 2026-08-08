@@ -9387,6 +9387,26 @@ defmodule BarkparkCloud.Web.Router do
       update_running_release: bp.update_running_release,
       update_latest_release: bp.update_latest_release,
       update_checked_at: bp.update_checked_at,
+      # dr-w24-s2 COMMIT DISTANCE — the control plane's OWN measurement of the
+      # commit each box actually serves (`BarkparkCloud.GitHub.CommitDistance`,
+      # written hourly by the UpdateStatusWorker), beside the box's release-tag
+      # self-grade above. They are DIFFERENT questions and they disagree today:
+      # prod carries rows reading `commit_distance: 2493, commit_ancestry:
+      # "behind", update_state: "current"` — the tag grade is pinned at `current`
+      # because no release tag has been cut since 2026-07-08, however far `main`
+      # runs ahead. Until this line existed the measurement had ZERO readers: no
+      # serializer, no CLI, no console.
+      #
+      # `commit_distance` is NULL for UNMEASURED — an empty `git_commit`, a 404
+      # on an unknown sha, and a rate-limit refusal all land NULL, never 0 — so
+      # every consumer must render it as unmetered and sort it to the TOP
+      # (registry/barkpark.ex, the field's own contract). `commit_ancestry` is
+      # one of unknown|current|behind|ahead_of_main|diverged and
+      # `commit_distance_checked_at` says when we last asked, so a consumer can
+      # age the reading instead of trusting it blindly.
+      commit_distance: bp.commit_distance,
+      commit_ancestry: bp.commit_ancestry,
+      commit_distance_checked_at: bp.commit_distance_checked_at,
       # isu-w5.2 fleet-autoupdate policy + channel — the console renders the
       # rollout state (enabled/paused/pinned/channel) per row. EXACT names —
       # sibling slices S3/S4 read these off the fleet-list JSON. The in-flight
