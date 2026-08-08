@@ -6376,3 +6376,5 @@ wave 53" does not exist (D402), "wave 21's six slices are built and not on origi
 and "the platform cannot say what commit is live" was discharged by #10605 before this wave started (D404).
 Two further inherited numbers were refuted outright: the "~40-hour rotating corpus" (D382, actually 17.7 days)
 and the "p90 488 s GitHub queue" as an attribution (D383, actually our own concurrency group at 96.4%).
+
+**Charter PR:** #10654 (docs-only). Epic task claimed by `epic-cycle-decide-w22` at epoch 55.
