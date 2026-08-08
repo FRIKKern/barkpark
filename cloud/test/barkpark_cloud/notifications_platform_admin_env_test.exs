@@ -175,17 +175,43 @@ defmodule BarkparkCloud.NotificationsPlatformAdminEnvTest do
     assert operator_call(user).status == 200
   end
 
-  ## 6. The far end of the same chain: what the DIGEST does with the empty set
+  ## 6. The far end of the chain — and where it was CUT (dr-w19-s5)
   ##
   ##    §1-§5 prove the chain fails CLOSED — an unset variable is nobody, and the
-  ##    operator gate 403s. dr-w18-s3 adds the other consequence of that same
-  ##    empty set, which had no test at all: the daily fleet digest resolves the
-  ##    same population, finds nobody, and used to return a success nothing
-  ##    counted. Driven here from the REAL runtime.exs boot path rather than an
-  ##    `Application.put_env`, so the assertion is about the deployed
-  ##    configuration and not about a value a test typed in.
+  ##    operator gate 403s. dr-w18-s3 added the other consequence of that same
+  ##    empty set: the daily fleet digest resolved the same population, found
+  ##    nobody, and used to return a success nothing counted.
+  ##
+  ##    dr-w19-s5 severed that link rather than living with it. The digest is now
+  ##    addressed per-team, to each team's own membership rows, so an unset
+  ##    `PLATFORM_ADMIN_EMAILS` no longer silences it at all. Both halves are
+  ##    pinned here, because the second is only trustworthy while the first is
+  ##    still driven from the REAL runtime.exs boot path: the env is genuinely
+  ##    empty, and the digest sends anyway.
 
-  test "an unset variable makes the daily fleet digest a COUNTED loss, not a quiet success" do
+  test "an unset variable no longer silences the digest — the audience is the team, not the env" do
+    assert boot_with_env(nil) == []
+
+    n = System.unique_integer([:positive])
+    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+    user = user_fixture()
+    {:ok, _} = Accounts.add_member(team, user, "owner")
+
+    fleet = [
+      %BarkparkCloud.Registry.Barkpark{
+        id: Ecto.UUID.generate(),
+        team_id: team.id,
+        name: "prod",
+        slug: "prod",
+        update_state: "behind"
+      }
+    ]
+
+    assert {:ok, %{sent: 1, recipients: [email]}} = Notifications.deliver_fleet_digest(fleet)
+    assert email == user.email
+  end
+
+  test "a fleet with no reachable recipient is still a COUNTED loss, not a quiet success" do
     _registered = user_fixture()
     assert boot_with_env(nil) == []
 
@@ -194,12 +220,13 @@ defmodule BarkparkCloud.NotificationsPlatformAdminEnvTest do
         assert {:ok, :no_admins} = Notifications.deliver_fleet_digest([])
       end)
 
-    # The loss is greppable and it is a WARNING — the same env state that dark-
-    # ens the operator console also silences the one push channel for fleet
-    # health, and now says so.
+    # The loss is greppable and it is a WARNING. The REASON moved with the
+    # address: `no_platform_admins` was the old empty population, and a run that
+    # still printed it after dr-w19-s5 would be naming a cause that no longer
+    # exists.
     assert log =~ "fleet_digest phase=settled"
     assert log =~ "recipients=0 sent=0"
-    assert log =~ "reason=no_platform_admins"
+    assert log =~ "reason=no_team_recipients"
     assert log =~ "[warning]"
   end
 

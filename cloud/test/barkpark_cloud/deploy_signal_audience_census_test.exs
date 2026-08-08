@@ -260,8 +260,9 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   enforces. For a `:push` reader, the recipient resolver its body calls and the
   population that resolver draws from, parsed from `notifications.ex`.
 
-  THE ASSERTION: a signal every one of whose readers lands on tier `operator`
-  (pull) or the platform allowlist (push) has an EMPTY AUDIENCE BY CONSTRUCTION
+  THE ASSERTION: a signal every one of whose readers lands on a no-human tier —
+  `operator` or `worker` (pull), see `@empty_pull_tiers` — or on the platform
+  allowlist (push) has an EMPTY AUDIENCE BY CONSTRUCTION
   and must be allowlisted with a reason NAMING ITS CLOSER — or it reds, naming
   the signal and the reader's `file:line`.
 
@@ -275,8 +276,16 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   This proves an AUDIENCE SHAPE, not DELIVERY. A green here does NOT prove any
   route returns 200, that a credential satisfying the tier exists, that mail was
   accepted by a relay, or that a human ever read the signal. A `worker`-tier
-  reader is a MACHINE population and this census does not judge whether its
-  secret is provisioned anywhere.
+  reader is a MACHINE population; since dr-w19-s5 this census calls that
+  population empty for a HUMAN signal, but it still does not judge whether the
+  machine's secret is provisioned anywhere.
+
+  Nor does it judge WHO within a population may see WHICH row. A push signal
+  resolving `team_members` is REACHABLE; whether it fans one team's rows into
+  another team's inbox is a TENANCY question this file cannot see, because it
+  reads the resolver's source text and nothing else. It would have gone green on
+  a fleet-wide digest exactly as readily as on the per-team one that shipped —
+  that ruling is made in `deliver_fleet_digest/1`'s own doc, not here.
 
   And the registry FAILS OPEN: an unregistered signal is invisible to this file,
   exactly as `router_head_fence_census_test.exs` admits of its own deny-list.
@@ -357,6 +366,21 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   @signal_floor 5
   @reader_floor 5
 
+  # THE PULL-SIDE EMPTY TIERS. `operator` was the whole list until dr-w19-s5,
+  # and that made the census's green on a `worker`-tier reader VACUOUS: `worker`
+  # is a MACHINE population whose secret (`WORKER_TOKEN`) is held by the
+  # provisioner, not by any account. No human credential satisfies it — a
+  # `bp cloud rollout status` on the real prod owner token 401s today — so a
+  # deploy-health signal readable ONLY over a worker-tier route is exactly as
+  # unreachable to a person as an operator-tier one, and this census exists to
+  # say so rather than to grade the router.
+  #
+  # The moduledoc's older sentence ("a `worker`-tier reader is a MACHINE
+  # population and this census does not judge whether its secret is provisioned
+  # anywhere") is now narrowed by construction: the census does not judge the
+  # PROVISIONING, but it no longer calls the tier reachable.
+  @empty_pull_tiers ["operator", "worker"]
+
   # ---------------------------------------------------------------------------
   # THE ALLOWLIST — today's empty audiences, each WITH ITS CLOSER.
   # ---------------------------------------------------------------------------
@@ -383,17 +407,33 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     # every team can reach. The "allowlist cannot rot" test reds on an excuse that
     # stopped being true and ordered this deletion by name, so the row is gone in
     # the same commit as the reader that closed it.
-    "fleet_operator_digest" =>
-      "EMPTY BY CONSTRUCTION today: `deliver_fleet_digest/1` resolves its recipients " <>
-        "through `platform_admin_emails/0`, whose only source is the " <>
-        "`:platform_admin_emails` config allowlist intersected with registered users. " <>
-        "On prod that list is `[]`, so the daily digest takes its `:no_admins` arm " <>
-        "every single day and nobody has ever received one. dr-w18-s3 does NOT close " <>
-        "this: it makes that arm a COUNTED loss (telemetry + a WARNING line) so the " <>
-        "zero can be seen, and deliberately leaves the ADDRESS alone — the audience is " <>
-        "still the same empty allowlist, which is why this row survives that slice. " <>
-        "CLOSER: dr-w19-fleet-digest-audience-still-empty gives fleet-health push a " <>
-        "reachable recipient population; when it lands, delete this row."
+    #
+    # `fleet_operator_digest` used to sit here too: `deliver_fleet_digest/1`
+    # resolved its recipients through `platform_admin_emails/0`, so the daily
+    # digest took its `:no_admins` arm every single day and nobody ever received
+    # one. Its named CLOSER (dr-w19-fleet-digest-audience-still-empty) is THIS
+    # branch: the digest is now partitioned by team and addressed to each team's
+    # own membership rows, so Side B reclassifies it `team_members` with no test
+    # edit at all. The rot assertion below reddened in its own words ("This is
+    # the GOOD direction: its closer landed. Delete the allowlist row.") and the
+    # row is gone in the same commit as the re-address that closed it.
+    "fleet_rollout_state" =>
+      "EMPTY BY CONSTRUCTION today, and green here until dr-w19-s5 widened the " <>
+        "pull-side empty tiers: `RolloutStatus` sends GET /v1/admin/autoupdate, which " <>
+        "the router gates at tier `worker` — the machine population that holds " <>
+        "`WORKER_TOKEN`. No human account holds that secret, and `bp cloud rollout " <>
+        "status` on the real prod owner token 401s, so the fleet brake's POSITION — " <>
+        "read before and after every deploy wave — is unreadable by any person. " <>
+        "This is NOT closed by re-pointing the Go client at the operator door " <>
+        "(GET/POST /v1/operator/autoupdate, router.ex:3470/3480/3491, already called " <>
+        "by the console at app.js:8321): that door exists, but it is gated on the " <>
+        "SAME `:platform_admin_emails` allowlist, and repointing there flips this " <>
+        "signal worker -> operator and reds this census harder. Charter D30 rules " <>
+        "that allowlist a PERMANENT HUMAN GATE. The defect is that no human ACCOUNT " <>
+        "is in it, not that no human VERB exists. " <>
+        "CLOSER: gr-ops-platform-admin-emails — set PLATFORM_ADMIN_EMAILS on the live " <>
+        "control plane and the operator door opens for a real person; when it lands, " <>
+        "delete this row."
   }
 
   # ---------------------------------------------------------------------------
@@ -422,7 +462,7 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
                    where: "#{reader.file}:#{line}",
                    sends: "#{method} #{path}",
                    resolves: tier,
-                   empty?: tier == "operator"
+                   empty?: tier in @empty_pull_tiers
                  }}
 
               {:error, why} ->
@@ -553,10 +593,12 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
 
     assert offenders == [], """
     #{length(offenders)} deploy-health signal(s) have an audience that is EMPTY BY
-    CONSTRUCTION: every reader resolves to the platform-operator population, which
-    no account is in and none can join (PLATFORM_ADMIN_EMAILS is unset on prod, no
-    User field carries operator-ness, and nothing but runtime.exs writes the key).
-    A signal reported there is a signal nobody receives.
+    CONSTRUCTION: every reader resolves to a population no person is in — the
+    platform-operator allowlist, which no account is in and none can join
+    (PLATFORM_ADMIN_EMAILS is unset on prod, no User field carries operator-ness,
+    and nothing but runtime.exs writes the key), or the `worker` machine tier,
+    whose token no human account holds. A signal reported there is a signal nobody
+    receives.
 
     #{Enum.join(offenders, "\n")}
 
@@ -598,10 +640,17 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
       # The closer is a bp TASK SLUG or a PR number. The slug pattern is
       # `dr-w<N>-<rest>` — widened from `dr-w\d+-s\d+` in the w18 review, because
       # a closer is not always a numbered slice of the wave that found the hole:
-      # `fleet_operator_digest`'s real closer is
+      # `fleet_operator_digest`'s real closer was
       # `dr-w19-fleet-digest-audience-still-empty`, a filed follow-up. Still
-      # anchored on the epic's own slug prefix, so free prose cannot satisfy it.
-      assert reason =~ ~r/CLOSER: (dr-w\d+-[a-z0-9-]+|PR #\d+)/,
+      # anchored on a filed slug prefix, so free prose cannot satisfy it.
+      #
+      # dr-w19-s5 admits the `gr-ops-` prefix as well, for the same reason the
+      # `dr-w\d+-` form was widened: `fleet_rollout_state`'s only real closer is
+      # a HUMAN GATE (`gr-ops-platform-admin-emails` — set the env var on the
+      # live control plane), and no amount of code closes it. Forcing a `dr-w`
+      # slug there would have made the row name a closer that cannot close it,
+      # which is the junk drawer this assertion exists to prevent.
+      assert reason =~ ~r/CLOSER: (dr-w\d+-[a-z0-9-]+|gr-ops-[a-z0-9-]+|PR #\d+)/,
              "#{name}: an empty-audience row must name the task or PR that closes it — " <>
                "an allowlist without closers is a junk drawer"
 
