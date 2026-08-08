@@ -68,19 +68,29 @@ defmodule BarkparkCloud.RegistryCustomHostTest do
     test "the url host is matched NORMALISED, not string-equal to https://<host>" do
       # Every one of these stored origins means the same hostname. An exact
       # `url == "https://" <> norm` comparison sees only the first.
-      for stored <- [
-            "https://occupied.barkpark.cloud",
-            "http://occupied.barkpark.cloud",
-            "https://Occupied.Barkpark.Cloud",
-            "https://occupied.barkpark.cloud.",
-            "https://occupied.barkpark.cloud:4000",
-            "https://occupied.barkpark.cloud/studio"
-          ] do
+      #
+      # EACH SPELLING GETS ITS OWN HOSTNAME, deliberately: reusing one host
+      # would leave the plain `https://<host>` victim from the first iteration
+      # standing, so every later assertion would pass on THAT row's claim even
+      # if its own spelling normalised to nothing. Isolated, each variant has to
+      # hold the name by itself.
+      variants = [
+        {"plain https", fn h -> "https://" <> h end},
+        {"http scheme", fn h -> "http://" <> h end},
+        {"mixed case", fn h -> "https://" <> String.upcase(h) end},
+        {"trailing dot", fn h -> "https://" <> h <> "." end},
+        {"explicit port", fn h -> "https://" <> h <> ":4000" end},
+        {"path suffix", fn h -> "https://" <> h <> "/studio" end}
+      ]
+
+      for {{label, spell}, i} <- Enum.with_index(variants) do
+        host = "occupied#{i}.barkpark.cloud"
+        stored = spell.(host)
         _victim = live_row_holding_url(stored)
         thief = barkpark_fixture(team_fixture())
 
-        assert {:error, :taken} = Registry.set_custom_host(thief, "occupied.barkpark.cloud"),
-               "stored url #{stored} did not hold the name"
+        assert {:error, :taken} = Registry.set_custom_host(thief, host),
+               "#{label}: stored url #{stored} did not hold #{host}"
       end
     end
 
