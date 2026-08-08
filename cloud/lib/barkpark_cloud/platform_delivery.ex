@@ -23,12 +23,23 @@ defmodule BarkparkCloud.PlatformDelivery do
   platform deploys have no site row, so they cannot be represented there at all.
   See the migration for the full argument.
 
-  ## The identity: (sha, delivering_run_id, first_seen_at)
+  ## The identity: (sha, delivering_run_id, target)
 
   179 of 180 non-success deploy runs carry ZERO jobs, so ~36% of merged shas are
   CARRIED by a later sha's run rather than delivered by one of their own. A
   `(sha, first_seen_at)` key would fold two runs delivering the same carried sha
   into one row — losing exactly the deliveries this wave exists to make visible.
+  The run id is part of the identity for that reason.
+
+  `target` is part of it too (W24, charter D422, which amends D410 on this key).
+  `deploy.yml`'s `control-plane` and `instance` jobs are two jobs of ONE workflow
+  run and share GITHUB_RUN_ID, so W23's `(sha, delivering_run_id, first_seen_at)`
+  key destroyed the second leg of every deploy and answered 200 — measured live:
+  a batch of two rows differing only in `target` returned
+  `%{received: 2, recorded: 1}`. No choice of clock repairs that (a run-stable
+  stamp loses the leg; a per-post stamp duplicates on retry), so the key names
+  `target` and names no clock at all. `first_seen_at` stays as the ordering
+  clock — PAYLOAD, not identity.
 
   ## Never raises into an HTTP response
 
@@ -68,7 +79,10 @@ defmodule BarkparkCloud.PlatformDelivery do
     :build_seconds,
     :serving_since,
     :target,
-    :carried
+    :carried,
+    :queued_self_seconds,
+    :queued_pickup_seconds,
+    :queued_stall_seconds
   ]
 
   # The bare list's pinned window. Never "everything": an unbounded list is a
@@ -78,7 +92,10 @@ defmodule BarkparkCloud.PlatformDelivery do
 
   # The unique index this upsert conflicts on, by name — so a rename of the
   # index is a compile-adjacent break here rather than a silent double-write.
-  @conflict_target [:sha, :delivering_run_id, :first_seen_at]
+  # The name is a LITERAL ATOM on both sides, which Postgres only resolves at
+  # RUNTIME: grep the whole tree when it changes.
+  @conflict_target [:sha, :delivering_run_id, :target]
+  @conflict_index :platform_deliveries_sha_run_target_index
 
   schema "platform_deliveries" do
     field :sha, :string
@@ -86,10 +103,23 @@ defmodule BarkparkCloud.PlatformDelivery do
     field :first_seen_at, :utc_datetime_usec
     field :merged_at, :utc_datetime_usec
     field :queued_seconds, :integer
+
+    # The queue, split into the three intervals an operator can act on. All
+    # nullable, carrying this table's law: if the producing query fails they read
+    # UNKNOWN, never 0 — a 0 would read as "the queue was instant".
+    field :queued_self_seconds, :integer
+    field :queued_pickup_seconds, :integer
+    field :queued_stall_seconds, :integer
+
     field :build_seconds, :integer
     field :serving_since, :utc_datetime_usec
     field :target, :string, default: @default_target
-    field :carried, :boolean, default: false
+
+    # NO DEFAULT (D422). An omitted `carried` must read `nil` — "nobody measured
+    # this" — never a measured `false`. A box-side writer does not know whether a
+    # sha rode another sha's run, and recording that ignorance as `false` is
+    # exactly the carried-vs-caused lie this epic exists to end.
+    field :carried, :boolean
 
     timestamps()
   end
@@ -123,7 +153,10 @@ defmodule BarkparkCloud.PlatformDelivery do
     |> validate_inclusion(:target, @targets)
     |> validate_number(:queued_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:build_seconds, greater_than_or_equal_to: 0)
-    |> unique_constraint(@conflict_target, name: :platform_deliveries_sha_run_seen_index)
+    |> validate_number(:queued_self_seconds, greater_than_or_equal_to: 0)
+    |> validate_number(:queued_pickup_seconds, greater_than_or_equal_to: 0)
+    |> validate_number(:queued_stall_seconds, greater_than_or_equal_to: 0)
+    |> unique_constraint(@conflict_target, name: @conflict_index)
   end
 
   # The wire is JSON written by a shell script, so both key styles and a numeric
@@ -150,7 +183,7 @@ defmodule BarkparkCloud.PlatformDelivery do
   Record a BATCH of delivery rows — one call per delivering run, one row per sha
   that run carried.
 
-  IDEMPOTENT on `(sha, delivering_run_id, first_seen_at)`: the insert is
+  IDEMPOTENT on `(sha, delivering_run_id, target)`: the insert is
   `on_conflict: :nothing`, so a retried deploy job re-posts its whole batch and
   writes nothing. `recorded` therefore counts NEW rows and `received` counts what
   the caller sent — a re-post is an honest `%{received: 3, recorded: 0}` rather
@@ -159,6 +192,9 @@ defmodule BarkparkCloud.PlatformDelivery do
   Returns:
 
     * `{:ok, %{received: n, recorded: m}}`
+    * `{:error, {:null_column, column}}` — a required column arrived explicitly
+      NULL and Postgres refused the row. The caller's payload is wrong, not the
+      crown, so this is a typed 422 on the wire and never a 500.
     * `{:error, {:invalid_row, index, errors}}` — one row failed validation; the
       whole batch is refused, because a partially-recorded delivery is a lie
       that is worse than a refusal the caller can retry.
@@ -318,6 +354,9 @@ defmodule BarkparkCloud.PlatformDelivery do
       first_seen_at: iso(d.first_seen_at),
       merged_at: iso(d.merged_at),
       queued_seconds: d.queued_seconds,
+      queued_self_seconds: d.queued_self_seconds,
+      queued_pickup_seconds: d.queued_pickup_seconds,
+      queued_stall_seconds: d.queued_stall_seconds,
       build_seconds: d.build_seconds,
       serving_since: iso(d.serving_since),
       target: d.target,
@@ -334,5 +373,16 @@ defmodule BarkparkCloud.PlatformDelivery do
   # meaning ("your cloud/ merge has not landed"), so it gets its own tag and its
   # own typed HTTP refusal. Everything else stays opaque and is logged.
   defp classify(%Postgrex.Error{postgres: %{code: :undefined_table}}), do: :unavailable
+
+  # A NOT NULL violation is the CALLER's row, not the crown being broken.
+  # `validate_required/2` does not catch an explicit `null` on a column it does
+  # not list, so the value reaches `insert_all/3` and Postgres refuses it — and
+  # until W24 that fell through to the router's 500 `record_failed`, telling a
+  # deploy job the platform had failed when its own payload was malformed. Typed
+  # 422, and it names the column so the writer fixes the field instead of
+  # retrying the same bytes forever.
+  defp classify(%Postgrex.Error{postgres: %{code: :not_null_violation} = pg}),
+    do: {:null_column, to_string(Map.get(pg, :column) || "unknown")}
+
   defp classify(error), do: error
 end

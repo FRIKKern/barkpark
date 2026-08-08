@@ -163,9 +163,91 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
       assert is_nil(stored.queued_seconds)
       assert is_nil(stored.build_seconds)
     end
+
+    test "an OMITTED `carried` reads UNKNOWN — nil, never a measured false" do
+      # D422: `carried` shipped NOT NULL DEFAULT false, so a writer that does not
+      # know whether a sha rode another sha's run recorded measured-FALSE. That
+      # is the carried-vs-caused lie this epic exists to end.
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([Map.delete(row(), "carried")])
+
+      assert {:ok, [stored]} = PlatformDelivery.list(sha: @sha)
+      assert is_nil(stored.carried)
+      assert is_nil(PlatformDelivery.to_json(stored)[:carried])
+
+      # And the DB agrees: nullable, with no default to fill the silence in.
+      %{rows: [[nullable, default]]} =
+        Repo.query!(
+          "SELECT is_nullable, column_default FROM information_schema.columns " <>
+            "WHERE table_name = 'platform_deliveries' AND column_name = 'carried'"
+        )
+
+      assert nullable == "YES"
+      assert is_nil(default)
+    end
+
+    test "an explicit `carried` still means MEASURED, in both directions" do
+      # Nullability must not blur the two answers it separates.
+      assert {:ok, %{recorded: 1}} = PlatformDelivery.record_all([row(%{"carried" => true})])
+      assert {:ok, [stored]} = PlatformDelivery.list(sha: @sha)
+      assert stored.carried == true
+    end
+
+    test "the three queue splits are NULLABLE integers and serialize as unknown" do
+      %{rows: rows} =
+        Repo.query!(
+          "SELECT column_name, data_type, is_nullable FROM information_schema.columns " <>
+            "WHERE table_name = 'platform_deliveries' " <>
+            "AND column_name IN ('queued_self_seconds','queued_pickup_seconds','queued_stall_seconds') " <>
+            "ORDER BY column_name"
+        )
+
+      assert rows == [
+               ["queued_pickup_seconds", "integer", "YES"],
+               ["queued_self_seconds", "integer", "YES"],
+               ["queued_stall_seconds", "integer", "YES"]
+             ]
+
+      # Omitted → UNKNOWN on the wire. A 0 here would read as "the queue was
+      # instant", which is the most flattering possible lie about a deploy
+      # nobody measured.
+      assert {:ok, %{recorded: 1}} = PlatformDelivery.record_all([row()])
+      assert {:ok, [stored]} = PlatformDelivery.list(sha: @sha)
+      json = PlatformDelivery.to_json(stored)
+
+      assert Map.has_key?(json, :queued_self_seconds)
+      assert is_nil(json[:queued_self_seconds])
+      assert is_nil(json[:queued_pickup_seconds])
+      assert is_nil(json[:queued_stall_seconds])
+    end
+
+    test "the three queue splits round-trip when the producer DID measure them" do
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "queued_self_seconds" => 9,
+                   "queued_pickup_seconds" => 3,
+                   "queued_stall_seconds" => 0
+                 })
+               ])
+
+      assert {:ok, [stored]} = PlatformDelivery.list(sha: @sha)
+      json = PlatformDelivery.to_json(stored)
+      assert json[:queued_self_seconds] == 9
+      assert json[:queued_pickup_seconds] == 3
+      # A measured zero is legal — it is the UNMEASURED zero that is the lie.
+      assert json[:queued_stall_seconds] == 0
+    end
+
+    test "a negative queue split is refused, not stored" do
+      assert {:error, {:invalid_row, 0, errors}} =
+               PlatformDelivery.record_all([row(%{"queued_stall_seconds" => -1})])
+
+      assert is_list(errors.queued_stall_seconds)
+    end
   end
 
-  ## 2. THE KEY — (sha, delivering_run_id, first_seen_at)
+  ## 2. THE KEY — (sha, delivering_run_id, target)
 
   describe "the unique key" do
     test "the SAME sha delivered by TWO runs at the same first sighting keeps BOTH rows" do
@@ -188,17 +270,102 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
       assert Enum.any?(rows, & &1.carried)
     end
 
-    test "the index in the DATABASE names all three columns" do
+    test "BOTH legs of one deploy — cp AND instance, one sha, ONE run — persist" do
+      # THE W23 DATA LOSS, now guarded (charter D422). deploy.yml's
+      # `control-plane` and `instance` jobs are two jobs of ONE workflow run, so
+      # they share GITHUB_RUN_ID; under the old key
+      # (sha, delivering_run_id, first_seen_at) the instance leg conflicted with
+      # the cp leg and was DROPPED, and the route still answered 200 with
+      # `recorded: 1`. Put `first_seen_at` back into the key and this test goes
+      # red on `recorded` and on the stored target set.
+      batch = [
+        row(%{"delivering_run_id" => "run-shared", "target" => "cp"}),
+        row(%{"delivering_run_id" => "run-shared", "target" => "instance"})
+      ]
+
+      assert {:ok, %{received: 2, recorded: 2}} = PlatformDelivery.record_all(batch)
+
+      assert {:ok, rows} = PlatformDelivery.list(sha: @sha)
+      assert length(rows) == 2
+      assert rows |> Enum.map(& &1.target) |> Enum.sort() == ["cp", "instance"]
+      # And both legs name the SAME run — the collision is real, not an artifact
+      # of the fixture handing them different run ids.
+      assert rows |> Enum.map(& &1.delivering_run_id) |> Enum.uniq() == ["run-shared"]
+    end
+
+    test "the two legs posted as SEPARATE calls both persist too" do
+      # The natural deploy.yml shape: each job posts its own leg. Under the old
+      # key the second call answered `%{received: 1, recorded: 0}` — byte-
+      # identical to a legitimate idempotent retry, which is why nothing on the
+      # cloud side could ever detect the loss.
+      assert {:ok, %{received: 1, recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{"delivering_run_id" => "run-split", "target" => "cp"})
+               ])
+
+      assert {:ok, %{received: 1, recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{"delivering_run_id" => "run-split", "target" => "instance"})
+               ])
+
+      assert {:ok, rows} = PlatformDelivery.list(sha: @sha)
+      assert length(rows) == 2
+    end
+
+    test "a SECOND post of the same leg is still a retry, not a second row" do
+      # The narrowing D422 accepts, pinned so it is a decision and not a
+      # surprise: same sha + same run + same target IS a retry, even when the
+      # clock moved. Under a per-post clock this would have been three rows.
+      leg = row(%{"delivering_run_id" => "run-retry", "target" => "instance"})
+
+      assert {:ok, %{recorded: 1}} = PlatformDelivery.record_all([leg])
+
+      assert {:ok, %{received: 1, recorded: 0}} =
+               PlatformDelivery.record_all([
+                 Map.put(leg, "first_seen_at", "2026-08-08T10:00:01.000000Z")
+               ])
+
+      assert {:ok, [_only_one]} = PlatformDelivery.list(sha: @sha)
+    end
+
+    test "the index in the DATABASE names all three key columns" do
       %{rows: [[indexdef]]} =
         Repo.query!(
           "SELECT indexdef FROM pg_indexes WHERE indexname = $1",
-          ["platform_deliveries_sha_run_seen_index"]
+          ["platform_deliveries_sha_run_target_index"]
         )
 
       assert indexdef =~ "UNIQUE"
-      assert indexdef =~ "sha"
-      assert indexdef =~ "delivering_run_id"
-      assert indexdef =~ "first_seen_at"
+
+      # The COLUMN LIST, not the index name. Asserting `indexdef =~ "target"`
+      # would be green against an index merely NAMED …_target_index over the old
+      # columns — measured: the key mutation passed that weaker assertion.
+      assert [_, columns] = Regex.run(~r/USING btree \(([^)]+)\)/, indexdef)
+
+      assert columns |> String.split(", ") |> Enum.sort() ==
+               ["delivering_run_id", "sha", "target"]
+
+      # The old key is GONE, not merely shadowed — a surviving unique on
+      # (sha, delivering_run_id, first_seen_at) would keep refusing the retry
+      # this table must absorb.
+      assert %{rows: []} =
+               Repo.query!(
+                 "SELECT indexdef FROM pg_indexes WHERE indexname = $1",
+                 ["platform_deliveries_sha_run_seen_index"]
+               )
+    end
+
+    test "`target` is NOT NULL, because a nullable key column disables the key" do
+      # Postgres NULLs never compare equal, so a nullable column in a btree
+      # unique key silently switches the constraint OFF for every row that omits
+      # it — the collision would return as duplication instead of loss.
+      %{rows: [[nullable]]} =
+        Repo.query!(
+          "SELECT is_nullable FROM information_schema.columns " <>
+            "WHERE table_name = 'platform_deliveries' AND column_name = 'target'"
+        )
+
+      assert nullable == "NO"
     end
 
     test "re-posting the SAME batch records nothing and says so" do
@@ -295,6 +462,29 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
       assert %{"error" => "invalid_row", "index" => 1, "errors" => errors} = body(conn)
       assert is_list(errors["sha"])
       # A partially-recorded delivery is worse than a refusal the caller retries.
+      assert {:ok, []} = PlatformDelivery.list([])
+    end
+
+    test "an explicitly NULL required column is a typed 422, never a 500" do
+      # `validate_inclusion/3` skips nil, so an explicit `"target": null` passes
+      # the changeset, reaches insert_all/3 and Postgres refuses it. Until W24
+      # that fell through `classify/1` to the router's 500 `record_failed` —
+      # telling a deploy job the CROWN had failed when its own payload was wrong,
+      # and sending it retrying identical bytes forever. Delete the
+      # `:not_null_violation` clause in classify/1 and this test goes red with a
+      # 500 and `record_failed`.
+      conn =
+        call(
+          :post,
+          "/v1/internal/platform-deliveries",
+          %{deliveries: [row(%{"target" => nil})]},
+          @worker_token
+        )
+
+      assert conn.status == 422
+      assert %{"error" => "null_column", "column" => "target"} = body(conn)
+      assert body(conn)["detail"] =~ "unknown"
+      refute body(conn)["error"] == "record_failed"
       assert {:ok, []} = PlatformDelivery.list([])
     end
 
