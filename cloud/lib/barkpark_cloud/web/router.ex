@@ -9240,7 +9240,11 @@ defmodule BarkparkCloud.Web.Router do
   defp scrub_entry(%{} = entry, keys) when is_list(keys) do
     Enum.reduce(keys, entry, fn key, acc ->
       case Map.fetch(acc, key) do
-        {:ok, value} when is_binary(value) -> Map.put(acc, key, FailureCopy.scrub(value))
+        # dr-w22-s1: `raw/1`, never a bare `scrub/1`. These entries are UNclassified
+        # remote captures, and a CSI run immediately left of a key blocks the
+        # scrub's key clause — this boundary shipped `\e[31mapi_key=…\e[0m` back
+        # byte-identical to input on all three of its call sites.
+        {:ok, value} when is_binary(value) -> Map.put(acc, key, FailureCopy.raw(value))
         _ -> acc
       end
     end)
@@ -11040,10 +11044,19 @@ defmodule BarkparkCloud.Web.Router do
       #     an unscrubbed twin field beside it would ship the credential the
       #     neighbouring field just redacted — exactly the leak shape
       #     task-4f363dc65ac43203 names ("an eighth channel added later ships
-      #     unscrubbed and nothing reds"). Scrubbed, then ANSI-stripped: 1,366 of
+      #     unscrubbed and nothing reds"). STRIPPED, THEN scrubbed: 1,366 of
       #     17,395 failed rows carry real 0x1B bytes from the build PTY.
       failure_class: DeployLedger.classify(d),
-      failure_reason_raw: d.failure_reason |> FailureCopy.scrub() |> FailureCopy.strip_ansi(),
+      #
+      #     dr-w22-s1 (REVIEW FIX): this key shipped as `scrub |> strip_ansi` —
+      #     the FOURTH instance of the very leak `scrub_entry/2` carried, and the
+      #     worst-rendering one. A CSI run parks an alphanumeric immediately left
+      #     of the key so the scrub's key clause never fires, and the TRAILING
+      #     strip then removes the escapes that blocked it — the credential
+      #     landed here in clean CLEARTEXT, in the same payload whose sibling
+      #     `console[].line` had just redacted it. `FailureCopy.raw/1` is the one
+      #     order; do not re-pipe this by hand.
+      failure_reason_raw: FailureCopy.raw(d.failure_reason),
       # deploy-reliability W15 S3 (the dr-w14-s3 follow-up): WHICH PHASE the box
       # refused in — "start" (the trigger; no build ever began) or "poll" (a beat
       # of a build already running, killed mid-flight). Same class, very
