@@ -188,6 +188,9 @@ defmodule BarkparkCloud.ScrubBoundaryHttpTest do
       d =
         d
         |> Ecto.Changeset.change(
+          status: "failed",
+          stage: "BUILD",
+          failure_reason: @capture,
           console: [%{"stage" => "BUILD", "status" => "failed", "line" => @capture}]
         )
         |> Repo.update!()
@@ -209,6 +212,30 @@ defmodule BarkparkCloud.ScrubBoundaryHttpTest do
 
       # ops recovery still has the bytes
       assert hd(Repo.get(Deployment, d.id).console)["line"] == @capture
+    end
+
+    # REVIEW ADDITION (dr-w22-s1 review): the FOURTH boundary, in the SAME
+    # payload as the third. `deployment_json/1` renders `failure_reason_raw`
+    # through its own hand-written pipe, which shipped as `scrub |> strip_ansi`
+    # — the leaky order, and the worst-rendering variant of it: the trailing
+    # strip removes the escapes that blocked the scrub, so the credential
+    # arrived in clean CLEARTEXT beside the `console[].line` that had just
+    # redacted it. Sweeping only `scrub_entry/2` would have left it open.
+    test "failure_reason_raw is folded in the rendered bytes", %{
+      site: site,
+      deployment: d,
+      token: token
+    } do
+      body = get_json("/v1/sites/#{site.id}/deployments/#{d.id}", token)
+
+      assert_folded(body["deployment"]["failure_reason_raw"], @capture, "failure_reason_raw")
+      refute body["deployment"]["failure_reason_raw"] =~ "\e"
+
+      # and the humanized twin beside it never carried it either
+      refute body["deployment"]["failure_reason"] =~ @secret
+
+      # the DB column is untouched — this is a display fold
+      assert Repo.get(Deployment, d.id).failure_reason == @capture
     end
   end
 end
