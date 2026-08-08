@@ -1409,11 +1409,6 @@ defmodule BarkparkCloud.Sites.Deploy do
     do:
       "so the instance is refusing this site persistently for a cause the ledger cannot name; check its deploy runner"
 
-  # Deferrals of THE SAME CAUSE at the HEAD of this site's stream, i.e. how many
-  # rounds the current chain has already run. Any other status — and any deferral
-  # for a DIFFERENT cause — ends the count: a busy box and a full build queue are
-  # two different stories, and counting them as one chain spends a site's whole
-  # budget on causes that never repeated.
   # The head-of-stream chain depth WITHOUT a cause in hand: take the cause from
   # the head deferral row itself, then count with the same scan `defer/3` uses.
   # Anything else at the head (a live build, a failure, nothing at all) is depth
@@ -1431,6 +1426,11 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
+  # Deferrals of THE SAME CAUSE at the HEAD of this site's stream, i.e. how many
+  # rounds the current chain has already run. Any other status — and any deferral
+  # for a DIFFERENT cause — ends the count: a busy box and a full build queue are
+  # two different stories, and counting them as one chain spends a site's whole
+  # budget on causes that never repeated.
   defp consecutive_deferrals(%Site{} = site, cause) do
     site
     |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
