@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -636,5 +637,236 @@ func TestRunCloudStatusTableDetailColumn(t *testing.T) {
 	}
 	if strings.Contains(healthyHeader, "DETAIL") {
 		t.Fatalf("healthy bucket must not grow a DETAIL column:\n%s", stdout)
+	}
+}
+
+// --- the DEPLOY section (dr-w19-s7) ------------------------------------------
+
+// statusDeployFleet is the fleet body every deploy-section test renders: two
+// live, healthy boxes. Both read `ok` on every column above the DEPLOY section,
+// which is the whole point — the deploy line is the sentence those columns
+// cannot say.
+const statusDeployFleet = `{"barkparks":[
+	{"id":"bp-1","name":"alpha","host":"h1","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"},
+	{"id":"bp-2","name":"beta","host":"h2","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"}
+]}`
+
+// statusDeploySites maps the census's site_ids onto boxes — the fold `bp cloud
+// status` does client-side, because a census row carries site_id and nothing
+// that names a box.
+const statusDeploySites = `{"sites":[
+	{"id":"site-a","barkpark_id":"bp-1"},
+	{"id":"site-c","barkpark_id":"bp-2"}
+]}`
+
+// newStatusDeployServer stands up a fake control plane answering the three
+// routes the DEPLOY section reads, with a chosen census status + body.
+func newStatusDeployServer(t *testing.T, censusStatus int, censusBody string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/deploy-ledger/census":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(censusStatus)
+			_, _ = io.WriteString(w, censusBody)
+		case "/v1/sites":
+			_, _ = io.WriteString(w, statusDeploySites)
+		default:
+			_, _ = io.WriteString(w, statusDeployFleet)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	seedCloudLogin(t, srv.URL)
+}
+
+// statusDeployCensus builds a census body whose two site rows carry the given
+// volume/live. `live` is a real key here; the older-control-plane case has its
+// own body below, WITHOUT it.
+func statusDeployCensus(minSample, aVolume, aLive, cVolume, cLive int) string {
+	return fmt.Sprintf(`{"window":{"from":"2026-08-07T00:00:00Z","to":"2026-08-08T00:00:00Z"},
+		"volume":%d,"failed":0,"min_sample":%d,
+		"failure_rate":{"sample":%d,"pct":0,"numerator":0,"min_sample":%d,"refused":false,"reason":""},
+		"sites":[
+			{"site_id":"site-a","volume":%d,"failed":1,"deferred":0,"live":%d,"failure_rate":{"sample":%d,"pct":null,"numerator":1,"min_sample":%d,"refused":true,"reason":""},"top_class":null},
+			{"site_id":"site-c","volume":%d,"failed":0,"deferred":0,"live":%d,"failure_rate":{"sample":%d,"pct":null,"numerator":0,"min_sample":%d,"refused":true,"reason":""},"top_class":null}
+		]}`,
+		aVolume+cVolume, minSample, aVolume+cVolume, minSample,
+		aVolume, aLive, aVolume, minSample,
+		cVolume, cLive, cVolume, minSample)
+}
+
+// statusDeployLineFor returns the DEPLOY line for a named box.
+func statusDeployLineFor(t *testing.T, out, name string) string {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, name+" ") && !strings.Contains(l, "https://") {
+			return trimmed
+		}
+	}
+	t.Fatalf("no DEPLOY line for %q:\n%s", name, out)
+	return ""
+}
+
+// TestStatusDeployLineCarriesLiveRateWithItsDenominator is the headline pin: a
+// metered box prints live WITH the denominator it was taken over, under a window
+// that names its DAILY period — and nothing above it moves.
+func TestStatusDeployLineCarriesLiveRateWithItsDenominator(t *testing.T) {
+	withTempConfigHome(t)
+	newStatusDeployServer(t, 200, statusDeployCensus(200, 435, 109, 1479, 416))
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "DEPLOY · period: DAILY · window") {
+		t.Fatalf("the deploy section must name its DAILY period and its window:\n%s", stdout)
+	}
+	// alpha owns site-a (435/109); beta owns site-c (1479/416). Both clear
+	// min_sample 200, so both are a rate WITH its denominator.
+	if line := statusDeployLineFor(t, stdout, "alpha"); !strings.Contains(line, "live 109/435 (25.1%)") {
+		t.Fatalf("alpha deploy line = %q, want the rate WITH its denominator", line)
+	}
+	if line := statusDeployLineFor(t, stdout, "beta"); !strings.Contains(line, "live 416/1479 (28.1%)") {
+		t.Fatalf("beta deploy line = %q, want the rate WITH its denominator", line)
+	}
+	// Both boxes still read `ok`: the gauge changed no status, rank or bucket.
+	if !strings.Contains(stdout, "HEALTHY (2)") {
+		t.Fatalf("the deploy line must not move a box between buckets:\n%s", stdout)
+	}
+}
+
+// TestStatusDeployRefusesBelowMinSample: under the census's own @min_sample the
+// line is UNMETERED with the reason — never a percentage, never a comforting
+// zero, and never a green.
+func TestStatusDeployRefusesBelowMinSample(t *testing.T) {
+	withTempConfigHome(t)
+	newStatusDeployServer(t, 200, statusDeployCensus(200, 12, 0, 4, 4))
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	line := statusDeployLineFor(t, stdout, "alpha")
+	if !strings.Contains(line, "UNMETERED") || !strings.Contains(line, "min_sample of 200") {
+		t.Fatalf("alpha deploy line = %q, want UNMETERED naming the floor", line)
+	}
+	if strings.Contains(line, "%)") {
+		t.Fatalf("a refused line must carry no percentage: %q", line)
+	}
+	// The box that shipped 4 of 4 is refused too — a flattering small sample is
+	// as unmeasured as a damning one.
+	if l := statusDeployLineFor(t, stdout, "beta"); !strings.Contains(l, "UNMETERED") {
+		t.Fatalf("beta deploy line = %q, want UNMETERED on a 4-row sample", l)
+	}
+}
+
+// TestStatusDeployOlderControlPlaneIsUnmeteredNotZeroLive is the POINTER pin: a
+// control plane predating #10519 sends site rows with no `live` key at all, and
+// that must render UNMETERED — a nil summed as zero would report every box in
+// the fleet as shipping nothing, the most alarming reading of an absence there
+// is.
+func TestStatusDeployOlderControlPlaneIsUnmeteredNotZeroLive(t *testing.T) {
+	withTempConfigHome(t)
+	const noLive = `{"window":{"from":"2026-08-07T00:00:00Z","to":"2026-08-08T00:00:00Z"},
+		"volume":1914,"failed":18,"min_sample":200,
+		"failure_rate":{"sample":1914,"pct":0.9,"numerator":18,"min_sample":200,"refused":false,"reason":""},
+		"sites":[
+			{"site_id":"site-a","volume":435,"failed":1,"deferred":325,"failure_rate":{"sample":435,"pct":0.2,"numerator":1,"min_sample":200,"refused":false,"reason":""},"top_class":null},
+			{"site_id":"site-c","volume":1479,"failed":17,"deferred":900,"failure_rate":{"sample":1479,"pct":1.1,"numerator":17,"min_sample":200,"refused":false,"reason":""},"top_class":null}
+		]}`
+	newStatusDeployServer(t, 200, noLive)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	line := statusDeployLineFor(t, stdout, "alpha")
+	if !strings.Contains(line, "UNMETERED") || !strings.Contains(line, "no per-site `live`") {
+		t.Fatalf("alpha deploy line = %q, want UNMETERED naming the missing per-site live", line)
+	}
+	if strings.Contains(line, "live 0/") || strings.Contains(line, "(0.0%)") {
+		t.Fatalf("an absent `live` must never render as zero-live: %q", line)
+	}
+}
+
+// TestStatusDeployCensusRefusalNamesItself: a 403 on the census renders as a
+// refusal that says nothing was read — never as a fleet with no deploy rows.
+func TestStatusDeployCensusRefusalNamesItself(t *testing.T) {
+	withTempConfigHome(t)
+	newStatusDeployServer(t, 403, `{"error":"forbidden","scope":"team","required":"read"}`)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0 (the fleet table still rendered)\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "NOT READ") || !strings.Contains(stdout, "403 forbidden") {
+		t.Fatalf("a refused census must name the refusal:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "no deploy rows in this window") {
+		t.Fatalf("a refusal must never render as an empty window:\n%s", stdout)
+	}
+}
+
+// TestStatusDeployIsAGaugeNotAFence: the diff adds no twelfth rung, no verdict
+// arm and no hardcoded floor. The ladder is still eleven, the buckets still
+// three, and the ONLY threshold the deploy line consults is the census's own
+// min_sample off the wire.
+func TestStatusDeployIsAGaugeNotAFence(t *testing.T) {
+	if len(attentionRankOrder) != 11 {
+		t.Fatalf("the ladder grew a rung: %v", attentionRankOrder)
+	}
+	// The floor is read, never carried: a census that sends min_sample 999 moves
+	// the refusal, which a hardcoded fence could not do.
+	metered := &statusDeployBox{Volume: 435, Live: 109, Sites: 1, LiveKnown: true}
+	if got := statusDeployLine(metered, 200); !strings.Contains(got, "live 109/435") {
+		t.Fatalf("metered = %q", got)
+	}
+	if got := statusDeployLine(metered, 999); !strings.Contains(got, "UNMETERED") || !strings.Contains(got, "999") {
+		t.Fatalf("the floor must come off the wire, got %q", got)
+	}
+	// And a control plane that sends NO floor cannot be silently assumed to have
+	// one: no percentage is quoted at all.
+	if got := statusDeployLine(metered, 0); !strings.Contains(got, "UNMETERED") || strings.Contains(got, "%)") {
+		t.Fatalf("an absent min_sample must refuse, got %q", got)
+	}
+}
+
+// TestDeployCensusSiteDecodesLive is the DECODER pin proper: the wire's per-site
+// `live` must land in a field. Before this slice DeployCensusSite had six fields
+// and no Live, so this key decoded to nothing and nothing said so.
+func TestDeployCensusSiteDecodesLive(t *testing.T) {
+	var site cloudclient.DeployCensusSite
+	if err := json.Unmarshal([]byte(`{"site_id":"s","volume":435,"failed":1,"deferred":325,"live":109}`), &site); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if site.Live == nil || *site.Live != 109 {
+		t.Fatalf("Live = %v, want 109 off the wire", site.Live)
+	}
+	// live + deferred + failed closes over volume exactly on the real payload
+	// this is modelled on — the arithmetic that makes `volume - failed -
+	// deferred` unnecessary as well as forbidden.
+	if 109+325+1 != site.Volume {
+		t.Fatalf("cohorts do not close over volume: %d", site.Volume)
+	}
+	// And the absence stays distinguishable from a zero.
+	var older cloudclient.DeployCensusSite
+	if err := json.Unmarshal([]byte(`{"site_id":"s","volume":435,"failed":1,"deferred":325}`), &older); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if older.Live != nil {
+		t.Fatalf("a control plane sending no `live` must decode to nil, got %d", *older.Live)
 	}
 }

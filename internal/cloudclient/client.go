@@ -1948,13 +1948,34 @@ type DeployCensusClass struct {
 }
 
 // DeployCensusSite is one site's slice of the window: its volume, its failures,
-// its deferrals, its own rate node and the class that hurt it most (nil when the
-// site had no failures at all — never an invented "none" class).
+// its deferrals, the rows that actually went LIVE, its own rate node and the
+// class that hurt it most (nil when the site had no failures at all — never an
+// invented "none" class).
+//
+// Live is the dr-w19-s7 addition, and it closes a DECODER gap, not a payload
+// one: deploy_ledger.ex site_row/2 has emitted a per-site `live` since #10519
+// (a real 200 on a team credential returned {"failed":1,"live":109,
+// "deferred":325,"volume":435} — 109+325+1 = 435 exactly), and this struct had
+// six fields and no Live, so the wire's per-site success decoded to nothing and
+// no guard reds (D260's blind spot: the UNREAD arm compares against a
+// FILE-GLOBAL tag union and `live` is already a tag on DeployCensus).
+//
+// It is a POINTER for the same reason DeployCensus.Live is: a control plane
+// predating #10519 sends no per-site `live` key at all, and "this control plane
+// does not name per-site success" must render UNMETERED — never a zero-live
+// site, which is the most alarming reading of an absence there is.
+//
+// A reader computes the per-site live rate from Live/Volume READ POSITIVELY off
+// the wire. `Volume - Failed - Deferred` is FORBIDDEN: it folds in-flight,
+// cancelled and residual rows back into live, re-creating exactly the unnamed
+// remainder dr-w16-s2 deleted — and site_row/2's own comment forbids that
+// subtraction at the source.
 type DeployCensusSite struct {
 	SiteID      string     `json:"site_id"`
 	Volume      int        `json:"volume"`
 	Failed      int        `json:"failed"`
 	Deferred    int        `json:"deferred"`
+	Live        *int       `json:"live"`
 	FailureRate DeployRate `json:"failure_rate"`
 	TopClass    *string    `json:"top_class"`
 }
