@@ -575,8 +575,6 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
     {"DeployLedger.census/3", :unread, "boundaries",
      "dr-w18-s5 — the vocabulary-boundary LIST. Emitted by census/3 as of dr-w18-s2; the Go decode and render ride the round-2 slice, which is fenced out of this file. Until then a reader of `bp cloud deployments` sees the refusal but not the instant that caused it."},
-    {"DeployLedger.census/3", :unread, "coalesced_attempts",
-     "dr-w18-s5 — the gauge for attempts that minted NO row, with its refusing coverage floor. Same round-2 fence as `boundaries`; the value is on the wire and in `-o json` (census.Raw is verbatim) before any struct field exists."},
     {"DeployLedger.census/3", :unread, "completeness",
      "dr-w18-s5 — the second independent count reconciled against volume + not_attempted. It reds IN THE ENVELOPE today; the Go reader must learn to print `unaccounted` rather than a balanced-looking number."},
     {"DeployLedger.census/3", :unread, "total_sites",
@@ -710,8 +708,26 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # THREE. Note which two rode free — it is NOT the pair a reader would
   # guess, which is the whole reason this number is measured and not derived.
   # The emitted floor does NOT move: this branch writes no serializer.
+  # 225 -> 227 (dr-w23-s4, wave-23 REVIEW). MEASURED off the `==` refusal's own
+  # count on THIS tree ("227 json tag(s) found in internal/cloudclient, floor is
+  # EXACTLY 225"), never by arithmetic. The slice declares
+  # `DeployCoalescedAttempts` with five json tags — `value`, `refused`, `reason`,
+  # `since`, `basis` — plus `coalesced_attempts` on `DeployCensus`, i.e. SIX new
+  # declarations, and the union grew by TWO. Four names were already declared
+  # elsewhere in client.go (the refusal shape is deliberately the same shape a
+  # DeployRate refusal uses), which is exactly why this number is re-measured on
+  # every move and never derived.
+  #
+  # THE CO-EDIT IS NOT OPTIONAL, and this comment is the record of why the review
+  # took it rather than leaving it to dr-w23-s6. `coalesced_attempts` was a KNOWN
+  # OPEN :unread row above; the moment a Go field declared it, the census's "no
+  # longer unread — DELETE the allowlist row" arm reds. That arm is DESIGNED to
+  # force this co-edit in the same commit. dr-w23-s6 (which generalises the UNREAD
+  # arm per struct) is a round-2 slice and is NOT built this wave, so deferring
+  # to it would have merged a PR that reds the Cloud gate on main the moment it
+  # lands — a stale-green, because a Go-only PR does not run the Cloud job.
   @emitted_floor 123
-  @go_tag_floor 225
+  @go_tag_floor 227
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 56 keys with the :when unwrap, 42 without.
