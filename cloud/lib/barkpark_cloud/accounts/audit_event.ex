@@ -38,9 +38,14 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # (including the OC24 instance-lifecycle triggers: retry / verify /
   # studio-link / site-url / self-update / rollback / autoupdate / domain /
   # vercel-deploy / resurrect);
-  # the env_var / twofa / oauth / email verbs are reserved for the PR-#680
-  # feature seams (onboarding, 2FA, SSO, shared secrets, email verification) as
-  # those call-sites gain audit wiring.
+  # the env_var pair (router.ex, through the transactional Accounts.audit/3) and
+  # the twofa pair (the account 2FA confirm / disable routes) are PRODUCED —
+  # they were called "reserved" here long after their call-sites were wired.
+  # Only `oauth.linked` and `email.verified` are still declared without a
+  # producer; both are named individually, with a MACHINE-CHECKED rationale
+  # (an anchor that must resolve plus a blocker that must stay absent), in
+  # test/barkpark_cloud/audit_vocabulary_census_test.exs's @producerless — which
+  # reds if a THIRD zero-producer verb joins them.
   @actions ~w(
     member.invited member.role_changed member.removed
     invitation.revoked invitation.accepted
