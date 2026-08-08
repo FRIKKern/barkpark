@@ -40,6 +40,13 @@ defmodule BarkparkCloud.HealthTest do
     body
   end
 
+  # The RENDERED /health bytes, decoded — what an operator actually sees.
+  defp health_body do
+    conn = Router.call(conn(:get, "/health"), @router_opts)
+    assert conn.status == 200
+    Jason.decode!(conn.resp_body)
+  end
+
   describe "serving/0 + health/0 git_sha" do
     test "reports the sha it was given" do
       System.put_env(@env, "aaaaaaa1111111111111111111111111111aaaa")
@@ -109,6 +116,53 @@ defmodule BarkparkCloud.HealthTest do
 
       assert conn.status == 200
       assert Jason.decode!(conn.resp_body)["git_sha"] == "fffffff6666666666666666666666666666ffff"
+    end
+  end
+
+  describe "D417 clock vocabulary, over the RENDERED /health bytes" do
+    # Everything here decodes conn.resp_body — the bytes an operator actually
+    # sees — never Health.serving/0's term. A key that never survives JSON
+    # encoding must red HERE, not in a unit test that reads the map directly.
+    test "serving_sha is git_sha — same source, same call, both keys on the wire" do
+      System.put_env(@env, "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaa1111")
+
+      body = health_body()
+
+      assert body["serving_sha"] == "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaa1111"
+      assert Map.fetch!(body, "serving_sha") == Map.fetch!(body, "git_sha")
+    end
+
+    test "serving_sha tracks git_sha into nil — an alias, not a second reader" do
+      # No env: both must be nil, and both keys must still be PRESENT
+      # (Map.fetch! reds on a dropped key instead of reading as nil).
+      body = health_body()
+
+      assert Map.fetch!(body, "serving_sha") == nil
+      assert Map.fetch!(body, "git_sha") == nil
+    end
+
+    test "process_since is on the wire as ISO-8601, alongside serving_since" do
+      System.put_env(@env, "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbb2222")
+
+      body = health_body()
+
+      assert {:ok, %DateTime{}, _} = DateTime.from_iso8601(Map.fetch!(body, "process_since"))
+      # No key was removed: serving_since is still there, still a timestamp.
+      assert {:ok, %DateTime{}, _} = DateTime.from_iso8601(Map.fetch!(body, "serving_since"))
+      assert body["process_since"] == body["serving_since"]
+    end
+
+    test "serving_since ships a basis string that says it is process-derived and restart-improvable" do
+      # THE GUARD. Delete @serving_since_basis (or drop the key from serving/0)
+      # and this test reds: the wire loses the only place that admits a bare
+      # restart makes the lag read smaller.
+      basis = Map.fetch!(health_body(), "serving_since_basis")
+
+      assert is_binary(basis) and basis != ""
+      down = String.downcase(basis)
+      assert down =~ "process-derived"
+      assert down =~ "restart"
+      assert down =~ "smaller"
     end
   end
 end

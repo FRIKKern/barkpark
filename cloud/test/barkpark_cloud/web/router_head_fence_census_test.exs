@@ -155,8 +155,21 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # session GETs already inside this baseline shares. So a bare HEAD is inert and
   # no `side_effecting_get?/1` clause is owed. machine and public are unchanged:
   # no existing route changed class.
-  @baseline_total 66
-  @baseline_session 47
+  # 2026-08-08: 67 / 48 / 7 / 12. deploy-reliability dr-w23-s2 added ONE
+  # session-or-PAT GET, `/v1/deliveries` — the read half of the platform's own
+  # per-sha delivery record (the write half is a POST, so it does not move this
+  # GET census at all). It counts as SESSION for the same reason the row above
+  # does: `Auth.require_user_or_pat` is a session wrapper here and the
+  # `require_ability("read")` beside it narrows a PAT rather than reclassifying
+  # the route. RULED NOT SIDE-EFFECTING: the handler is
+  # `PlatformDelivery.normalize_sha/1` + `clamp_limit/1` (pure) and
+  # `PlatformDelivery.list/1` (one `Repo.all`) — no row minted, no credential
+  # burned, no nonce spent; the only write on the path is the same throttled
+  # `last_used` bookkeeping every session GET in this baseline already shares. So
+  # a bare HEAD is inert and no `side_effecting_get?/1` clause is owed. machine
+  # and public are unchanged: no existing route changed class.
+  @baseline_total 67
+  @baseline_session 48
   @baseline_machine 7
   @baseline_public 12
 

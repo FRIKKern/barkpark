@@ -104,6 +104,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
+      GET     /v1/deliveries       user(s)   the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
       PATCH   /v1/admin/barkparks/:id/channel worker set one box's release channel
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
@@ -171,6 +172,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/warm-servers/:name/refreshed worker  mark a warm server refreshed
       GET     /v1/internal/warm-servers/count worker  the warm-pool depth
       DELETE  /v1/internal/warm-servers/:name worker  drop a warm server
+      POST    /v1/internal/platform-deliveries worker  record a BATCH of platform delivery rows for one delivering run (idempotent on sha+run+first_seen_at; 503 unavailable when the migration has not landed)
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
@@ -267,6 +269,7 @@ defmodule BarkparkCloud.Web.Router do
     Metrics,
     Notifications,
     OAuth,
+    PlatformDelivery,
     PublishClock,
     Push,
     Registry,
@@ -415,7 +418,14 @@ defmodule BarkparkCloud.Web.Router do
   plug(Plug.Static,
     at: "/",
     from: :barkpark_cloud,
-    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html),
+    # robots.txt is APPENDED, never prepended: cloud-static-gz-guard.sh finds
+    # this allowlist by grepping for the opening of the list with index.html as
+    # its FIRST entry, so anything inserted ahead of index.html loses the guard
+    # its anchor. (Do not quote that literal in a comment either — the grep
+    # takes the first line that matches and would anchor on the prose.) It is
+    # also absent from the Dockerfile gzip line on purpose: at ~100 bytes the
+    # .gz sibling costs more than it saves.
+    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html robots.txt),
     gzip: true,
     headers: %{"cache-control" => "no-cache"},
     cache_control_for_etags: "no-cache"
@@ -3685,12 +3695,105 @@ defmodule BarkparkCloud.Web.Router do
         case DeployLedger.parse_window(conn.query_params["from"], conn.query_params["to"]) do
           {:ok, from, to} ->
             census = DeployLedger.census(from, to, site_ids: scoped)
-            json(conn, 200, Map.put(census, :scope, census_scope(team, scoped)))
+
+            json(
+              conn,
+              200,
+              census
+              |> Map.put(:scope, census_scope(team, scoped))
+              # THE DELIVERY NODE, SCOPED (dr-w21-s6). It was added ONLY by
+              # `deploy_census_json/2` on the OPERATOR route, so wave 15's
+              # reader shipped onto a route nobody can reach: measured live,
+              # `bp cloud deployments -o table` rendered "NOT MEASURED — this
+              # control plane sends no delivery census" to every real operator,
+              # because the only route a real token can reach is this one and it
+              # carried no `delivery` key.
+              #
+              # `site_ids: scoped` IS THE WHOLE SAFETY ARGUMENT and it is not
+              # optional decoration. `DeployLedger.delivery/3` filtered
+              # `inserted_at` + `environment` and nothing else until this slice
+              # threaded the option through — a bare `delivery(from, to)` here
+              # would pool FOREIGN teams' waits into this team's percentiles and
+              # name their `site_id`s in the `sites` list under them.
+              |> Map.put(:delivery, DeployLedger.delivery(from, to, site_ids: scoped))
+            )
 
           {:error, detail} ->
             json(conn, 422, %{error: "invalid_window", detail: detail})
         end
     end
+  end
+
+  # GET /v1/deliveries[?sha=<sha>][&limit=n] → 200 {deliveries, count, …} — THE
+  # PLATFORM'S OWN PAST, readable by a human (dr-w23-s2, charter D385).
+  #
+  # THE CREDENTIAL IS `require_user_or_pat` + `require_ability("read")`, and that
+  # is the load-bearing half of this slice. The writer above is worker-token
+  # (machine-only by construction: the whole `/v1/internal/*` family is), and
+  # `require_platform_operator` delegates to `require_user`, which authenticates
+  # SESSION tokens ONLY — so an operator gate would answer a PAT **401, never
+  # 403** (D412, measured live). A record that only a browser session can read is
+  # a record no script, no CI job and no `bp` invocation can ever check, which is
+  # the same unreadable-by-construction defect the operator census demonstrates.
+  #
+  # NOT a node on GET /v1/sites/:id/deployments: that route is session-only and
+  # 401s a read PAT today, and re-tiering it is D219's cross-epic ruling — filed,
+  # not built, and emphatically not this slice's to build.
+  #
+  # NOT TEAM-SCOPED, on purpose. These rows are Barkpark's OWN deploys; there is
+  # no `sites` row and therefore no `team_id` to scope by (that is also why they
+  # cannot live in `deployments`). The body carries no tenant content — a sha,
+  # a run id and four clocks — so the read is the platform's operational record,
+  # and `scope: "platform"` says so in the envelope rather than leaving a reader
+  # to assume it was filtered to them.
+  #
+  # AN UNKNOWN SHA IS AN HONEST EMPTY LIST, not a 404. "Nothing was ever recorded
+  # for this sha" is the single most useful thing this table can say about a
+  # deploy that went silent, and a 404 would render it as "no such route".
+  get "/v1/deliveries" do
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
+
+    if conn.halted do
+      conn
+    else
+      qp = fetch_query_params(conn).query_params
+      sha = PlatformDelivery.normalize_sha(qp["sha"])
+      limit = PlatformDelivery.clamp_limit(qp["limit"])
+
+      case PlatformDelivery.list(sha: sha, limit: limit) do
+        {:ok, rows} ->
+          json(conn, 200, %{
+            deliveries: Enum.map(rows, &PlatformDelivery.to_json/1),
+            count: length(rows),
+            sha: sha,
+            limit: limit,
+            scope: "platform"
+          })
+
+        {:error, :unavailable} ->
+          json(conn, 503, platform_deliveries_unavailable())
+
+        {:error, reason} ->
+          Logger.error("platform_deliveries: read refused: #{inspect(reason)}")
+          json(conn, 500, %{error: "read_failed"})
+      end
+    end
+  end
+
+  # The ONE refusal body both platform-delivery routes answer when this control
+  # plane has no `platform_deliveries` table yet — written once so the recorder
+  # and the reader can never drift into two different names for one condition.
+  # 503, not 404: the route exists and the caller should retry after the
+  # `cloud/**` merge lands, which is precisely what the detail says.
+  defp platform_deliveries_unavailable do
+    %{
+      error: "unavailable",
+      reason: "platform_deliveries_missing",
+      detail:
+        "this control plane has not run the platform_deliveries migration yet — " <>
+          "an api-only merge deploys the instance leg without the cloud/ one. Retry " <>
+          "after the cloud release lands; nothing was recorded."
+    }
   end
 
   # The scope line the team census prints on EVERY response. It carries the team
@@ -6347,6 +6450,64 @@ defmodule BarkparkCloud.Web.Router do
 
       {:ok, _} = Registry.delete_warm_server(conn.path_params["name"], claim_token)
       json(conn, 200, %{ok: true})
+    end
+  end
+
+  # POST /v1/internal/platform-deliveries {deliveries: [row, ...]} → the recorder
+  # for the platform's OWN deploys (dr-w23-s2, charter D385).
+  #
+  # THE CREDENTIAL IS `require_worker`, deliberately. This is written by a deploy
+  # job, never by a human, and `WORKER_TOKEN` is already in
+  # `/opt/barkpark/cloud/.env` — the file the deploy already sources. Zero new
+  # credentials, and the family is proven fail-closed live (401 without a token).
+  # The READ half is a different tier on purpose: see GET /v1/deliveries, which is
+  # PAT-reachable, because a record no human credential can read is not a record.
+  #
+  # A LIST IN ONE CALL. One delivering run carries one row per sha it delivered —
+  # ~36% of merged shas have no run of their own and ride someone else's — so the
+  # natural unit of the write is the run's whole batch, not a row.
+  #
+  # IDEMPOTENT on (sha, delivering_run_id, first_seen_at): a retried deploy job
+  # re-posts the same batch and writes nothing. The 200 counts BOTH — `received`
+  # is what the caller sent, `recorded` is what was new — so a re-post reads as
+  # `{received: 3, recorded: 0}` instead of a fake success.
+  #
+  # 503 unavailable IS THE POINT. deploy.yml's `instance` job fires on
+  # `^(api|internal|deploy|connectors|templates)/` and does NOT require the
+  # `cloud/**` merge that carries this table's migration, so an api-only merge
+  # posts here against a control plane that has no `platform_deliveries` yet.
+  # That answer must be a typed, retryable refusal the caller LOGS — never a 500,
+  # and never a silent `|| true`, which is the exact blindness this wave exists
+  # to end. (An older control plane without this ROUTE answers the router's 404;
+  # the caller treats both as "the crown did not record this".)
+  post "/v1/internal/platform-deliveries" do
+    conn = Auth.require_worker(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not is_list(conn.body_params["deliveries"]) ->
+        json(conn, 422, %{
+          error: "deliveries_required",
+          detail: "body must carry a `deliveries` LIST of rows, one per sha this run delivered"
+        })
+
+      true ->
+        case PlatformDelivery.record_all(conn.body_params["deliveries"]) do
+          {:ok, %{received: received, recorded: recorded}} ->
+            json(conn, 200, %{ok: true, received: received, recorded: recorded})
+
+          {:error, :unavailable} ->
+            json(conn, 503, platform_deliveries_unavailable())
+
+          {:error, {:invalid_row, index, errors}} ->
+            json(conn, 422, %{error: "invalid_row", index: index, errors: errors})
+
+          {:error, reason} ->
+            Logger.error("platform_deliveries: record refused: #{inspect(reason)}")
+            json(conn, 500, %{error: "record_failed"})
+        end
     end
   end
 

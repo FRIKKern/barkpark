@@ -1250,24 +1250,58 @@ defmodule BarkparkCloud.DeployLedger do
         min_sample: 200, refused: true, basis: "…",
         reason: "p95 is UNIDENTIFIABLE: 40.0% are still waiting, exceeding the 5.0% headroom p95 needs"}
 
+  ## Scoping the population: `:site_ids` (dr-w21-s6)
+
+  IDENTICAL IN MEANING TO `census/3`'s option, and it exists for the same
+  reason: the TEAM route (`GET /v1/deploy-ledger/census`) asks this same
+  function for the caller's OWN waits. Until this option existed the function
+  had exactly two narrowing knobs — `:site_limit` and `:as_of` — and its query
+  filtered `inserted_at` and `environment` and NOTHING ELSE, i.e. it was
+  FLEET-WIDE by construction. `Map.put(:delivery, delivery(from, to))` on a
+  team-scoped body would therefore have rendered OTHER TEAMS' `site_id`s inside
+  the caller's own envelope: an IDOR on a latency number, and on the `sites`
+  list under it by name.
+
+  THE PREDICATE LIVES IN THE QUERY, exactly as it does in `census/3` and for a
+  sharper reason here: the estimator is a QUANTILE over a pooled, sorted sample.
+  A post-filter over the rendered `sites` node cannot repair `p50`/`p95`/`max`,
+  `sample`, `delivered` or `censored` — every one of those is folded from
+  foreign observations BEFORE any downstream filter could run — so a scoped
+  reader would print a fleet-wide percentile under a team's name.
+
+  `[]` means EMPTY, not "everything": a caller who owns no site gets `sample: 0`
+  and a refusal, which is the fail-closed answer. `nil` (or omitting the option)
+  is the whole fleet, which is what the operator route asks for. The ids reach
+  a `binary_id` column, so the caller must hand this an intersection it computed
+  itself — never a client-supplied list.
+
   Options: `:as_of` (the still-waiting clock, default now), `:site_limit`
-  (default 50).
+  (default 50), `:site_ids` (default `nil` — the whole fleet).
   """
   @spec delivery(DateTime.t(), DateTime.t(), keyword()) :: map()
   def delivery(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
     site_limit = Keyword.get(opts, :site_limit, 50)
+    site_ids = Keyword.get(opts, :site_ids)
     as_of = opts |> Keyword.get(:as_of, DateTime.utc_now()) |> DateTime.truncate(:microsecond)
+
+    scoped =
+      from(d in Deployment,
+        where: d.inserted_at >= ^from and d.inserted_at < ^to,
+        # PRODUCTION only. Safe as a WHERE because the column is NOT NULL
+        # DEFAULT 'production' (20260702170000_add_branch_previews) — every
+        # pre-gh-6 row is already production, so nothing is silently dropped.
+        # The rows that CANNOT be dropped by a predicate are the unkeyable
+        # ones, and those are counted in `unmetered` below.
+        where: d.environment == "production"
+      )
+      # THE SAME clause `census/3` uses, on the SAME source query — one
+      # narrowing, one meaning, so a team's delivery population and its census
+      # population can never be two different sets of rows.
+      |> scope_to_sites(site_ids)
 
     rows =
       Repo.all(
-        from(d in Deployment,
-          where: d.inserted_at >= ^from and d.inserted_at < ^to,
-          # PRODUCTION only. Safe as a WHERE because the column is NOT NULL
-          # DEFAULT 'production' (20260702170000_add_branch_previews) — every
-          # pre-gh-6 row is already production, so nothing is silently dropped.
-          # The rows that CANNOT be dropped by a predicate are the unkeyable
-          # ones, and those are counted in `unmetered` below.
-          where: d.environment == "production",
+        from(d in scoped,
           select: %{
             site_id: d.site_id,
             status: d.status,

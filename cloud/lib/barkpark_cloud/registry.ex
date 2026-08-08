@@ -27,6 +27,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Accounts.{Team, TeamMembership, User}
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.Subscription
+  alias BarkparkCloud.GitHub.CommitDistance
   alias BarkparkCloud.Notifications
   alias BarkparkCloud.Notifications.Withhold
 
@@ -3780,6 +3781,41 @@ defmodule BarkparkCloud.Registry do
 
   defp string_field(v) when is_binary(v) and v != "", do: v
   defp string_field(_), do: nil
+
+  @doc """
+  Grade how far behind `main` the commit this box actually SERVES is, and
+  persist the verdict into its own three columns (deploy-reliability W21).
+
+  This is the control plane's OWN measurement, and it is deliberately not
+  `update_state`: that column mirrors the box's release-tag self-grade, which
+  reads `current` on a box 2,468 commits behind. The verdict comes from ONE
+  unauthenticated GitHub compare call
+  (`BarkparkCloud.GitHub.CommitDistance.verdict/2`).
+
+  NEVER raises and ALWAYS writes: every failure mode — an empty/NULL
+  `git_commit` (the agent is offline), an unknown sha (404), a rate-limit
+  refusal (403), a transport error, an unconfigured client — lands
+  `commit_ancestry: "unknown"` with `commit_distance: NULL`, never 0, plus a
+  fresh `commit_distance_checked_at` so the row honestly says "we asked and got
+  no usable answer". Returns `{:ok, bp}` on a persisted verdict of any rung, or
+  `{:error, reason}` if the write itself failed.
+
+  `update_state`, `update_checked_at` and every other column are untouched: the
+  write goes through the narrow `Barkpark.commit_distance_changeset/2`.
+  """
+  @spec refresh_commit_distance(Barkpark.t(), keyword()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def refresh_commit_distance(%Barkpark{} = bp, opts \\ []) do
+    %{ancestry: ancestry, distance: distance} = CommitDistance.verdict(bp.git_commit, opts)
+
+    bp
+    |> Barkpark.commit_distance_changeset(%{
+      commit_ancestry: ancestry,
+      commit_distance: distance,
+      commit_distance_checked_at: DateTime.utc_now()
+    })
+    |> Repo.update()
+  end
 
   @doc """
   Trigger a self-update RUN on a live instance: `POST <instance>/v1/admin/self-update`
