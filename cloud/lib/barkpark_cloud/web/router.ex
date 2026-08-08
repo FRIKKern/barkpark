@@ -3944,9 +3944,17 @@ defmodule BarkparkCloud.Web.Router do
   defp intersect_owned_sites(owned, _raw), do: owned
 
   # GET /v1/operator/deliveries → 200 {deliveries: [<delivery_json>]} — the
-  # FLEET-DIGEST send log (team_id nil, event fleet_digest), newest first. These
-  # rows are structurally invisible to the team-scoped /v1/notifications/
-  # deliveries, so this is their only read surface. `?limit` caps the page via
+  # FLEET-DIGEST send log (event fleet_digest, ANY team), newest first.
+  #
+  # RETRACTED (cch-w56-s3): this comment used to claim "these rows are
+  # structurally invisible to the team-scoped /v1/notifications/deliveries, so
+  # this is their only read surface". Both halves were false. The writer stamps
+  # a REAL team_id, so a team's own admins DO see their receipts through
+  # /v1/notifications/deliveries?event=fleet_digest — dispatched against the
+  # reader as it stands, a team owner got rows=2 and a plain member rows=1,
+  # correctly self-scoped. What this route adds is OPERATOR scope: every team's
+  # receipts on one page, which is a cross-team disclosure of member addresses
+  # and is gated on require_platform_operator alone. `?limit` caps the page via
   # parse_int, hard-capped at 200 HERE (list_fleet_deliveries rides the context
   # default; the router owns the clamp — the /v1/notifications/deliveries
   # precedent).
