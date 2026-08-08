@@ -525,6 +525,67 @@ jobs:
       - name: /v1/me envelope census (route keys ≡ preview corpus keys)
         run: node cloud/priv/static/__me_envelope_census.mjs
 
+      # ── agent-event vocabulary census — A TITLE IS A PROMISE ────────────────
+      # Fourth sibling of the three censuses above, and the same law: the
+      # instance Timeline must not name an event type nothing in the control
+      # plane can write, and must not leave a type that IS written rendering as
+      # a raw lowercase slug. Before wave 51, TLV_EVENT_TITLES gave human
+      # titles to `backup`, `tls` and `content` — ZERO producers in cloud/lib
+      # and none in the history of main — tlvVerdictOf answered "completed" for
+      # a backup that cannot exist, and the empty state told a brand-new owner
+      # in the console's own voice that "backups" would appear here. Meanwhile
+      # `space`, which the agent beat DOES write, had no title at all.
+      #
+      # SIDE A IS READ BY RUNNING, NOT BY PARSING (charter D341, and this is
+      # the load-bearing choice): app.js is evaluated in a node:vm sandbox and
+      # the vocabulary comes off `__bpTestHook.tlvEventTitles`, which app.js
+      # derives with Object.keys(TLV_EVENT_TITLES). A literal parse was built
+      # and MEASURED first — against a value-preserving `forEach` refactor of
+      # the map it emitted EIGHTY false orphans with a confident verdict while
+      # the vm run reported the one real defect. A false red in a merge-blocking
+      # gate is worse than the miss it replaces.
+      #
+      # SIDE B IS cloud/lib/** ONLY, AND THAT IS ALSO LOAD-BEARING: a variant
+      # globbing cloud/** runs GREEN on the very tree this census exists to
+      # red, because registry_test.exs and accounts_test.exs supply backup/tls/
+      # content as false producers. Tests are not producers.
+      #
+      # NOT A COUNT, ANY ARM (D383): all three arms are derived SETS and the
+      # gate is their difference in three named directions, so a commit that
+      # drops one title and adds another cannot hold it green.
+      #
+      # PROVEN ABLE TO LOSE, ALL THREE ARMS, EACH MUTATION ONE FILE, BEFORE
+      # THIS STEP WAS WIRED:
+      #   rc=1 — `snapshot: "Snapshot"` added to TLV_EVENT_TITLES in app.js
+      #          alone → "rendered-with-no-producer: snapshot"
+      #   rc=1 — Registry.record_event(_, "quota", …) added to
+      #          health/staleness_worker.ex alone → "produced-with-no-renderer:
+      #          quota", naming the call site by file:line
+      #   rc=1 — the deleted ev(7,"backup",…) row re-added to scenarios.mjs
+      #          alone → "fixture-manufactures-unproducible: backup", naming
+      #          the fixture line
+      #   rc=2 — it REFUSES to measure rather than pass: the tlvEventTitles
+      #          export removed, a non-array export, an app.js that throws, an
+      #          unreadable cloud/lib, or ANY arm under its floor (produced ≥ 4,
+      #          rendered ≥ 4, fixtured ≥ 3). An unreadable render side reads as
+      #          an EMPTY set, which would satisfy every arm trivially — that is
+      #          the exit that matters most.
+      #
+      # NEGATIVE CONTROL, run on the identical tree: the cheap variant whose
+      # side A is AgentEvent's @types allowlist is GREEN where this one reds —
+      # it never opens app.js, so it is blind to every console-side regression
+      # this step exists to catch. DECLARED is not PRODUCED, and @types keeps
+      # backup/tls/content on purpose (charter D576).
+      #
+      # CONSOLE_PATHS already carries both cloud/priv/static/** and cloud/lib/**
+      # (scripts/console-path-escape-check.sh), so a new producer AND a new
+      # title each re-fire this job — the guard is non-vacuous in both
+      # directions. No new leaf in .github/required-checks.json: console-unit is
+      # already in console-gate's `needs:`, so a failure here fails the one
+      # required context.
+      - name: Agent-event vocabulary census (titles ≡ producers ≡ fixtures)
+        run: node cloud/priv/static/__agent_event_vocabulary_census.mjs
+
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
   # app.css, or scans its comment nesting, or reads `--x:` declarations out of

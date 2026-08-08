@@ -891,10 +891,8 @@ const ev = (id, type, payload, at) => ({ id, type, payload, inserted_at: at });
 const liveInstanceEvents = [
   ev(9, "verify", verifyPass, tMinus(120)),
   ev(8, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 212, uptime_s: 86000 }, tMinus(300)),
-  ev(7, "backup", { status: "ok", size_mb: 88, took_s: 12 }, tMinus(4100)),
   ev(6, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 211 }, tMinus(7300)),
   ev(5, "status", { transition: "online", reason: "agent_report" }, tMinus(80000)),
-  ev(4, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
 ];
 const liveInstanceEventsOneFail = [ev(10, "verify", verifyOneFail, tMinus(60))].concat(liveInstanceEvents.slice(1));
 const liveInstanceEventsNoVerify = liveInstanceEvents.slice(1);
@@ -3495,7 +3493,6 @@ export const SCENARIOS = {
           ...Array.from({ length: 10 }, (_, i) =>
             ev(40 - i, "health", { health: "down", disk_used_pct: 91, pg_size_mb: 212 }, tMinus(60 + i * 60))),
           ev(20, "status", { transition: "offline", reason: "agent_silent" }, tMinus(700)),
-          ev(19, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
         ],
       },
     },

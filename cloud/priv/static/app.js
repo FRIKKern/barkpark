@@ -10225,15 +10225,24 @@
   // synchronous /verify suite and renders the returned envelope immediately —
   // an unreachable box is a NORMAL result rendered honestly, not an error.
 
-  // The event-type vocabulary is CLOSED server-side (AgentEvent @types:
-  // health status backup tls content verify); an unknown type renders its raw
-  // name (version-skew safety), never blanks a row.
+  // The event-type vocabulary is CLOSED server-side — AgentEvent @types declares
+  // SEVEN: health status backup tls content verify space. DECLARED IS NOT
+  // PRODUCED. Only FOUR of them have a producer anywhere in the control plane
+  // (Registry.record_event/3 call sites in cloud/lib): `health` and `space`
+  // (router.ex, the agent beat), `verify` (router.ex, the suite), `status`
+  // (health/staleness_worker.ex). `backup`, `tls` and `content` have ZERO
+  // producers and never have had one in the history of main — so this map
+  // TITLES ONLY WHAT CAN ARRIVE (charter D575/D576: @types keeps the three,
+  // because `content` has a live server consumer; the console stops staging a
+  // welcome for them). A type with no title here renders its RAW name through
+  // the `|| entry.type` fallbacks below — that is deliberate version-skew
+  // safety for a type a newer server starts sending, never a blank row. The
+  // bidirectional census (__agent_event_vocabulary_census.mjs) reds if a title
+  // here loses its producer, or a producer lands with no title.
   var TLV_EVENT_TITLES = {
     health: "Health report",
     status: "Status change",
-    backup: "Backup",
-    tls: "TLS",
-    content: "Content",
+    space: "Disk space",
     verify: "Verification",
   };
 
@@ -10383,9 +10392,9 @@
   }
 
   // Pure: one comparable verdict per entry — { text, sev } (sev 0 fine / 1
-  // neutral / 2 bad) or null where the type carries none (tls, content,
-  // audit, unknown: their rows summarise by count alone, never an invented
-  // verdict). The texts are written to compose after "all …" / "N of M …".
+  // neutral / 2 bad) or null where the type carries none (space, audit,
+  // unknown: their rows summarise by count alone, never an invented verdict).
+  // The texts are written to compose after "all …" / "N of M …".
   function tlvVerdictOf(entry) {
     entry = entry || {};
     var p = entry.payload || {};
@@ -10399,11 +10408,6 @@
     }
     if (entry.type === "status") {
       return p.transition ? { text: "→ " + String(p.transition), sev: 1 } : null;
-    }
-    if (entry.type === "backup") {
-      if (p.status == null) return null;
-      var s = String(p.status);
-      return s === "ok" ? { text: "completed", sev: 0 } : { text: s, sev: 2 };
     }
     return null;
   }
@@ -10611,9 +10615,18 @@
       ? '<div class="tlv-quiet">' + esc(opts.quietLine) + "</div>"
       : "";
     if (!entries.length) {
+      // The enumeration names ONLY what a producer can write (charter D578):
+      // health + space beats, verify runs, team audit rows. The second sentence
+      // is ADJUDICATED WORDING — it states the absence of a MEASUREMENT, never
+      // "No backup" and never "Backup failed", because backup_ok on the wire is
+      // a plain Go bool whose `false` conflates three realities (no probe wired
+      // / probe ran and failed / probe errored) and the only discriminator is
+      // the agent's free-text detail, which today says exactly one thing.
       return quiet + '<div class="empty-state"><h2>Nothing here yet</h2>' +
-        "<p>Events will appear here as this Barkpark works &mdash; health reports, backups, " +
-        "verification runs, and team actions, in order.</p></div>";
+        "<p>Events will appear here as this Barkpark works &mdash; health reports, disk-space reports, " +
+        "verification runs, and team actions, in order. Backups are not among them: the on-box agent " +
+        "reports “no backup probe wired”, so nothing here can tell you whether this " +
+        "instance is backed up.</p></div>";
     }
     var open = opts.expandedKeys || [];
     var openGroups = opts.openGroups || [];
@@ -22155,6 +22168,9 @@
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
       mergeTimeline: mergeTimeline, auditMirrorsEvent: auditMirrorsEvent,
       tlvEntryTitle: tlvEntryTitle, tlvRowHtml: tlvRowHtml, tlvDetailHtml: tlvDetailHtml,
+      // The LIVE title vocabulary, read by running (never by parsing the
+      // literal) — __agent_event_vocabulary_census.mjs's render side.
+      tlvEventTitles: Object.keys(TLV_EVENT_TITLES),
       timelineFeedHtml: timelineFeedHtml, timelineTabShellHtml: timelineTabShellHtml,
       mountTimelineTab: mountTimelineTab,
       latestVerifyOf: latestVerifyOf, probeChipsModel: probeChipsModel,

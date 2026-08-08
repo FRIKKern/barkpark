@@ -1830,7 +1830,7 @@ const EXPECTATIONS = {
       const open = hooks.timelineFeedHtml(entries, { openGroups: [gkey] });
       assert.ok(open.includes('aria-expanded="true">Collapse<'), "the open group offers Collapse");
       assert.ok(open.includes("tlv-coalesce-members"), "the member rail renders");
-      assert.equal(countMatches(open, 'data-tlv-key="'), 14, "10 members + status + tls + the 2 audit rows all render");
+      assert.equal(countMatches(open, 'data-tlv-key="'), 13, "10 members + status + the 2 audit rows all render");
     },
   },
 
