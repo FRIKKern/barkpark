@@ -297,3 +297,24 @@ S6's smoke must be green before any prebuilt-image revisit (D7).
 
 <!-- one row per wave: date · wave paper · slices merged · the cold-start transcript that proves it -->
 - 2026-08-08 · `self-host-blessing-wave-2026-08-08` · W1 cut: round 1 = `shb-w1-s1a-image-and-compose`, `shb-w1-s1b-census-cloud-pdfbl`, `shb-w1-s1c-secret-refusals`, `shb-w1-s2-env-example`; round 2 (lead-dispatched after S1a+S1c merge) = `shb-w1-s6-compose-smoke`. Decisions D9–D24 recorded this wave. Merge order per D9: S1b/S2/S6 inert-or-cloud first, S1a next, S1c (runtime.exs) LAST.
+
+### Wave 2026-08-08 — review complete (grade A-)
+
+Round 1 built 4/4, all reviewed, all gates re-run green, all pushed with PRs:
+S2 `#10950` (branch `…s2…-3-r` — review fixed the "decode to 64 bytes" wording: the floor is
+RAW byte length), S1b `#10951` (branch `…s1b…-1-r` — review completed the D15 exempt baseline:
+the five build/deploy internals were missing and the api census would have redded the S6 smoke
+on the merged state; `BARKPARK_SEED_PROFILE` added to DEFAULTS_OK), S1a `#10952` (no changes —
+image builds, ENV set is exactly PATH/PHX_SERVER/PORT, healthcheck verbatim D19), S1c `#10953`
+(no changes — 34/34 config tests green; reviewer independently re-measured the live green slot:
+SKB exactly 64 raw bytes, KEK strict-base64-of-32, PREVIEW 44 — the refusal cannot wedge
+guerrilla; an independent second pass before merge is still warranted per E2, input in the PR
+body). Merge in D9 order: #10950/#10951 first, #10952 next, #10953 LAST with a fresh collision
+re-scan (zero collisions at review time). Lead closes each task's merge-gated criterion on
+merge; S1c criterion 4 also closes on merge (PR body carries the restatement; builder's claim
+still held at review). Ledger: `pdf-bl-limit-env-passthrough` absorb-closed per D22
+(close_reason now pins PR #10951); backlog `shb-bl-cloud-env-example-rest` filed by the
+reviewer (S1b hit the create-verb outage); S1a's "LEAD PLEASE FILE" runtime-guard note is MOOT
+— S1c is that guard. Round 2 (`shb-w1-s6-compose-smoke`, open, 0/6) dispatches AFTER #10952 and
+#10953 merge — that lands D1, the epic's first gate, and is the next wave's first move; then W2
+S3 (TLS) / S4 (runbook) / S5 (PG floor + deploy.sh PGDG pin, D8).
