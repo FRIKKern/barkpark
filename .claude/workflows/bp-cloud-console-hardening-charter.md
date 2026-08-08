@@ -2587,6 +2587,100 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-08 — wave 54 REVIEW — grade A — seven slices built, reviewed, re-gated, pushed and PR'd; TWO reviewer code fixes, both proven able to lose; one round-2 slice deferred by design
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer on the final state |
+|---|---|---|---|---|
+| The console stops painting a stop nothing performs + the (state, reason) manifest | `cch-w54-s1-the-stop-nothing-performs-and-the-lifecycle-state-register` | `loop-epic/the-console-stops-painting-a-stop-nothin-0` | #10847 | `node --check` 0; `__app.test.mjs` **1016 pass / 0 fail**; smoke **110/110 scenarios**; `mix test lifecycle_state_manifest_test.exs sold_capability_manifest_test.exs` **14 / 0** |
+| Suspension closes the three mint-and-reveal paths | `cch-w54-s2-suspension-closes-the-three-mint-and-reveal-paths` | `loop-epic/a-suspended-instance-stops-minting-studi-1-r` | #10848 | `mix test test/barkpark_cloud/web` **1164 / 0**; `mix format --check-formatted` clean |
+| Sign-out-everywhere ends the live stream | `cch-w53-s4-sign-out-everywhere-ends-the-live-stream` | `loop-epic/sign-out-everywhere-ends-the-live-stream-2` | #10849 | gate suites **123 / 0**; the slice's own `router_sse_revoke_test.exs` (NOT in its gate) run separately **6 / 0** |
+| OAuth exchange stops skipping two-factor | `cch-w53-s6-oauth-exchange-stops-skipping-two-factor` | `loop-epic/oauth-exchange-stops-skipping-two-factor-3` | #10850 | **324 tests / 0 failures** |
+| Decommission sweeps DNS by VALUE, not by name | `cch-w54-s6-decommission-sweeps-dns-by-value-not-by-name` | `loop-epic/decommission-sweeps-dns-by-value-not-by--4-r` | #10851 | `go build` + `go vet` + `go test -run 'Deprovision\|Attach\|Sweep\|RecordLister'` all ok; full package suites ok; `gofmt` clean |
+| The ledger arrears pays twenty-five rows | `cch-w54-s7-the-ledger-arrears-pays-twenty-five-rows` | `loop-epic/the-ledger-arrears-pays-twenty-five-merg-5` | #10852 | epic census re-derived: **published 725, done 317, live 363** |
+| The guard suite refuses an absent object database | `cch-w54-s8-the-guard-suite-refuses-an-absent-object-database` | `loop-epic/the-guard-suite-refuses-an-absent-object-6` | #10853 | real tree **170 passed / 0 failed, exit 0**; `.git`-less extract **exit 3**, `grep -c 'no non-exempt'` = **0** (pre-change control: 168/2, exit 1, count **1**) |
+
+**What landed.** The wave's axis — *a surface, a gate, or a control plane that certifies something nothing behind it
+can support* — paid in five registers, and the two strongest payments are the ones nobody asked for.
+
+(1) **THE CROWN.** The console stopped painting a stop it does not perform. `LIFECYCLE_PILL_LABEL.stopped` said
+"Stopped" and reached the DOM verbatim with **zero guard** — renaming it red nothing. Suspension is one
+`Repo.update_all` writing four columns; the reviewer re-derived this independently from the producer and then scanned
+every reader of the `suspended` column repo-wide: DB filters, two serializer sites, one `Events.broadcast`, and
+**nothing that issues a power, agent or network action**. The word is now "Suspended", `statusOf` stopped printing the
+raw `quota_exceeded` slug at a user, and the `(state, reason)` manifest reds if any of it drifts back.
+
+(2) **THE PAYING TEAM WHO WAS TOLD THEIR PAYMENT FAILED.** `suspendedCardBannerHtml` was blind to both the reason and
+`sub.status`, so a fully paid `active` team holding a quota-suspended box read "Suspended September 1 — payment
+failed" — with a date the plane cannot produce (`suspended_at` is written but never serialized, so `dunningDates`
+substituted a FUTURE `current_period_end` as a PAST suspension day) and a promise that paying restores it, which on
+the quota axis is not merely unbacked but **wrong guidance**.
+
+(3) **"ACCESS REVOKED" BECAME TRUE.** `billing.ex`'s own docstring called suspension "data retained, access revoked".
+Three admin-credential-backed routes said otherwise by run: a redeemable Studio ticket, a **durable** read+write+chat
+app token expiring 2030-01-01, and the **plaintext** instance admin token. All three now 409, with
+`instance_requests` 1 → 0 — the refusal beats the decrypt, so no byte leaves the control plane.
+
+(4) **TWO AUTH HOLES, ONE LIVE AND ONE LATENT.** "Sign out everywhere" was true of the rows and false of the channel:
+a broadcast at **t+55s** still reached the signed-out device over a real Bandit listener, and a ticket minted one
+second before the revoke still opened a fresh stream. And `POST /v1/auth/oauth/exchange` minted a full 30-day session
+for a 2FA-enrolled account — latent only because prod answers `{"providers":[]}`; the arming condition is two env
+vars and a restart.
+
+(5) **THE INSTRUMENT ATE ITS OWN DEFECT.** `required-checks.test.sh` §13 printed
+`ok  no non-exempt *.md teaches gh pr merge … --admin` **one line under a `fatal: not a git repository`**, over a
+corpus of zero files. This epic's signature defect, living inside the epic's flagship gate, for the fourth sighting.
+It now refuses up front with exit 3. The same slice found the subtler cause: `grep` omits the filename prefix on a
+one-file argument list, so §13's own mutation proof silently required a ≥ 2 file corpus.
+
+**The two reviewer fixes, both on risks the builders named first in their own reviews.**
+
+* **cch-w54-s2** — the three new 409 details each ended *"until the subscription is current."* But `suspended` is ONE
+  column written by TWO independent producers and only one of them is money. The API's refusal was re-emitting, one
+  layer down, the exact falsehood cch-w54-s1 was removing from the banner **in the same wave**. All three now say
+  "until the suspension is cleared", matching the `ERRORS.suspended` string s1 ships for these very 409s; the pin
+  widened from one detail to the closed set of three, refusing subscription / payment / invoice and stopped /
+  powered-off. Reverting the strings reds it.
+* **cch-w54-s6** — and this one was a live hole on the shipped branch, not a theoretical one. The deprovision identity
+  scan `break`s on the first match, so a co-tenant sharing a recycled IP is noticed only if listed FIRST — and
+  `ListByLabel` sorts by name, so in the existing IP-reuse fixture ours **is** first. Harmless while the DNS step was
+  one by-name delete; with this slice's **by-value sweep** it deletes the co-tenant's live A record while its box keeps
+  running. Not fixed by refusing the job (that contradicts merged, deliberate behaviour) but by running the scan to
+  completion and using its answer to **narrow** the DNS step: `deprovisionDNS` takes an `exclusiveIP` argument and
+  degrades to the by-name delete at a shared address. Dropping the narrowing reds both list orders.
+
+**Ledger.** Honest throughout — every builder claimed before working, stamped as they went, and left lifecycle
+`in_progress` with only merge-gated criteria open. `cch-w54-s7` paid Standing Law 0: 25 merged-but-open rows closed
+(all verified `done` by the reviewer), the 4 genuinely stranded and the 4 never-claimed spared (all verified `open`),
+the priority-0 phantom refuted by run before being cancelled. Reviewer fixes: stamped `cch-w51-bl` #2 and #3 (now
+4/4) and `cch-w54-s2` #6 and #7 from the PR body (now 8/9). **No ledger lie was found.** The one honest miss —
+`cch-w54-s7` criterion #7's absolute floor of 340 live rows — was correctly stamped `--miss` with arithmetic rather
+than fudged; the floor is unreachable by construction in a concurrent wave, and the authoring rule is filed as
+`cch-bl-live-count-criteria-must-be-deltas-not-absolute-floors`.
+
+**What the next wave must know.**
+
+* **DISPATCH ORDER IS NOT FREE.** Merge round 1 first, then `cch-w54-s5` (the dunning grace clock), which was deferred
+  by design because it edits the same two console harnesses and an adjacent `app.js` region as s1. Dispatching it
+  beside s1 guarantees a conflict.
+* **AN INDEPENDENT SECOND REVIEWER IS OWED ON THREE JUDGMENTS.** This workflow spawns exactly one reviewer, so the
+  E2 dual-review is a manual lead step: s1's `(state, reason)` mechanism classification, s2's boolean-keying +
+  non-admin reachability, and s6's refusal shape. The reviewer re-derived all three independently and **agrees with
+  all three**; that is one more pair of eyes, not two.
+* **THE STRONGEST REMAINING VEIN IS THE ONE s8 OPENED AND DID NOT WALK.** Only the object-database class was fixed.
+  Nobody has yet asked whether OTHER sections of the guard suite fail open under a different missing precondition —
+  no `gh`, no network, no `jq`. `seal-predicate.test.mjs` has the identical disease (14/75 in an extract vs 75/75 in a
+  clone) and is filed as `cch-w54-r1`.
+* Two per-slice residues are filed, not lost: `instanceHeaderHtml` still renders a raw `suspended_reason`
+  (`cch-w54-followup-instance-header-raw-suspended-reason`), and per-row session revoke still does not end that
+  device's stream (`cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream`).
+* **A GATE THAT OMITS ITS OWN HEADLINE TEST.** `cch-w53-s4`'s gate does not include `router_sse_revoke_test.exs` — the
+  file the whole slice exists to add. It passes (6/0, and a reviewer mutation reds 2 of the 6), but a gate that cannot
+  see the slice's proof is a gate this epic should be suspicious of.
+* Prod still has **zero suspended rows and zero past_due subscriptions**. Every artifact this wave is written in the
+  present tense, and every one of these holes was hardened before its first walker.
+
+Paper: `cloud-console-hardening-wave-54-2026-08-08`.
+
 ### 2026-08-08 — wave 54 DECIDE — the lifecycle-state register — 8 slices cut, 6 new rows filed, 25 arrears rows queued for close
 
 **What was proven, not read.** The suspension crown is confirmed as a MECHANISM (five non-rendering readers, none halting) and LATENT as an EVENT (prod: 27 teams, 8 barkparks, ZERO suspended rows, 22 subscriptions all active, `n_tup_upd=145569` proving the zeros are data). A `(state, reason)` → mechanism manifest was prototyped and is **RED on unmodified main three times**, discharging D591. `POST /v1/barkparks/:id/studio-link` was proven to mint a working ticket for a suspended box (`status=200`, `instance_requests=1`) and to return **409 with `instance_requests=0`** under a one-clause predicate, with `mix test test/barkpark_cloud/web` = 1159/0 — and two SIBLING routes (`/app-token`, `/credentials`) were proven equally open, the app-token one strictly worse. The quota arm was driven in the shipped `node:vm` sandbox and renders "payment failed" plus the restore promise on a **fully paid active** subscription; ARM B (reason-aware banner) ships **1013/1013** while ARM A (delete the sentence) reds three merged tests.
