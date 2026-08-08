@@ -27,9 +27,16 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
       ~15-min sampler tick (cloud-console wave 3), written by
       `Usage.record_sample/1` and never mutated. We keep 14 days (the same window
       as the metrics beats); the summary read only ever wants the latest row.
+    * `platform_deliveries` — one row per (sha, delivering run, first sighting)
+      of the PLATFORM's own deploys (dr-w23-s2), append-only. We keep 180 days:
+      long enough to compare this quarter's delivery latency to last quarter's,
+      which is the whole reason the table exists, and bounded so it can never
+      become the next unbounded table someone discovers. Sizing: ~62 commits/day
+      at ~200 B/row ≈ 5 MB/year against a 265 MB database — retention here is
+      designed in, not inherited.
 
   Idempotent: a run with nothing to prune returns `{:ok, %{events_deleted: 0,
-  tokens_deleted: 0, samples_deleted: 0}}` and never raises. `max_attempts: 1` —
+  tokens_deleted: 0, samples_deleted: 0, deliveries_deleted: 0}}` and never raises. `max_attempts: 1` —
   a missed daily prune is harmless (the next tick catches up), so there is
   nothing to retry.
   """
@@ -38,6 +45,7 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
 
   import Ecto.Query
 
+  alias BarkparkCloud.PlatformDelivery
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Registry.{AgentEvent, AgentToken}
   alias BarkparkCloud.Usage.Sample
@@ -48,6 +56,9 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
   @token_grace_days 30
   # Keep cached usage samples this long; the summary read only wants the latest.
   @sample_retention_days 14
+  # Keep the platform's own delivery record this long — two quarters, so a
+  # quarter-over-quarter comparison always has its predecessor to compare to.
+  @delivery_retention_days 180
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
@@ -55,6 +66,7 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
     events_cutoff = DateTime.add(now, -@event_retention_days * 24 * 3600, :second)
     tokens_cutoff = DateTime.add(now, -@token_grace_days * 24 * 3600, :second)
     samples_cutoff = DateTime.add(now, -@sample_retention_days * 24 * 3600, :second)
+    deliveries_cutoff = DateTime.add(now, -@delivery_retention_days * 24 * 3600, :second)
 
     {events_deleted, _} =
       from(e in AgentEvent, where: e.inserted_at < ^events_cutoff)
@@ -77,11 +89,20 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
       from(s in Sample, where: s.measured_at < ^samples_cutoff)
       |> Repo.delete_all()
 
+    # Drop platform delivery rows past 180 days, keyed on `inserted_at` — the
+    # instant the recorder wrote the row, which is the only clock on this table
+    # that is never supplied by the caller (`first_seen_at` is, and a wrong one
+    # must not be able to make a row immortal or delete it early).
+    {deliveries_deleted, _} =
+      from(d in PlatformDelivery, where: d.inserted_at < ^deliveries_cutoff)
+      |> Repo.delete_all()
+
     {:ok,
      %{
        events_deleted: events_deleted,
        tokens_deleted: tokens_deleted,
-       samples_deleted: samples_deleted
+       samples_deleted: samples_deleted,
+       deliveries_deleted: deliveries_deleted
      }}
   end
 end
