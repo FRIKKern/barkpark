@@ -55,8 +55,13 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   @dataset "production"
 
   # Absolute budgets (wave-1 targets; wave 2 ratchets here, never loosens).
-  @dead_leg_budget 15
-  @both_legs_budget 30
+  # +1 on both (15→16, 30→31): PaperRevisionHeaders' validator lookup
+  # (http-edge-truth s1, PR #10834) — one deliberate Repo.one per HTTP view
+  # that mints the reader's ETag. It buys the 304 halt: a revalidating
+  # reader's dead leg costs 1 statement instead of all 16. A priced
+  # capability, not a silent regression — the next unexplained +1 still reds.
+  @dead_leg_budget 16
+  @both_legs_budget 31
   @max_n_plus_one_slope 1.0
 
   setup do
