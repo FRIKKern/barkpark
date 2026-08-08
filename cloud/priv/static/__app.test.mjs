@@ -18873,3 +18873,123 @@ test("cch-w50-s3: the cancel copy promises a BOUNDED restore and no stop it cann
   assert.ok(src.includes("Everything comes back exactly as it was the moment payment succeeds."),
     "the past-due banner's promise is backed by recover_subscription and must not be swept up");
 });
+
+// ── cch-w51-s2 · THE BACKUP SENTINEL, PINNED ACROSS THE EPIC FENCE ──────────
+//
+// Wave 51 s1 (#10613) made the Timeline empty state say, in the console's own
+// voice, that the on-box agent reports "no backup probe wired" and that nothing
+// here can tell you whether this instance is backed up. That sentence is TRUE
+// BY CONSTRUCTION today — internal/agent/report.go:588-597 takes the else
+// branch whenever cfg.BackupProbe is nil, and nothing under internal/ or cmd/
+// ever sets that field — and it goes FALSE the day someone wires a real probe.
+// A sentence with no guard is not a fix. These three arms are the guard, and
+// the interesting one reads ACROSS the deploy-reliability fence.
+//
+// internal/agent/** is READ here, NEVER edited. The price of that read is paid
+// in scripts/console-path-escape-check.sh: `internal/agent/report.go` is now
+// declared in CONSOLE_PATHS, which means a deploy-reliability PR touching
+// report.go fires the blocking Console gate. That is the intended non-vacuity.
+const BACKUP_SENTINEL = "no backup probe wired";
+const BACKUP_GO_TREES = ["internal", "cmd"];
+
+function goSourceFiles(dir) {
+  const out = [];
+  if (!fs.existsSync(dir)) return out;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...goSourceFiles(full));
+    else if (ent.name.endsWith(".go") && !ent.name.endsWith("_test.go")) out.push(full);
+  }
+  return out.sort();
+}
+
+// ARM A — the sentinel is in app.js SOURCE.
+//
+// SCOPE THIS HONESTLY, because two incumbent tests already cover most of it.
+// `C8: the empty feed states the backup ABSENCE, never a backup verdict` and
+// `D-04: the quiet line and teaching empty state survive the coalescing
+// rewrite` both pin the FULL sentence by regex, and that regex contains this
+// sentinel as a substring — so deleting the sentence, or rewording `wired`
+// alone, reds THOSE TWO as well as this one. Both mutations were run; neither
+// can red arm A in isolation.
+//
+// The ONE case arm A uniquely covers: both incumbents assert on the RENDERED
+// output of timelineFeedHtml([]), so they still pass if the sentence moves out
+// of app.js into a server-rendered fragment, a fixture, or an injected config
+// while still rendering. Arm A reads app.js SOURCE TEXT, so it reds on exactly
+// that move — which is the move that takes the sentence out of reach of arm B's
+// cross-fence pin below. A future dedup pass should delete THIS arm, not C8 or
+// D-04, if it decides that move is not worth guarding.
+test("cch-w51-s2 arm A: the backup sentinel is in app.js SOURCE, not only in the rendered output", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.ok(
+    src.includes(BACKUP_SENTINEL),
+    "app.js must carry the sentinel verbatim; if it renders but no longer lives here, arm B is pinning a string this console no longer owns",
+  );
+});
+
+// ARM B — the Go emitter still produces the exact string the console quotes.
+//
+// QUOTE-CHARACTER TRAP, and it is why BACKUP_SENTINEL is the BARE phrase with
+// no quote characters in it: app.js and the incumbent tests wrap the sentinel
+// in CURLY quotes, while report.go:596 is a Go literal in straight ASCII
+// quotes. A shared constant that included the quote characters would be either
+// permanently red on one side or permanently blind on the other. Each arm adds
+// its own quoting.
+test("cch-w51-s2 arm B: internal/agent/report.go still emits the quoted sentinel the console attributes to it", () => {
+  const reportGo = path.join(REPO_ROOT, "internal/agent/report.go");
+  const src = fs.readFileSync(reportGo, "utf8");
+  assert.ok(
+    src.includes(`"${BACKUP_SENTINEL}"`),
+    "report.go must still emit the ASCII-quoted literal; reword it and the console is quoting a string the agent no longer produces",
+  );
+});
+
+// ARM C — nobody has wired a probe yet, in EITHER Go idiom.
+//
+// This is the arm that reds the day the console's sentence becomes stale FOR
+// THE RIGHT REASON, and it forces the copy to change in the same PR.
+//
+// TWO REFINEMENTS, both measured, both the difference between a guard and a
+// decoration:
+//   1. The predicate is /BackupProbe\s*[:=]\s*\S/, NOT /BackupProbe:\s*\S/. The
+//      struct-literal-only form was planted with `c.BackupProbe = func() …` in a
+//      non-test Go file and stayed GREEN. The alternation reds on both idioms.
+//   2. The walk covers cmd/ as well as internal/. cmd/barkpark-agent/main.go is
+//      where the other twelve probes (Root, Journal, PGSize, …) are actually
+//      wired; an internal/-only walk is blind to the exact file a real probe
+//      would land in.
+// `cfg.BackupProbe != nil` and `BackupProbe func() (bool, string, error)` are
+// correctly NOT matches. `== nil` WOULD have been a false positive under the
+// bare `[:=]` form (the second `=` satisfies \S), so the `=` alternative
+// carries a `(?!=)`: a COMPARISON is not a wiring, and a guard that reds on
+// `if cfg.BackupProbe == nil` would be reding on the very line that proves no
+// probe is wired. The narrowing is strict — `BackupProbe: fn` and
+// `BackupProbe = fn` both still match, and both plants below were re-run.
+// Comment lines are skipped so a doc line like `// BackupProbe: …` cannot red
+// it either.
+test("cch-w51-s2 arm C: no non-test BackupProbe assigner exists under internal/ or cmd/", () => {
+  const ASSIGNER = /BackupProbe\s*(?::|=(?!=))\s*\S/;
+  const wirings = [];
+  let scanned = 0;
+  for (const tree of BACKUP_GO_TREES) {
+    for (const file of goSourceFiles(path.join(REPO_ROOT, tree))) {
+      scanned += 1;
+      const rel = path.relative(REPO_ROOT, file);
+      fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+        if (/^\s*\/\//.test(line)) return;
+        if (ASSIGNER.test(line)) wirings.push(`${rel}:${i + 1}: ${line.trim()}`);
+      });
+    }
+  }
+  // ANTI-BLINDNESS FLOOR: a lower bound, never a pin. A walk that resolved to
+  // nothing would report a confident "zero wirings" — the vacuous pass this
+  // whole epic exists to remove.
+  assert.ok(scanned >= 100,
+    `the Go walk must actually reach a corpus (scanned ${scanned} files under ${BACKUP_GO_TREES.join("/ + ")}/)`);
+  assert.deepEqual(
+    wirings,
+    [],
+    "a BackupProbe is now wired — backup_ok/backup_detail carry a real verdict, so the console's no-backup-probe-wired empty state is stale and must change in THIS PR",
+  );
+});
