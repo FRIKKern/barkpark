@@ -290,10 +290,20 @@ jobs:
         #
         # The instance publishes its sha at GET /status.json as `commit`
         # (unauthenticated, api/lib/barkpark_web/router.ex, shipped in #6422) —
-        # a NINE-character short sha. The compare API accepts the short form
-        # verbatim; proved live 2026-08-08T04:11Z:
-        #   gh api repos/FRIKKern/barkpark/compare/2673eb009...572d51e13fa41fd4aace729661f6fc0119bfa8f2 \
-        #     --jq '.status,.ahead_by,.behind_by'   ->  ahead / 4 / 0
+        # a NINE-character short sha, and the compare API accepts that short
+        # form verbatim on EITHER side.
+        #
+        # READ THE ARGUMENT ORDER CAREFULLY — `compare/<base>...<head>` reports
+        # the status of HEAD relative to BASE, so this step passes base=this
+        # run's sha and head=the served sha, and `ahead` therefore means "the
+        # box carries this run's commit plus more". Re-verified live
+        # 2026-08-08, with guerrilla serving 2673eb009 while main was at
+        # 572d51e13 (a box four commits STALE):
+        #   compare/2673eb009...572d51e13   ->  ahead    / 4 / 0   (short sha accepted)
+        #   compare/572d51e13...2673eb009   ->  behind   / 0 / 4   (this step's order: RED)
+        # The first line is only the short-sha acceptance proof; the SECOND is
+        # this step's own call, and on that stale box it correctly fails. Do not
+        # mistake the first for a passing verdict.
         #
         # HONEST BOUND: unlike /health's env-injected git_sha, `commit` here is
         # baked at COMPILE time, so it certifies "the running release was built

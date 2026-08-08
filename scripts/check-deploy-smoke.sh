@@ -178,6 +178,8 @@ check_sha_assertion() {
   if ! printf '%s\n' "$runs" | grep -qF 'DID NOT MOVE'; then
     echo "  DRIFT    [$job] no immediate hard failure on a clean behind/diverged verdict" >&2
     failures=$((failures + 1))
+  else
+    echo "  ok       [$job] a clean behind/diverged verdict hard-fails immediately (never retried away)"
   fi
 
   return "$failures"
