@@ -3113,7 +3113,8 @@ defmodule BarkparkCloud.Registry do
   admin token itself NEVER leaves this function (not in the URL, not in the
   response, not logged) — only the short-lived ticket does.
 
-  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  Errors: `:suspended` (the billing verdict — checked FIRST, before the admin
+  token is decrypted), `:not_live` (no `url` yet — still provisioning/failed),
   `:no_admin_token` (row never got one; mirrors the `/credentials` 404),
   `:decrypt_failed` (tampered ciphertext, fail-closed), `:instance_error`
   (the instance call failed or returned a non-ticket).
@@ -3131,8 +3132,20 @@ defmodule BarkparkCloud.Registry do
   """
   @spec mint_studio_link(Barkpark.t(), String.t() | nil) ::
           {:ok, String.t()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+          | {:error, :suspended | :not_live | :no_admin_token | :decrypt_failed | :instance_error}
   def mint_studio_link(bp, user_email \\ nil)
+
+  # cch-w54-s2 — a SUSPENDED box mints nothing. `billing.ex`'s own
+  # cancel_subscription/1 calls suspension "data retained, access revoked"; until
+  # this clause existed no access was revoked — a suspended instance still handed
+  # back a redeemable ticket. Keyed on the BOOLEAN, not the reason: both
+  # producers set the same column, and the console paints one state from it
+  # (lifecyclePillState "stopped", Open Studio hidden), so the server is now
+  # congruent with the state the client already shows. It sits ABOVE the working
+  # clause deliberately: the refusal fires BEFORE reveal_admin_token/1, so the
+  # stored admin credential is never decrypted and no byte leaves the control
+  # plane for a suspended box.
+  def mint_studio_link(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
 
   def mint_studio_link(%Barkpark{url: url} = bp, user_email)
       when is_binary(url) and url != "" do
@@ -3220,7 +3233,8 @@ defmodule BarkparkCloud.Registry do
   payload: `{:ok, %{token, workspace_id, permissions, expires_at}}`. The
   caller must never log or audit the token value.
 
-  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  Errors: `:suspended` (the billing verdict — checked FIRST, before the admin
+  token is decrypted), `:not_live` (no `url` yet — still provisioning/failed),
   `:no_admin_token` (row never got one; mirrors `/credentials`),
   `:decrypt_failed` (tampered ciphertext, fail-closed),
   `:app_token_unsupported` (the instance 404s the mint route — a pre-exchange
@@ -3239,11 +3253,20 @@ defmodule BarkparkCloud.Registry do
              expires_at: String.t() | nil
            }}
           | {:error,
-             :not_live
+             :suspended
+             | :not_live
              | :no_admin_token
              | :decrypt_failed
              | :app_token_unsupported
              | :instance_error}
+  # cch-w54-s2 — the strictly-worse sibling of the studio-link hole, and the
+  # reason gating studio-link alone was refused: this token is DURABLE
+  # (read+write+chat, long expiry) and member-reachable, so one mint through a
+  # suspended box outlives the suspension entirely. Same physics as the clause
+  # above: boolean-keyed, above the working clause, so the refusal beats
+  # reveal_admin_token/1 and the instance is never called.
+  def mint_app_token(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
+
   def mint_app_token(%Barkpark{url: url} = bp, user_email)
       when is_binary(url) and url != "" and is_binary(user_email) and user_email != "" do
     case reveal_admin_token(bp) do
