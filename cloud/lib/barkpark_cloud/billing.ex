@@ -736,19 +736,17 @@ defmodule BarkparkCloud.Billing do
         # fleet on a 3-box plan. Pinned by billing_lifecycle_test.exs
         # "resubscribing on a SMALLER plan restores only up to the new ceiling".
         #
-        # Known side effect: resume_team_barkparks/1 is reason-blind, so a
-        # pre-existing `quota_exceeded` row is resumed too and immediately
-        # re-suspended by the reconcile — net state is right, but suspended_at is
-        # reset. Stated precisely (cch-w50 review): the bulk resume does an
-        # `update_all` and broadcasts NOTHING, so the event feed sees an
-        # UNPAIRED `barkpark.suspended` for a box whose availability never
-        # changed — not a restored/suspended pair. A consumer treating these as
-        # edges will read one spurious suspend, with no matching restore before
-        # it. Narrowing this to a `resume_billing_suspended/1` (reason-scoped,
-        # and mode-scoped like its suspend_team_barkparks/2 counterpart) is
-        # filed rather than done here: registry.ex is outside this slice's fence.
+        # cch-w55-s4: this is `resume_billing_suspended/1`, NOT the reason-blind
+        # `resume_team_barkparks/1` it used to be. The blind resume also cleared
+        # `quota_exceeded` rows; here that was self-correcting (the reconcile
+        # below re-stamped them, at the cost of a reset `suspended_at` and an
+        # UNPAIRED `barkpark.suspended` in the event feed, since the bulk
+        # `update_all` broadcasts nothing). At the OTHER call site —
+        # recover_subscription/1 — nothing followed it, so the over-grant was
+        # permanent. Both call sites are narrowed together: the billing axis
+        # lifts the billing reasons, on managed rows, and no others.
         with {:ok, %Subscription{}} <- inserted do
-          {:ok, _count} = Registry.resume_team_barkparks(team_id)
+          {:ok, _count} = Registry.resume_billing_suspended(team_id)
         end
 
         inserted
@@ -859,13 +857,20 @@ defmodule BarkparkCloud.Billing do
 
   @doc """
   Recover `sub` from dunning back to `active` (a failed invoice was paid). Clears
-  `past_due` and RESUMES the team's suspended Barkparks.
+  `past_due` and lifts the team's BILLING suspensions —
+  `Registry.resume_billing_suspended/1`, reason- and mode-scoped.
+
+  cch-w55-s4: this used to call the reason-blind `resume_team_barkparks/1` with
+  NOTHING behind it (no reconcile), so paying a failed invoice also cleared
+  `"quota_exceeded"` flags a downgrade had set — free capacity, with nothing
+  scheduled to take it back — and revived `self_hosted` rows the suspend side
+  refuses to touch. A paid invoice settles the billing axis and only that.
   """
   @spec recover_subscription(Subscription.t()) :: {:ok, Subscription.t()} | {:error, term}
   def recover_subscription(%Subscription{} = sub) do
     with {:ok, sub} <-
            update_status(sub, %{status: "active", past_due: false, canceled_at: nil}) do
-      {:ok, _count} = Registry.resume_team_barkparks(sub.team_id)
+      {:ok, _count} = Registry.resume_billing_suspended(sub.team_id)
       {:ok, sub}
     end
   end
