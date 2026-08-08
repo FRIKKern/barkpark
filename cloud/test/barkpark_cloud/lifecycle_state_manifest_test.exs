@@ -599,6 +599,18 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
              "rather than by editing this assertion."
 
     assert detail =~ "refused after it"
+
+    # ATTRIBUTION, not merely refusal. `fence_verdict/2` reports :fence for ANY
+    # post-producer refusal, so a producer that also broke the row some other way
+    # (`:not_live`, `:no_admin_token`) would score a fence this class did not
+    # earn. The class is named for the suspension clause, so the reason is pinned
+    # to it here — the probe's own moduledoc promise ("refuses to report a fence
+    # it cannot attribute") is only kept if the attribution is asserted.
+    assert detail =~ ":suspended",
+           "the fence probe refused after the producer, but not with {:error, :suspended}: " <>
+             "#{detail}. :cp_access_fence names the suspension clause specifically; a refusal " <>
+             "for any other reason is a broken row, not the fence this class claims to observe."
+
     assert MapSet.member?(obs.observed, :cp_access_fence)
 
     # …and that observation stays on the NON-halting side. This is the split's
