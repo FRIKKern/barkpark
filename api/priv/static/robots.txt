@@ -1,5 +1,11 @@
-# See https://www.robotstxt.org/robotstxt.html for documentation on how to use the robots.txt file
-#
-# To ban all spiders from the entire site uncomment the next two lines:
-# User-agent: *
-# Disallow: /
+# Barkpark - public content reader.
+# Policy, not protection (charter D6): enforcement is the limiter, not this file.
+
+User-agent: *
+Allow: /papers/
+Allow: /sheets/
+Disallow: /finder
+Disallow: /quiz/
+Disallow: /studio
+Disallow: /login
+Disallow: /s/

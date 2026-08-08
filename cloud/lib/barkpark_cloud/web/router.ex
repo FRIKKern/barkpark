@@ -418,7 +418,14 @@ defmodule BarkparkCloud.Web.Router do
   plug(Plug.Static,
     at: "/",
     from: :barkpark_cloud,
-    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html),
+    # robots.txt is APPENDED, never prepended: cloud-static-gz-guard.sh finds
+    # this allowlist by grepping for the opening of the list with index.html as
+    # its FIRST entry, so anything inserted ahead of index.html loses the guard
+    # its anchor. (Do not quote that literal in a comment either — the grep
+    # takes the first line that matches and would anchor on the prose.) It is
+    # also absent from the Dockerfile gzip line on purpose: at ~100 bytes the
+    # .gz sibling costs more than it saves.
+    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html robots.txt),
     gzip: true,
     headers: %{"cache-control" => "no-cache"},
     cache_control_for_etags: "no-cache"
