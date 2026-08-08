@@ -3625,7 +3625,28 @@ defmodule BarkparkCloud.Web.Router do
         case DeployLedger.parse_window(conn.query_params["from"], conn.query_params["to"]) do
           {:ok, from, to} ->
             census = DeployLedger.census(from, to, site_ids: scoped)
-            json(conn, 200, Map.put(census, :scope, census_scope(team, scoped)))
+
+            json(
+              conn,
+              200,
+              census
+              |> Map.put(:scope, census_scope(team, scoped))
+              # THE DELIVERY NODE, SCOPED (dr-w21-s6). It was added ONLY by
+              # `deploy_census_json/2` on the OPERATOR route, so wave 15's
+              # reader shipped onto a route nobody can reach: measured live,
+              # `bp cloud deployments -o table` rendered "NOT MEASURED — this
+              # control plane sends no delivery census" to every real operator,
+              # because the only route a real token can reach is this one and it
+              # carried no `delivery` key.
+              #
+              # `site_ids: scoped` IS THE WHOLE SAFETY ARGUMENT and it is not
+              # optional decoration. `DeployLedger.delivery/3` filtered
+              # `inserted_at` + `environment` and nothing else until this slice
+              # threaded the option through — a bare `delivery(from, to)` here
+              # would pool FOREIGN teams' waits into this team's percentiles and
+              # name their `site_id`s in the `sites` list under them.
+              |> Map.put(:delivery, DeployLedger.delivery(from, to, site_ids: scoped))
+            )
 
           {:error, detail} ->
             json(conn, 422, %{error: "invalid_window", detail: detail})

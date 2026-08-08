@@ -872,8 +872,21 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 	// arm printed "NOT MEASURED — this control plane sends no delivery census" to
 	// every operator forever, because nothing in cloud/lib called
 	// `DeployLedger.delivery/3` and the census route emitted no `delivery` key.
-	// The route emits it now (`Web.Router.deploy_census_json/2`), so an envelope
-	// that CARRIES the node must never render the sentence that says it doesn't.
+	//
+	// CORRECTED, dr-w21-s6. This comment used to read "The route emits it now
+	// (`Web.Router.deploy_census_json/2`), so an envelope that CARRIES the node
+	// must never render the sentence that says it doesn't" — and that was true
+	// only of the OPERATOR route, `GET /v1/operator/deploy-ledger/census`, which
+	// `require_platform_operator` answers `403 forbidden/platform_operator` to
+	// every real account token. `bp cloud deployments` reads the TEAM route,
+	// `GET /v1/deploy-ledger/census`, which carried NO `delivery` key at all, so
+	// the only arm production ever executed was the one this check forbids: the
+	// assertion below was green against a fixture this test builds itself while
+	// the live plane printed "NOT MEASURED" to every operator. The team route
+	// now emits a team-SCOPED `delivery` node (router.ex, dr-w21-s6), which is
+	// what finally makes this fixture's shape the shape production sends. The
+	// check itself is unchanged — it was never wrong about the RENDER, only
+	// about which route had ever produced its input.
 	if strings.Contains(stdout, "NOT MEASURED") {
 		t.Fatalf("the delivery node is present, yet the render still claims it was not measured:\n%s", stdout)
 	}
