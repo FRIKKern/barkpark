@@ -825,6 +825,91 @@ else
   ok "a spec that requires ZERO contexts FAILS — it could never fail, which is the disease"
 fi
 
+section "8b. enforced=false is CHECKED against the live branch, not taken on the spec's word"
+
+# THE DEFECT THIS SECTION PINS (cch-w51-s6). `run_full`'s `enforced != true`
+# branch used to `return 0` before `live_protection` was ever called — the first
+# live read sat on the line AFTER that return. So the guard could not see one of
+# the two drift directions at all: SPEC SAYS THE GATE IS OFF WHILE THE GATE IS
+# ON. Measured on the primary checkout, 652 commits behind, against a live
+# branch carrying four required contexts under `enforce_admins: true`: exit 0,
+# "protection is not applied yet". Not a stale-checkout chore — a code property,
+# reachable from `scripts/bp-merge.sh:77`, which resolves the verifier out of
+# whatever checkout the merger happens to be sitting in.
+#
+# HERMETIC, and the "unprotected" fixture is GitHub's OWN 404 body rather than a
+# sentinel invented here: `{"message":"Branch not protected"}` is what the API
+# returns, is what the live code path greps for, and is already quoted as
+# expected output in five other files in this repo. A fixture that agreed with
+# the code only because both were made up would prove nothing.
+
+RCS6_UNAPPLIED="$TMP/s6-unapplied.json"          # the committed spec, flag flipped off
+jq '.enforced = false' "$SPEC" > "$RCS6_UNAPPLIED"
+RCS6_UNPROTECTED="$TMP/s6-rb-unprotected.json"
+printf '%s\n' '{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection"}' > "$RCS6_UNPROTECTED"
+
+# (a) THE DRIFT DIRECTION. enforced=false spec, live branch PROTECTED -> red,
+#     and red NAMING what it found: a bare non-zero would be satisfied by an
+#     outage, a bad fixture path, or any other refusal in the file.
+RCS6_OUT="$(bash "$VERIFY" --spec "$RCS6_UNAPPLIED" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe 2>&1)" && RCS6_RC=0 || RCS6_RC=$?
+RCS6_MISSING=""
+while IFS= read -r c; do
+  grep -qF "$c" <<<"$RCS6_OUT" || RCS6_MISSING="$RCS6_MISSING $c"
+done < <(SPEC_CONTEXTS)
+if [ "$RCS6_RC" -ne 0 ] && grep -q "IS PROTECTED right now" <<<"$RCS6_OUT" && [ -z "$RCS6_MISSING" ]; then
+  ok "an enforced=false spec against a PROTECTED branch REDS (exit $RCS6_RC) and names all $(SPEC_CONTEXTS | grep -c .) live context(s)"
+else
+  bad "the enforced=false/protected drift was not caught as a named red (exit $RCS6_RC, unnamed:${RCS6_MISSING:- none}): $(grep -m2 FAIL <<<"$RCS6_OUT")"
+fi
+# …and it must not ALSO claim agreement in the same breath.
+if grep -q "protection is not applied yet" <<<"$RCS6_OUT"; then
+  bad "the drift red still printed the all-agree line — a red that also says OK is read as OK"
+else
+  ok "…and the run does NOT print the \`protection is not applied yet\` line it used to exit 0 on"
+fi
+
+# (b) THE LEGITIMATE CASE, unchanged. Same spec, genuinely unprotected branch.
+#     Without this the fix would be indistinguishable from "always red here",
+#     which is how a guard gets disabled two waves later.
+RCS6_OK_OUT="$(bash "$VERIFY" --spec "$RCS6_UNAPPLIED" --readback "$RCS6_UNPROTECTED" --runs "$TMP/runs.json" --sha probe 2>&1)" && RCS6_OK_RC=0 || RCS6_OK_RC=$?
+if [ "$RCS6_OK_RC" -eq 0 ] && grep -q "genuinely unprotected" <<<"$RCS6_OK_OUT"; then
+  ok "…while a genuinely unapplied spec against a genuinely unprotected branch still exits 0"
+else
+  bad "the pre-flip case broke (exit $RCS6_OK_RC): $(tail -2 <<<"$RCS6_OK_OUT")"
+fi
+
+# (c) COULD-NOT-LOOK IS NOT AGREEMENT. An unreadable read-back on this branch
+#     must red, and must say so in those terms — the whole finding is a guard
+#     that greened because it declined to look.
+RCS6_BLIND_OUT="$(bash "$VERIFY" --spec "$RCS6_UNAPPLIED" --readback "$TMP/nope.json" --runs "$TMP/runs.json" --sha probe 2>&1)" && RCS6_BLIND_RC=0 || RCS6_BLIND_RC=$?
+if [ "$RCS6_BLIND_RC" -ne 0 ] && grep -q "could not look at live protection" <<<"$RCS6_BLIND_OUT" \
+   && ! grep -q "protection is not applied yet" <<<"$RCS6_BLIND_OUT"; then
+  ok "…and an unreadable live protection on the enforced=false path REDS as \"could not look\", never as agreement"
+else
+  bad "the no-read path did not degrade honestly (exit $RCS6_BLIND_RC): $(tail -2 <<<"$RCS6_BLIND_OUT")"
+fi
+
+# (d) MUTATION PROOF. Remove the new clause's CALL from a copy of verify and
+#     (a)'s exact fixture must sail through green again. Without this, (a)
+#     passes on any refusal the file happens to raise for another reason —
+#     and the BEFORE half of this slice's claim is unproven.
+RCS6_NOCHECK="$TMP/verify-no-s6-clause.sh"
+sed -E 's%^( *)unapplied_spec_matches_reality \|\| return 1%\1: # S6 CLAUSE REMOVED%' "$VERIFY" > "$RCS6_NOCHECK"
+if ! grep -q "S6 CLAUSE REMOVED" "$RCS6_NOCHECK"; then
+  bad "the s6 mutation did not apply — the clause's call is no longer on its own line, so the proof below is vacuous"
+else
+  ok "the mutation applies: the enforced=false live-probe call is removed from a copy of verify"
+  # `--workflows` explicitly: the mutant lives in $TMP, so its own REPO_ROOT
+  # points at the temp dir and the advisory-prose clause would red for a reason
+  # that has nothing to do with what is being proven here.
+  RCS6_MUT_OUT="$(bash "$RCS6_NOCHECK" --spec "$RCS6_UNAPPLIED" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe --workflows "$REPO_ROOT/.github/workflows" 2>&1)" && RCS6_MUT_RC=0 || RCS6_MUT_RC=$?
+  if [ "$RCS6_MUT_RC" -eq 0 ] && grep -q "protection is not applied yet" <<<"$RCS6_MUT_OUT"; then
+    ok "…and WITHOUT it the SAME protected read-back exits 0 saying \`protection is not applied yet\` — the old blindness, reproduced on demand"
+  else
+    bad "the unguarded verify did not reproduce the blindness (exit $RCS6_MUT_RC) — clause (a) may be reding for an unrelated reason: $(tail -2 <<<"$RCS6_MUT_OUT")"
+  fi
+fi
+
 section "9. verify --selftest is itself green"
 
 if bash "$VERIFY" --selftest >/dev/null 2>&1; then
@@ -852,13 +937,14 @@ section "11 (hermetic half). the section-11 mutation is DERIVED, not typed"
 # always yields a genuinely different spec.
 #
 # AND THE EXPECTATION IS ERA-AWARE, because inverting the flag is only a
-# falsifiable mutation in one direction. `enforced: false` is a COMMITTED,
-# reviewable state that full mode deliberately does not diff against live
-# config, so post-flip the inverted (false) spec is legitimately GREEN.
-# Asserting a red there would be a lie in the opposite direction. Post-flip the
-# mutation that must red is a CONTENT one — a required context live protection
-# does not carry — which is the same class of finding (spec disagrees with the
-# world) reached through the field that still moves.
+# falsifiable mutation in one direction. `enforced: false` used to be treated as
+# a COMMITTED, reviewable state that full mode deliberately did not diff against
+# live config — so post-flip the inverted (false) spec was asserted GREEN. That
+# was the blindness, not a design (cch-w51-s6): full mode now reads live
+# protection on that path too, so post-flip the inverted spec REDS and names
+# what it found. The CONTENT mutation below — a required context live protection
+# does not carry — stays as the second, independent falsifier, reached through
+# the field that moves in both eras.
 FULLMUT="$TMP/enforced-inverted.json"
 jq '.enforced |= not' "$SPEC" > "$FULLMUT"
 if [ "$(jq -c . "$FULLMUT")" = "$(jq -c . "$SPEC")" ]; then
@@ -935,10 +1021,20 @@ api_stage() {
     else
       bad "full mode red (exit $cmrc) without naming '$phantom' — that is an outage-shaped red, indistinguishable from the finding: $(grep -m2 -E 'FAIL|DRIFT' <<<"$cmout")"
     fi
-    if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
-      ok "…and the INVERTED flag (enforced=false) is green by design — a committed, reviewable state, never a swallowed one"
+    # THE INVERTED FLAG USED TO BE ASSERTED GREEN HERE, and that assertion was
+    # the blindness written down as a requirement (cch-w51-s6). Post-flip the
+    # branch IS protected, so a spec claiming `enforced=false` is not "a
+    # committed, reviewable state" — it is a spec contradicting the live gate,
+    # in the one direction the guard used to return 0 without reading. It must
+    # red, and it must NAME the live contexts, or the red is outage-shaped.
+    local imout imrc=0
+    imout="$(bash "$VERIFY" --spec "$FULLMUT" 2>&1)" || imrc=$?
+    if [ "$imrc" -eq 0 ]; then
+      bad "full mode PASSED with enforced=false while the branch IS protected — the guard declined to look (cch-w51-s6)"
+    elif grep -q "IS PROTECTED right now" <<<"$imout"; then
+      ok "…and the INVERTED flag (enforced=false) REDS against a protected branch, naming the live contexts (the direction the guard used to skip)"
     else
-      bad "full mode reds on enforced=false, which is a committed state the guard is documented to accept"
+      bad "full mode red on the inverted flag (exit $imrc) without naming the live protection — outage-shaped: $(grep -m2 FAIL <<<"$imout")"
     fi
   fi
 }

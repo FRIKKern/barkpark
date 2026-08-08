@@ -18,6 +18,12 @@
 #     read-back object, not just the keys the spec happens to mention — an
 #     unaccounted key is a failure, because that is exactly the shape an
 #     "idempotent apply" hides behind.
+#   * A spec that says the gate is OFF while the gate is ON (cch-w51-s6). This
+#     is the direction the script used to decline to look in: with
+#     `enforced=false` it returned 0 before ever reading live protection, so a
+#     checkout carrying a stale or post-break-glass spec reported "protection is
+#     not applied yet" while required contexts were blocking under
+#     enforce_admins. Both directions are read now — see probe_live_protection.
 #
 # THE DEADLOCK DETECTOR IS A SET DIFFERENCE, NOT A MESSAGE GREP (D38)
 #
@@ -111,6 +117,96 @@ live_protection() {
     fail "cannot read live protection for $repo/$branch: $out"
   }
   printf '%s' "$out"
+}
+
+# ── the OTHER polarity: is the branch protected RIGHT NOW? (cch-w51-s6) ──────
+#
+# `live_protection` above is the enforced=true reader, and its polarity is
+# baked in: an absent config is a hard `fail`, because with enforced=true that
+# IS the drift. The enforced=false branch of `run_full` needs the opposite —
+# absent is the state the spec claims, and PRESENT is the drift — so it cannot
+# reuse that reader. For two waves it therefore read nothing at all: the branch
+# `return 0`d before `live_protection` was ever called, which made this script
+# structurally incapable of seeing one of the two drift directions. It did not
+# fail when it could not see; it declined to look.
+#
+# THREE-VALUED ON PURPOSE. Collapsing to a boolean would fold "I looked and
+# found no protection" into "I could not look", and the second one must never
+# be rendered as agreement (that is this repo's standing rule for guards, and
+# the header three lines up already states it for the other polarity).
+#
+# stdout, exactly two lines, and it ALWAYS exits 0 — the CALLER decides what
+# each state means:
+#   1: protected | unprotected | unknown
+#   2: protected   -> the live required contexts, comma-joined ("" if none)
+#      unprotected -> how that was established
+#      unknown     -> why the look failed
+probe_live_protection() {
+  local repo branch out
+  repo="$(spec_repo)"; branch="$(spec_branch)"
+
+  if [ -n "$READBACK_FILE" ]; then
+    if [ ! -f "$READBACK_FILE" ]; then
+      printf 'unknown\nno protection read-back file at %s\n' "$READBACK_FILE"; return 0
+    fi
+    if ! jq -e . "$READBACK_FILE" >/dev/null 2>&1; then
+      printf 'unknown\n%s is not valid JSON\n' "$READBACK_FILE"; return 0
+    fi
+    out="$(cat "$READBACK_FILE")"
+  elif ! command -v gh >/dev/null 2>&1; then
+    printf 'unknown\nthe gh CLI is not on PATH, so live protection could not be read at all\n'; return 0
+  elif ! out="$(gh api "repos/$repo/branches/$branch/protection" 2>&1)"; then
+    # GitHub's own 404 body is the ONE honest "there is nothing there".
+    # Anything else — a token without admin, a rate limit, a network fault —
+    # is a failure to look, not a finding.
+    if grep -q "Branch not protected" <<<"$out"; then
+      printf 'unprotected\n%s/%s returns the API'"'"'s own "Branch not protected" body\n' "$repo" "$branch"; return 0
+    fi
+    printf 'unknown\ncannot read live protection for %s/%s: %s\n' "$repo" "$branch" "$(head -1 <<<"$out")"
+    return 0
+  fi
+
+  # A read-back FIXTURE may also carry that 404 body — that is how the suite
+  # drives this arm hermetically, with the API's real shape rather than a
+  # sentinel invented for the test.
+  if jq -e 'type == "object" and ((.message? // "") | test("Branch not protected"; "i"))' <<<"$out" >/dev/null 2>&1; then
+    printf 'unprotected\n%s/%s returns the API'"'"'s own "Branch not protected" body\n' "$repo" "$branch"; return 0
+  fi
+  local ctxs=""
+  ctxs="$(jq -r '[(.required_status_checks.checks[]?.context), (.required_status_checks.contexts[]?)]
+                 | unique | join(", ")' <<<"$out" 2>/dev/null || true)"
+  printf 'protected\n%s\n' "$ctxs"
+}
+
+# The clause the enforced=false branch was missing entirely. Green here means
+# the spec's claim and reality agree in BOTH directions, not just the one the
+# script happened to look in.
+unapplied_spec_matches_reality() {
+  local probe state detail
+  probe="$(probe_live_protection)"
+  state="$(sed -n 1p <<<"$probe")"
+  detail="$(sed -n 2p <<<"$probe")"
+  case "$state" in
+    unprotected)
+      say "  live probe: $detail — the spec's enforced=false claim matches reality."
+      return 0
+      ;;
+    protected)
+      echo "FAIL: the committed spec says enforced=false — protection NOT applied — but $(spec_repo)/$(spec_branch) IS PROTECTED right now." >&2
+      echo "      live required contexts: ${detail:-(none named — the branch is protected by other rules)}" >&2
+      echo "      Nothing downstream of this spec can be trusted about the gate: a merge pre-flight" >&2
+      echo "      loads the SPEC's contexts, so every live context the spec omits is invisible to it." >&2
+      echo "      Fix by re-applying (scripts/required-checks-apply.sh) or by committing enforced=true — but do" >&2
+      echo "      not leave the file claiming a gate is off while it is on." >&2
+      return 1
+      ;;
+    *)
+      echo "FAIL: could not look at live protection, so this run CANNOT stand behind the spec's enforced=false claim." >&2
+      echo "      reason: $detail" >&2
+      echo "      This is a failure, never a skip: \"I could not look\" is not \"they agree\"." >&2
+      return 1
+      ;;
+  esac
 }
 
 # ── the full-object diff ─────────────────────────────────────────────────────
@@ -451,7 +547,12 @@ run_full() {
   # SUPPOSED to be red on: protection not applied yet. The deadlock detector
   # below still runs against a real head, so this mode is never vacuous either.
   if [ "$(spec_enforced)" != "true" ]; then
-    say "── enforced=false: nothing has been applied, so there is no live config to diff ──"
+    say "── enforced=false: the spec CLAIMS nothing has been applied — checking that against the live branch ──"
+    say "  There is no full-object diff to run before the flip, but there is still one"
+    say "  question worth asking, and this branch used to return 0 without asking it:"
+    say "  is the branch protected right now anyway? A yes is drift, in the direction"
+    say "  no amount of spec-reading can see."
+    unapplied_spec_matches_reality || return 1
     say "  The deadlock detector below still runs against a real PR head. From the"
     say "  commit that flips enforced to true, an unreadable or absent protection"
     say "  config is a hard failure here."
@@ -462,7 +563,7 @@ run_full() {
     [ "$drc0" -eq 3 ] && return 3
     [ "$drc0" -eq 4 ] && say "NOTE: the sampled head carries a cancelled required context (above). See --deadlock for the actionable form."
     [ "$drc0" -eq 0 ] || [ "$drc0" -eq 4 ] || return 1
-    say "OK: the committed spec and the rendered check names agree; protection is not applied yet."
+    say "OK: the branch is genuinely unprotected, and the committed spec and the rendered check names agree; protection is not applied yet."
     return 0
   fi
   actual="$(live_protection)"
