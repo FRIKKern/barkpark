@@ -67,6 +67,12 @@ defmodule BarkparkCloud.Billing do
   # so ops can retune without a code change — mirrors `prices` / `limits`).
   @default_trial_days 14
 
+  # Plans that NEVER open a checkout session: `free` is the no-charge signup
+  # tier and `trial` is granted with no card. Subtracted from the schema's plan
+  # enumeration to derive `checkout_plans/0` — so a new tier added to
+  # `Subscription` is checkout-eligible by default rather than silently absent.
+  @never_checkout_plans ~w(free trial)
+
   @doc """
   The configured billing gateway module. Resolved at call time (not compile
   time) so runtime.exs's prod override is honoured — mirrors `Registry.Vault`'s
@@ -107,9 +113,21 @@ defmodule BarkparkCloud.Billing do
   an unpriced plan can't open one). The actual subscription is marked active
   later, when Stripe posts a signed `checkout.session.completed` webhook that
   `subscribe/2` lands.
+
+  PRE-FLIGHT REFUSAL (D553). A resolved price is NOT enough to open a session.
+  With prices wired but no webhook signing secret, `checkout_capability/0` is
+  `:unverifiable`: a REAL hosted session opens and the card is charged, while
+  `StripeGateway.verify_webhook/2` returns `{:error, :no_secret}` forever, so the
+  activation event can never land and the customer pays for nothing. This
+  function therefore consults `checkout_capability/0` and returns
+  `{:error, :billing_not_configured}` BEFORE `create_checkout_session/3` is ever
+  called. The check sits AFTER the price resolution so an unknown/"free" plan
+  keeps its existing `:plan_invalid` answer — the new refusal fires exactly in
+  the hole where a price resolves but the money could never be honoured.
   """
   @spec checkout(Team.t() | binary(), Subscription.plan() | atom() | String.t()) ::
-          {:ok, BarkparkCloud.Billing.Gateway.checkout_url()} | {:error, :plan_invalid | term}
+          {:ok, BarkparkCloud.Billing.Gateway.checkout_url()}
+          | {:error, :plan_invalid | :billing_not_configured | term}
   def checkout(team, plan) do
     plan = to_string(plan)
 
@@ -118,7 +136,11 @@ defmodule BarkparkCloud.Billing do
         {:error, :plan_invalid}
 
       price_id ->
-        gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
+        if checkout_capability() == :available do
+          gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
+        else
+          {:error, :billing_not_configured}
+        end
     end
   end
 
@@ -331,30 +353,91 @@ defmodule BarkparkCloud.Billing do
   @doc """
   Is the billing gateway fully configured to actually take money right now?
 
-  For the in-memory `StubGateway` (dev/test) this is always true — it needs no
-  external config. For the real `StripeGateway` it is true only when at least one
-  plan price is wired (`STRIPE_PRICE_*`) AND a webhook signing secret is set
-  (`STRIPE_WEBHOOK_SECRET`) — without both, a checkout can't resolve a price and
-  an activation webhook can't be verified, so the team could never actually
-  subscribe. The router uses this to surface an operator-actionable
-  `billing_not_configured` instead of a misleading `plan_invalid` (BILL-2).
+  A PROJECTION of `checkout_capability/0` (`== :available`) — the two cannot
+  drift because there is only one computation. True only when at least one plan
+  price is wired (`STRIPE_PRICE_*`) AND a webhook signing secret is set
+  (`STRIPE_WEBHOOK_SECRET`); always true for the in-memory `StubGateway`, which
+  needs no external config. The router uses this to surface an
+  operator-actionable `billing_not_configured` instead of a misleading
+  `plan_invalid` (BILL-2). Callers that need to know WHICH way it fails — a dead
+  button vs. a chargeable-but-unactivatable session — want the enum, not this.
   """
   @spec configured?() :: boolean()
-  def configured? do
+  def configured?, do: checkout_capability() == :available
+
+  @doc """
+  The plans a customer could actually be sent to checkout for RIGHT NOW — the
+  checkout-eligible universe filtered by whether each plan's gateway price id
+  resolves at this moment.
+
+  DERIVED, never declared: the universe is the `Subscription` plan enumeration
+  minus the plans that never open a checkout (`free` is the no-charge signup
+  tier; `trial` is granted with no card), and membership is decided by CALLING
+  `price_id/1`. So a half-wired deploy (only `supporter` priced) reports exactly
+  `["supporter"]` instead of a constant that claims both paid tiers — the case a
+  `configured?` boolean structurally cannot express, and the case where the
+  console otherwise blames the customer's plan choice for the deploy's gap.
+  """
+  @spec priced_plans() :: [String.t()]
+  def priced_plans do
+    Enum.filter(checkout_plans(), &is_binary(price_id(&1)))
+  end
+
+  @doc """
+  The checkout-eligible plan universe: every `Subscription` plan except the ones
+  that never open a checkout session. Server-owned — nothing client-supplied
+  reaches it — and derived from the schema's enumeration so a new tier is in
+  scope the moment it is added there.
+  """
+  @spec checkout_plans() :: [String.t()]
+  def checkout_plans, do: Subscription.plans() -- @never_checkout_plans
+
+  @doc """
+  Can this deploy actually take money right now, and if not, HOW does it fail?
+
+  A three-value answer because the two failure modes are not the same event:
+
+    * `:unconfigured` — no paid plan has a price id, so `checkout/2` can only
+      ever refuse. Harmless: the button is dead, no card is touched.
+    * `:unverifiable` — at least one plan IS priced but there is no webhook
+      signing secret. This is the DANGEROUS one: a real hosted Checkout Session
+      opens, the customer's card IS charged, and `verify_webhook/2` returns
+      `{:error, :no_secret}` forever, so the activation event can never be
+      trusted and the subscription can never go active. `checkout/2` refuses
+      pre-flight (see its docs) precisely so this state cannot move money.
+    * `:available` — priced and verifiable; checkout may proceed.
+
+  For the in-memory `StubGateway` (dev/test) this is always `:available` — it
+  needs no external config and moves no money.
+
+  `configured?/0` is a PROJECTION of this function (`== :available`), so the
+  boolean and the enum can never drift apart.
+  """
+  @spec checkout_capability() :: :available | :unconfigured | :unverifiable
+  def checkout_capability do
     case gateway() do
       BarkparkCloud.Billing.StripeGateway ->
-        prices =
-          Application.get_env(:barkpark_cloud, __MODULE__, []) |> Keyword.get(:prices, %{})
-
-        secret =
-          Application.get_env(:barkpark_cloud, BarkparkCloud.Billing.StripeGateway, [])
-          |> Keyword.get(:webhook_secret)
-
-        map_size(prices) > 0 and is_binary(secret) and secret != ""
+        cond do
+          priced_plans() == [] -> :unconfigured
+          not webhook_secret?() -> :unverifiable
+          true -> :available
+        end
 
       _ ->
-        true
+        :available
     end
+  end
+
+  # Is a non-empty webhook signing secret wired? Read at call time, same seam
+  # `StripeGateway.verify_webhook/2` reads — if this is false that function
+  # returns {:error, :no_secret} for every event, forever.
+  @spec webhook_secret?() :: boolean()
+  defp webhook_secret? do
+    secret =
+      Application.get_env(:barkpark_cloud, BarkparkCloud.Billing.StripeGateway, [])
+      |> Keyword.get(:webhook_secret)
+
+    is_binary(secret) and secret != ""
   end
 
   @doc """

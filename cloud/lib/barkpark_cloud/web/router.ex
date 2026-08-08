@@ -1816,10 +1816,19 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/subscription → 200 {subscription: {plan, status, started_at} | nil}.
+  # GET /v1/subscription → 200 {subscription: {plan, status, started_at} | nil,
+  #                             billing_capability: {checkout, plans}}.
   # The Billing view reads this to show the REAL current plan (and gate the
   # already-subscribed state) instead of hardcoding "Free = current plan". A
   # team with no active subscription gets {subscription: nil}.
+  #
+  # D554 — `billing_capability` is a TOP-LEVEL SIBLING, not a field inside
+  # `subscription`, precisely so it is present in the `{subscription: nil}` arm:
+  # that is the arm the UNSUBSCRIBED owner staring at the Subscribe button gets,
+  # and it is the only one where knowing whether checkout can work MATTERS. It
+  # rides this route (not /v1/me — see that route's comment: "Membership is the
+  # whole scope") because the fact is "whether a subscription can be created",
+  # and renderBilling already reads here, so it costs zero new round-trips.
   get "/v1/subscription" do
     conn = Auth.require_user(conn, [])
 
@@ -1828,14 +1837,20 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       is_nil(conn.assigns.current_team) ->
-        json(conn, 200, %{subscription: nil})
+        json(conn, 200, %{subscription: nil, billing_capability: billing_capability_json()})
 
       true ->
         # The LIVE subscription (active OR past_due) so the Billing view shows a
         # paying-but-in-dunning customer their real plan + status, not "no plan".
         case Billing.live_subscription(conn.assigns.current_team) do
-          nil -> json(conn, 200, %{subscription: nil})
-          sub -> json(conn, 200, %{subscription: subscription_json(sub)})
+          nil ->
+            json(conn, 200, %{subscription: nil, billing_capability: billing_capability_json()})
+
+          sub ->
+            json(conn, 200, %{
+              subscription: subscription_json(sub),
+              billing_capability: billing_capability_json()
+            })
         end
     end
   end
@@ -5379,6 +5394,14 @@ defmodule BarkparkCloud.Web.Router do
             else
               json(conn, 422, %{error: "billing_not_configured"})
             end
+
+          {:error, :billing_not_configured} ->
+            # D553: the plan IS priced, but the deploy could never honour the
+            # charge (no webhook secret → the activation event can never
+            # verify). Billing.checkout/2 refuses BEFORE a session is created,
+            # so no card is touched; the owner gets the same operator-actionable
+            # error the never-wired case already had.
+            json(conn, 422, %{error: "billing_not_configured"})
 
           {:error, reason} ->
             json(conn, 422, %{error: "checkout_failed", reason: inspect(reason)})
@@ -9314,6 +9337,19 @@ defmodule BarkparkCloud.Web.Router do
       last_step: status.last_step,
       all_done: status.all_done?,
       steps: Enum.map(status.steps, &%{key: &1.key, done: &1.done})
+    }
+  end
+
+  # D554: what this deploy can actually do about money, declared BEFORE the
+  # click instead of only in the 422 after it. Both values are computed by
+  # CALLING the context (`checkout_capability/0`, `priced_plans/0`) — never a
+  # constant — so the wire cannot claim a capability the server does not have.
+  # No secrets: the enum says whether a secret exists, never its value, and the
+  # plan keys are the public tier names, never gateway price ids.
+  defp billing_capability_json do
+    %{
+      checkout: Atom.to_string(Billing.checkout_capability()),
+      plans: Billing.priced_plans()
     }
   end
 
