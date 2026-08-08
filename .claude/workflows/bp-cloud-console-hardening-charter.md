@@ -2552,6 +2552,81 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-08 — wave 53 REVIEW — grade A- — four round-1 slices built, reviewed, re-gated against current `origin/main`, pushed and PR'd; ZERO reviewer code fixes; two round-2 slices deferred by design
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer (on the branch merged with current `origin/main`) |
+|---|---|---|---|---|
+| CROWN, honest half — the console stops claiming three custodies the plane cannot perform | `cch-w53-s1-console-stops-claiming-three-custodies-it-cannot-perform` | `loop-epic/crown-honest-half-the-console-stops-clai-0-r` | see PR table below | `node --check` 0; `__app.test.mjs` **1013 pass / 0 fail**; smoke 110/110 scenarios; breakpoint-sweep coverage OK; `__css_check` 0 errors; `__binding_census` 79/79 |
+| CROWN, the guard — a CP→worker claim payload manifest | `cch-w53-s2-cp-worker-claim-payload-manifest` | `loop-epic/crown-the-guard-a-cp-to-worker-claim-pay-1-r` | see PR table below | **51 tests / 0 failures**; `cloud-path-escape-check.sh` exit 0; `--selftest` **159 passed / 0 failed**; reviewer mutation (delete `internal/provisioner/**` from CLOUD_PATHS) REDS ARM 6 naming the dispatcher |
+| The audit census stops excusing four verbs with three false rationales | `cch-w53-s3-audit-census-false-rationales-and-the-twofa-producers` | `loop-epic/the-audit-census-stops-excusing-four-ver-2-r` | see PR table below | **201 tests / 0 failures**; `mix format --check-formatted` clean; `mix compile --warnings-as-errors` clean |
+| The guard suite stops exiting green after running a third of itself | `cch-w53-s5-guard-suite-vacuous-green-and-the-blocking-label` | `loop-epic/the-guard-suite-stops-exiting-green-afte-3-r` | see PR table below | **170 passed / 0 failed** full, **166 passed / 0 failed** hermetic, in a real worktree; `sh …` → **exit 2, zero assertions**; `zsh …` → **exit 2** |
+
+**What landed.** The wave's axis — *a surface, or a gate, that certifies something nothing behind it can support* — paid
+in four registers, and every payment carries a pin that can lose.
+
+(1) **THE CROWN'S HONEST HALF.** Three custody claims retracted, each previously pinned by NOTHING (the prescribed
+edits were free-green at 1007/1007, which is exactly why each retraction had to ADD a pin). The env-var surface stops
+claiming boot-time injection in BOTH files — `app.js`'s `envVarsPanelHtml` and, independently, `index.html`'s
+`#view-env` header, which renders before `app.js` paints and survives every panel error state — and the delete sheet
+stops claiming a containment (`removes it from every instance at the next boot`) that nothing performs, while
+`can't be recovered` survives byte-identical because three live smoke pins read it. Sign-out-everywhere drops
+`immediately` and writes **no** replacement timing word, because `within 25 seconds` would be false until the round-2
+mechanism slice lands. The 2FA on-state is qualified to password sign-in. Six new tests, three of them NEGATIVE
+(`ENV_CUSTODY_LIES`), plus a defensive `two_factor` branch in `bootOAuth` routed through the same `loginResponseKind`
+classifier both password-login submit sites use — unreachable until s6 lands, by design, so s6 does not become a
+permanent dead end.
+
+(2) **THE CROWN'S GUARD.** A CP→worker claim payload manifest: Side A is a real 200 through `Plug.Test` on the
+provision / support / resurrect claim routes (11, 12 and 12 captured keys, fixtures making `kind`/`credentials`/
+`bundle_ref`/`env`/`template` real), Side B is PER-DECODE-SITE across six `json.Unmarshal` sites in
+`internal/provisioner` including the inline anonymous "tolerated dialect" — and both rivals are refuted IN-SUITE
+rather than asserted, `@known_open` is a MapSet EQUALITY on the ruled six, `@custody_ineligible` (env, agent_token,
+credentials) is its own pinned list, and `internal/provisioner/**` joins `CLOUD_PATHS` with the ratchet's own census
+asserted to CONTAIN the Go root so the WIRING can lose too.
+
+(3) **THE AUDIT REGISTER.** `twofa.enabled` / `twofa.disabled` get producers — post-commit, best-effort, and
+FAIL-CLOSED on the real `Accounts.primary_team/1 == nil` path (proven by two tests asserting 200 + real recovery codes
++ 2FA actually on + a logged SKIP), with `twofa.disabled` gated on 2FA having actually been enabled so the idempotent
+no-op writes no row. The two surviving `@producerless` rationales are rewritten to their TRUE reasons, and every entry
+becomes `%{reason, anchor, blocker_absent}` with three tests that CONSUME the values — the arm wave 51 did not have,
+where four rationales were inert strings read only by `Map.keys/1` and three of them were false against routes on the
+same tree.
+
+(4) **THE GUARD SUITE.** `sh scripts/required-checks.test.sh` — the literal invocation this epic's own strategic
+direction prints — ran 68 of 170 assertions, died on a process substitution, and **exited 0**. A shebang-independent
+interpreter guard now refuses (exit 2, naming bash) before the first assertion. And `required-checks-drift.yml:9`
+stops calling its own job BLOCKING, reusing `docs/ops/merge-gates.md`'s existing wording rather than minting a third
+phrasing; no attempt to register the context, which is a protection change and a lead call.
+
+**Reviewer's own work.** Zero code fixes were needed — a first for this epic at this slice count. What the review
+added instead: every `-r` branch was MERGED WITH CURRENT `origin/main` (the builders based off `b402c0083`, four
+commits back, and `8251f3a5c` had since touched `router.ex` and `failure_copy.ex`) and its gate re-run on the merged
+tree, all four green; the s2 CI-wiring guard was independently mutation-killed; and the ledger row
+`cch-w51-bl-two-factor-and-identity-changes-leave-no-audit-trail` — which the s3 brief said the slice CLAIMED, but
+which the builder correctly refused to stamp holding no claim — was claimed and stamped 4/4 against `71a288c49`,
+lifecycle left `in_progress` for the lead to close on merge.
+
+**What the next wave must know.**
+
+- **DISPATCH ORDER IS LAW.** Merge round 1 first. Then `cch-w53-s4-sign-out-everywhere-ends-the-live-stream` once
+  s3 is on main (both edit `router.ex` + `accounts.ex`), and `cch-w53-s6-oauth-exchange-stops-skipping-two-factor`
+  once BOTH s1 and s3 are on main (s6's refusal has no console renderer without s1's defensive branch). Both are
+  filed, published, unclaimed, honestly at 0/11.
+- **THREE HIGH-FLIP-RISK JUDGMENTS ARE OWED AN INDEPENDENT SECOND REVIEWER** before merge (E2, a manual lead step):
+  s2's CI-wiring judgment, s4's session-revocation judgment, s6's refusal-shape judgment.
+- **Three named residues, none of them defects shipping to a user.** (a) s2's `@reserved` mechanism is FAIL-CLOSED and
+  cannot currently pass — `app.js` exports no `claimKeyVocabulary` on `__bpTestHook`, so no forward-compat key has a
+  path to a reserved row until the console publishes its vocabulary; a future author under time pressure may weaken R2
+  rather than add the export. (b) s2's deprovision and attach-domain decode sites have pins but no Side-A pairing.
+  (c) s5 corrected the workflow header rather than widening §20 to police workflow-level BLOCKING labels, so nothing
+  yet prevents a future header from re-asserting it — filed as the durable fix.
+- **The env-var product call is now the loudest open question.** The panel currently tells a user, honestly, that a
+  shipped feature does nothing. That is the correct copy for today's mechanism and it is not a good end state;
+  `cch-w53-bl-env-var-round-2-product-call` is the lead's, and it is a migration.
+- D601's stale `164` baseline needs no charter edit — **D614 already carries the correction** (170/0 full, 166/0
+  hermetic in a real worktree; 164/2 is the `git archive` extract artifact). Do not reword D601: §18's census key is
+  content-hashed and four charter lines are pinned.
+
 ### 2026-08-08 — wave 52 REVIEW — grade A — five round-1 slices built, reviewed, gated, pushed and PR'd; two reviewer fixes
 
 | Slice | Task | Final branch | PR | Gate re-run by the reviewer |
