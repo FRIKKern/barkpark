@@ -2726,6 +2726,95 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-08 — wave 56 REVIEW — grade A− — five round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; four reviewer commits; one round-2 slice deferred by design; the wave's own instrument was the biggest thing it fixed
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| The crown unblock — `:fence` SPLITS rather than moving wholesale | `cch-w55-f1-rederive-lifecycle-manifest-after-10848` | `loop-epic/the-crown-unblock-fence-splits-rather-th-0-r`, fast-forwarded onto #10847's own branch | #10847 (pre-existing; this is the commit that turns it green) | `lifecycle_state_manifest_test.exs` + `sold_capability_manifest_test.exs` **14 / 0**; reviewer mutation (registry.ex:3209 → `{:error, :not_live}`) reds by name |
+| The clock column stops being a constant | `cch-w56-s2-the-clock-column-stops-being-a-constant` | `loop-epic/the-clock-column-stops-being-a-constant--1-r` (builder's commit unchanged) | new PR | `promise_actor_manifest_test.exs` **7 / 0**; escape check **10 reads, OK**; selftest **160 / 0** |
+| The operator fleet-digest log returns its own rows | `cch-w56-s3-the-operator-digest-log-can-return-its-own-rows` | `loop-epic/the-operator-fleet-digest-log-can-return-2-r` | new PR | `router_operator_test.exs` + `notifications_test.exs` **44 / 0**; `__app.test.mjs` **1018 / 0**; smoke **110 scenarios**; `mix format --check-formatted` clean AFTER the reviewer's format commit |
+| The PR task gate stops concluding success having evaluated nothing | `cch-w56-s4-the-task-gate-stops-passing-having-evaluated-nothing` | `loop-epic/the-pr-task-gate-stops-concluding-succes-3-r` | new PR | `pr-task-gate.test.sh` **90 / 0**; `required-checks-verify.sh` OK; `required-checks.test.sh` **170 / 0**; `check-doc-budgets.sh` PASS |
+| A compliance guard nothing in production can call | `cch-w56-s5-a-compliance-guard-nothing-in-production-can-call` | `loop-epic/reveal-env-var-enforces-write-once-on-a--4-r` | new PR | `registry_env_var_test.exs` + `claim_payload_manifest_test.exs` **48 / 0**; `go build ./...` ok; `go vet ./internal/provisioner/...` ok |
+
+All five merge cleanly onto `origin/main` and onto each other — test-merged in one integration branch, **89 Elixir tests / 0
+failures, 1018 JS assertions / 0, 110 preview scenarios, escape census OK**. No cross-slice conflicts; `router.ex` is
+touched by two slices in regions ~7 000 lines apart.
+
+**What landed.**
+
+(1) **THE INSTRUMENT'S OWN NULLARY CONSTANT (D649).** `resolve_clock(:synchronous)` took no subject, read no config and
+touched no DB — verify had SWAPPED the clock labels between a genuinely-absent row and a genuinely in-band one and the
+suite stayed 6/6 green. It is DELETED with no fallback clause, replaced by `{:in_band, subject}` resolvers that run the
+named guard with BOTH controls, and by `{:external_armed_here, path, literal, cadence}` whose cadence payload loses in
+both directions — an invented `{:cadence,"90d"}` reds, and a lazily-declared `:no_cadence_in_tree` on a cadence-bearing
+file reds too, closing a hole the `elem/2` taxonomy pin structurally cannot see. Four rows land (invitation expiry,
+password-reset expiry asserting the EFFECT, Caddy auto-TLS, the hardened `:crontab_absent` row) and `:crontab_absent` /
+`:external_only` now carry a REQUIRED zero-hit search that also reds on an empty corpus, so "absent" can no longer be
+reached by failing to look.
+
+(2) **THE CROWN UNBLOCK, SPLIT NOT RECLASSIFIED (D648).** `:cp_access_fence` (non-halting, what #10848's
+`mint_studio_link` refusal actually built) and `:traffic_fence` (halting, declared-empty). Accepting `:fence` as halting
+would have taken all three rows into the CROWN's else-branch and deleted the `refute word =~ @halt_words` check — this
+epic's thesis killed by this epic's own crown. **HIGH-FLIP-RISK, and an independent second reviewer is genuinely owed**:
+"is withholding a credential a halt?" has a defensible opposite reading (a customer whose only route in was the studio
+link experiences the refusal as a stop).
+
+(3) **THE OPERATOR LOG THAT COULD NEVER RETURN ITS OWN ROWS.** `is_nil(d.team_id) and event == "fleet_digest"` could not
+intersect a writer whose `is_binary(team_id)` guard makes the nil-team shape unreachable by construction — the card was
+empty forever on a fleet that mails a digest every morning, and the old test was 8/8 green under BOTH readers because its
+fixtures hand-built a shape `record_delivery/5` can never write. Now the tests DRIVE `deliver_fleet_digest/1` and dispatch
+the real route. **HIGH-FLIP-RISK: tenancy** — the operator page is now cross-team and carries every team's member
+addresses behind `require_platform_operator` alone. Re-derived independently at review and concurred: the route was
+already operator-gated and `/v1/operator/fleet` is cross-team by name, but the cheaper retreat if a second reviewer balks
+is a per-team `?team_id=` view.
+
+(4) **A REQUIRED CONTEXT THAT DISCLOSED NOTHING (S4).** The grandfather arm skipped every evaluating step and concluded
+SUCCESS having verified no task, with no annotation — the only required context with no nothing-dispatched disclosure. It
+now emits one, on the annotation channel that actually reaches the check-run API, and it is deliberately NOT worded
+"nothing ran" (that phrase is §21's roster key for path-gated aggregators). More important: the cutoff's grandfather
+predicate was a hard-coded literal path to its OWN file, so one rename would have grandfathered the entire open-PR fleet
+while the renaming PR grandfathered itself. The path is now self-checked at HEAD and **fails closed**. Day-one residue
+re-derived at 39/39 open PRs carrying the file — the fail-closed arm stalls nothing today. **This is merge authority
+under `enforce_admins:true` and warrants an independent read of the cutoff step before merge.**
+
+(5) **A GUARD THAT COULD NOT LOSE.** `reveal_env_var/1`'s `{:error, :write_once}` had zero non-test callers on an HTTP
+surface with no reveal route — the only thing that could make it fire was the test asserting it. Deleted, with the
+reasoning recorded at the deletion site; write-once still holds on `put_env_var/2`, where a caller can actually reach it.
+
+**Reviewer commits (four).** (a) `lifecycle_state_manifest_test.exs`: `fence_verdict/2` reported `:fence` for ANY
+post-producer refusal, so a producer that broke the row some other way scored a `:cp_access_fence` the class had not
+earned — against the file's own written promise that it "refuses to report a fence it cannot attribute". The FENCE arm now
+pins the reason to `:suspended`; mutation-proven. (b) `router_operator_test.exs` shipped three lines over the formatter's
+width — `mix format --check-formatted` reds, which is a blocking arm of the Cloud gate. (c) **The gofmt exclusion row
+carried a false durability promise**: it claimed hand-added exclusions "survive regeneration (the emit is a MERGE, not an
+overwrite)". `required-checks-generate.sh` merges `_readme` and unions the CHECK LIST base-first, but emits
+`exclusions: $exclusions` from the array THIS run derived and never reads `$b.exclusions` — and a paths-filtered name can
+never re-enter the derived array, because stage 2 iterates only names that RENDERED on sampled main heads. The next
+regeneration drops the row silently, by the same mechanism that already took four names. Both prose sites corrected; the
+generator fix filed as `cch-w56-bl-exclusions-are-overwritten-not-merged`. (d) **Three live "env reaches the box"
+claims retracted in `lib`.** Slice 5's own commit quotes `worker.go` as proof that `JobSpec` declares no `env` field, then
+left `registry.ex`'s `resolved_env_for_barkpark/1` @doc ("This is the injection payload … so the values reach the box's
+runtime env"), `registry/env_var.ex`'s moduledoc, and `router.ex`'s claim-payload comment ("The worker bakes these into
+the box's runtime env at provision time … the one place the plaintext must exist so the values can reach the instance")
+standing. The console has been honest since cch-w53-s1; `lib` was still asserting the opposite in three places, and
+`claim_payload_manifest_test.exs` ARM 1 already refuted them mechanically. Retracted, and the router comment now names
+that manifest — which discharges both criteria of `cch-w54-bl-the-server-comment-still-asserts-env-delivery-to-the-box`
+(stamped, left `in_progress` for the lead to close on merge).
+
+**Ledger.** All five slice tasks are `in_progress` with evidence stamped as the builders worked, merge-gated criteria left
+open for the lead: f1 10/11, s2 12/13, s3 6/9 (5, 6 are PR-body obligations the builder honestly `--miss`-noted, 8
+merge-gated), s4 9/11, s5 8/9. `cch-w54-s5` (round 2) correctly still `open`. No lies found; no task outside this wave
+touched. Two ledger writes made: the new backlog row above, and the two stamps on the env-comment task.
+
+**What the next wave should take.** Round 2 first: `cch-w54-s5-the-dunning-grace-clock-names-a-day-nothing-acts-on`,
+which must branch from `main` only AFTER #10847 lands (it rewrites `app.js` at exactly `overviewDunningBannerHtml`).
+Then the two the reviewer surfaced: `cch-w56-bl-exclusions-are-overwritten-not-merged` (a merge-authority census that
+silently loses its own rows) and the env-var product call — the values are stored, encrypted, tenancy-scoped and
+**delivered to nothing**, which is now honestly documented everywhere and still a feature the console sells. Also open and
+sharp: `cch-w56-bl-the-register-has-no-add-direction-so-the-thesis-is-uncertifiable` — both manifests iterate their own
+`@register`, so a console promise nobody wrote down is UNEXAMINED, not verified-absent. Paper:
+`cloud-console-hardening-wave-56-2026-08-08`.
+
 ### 2026-08-08 — wave 55 REVIEW — grade A — five round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; two reviewer commits; two round-2 slices deferred by design; the crown is still blocked, by a sibling, not by this wave
 
 | Slice | Task | Final branch | PR | Gate re-run by the reviewer |
