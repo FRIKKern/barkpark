@@ -2644,6 +2644,87 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-08 — wave 55 REVIEW — grade A — five round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; two reviewer commits; two round-2 slices deferred by design; the crown is still blocked, by a sibling, not by this wave
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| A `mix format` on one file unblocks the wave-54 crown | `cch-w55-s1-format-unblocks-the-wave-54-crown` | `loop-epic/the-console-stops-painting-a-stop-nothin-0` (pushed onto the EXISTING branch, no new PR by design) | #10847 (pre-existing) | `mix format --check-formatted` clean; `mix compile --warnings-as-errors` clean; diff re-read and confirmed token-identical |
+| The console stops prescribing a remedy that increases the bill | `cch-w55-s2-archive-does-not-stop-paying` | `loop-epic/the-console-stops-prescribing-a-remedy-t-1` (builder's commit unchanged) | #10956 | `failure_copy_test.exs` **116 / 0**; smoke **110 scenarios rc=0**; `go build ./...` ok; `go test ./internal/cli/cloud/...` ok; `mix format` clean |
+| Four console assertions the plane cannot support | `cch-w55-s3-four-console-assertions-the-plane-cannot-support` | `loop-epic/the-console-stops-asserting-four-things--2-r` | #10957 | `node --check` clean; `__app.test.mjs` **1015 pass / 0 fail**; smoke **110 scenarios** |
+| A paid invoice lifts only billing suspensions + the promise-actor register | `cch-w55-s4-the-resume-narrowing-and-the-promise-actor-register` | `loop-epic/paying-a-failed-invoice-stops-lifting-qu-3-r` | #10959 | `mix format --check-formatted` clean; **`mix test` 3386 tests / 0 failures**; reviewer mutation reds `billing_lifecycle_test.exs` 34/2 |
+| The wave-54 arrears pays eight rows | `cch-w55-s5-the-wave-54-arrears-pays-eight-rows` | `loop-epic/the-ledger-arrears-six-shipped-but-open--4` (builder's commit unchanged) | #10962 | census command runs (740 published / 372 live at review time); receipt file present |
+
+**What landed.** The wave's axis — *find the places where the Console, the control plane, or their gates tell a user or
+a merge something they cannot support, and fix them with guards that can lose* — paid in five registers.
+
+(1) **THE REMEDY THAT INCREASED THE BILL.** `capability_gap_reason("hetzner","pause")` told an operator to *"Archive it
+to stop paying"* while the console rendered `bp cloud instance archive Production` as a live chip beside it. Grounded
+in the **vendor page**, not repo self-consistency: Hetzner bills a server "for as long as it exists, regardless of
+whether it is turned on or not" AND bills snapshots "per gigabyte per month", and no archive path in this tree touches
+power or existence — so the prescribed remedy strictly INCREASED the bill. `assert reason =~ "Archive"` was REWRITTEN,
+never deleted, and the arm now records why it passed for the whole time the sentence was false. Mutation-proven twice,
+in both directions.
+
+(2) **FOUR CONSOLE ASSERTIONS.** The onboarding runway's *"We'll notice automatically"* (no `record_event` call site
+writes `"content"`; the agent has no content endpoint; `{action:"skip"}` is the only onboarding action the console
+POSTs — the string was pinned by NOTHING, so the retraction ships the first pin). The non-owner trial card, which
+withheld the teardown sentence the owner card and BOTH notification renderers carry — the one person who can neither
+subscribe nor save the box was the only one told just the pleasant half; both taglines are now pinned as a PAIR. The
+fleet-digest empty state, which asserted a send history it structurally cannot read (writer stamps a real `team_id`,
+this reader filters `is_nil(team_id)` — predicates that cannot intersect), with the backed `06:00 UTC` clock KEPT. And
+a preview fixture vouching for a `suspended_reason` no producer writes. **No producer was built for any of them** —
+the wave retracted claims rather than manufacturing backing, which is the correct shape.
+
+(3) **THE OVER-GRANT.** `resume_team_barkparks/1` filtered only `team_id and suspended == true` while its suspend twin
+filtered reason AND mode, so paying a failed invoice cleared `quota_exceeded` flags a downgrade had set — a downgraded
+team ran **5 live boxes on a 3-box plan** with nothing scheduled to take them back — and revived `self_hosted` rows the
+suspend side returns count 0 on. `resume_billing_suspended/1` narrows both call sites, and deliberately lifts BOTH
+billing reasons: the `billing_lapsed`-only filter first filed on #10558 would have stranded every grace-elapsed payer
+forever (D632), trading an over-grant for a permanent under-restore.
+
+(4) **THE PROMISE-ACTOR REGISTER**, the epic's sixth guard, keyed on `(reason, transition) → (clock, actor, effect)`.
+Its CLOCK is a full-crontab EQUALITY read off `Application.get_env`, never a module-name regex an `ArrearsWorker` would
+walk past; its ACTOR on the discharged row is the real producer RUN with an observer pre-armed — and D635 is
+*demonstrated inside the wave* rather than cited: neutering `TrialExpiryWorker.perform/1` left the sibling manifest at
+6/6 green while this register went red.
+
+(5) **THE ARREARS.** Six shipped-but-open rows closed against four-way-verified carriers, **two spared** because their
+last criterion is a conjunction no merge sha can satisfy. The spare is the finding: closing them would have stamped a
+criterion never met.
+
+**Reviewer's own work.** Two commits. On s3's branch: `app.js`'s `lifecycleActionRowHtml` comment paraphrased the very
+remedy s2 retracts, and `app.js` is outside s2's fence — the two slices would otherwise have merged with the console's
+own source quoting the false remedy back at the next reader (this discharges the filed row
+`cch-w55-bl-app-js-comment-quotes-the-retracted-pause-sentence`). On s4's branch: three suspension docs, two of them
+false BEFORE this wave — most sharply `registry/barkpark.ex`'s schema doc asserting `suspended_reason` **is** the two
+billing values, when the quota reconciler writes a third. **That doc was the bug's premise**: a reader trusting the
+two-value enum writes exactly the reason-blind resume this wave removed. Also independently re-derived s4's
+HIGH-FLIP-RISK entitlement judgment by enumerating every writer of the column (two bulk reasons, one single-row
+`quota_exceeded`, no third writer, no admin route, no migration) — **confirmed** — and re-measured the mutation rather
+than quoting it. All three sibling branches test-merged cleanly and were green after the merge.
+
+**What did NOT land, and the lead must know it.** `cch-w55-s1` did its job — the format job on #10847 flipped to
+SUCCESS on the exact commit it pushed — but **#10847 is still RED and still blocks the crown**: `Cloud control-plane
+(test)` now fails because sibling wave-54 slice `cch-w54-s2` (#10848) merged to main after that branch was last green
+and fences `mint_studio_link` on suspended. That is the wave-54 manifest guard *correctly losing* against work that
+landed beside it — a guard that can lose, losing — and the builder rightly refused to re-derive a hand-derived manifest
+inside a formatting commit. Filed as `cch-w55-f1-rederive-lifecycle-manifest-after-10848` (priority 0).
+
+**Ledger.** Clean, and the best this epic has recorded: all five slice tasks `in_progress`, published, wave Paper
+linked, N−1 criteria stamped with real run output, and ONLY the explicitly merge-gated criterion left open for the
+lead on each. `cch-w50-bl-resume-billing-suspended-narrowing` was claimed and stamped rather than duplicated, and its
+one unbuilt criterion (the unpaired-broadcast pin) is honestly left OPEN. No task outside this wave was mutated. Zero
+reviewer ledger corrections were required.
+
+**Next wave takes**, in this dispatch order: (1) MERGE round 1 — #10956, #10957, #10959, #10962 — then dispatch the two
+deferred rows as their deps land: `cch-w54-s5-the-dunning-grace-clock-names-a-day-nothing-acts-on` (#10802, after s1
+and s3) and `cch-w50-bl-fifteen-lapsed-trials-still-read-active-so-the-reminder-copy-never-stops` (#10550, after s3).
+(2) `cch-w55-f1` — the crown stays blocked until the lifecycle manifest is re-derived by hand against #10848.
+(3) `cch-bl-merge-gated-override-cannot-tell-a-lead-from-a-builder` — `--merge-gated` is a bare flag with **no
+authority check**, which is this epic's own thesis pointed at its own ledger tooling. (4) The two spared wave-53 rows,
+which a lead who knows who reviewed #10849/#10850 can close in a minute. (5) The durable shape behind s4: a reason
+ALLOWLIST on the schema, so a fourth billing-ish reason cannot silently strand a paying customer's box.
+
 ### 2026-08-08 — wave 53 REVIEW — grade A- — four round-1 slices built, reviewed, re-gated against current `origin/main`, pushed and PR'd; ZERO reviewer code fixes; two round-2 slices deferred by design
 
 | Slice | Task | Final branch | PR | Gate re-run by the reviewer (on the branch merged with current `origin/main`) |
