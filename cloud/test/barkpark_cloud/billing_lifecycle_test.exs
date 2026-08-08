@@ -430,6 +430,143 @@ defmodule BarkparkCloud.BillingLifecycleTest do
     end
   end
 
+  ## ── cch-w55-s4: a paid invoice lifts the BILLING axis, and only that ──
+
+  # THE OVER-GRANT THESE PIN. `Registry.resume_team_barkparks/1`'s entire where
+  # clause is `team_id and suspended == true` — no reason scope, no mode scope,
+  # while its suspend twin has both. Both billing recovery paths called it, and
+  # `recover_subscription/1` had NOTHING behind it (unlike
+  # do_activate_from_session, whose reconcile re-stamps the overflow). So paying
+  # a failed invoice cleared `quota_exceeded` flags a downgrade had set, with
+  # nothing scheduled to take that capacity back, and revived `self_hosted` rows
+  # the suspend side refuses to touch.
+  #
+  # Each test below reds if `resume_billing_suspended/1` is reverted to the blind
+  # resume (measured: 3 failures, with the counts named in the messages).
+  describe "invoice.paid recovery is reason- and mode-scoped (cch-w55-s4)" do
+    defp live_bps(team), do: Registry.list_barkparks(team) |> Enum.reject(& &1.suspended)
+
+    # Drive `sub` into dunning and past grace, so the team's managed boxes carry
+    # `billing_past_due` — the real path a paid invoice recovers from.
+    defp lapse_into_past_due(sub) do
+      {:ok, _} =
+        Billing.handle_webhook(event("invoice.payment_failed", sub.gateway_customer_id), sig())
+
+      past = DateTime.add(DateTime.utc_now(), -1, :day)
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
+      :ok
+    end
+
+    test "a quota_exceeded box is NOT lifted by a paid invoice, and nothing is scheduled to re-suspend it" do
+      {team, sub} = subscribed_team("supporter")
+      quota_bp = barkpark_fixture(team)
+
+      {:ok, _} = Registry.suspend_barkpark(quota_bp, Billing.quota_suspended_reason())
+      assert reload_bp(quota_bp).suspended_reason == "quota_exceeded"
+
+      lapse_into_past_due(sub)
+
+      assert {:ok, %Subscription{status: "active", past_due: false}} =
+               Billing.handle_webhook(event("invoice.paid", sub.gateway_customer_id), sig())
+
+      assert %Barkpark{suspended: true, suspended_reason: "quota_exceeded"} = reload_bp(quota_bp),
+             "paying a failed invoice lifted a QUOTA suspension the billing axis never set — " <>
+               "and no reconcile runs behind recover_subscription/1, so nothing takes that " <>
+               "capacity back"
+
+      # There is no worker to re-suspend it either: the resume must simply not
+      # have touched the row.
+      assert [] == Repo.all(from(j in Oban.Job, select: j.worker)),
+             "nothing is enqueued to re-suspend an over-granted box — the resume itself must be scoped"
+    end
+
+    test "a billing_past_due box IS lifted by a paid invoice (the narrowing must not strand a payer)" do
+      {team, sub} = subscribed_team("supporter")
+      bp = barkpark_fixture(team)
+
+      lapse_into_past_due(sub)
+      assert %Barkpark{suspended: true, suspended_reason: "billing_past_due"} = reload_bp(bp)
+
+      assert {:ok, %Subscription{status: "active"}} =
+               Billing.handle_webhook(event("invoice.paid", sub.gateway_customer_id), sig())
+
+      assert %Barkpark{suspended: false, suspended_reason: nil} = reload_bp(bp),
+             "a resume scoped to billing_lapsed ALONE strands every grace-elapsed box forever — " <>
+               "the over-grant traded for a permanent under-restore"
+    end
+
+    test "a downgraded team is NOT running 5 boxes on a 3-box plan after a past_due → paid cycle" do
+      {team, sub} = subscribed_team("support_plus")
+      for _ <- 1..5, do: barkpark_fixture(team)
+      assert length(live_bps(team)) == 5
+
+      # The downgrade the reconciler enforces: 5 live, ceiling 3 → 2 suspended
+      # as `quota_exceeded`. No billing suspension anywhere in this fixture.
+      # The DOWNGRADE (support_plus → supporter, ceiling 10 → 3). Overflow is
+      # only reachable this way: register_barkpark/2 enforces the ceiling on
+      # create.
+      {:ok, _} = sub |> Subscription.changeset(%{plan: "supporter"}) |> Repo.update()
+      assert Billing.barkpark_limit(team) == 3
+      assert %{suspended: 2, restored: 0} = Billing.reconcile_plan_limit(team)
+      assert length(live_bps(team)) == 3
+
+      # A merely past_due → paid cycle. It must settle billing, not hand back
+      # the two boxes the plan does not cover.
+      lapse_into_past_due(sub)
+
+      assert {:ok, %Subscription{status: "active"}} =
+               Billing.handle_webhook(event("invoice.paid", sub.gateway_customer_id), sig())
+
+      live = length(live_bps(team))
+
+      assert live == 3,
+             "supporter's ceiling is 3; paying a failed invoice left #{live} boxes running — " <>
+               "the blind resume cleared the downgrade's quota flags for free"
+    end
+
+    test "a self_hosted row the suspend path refuses to touch is not revived by the billing resume" do
+      team = team_fixture()
+      managed = barkpark_fixture(team, %{mode: "managed"})
+      self_hosted = barkpark_fixture(team, %{mode: "self_hosted"})
+
+      # The mode asymmetry, stated by running: the suspend side reports 1, not 2.
+      assert {:ok, 1} = Registry.suspend_team_barkparks(team, "billing_lapsed")
+      refute reload_bp(self_hosted).suspended
+
+      # Suspend the self_hosted row by another route entirely, so the resume has
+      # something out-of-axis to (wrongly) revive.
+      {:ok, _} = Registry.suspend_barkpark(self_hosted, "billing_lapsed")
+      assert reload_bp(self_hosted).suspended
+
+      assert {:ok, 1} = Registry.resume_billing_suspended(team),
+             "the billing resume must be mode-scoped like its suspend twin — one managed row"
+
+      refute reload_bp(managed).suspended
+
+      assert reload_bp(self_hosted).suspended,
+             "resume revived a self_hosted row that suspend_team_barkparks/2 returns count 0 on"
+    end
+
+    test "resume_billing_suspended/1 is idempotent and lifts neither quota nor foreign teams" do
+      team = team_fixture()
+      other = team_fixture()
+      lapsed = barkpark_fixture(team)
+      quota = barkpark_fixture(team)
+      foreign = barkpark_fixture(other)
+
+      {:ok, _} = Registry.suspend_barkpark(lapsed, "billing_lapsed")
+      {:ok, _} = Registry.suspend_barkpark(quota, Billing.quota_suspended_reason())
+      {:ok, _} = Registry.suspend_barkpark(foreign, "billing_lapsed")
+
+      assert {:ok, 1} = Registry.resume_billing_suspended(team)
+      assert {:ok, 0} = Registry.resume_billing_suspended(team)
+
+      refute reload_bp(lapsed).suspended
+      assert reload_bp(quota).suspended
+      assert reload_bp(foreign).suspended
+    end
+  end
+
   ## ── Registry suspension primitives ──
 
   describe "Registry.suspend_team_barkparks/2 + resume_team_barkparks/1" do

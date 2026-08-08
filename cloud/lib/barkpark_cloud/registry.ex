@@ -904,12 +904,64 @@ defmodule BarkparkCloud.Registry do
     {:ok, count}
   end
 
+  @doc """
+  cch-w55-s4: lift ONLY the suspensions a paid invoice is entitled to lift — the
+  billing axis, on `mode == "managed"` rows. The reason-and-mode-scoped twin of
+  `suspend_team_barkparks/2`, and the one the billing recovery paths call.
+
+  WHY IT IS NOT `resume_team_barkparks/1`. That function's entire `where` is
+  `team_id and suspended == true`: no reason scope and no mode scope, while its
+  suspend twin has both. So a paid invoice used to clear a `"quota_exceeded"`
+  flag the billing axis never set — a team downgraded from `support_plus` to
+  `supporter` ended with FIVE live boxes on a three-box plan, with nothing
+  scheduled to re-suspend them — and it revived a `self_hosted` row that
+  `suspend_team_barkparks/2` had refused to touch (count 0).
+
+  WHY BOTH REASONS, not just `"billing_lapsed"`. `Billing.maybe_enforce/1`
+  stamps `"billing_past_due"` when a grace window elapses. A resume scoped to
+  `"billing_lapsed"` alone would strand those boxes FOREVER — trading an
+  over-grant for a permanent under-restore (it reds
+  `billing_lifecycle_test.exs`'s dunning-recovery arms). The billing axis owns
+  exactly these two reasons, and this function lifts exactly them.
+
+  One bulk `UPDATE`; idempotent (a second call clears nothing, count 0).
+  Returns `{:ok, count}`.
+  """
+  @spec resume_billing_suspended(Team.t() | binary()) :: {:ok, non_neg_integer()}
+  def resume_billing_suspended(team) do
+    tid = team_id(team)
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    {count, _} =
+      Barkpark
+      |> where(
+        [b],
+        b.team_id == ^tid and b.suspended == true and b.mode == "managed" and
+          b.suspended_reason in ["billing_lapsed", "billing_past_due"]
+      )
+      |> Repo.update_all(
+        set: [suspended: false, suspended_reason: nil, suspended_at: nil, updated_at: now]
+      )
+
+    {:ok, count}
+  end
+
   ## Quota reconciler suspension — the reversible plan-ceiling enforcement.
   #
   # A SEPARATE axis from the bulk billing-lapse suspend above: these single-row
   # helpers stamp/clear the `"quota_exceeded"` reason (driven by
-  # `Billing.reconcile_plan_limit/1`), so a downgrade suspend and a billing-lapse
-  # suspend never restore each other. All three reuse main's `suspend_changeset`
+  # `Billing.reconcile_plan_limit/1`).
+  #
+  # HOW FAR THE INDEPENDENCE ACTUALLY GOES (cch-w55-s4 retraction). This comment
+  # used to assert that "a downgrade suspend and a billing-lapse suspend never
+  # restore each other." That holds in the SUSPEND direction only: each side
+  # stamps its own reason and neither clears the other's. In the RESTORE
+  # direction it was FALSE — `resume_team_barkparks/1` is reason-blind and did
+  # clear `"quota_exceeded"` rows whenever a billing recovery ran. The billing
+  # recovery paths now call `resume_billing_suspended/1` above, which IS
+  # reason-scoped, so the independence holds both ways for those callers; a
+  # direct `resume_team_barkparks/1` call remains blanket by design and is not
+  # the billing axis. All three helpers below reuse main's `suspend_changeset`
   # and `suspended*` columns — no new schema.
 
   @doc """
