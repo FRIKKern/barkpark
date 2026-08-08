@@ -173,6 +173,32 @@ atomic_symlink_swap() { # <tmp-link> <dest-link>
 }
 
 # ---------------------------------------------------------------------------
+# THE ROUTE-MARKER PREDICATE (D345) — an IDENTITY, not a substring.
+#
+# `BARKPARK_SITE_ROUTE:<slug>` read as a bare substring is not an identity: a
+# slug can be a strict PREFIX of another slug, and then every `grep -q "$marker"`
+# and every awk `index($0, m)` matches the SIBLING'S block. Measured live on
+# guerrilla: `search` is a prefix of `search-capstone`/`search-ember`, so the
+# arm's already-armed guard kept matching the sibling and returned 0 WITHOUT
+# WRITING — 208 deploys in 36h reported SWITCH ok at exit 0 while
+# https://…/sites/search/ was a 404 the whole time (9 markers, 10 site dirs).
+#
+# `grep -qw` IS NOT THE FIX. `-w` treats `-` as a NON-word character, so
+# `…ROUTE:search` still word-matches `…ROUTE:search-capstone`. What separates
+# them is the DELIMITER: anchor the marker to whitespace-or-end-of-line. Every
+# armed block writes `# BARKPARK_SITE_ROUTE:<slug> — …`, so a space always
+# follows; a hypothetical marker at end-of-line matches too.
+#
+# Safe to interpolate raw: valid_slug() is `^[a-z0-9][a-z0-9-]{0,62}$`, which
+# carries no ERE metacharacter (a `-` outside a bracket expression is literal),
+# so the same string is a correct pattern for grep -E AND for awk's dynamic
+# regex. Both engines carry this pair verbatim — arm, disarm, the active-port
+# read and the port flip must all agree, or one of them re-opens the defect.
+# ---------------------------------------------------------------------------
+site_route_marker_re() { printf 'BARKPARK_SITE_ROUTE:%s([[:space:]]|$)' "$SITE_SLUG"; }
+has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
+
+# ---------------------------------------------------------------------------
 # The four pure state-machine primitives operate on globals ROOT / RELEASES /
 # CURRENT / BUILD_ID so --self-test can exercise the SAME code the deploy path
 # runs (no fixture fork — the test proves the real primitives).
@@ -1223,8 +1249,12 @@ FAKENPM
     # closed whitelists accept (@stage_names/@stage_statuses in deploy_runner.ex):
     # an invented word is silently DROPPED, and an unknown status renders as
     # 'pending' — a stage bar stuck forever with the deploy long finished.
+    # ROUTE is the ONE deliberate exception (D346): it is outside @stage_names ON
+    # PURPOSE so the route report can never enter `stages` or reach
+    # stage_exit_code/1, i.e. never flip a verdict. It is excluded here and
+    # asserted separately (see the ROUTE block below).
     pb_wire_whitelisted() {
-      ! grep '^BPSTAGE ' "$E2E/pb.out" \
+      ! grep '^BPSTAGE ' "$E2E/pb.out" | grep -v '^BPSTAGE name=ROUTE ' \
         | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |$)'
     }
     mk_prebuilt() { # <dir> <build_id> <body-marker>
@@ -1405,8 +1435,8 @@ FAKENPM
     check "the refusal rides the BPSTAGE detail too (dual-channel)" \
       grep -qE '^BPSTAGE name=HEALTH status=failed build_id=dp1 detail="index.html links to /d/caf%C3%A9/ .* served HTTP [0-9]+, want 200\. Re-pack and re-upload; do not retry this artifact\. Cause: a tar dropped' "$E2E/dp.out"
     check "the re-gate ran no npm (it re-gated the STAGED bytes)" [ ! -s "$DPSRC/.npm-calls" ]
-    check "every BPSTAGE name+status on the wire is still whitelisted" \
-      sh -c "! grep '^BPSTAGE ' '$E2E/dp.out' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
+    check "every BPSTAGE name+status on the wire is still whitelisted (ROUTE excepted by design)" \
+      sh -c "! grep '^BPSTAGE ' '$E2E/dp.out' | grep -v '^BPSTAGE name=ROUTE ' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
 
     # -----------------------------------------------------------------------
     # ROUTE ARMING CAN REPORT FAILURE (engine-D77 applied to the arm direction).
@@ -1450,7 +1480,27 @@ FAKENPM
     check "armed run exits 0"                            [ "$rc" = 0 ]
     check "armed run really wrote the marker into the Caddyfile" \
       grep -q 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.ok"
-    check "armed run emits NO ROUTE failure"             absent '^BPSTAGE name=ROUTE ' "$RF/ok.out"
+    check "armed run emits NO ROUTE failure"             absent '^BPSTAGE name=ROUTE status=failed' "$RF/ok.out"
+    # D346: the SUCCESS path speaks on the durable channel too. Before this, an
+    # arm outcome only ever reached the operator through log() — stdout, which
+    # nothing persists — so `route already armed` appeared ZERO times across
+    # 1,178 durable .log files on guerrilla although it MUST fire on every
+    # re-deploy of an already-armed site (astro-search alone: 244). The zero was
+    # vacuous, not healthy.
+    check "armed run emits ROUTE ok on the DURABLE machine channel (not just stdout)" \
+      grep -q '^BPSTAGE name=ROUTE status=ok build_id=rf1 detail="armed: ' "$RF/ok.out"
+    check "…and that detail names WHICH outcome and where it wrote" \
+      grep -qE '^BPSTAGE name=ROUTE status=ok build_id=rf1 detail="armed: this run wrote the BARKPARK_SITE_ROUTE:routefail handle into .*Caddyfile\.ok' "$RF/ok.out"
+    # THE RE-DEPLOY: the marker is now in the file, so this run takes the
+    # already-armed branch — the branch that fired 244 times and said nothing.
+    rc="$(rf_deploy "$RF/okbin" rf1b "$RF/Caddyfile.ok" "$RF/ok2.out")"
+    check "a RE-deploy over an armed route exits 0"      [ "$rc" = 0 ]
+    check "the already-armed branch is now VISIBLE on the durable channel" \
+      grep -q '^BPSTAGE name=ROUTE status=ok build_id=rf1b detail="already armed: ' "$RF/ok2.out"
+    check "…and it says the deploy left Caddy untouched" \
+      grep -q 'left Caddy untouched' "$RF/ok2.out"
+    check "the re-deploy still advertises the public URL (the route really is armed)" \
+      grep -q "HEALTHY — 'routefail' live at build rf1b (https://sites.example.com/sites/routefail/)" "$RF/ok2.out"
     check "armed run DOES advertise the public URL" \
       grep -q "HEALTHY — 'routefail' live at build rf1 (https://sites.example.com/sites/routefail/)" "$RF/ok.out"
     # (b) THE CASE: same engine, same bytes, a caddy that rejects. The marker
@@ -1490,6 +1540,106 @@ FAKENPM
     fi
     check "every OTHER BPSTAGE name+status on the wire is still whitelisted" \
       sh -c "! grep '^BPSTAGE ' '$RF/bad.out' | grep -v '^BPSTAGE name=ROUTE ' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
+
+    # -----------------------------------------------------------------------
+    # THE PREFIX COLLISION (D345) — the case NO test in either engine could see.
+    #
+    # LIVE SHAPE, reproduced: `search` is a strict PREFIX of `search-capstone`.
+    # On origin/main the arm's already-armed guard is a BARE substring grep, so
+    # the SECOND site here matches the FIRST site's marker, logs "route already
+    # armed", returns 0 WITHOUT WRITING, and the run signs off SWITCH ok + exit 0
+    # + a public URL over a 404. That is 208 real deploys of one live site.
+    #
+    # BOTH DIRECTIONS ARE ASSERTED, because this predicate governs the arm, the
+    # disarm and the port flip of EVERY live site's public route — a predicate
+    # that is too strict silently UN-ARMS the nine sites that work today:
+    #   (a) the prefix slug arms ITS OWN block despite the sibling's marker
+    #   (b) the exact slug still matches its own marker on a re-deploy
+    #   (c) the sibling's block is untouched (this is an ADD, not a rewrite)
+    # `grep -qw` passes NONE of these: `-w` treats `-` as a non-word character,
+    # so `…:pfx` still word-matches `…:pfx-capstone`.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: a slug that is a strict PREFIX of an armed slug arms its OWN route (D345)"
+    PX="$E2E/prefix"; PXSRC="$PX/src"
+    mkdir -p "$PX/bin" "$PXSRC"
+    printf '{"name":"selftest-prefix","private":true}\n' > "$PXSRC/package.json"
+    cp "$RF/okbin/caddy" "$RF/okbin/systemctl" "$PX/bin/"
+    chmod +x "$PX/bin/"*
+    rf_caddyfile "$PX/Caddyfile"
+    px_deploy() { # <slug> <build_id> <outfile> -> exit code
+      env PATH="$PX/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG="$1" BUILD_ID="$2" CONTENT_REV=rev-1 SITE_SRC="$PXSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$PX/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$PX/deploy.lock" BARKPARK_CADDYFILE_LOCK="$PX/caddyfile.lock" \
+        BARKPARK_SITE_STATUS_FILE="$PX/$2.status" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$3" 2> "$3.err"
+      echo $?
+    }
+    px_markers() { grep -c 'BARKPARK_SITE_ROUTE:' "$PX/Caddyfile" | tr -d ' '; }
+    # (1) the LONGER slug arms first — this is the sibling that swallowed the
+    #     prefix site's identity on the live box.
+    rc="$(px_deploy pfx-capstone px1 "$PX/long.out")"
+    check "prefix: the LONGER sibling arms first (exit 0)"   [ "$rc" = 0 ]
+    check "prefix: one marker in the Caddyfile so far"       [ "$(px_markers)" = 1 ]
+    # (2) THE CASE. The prefix slug deploys into a Caddyfile that already carries
+    #     the sibling's marker. On the unpatched predicate this run REDS every
+    #     assertion below: no marker is written, ROUTE says already-armed, and
+    #     https://…/sites/pfx/ is a 404 the engine advertises anyway.
+    rc="$(px_deploy pfx px2 "$PX/short.out")"
+    check "prefix: the PREFIX slug's deploy exits 0"         [ "$rc" = 0 ]
+    check "prefix: it ARMED ITS OWN route (a SECOND marker exists)" \
+      [ "$(px_markers)" = 2 ]
+    check "prefix: the Caddyfile really carries the prefix slug's own marker" \
+      grep -qE 'BARKPARK_SITE_ROUTE:pfx([[:space:]]|$)' "$PX/Caddyfile"
+    check "prefix: ROUTE reports ARMED, not already-armed (the durable channel)" \
+      grep -q '^BPSTAGE name=ROUTE status=ok build_id=px2 detail="armed: ' "$PX/short.out"
+    # DURABILITY, asserted where it actually matters (D346). stdout is NOT the
+    # record: on a real box the .log holds raw npm child output and the .status
+    # fold holds BPSTAGE lines — which is exactly why `route already armed`
+    # appeared ZERO times in 1,178 durable .log files while firing hundreds of
+    # times. The ROUTE line must survive INTO the status fold, or this whole
+    # report is invisible again the moment the process exits.
+    check "prefix: the ROUTE line lands in the DURABLE .status fold, not just stdout" \
+      grep -q '^BPSTAGE name=ROUTE status=ok build_id=px2 detail="armed: ' "$PX/px2.status"
+    check "prefix: it did NOT claim the sibling's route was already its own" \
+      sh -c "! grep -q 'already armed' '$PX/short.out'"
+    check "prefix: its handle points at ITS OWN release tree, not the sibling's" \
+      grep -q "root \* $E2E/sites/pfx/current" "$PX/Caddyfile"
+    check "prefix: the sibling's own handle is untouched (an ADD, not a rewrite)" \
+      grep -q "root \* $E2E/sites/pfx-capstone/current" "$PX/Caddyfile"
+    check "prefix: the run advertises the URL it actually armed" \
+      grep -q "HEALTHY — 'pfx' live at build px2 (https://sites.example.com/sites/pfx/)" "$PX/short.out"
+    # (3) THE REVERSE DIRECTION — the blast-radius guard. A predicate strict
+    #     enough to reject a sibling must still match a site's OWN marker, or it
+    #     silently re-arms (duplicating) every already-working site.
+    rc="$(px_deploy pfx px3 "$PX/short2.out")"
+    check "prefix/reverse: an EXACT re-deploy still matches its own marker"  [ "$rc" = 0 ]
+    check "prefix/reverse: no THIRD marker was written (no duplicate route)" \
+      [ "$(px_markers)" = 2 ]
+    check "prefix/reverse: ROUTE says already-armed for the exact slug" \
+      grep -q '^BPSTAGE name=ROUTE status=ok build_id=px3 detail="already armed: ' "$PX/short2.out"
+    check "prefix/reverse: the already-armed decision is DURABLE too (.status fold)" \
+      grep -q '^BPSTAGE name=ROUTE status=ok build_id=px3 detail="already armed: ' "$PX/px3.status"
+    rc="$(px_deploy pfx-capstone px4 "$PX/long2.out")"
+    check "prefix/reverse: the LONGER slug also still matches its own marker" \
+      grep -q '^BPSTAGE name=ROUTE status=ok build_id=px4 detail="already armed: ' "$PX/long2.out"
+    check "prefix/reverse: still exactly two markers after four deploys" \
+      [ "$(px_markers)" = 2 ]
+    # (4) DISARM is the same predicate, in its most destructive direction: a bare
+    #     substring would excise the SIBLING's live block on this site's teardown.
+    env PATH="$PX/bin:$FAKEBIN:$PATH" \
+      SITE_SLUG=pfx BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$PX/Caddyfile" \
+      BARKPARK_SITE_DEPLOY_LOCK="$PX/deploy.lock" BARKPARK_CADDYFILE_LOCK="$PX/caddyfile.lock" \
+      BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" --teardown > "$PX/down.out" 2>&1
+    check "prefix/disarm: the prefix slug's own block is gone" \
+      sh -c "! grep -qE 'BARKPARK_SITE_ROUTE:pfx([[:space:]]|\$)' '$PX/Caddyfile'"
+    check "prefix/disarm: the SIBLING's block SURVIVED the prefix teardown" \
+      grep -qE 'BARKPARK_SITE_ROUTE:pfx-capstone([[:space:]]|$)' "$PX/Caddyfile"
+    check "prefix/disarm: the sibling still proxies its own release tree" \
+      grep -q "root \* $E2E/sites/pfx-capstone/current" "$PX/Caddyfile"
   fi
 
   # -------------------------------------------------------------------------
@@ -1857,15 +2007,17 @@ fi
 disarm_caddy_site_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
-  local marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
-  grep -q "$marker" "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
+  local marker; marker="$(site_route_marker_re)"
+  has_site_route_marker "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
   local bak; bak="${CADDYFILE}.bak.teardown.${SITE_SLUG}.$(date -u +%Y%m%d%H%M%S)"
   cp -a "$CADDYFILE" "$bak"
   local tmp; tmp="$(mktemp)"
-  # brace-counted block excision, anchored on the marker (never a global grep).
+  # brace-counted block excision, anchored on the marker (never a global grep) —
+  # and the marker is the DELIMITER-ANCHORED regex, so a prefix sibling's block
+  # is never the one excised (D345).
   BP_MARK="$marker" awk '
     BEGIN { m = ENVIRON["BP_MARK"] }
-    !inb && index($0, m) { inb = 1; depth = 0; opened = 0; next }
+    !inb && $0 ~ m { inb = 1; depth = 0; opened = 0; next }
     inb {
       o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
       if (o > 0) opened = 1
@@ -2221,14 +2373,22 @@ setup_caddy_lock
 # returns 1 out of its OWN guards when the lock cannot be taken, and that is a
 # different fact — the Caddyfile was never even read.
 arm_caddy_site_route() {
-  command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG route"; return 0; }
-  [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping /sites/$SITE_SLUG route"; return 0; }
+  command -v caddy >/dev/null 2>&1 || { ROUTE_DETAIL="not armed: caddy is not installed on this box, so nothing publishes /sites/$SITE_SLUG — the release is live on disk only"; log "caddy not installed — skipping /sites/$SITE_SLUG route"; return 0; }
+  [ -f "$CADDYFILE" ] || { ROUTE_DETAIL="not armed: there is no $CADDYFILE on this box, so nothing publishes /sites/$SITE_SLUG — the release is live on disk only"; log "no $CADDYFILE — skipping /sites/$SITE_SLUG route"; return 0; }
   local marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
-  if grep -q "$marker" "$CADDYFILE"; then log "caddy /sites/$SITE_SLUG route already armed"; return 0; fi
+  # The guard is the DELIMITER-ANCHORED predicate (D345): a bare substring read
+  # matched a prefix SIBLING's marker and returned "already armed" for a site
+  # that had never been armed at all.
+  if has_site_route_marker "$CADDYFILE"; then
+    ROUTE_DETAIL="already armed: $CADDYFILE carries this site's own $marker block, so this deploy left Caddy untouched (the symlink flip is what goes live)"
+    log "caddy /sites/$SITE_SLUG route already armed"
+    return 0
+  fi
   # Anchor on the FIRST slot/site reverse_proxy so the handle lands INSIDE the
   # live FQDN site block (ahead of the fallback proxy).  Matches the guerrilla
   # blue/green slot ports 4000/4001 (same anchor arm_caddy_mcp_route uses).
   if ! grep -qE 'reverse_proxy[[:space:]]+localhost:(4000|4001)([[:space:]]|$)' "$CADDYFILE"; then
+    ROUTE_DETAIL="not armed: $CADDYFILE has no slot 'reverse_proxy localhost:4000|4001' site block to insert the handle into, so there is nowhere to hang /sites/$SITE_SLUG — Caddy left untouched and that URL will 404"
     log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — leaving Caddy untouched (/sites/$SITE_SLUG not armed)"
     return 0
   fi
@@ -2257,7 +2417,8 @@ SITEROUTE
   chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
   chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
   if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
-    if systemctl reload caddy 2>/dev/null; then log "armed caddy /sites/$SITE_SLUG route -> $ROOT/current"; else log "caddy reload failed (config valid) — /sites/$SITE_SLUG live on next reload"; fi
+    ROUTE_DETAIL="armed: this run wrote the $marker handle into $CADDYFILE and reloaded Caddy, so https://$HEALTH_HOST/sites/$SITE_SLUG/ is now served from $ROOT/current"
+    if systemctl reload caddy 2>/dev/null; then log "armed caddy /sites/$SITE_SLUG route -> $ROOT/current"; else ROUTE_DETAIL="armed: this run wrote the $marker handle into $CADDYFILE, but the caddy reload failed (the config validates) — https://$HEALTH_HOST/sites/$SITE_SLUG/ goes live on the next reload"; log "caddy reload failed (config valid) — /sites/$SITE_SLUG live on next reload"; fi
     rm -f "$bak"
     return 0
   else
@@ -2280,9 +2441,27 @@ SITEROUTE
 # @stage_names whitelist is PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE, so
 # parse_stage_line/2 SKIPS a ROUTE line — it never enters `stages` and cannot
 # reach stage_exit_code/1.  It still rides the durable log tail the operator reads.
+#
+# AND THE SUCCESS PATH SPEAKS TOO (D346). Every arm outcome used to reach the
+# operator through `log()` alone — i.e. through STDOUT, which nothing persists:
+# the durable `.log` holds raw npm child output and the durable `.status` holds
+# BPSTAGE lines only. Measured across 1,178 durable .log files on guerrilla,
+# `route already armed`, `leaving Caddy untouched` and `skipping /sites/` each
+# appear ZERO times — and the first MUST fire on every re-deploy of an
+# already-armed site (astro-search alone re-deployed 244 times). That zero was
+# VACUOUS, not healthy: route-arm incidence was structurally unmeasurable, so a
+# fresh alarm would have been exactly as invisible as the old one. The ROUTE
+# line is the channel that already exists and is already free, so emit it on the
+# ok path as well, naming which of armed / already-armed / not-armed-and-why
+# this run took.
 ROUTE_ARMED=1
+ROUTE_DETAIL=""
 arm_rc=0
 with_caddy_lock arm_caddy_site_route || arm_rc=$?
+if [ "$arm_rc" = 0 ]; then
+  log "ROUTE: $ROUTE_DETAIL"
+  emit ROUTE ok "$ROUTE_DETAIL"
+fi
 if [ "$arm_rc" != 0 ]; then
   ROUTE_ARMED=0
   # TWO different failures, and they are NOT the same claim (same split the
