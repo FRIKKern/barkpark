@@ -2656,7 +2656,7 @@ defmodule BarkparkCloud.Web.Router do
               error: "suspended",
               detail:
                 "This instance is suspended. The admin credential is not revealed " <>
-                  "until the subscription is current."
+                  "until the suspension is cleared."
             })
 
           %Barkpark{team_id: tid} = bp when tid == team.id ->
@@ -2729,14 +2729,24 @@ defmodule BarkparkCloud.Web.Router do
 
               # cch-w54-s2 — the box is suspended: no ticket is minted and the
               # instance is never called. Distinct slug from `not_live` (which
-              # means "still provisioning") because this is a billing verdict the
-              # owner resolves in Billing, not a wait.
+              # means "still provisioning") because this is a verdict the owner
+              # resolves, not a wait.
+              #
+              # REVIEW (cch-w54 wave review) — the detail deliberately does NOT
+              # say "until the subscription is current". `suspended` is one
+              # column written by TWO independent producers, and only one of them
+              # is money: `Billing.reconcile_plan_limit/1` suspends for
+              # `quota_exceeded` on a team that is fully paid and `status:
+              # "active"`. Naming the subscription here would tell that team the
+              # same falsehood cch-w54-s1 just removed from the instance-card
+              # banner. "Until the suspension is cleared" is true on both axes and
+              # is the same vocabulary as the console's ERRORS.suspended string.
               {:error, :suspended} ->
                 json(conn, 409, %{
                   error: "suspended",
                   detail:
                     "This instance is suspended. Studio access is closed until the " <>
-                      "subscription is current."
+                      "suspension is cleared."
                 })
 
               {:error, :not_live} ->
@@ -2823,7 +2833,7 @@ defmodule BarkparkCloud.Web.Router do
                   error: "suspended",
                   detail:
                     "This instance is suspended. New app tokens are not issued until " <>
-                      "the subscription is current."
+                      "the suspension is cleared."
                 })
 
               {:error, :not_live} ->

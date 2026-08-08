@@ -292,20 +292,55 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
       refute conn.resp_body =~ @instance_admin_token
     end
 
-    test "the 409 detail names the billing remedy without promising restoration" do
+    # REVIEW (cch-w54 wave review) — this test used to pin the phrase
+    # "subscription is current" on all three details. That phrase is only true on
+    # ONE of the two axes that write the `suspended` column:
+    # Billing.cancel_subscription/1 and the grace-elapsed arm of mark_past_due/2
+    # write a billing reason, but Billing.reconcile_plan_limit/1 writes
+    # `quota_exceeded` on a team whose subscription IS current and whose invoices
+    # are all paid. cch-w54-s1 removed exactly that falsehood from the console's
+    # instance-card banner in the same wave; leaving it in the API's own refusal
+    # would have re-emitted it one layer down. So the pin is now the CLOSED SET:
+    # every one of the three details is checked, and none of them may claim a
+    # money cause the boolean does not carry.
+    test "no 409 detail claims a money cause the `suspended` boolean does not carry" do
       {user, team} = user_with_team()
       bp = suspended_live_barkpark(team)
       {:ok, token} = Accounts.create_user_session_token(user)
 
-      conn = call(:post, "/v1/barkparks/#{bp.id}/studio-link", token)
-      detail = json_body(conn)["detail"]
+      details =
+        for {method, path} <- [
+              {:post, "/v1/barkparks/#{bp.id}/studio-link"},
+              {:post, "/v1/barkparks/#{bp.id}/app-token"},
+              {:get, "/v1/barkparks/#{bp.id}/credentials"}
+            ] do
+          conn = call(method, path, token)
+          assert conn.status == 409, "#{method} #{path} did not refuse"
+          assert json_body(conn)["error"] == "suspended"
+          json_body(conn)["detail"]
+        end
 
-      assert detail =~ "subscription is current"
-      # The card banner already carries the restoration promise (app.js
-      # suspendedCardBannerHtml); an error toast repeating it would answer a
-      # question nobody asked instead of saying why THIS click failed.
-      refute detail =~ "comes back"
-      refute detail =~ "exactly as it was"
+      assert length(details) == 3
+
+      for detail <- details do
+        assert is_binary(detail) and detail != ""
+        # THE HONEST CAUSE: the control plane has withdrawn access, which is true
+        # on both axes and is the console's own ERRORS.suspended vocabulary.
+        assert detail =~ "suspension is cleared"
+        # NOT a money claim: a quota-suspended team is fully paid.
+        refute detail =~ "subscription"
+        refute detail =~ "payment"
+        refute detail =~ "invoice"
+        # The card banner already carries the restoration promise (app.js
+        # suspendedCardBannerHtml); an error toast repeating it would answer a
+        # question nobody asked instead of saying why THIS click failed.
+        refute detail =~ "comes back"
+        refute detail =~ "exactly as it was"
+        # And it never claims a power state — nothing on the suspension path
+        # reaches the host (cch-w54-s1's LIFECYCLE_PILL_LABEL note).
+        refute detail =~ "stopped"
+        refute detail =~ "powered off"
+      end
     end
 
     test "resuming the team re-opens all three paths (the guard can lose)" do
