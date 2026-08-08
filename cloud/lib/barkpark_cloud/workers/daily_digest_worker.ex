@@ -1,20 +1,23 @@
 defmodule BarkparkCloud.Workers.DailyDigestWorker do
   @moduledoc """
   isu-w5 — the daily fleet-update digest send. Once a day (the `0 6 * * *`
-  crontab entry) this reads the whole fleet and pushes a plain-text operator
-  digest to the platform admins: where every managed instance stands against the
-  newest release the fleet has seen. It turns the release curator's daily
-  judgment from a draft Release + a run log (which a human must go look for) into
-  something a human passively RECEIVES.
+  crontab entry) this reads the whole fleet and pushes a plain-text digest:
+  where every managed instance stands against the newest release the fleet has
+  seen. It turns the release curator's daily judgment from a draft Release + a
+  run log (which a human must go look for) into something a human passively
+  RECEIVES.
 
   It never computes a verdict and never calls GitHub — it reads only the update
   columns the fleet already polls (`Registry.all_barkparks/0`) and hands them to
-  `Notifications.deliver_fleet_digest/1`, which resolves the operator recipients
-  and renders/sends.
+  `Notifications.deliver_fleet_digest/1`, which partitions the fleet BY TEAM,
+  resolves each team's own members as the recipients (dr-w19-s5 — it used to
+  resolve the platform-admin allowlist, which is unset on prod and joinable by
+  nobody), and renders/sends.
 
-  Zero platform admins is NOT a no-op any more (dr-w18-s3). It is a COUNTED
-  LOSS: `deliver_fleet_digest/1` emits `fleet_digest phase=settled recipients=0
-  sent=0` at WARNING plus a `:telemetry` event, then returns `{:ok, :no_admins}`.
+  A fleet with no team that has a member is NOT a no-op (dr-w18-s3). It is a
+  COUNTED LOSS: `deliver_fleet_digest/1` emits `fleet_digest phase=settled
+  recipients=0 sent=0` at WARNING plus a `:telemetry` event, then returns
+  `{:ok, :no_admins}` (the atom is kept verbatim — it is this function's match).
   This job still completes — a missing recipient list is not this job failing,
   and discarding it would only turn one unread Oban state into another (there is
   no Oban read route in the console at all) — so the accounting record, not the
@@ -46,7 +49,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorker do
         :ok
 
       {:ok, %{sent: n}} ->
-        Logger.info("DailyDigestWorker: fleet digest sent to #{n} platform admin(s)")
+        Logger.info("DailyDigestWorker: fleet digest sent to #{n} team member(s)")
     end
 
     # Return the delivery result — both `{:ok, :no_admins}` and

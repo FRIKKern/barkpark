@@ -2,12 +2,14 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   @moduledoc """
   isu-w5 — the daily fleet-update digest: honest fleet roll-up (current/behind/
   paused counts + per-instance running->latest, state, pin/pause flags, last
-  checked), platform-admin-ONLY recipients (a non-admin registered user is never
-  a recipient), and a zero-admin logged no-op that never crashes.
+  checked), TEAM-MEMBER recipients since dr-w19-s5 (a registered user outside the
+  owning team is never a recipient, and an allowlisted address that is in no team
+  is not one either), and a no-recipient run that is counted, warned, and never
+  crashes.
 
-  `async: false` — the recipient allowlist is process-global Application config
-  (`:platform_admin_emails`), so these tests must not run concurrently against a
-  shared key. Oban runs in `:manual` mode (config/test.exs), so `perform_job/2`
+  `async: false` — several tests still WRITE `:platform_admin_emails`, which is
+  process-global Application config, precisely to prove the digest no longer
+  reads it; they must not run concurrently against a shared key. Oban runs in `:manual` mode (config/test.exs), so `perform_job/2`
   runs the worker synchronously in this test's transaction; the Swoosh Test
   adapter captures every send for `assert_email_sent` / `refute_email_sent`.
   """
@@ -158,9 +160,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
 
   ## 3. Recipients — platform-admin ONLY; a non-admin registered user is excluded
 
-  test "the digest reaches configured platform admins and NEVER a non-admin user" do
+  test "the digest reaches the instance's TEAM MEMBERS and NEVER a user outside the team" do
     admin = user("admin-#{System.unique_integer([:positive])}@example.com")
-    non_admin = user("member-#{System.unique_integer([:positive])}@example.com")
+    outsider = user("member-#{System.unique_integer([:positive])}@example.com")
     t = team(admin)
 
     _bp =
@@ -170,15 +172,18 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_latest_release: "v1.1.0"
       })
 
-    # Only the admin is on the allowlist — the non-admin user exists but is not.
-    set_admins([admin.email])
+    # dr-w19-s5: the allowlist is EMPTY here on purpose. Before the re-address it
+    # was the whole audience, so this test would have sent nothing; the digest is
+    # now addressed to the owning team's members and this run must still deliver.
+    set_admins([])
 
     assert {:ok, %{sent: 1, recipients: recipients}} = perform_job(DailyDigestWorker, %{})
     assert recipients == [admin.email]
 
-    # The non-admin registered user is proven excluded from the RESOLVED recipient
-    # set (the exfiltration boundary — this is where a non-admin would leak in).
-    refute non_admin.email in recipients
+    # The registered user who is in no team is proven excluded from the RESOLVED
+    # recipient set — the exfiltration boundary, and the tenancy boundary too: a
+    # fleet-wide fan-out would have handed this account another team's instances.
+    refute outsider.email in recipients
 
     # ...and a real digest actually went to the admin (not a silent empty send).
     assert_email_sent(fn email ->
@@ -188,18 +193,23 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     end)
   end
 
-  test "a configured email with no registered account is dropped, never mailed" do
-    admin = user("op-#{System.unique_integer([:positive])}@example.com")
-    t = team(admin)
+  test "an allowlisted address that is in no team is dropped, never mailed" do
+    n = System.unique_integer([:positive])
+    member = user("op-#{n}@example.com")
+    listed_outsider = user("listed-#{n}@example.com")
+    t = team(member)
 
-    _bp =
-      instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "current"})
+    _bp = instance(t, "Prod", "prod-#{n}", %{update_state: "current"})
 
-    # Real admin + a ghost address that was never registered.
-    set_admins([admin.email, "ghost@example.com"])
+    # A REGISTERED platform admin, a ghost address, and neither in the team that
+    # owns the instance. Before dr-w19-s5 the first two would both have been
+    # resolved (the ghost dropped for being unregistered, the admin mailed); now
+    # the allowlist decides nothing at all and only the team's member is mailed.
+    set_admins([listed_outsider.email, "ghost@example.com"])
 
     assert {:ok, %{sent: 1, recipients: recipients}} = perform_job(DailyDigestWorker, %{})
-    assert recipients == [admin.email]
+    assert recipients == [member.email]
+    refute listed_outsider.email in recipients
     refute "ghost@example.com" in recipients
   end
 
@@ -236,14 +246,19 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     ref
   end
 
-  test "zero configured admins is a COUNTED loss: recipients=0 sent=0, warned, still :ok" do
-    admin = user("nobody-#{System.unique_integer([:positive])}@example.com")
-    t = team(admin)
+  test "a fleet with no reachable recipient is a COUNTED loss: recipients=0 sent=0, warned, still :ok" do
+    # dr-w19-s5 re-addressed the digest: the empty population is no longer the
+    # platform allowlist (which nobody could join) but a team with no members —
+    # the honest zero. An instance owned by a memberless team is the fleet row
+    # that reaches nobody, and the allowlist is set to a REGISTERED admin here on
+    # purpose: the old address must not be able to rescue this run.
+    n = System.unique_integer([:positive])
+    orphan_owner = user("nobody-#{n}@example.com")
+    {:ok, memberless} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
 
-    _bp =
-      instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "behind"})
+    _bp = instance(memberless, "Prod", "prod-#{n}", %{update_state: "behind"})
 
-    set_admins([])
+    set_admins([orphan_owner.email])
     ref = attach_digest_probe()
 
     log =
@@ -257,7 +272,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert_received {:fleet_digest, ^ref, measurements, metadata}
     assert measurements == %{recipients: 0, sent: 0}
     assert metadata.phase == :settled
-    assert metadata.reason == "no_platform_admins"
+    assert metadata.reason == "no_team_recipients"
     assert metadata.instances == 1
 
     # (b) THE LINE — greppable in journald, at WARNING, because "nobody was

@@ -358,44 +358,55 @@ defmodule BarkparkCloud.Notifications do
   ## ── Fleet digest (isu-w5, the operator push) ─────────────────────────────
 
   @doc """
-  Deliver the daily FLEET-UPDATE digest to the platform's operator admins — the
-  "from nag to product" push that lands the release curator's daily judgment in a
-  human inbox instead of only a draft Release + a run log.
+  Deliver the daily FLEET-UPDATE digest — the "from nag to product" push that
+  lands the release curator's daily judgment in a human inbox instead of only a
+  draft Release + a run log.
 
   `barkparks` is the whole fleet (the caller, `DailyDigestWorker`, hands it
-  `Registry.all_barkparks/0`). Recipients are resolved by `platform_admin_emails/0`
-  — the platform-operator allowlist, intersected with REGISTERED users so the
-  digest can only reach real accounts (the exfiltration-guard analogue: this is a
-  fleet-wide operator report, never a per-team blast and never an open relay).
-  Zero resolved admins is a LOGGED no-op — never a crash and never a send.
+  `Registry.all_barkparks/0`). It is PARTITIONED BY TEAM here, and each team's
+  members are mailed a digest over THEIR OWN instances: recipients come from
+  `team_member_emails/1` -> `Accounts.list_team_member_emails/1`, the same
+  exfiltration guard the alert fan-out uses. A fleet with no team that has a
+  member is a COUNTED no-op — never a crash and never a send.
 
   The send rides the PLATFORM `Mailer` (like the transactional path); each
-  recipient's send is recorded as a `Delivery` row (kind `"transactional"`,
-  `team_id: nil` — a platform-operator email belongs to no team, exactly like the
-  user-scoped identity emails). Returns `{:ok, :no_admins}` or
-  `{:ok, %{sent: n, recipients: [...]}}`.
+  recipient's send is recorded as a `Delivery` row (kind `"transactional"`) with
+  the REAL `team_id` it was sent for, so the row is returnable by the team it
+  concerns instead of belonging to nobody. Returns `{:ok, :no_admins}` or
+  `{:ok, %{sent: n, recipients: [...]}}` — the `:no_admins` atom is kept verbatim
+  because `DailyDigestWorker.perform/1` matches on it; the LOG reason carries the
+  honest new wording (`no_team_recipients`).
 
-  ## dr-w18-s3 — every outcome is ACCOUNTED, so the zero can be seen
+  ## dr-w19-s5 — THE ADDRESS, not just the count
 
-  Both arms call `account_fleet_digest/2` before returning: `recipients=N sent=M`
-  as a `:telemetry` event AND one key=value log line. The zero-recipient arm is
-  the reason the seam exists — `PLATFORM_ADMIN_EMAILS` is unset on prod, so the
-  recipient population is empty BY CONSTRUCTION, the arm returned `{:ok,
-  :no_admins}`, `DailyDigestWorker` matched it as `:ok`, and Oban recorded a
-  COMPLETED job. Measured: 5 of 5 digest jobs `completed`, zero `fleet_digest`
-  rows in `notification_deliveries` across 37 unpruned days. The one push channel
-  for fleet health had been succeeding at sending nothing for its whole recorded
-  life, and nothing anywhere counted it.
+  This used to resolve `platform_admin_emails/0`, whose only source is the
+  `:platform_admin_emails` config allowlist. `PLATFORM_ADMIN_EMAILS` is unset on
+  prod, `config.exs` hard-defaults the key to `[]`, no User field carries
+  operator-ness and no route, console action or mix task writes it — so the
+  population was EMPTY BY CONSTRUCTION and the only push channel for fleet
+  health had been succeeding at sending nothing for its whole recorded life.
+  Measured (dr-w18-s3): 5 of 5 digest jobs `completed`, zero `fleet_digest` rows
+  in `notification_deliveries` across 37 unpruned days. That slice made the zero
+  VISIBLE and deliberately left the address alone; this one moves the address.
 
-  What the accounting is NOT: it writes no `Delivery` row and invents no
-  recipient — charter D362 names this digest verbatim as a consented
-  recipient-less withhold, and `Delivery.changeset/2` requires a recipient. It is
-  also not a new alert PRODUCER (D14): it is one counted record on an existing
-  rail, at WARNING when the rail lost, so `journalctl -u barkpark-cloud | grep
-  fleet_digest` answers "did anyone get today's digest?" without a metrics
-  pipeline and without an operator-gated read route (of which there is none for
-  this event — the only reader of a `fleet_digest` Delivery row is
-  `GET /v1/operator/deliveries`, gated on the SAME empty population).
+  THE TENANCY RULING, stated because the guard cannot make it. A fleet-wide
+  digest fanned to every team's members would be a CROSS-TEAM DISCLOSURE: the
+  body renders one line per instance, by NAME, so a fleet-wide blast would tell
+  every member of every team what every other team runs. So the digest is
+  PER-TEAM — `Enum.group_by/2` on `team_id`, one summary per team, recipients
+  strictly that team's membership rows. Nobody learns of an instance they could
+  not already read through the team-scoped instance list. The empty-audience
+  census (`deploy_signal_audience_census_test.exs`) would have gone green on the
+  fleet-wide shape just as readily as on this one — it reads the resolver's
+  source text and judges the POPULATION, never who may see which row.
+
+  What the accounting is NOT: the zero-recipient arm still writes no `Delivery`
+  row and invents no recipient — charter D362 names this digest verbatim as a
+  consented recipient-less withhold, and `Delivery.changeset/2` requires a
+  recipient. It is also not a new alert PRODUCER (D14): it is one counted record
+  on an existing rail, at WARNING when the rail lost, so `journalctl -u
+  barkpark-cloud | grep fleet_digest` answers "did anyone get today's digest?"
+  without a metrics pipeline.
 
   Scope, stated so it is not overclaimed: this fixes the ADDRESS, not the
   PAYLOAD. `DigestEmail.summary/1` carries release-freshness only (total /
@@ -406,13 +417,32 @@ defmodule BarkparkCloud.Notifications do
   @spec deliver_fleet_digest([term()]) ::
           {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
   def deliver_fleet_digest(barkparks) when is_list(barkparks) do
-    summary = DigestEmail.summary(barkparks)
+    fleet = DigestEmail.summary(barkparks)
 
-    case platform_admin_emails() do
-      # cch-w32-r2 (census row `deliver_fleet_digest/1 c1 do
-      # case(platform_admin_emails())>[]`): NAMED CONSENTED — the same
-      # recipient-less-by-construction shape as the empty-team fan-out, one
-      # level up. `Delivery.changeset/2` requires a recipient (delivery.ex:78)
+    # WHO gets what, resolved before anything is sent. Two reasons this is a
+    # separate pass and not one fused comprehension:
+    #
+    #   * the empty-audience census derives this function's audience from the
+    #     `*_emails` call in THIS body, so the resolution must stay here rather
+    #     than move behind a helper;
+    #   * the withhold census (`withhold_test.exs`) reads a trace call in a
+    #     PREFIX statement as covering every path after it. Sending inside this
+    #     comprehension would put `record_delivery/5` ahead of the `[]` arm and
+    #     silently absolve the zero-recipient withhold — on that arm the
+    #     comprehension ran zero times and traced nothing. Resolve first, send
+    #     inside the branch, and the consented withhold stays derivable.
+    targets =
+      for {team_id, rows} <- Enum.group_by(barkparks, & &1.team_id),
+          is_binary(team_id),
+          recipients = team_member_emails(team_id),
+          recipients != [],
+          summary = DigestEmail.summary(rows),
+          recipient <- Enum.uniq(recipients),
+          do: {team_id, summary, recipient}
+
+    case targets do
+      # cch-w32-r2 / dr-w19-s5: NAMED CONSENTED — recipient-less by construction,
+      # one level up. `Delivery.changeset/2` requires a recipient (delivery.ex:78)
       # and this arm has none; charter D362 forbids a synthetic one. This is not
       # the system deciding against a person, it is the absence of a person.
       #
@@ -424,29 +454,30 @@ defmodule BarkparkCloud.Notifications do
       [] ->
         account_fleet_digest(
           %{recipients: 0, sent: 0},
-          %{instances: summary.total, reason: "no_platform_admins"}
+          %{instances: fleet.total, reason: "no_team_recipients"}
         )
 
         {:ok, :no_admins}
 
-      recipients ->
+      targets ->
         results =
-          for recipient <- recipients do
+          for {team_id, summary, recipient} <- targets do
             email = DigestEmail.build(summary, recipient)
             result = Mailer.deliver(email)
-            record_delivery(nil, recipient, "fleet_digest", "transactional", result)
-            result
+            record_delivery(team_id, recipient, "fleet_digest", "transactional", result)
+            {recipient, result}
           end
 
         # `{:ok, _}` is `record_delivery/5`'s own "sent" classification, reused so
         # the count and the Delivery rows can never disagree. A digest that failed
-        # for two of three admins used to return `sent: 3`.
-        sent = Enum.count(results, &match?({:ok, _}, &1))
+        # for two of three recipients used to return `sent: 3`.
+        sent = Enum.count(results, fn {_to, result} -> match?({:ok, _}, result) end)
+        recipients = Enum.map(results, fn {to, _result} -> to end)
         reason = if sent < length(recipients), do: "partial_send"
 
         account_fleet_digest(
           %{recipients: length(recipients), sent: sent},
-          %{instances: summary.total, reason: reason}
+          %{instances: fleet.total, reason: reason}
         )
 
         {:ok, %{sent: sent, recipients: recipients}}
