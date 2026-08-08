@@ -162,6 +162,15 @@ EXEMPT = {
     "RELEASE_NODE": "set by the OTP release boot scripts (2026-08-08)",
     "RELEASE_COOKIE": "set by the OTP release boot scripts (2026-08-08)",
     "PHX_SERVER": "set by the Dockerfile/release; not an operator knob (2026-08-08)",
+    # Build/deploy internals — the D15 ratified baseline, reason "not an
+    # operator knob": read by build_info.ex / sites/deploy_runner.ex for build
+    # metadata and the site-build lock path, set by build tooling, never by a
+    # compose operator.
+    "TMPDIR": "OS/build-tooling temp dir; deploy_runner lock-path fallback, not an operator knob (2026-08-08)",
+    "BARKPARK_BUILD_GATE_LOCK": "site-build lock path override for deploy tooling; not an operator knob (2026-08-08)",
+    "BARKPARK_BUILD_VERSION": "build-metadata bake for docker/tarball builds; not an operator knob (2026-08-08)",
+    "BARKPARK_BUILD_COMMIT": "build-metadata bake for docker/tarball builds; not an operator knob (2026-08-08)",
+    "BARKPARK_BUILD_DATE": "build-metadata bake for docker/tarball builds; not an operator knob (2026-08-08)",
     "CI": "CI-only (2026-08-08)",
     "GITHUB_ACTIONS": "CI-only (2026-08-08)",
     "GITHUB_TOKEN": "CI-only (2026-08-08)",
@@ -197,6 +206,9 @@ DEFAULTS_OK = {
     "MAIL_FROM_NAME": "non-secret display value (2026-08-08)",
     "TRUSTED_PROXY_PEERS": "must track the pinned subnet's .1 gateway (2026-08-08)",
     "PHX_HOST": "self-host default; S1a converts this to a :? require (2026-08-08)",
+    "BARKPARK_SEED_PROFILE": "compose deliberately defaults to `clean` (the app-side "
+    "default is `demo`, too heavy for a self-host first boot) — reviewed choice, "
+    "S1a (2026-08-08)",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
