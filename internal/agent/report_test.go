@@ -1378,26 +1378,30 @@ func newTempGitRepo(t *testing.T) string {
 	}
 	dir := t.TempDir()
 
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-
-	run("init", "--quiet")
+	runGitIn(t, dir, "init", "--quiet")
 	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatalf("write tracked file: %v", err)
 	}
-	run("add", "tracked.txt")
-	run("commit", "--quiet", "--no-gpg-sign", "-m", "initial")
+	runGitIn(t, dir, "add", "tracked.txt")
+	runGitIn(t, dir, "commit", "--quiet", "--no-gpg-sign", "-m", "initial")
 	return dir
+}
+
+// runGitIn runs one git command in dir under a pinned identity and neutralised
+// global/system config, so the host's git settings can never change what these
+// tests measure. Any failure is fatal — a probe test over a half-built repo
+// would assert nothing.
+func runGitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
 }
 
 // TestGitProbeDirtyIgnoresUntrackedFiles is the assertion that FAILS against
@@ -1448,6 +1452,40 @@ func TestGitProbeDirtyReportsModifiedTrackedFile(t *testing.T) {
 	if !g.dirty() {
 		t.Error("dirty() = false with a MODIFIED TRACKED file — the deploy-hygiene flag can no longer say dirty")
 	}
+}
+
+// TestGitProbeDirtyReportsIndexOnlyTrackedChanges pins the OTHER half of the
+// blast-radius claim: `--untracked-files=no` drops untracked files and NOTHING
+// else. A staged ADD (the file is in the index, so it is tracked) and a tracked
+// DELETION both still read dirty. Without these, "only untracked stops counting"
+// is asserted in prose and proven nowhere — and the next flag edit (`-uall`,
+// `--ignore-submodules=all`, a porcelain v2 switch) could quietly widen the
+// suppression with every existing test still green.
+func TestGitProbeDirtyReportsIndexOnlyTrackedChanges(t *testing.T) {
+	t.Run("staged add", func(t *testing.T) {
+		dir := newTempGitRepo(t)
+		if err := os.WriteFile(filepath.Join(dir, "added.txt"), []byte("new\n"), 0o644); err != nil {
+			t.Fatalf("write new file: %v", err)
+		}
+		runGitIn(t, dir, "add", "added.txt")
+
+		g := gitProbe{runner: ExecRunner{}, checkout: dir}
+		if !g.dirty() {
+			t.Error("dirty() = false with a STAGED ADD — a file in the index is tracked and must still read dirty")
+		}
+	})
+
+	t.Run("tracked deletion", func(t *testing.T) {
+		dir := newTempGitRepo(t)
+		if err := os.Remove(filepath.Join(dir, "tracked.txt")); err != nil {
+			t.Fatalf("delete tracked file: %v", err)
+		}
+
+		g := gitProbe{runner: ExecRunner{}, checkout: dir}
+		if !g.dirty() {
+			t.Error("dirty() = false with a DELETED TRACKED file — a missing committed file is the loudest hygiene red flag there is")
+		}
+	})
 }
 
 // TestGitProbeUnreadableStaysUnknown pins the contract documented on
