@@ -271,7 +271,9 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     [a_receipt] = drive_digest(team_a)
     [b_receipt] = drive_digest(team_b)
 
-    ids = json_body(call(:get, "/v1/operator/deliveries", token))["deliveries"] |> Enum.map(& &1["id"])
+    ids =
+      json_body(call(:get, "/v1/operator/deliveries", token))["deliveries"]
+      |> Enum.map(& &1["id"])
 
     assert a_receipt.id in ids
     assert b_receipt.id in ids
@@ -311,10 +313,14 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     [newer] = drive_digest(team_b)
 
     older =
-      older |> Ecto.Changeset.change(inserted_at: ~U[2026-07-01 00:00:00.000000Z]) |> Repo.update!()
+      older
+      |> Ecto.Changeset.change(inserted_at: ~U[2026-07-01 00:00:00.000000Z])
+      |> Repo.update!()
 
     newer =
-      newer |> Ecto.Changeset.change(inserted_at: ~U[2026-07-02 00:00:00.000000Z]) |> Repo.update!()
+      newer
+      |> Ecto.Changeset.change(inserted_at: ~U[2026-07-02 00:00:00.000000Z])
+      |> Repo.update!()
 
     rows = json_body(call(:get, "/v1/operator/deliveries", token))["deliveries"]
     ids = Enum.map(rows, & &1["id"])
