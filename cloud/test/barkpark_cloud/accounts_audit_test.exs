@@ -72,6 +72,23 @@ defmodule BarkparkCloud.AccountsAuditTest do
                })
     end
 
+    test "accepts site.rolled_back — the router really produces it and the console labels it" do
+      team = team_fixture()
+      actor = user_fixture()
+
+      assert {:ok, %AuditEvent{} = ev} =
+               Accounts.record_audit(%{
+                 team_id: team.id,
+                 actor_user_id: actor.id,
+                 action: "site.rolled_back",
+                 target_type: "site",
+                 target_id: "site-123",
+                 metadata: %{deployment_id: "d-prev", previous_deployment_id: "d-live"}
+               })
+
+      assert ev.action == "site.rolled_back"
+    end
+
     test "rejects an action outside the closed vocabulary" do
       team = team_fixture()
 

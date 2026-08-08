@@ -49,7 +49,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     site.created site.deleted
     site.deploy_requested site.artifact_uploaded site.env_changed
     site.domain_added site.github_connected site.github_disconnected
-    site.cloudflare_bound
+    site.cloudflare_bound site.rolled_back
     deployment.promoted
     webhook.created webhook.updated webhook.deleted webhook.rotated webhook.replayed
     webhook.test_sent

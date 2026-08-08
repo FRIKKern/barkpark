@@ -1857,6 +1857,39 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.get_site(site.id).current_deployment_id == prev.id
     end
 
+    test "the rollback LANDS in the audit trail — the console calls Activity append-only" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000002"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000002"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000002"}}
+      )
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 200
+
+      # The router writes this event with `_ = Accounts.record_audit(…)`: a
+      # changeset error is DISCARDED, so the 200 above says nothing about
+      # whether the row exists. Only the trail itself can answer.
+      events = Accounts.list_audit_events(team)
+      assert ev = Enum.find(events, &(&1.action == "site.rolled_back"))
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "site"
+      assert ev.target_id == site.id
+      assert ev.metadata["deployment_id"] == prev.id
+      assert ev.metadata["previous_deployment_id"] == live.id
+    end
+
     test "a rollback that CANNOT happen answers non-2xx — the CLI gates success on the status alone" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
