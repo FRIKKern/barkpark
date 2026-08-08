@@ -247,7 +247,7 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
     end
   end
 
-  ## 2. THE KEY — (sha, delivering_run_id, first_seen_at)
+  ## 2. THE KEY — (sha, delivering_run_id, target)
 
   describe "the unique key" do
     test "the SAME sha delivered by TWO runs at the same first sighting keeps BOTH rows" do
