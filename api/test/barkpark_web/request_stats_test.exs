@@ -94,7 +94,13 @@ defmodule BarkparkWeb.RequestStatsTest do
 
       assert count == 124
 
-      assert classes[:api] == %{count: 117, req_per_s: 1.95, authed: 90, anon: 27, auth_unknown: 0}
+      assert classes[:api] == %{
+               count: 117,
+               req_per_s: 1.95,
+               authed: 90,
+               anon: 27,
+               auth_unknown: 0
+             }
 
       assert classes[:lv_dead] == %{
                count: 6,

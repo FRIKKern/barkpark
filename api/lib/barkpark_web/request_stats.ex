@@ -422,7 +422,10 @@ defmodule BarkparkWeb.RequestStats do
     # head must carry the row's FULL arity — a narrower pattern against the
     # 5-tuple rows matches nothing and the "prune" silently becomes an unbounded
     # leak. `RequestStatsTest` proves prune-still-deletes at this arity.
-    :ets.select_delete(state.table, [{{{:"$1", :_}, :_, :_, :_, :_}, [{:<, :"$1", cutoff}], [true]}])
+    :ets.select_delete(state.table, [
+      {{{:"$1", :_}, :_, :_, :_, :_}, [{:<, :"$1", cutoff}], [true]}
+    ])
+
     schedule_prune()
     {:noreply, state}
   end
