@@ -368,7 +368,7 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("%s", deployCensusScopeLine(census.Scope))
 	out.outf("")
 	out.outf("%s", deployCensusHeadline(census))
-	out.outf("  basis: %s", deployCensusBasis(census.FailureRate.Basis))
+	out.outf("  basis: %s", deployCensusBasis(census))
 	out.outf("")
 
 	if len(census.Classes) > 0 {
@@ -383,6 +383,10 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		for _, c := range census.Deferred {
 			out.outf("  %-28s %6d  %-7s %s", sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(c.Label))
 		}
+		out.outf("")
+	}
+	if line := deployCensusCapacityLine(census); line != "" {
+		out.outf("%s", line)
 		out.outf("")
 	}
 	if len(census.NotAttempted) > 0 {
@@ -525,29 +529,125 @@ func deployCensusEndStates(census cloudclient.DeployCensus) []string {
 }
 
 // deployCensusBasis names the DENOMINATOR every rate above it was taken over,
-// and corrects the one word the control plane's own basis gets wrong.
+// corrects the one word the control plane's own basis gets wrong, and then says
+// HOW BIG the correction is FOR THIS WINDOW — measured, or refused, never
+// frozen.
 //
 // The census calls its denominator "attempted rows". It is rows, and it is NOT
 // attempts: the (site_id, environment) active index refuses a second concurrent
 // production build, so an attempt that coalesces onto an in-flight build
-// completes having minted NO deployment row. Measured on cloud-db-1, auto-deploy
-// worker jobs against `trigger='content-auto'` rows: 2026-08-05 excluded 171,
-// 2026-08-06 excluded 1,584 against 2,182 counted rows, 2026-08-07 excluded 106.
-// Every excluded attempt is non-live, so including them can only LOWER the live
-// rate — which makes live-per-attempt as computed here a CEILING, in the
-// flattering direction. (`coalesced_attempts` now lands on the row but is not in
-// this envelope, so the denominator still excludes them.)
+// completes having minted NO deployment row. Every excluded attempt is non-live,
+// so including them can only LOWER the live rate — which makes live-per-attempt
+// as computed here a CEILING, in the flattering direction.
+//
+// THE FROZEN SENTENCE IS GONE, AND WHY IT HAD TO GO. This line used to append,
+// on EVERY render regardless of the window asked for, "(measured 2026-08-06:
+// 3,766 auto-deploy worker jobs against 2,182 rows — 1,584 attempts excluded)".
+// That literal is not WRONG — it is WINDOW-INDEPENDENT, which on any other
+// window is a different failure: on a `--days 1` screen whose own counter reads
+// low double digits it asserts an exclusion mass of 72.6% while the instrument
+// measuring exactly that quantity for the rendered window says something else
+// entirely. The comment that justified the hardcode ("coalesced_attempts now
+// lands on the row but is not in this envelope") was itself refuted: it IS in
+// the envelope, and as of dr-w23-s4 it is decoded — see
+// deployCensusCoalescedTerm, which renders the window's OWN number or the
+// producer's own refusal.
 //
 // It prints on EVERY render, including the payload that sends no basis at all,
 // and it carries no percentage — the basis line must be safe to print beside a
 // rate that refused one.
-func deployCensusBasis(sent string) string {
-	const correction = "denominator = deployment ROWS, not attempts. An attempt that coalesces onto an in-flight build completes without minting a row, so it is never counted here " +
-		"(measured 2026-08-06: 3,766 auto-deploy worker jobs against 2,182 rows — 1,584 attempts excluded). Every excluded attempt is non-live, so the live rate above is a CEILING."
-	if b := strings.TrimSpace(sent); b != "" {
-		return sanitizeCell(b) + " — " + correction
+func deployCensusBasis(census cloudclient.DeployCensus) string {
+	const correction = "denominator = deployment ROWS, not attempts. An attempt that coalesces onto an in-flight build completes without minting a row, so it is never counted here. " +
+		"Every excluded attempt is non-live, so the live rate above is a CEILING."
+	line := correction + " " + deployCensusCoalescedTerm(census.CoalescedAttempts)
+	if b := strings.TrimSpace(census.FailureRate.Basis); b != "" {
+		return sanitizeCell(b) + " — " + line
 	}
-	return correction
+	return line
+}
+
+// deployCensusCoalescedTerm renders the coalesced-attempt gauge — how many
+// attempts THIS window excluded from the denominator above — and it has three
+// endings, none of which is a bare zero:
+//
+//   - the control plane sends no `coalesced_attempts` node at all: NOT MEASURED.
+//     Silence here reads as "nothing was excluded", which is the flattering
+//     reading of an absence and the exact claim nobody made;
+//   - the node REFUSES: it prints the producer's own reason and NO number. The
+//     refusal is a COVERAGE floor, not a sample floor — the counter column
+//     landed in migration 20260807150000 and every earlier row carries a
+//     materialised 0 rather than a NULL, so a SUM over an earlier window returns
+//     a confident 0 for a day whose true coalesced volume was ~1,563. A renderer
+//     that printed that 0 would manufacture precisely the confidence the
+//     producer refused to manufacture;
+//   - it has a value: the count, said to be THIS window's, with the producer's
+//     own basis for what it counts. Zero prints as zero HERE and only here —
+//     because here it is a measurement ("this window excluded none"), which is a
+//     different sentence from a decoder's zero.
+//
+// This follows the `delivery — NOT MEASURED` precedent above: an honest absence
+// is rendered, never omitted, because a reader cannot notice a line that is not
+// there.
+func deployCensusCoalescedTerm(c *cloudclient.DeployCoalescedAttempts) string {
+	if c == nil {
+		return "Coalesced attempts NOT MEASURED: this control plane sends no coalesced-attempt counter, so how many attempts this window excluded is UNKNOWN — it is not zero."
+	}
+	if c.Refused || c.Value == nil {
+		reason := strings.TrimSpace(c.Reason)
+		if reason == "" {
+			reason = "the control plane refused a count for this window and sent no reason"
+		}
+		return "Coalesced attempts NOT MEASURED for this window: " + sanitizeCell(reason) + "."
+	}
+	term := fmt.Sprintf("Coalesced attempts measured over THIS window: %d", *c.Value)
+	if basis := strings.TrimSpace(c.Basis); basis != "" {
+		term += " (" + sanitizeCell(basis) + ")"
+	}
+	return term + "."
+}
+
+// deployCensusCapacityLine is the ONE cross-reference line: box capacity is a
+// single physical cause that this census reports through TWO cohorts, and no
+// line on the rendered screen has ever connected them.
+//
+// A capacity 409 that settles `failed` routes through the FAILED arm and lands
+// in the failure numerator as ABANDONED_AT_CAPACITY (which is NOT BOX_BUSY_409 —
+// that is the separate, non-abandoned refusal class); rows of the SAME cause
+// that were re-queued sit in the deferral cohort as BOX_AT_CAPACITY_DEFERRED,
+// deliberately outside the numerator. Measured live over 2026-08-07T00:00-06:00Z
+// the two read 6 and 719, five columns apart on the same screen, with nothing
+// saying they are the same box being full.
+//
+// IT DOES NOT RE-CLASSIFY ANYTHING. Whether an abandoned publish belongs in the
+// failure numerator is a JUDGMENT — the content genuinely never shipped — and
+// this reader deliberately does not make it. The line names the split and gives
+// both counts; the cohorts are exactly as the control plane sent them.
+//
+// It returns "" when BOTH counts are zero: a cross-reference to two absent
+// cohorts is noise, and printing "0 and 0" would assert a split that this window
+// did not have.
+func deployCensusCapacityLine(census cloudclient.DeployCensus) string {
+	abandoned := deployCensusClassCount(census.Classes, "ABANDONED_AT_CAPACITY")
+	deferred := deployCensusClassCount(census.Deferred, "BOX_AT_CAPACITY_DEFERRED")
+	if abandoned == 0 && deferred == 0 {
+		return ""
+	}
+	return fmt.Sprintf("box capacity is ONE cause reported through TWO cohorts: ABANDONED_AT_CAPACITY %d (in the failure classes, INSIDE the failure numerator) and BOX_AT_CAPACITY_DEFERRED %d (in the deferrals, OUTSIDE it). "+
+		"Same full box, two cohorts. This reader does not move either row: whether an abandoned publish belongs in the failure numerator is a judgment, not a rendering.",
+		abandoned, deferred)
+}
+
+// deployCensusClassCount reads ONE named class count out of a cohort, or 0 when
+// this window carried no such class. It matches the class name exactly — a
+// prefix or contains match would fold BOX_AT_CAPACITY_DEFERRED and a future
+// BOX_AT_CAPACITY_* sibling into one number.
+func deployCensusClassCount(rows []cloudclient.DeployCensusClass, class string) int {
+	for _, r := range rows {
+		if r.Class == class {
+			return r.Count
+		}
+	}
+	return 0
 }
 
 // deployCensusDeferredTotal sums the deferral class counts — the third cohort,

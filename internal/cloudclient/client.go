@@ -2063,7 +2063,38 @@ type DeployCensus struct {
 	// an unnamed population dressed as a named one. Nil MUST render as "the
 	// population was NOT NAMED", never as an empty team.
 	Scope *DeployCensusScope `json:"scope"`
-	Raw   []byte             `json:"-"`
+	// CoalescedAttempts is the dr-w23-s4 addition: the gauge for deploy attempts
+	// that minted NO deployment row at all (AutoDeployWorker coalesced them onto
+	// an in-flight build). It is DISJOINT from Volume and never folded into it —
+	// a deferred row IS in Volume; a coalesced attempt produced no row to count.
+	//
+	// It is a POINTER for the same reason Delivery is: every control plane older
+	// than this counter sends no key, and "this control plane does not measure
+	// the attempts it drops" must not decode to "it drops none". Before this
+	// field existed the value rode the wire and reached `-o json` only because
+	// `-o json` re-emits Raw verbatim — no Go struct in this package named it,
+	// so no human render could.
+	CoalescedAttempts *DeployCoalescedAttempts `json:"coalesced_attempts"`
+	Raw               []byte                   `json:"-"`
+}
+
+// DeployCoalescedAttempts is the coalesced-attempt gauge WITH its own refusal —
+// the same shape as a DeployRate and for the same reason: it has three endings
+// and none of them is a zero.
+//
+// Value is a POINTER because the producer sends `null` when it REFUSES. The
+// refusal is not a sampling floor but a COVERAGE floor: the counter column
+// landed in migration 20260807150000, and PostgreSQL materialised its `0`
+// default onto every pre-existing row, so a SUM over any window starting before
+// Since reads a confident `0` for days whose true coalesced volume ran into the
+// thousands. A reader that decodes that null into an int prints exactly the
+// false confidence the producer refused to print.
+type DeployCoalescedAttempts struct {
+	Value   *int   `json:"value"`
+	Refused bool   `json:"refused"`
+	Reason  string `json:"reason"`
+	Since   string `json:"since"`
+	Basis   string `json:"basis"`
 }
 
 // DeployDeliveryWindow is the delivery census's PINNED window WITH its width —

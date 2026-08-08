@@ -670,9 +670,18 @@ func TestDeployCensusHeadlineRendersLiveInBOTHBranches(t *testing.T) {
 
 // TestCloudDeploymentsBasisNamesRowsNotAttempts: the basis line says what its
 // denominator actually counts. The control plane calls it "attempted rows",
-// which reads as ATTEMPTS; it is rows, and 1,584 attempts on 2026-08-06 minted
-// no row at all, so every rate above it is a ceiling. The line prints on EVERY
-// payload, including the one that sends no basis of its own.
+// which reads as ATTEMPTS; it is rows, and an attempt that coalesces onto an
+// in-flight build mints no row at all, so every rate above it is a ceiling. The
+// line prints on EVERY payload, including the one that sends no basis of its
+// own.
+//
+// THE SIZE OF THE CORRECTION IS NO LONGER FROZEN. This line used to append the
+// literal "(measured 2026-08-06: 3,766 auto-deploy worker jobs against 2,182
+// rows — 1,584 attempts excluded)" on every render regardless of window, and
+// these assertions pinned it. It was not wrong; it was WINDOW-INDEPENDENT, which
+// is its own kind of untrue on the other six windows. It is replaced by the
+// window's own measurement or the producer's own refusal, asserted below and in
+// TestCloudDeploymentsCoalescedAttemptsHonourRefusal.
 func TestCloudDeploymentsBasisNamesRowsNotAttempts(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -683,7 +692,7 @@ func TestCloudDeploymentsBasisNamesRowsNotAttempts(t *testing.T) {
 			name:     "control plane sent a basis",
 			envelope: censusS1Envelope,
 			// The control plane's own words are kept, verbatim, and corrected after.
-			wantIn: []string{"attempted rows (deferrals included)", "deployment ROWS, not attempts", "1,584 attempts excluded", "CEILING"},
+			wantIn: []string{"attempted rows (deferrals included)", "deployment ROWS, not attempts", "CEILING"},
 		},
 		{
 			name:     "control plane sent no basis",
@@ -710,8 +719,262 @@ func TestCloudDeploymentsBasisNamesRowsNotAttempts(t *testing.T) {
 			if pctRe.MatchString(basis) {
 				t.Fatalf("the basis line must carry no percentage: %q", basis)
 			}
+			// THE FROZEN-LITERAL GUARD, on rendered bytes. Neither envelope
+			// carries a `coalesced_attempts` node, so the only way a date-stamped
+			// count can reach this screen is a hardcode. It reds the moment one
+			// is reintroduced in ANY wording, because it matches the SHAPE
+			// ("measured <ISO date>: <count>") rather than the sentence.
+			if m := frozenCountRe.FindString(basis); m != "" {
+				t.Fatalf("a date-stamped count is hardcoded into the basis line (%q) — this window did not measure it: %q", m, basis)
+			}
 		})
 	}
+}
+
+// frozenCountRe matches a count quoted against a fixed calendar date — the
+// shape of the literal dr-w23-s4 deleted ("measured 2026-08-06: 3,766 …
+// 1,584 attempts excluded"). A number a reader takes as this window's must come
+// from this window's envelope; a number stamped with someone else's day is a
+// claim no render can check.
+var frozenCountRe = regexp.MustCompile(`measured \d{4}-\d{2}-\d{2}: *[\d,]+`)
+
+// censusCoalescedMeasuredEnvelope carries the dr-w23-s4 gauge with a REAL count:
+// a window wholly after the counter's coverage floor, so the producer measures
+// rather than refuses.
+const censusCoalescedMeasuredEnvelope = `{
+  "window": {"from": "2026-08-07T12:00:00Z", "to": "2026-08-08T00:00:00Z"},
+  "volume": 41,
+  "failed": 2,
+  "failure_rate": {"sample": 41, "pct": null, "numerator": 2, "min_sample": 200, "refused": true, "reason": "sample 41 below min_sample 200"},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200,
+  "coalesced_attempts": {
+    "value": 17,
+    "refused": false,
+    "reason": null,
+    "since": "2026-08-07T10:02:23Z",
+    "basis": "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from ` + "`volume`" + `, never folded into it"
+  }
+}`
+
+// censusCoalescedRefusedEnvelope is the SAME gauge over a window that starts
+// before the counter existed. `value` is null and `refused` is true: every
+// pre-migration row carries a materialised 0 rather than a NULL, so a SUM here
+// would report a confident zero for a day whose true coalesced volume ran into
+// the thousands.
+const censusCoalescedRefusedEnvelope = `{
+  "window": {"from": "2026-08-06T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2182,
+  "failed": 25,
+  "failure_rate": {"sample": 2182, "pct": 1.15, "numerator": 25, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200,
+  "coalesced_attempts": {
+    "value": null,
+    "refused": true,
+    "reason": "the coalesced-attempt counter did not exist before 2026-08-07T10:02:23Z (migration 20260807150000). Every earlier row carries a materialised default of 0, not a NULL, so a SUM over this window would report a confident 0 — it read 0 for 2026-08-06, a day whose true coalesced volume was ~1,563",
+    "since": "2026-08-07T10:02:23Z",
+    "basis": "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from ` + "`volume`" + `, never folded into it"
+  }
+}`
+
+// TestCloudDeploymentsCoalescedAttemptsHonourRefusal: the gauge renders in
+// `-o table` with all THREE of its endings, and the refusal is the one that
+// matters. Before this slice the key rode the wire and reached `-o json` only
+// because `-o json` re-emits the envelope verbatim — no Go struct named it, so
+// the human render could not show it at any price.
+//
+// A renderer that printed `0` for the refused node would manufacture exactly the
+// confidence the producer declined to manufacture, which is why the refused arm
+// asserts the ABSENCE of a count as hard as the measured arm asserts its
+// presence.
+func TestCloudDeploymentsCoalescedAttemptsHonourRefusal(t *testing.T) {
+	t.Run("measured: the window's OWN number, on the basis line", func(t *testing.T) {
+		newCensusServer(t, 200, censusCoalescedMeasuredEnvelope)
+		pinCensusClock(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC))
+
+		stdout, stderr, code := runDeployments(t, "table")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+		}
+		basis := censusLineContaining(t, stdout, "basis:")
+		for _, want := range []string{"Coalesced attempts measured over THIS window: 17", "DISJOINT from"} {
+			if !strings.Contains(basis, want) {
+				t.Fatalf("basis line %q missing %q — the measured count and what it counts must travel together", basis, want)
+			}
+		}
+		if strings.Contains(basis, "NOT MEASURED") {
+			t.Fatalf("a measured gauge must not also claim it was not measured: %q", basis)
+		}
+		t.Logf("`bp cloud deployments` basis line, gauge MEASURED:\n%s", basis)
+	})
+
+	t.Run("refused: a reason and NO number, never a zero", func(t *testing.T) {
+		newCensusServer(t, 200, censusCoalescedRefusedEnvelope)
+		pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+		stdout, stderr, code := runDeployments(t, "table")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+		}
+		basis := censusLineContaining(t, stdout, "basis:")
+		for _, want := range []string{
+			"Coalesced attempts NOT MEASURED for this window",
+			"did not exist before 2026-08-07T10:02:23Z",
+			"materialised default of 0",
+		} {
+			if !strings.Contains(basis, want) {
+				t.Fatalf("basis line %q missing %q — a refusal must carry the producer's own reason", basis, want)
+			}
+		}
+		// THE COMFORTING ZERO, forbidden in every wording a refused count could
+		// wear. `measured over THIS window: 0` is the shape a nil-coalescing
+		// decoder would print.
+		if strings.Contains(basis, "measured over THIS window") {
+			t.Fatalf("a REFUSED gauge rendered as a measurement: %q", basis)
+		}
+		t.Logf("`bp cloud deployments` basis line, gauge REFUSED:\n%s", basis)
+	})
+
+	t.Run("not sent: an absence, named", func(t *testing.T) {
+		newCensusServer(t, 200, censusTodayEnvelope)
+		pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+		stdout, _, code := runDeployments(t, "table")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0", code)
+		}
+		basis := censusLineContaining(t, stdout, "basis:")
+		if !strings.Contains(basis, "Coalesced attempts NOT MEASURED: this control plane sends no coalesced-attempt counter") {
+			t.Fatalf("an absent gauge must be named absent, never omitted: %q", basis)
+		}
+		if !strings.Contains(basis, "it is not zero") {
+			t.Fatalf("an absence must say what it is NOT, or it reads as a zero: %q", basis)
+		}
+	})
+
+	t.Run("the decoder actually decodes it", func(t *testing.T) {
+		var census cloudclient.DeployCensus
+		if err := json.Unmarshal([]byte(censusCoalescedMeasuredEnvelope), &census); err != nil {
+			t.Fatalf("fixture does not decode: %v", err)
+		}
+		if census.CoalescedAttempts == nil || census.CoalescedAttempts.Value == nil {
+			t.Fatalf("coalesced_attempts did not decode into a typed field: %+v", census.CoalescedAttempts)
+		}
+		if *census.CoalescedAttempts.Value != 17 || census.CoalescedAttempts.Since != "2026-08-07T10:02:23Z" {
+			t.Fatalf("decoded gauge is wrong: %+v", *census.CoalescedAttempts)
+		}
+		var refused cloudclient.DeployCensus
+		if err := json.Unmarshal([]byte(censusCoalescedRefusedEnvelope), &refused); err != nil {
+			t.Fatalf("refused fixture does not decode: %v", err)
+		}
+		// The load-bearing decode: `null` must arrive as nil, not as 0.
+		if refused.CoalescedAttempts == nil || !refused.CoalescedAttempts.Refused || refused.CoalescedAttempts.Value != nil {
+			t.Fatalf("a refused gauge must decode with NO value: %+v", refused.CoalescedAttempts)
+		}
+	})
+}
+
+// censusCapacitySplitEnvelope carries the SAME physical cause in both cohorts,
+// at the live proportions measured over 2026-08-07T00:00–06:00Z: six capacity
+// abandonments inside the failure numerator, 719 capacity deferrals outside it.
+const censusCapacitySplitEnvelope = `{
+  "window": {"from": "2026-08-07T00:00:00Z", "to": "2026-08-07T06:00:00Z"},
+  "volume": 965,
+  "failed": 14,
+  "failure_rate": {"sample": 965, "pct": 1.45, "numerator": 14, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [
+    {"class": "ABANDONED_AT_CAPACITY", "label": "the box was full and the publish was abandoned", "count": 6,
+     "share": {"sample": 14, "pct": 42.86, "numerator": 6, "min_sample": 200, "refused": false, "reason": null}},
+    {"class": "DOC_ID_EMPTY", "label": "the cause went unrecorded", "count": 8,
+     "share": {"sample": 14, "pct": 57.14, "numerator": 8, "min_sample": 200, "refused": false, "reason": null}}
+  ],
+  "deferred": [
+    {"class": "BOX_AT_CAPACITY_DEFERRED", "label": "the box was at capacity; re-queued", "count": 719,
+     "share": {"sample": 965, "pct": 74.51, "numerator": 719, "min_sample": 200, "refused": false, "reason": null}}
+  ],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsCapacityCrossReference: one cause, two cohorts, and now
+// ONE line that says so — with both counts, on the rendered screen.
+//
+// It is a cross-reference and NOT a re-classification: ABANDONED_AT_CAPACITY
+// stays in the failure classes and BOX_AT_CAPACITY_DEFERRED stays in the
+// deferrals, exactly as the control plane sent them. Whether an abandoned
+// publish belongs in the failure numerator is a judgment this reader does not
+// make — asserted below by checking both rows still render in their own cohorts
+// with their own counts.
+func TestCloudDeploymentsCapacityCrossReference(t *testing.T) {
+	newCensusServer(t, 200, censusCapacitySplitEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 6, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "box capacity is ONE cause reported through TWO cohorts")
+	for _, want := range []string{"ABANDONED_AT_CAPACITY 6", "BOX_AT_CAPACITY_DEFERRED 719", "INSIDE the failure numerator", "OUTSIDE it"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("cross-reference line %q missing %q — both counts and both sides of the numerator must ride it", line, want)
+		}
+	}
+	// NOTHING MOVED. Both rows still render inside their own cohort, under their
+	// own heading, with their own counts.
+	failures := censusSectionAfter(t, stdout, "failure classes")
+	if !strings.Contains(failures, "ABANDONED_AT_CAPACITY") {
+		t.Fatalf("the abandoned rows left the failure classes — this slice re-classified something:\n%s", stdout)
+	}
+	deferrals := censusSectionAfter(t, stdout, "deferrals (in the volume")
+	if !strings.Contains(deferrals, "BOX_AT_CAPACITY_DEFERRED") {
+		t.Fatalf("the deferred rows left the deferral cohort — this slice re-classified something:\n%s", stdout)
+	}
+	t.Logf("`bp cloud deployments` against a window whose capacity refusals split across cohorts:\n%s", stdout)
+
+	// AND IT CAN LOSE: with both counts zero, the line is ABSENT. A
+	// cross-reference to two cohorts this window did not have would assert a
+	// split that did not happen.
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+	quiet, _, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if strings.Contains(quiet, "ONE cause reported through TWO cohorts") {
+		t.Fatalf("the cross-reference line printed for a window with neither capacity cohort:\n%s", quiet)
+	}
+}
+
+// censusSectionAfter returns the rendered block that starts at the heading
+// containing `heading` and ends at the next blank line — so an assertion about
+// "the failure classes" is taken against the failure classes and not against
+// any line that happens to name the same class elsewhere on the screen.
+func censusSectionAfter(t *testing.T, out, heading string) string {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, heading) {
+			continue
+		}
+		var section []string
+		for _, l := range lines[i:] {
+			if strings.TrimSpace(l) == "" && len(section) > 0 {
+				break
+			}
+			section = append(section, l)
+		}
+		return strings.Join(section, "\n")
+	}
+	t.Fatalf("no section headed %q:\n%s", heading, out)
+	return ""
 }
 
 // censusDeliveryEnvelope is the census WITH dr-w11-s4's `delivery` node. Its key
@@ -874,7 +1137,16 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 	// `DeployLedger.delivery/3` and the census route emitted no `delivery` key.
 	// The route emits it now (`Web.Router.deploy_census_json/2`), so an envelope
 	// that CARRIES the node must never render the sentence that says it doesn't.
-	if strings.Contains(stdout, "NOT MEASURED") {
+	//
+	// PINNED ON THE DELIVERY SENTENCE, NOT ON THE WORDS "NOT MEASURED". The
+	// assertion was a whole-stdout search for "NOT MEASURED", which was a
+	// SECOND, unintended claim: that no other section of the census may ever
+	// refuse a measurement. dr-w23-s4 renders the coalesced-attempt gauge's own
+	// honest absence with the same two words on the basis line, and this guard
+	// would have forbidden that — pushing a new refusal towards softer wording,
+	// which is backwards. Narrowed to the exact arm it exists to catch, and no
+	// weaker: `renderDeployDelivery`'s `d == nil` sentence.
+	if strings.Contains(stdout, "sends no delivery census") {
 		t.Fatalf("the delivery node is present, yet the render still claims it was not measured:\n%s", stdout)
 	}
 
@@ -916,7 +1188,12 @@ func TestCloudDeploymentsWithoutDeliverySaysNotMeasured(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
-	line := censusLineContaining(t, stdout, "NOT MEASURED")
+	// The needle names the DELIVERY refusal specifically: more than one section
+	// can honestly refuse on the same render (dr-w23-s4 added the
+	// coalesced-attempt gauge's refusal to the basis line), and
+	// censusLineContaining returns the FIRST match, so a bare "NOT MEASURED"
+	// would silently start asserting against a different section's refusal.
+	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no delivery census")
 	if !strings.Contains(line, "NOT a fleet that delivers instantly") {
 		t.Fatalf("a missing delivery census must refuse out loud, not print nothing:\n%s", stdout)
 	}
