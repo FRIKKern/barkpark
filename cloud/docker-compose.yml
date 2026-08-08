@@ -99,6 +99,73 @@ x-control-plane: &control_plane
     # NOTHING (see the rule at the top of this file) and the container reports
     # null forever while looking built.
     - BARKPARK_GIT_SHA
+    # ── Census widening (self-host-blessing W1/S1b) ────────────────────────
+    # Everything below is read by cloud/config/runtime.exs or cloud/lib and was
+    # NOT passed through: the container fell back to the code-side default (or
+    # to "feature off") no matter what the operator put in cloud/.env, because
+    # compose passes NOTHING it is not told to pass. The set is derived, not
+    # hand-listed — `python3 scripts/env-census.py --root cloud` re-derives it
+    # and FAILS if this list drifts from what the code reads.
+    #
+    # All BARE. A `${NAME:-default}` here would turn "unset" into "set to
+    # something", which is a different server-side meaning; the code already
+    # owns its own defaults (charter D24).
+
+    # Plan instance limits (runtime.exs:82-85). Unset → 1/1/3/10.
+    - LIMIT_FREE
+    - LIMIT_TRIAL
+    - LIMIT_SUPPORTER
+    - LIMIT_SUPPORT_PLUS
+
+    # Stripe Checkout/Portal redirect targets (runtime.exs:125-130). Unset →
+    # Stripe falls back to its dashboard-configured URLs.
+    - STRIPE_SUCCESS_URL
+    - STRIPE_CANCEL_URL
+    - STRIPE_PORTAL_RETURN_URL
+
+    # GitHub App (runtime.exs:143-166). Unset → the App integration is off.
+    - GITHUB_APP_ID
+    - GITHUB_APP_PRIVATE_KEY
+    - GITHUB_APP_WEBHOOK_SECRET
+    - GITHUB_APP_SLUG
+
+    # Bundle object storage on Hetzner (runtime.exs:206-209). Unset → bundle
+    # upload is not configured; BARKPARK_BUNDLE_LOCATION defaults to fsn1.
+    - HETZNER_S3_ACCESS_KEY
+    - HETZNER_S3_SECRET_KEY
+    - BARKPARK_BUNDLE_BUCKET
+    - BARKPARK_BUNDLE_LOCATION
+
+    # Push relay (runtime.exs:228-237) — the human gate documented in
+    # .env.example. Unset → Push.Adapters.NotConfigured, every send cancels
+    # terminally. APNS_ENV defaults to "sandbox" code-side.
+    - APNS_KEY_P8
+    - APNS_KEY_ID
+    - APNS_TEAM_ID
+    - APNS_BUNDLE_ID
+    - APNS_ENV
+    - FCM_SERVICE_ACCOUNT_JSON
+
+    # Public URLs (runtime.exs:381-388). PUBLIC_URL wins over
+    # CONTROL_PLANE_URL; DASHBOARD_URL is the SPA origin.
+    - PUBLIC_URL
+    - CONTROL_PLANE_URL
+    - DASHBOARD_URL
+
+    # Ops knobs. AUDIT_RETENTION_DAYS (runtime.exs:43) prunes the audit log;
+    # OBAN_QUEUES_DISABLED (runtime.exs:270) parks background queues;
+    # AUTODEPLOY_DEBOUNCE_S (sites/auto_deploy_worker.ex:124) throttles
+    # auto-deploy. All optional, all code-defaulted when unset.
+    - AUDIT_RETENTION_DAYS
+    - OBAN_QUEUES_DISABLED
+    - AUTODEPLOY_DEBOUNCE_S
+
+    # Plugin kill switch. The control plane does not load Barkpark plugins
+    # today, so this is passthrough parity with the root compose rather than a
+    # live knob — present so that the day it IS read, the value an operator
+    # sets actually arrives. NEVER `${BARKPARK_PLUGINS:-}`: an empty string
+    # means "load NO plugins", which is not what "unset" means (charter D24).
+    - BARKPARK_PLUGINS
   restart: unless-stopped
 
 services:
