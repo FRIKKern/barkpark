@@ -6378,3 +6378,71 @@ Two further inherited numbers were refuted outright: the "~40-hour rotating corp
 and the "p90 488 s GitHub queue" as an attribution (D383, actually our own concurrency group at 96.4%).
 
 **Charter PR:** #10654 (docs-only). Epic task claimed by `epic-cycle-decide-w22` at epoch 55.
+
+
+### Wave 2026-08-08 (wave 22) — REVIEWED · Paper `deploy-reliability-wave-22-2026-08-08` · grade **A−**
+
+**Four round-1 slices built, reviewed, gate-green on their final state, pushed and PR'd. Three slices (s5, s6,
+s7) were round 2 BY DESIGN and were not built — the sequenced-rounds law, not a stall.**
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| Four display boundaries stop shipping the secret | `dr-w22-s1-scrub-entry-boundaries-stop-leaking` | `…scrub-boundaries-stop-shi-0-r` | [#10710](https://github.com/FRIKKern/barkpark/pull/10710) | 122 targeted · full cloud suite **3261/0** · format clean |
+| The box remembers: door census + serving clock | `dr-w22-s2-the-box-remembers` | `…reporting-a-constant-obser-1` | [#10711](https://github.com/FRIKKern/barkpark/pull/10711) | 18 tests, 0 failures · WAES_RC=0 (+ `deploy_runner_test` 79/0) |
+| `dirty_tree` becomes a gauge that can say clean | `dr-w22-s3-dirty-tree-can-say-clean` | `…gauge-that-can-say--2-r` | [#10712](https://github.com/FRIKKern/barkpark/pull/10712) | `go build`/`vet`/`test ./internal/agent/...` ok · gofmt clean |
+| The null-sort law: `usageStateSeverity` fails CLOSED | `dr-w22-s4-null-sort-fails-closed` | `…usagestateseverity-fai-3` | [#10713](https://github.com/FRIKKern/barkpark/pull/10713) | build/vet/test all rc=0 · gofmt clean |
+
+**What landed.** Two of the wish's three clauses moved, and one of them moved further than the plan asked.
+STILL-SILENT: the box stopped reporting a constant. `GET /v1/instance/site-deploy` carried `build_slots`, a
+compile-time `1` that reads the same on an idle box, a saturated box, and a box that refused 1,810 deploys —
+and the one real concurrency measurement in the tree was interpolated into a log line and discarded. It is now
+`door.observed_in_flight` + `refusals_total` beside `refusals_since` + `measured_at`, with a `serving` clock
+sited on the run-state dir that a restart cannot improve. STILL-MIS-REPORTED: `dirty_tree` counted untracked
+files, so every working production box was pinned dirty forever and the gauge could never say the good state
+(guerrilla flips true→false); and `usageStateSeverity`'s `default: return 0` rolled an unranked state up as
+the healthy FLOOR, opposite to its own shipped sibling `attentionBucket`.
+
+**The wave's sharpest finding is a REVIEW finding.** `dr-w22-s1` closed the three `scrub_entry/2` boundaries as
+briefed. The reviewer's independent sweep of `FailureCopy.scrub(` across `cloud/lib` + `api/lib` found a
+**fourth**, in the same rendered payload as the third: `deployment_json/1`'s `failure_reason_raw` hand-piped
+`scrub |> strip_ansi`, the worst variant — the trailing strip removes the very escapes that blocked the scrub,
+so the credential arrived in clean CLEARTEXT beside the `console[].line` the same response had just redacted.
+Mutation-proved (`failure_reason_raw shipped a live credential: "api_key=Ab3xQ9zK1mP7vT fetching graph corpus"`),
+fixed, and pinned by a new HTTP assertion. **Both instances were found by a human reading the file; nothing in
+the tree reds when a fifth is added the same way.** Filed as `dr-w22-bl-scrub-order-tripwire` (priority 1).
+
+**Review fixes made in place** (two commits on `-r` branches):
+1. **s1** — the fourth bare-scrub boundary above, plus its HTTP-boundary assertion, mutation-proved both ways.
+2. **s3** — a staged-ADD and a tracked-DELETION subtest. The blast-radius claim "only untracked stops counting"
+   was stated in prose and proven nowhere, so a later flag edit (`-uall`, porcelain v2) could widen the
+   suppression with every existing test still green. Both mutation-proved.
+   s2 and s4 needed nothing and were pushed unchanged.
+
+**What did NOT land, and must be said plainly.** Nothing is merged, so no rate moved. `dr-w22-s2` ships a
+recorder with **zero non-test readers** — `git grep "instance/site-deploy" origin/main` is the route, its test,
+one ledger note — so no human can read the box's new numbers until `dr-w22-s7`. `dr-w22-s4`'s guard is enforced
+by REVIEW, not CI: `internal/cli/**` trips zero required gates (D391), so a future edit reverting `default` to 0
+merges four-green. The OSC leak (`"\e]0;t\ainapi_key=…"`) survives BOTH scrub orders and is open by design,
+asserted as a standing residual that reds when someone fixes it. And `door_census/0`'s honest-unknown branch —
+`null` means UNREAD, never zero, the gauge's whole contract — is coded and reasoned but reached by NO test.
+
+**Filed, not built (the visible backlog this wave seeded):** `dr-osc-residual-strip-fuses-tokens` ·
+`dr-w22-s2-followup-census-staleness-systemd` · `dr-w22-s2-followup-serving-write-on-read` ·
+`dr-w22-bl-scrub-order-tripwire` (priority 1) · `dr-w22-bl-door-census-unknown-branch-unproven`.
+
+**Ledger audit.** All four slice tasks were claimed before work, stamped as they went, and left `in_progress`
+with only the merge-gated criterion open — no false-done anywhere, and `dr-w22-s3` honestly recorded its
+PR-body criterion as `--miss` rather than claiming it. The reviewer stamped that one (criterion 5) off the PR
+it could finally point at, and pulsed all four with the final branch, PR and gate. No task outside this wave
+was touched.
+
+**What the next wave takes.** Merge round 1 first, then dispatch the deferred slices strictly as their deps
+land: `dr-w22-s5` and `dr-w22-s7` after `dr-w21-s6`(+`dr-w22-s2` for s7), `dr-w22-s6` after `dr-w21-s1`. Then
+the tripwire — this epic has now hand-fixed the same scrub-order leak twice and still cannot detect the third.
+**Independence is owed before merge on `dr-w22-s1` and `dr-w22-s2`** (security, and the ETS-vs-`GenServer.call`
+census siting); this workflow spawns one reviewer, so that dispatch is a manual lead step.
+
+**Vocabulary note for `dr-w22-s7`:** the box renders `serving: {serving_sha, serving_since}` where
+`serving_since` IS the first-sighting instant; s7's brief names three keys (`serving_sha`/`serving_since`/
+`first_seen_at`). Pick one shape across both surfaces or a reader comparing box to plane will compare two
+different facts with the same name.
