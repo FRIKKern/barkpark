@@ -5305,3 +5305,297 @@ runs the same three-cohort split per site with no partition guard at all.
 `census/3`'s return map and s8 is the last link. S8 is the one that matters most to the wish: it turns the
 hardcoded ceiling into an emitted `coalesced_attempts`, moving 2026-08-06 from 25.67% to 14.94%. Beside them,
 the per-site partition guard and the still-unrepaired prebuilt dead end are the two unclaimed silences.
+
+## Wave 20 — the platform is blind to itself, and the harm changed its name again (2026-08-08)
+
+Epic task `task-fb4fb869490b4213` · Wave 20 Paper `deploy-reliability-wave-20-2026-08-08`
+
+**NUMBERING NOTE.** This wave numbers from **D337**. `origin/main` tops out at D301; D302–D321 (wave 18)
+and D322–D336 (wave 19) are claimed by two charter PRs that are still unmerged. Every charter fact this
+wave cites was read with `git show origin/main:` — the primary checkout's copy of this file is a stale
+stump and must never be read as the charter. **D320 is not in this charter at all** (it is an
+`overflow-wrap: anywhere` ruling in the console-hardening charter); neither `59.3` nor `50.3` appears here.
+
+### Decisions (wave 20)
+
+- **D337 — DEPLOYS ARE NOT BEING LOST. "MERGED = LIVE" HOLDS, MEASURED, AND `UNCOVERED` CANNOT BE THE
+  HONESTY GAUGE.** Over a pinned 30-day window (2026-07-09..08-08), applying `deploy.yml`'s `on.push.paths`
+  **era-locally** (the filter grew three times mid-window: `connectors/**` 07-14, `templates/**` 07-16,
+  `cmd/**` 07-24), 790 cp-target and 1,172 instance-target commits are ALL covered by a successful run —
+  **100.0000%, UNCOVERED = 0, both targets**. And a merge that never got a run does not occur: 2,264 pushes
+  to main, 1,373 path-matching, 1,373 with a run, **0 missing**, with a second independent oracle over
+  2026-07-28..08-07 agreeing exactly (641 / 394 / 394 / 0). *Why:* the wish's word "fail" has expired; this
+  epic sells on cost, service degradation and BLINDNESS, never on lost deploys. And UNCOVERED is pinned at 0
+  **by construction** — a deploy ships the whole tree, so any later success covers every ancestor — so it can
+  only fire on the last minutes of history. The gauge that moved is **time-to-coverage**: cp p99 46.8 h /
+  max 49.5 h, instance p99 36.3 h / max 49.5 h, and over cancelled runs p50 9.1 min / p95 33.3 h / **max
+  49.96 h**. Nothing measures it. Filed: `dr-w20-bl-time-to-coverage-is-the-gauge-that-can-move`.
+
+- **D338 — THE 46% CANCELLED COHORT IS QUEUE EVICTION, AND THE REPORTER IGNORING IT IS CORRECT BY DESIGN.**
+  All 94 cancelled runs since 2026-08-01 report `jobs=0` — no job was ever created, so nothing was
+  interrupted — and lifetimes agree from the other side (cancelled `updated−created` p50 8 s / p95 52 s / max
+  192 s against success p50 322 s / p95 668 s). `concurrency: {group: deploy-production, cancel-in-progress:
+  false}` keeps exactly one PENDING slot; a third arrival evicts the pending run before it starts. 0 of 348
+  cancelled runs across 30 days is uncovered by a later successful descendant. `cch-w42` reached the identical
+  structural conclusion from the opposite epic. **Stop re-litigating cancelled runs.**
+
+- **D339 — THE 84-FAILURE MASS IS ONE INCIDENT WITH ONE CAUSE, AND ITS ONLY MITIGATION IS MEASURED AT
+  0-FOR-65.** 2026-07-21T07:59:48Z..07-23T08:46:54Z: 121 runs, 84 failure, 37 cancelled, ZERO success. Full
+  census (not a sample): 82 of 84 are exit 13 and the same docker-compose network recreate race in two
+  phrasings — 65 with `network cloud_default has active endpoints (name:"cloud-control_plane_green-1"
+  id:"9a7aab2dba5b")` + `FAILED twice`, 15 with the sibling daemon message `is not connected to the network
+  cloud_default` + `SLOT BOOT FAILED`, 2 with both, 2 exit 255. **The endpoint id is byte-identical across 27
+  hours**: one wedged endpoint re-hit by every merge, not 84 races. In **83 of the 84 the INSTANCE job
+  SUCCEEDED** — guerrilla deployed throughout, which is why the epic narrated a control-plane outage as a
+  deploy outage. The #5584 retry (5866f3b90) was live for the final 27 h; 66 of 84 failures postdate it and
+  65 of those carry `FAILED twice`. **A slice sold as "harden the retry" would be selling a lever measured at
+  zero.**
+
+- **D340 — THE RACE IS LATENT, ITS FIX LIVES ONLY IN MUTABLE BOX STATE, AND WAVE 20 FILES IT RATHER THAN
+  ALARMING ON IT.** Zero occurrences across 323 successful runs (232 of which ran the CP job) and 171
+  cancelled runs since 2026-07-24, with a **positive control** proving the detector fires on blackout run
+  29992317636 — and that control reads the OLDEST log in scope, so the zero is not a retention artifact. But
+  `cp-deploy.sh` has had no commit since 5866f3b90; there is no stale-endpoint detection, no `docker network
+  disconnect`, no prune, and no docker version pin anywhere under `deploy/`; `instance-deploy.sh` has zero
+  race handling at all. The blackout ended by a manual act with **no commit in the gap**. *Why filed, not
+  built:* an alarm over an unexhibited class is this epic's own standing test failing on itself.
+  `dr-w20-bl-cp-deploy-cannot-clear-a-wedged-endpoint`. **Re-derivation trap, mandatory:** run the census with
+  `-R FRIKKern/barkpark`; from a non-repo cwd `gh` dies, every fetch returns empty, and the pipeline prints a
+  clean, comforting ZERO at exit 0.
+
+- **D341 — THE CONTROL-PLANE SERVING-SHA VITAL IS A CLOCK, NOT AN ALARM, AND WAVE 20 BUILDS IT.** Drift was
+  measured at **0** at three independent layers — the box checkout equals `origin/main`; the running image was
+  built 33 s after the pull; and the RUNNING BEAM's compiled code (`rpc FailureCopy.domain_stage_remediation`
+  returning HEAD's sentence, not its parent's) plus the served `app.js` md5 both match HEAD. Merge to live was
+  ~2m54s. *Why a clock:* an alarm keyed on `drift > 0` would be unfalsifiable in the window we can observe —
+  the exact shape this epic has already refuted twice (the eternal-queued reaper at n=0, `already_running` at
+  zero occurrences). The instrument always emits `git_sha` + `serving_since`, so a future non-zero reading is a
+  CHANGE in a number already on screen. **Absent means `nil`** — never `"unknown"`, never `0`.
+
+- **D342 — THE SHA RIDES `/health`, NOT A NEW ROUTE AND NOT THE AGENT.** `cp-deploy.sh` never installs
+  `barkpark-agent` (`git grep -n agent origin/main -- deploy/cp-deploy.sh` is EMPTY), so an agent-borne CP sha
+  needs a new systemd unit AND a new credential. `/health` is already 200, already unauthenticated, already
+  smoke-tested. `send_health/1` passes the map through whole, so **no router change is needed**. **THE EXPORT
+  IS THE LOAD-BEARING LINE:** `cp-deploy.sh` exports nothing today, and compose's bare-`KEY` form passes a
+  variable only when the invoking shell has it — so shipping the reader and the compose line WITHOUT
+  `export BARKPARK_GIT_SHA="$NEW"` (placed after the `.env` source, sourced from `$NEW`, never a second
+  `rev-parse`) yields `git_sha: null` forever and looks built. Honest limit: the container leg is proved by
+  document, not by run — this host has Docker 29.6.1 with no compose plugin, and the repo already records
+  (`notifications_platform_admin_env_test.exs:21-23`) that no Elixir test can observe it. The vital is L4
+  until a post-merge `curl … | jq -r .git_sha` is quoted.
+
+- **D343 — THE CUSTOMER-BOX "FRESHNESS RAIL" IS A RELEASE RAIL, NOT A SHA RAIL. NOBODY HAS A SHA READER.**
+  This CORRECTS the direction this wave inherited. `Registry.refresh_update_status/1` computes nothing — it
+  GETs the instance's own `/v1/admin/self-update` and MIRRORS its `check` block; `git_commit` appears nowhere
+  in that path, and `bp cloud status` carries no `git_commit` and no `version` key at all. So `update_state`
+  is a release-catalogue verdict the box grades ITSELF on, and `behind` means "a tag exists I am not on",
+  never "code was merged that I am not running". Measured today: all six prod boxes read `current` at
+  `0.2.25 == 0.2.25`, while their reported commits sit **0 / 213 / 578 / 872 / 2,454 behind** and one is NULL.
+  Three of the stale ones additionally read `bucket: healthy, status: ok`. The serving-sha vital is therefore
+  the product's **first**, not a port. Filed: `dr-w20-bl-instance-target-has-no-serving-sha`; the unearned
+  green itself remains `dr-bl-w6-update-state-current-is-an-unearned-green`, unfixed and aged.
+
+- **D344 — `deploy.yml`'s CP SMOKE IS THE UNBACKSTOPPED ONE, NOT `cp-deploy.sh`'s.** This CORRECTS the digest.
+  `cp-deploy.sh:129-141` already requires a bad-creds `POST /v1/auth/login` to answer 401, with a comment
+  naming the 16 h outage the `/` gate slept through. `deploy.yml:114-120` accepts `200|301|302|404` with no DB
+  probe — and `/` is `send_dashboard` → `send_file(200, priv/static/index.html)` with **zero Repo in the
+  path**, so it is structurally incapable of failing on a DB-dead box. Demonstrated live without harming prod:
+  `https://barkpark.cloud/definitely-not-a-route-xyz` → 404, which the regex ACCEPTS. The fix is a copy of a
+  backstop that already exists 80 lines away in the same repo; `deploy.yml:156-158`'s hard `test "$code" =
+  "200"` on the instance job is the counterexample proving the asymmetry is a defect. Honest bound: a FULLY
+  dead CP already fails (Caddy 502 is rejected); this closes the PARTIAL-death class — the one that happened.
+
+- **D345 — THE ARM-ROUTE SILENCE IS NOT ZERO: ONE LIVE SITE HAS BEEN A PUBLIC 404 FOR 208 DEPLOYS WHILE
+  REPORTING `SWITCH ok` AND `exit 0`.** 9 markers against 10 site dirs on guerrilla; `/sites/search/` returns
+  404 while the other nine return 200. `search` is a strict PREFIX of `search-capstone` and `search-ember`,
+  and both matchers match the bare substring — `grep -q "$marker"` (site-deploy.sh:2227, :1861;
+  site-deploy-node.sh:263) and `active_caddy_port`'s awk `index($0, m)`. Chain, each link measured:
+  `active_caddy_port` → 8506 (the sibling's port) → `active_slot` matches neither PORT_A 8404 nor PORT_B 8405
+  → `CUR_SLOT=""` → the "first deploy" ARM branch → the already-armed guard matches the SIBLING and returns 0
+  **without writing anything** → `emit SWITCH ok` → exit 0. All 208 runs are first deploys (206 `for slot a`,
+  zero slot b, no `.previous`), so blue/green rollback for this site is silently absent too. **The cause is the
+  marker PREDICATE, not the global sed the code comment blames — and `grep -qw` does NOT fix it** (`-` is a
+  non-word character, so `…:search` still word-matches `…:search-capstone`). Both engines' self-tests pass
+  today (128/128, 108/108) and neither ever arms a prefix slug: the whole class is outside both oracles.
+
+- **D346 — THE ARM DECISION HAS NO DURABLE CHANNEL AT ALL, WHICH IS WHY ITS ZERO LOOKED LIKE HEALTH.**
+  `leaving Caddy untouched`, `skipping /sites/` **and** `route already armed` all appear ZERO times across
+  1,178 durable `.log` files — and the third MUST fire on every re-deploy of an already-armed site
+  (astro-search alone has 244). `.log` carries raw child output only; `.status` carries `BPSTAGE` lines only;
+  every `log()` line dies on stdout. So route-arm incidence is currently **unmeasurable through the intended
+  channel**, and any new alarm would be as invisible as the old one. The channel exists and is free: `emit
+  ROUTE` is already a BPSTAGE line held DELIBERATELY outside `DeployRunner`'s `@stage_names`
+  (site-deploy.sh:2279-2283, self-test-pinned at :1486-1489), so it is durable in the fold and cannot flip a
+  verdict. Wave 20 emits ROUTE on the SUCCESS path too, in both engines. **No exit code changes** — D327's
+  report-don't-fail posture stands, and `dr-w19-bl-arm-route-incidence-then-fatal` still owns the fatal
+  question; this wave makes it answerable.
+
+- **D347 — THE COST DECOMPOSITION IS RE-DERIVED, AND NOTHING RETRIES.** Live post-boundary: APL **3.71 = 2.62×
+  per-site repetition × 1.42× sites-not-reaching-live**, with fan-out CONFIRMED and refined 4.01 → **4.10
+  sites per publish**. Oban `avg(attempt) = 1.000`, max 3, **6 of 12,644 jobs ever exceeded attempt 1** — so
+  D223's "3.64× retry" factor is **MISNAMED**. It is debounce-cycle plus deferral-chain repetition, and calling
+  it retry is what pointed this epic at the wrong mechanism twice. The deciding split: (site, content_rev)
+  pairs that never deferred carry **1.26** rows; pairs that deferred carry **4.04** (856 vs 818 pairs). All
+  amplification above the cadence floor is the deferral RE-QUEUE CHAIN (`Deploy`'s defer arm →
+  `requeue_rebuild/1` → `enqueue/1`, minting another job 60 s out), at observed depths 1..6 =
+  184/143/102/59/21/4. Fan-out explains VOLUME, not the ratio.
+
+- **D348 — THE AMPLIFICATION IS A QUEUEING-OVERLOAD ARTIFACT, AND IT IS A THRESHOLD, NOT A GRADIENT.** Supply
+  is 1 build slot / p50 63.2 s ≈ **0.95 builds/min**; demand is 5 sites × 1 build/61.0 s cycle ≈ **4.9
+  builds/min** — 5.3× oversubscribed, which is why **68.3%** of post-boundary attempts defer and each refusal
+  re-queues. At fixed supply, volume and ratio are not separable: any lever that drops demand under ~0.95
+  builds/min collapses the chain toward the ~1.26 cadence floor, and any lever that does not cross it barely
+  moves the number. **W = 90 or W = 120 would be an expensive nothing.** Stated as a model, not a measurement —
+  nobody has run this system above W = 60, and the cheapest reversible test of it is
+  `dr-w20-bl-debounce-window-live-experiment`.
+
+- **D349 — LEG B's RULING, ON THE MERITS, FOR THE FIRST TIME: NOBODY EVER RULED, AND THE DEMAND CUT IS THE
+  OWNER'S CALL.** Read literally on `origin/main`: **D206** FILES the cut and conditions it ("The label must
+  exist BEFORE the cut, not after"); **D223** rules that label unbuildable ("RULING: no label, no column, no
+  migration"); **D228(f)** says the cut therefore "needs a fresh argument, not a label". So the fence everyone
+  has cited is a **stalled filing whose only gate was demolished by the very next wave**, and wave 20 must not
+  pretend to "overrule D206" — it issues the first merits ruling REQUEST. What a cut cannot touch: `jarl.no` /
+  `www.jarl.no` ride barkpark `9fb839d6`, **not guerrilla**; 12 of 13 sites carry zero custom domains, one team
+  owns every site, 26 of 27 teams own none. What a cut DOES cost, said out loud: five sites carry ~99% of all
+  deploys ever, so every rate, cohort and percentile this epic has built is calibrated on those rows — cutting
+  sites shrinks the epic's own test population. "Working as designed, and the only lever is fewer demo sites"
+  is a legitimate outcome. Filed as a human gate: `dr-w20-hg-demand-cut-is-the-owners-call`.
+
+- **D350 — THE FRESH ARGUMENT IS SEARCH LATENCY, AND IT IS LIVE, NOT HISTORICAL. THIS OVERTURNS WAVE 19'S
+  VERDICT *AND THIS WAVE'S OWN SURVEY*.** Both engines ARE niced (`nice -n 19` + `ionice -c3`,
+  site-deploy.sh:2126-2128 and site-deploy-node.sh:1678-1680, landed together in de7d4783d), ionice is
+  installed, and idle-class inheritance was proven on a live running build. **It did not fix it.** 4,280
+  POST-nicing `documents-api` search events, bucketed by build concurrency reconstructed from every run's own
+  `started_at`/`finished_at`: p50 **1,246 ms at 0 builds → 3,585 ms at 1 → 8,631 ms at ≥2** — a **6.9×**
+  blow-up at exactly the condition the code comment names. The confound runs the wrong way for the null: the
+  concurrency-0 bucket carries the HEAVIEST queries (median 1,621 results vs 674) and is still fastest, and the
+  effect survives banding on `result_count` in 3 of 4 bands. ≥2 concurrent builds hold **12.03% of wall
+  time**, ≥3 hold 8.02%, peak 6. **Nothing caps cross-site build concurrency:** `site_deploy: 1` serialises
+  only the START (`start_and_report` returns on `{:ok, :started}`) and the box flock is PER-SLUG. The unfenced
+  resource is **MEMORY, not CPU** — nicing bounds CPU share and IO priority, not page cache, and Postgres runs
+  `shared_buffers=128MB` with `effective_cache_size=4GB` on a 3,819 MB swapping box at a 98.527% hit ratio over
+  1.11 bn block reads, while `npm ci` evicts exactly that cache. **Do NOT quote the pre/post-nicing aggregate
+  (1,147 → 3,161 ms): it is mix-confounded by ~16× corpus and traffic growth.** The load-bearing number is the
+  within-period concurrency correlation, which is observational, not an intervention — a clean A/B needs a
+  deliberate build storm on a quiet box. Also: the survey's "30-60× below the claim" was taken under ONE niced
+  build on a quiet host, which is precisely the condition the comment does NOT name.
+
+- **D351 — THE "8 s COLD SEARCH" IS NOT A COLD PATH.** Five never-issued queries returned in 77-92 ms on an
+  idle box; repeat-vs-novel showed no cold penalty. The 8,022 ms reading and the 8,631 ms p50 at concurrency ≥2
+  are the same number. **Leg B must never be revived on a cold-search story.**
+
+- **D352 — THE BACKOFF LEVER IS REACHABLE, IS BUILT THIS WAVE, AND ITS CEILING IS STATED.** The question as
+  filed contains a category error — `@unique states` are `[:available, :scheduled]`, so a conflicting sibling is
+  one of those BY CONSTRUCTION and the DB cannot be asked (a coalesced insert leaves no row). The measurable
+  form: the Oban job does **not** hold `:executing` during the build (p50 `completed_at−attempted_at` = 0.30 s
+  against a p50 build of 63.2 s — the `:executing` sliver is **0.49%** of a 61.0 s cycle) because `perform/1`
+  spawns a supervised driver and returns. So the defer path never sees a conflict and a longer window inserts
+  verbatim. Consequence worth recording: the moduledoc's claim that dropping `:executing` is what mints the
+  trailing rebuild is **inoperative in production** — the trailing rebuild is delivered by the job having
+  COMPLETED. Constraints unchanged: cap ≤ 240 s **or** `timestamp: :scheduled_at`, never `replace:`. Honest
+  ceiling: this collapses the CHAIN toward ~1.26 only if aggregate demand crosses under supply (D348), it does
+  **not** make a publish go live faster, and `@schedule_in_default` is GLOBAL — it slows any real customer site
+  on this control plane too.
+
+- **D353 — DO NOT RE-FILE THE NULL `deferral_cause` MASS AS A CLASSIFIER HOLE.** 1,818 of 2,331 deferred rows
+  carry a NULL cause and a `detail` reading `already_running`, which looks exactly like a 78% classifier gap.
+  It is a clean column-writer DEPLOY BOUNDARY: NULL rows end 2026-08-07 10:01:54 and non-NULL begin 10:12:35.
+  The real, smaller observation is that post-boundary **all 513 classified deferrals are
+  `BOX_AT_CAPACITY_DEFERRED` and zero are `BOX_BUSY_DEFERRED`** — a two-arm taxonomy running on one arm.
+  Relatedly, any series crossing **2026-08-05 21:27:11** must be split or it compares a failure count to a
+  deferral count (pre: 0 deferred / ~17 k failed; post: 1,413 deferred / 18 failed).
+
+- **D354 — THE RAW-CAPTURE LEAK IS LIVE ON MAIN AND IS REPAIRED THIS WAVE.** `failure_copy.ex`'s own moduledoc
+  (:184-187) rules that any path rendering a raw capture without classifying must be `strip_ansi() |> scrub()`
+  — "measured 2000/2000 leaked under `scrub |> strip_ansi` and 0/2000 under `strip_ansi |> scrub`" — while
+  `notifications/event_email.ex:214` and `:250` both call bare `FailureCopy.scrub(d)`. A colourised
+  `client_secret=…` still ships to an operator's inbox. `dr-w20-s4` carries the ~3-line fix plus the boundary
+  test; #10019 is RE-CUT, not rebased (D355), and cited as prior art.
+
+- **D355 — THE OPEN-PR DISPOSITIONS, MEASURED WITH `git merge-tree --write-tree`, NOT `mergeStateStatus`.**
+  **#10518 is MERGED** (1c85657dd, 2026-08-07T23:35:24Z) — leg A item (4) is already done, `dr-w19-s5` and
+  `dr-w19-s7` are round 1 for this wave, and **five wave-19 rows are one lead-close from done** (`dr-w19-s1`
+  7/8, `dr-w18-s1` 8/9, `dr-w19-s2` 7/8, `dr-w19-s3` 7/8, `dr-w19-s4` 8/9), each blocked solely on its verbatim
+  "MERGE-GATED (the LEAD closes this)" criterion. **#10518 pays TWO of them — count the PR once.** `dr-w19-s3`
+  carries no PR number in its row; stamp #10563 when closing or the link is lost again. Dispositions:
+  **#10400 REBASE AND FIX** (18 behind, ZERO conflicts, four reds all its own table/exhaustiveness pins — but
+  re-derive them on today's main, since its base predates #10519's rewrite of the same file; porting is the
+  stale-green shape); **#10129 CLOSE** (95 behind, 6 conflicts including both files leg A must open, asserts a
+  TEN-rung ladder against main's thirteen — this EXECUTES D242's standing ruling, unexecuted since wave 13);
+  **#10086 RE-CUT small**, sequenced after `dr-w19-s7`'s `DeployCensusSite` edit; **#10019 RE-CUT tiny**
+  (D354). Filed: `dr-w20-bl-open-pr-disposition-10129-10086-10400-10019`.
+
+- **D356 — `dr-w18-s5` IS CLOSED AS SUPERSEDED BY `dr-w19-s7`, NOT MERGED INTO IT.** Zero work lost (0/14).
+  Two independent reasons: its calibration terms `settled_absorption` and `hard_failure` **do not exist
+  anywhere in the tree** (`git grep -c … origin/main -- cloud internal api` exits 1 with no output), a full
+  wave after the slice meant to ship them merged; and the two rows are **contradictory, not overlapping** — s5
+  demands a new attention rung, a K-of-N sustain device and an 11→12 rung ladder move, while s7's criterion 2
+  forbids all three. Its hourly framing is also dead on measurement (`@min_sample 200` reached by 6 of 432
+  hourly buckets, 0 of 20 post-cut, against 20 of 21 daily). Its one surviving item — the `go-tests.yml`
+  fixture-path fix — is carried forward as `dr-w20-bl-w18-s5-fixture-path-survives-its-supersession`.
+
+- **D357 — `dr-w19-s7`'s CRITERION 5 IS RE-CUT: THE SERVER ALREADY EMITS PER-SITE `live`, THE GO DECODER DROPS
+  IT, AND NOTHING REDS.** `site_row/2` emits `live` positively — landed in #10519 at 2026-08-07 23:38, AFTER
+  s7 was written — with a comment forbidding `volume − failed − deferred` because "a subtraction would fold
+  in-flight and cancelled rows into `live`". The live wire carries it (a real 200 on a team credential returned
+  `{"failed":1,"live":109,"deferred":325,"volume":435}`; 109+325+1 = 435 exactly). `DeployCensusSite`
+  (client.go:1953) has six fields and **no `Live`**, so the per-site `live` decodes to nothing. And nothing
+  catches it: D260's per-struct pin (payload_key_set_census_test.exs ~:874) iterates the cohort keys against
+  `Go.struct_tags(src, "DeployCensus")` ONLY, while its UNREAD arm compares against a FILE-GLOBAL tag union in
+  which `live` already appears — **D260's own documented blind spot, reproduced one struct over, on this
+  epic's own new key**. Re-cut to three clauses: `Live *int` (POINTER, so a CP predating #10519 renders
+  UNMETERED and never zero-live); the rate read POSITIVELY off the wire with the subtraction forbidden in the
+  PR body; and the D260 assertion EXTENDED to `DeployCensusSite` with fail-before pasted. Do **not** re-cut it
+  to "fleet-level with the absence named" — the absence is a two-line decoder gap, and naming it as a missing
+  capability would ship a false statement.
+
+- **D358 — THE FLIP NO-OP AND THE FOREIGN-VHOST CLOBBER: ONE REFUTED, ONE SECOND-ORDER, NEITHER BUILT — AND
+  THE POST-FLIP CURL BELONGS TO ANOTHER EPIC.** Foreign-vhost clobbering by `instance-deploy.sh` is REFUTED on
+  both live Caddyfiles (guerrilla: exactly ONE `localhost:400[01]`, one vhost, 9 site routes all on
+  4010/4020/85xx-98xx, and running the real grep+sed against a copy changes only line 82; the CP's Caddyfile is
+  three lines). The class IS real on the site RUNTIME writer, already repaired as
+  `runtime-caddy-preserves-foreign-vhosts` (#8198) — a different writer on a different box. The `FLIP_FROM`
+  fallback no-op is reachable only through a Caddyfile that has ALREADY lost its slot upstream: mechanically
+  proven (a byte-identical file passes `caddy validate`, reload succeeds, the probe is print-only, exit 0) and
+  never observed — sell it as a second-order amplifier or not at all. **The post-flip health curl finding is
+  ALREADY OPEN in the PDS epic** as `pds-bl-w49-post-flip-curl-only-logged` (#9644), citing
+  instance-deploy.sh:258/:793 and cp-deploy.sh:155 and declaring `deploy/**` IN-FENCE for PDS — wave 20 does
+  **not** re-file it, and any deploy-reliability slice touching those lines needs an owner-level cross-epic
+  negotiation. The residues that ARE unfiled: `cp-deploy.sh:194`'s unchecked `systemctl restart
+  barkpark-provisioner` under a script with no `set -e`, and `cp-deploy_test.sh`'s total silence on the flip
+  (66 lines, 7 checks, all the dwb-16 control-url pin) where the static engine's harness asserts it. Filed:
+  `dr-w20-bl-provisioner-restart-cannot-fail-the-deploy`, `dr-w20-bl-arm-and-flip-paths-with-no-selftest-row`.
+
+### Wave 20 plan — 8 slices, 7 in round 1, file sets disjoint within the round
+
+All builders are **opus** this wave: Fable is unavailable (lead standing note), so the model axis carries no
+information here and every brief is written to be buildable at opus depth. Two slices carry a
+**HIGH-FLIP-RISK** line for the reviewer; a third inherits one.
+
+| # | Slice | Task | Surface | Round | Flip-risk |
+|---|---|---|---|---|---|
+| 1 | The control plane states its own sha (a clock on `/health`) | `dr-w20-s1-control-plane-states-its-own-sha` | `cloud/…/health.ex` + test, `cloud/docker-compose.yml`, `deploy/cp-deploy.sh` | 1 | REACHABILITY — the container leg is proved by document, not by run |
+| 2 | The CP smoke stops accepting a 404 | `dr-w20-s2-cp-smoke-can-fail-on-a-dead-box` | `.github/workflows/deploy.yml`, `scripts/check-deploy-smoke.sh` | 1 | — |
+| 3 | The site route marker stops prefix-colliding; ROUTE becomes durable | `dr-w20-s3-site-route-marker-stops-colliding` | `deploy/site-deploy.sh`, `deploy/site-deploy-node.sh` | 1 | BLAST RADIUS — the predicate governs every live site's public route |
+| 4 | The raw capture strips ANSI before scrubbing | `dr-w20-s4-raw-capture-strips-ansi-before-scrub` | `cloud/…/notifications/event_email.ex` + new boundary test | 1 | — |
+| 5 | `bp cloud status` reads the deploy verdict (criterion 5 re-cut, D357) | `dr-w19-s7-status-reads-the-deploy-verdict` | `internal/cli/cloud_status_cmd.go`, `internal/cloudclient/client.go`, `payload_key_set_census_test.exs` | 1 | — |
+| 6 | The fleet digest gets a real audience; the brake is ruled | `dr-w19-s5-digest-audience-and-brake-ruling` | `cloud/…/notifications.ex` + 2 tests | 1 | TENANCY (inherited) — a fleet-wide digest is a cross-team disclosure question |
+| 7 | Depth-derived refusal backoff on the defer paths | `dr-w20-refusal-backoff-depth-derived` | `cloud/…/sites/auto_deploy_worker.ex`, `sites/deploy.ex` + test | 1 | — |
+| 8 | The deploy smoke asserts the serving sha | `dr-w20-s8-deploy-smoke-asserts-the-serving-sha` | `.github/workflows/deploy.yml`, `scripts/check-deploy-smoke.sh` | **2** — after slices 1 **and** 2 merge | — |
+
+Slice 8 is round 2 for two reasons, both hard: it reads the `/health` key slice 1 creates, and it edits the
+exact smoke step slice 2 rewrites. Dispatching it beside either produces a BLOCKED report or a guaranteed
+conflict. Within round 1 every file set is disjoint — note in particular that slice 4 owns
+`notifications/event_email.ex` while slice 6 owns `notifications.ex`, and slice 1 owns `deploy/cp-deploy.sh`
+while slice 3 owns `deploy/site-deploy*.sh`.
+
+**What the lead owes on merge, beyond the eight merge-gates:** close the five wave-19 rows that are one
+lead-close from done (D355), stamping #10563 onto `dr-w19-s3`, and counting #10518 once.
+
+**Coverage.** Both fleets reported in full — no survey deficit and no verify deficit. Every premise this
+wave builds on was smoke-tested against `origin/main` before it reached a brief: `health.ex` and
+`send_health/1`, `cp-deploy.sh`'s `.env` source and `$NEW`, `deploy.yml`'s smoke and diff-base blocks, both
+engines' marker predicates and `active_caddy_port`, `event_email.ex`'s two bare `scrub` sites,
+`FailureCopy.strip_ansi/1`, and `emit ROUTE`'s position outside `@stage_names`. Three cited authorities were
+read for COVERAGE and found not to cover what they were cited for: D206 (files, does not authorise), D320
+(not in this charter), and the direction's "#10518 is open" (merged).
