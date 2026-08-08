@@ -6744,3 +6744,67 @@ compiler. Never `make cli-install` as part of a proof.
 reader, on a route family that is machine-only by construction) and slice 6 (whether the widened arm can
 actually LOSE, given D414's laundered-green proof). Both warrant a genuinely independent second reviewer
 before merge; this workflow spawns one, so that dispatch is a manual lead step.
+
+### Wave 2026-08-08 (wave 23) — REVIEWED · Paper `deploy-reliability-wave-23-2026-08-08` · grade **A−**
+
+**WHAT LANDED.** Six of eight slices built; two deferred by the sequenced-rounds law (s3 after s2, s6 after
+s4). Three PRs opened by the reviewer on final branches, all gate-green on the tree that was reviewed:
+
+| Slice | Task | Final branch | PR | Gate on the final tree |
+|---|---|---|---|---|
+| s1 delivery | `dr-w23-s1-delivery-reaches-origin` | — (git/gh + bp) | #10756 #10757 #10758 | `git ls-remote` prints 3 |
+| s2 crown, cloud half | `dr-w23-s2-platform-deliveries-table` | `…the-platform-remembers-a-delivery-a-dura-1` | #10808 | 28/0 + fmt + head-fence 4/0 |
+| s4 census table | `dr-w23-s4-census-table-stops-hiding` | `…the-deploy-census-table-stops-hiding-a-m-2-r` | #10811 | go build/vet/test green + census 13/0 |
+| s5 `/health` clock | `dr-w23-s5-health-names-its-clock` | `…health-stops-calling-a-process-clock-a-s-3` | #10815 | 13/0, basis-deletion mutation reds |
+| s7 rulings | `dr-w23-s7-lever-and-seal-rulings` | — (Papers) | — | both Papers read back published |
+| s8 ledger | `dr-w23-s8-ledger-closes-the-closable` | — (bp ledger) | — | 6 rows closed with pasted merge proof |
+
+The wave's substance: **the platform got a memory.** `platform_deliveries` is the first durable per-sha record
+the control plane has ever kept — machine-written under the existing `WORKER_TOKEN` (zero new credentials),
+PAT-readable at `GET /v1/deliveries`, retention designed in at 180 days rather than inherited, and answering a
+typed 503 (never a 500, never a `|| true`) when an api-only merge reaches a plane whose migration has not
+landed. Beside it, `/health` stopped calling a process clock a serving clock, and the deploy census stopped
+hiding a number it already measures behind a sentence frozen to one day in August.
+
+**THE REVIEWER'S ONE FIX, and it was a merge-breaker.** s4's two new json tags move the `internal/cloudclient`
+tag union 225 → 227, and `payload_key_set_census_test.exs` pins `@go_tag_floor` at EXACTLY 225 while carrying
+a KNOWN OPEN `:unread` row for `coalesced_attempts` whose "no longer unread" arm reds the instant a Go field
+declares it. Run on the builder's tree: **13 tests, 2 failures.** The builder correctly declined the co-edit
+(that file is s6's fence) — but s6 is round 2 and was NOT built, so the PR would have merged green (a Go-only
+PR never runs the Cloud job) and red `main` on landing. **Stale-green, exactly as `stale-green-merge-window`
+describes it.** Fixed on the `-r` branch: floor re-MEASURED off the refusal's own count, allowlist row deleted,
+13/0. Four of the six new tag names were already declared elsewhere in `client.go`, which is why that number
+is measured and never derived.
+
+**RULING — a fence is not a licence to red main.** When a guard is DESIGNED to force a co-edit and the slice
+that owns the guarded file is deferred to a later round, the co-edit belongs to the slice that trips it, not to
+the absent owner. A builder may decline it; the REVIEW must take it. The fence protects against two builders
+colliding, not against a PR that breaks the trunk.
+
+**WHAT STALLED / WHAT IS OWED.** Nothing stalled. Three honest bounds carry forward:
+(a) **s1's gate is a lease, not a fact** — five wave-21 slice tasks are `in_progress` under a *delivery* worker
+that built none of them, and `PR references an active task` goes red again on all five when that lease lapses.
+The lead should merge those five PRs before it does, and re-attribute the claims on merge.
+(b) **FOUR of those five PRs deploy production on merge** (#10756 `cloud/**`, #10757 `deploy/**`, #10758
+`cloud/**`+`internal/**`, #10720 `internal/**`); only #10757 says so in its body. Treat the whole batch as
+deploy-firing.
+(c) s1 verified none of the wave-21 code it delivered — CI on those PRs is the first independent check any of
+it has had.
+
+**LEDGER.** All six built slices `in_progress` with real claims, evidence stamped as the work happened, and
+merge-gated criteria left OPEN for the lead — no false dones. The two deferred slices sit `open` at 0/8, which
+is honest. Two reviewer stamps: s5 criterion 4 (a PR-body criterion no builder can satisfy in this cycle shape,
+met by #10815) and s7 criterion 7 (the wave Paper now names both ruling slugs back). s8's own disclosure is the
+most valuable thing in its report: `bp doc discard-draft` on a draft-only document is a **DELETE**, not a
+revert — it destroyed a real backlog row and recovered it only because `restore-revision` existed. Filed as
+`dr-w23-bl-discard-draft-deletes-draft-only-docs`.
+
+**NEXT WAVE — the dispatch order is the deliverable.** Merge round 1 first (#10808 s2, #10811 s4, #10815 s5,
+plus the five s1 PRs). **s4 and s6 are coupled and s6's brief is now stale**: the floor row is reconciled in
+#10811, so s6 inherits 227 and owns only the *generalisation* of the UNREAD arm plus the four laundered
+`SiteDeployment` keys (`artifact_url`, `detail`, `git_ref`, `image_tag`). Then dispatch s3 (after s2 merges —
+deploy.yml writes the per-carried-sha row and `bp cloud deliveries <sha>` renders the timeline; **its
+`first_seen_at` must be STABLE per (sha, run) or s2's idempotency silently degrades to duplicates, and nothing
+on the cloud side can detect that**) and s6 (after s4 merges). Then the two written rulings need a READER: both
+of s7's Papers return `422 semantic_empty` from `bp paper view`, so the owner can only reach them on the web —
+worth thirty seconds to confirm before the lever question is put to them at all.
