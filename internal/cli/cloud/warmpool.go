@@ -1730,20 +1730,34 @@ func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone s
 	}
 	name := ""
 	ipOccupiedByOther := false
+	// REVIEW (cch-w54 wave review) — this loop used to `break` the moment it
+	// found OUR box, so a co-tenant sharing the address was noticed ONLY when the
+	// provider happened to list it first. That asymmetry was harmless while the
+	// DNS step was a single by-name delete; the by-value sweep below makes it
+	// dangerous, because a sweep at a shared address takes the co-tenant's record
+	// down with ours while its box keeps running. So the scan now runs to
+	// completion and `ipOccupiedByOther` is reliable in BOTH list orders.
+	//
+	// It does NOT become a refusal when our own box also matched: that case is
+	// deliberate, merged behaviour (TestDeprovisionByIP_IPReuseMatchesByFQDNLabel
+	// — delete the box whose identity matches, leave the stranger's alone). What
+	// it does is DOWNGRADE the DNS step to the by-name delete, so the widened
+	// blast radius never reaches an address we do not exclusively hold.
 	for _, s := range managed {
-		if s.IP == ip {
-			if s.Labels[FQDNLabelKey] == wantFqdn {
-				name = s.Name
-				break
-			}
-			// A managed box occupies this IP but its identity label does NOT match
-			// this job's box. Two cases, both unsafe to proceed past: (a) a legacy box
-			// created before the barkpark-fqdn label existed, or (b) a recycled IP now
-			// held by a DIFFERENT tenant's box. We must neither delete it nor let the
-			// control plane delete the registry row (which would strand a billed box),
-			// so we FAIL LOUDLY instead of silently no-op'ing the delete.
-			ipOccupiedByOther = true
+		if s.IP != ip {
+			continue
 		}
+		if s.Labels[FQDNLabelKey] == wantFqdn {
+			name = s.Name
+			continue
+		}
+		// A managed box occupies this IP but its identity label does NOT match
+		// this job's box. Two cases, both unsafe to proceed past: (a) a legacy box
+		// created before the barkpark-fqdn label existed, or (b) a recycled IP now
+		// held by a DIFFERENT tenant's box. We must neither delete it nor let the
+		// control plane delete the registry row (which would strand a billed box),
+		// so we FAIL LOUDLY instead of silently no-op'ing the delete.
+		ipOccupiedByOther = true
 	}
 	if name == "" && ipOccupiedByOther {
 		return fmt.Errorf(
@@ -1760,7 +1774,7 @@ func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone s
 	}
 
 	if wp.DNS != nil && dnsZone != "" {
-		if derr := deprovisionDNS(dctx, wp.DNS, dnsZone, dnsLabel, ip); derr != nil {
+		if derr := deprovisionDNS(dctx, wp.DNS, dnsZone, dnsLabel, ip, !ipOccupiedByOther); derr != nil {
 			return fmt.Errorf("deprovision %s: %w", ip, derr)
 		}
 	}
@@ -1792,8 +1806,17 @@ func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone s
 // A DNSProvider that cannot list records degrades to the old by-name delete
 // rather than failing the teardown: the server delete has already succeeded by
 // this point, and erroring here would strand the job with the box gone.
-func deprovisionDNS(ctx context.Context, dns DNSProvider, zone, label, ip string) error {
-	if _, ok := dns.(RecordLister); !ok {
+//
+// `exclusiveIP` is the caller's answer to "do we hold this address alone?".
+// DeprovisionByIP passes false when ANOTHER managed box was found sitting on the
+// same IP under a different identity label — the recycled-IP shape. In that
+// shape a by-value sweep would delete the co-tenant's live A record, so the step
+// degrades to the by-name delete: narrower than we would like (a custom-domain
+// record can still be orphaned), but never wider than the box we actually own.
+// The orphan is the lesser failure, and it is loud in the zone rather than
+// silent on someone else's running site.
+func deprovisionDNS(ctx context.Context, dns DNSProvider, zone, label, ip string, exclusiveIP bool) error {
+	if _, ok := dns.(RecordLister); !ok || !exclusiveIP {
 		if label == "" {
 			return nil
 		}
