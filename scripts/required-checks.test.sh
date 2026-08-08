@@ -98,6 +98,44 @@ if [ "$LIVE" -eq 1 ] && [ "$HERMETIC" -eq 1 ]; then
   exit 2
 fi
 
+# ── the object database is a PRECONDITION, not an assumption ─────────────────
+#
+# FOURTH SIGHTING of the same trap (charter D423, D547, and the third-sighting
+# paragraph). At origin/main in a REAL worktree this suite is 170 passed, 0
+# failed, exit 0. Unpack the IDENTICAL tree with `git archive origin/main | tar
+# -x` — no `.git`, so no object database — and it becomes 168 passed, 2 failed,
+# exit 1, with `fatal: not a git repository` printed above each red.
+#
+# Two reads need the object database:
+#   §13 `git ls-files -- '*.md'`  — the corpus of the `gh pr merge --admin`
+#                                   prose ratchet (1291 files real, ZERO here)
+#   §18 `git grep --untracked -lE` — the protection-claim census, which then
+#                                   reports all 14 pins STALE
+#
+# §18 fails CLOSED (it reds). §13 fails OPEN: its primary assertion printed
+#
+#   ok   no non-exempt *.md teaches `gh pr merge … --admin` …
+#
+# one line under the fatal — a green earned over a corpus of zero files, which
+# is the exact defect this suite exists to catch, living inside the suite. A
+# degraded run is worse than no run, so refuse BEFORE any section: name the
+# cause, name the fix, and exit 3 (distinct from the 2 that means "you invoked
+# me wrong" and from the 1 that means "an assertion failed").
+#
+# Both probes matter. `rev-parse --git-dir` catches the extract; a non-empty
+# tracked *.md corpus catches the subtler shape — a directory that IS inside a
+# repository but whose tree git does not track — where §13 would again scan
+# nothing and call it ok.
+if ! ( cd "$REPO_ROOT" && git rev-parse --git-dir >/dev/null 2>&1 ); then
+  echo "required-checks.test.sh: no git object database at $REPO_ROOT (a \`git archive\` extract or a copied tree?); sections 13 and 18 read the tracked corpus with \`git ls-files\`/\`git grep\`, and without it section 13 prints ok over ZERO files; run: bash scripts/required-checks.test.sh from a real checkout or worktree" >&2
+  exit 3
+fi
+RC_TRACKED_MD="$( ( cd "$REPO_ROOT" && git ls-files -- '*.md' 2>/dev/null ) | grep -c . || true )"
+if [ "$RC_TRACKED_MD" -eq 0 ]; then
+  echo "required-checks.test.sh: git tracks no *.md under $REPO_ROOT, so section 13's prose ratchet would scan an EMPTY corpus and print ok over nothing; run: bash scripts/required-checks.test.sh from a real checkout or worktree" >&2
+  exit 3
+fi
+
 PASS=0
 FAIL=0
 TMP="$(mktemp -d)"
@@ -1238,7 +1276,7 @@ prose_admin_hits() { # [extra path…]
     | grep -v '^$' \
     | grep -v '^tooling/grip/ledger/' \
     | grep -v '^\.claude/workflows/.*charter\.md$' \
-    | ( cd "$REPO_ROOT" && tr '\n' '\0' | xargs -0 grep -nE 'gh pr merge[^`]*--admin' 2>/dev/null ) || true
+    | ( cd "$REPO_ROOT" && tr '\n' '\0' | xargs -0 grep -nHE 'gh pr merge[^`]*--admin' 2>/dev/null ) || true
 }
 
 PROSE_HITS="$(prose_admin_hits)"
@@ -1252,6 +1290,14 @@ fi
 # MUTATION PROOF: the ratchet above is a grep, and a grep that matches nothing
 # is indistinguishable from a grep that is broken. So plant the folklore in a
 # file the scan actually covers and watch it fire.
+#
+# The scan above carries `-H` for THIS assertion's sake, matching §18's `-nHE`.
+# grep omits the filename prefix when it is handed exactly ONE file, so without
+# `-H` the canary line comes back as `1:poll checks + …` with no path and the
+# `grep -q 'ratchet-canary'` below MISSES — the match was found, the assertion
+# reported it broken. That made this mutation proof silently dependent on the
+# tracked corpus being >= 2 files: it defeats itself on a one-file corpus and
+# on any tree where git tracks nothing (see the object-database refusal above).
 RATCHET_CANARY="$TMP/ratchet-canary.md"
 printf 'poll checks + `gh pr merge --squash --admin` once the gate passes\n' > "$RATCHET_CANARY"
 CANARY_HITS="$(prose_admin_hits "$RATCHET_CANARY")"
