@@ -40,6 +40,59 @@ defmodule BarkparkCloud.PlatformDelivery do
   control plane whose table does not exist. That must be a LOUD, typed 503 —
   never a 500, and never a silent `|| true`, which is the exact blindness this
   wave exists to end.
+
+  ## `transition`: PREVIOUS-vs-NEW — deliberately NOT `commit_ancestry`'s words
+
+  W25 (charter D437) adds `previous_sha` and `transition`. `transition` grades
+  the move THIS ROW records: what the box was serving BEFORE (`previous_sha`)
+  against what it serves after (`sha`). `barkparks.commit_ancestry` grades a
+  different pair entirely — the box's CURRENTLY SERVED commit against `main`'s
+  tip. One is PREVIOUS-vs-NEW, the other is BOX-vs-MAIN. The two vocabularies
+  are therefore DELIBERATELY NOT SHARED, even though a reader skimming both
+  columns will see similar-looking words: `commit_ancestry` says
+  `current | behind | ahead_of_main | diverged | unknown`, `transition` says
+  `forward | rollback | diverged | noop | unknown`. A box can be `behind` main
+  and still have just moved `forward`, and a box exactly `current` can have
+  arrived there by `rollback`. Reusing one enum for both would make those two
+  sentences unsayable, and would invite a reader to compare two verdicts that
+  were never measured against the same reference.
+
+    * `forward` — `sha` is a descendant of `previous_sha`; the box moved ahead.
+    * `rollback` — `sha` is an ANCESTOR of `previous_sha`; the box moved back.
+    * `diverged` — neither is an ancestor of the other; BOTH sides of the range
+      are non-empty. The box serves code that left the line.
+    * `noop` — the two shas are equal; the deploy delivered nothing new.
+    * `unknown` — the writer TRIED and could not decide (a `gc`'d sha, an
+      unreachable box, a shallow clone). A NULL `transition` is a different
+      statement: the writer never attempted a verdict at all.
+
+  A `rolled_back` BOOLEAN was considered and REJECTED (D437): it cannot express
+  `diverged` or `unknown`, so it would have to be widened on the first
+  divergence — and until then every divergence would record as `false`, a
+  confident and wrong "not a rollback".
+
+  ## The range primitive the WRITER must use
+
+      git rev-list --count --left-right OLD...NEW      # three dots, --left-right
+
+  Capture the output, CHECK THE EXIT CODE, and refuse on anything non-zero.
+  Measured on guerrilla's own live slot pair on 2026-08-08 — green `b97663730`
+  -> idle blue `c0e43440b`, a REAL two-commit rollback:
+
+      git rev-list --count OLD..NEW                 -> 0        # a LIE
+      git rev-list --count --left-right OLD...NEW   -> 2   0    # the truth
+
+  The two-dot count reads `0` on a rollback, byte-identical to a no-op. Only
+  `--left-right` shows both sides, which is what makes `rollback` (left > 0,
+  right = 0) distinguishable from `noop` (0, 0) and from `diverged` (both > 0).
+
+  NEVER `|| echo 0` (the idiom at `scripts/doctor.sh:27-28`): a `gc`'d or
+  unknown sha exits 128, and that fallback launders a hard failure into a
+  confident zero — which then reads as `noop`. NEVER PIPE the command either: a
+  pipeline reports the LAST command's status, so `git rev-list … | head -2`
+  prints `fatal:` and still exits 0 (this exact trap was caught inside a W25
+  rollback probe). On any failure record `transition: "unknown"` and leave the
+  counts NULL — never 0, and never a silent fallback to `forward`.
   """
 
   use Ecto.Schema
@@ -57,6 +110,14 @@ defmodule BarkparkCloud.PlatformDelivery do
   @targets ~w(cp instance)
   @default_target "cp"
 
+  # The `transition` vocabulary (W25, D437). NOT `commit_ancestry`'s — see the
+  # moduledoc: that one grades BOX-vs-MAIN, this one grades PREVIOUS-vs-NEW.
+  # There is NO default: a writer that does not grade the move leaves it NULL,
+  # which says "never attempted" and is distinct from "unknown" ("tried, could
+  # not decide"). A default of any kind would mint a verdict nobody measured.
+  @transitions ~w(forward rollback diverged noop unknown)
+  @unknown_transition "unknown"
+
   # The write columns, in the order the wire carries them. `insert_all/3` takes a
   # bare map, so this list is what turns a validated changeset back into a row.
   @columns [
@@ -68,7 +129,9 @@ defmodule BarkparkCloud.PlatformDelivery do
     :build_seconds,
     :serving_since,
     :target,
-    :carried
+    :carried,
+    :previous_sha,
+    :transition
   ]
 
   # The bare list's pinned window. Never "everything": an unbounded list is a
@@ -91,6 +154,12 @@ defmodule BarkparkCloud.PlatformDelivery do
     field :target, :string, default: @default_target
     field :carried, :boolean, default: false
 
+    # W25 (D437) — where the box CAME FROM, and what kind of move this was.
+    # Both nullable with no default; NULL means unmeasured, never zero and
+    # never a stand-in for the new sha.
+    field :previous_sha, :string
+    field :transition, :string
+
     timestamps()
   end
 
@@ -99,6 +168,26 @@ defmodule BarkparkCloud.PlatformDelivery do
   @doc "The `target` vocabulary: which leg delivered this sha."
   @spec targets() :: [binary()]
   def targets, do: @targets
+
+  @doc """
+  The `transition` vocabulary: how `previous_sha` relates to `sha`.
+
+  PREVIOUS-vs-NEW, not BOX-vs-MAIN — `BarkparkCloud.Registry`'s
+  `commit_ancestry` grades a different pair against a different reference and
+  the two lists are deliberately not shared.
+  """
+  @spec transitions() :: [binary()]
+  def transitions, do: @transitions
+
+  @doc """
+  The fail-closed verdict: the writer tried to grade the move and could not.
+
+  Everything a range computation can go wrong with — a `gc`'d sha (exit 128), an
+  unreachable box, a shallow clone — lands HERE, with the counts left NULL. It
+  must never land on `"forward"` and the counts must never land on 0.
+  """
+  @spec unknown_transition() :: binary()
+  def unknown_transition, do: @unknown_transition
 
   @doc "The default `target` when the writer does not name one."
   @spec default_target() :: binary()
@@ -120,6 +209,10 @@ defmodule BarkparkCloud.PlatformDelivery do
       message: "must be a lowercase hex commit sha (7-64 chars)"
     )
     |> validate_length(:delivering_run_id, min: 1, max: 64)
+    |> validate_inclusion(:transition, @transitions)
+    |> validate_format(:previous_sha, ~r/^[0-9a-f]{7,64}$/,
+      message: "must be a lowercase hex commit sha (7-64 chars)"
+    )
     |> validate_inclusion(:target, @targets)
     |> validate_number(:queued_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:build_seconds, greater_than_or_equal_to: 0)
@@ -136,6 +229,8 @@ defmodule BarkparkCloud.PlatformDelivery do
     |> Map.new()
     |> Map.update("delivering_run_id", nil, &stringify/1)
     |> Map.update("sha", nil, &downcase/1)
+    |> Map.update("previous_sha", nil, &downcase/1)
+    |> Map.update("transition", nil, &downcase/1)
   end
 
   defp normalize(_other), do: %{}
@@ -322,6 +417,8 @@ defmodule BarkparkCloud.PlatformDelivery do
       serving_since: iso(d.serving_since),
       target: d.target,
       carried: d.carried,
+      previous_sha: d.previous_sha,
+      transition: d.transition,
       recorded_at: iso(d.inserted_at)
     }
   end

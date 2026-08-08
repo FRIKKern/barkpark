@@ -429,4 +429,291 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
       assert body(conn)["reason"] == "platform_deliveries_missing"
     end
   end
+
+  ## 6. THE TRANSITION — W25 (D437): a rollback stops reading as a no-op
+
+  # NOTHING in the three sections below asserts a ROW COUNT, or that "the crown
+  # holds a row". The LIVE table already contains junk (a `w25-seam-probe` row
+  # and an all-zeros sha with run id "0"), so a count is a fact about whoever
+  # posted last, not about this code. Every assertion here keys on SHAPE: the
+  # value in a named field, the emitted key set, a changeset verdict, or a
+  # column definition read out of the catalog.
+
+  describe "the transition columns" do
+    test "previous_sha and transition are NULLABLE with NO default in the DATABASE" do
+      # The migration is catalog-only on purpose: a NOT NULL or a DEFAULT would
+      # mint a verdict for every pre-migration row, and there is no fact on this
+      # control plane from which those rows could be reclassified.
+      %{rows: rows} =
+        Repo.query!(
+          "SELECT column_name, is_nullable, column_default FROM information_schema.columns " <>
+            "WHERE table_name = 'platform_deliveries' " <>
+            "AND column_name IN ('previous_sha', 'transition') ORDER BY column_name"
+        )
+
+      assert [
+               ["previous_sha", "YES", nil],
+               ["transition", "YES", nil]
+             ] = rows
+    end
+
+    test "neither new column is indexed — an index with no reader is write cost for nothing" do
+      %{rows: indexdefs} =
+        Repo.query!("SELECT indexdef FROM pg_indexes WHERE tablename = 'platform_deliveries'")
+
+      refute Enum.any?(indexdefs, fn [indexdef] -> indexdef =~ "transition" end)
+      refute Enum.any?(indexdefs, fn [indexdef] -> indexdef =~ "previous_sha" end)
+    end
+
+    test "every word in the vocabulary is accepted and stored verbatim" do
+      assert PlatformDelivery.transitions() == ~w(forward rollback diverged noop unknown)
+
+      for {word, n} <- Enum.with_index(PlatformDelivery.transitions()) do
+        run = "transition-run-#{n}"
+
+        assert {:ok, %{recorded: 1}} =
+                 PlatformDelivery.record_all([
+                   row(%{
+                     "delivering_run_id" => run,
+                     "previous_sha" => String.duplicate("d", 40),
+                     "transition" => word
+                   })
+                 ])
+
+        assert {:ok, stored} = fetch_by_run(run)
+        assert stored.transition == word
+        assert stored.previous_sha == String.duplicate("d", 40)
+      end
+    end
+
+    test "a word OUTSIDE the vocabulary fails the changeset — it is never stored" do
+      # `rolled_back` is the boolean this design rejected; the rest are
+      # `commit_ancestry`'s words, which grade BOX-vs-MAIN and say nothing at
+      # all about PREVIOUS-vs-NEW.
+      for bogus <- ["rolled_back", "ahead_of_main", "behind", "current", "reverted", "yes"] do
+        cs = PlatformDelivery.changeset(%PlatformDelivery{}, row(%{"transition" => bogus}))
+
+        refute cs.valid?
+        assert %{transition: ["is invalid"]} = errors_on(cs)
+      end
+    end
+
+    test "an out-of-vocabulary transition refuses the WHOLE batch, like any bad row" do
+      assert {:error, {:invalid_row, 0, errors}} =
+               PlatformDelivery.record_all([row(%{"transition" => "rolled_back"})])
+
+      assert is_list(errors[:transition])
+    end
+
+    test "a previous_sha that is not a sha is refused, not stored as junk" do
+      cs = PlatformDelivery.changeset(%PlatformDelivery{}, row(%{"previous_sha" => "HEAD~1"}))
+
+      refute cs.valid?
+      assert %{previous_sha: [msg]} = errors_on(cs)
+      assert msg =~ "lowercase hex commit sha"
+    end
+
+    test "an upper-cased previous_sha is normalized, not refused" do
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "prev-case-run",
+                   "previous_sha" => String.upcase(String.duplicate("e", 40)),
+                   "transition" => "forward"
+                 })
+               ])
+
+      assert {:ok, stored} = fetch_by_run("prev-case-run")
+      assert stored.previous_sha == String.duplicate("e", 40)
+    end
+  end
+
+  ## 7. FAIL-CLOSED — the whole point of the two columns
+
+  describe "an undecidable transition" do
+    test "records `unknown` with NULL counts — never 0, never a fallback to `forward`" do
+      # The writer's failure modes are real and measured: a gc'd sha exits 128,
+      # an unreachable box answers nothing, a shallow clone cannot walk the
+      # range. All of them land HERE. The repo's own `|| echo 0` idiom
+      # (scripts/doctor.sh:27-28) would turn every one of them into a confident
+      # zero, which then reads as `noop` — a rollback rendered as "nothing
+      # happened", the exact disease this epic exists to cure.
+      assert PlatformDelivery.unknown_transition() == "unknown"
+
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "undecidable-run",
+                   "previous_sha" => nil,
+                   "transition" => PlatformDelivery.unknown_transition(),
+                   "queued_seconds" => nil,
+                   "build_seconds" => nil
+                 })
+               ])
+
+      assert {:ok, stored} = fetch_by_run("undecidable-run")
+
+      assert stored.transition == "unknown"
+      refute stored.transition == "forward"
+      refute stored.transition == "noop"
+
+      # NULL, not 0 — and both are asserted, because a laundered zero satisfies
+      # neither `is_nil/1` nor a bare "it has a value" check.
+      assert is_nil(stored.queued_seconds)
+      assert is_nil(stored.build_seconds)
+      assert is_nil(stored.previous_sha)
+      refute stored.queued_seconds == 0
+      refute stored.build_seconds == 0
+    end
+
+    test "a writer that says NOTHING leaves transition NULL — it does not become `forward`" do
+      # NULL and "unknown" are different sentences. NULL: no verdict was ever
+      # attempted (every row written before this migration). "unknown": a
+      # verdict was attempted and could not be reached. Neither may decay into a
+      # cheerful `forward`.
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([row(%{"delivering_run_id" => "silent-run"})])
+
+      assert {:ok, stored} = fetch_by_run("silent-run")
+      assert is_nil(stored.transition)
+      assert is_nil(stored.previous_sha)
+      refute stored.transition == "forward"
+    end
+
+    test "a BLANK transition is NULL (no verdict), never `forward` and never `noop`" do
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{"delivering_run_id" => "blank-run", "transition" => "   "})
+               ])
+
+      assert {:ok, stored} = fetch_by_run("blank-run")
+      assert is_nil(stored.transition)
+      refute stored.transition == "forward"
+      refute stored.transition == "noop"
+    end
+
+    test "a rollback and a no-op are DISTINGUISHABLE in the record" do
+      # The measurement that forced these columns: on guerrilla's live slot pair
+      # `git rev-list --count green..blue` read 0 for a REAL two-commit
+      # rollback — byte-identical to a no-op. Same delivered sha, different
+      # truth; before this slice the two rows had identical shape.
+      old = String.duplicate("1", 40)
+
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "rollback-run",
+                   "previous_sha" => old,
+                   "transition" => "rollback"
+                 })
+               ])
+
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "noop-run",
+                   "previous_sha" => @sha,
+                   "transition" => "noop"
+                 })
+               ])
+
+      assert {:ok, rolled} = fetch_by_run("rollback-run")
+      assert {:ok, noop} = fetch_by_run("noop-run")
+
+      assert rolled.sha == noop.sha
+      assert rolled.transition == "rollback"
+      assert noop.transition == "noop"
+      assert rolled.previous_sha == old
+      assert noop.previous_sha == noop.sha
+    end
+  end
+
+  ## 8. THE WIRE — a column nobody can read is not a record
+
+  describe "to_json/1 carries the transition" do
+    test "the emitted KEY SET names both new fields" do
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "json-run",
+                   "previous_sha" => String.duplicate("a", 40),
+                   "transition" => "rollback"
+                 })
+               ])
+
+      assert {:ok, stored} = fetch_by_run("json-run")
+      json = PlatformDelivery.to_json(stored)
+
+      assert json |> Map.keys() |> Enum.sort() == [
+               :build_seconds,
+               :carried,
+               :delivering_run_id,
+               :first_seen_at,
+               :merged_at,
+               :previous_sha,
+               :queued_seconds,
+               :recorded_at,
+               :serving_since,
+               :sha,
+               :target,
+               :transition
+             ]
+
+      assert json.previous_sha == String.duplicate("a", 40)
+      assert json.transition == "rollback"
+    end
+
+    test "an unclassified row emits both keys as null — present and honestly empty" do
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([row(%{"delivering_run_id" => "null-json-run"})])
+
+      assert {:ok, stored} = fetch_by_run("null-json-run")
+      json = PlatformDelivery.to_json(stored)
+
+      assert Map.has_key?(json, :previous_sha)
+      assert Map.has_key?(json, :transition)
+      assert is_nil(json.previous_sha)
+      assert is_nil(json.transition)
+    end
+
+    test "the READER route renders the transition in the response BYTES" do
+      {user, team} = user_with_team()
+
+      assert {:ok, %{recorded: 1}} =
+               PlatformDelivery.record_all([
+                 row(%{
+                   "delivering_run_id" => "wire-run",
+                   "previous_sha" => String.duplicate("b", 40),
+                   "transition" => "diverged"
+                 })
+               ])
+
+      conn = call(:get, "/v1/deliveries?sha=#{@sha}", nil, pat(user, team, ["read"]))
+
+      assert conn.status == 200
+      assert conn.resp_body =~ "diverged"
+
+      delivery =
+        conn
+        |> body()
+        |> Map.fetch!("deliveries")
+        |> Enum.find(&(&1["delivering_run_id"] == "wire-run"))
+
+      assert delivery["transition"] == "diverged"
+      assert delivery["previous_sha"] == String.duplicate("b", 40)
+    end
+  end
+
+  # Fetch the ONE row a test wrote, by its own unique run id. Deliberately not
+  # `List.first/1` and never a count: the identity is
+  # (sha, delivering_run_id, first_seen_at), so the run id is what makes a row
+  # this test's own.
+  defp fetch_by_run(run_id) do
+    {:ok, rows} = PlatformDelivery.list(sha: @sha)
+
+    case Enum.find(rows, &(&1.delivering_run_id == run_id)) do
+      nil -> {:error, {:no_row_for_run, run_id}}
+      found -> {:ok, found}
+    end
+  end
 end
