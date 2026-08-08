@@ -55,7 +55,20 @@ defmodule BarkparkCloud.Registry do
   # than this stops holding a name claim against custom-host attachment — see
   # provisioning_fqdn_taken?/1. Every live instance reports within a minute of
   # provisioning, so 7 days of silence-from-birth is unambiguous abandonment.
+  #
+  # SILENCE-FROM-BIRTH IS NOT ABANDONMENT ON ITS OWN. Measured 2026-08-08, this
+  # clock alone was 0-for-3 on live data: all three rows it would have released
+  # were on live subscriptions and one was still being polled every ~15 minutes
+  # with its decrypted admin bearer token. `provisioning_fqdn_claim/1` therefore
+  # guards it with three further legs; this constant is only the LAST of six.
   @abandoned_claim_after_days 7
+
+  # A `usage_samples` row inside this window is proof of an IN-FLIGHT
+  # platform→instance transmission (the sampler writes one row per checkable
+  # instance every ~15 min, crontab 7,22,37,52), so it is a hard block on
+  # releasing the row's name claim. Sized well above the sampler's own period so
+  # a couple of missed sweeps cannot look like silence — see claim_leg/2.
+  @recent_sample_window_hours 24
 
   # The four terminal reasons `reap_stale_deployments/0` stamps. Named so the
   # alert fan-out below can pair a reaped row with the reason it was just written
@@ -5334,31 +5347,114 @@ defmodule BarkparkCloud.Registry do
   end
 
   defp provisioning_fqdn_taken?(norm) do
-    url = "https://" <> norm
+    case provisioning_fqdn_claim(norm) do
+      :free ->
+        false
 
-    # ABANDONED rows do not hold a name claim. A row whose agent NEVER phoned
-    # home (last_seen_at nil — every live instance reports within a minute of
-    # provisioning), that is older than @abandoned_claim_after_days, and that
-    # has no active job in flight is a provisioning ghost (seen live
-    # 2026-07-08: a June-29 pre-registry-era attempt squatted
-    # gyldendal.barkpark.cloud forever with no owner able to release it).
-    # Excluding it here lets a legitimate attach reclaim the name; the ghost
-    # row itself stays untouched (it is dead weight, not a conflict).
+      {:held, leg, why} ->
+        Logger.info("custom_host refused for #{norm}: leg=#{leg} — #{why}")
+        true
+    end
+  end
+
+  @doc """
+  Does any row's provisioning FQDN still hold the name `host`, and if so WHICH
+  leg holds it? `:free` (no row, or the only rows are genuinely abandoned) or
+  `{:held, leg, why}` — `leg` is the atom naming the refusing leg and `why` is
+  the operator-facing sentence.
+
+  ABANDONED rows do not hold a name claim. A row whose agent NEVER phoned home
+  (last_seen_at nil — every live instance reports within a minute of
+  provisioning), that is older than `@abandoned_claim_after_days`, and that has
+  no active job in flight is a provisioning ghost (seen live 2026-07-08: a
+  June-29 pre-registry-era attempt squatted gyldendal.barkpark.cloud forever
+  with no owner able to release it). Excluding it lets a legitimate attach
+  reclaim the name; the ghost row itself stays untouched (it is dead weight,
+  not a conflict).
+
+  `last_seen_at IS NULL` alone is NOT abandonment — it means the AGENT never
+  phoned home, which says nothing about whether the PLATFORM is still dialling
+  the box. Measured 2026-08-08 on live data, the silence-only carve-out was
+  0-for-3: every row it would have released was on a live subscription, and one
+  of them was still being polled every ~15 minutes with its decrypted admin
+  bearer token. So three independent AND-legs guard the release, any ONE of
+  which keeps the claim:
+
+    * `:admin_credential` — the row holds `admin_token_encrypted`. A row the
+      platform can still decrypt a bearer token FOR is by definition not
+      abandoned; releasing its name hands the next tenant a hostname the
+      platform keeps dialling with someone else's live credential. HARD BLOCK,
+      independent of `last_seen_at`.
+    * `:recent_usage_sample` — a `usage_samples` row inside the last 24h. The
+      sampler only writes for instances it actually reaches out to; a sample is
+      proof of an in-flight platform→instance transmission. HARD BLOCK,
+      independent of `last_seen_at`.
+    * `:active_subscription` — the owning team has a live subscription
+      (`active` or `past_due`; a past_due row is still a billed customer). We
+      do not release the name of something a customer is paying for.
+
+  Widening the carve-out means deleting a leg here, and the refusal names which
+  leg refused so that cost is visible before anyone does.
+  """
+  @spec provisioning_fqdn_claim(String.t()) :: :free | {:held, atom(), String.t()}
+  def provisioning_fqdn_claim(host) when is_binary(host) do
+    url = "https://" <> host
     cutoff = DateTime.add(DateTime.utc_now(), -@abandoned_claim_after_days, :day)
+    sample_cutoff = DateTime.add(DateTime.utc_now(), -@recent_sample_window_hours, :hour)
 
     Barkpark
     |> where([b], b.url == ^url)
-    |> where(
-      [b],
-      not (is_nil(b.last_seen_at) and b.inserted_at < ^cutoff and
-             b.id not in subquery(active_job_barkpark_ids()))
-    )
-    |> select([b], 1)
-    |> limit(1)
-    |> Repo.one()
-    |> case do
-      nil -> false
-      _ -> true
+    |> select([b], %{
+      id: b.id,
+      last_seen_at: b.last_seen_at,
+      inserted_at: b.inserted_at,
+      has_admin_token: not is_nil(b.admin_token_encrypted),
+      active_job: b.id in subquery(active_job_barkpark_ids()),
+      recent_sample:
+        fragment(
+          "EXISTS (SELECT 1 FROM usage_samples us WHERE us.barkpark_id = ? AND us.measured_at >= ?)",
+          b.id,
+          ^sample_cutoff
+        ),
+      live_subscription:
+        fragment(
+          "EXISTS (SELECT 1 FROM subscriptions s WHERE s.team_id = ? AND s.status IN ('active','past_due'))",
+          b.team_id
+        )
+    })
+    |> Repo.all()
+    |> Enum.find_value(:free, &claim_leg(&1, cutoff))
+  end
+
+  # Which leg (if any) keeps THIS row's name claim? nil = this row is a
+  # genuine ghost and releases the name. The two hard-block legs are named
+  # first: they are the ones a widening operator must consciously delete.
+  defp claim_leg(row, cutoff) do
+    cond do
+      row.has_admin_token ->
+        {:held, :admin_credential,
+         "row #{row.id} still holds a decryptable admin token — the platform can dial this host with a live credential, so it is not abandoned"}
+
+      row.recent_sample ->
+        {:held, :recent_usage_sample,
+         "row #{row.id} was sampled by the usage worker within the last #{@recent_sample_window_hours}h — the platform is still transmitting to this host"}
+
+      row.live_subscription ->
+        {:held, :active_subscription,
+         "row #{row.id} belongs to a team with a live subscription (active or past_due) — a billed name is never released"}
+
+      not is_nil(row.last_seen_at) ->
+        {:held, :agent_reporting, "row #{row.id} phoned home at #{row.last_seen_at}"}
+
+      row.active_job ->
+        {:held, :active_job, "row #{row.id} has a provision job in flight"}
+
+      DateTime.compare(row.inserted_at, cutoff) != :lt ->
+        {:held, :within_grace,
+         "row #{row.id} is younger than the #{@abandoned_claim_after_days}-day abandonment window"}
+
+      true ->
+        nil
     end
   end
 

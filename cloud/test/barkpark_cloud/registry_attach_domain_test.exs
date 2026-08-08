@@ -19,7 +19,9 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
   use BarkparkCloud.DataCase, async: true
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
+  alias BarkparkCloud.Usage.Sample
 
   @domain "gyldendal.barkpark.cloud"
 
@@ -38,6 +40,34 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       Registry.register_barkpark(team, Enum.into(attrs, %{name: "BP #{n}", slug: "bp-#{n}"}))
 
     bp
+  end
+
+  # A silence-only "ghost": url squats `host`, agent never phoned home, row is
+  # older than the 7-day abandonment window, no jobs. This is the shape the
+  # carve-out used to release on its own.
+  defp ghost_row(team, host) do
+    barkpark_fixture(team)
+    |> Ecto.Changeset.change(
+      url: "https://" <> host,
+      inserted_at: DateTime.add(DateTime.utc_now(), -30, :day)
+    )
+    |> Repo.update!()
+  end
+
+  defp with_admin_credential(bp) do
+    bp |> Ecto.Changeset.change(admin_token_encrypted: "ciphertext") |> Repo.update!()
+  end
+
+  defp with_usage_sample(bp, measured_at) do
+    Repo.insert!(%Sample{
+      barkpark_id: bp.id,
+      envelope: %{"meters" => %{}},
+      measured_at: measured_at
+    })
+  end
+
+  defp with_active_subscription(team) do
+    Repo.insert!(%Subscription{team_id: team.id, plan: "supporter", status: "active"})
   end
 
   ## set_custom_host/2
@@ -97,6 +127,75 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       claimer = barkpark_fixture(team_fixture())
 
       assert {:error, :taken} = Registry.set_custom_host(claimer, "occupied.barkpark.cloud")
+    end
+
+    test "the LIVE shape (silent, old, no job, credential + sample + subscription) is NOT releasable" do
+      # The exact shape measured on live data 2026-08-08: last_seen_at NULL,
+      # inserted_at far past the abandonment cutoff, no active job — yet the
+      # platform still holds a decryptable admin token for it, sampled it 5
+      # minutes ago, and the owning team is on an ACTIVE subscription. The
+      # silence-only carve-out released this name; three AND-legs now refuse.
+      team = team_fixture()
+      ghost = ghost_row(team, "still-dialled.barkpark.cloud")
+      with_admin_credential(ghost)
+      with_usage_sample(ghost, DateTime.add(DateTime.utc_now(), -5, :minute))
+      with_active_subscription(team)
+
+      assert {:held, :admin_credential, why} =
+               Registry.provisioning_fqdn_claim("still-dialled.barkpark.cloud")
+
+      assert why =~ "decryptable admin token"
+
+      claimer = barkpark_fixture(team_fixture())
+
+      assert {:error, :taken} = Registry.set_custom_host(claimer, "still-dialled.barkpark.cloud")
+    end
+
+    test "MUTATION per leg: dropping one leg at a time shows exactly which leg still refuses" do
+      team = team_fixture()
+      ghost = ghost_row(team, "mutate.barkpark.cloud")
+      ghost = with_admin_credential(ghost)
+      with_usage_sample(ghost, DateTime.add(DateTime.utc_now(), -5, :minute))
+      with_active_subscription(team)
+
+      host = "mutate.barkpark.cloud"
+
+      # All three legs present → the credential leg (the hard block) refuses.
+      assert {:held, :admin_credential, _} = Registry.provisioning_fqdn_claim(host)
+
+      # Drop the credential → the recent-sample leg still refuses.
+      ghost |> Ecto.Changeset.change(admin_token_encrypted: nil) |> Repo.update!()
+      assert {:held, :recent_usage_sample, why} = Registry.provisioning_fqdn_claim(host)
+      assert why =~ "sampled by the usage worker within the last 24h"
+
+      # Drop the sample too → the billing leg still refuses.
+      Repo.delete_all(from(s in "usage_samples"))
+      assert {:held, :active_subscription, why} = Registry.provisioning_fqdn_claim(host)
+      assert why =~ "live subscription"
+
+      # Drop the subscription too → NOW it is a genuine ghost and releases.
+      Repo.delete_all(from(s in Subscription, where: s.team_id == ^team.id))
+      assert :free = Registry.provisioning_fqdn_claim(host)
+
+      claimer = barkpark_fixture(team_fixture())
+      assert {:ok, %Barkpark{custom_host: ^host}} = Registry.set_custom_host(claimer, host)
+    end
+
+    test "a usage sample OLDER than 24h does not hold the claim on its own" do
+      team = team_fixture()
+      ghost = ghost_row(team, "stale-sample.barkpark.cloud")
+      with_usage_sample(ghost, DateTime.add(DateTime.utc_now(), -49, :hour))
+
+      assert :free = Registry.provisioning_fqdn_claim("stale-sample.barkpark.cloud")
+    end
+
+    test "a canceled subscription does not hold the claim (only live ones do)" do
+      team = team_fixture()
+      ghost_row(team, "canceled-team.barkpark.cloud")
+
+      Repo.insert!(%Subscription{team_id: team.id, plan: "supporter", status: "canceled"})
+
+      assert :free = Registry.provisioning_fqdn_claim("canceled-team.barkpark.cloud")
     end
 
     test "a young silent row keeps the claim (still provisioning, not yet abandoned)" do
