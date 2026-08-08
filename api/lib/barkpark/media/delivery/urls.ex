@@ -8,7 +8,18 @@ defmodule Barkpark.Media.Delivery.Urls do
   alias Barkpark.Media.Renditions
   alias Barkpark.Media.Storage.{Access, MediaFile, SignedUrl}
 
-  @immutable_cache "public, max-age=31536000, immutable"
+  # Visibility-aware local-file cache policy (charter http-edge-truth D12).
+  # A public asset is still cacheable, but for a DAY and only with a
+  # revalidation contract — the old year-long `immutable` policy was applied
+  # visibility-BLIND, so a shared cache could hold gated bytes (and any byte
+  # change under a stable URL was unrecallable for a year).
+  @public_cache "public, max-age=86400, must-revalidate"
+
+  # Anything not provably public ("token", "private", and any UNKNOWN value —
+  # fail-closed, mirroring Access.delivery_ok?/3's catch-all) is never stored
+  # anywhere: no shared-cache entry, no browser disk copy, and no ETag at all,
+  # so a client cannot revalidate its way back to gated bytes.
+  @no_store_cache "no-store"
 
   @doc "Original binary URL (WoodWing `originalUrl`)."
   @spec original_url(%MediaFile{}, keyword()) :: String.t()
@@ -48,21 +59,63 @@ defmodule Barkpark.Media.Delivery.Urls do
     end
   end
 
-  @doc "Apply long-lived cache + ETag headers for immutable media bytes."
-  @spec put_file_cache_headers(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
-  def put_file_cache_headers(conn, full_path) do
+  @doc """
+  Apply the visibility-aware cache policy for local media bytes.
+
+  `visibility` is the asset document's `bp_visibility`, threaded from the
+  caller as `Access.visibility(doc)` — the doc is already in scope at both
+  call sites, so this costs no extra query.
+
+    * `"public"` — `#{@public_cache}` + a strong ETag, and a conditional
+      request that matches short-circuits to `304`.
+    * anything else (`"token"`, `"private"`, any unknown string, `nil`) —
+      `#{@no_store_cache}`, NO ETag, and NO 304: a non-public asset must
+      never be revalidated off a client-held validator, because the answer
+      "unchanged" is itself a disclosure about bytes the caller may since
+      have lost access to.
+  """
+  @spec put_file_cache_headers(Plug.Conn.t(), String.t(), String.t() | nil) :: Plug.Conn.t()
+  def put_file_cache_headers(conn, full_path, visibility)
+
+  def put_file_cache_headers(conn, full_path, "public") do
     etag = etag_for(full_path)
 
     conn =
       conn
-      |> Plug.Conn.put_resp_header("cache-control", @immutable_cache)
+      |> Plug.Conn.put_resp_header("cache-control", @public_cache)
       |> Plug.Conn.put_resp_header("etag", etag)
 
-    case Plug.Conn.get_req_header(conn, "if-none-match") do
-      [^etag | _] -> Plug.Conn.send_resp(conn, 304, "")
-      _ -> conn
+    if if_none_match_hit?(conn, etag) do
+      Plug.Conn.send_resp(conn, 304, "")
+    else
+      conn
     end
   end
+
+  # Fail-closed catch-all: "token", "private", nil, and every unknown value.
+  # Returns BEFORE any ETag/304 machinery — the full body is always sent.
+  def put_file_cache_headers(conn, _full_path, _visibility) do
+    Plug.Conn.put_resp_header(conn, "cache-control", @no_store_cache)
+  end
+
+  # ── If-None-Match conformance (charter http-edge-truth D11) ───────────────
+  # RFC 9110 §13.1.2: the field is a LIST, may repeat across header lines,
+  # accepts `*`, and compares WEAKLY — so `W/"x"`, `"a", "x"` and `*` must all
+  # match `"x"`. The previous pin-match (`[^etag | _]`) honoured only a single
+  # header line whose entire value was the exact strong tag; every other
+  # conformant form fell through to a full 200.
+  defp if_none_match_hit?(conn, etag) do
+    conn
+    |> Plug.Conn.get_req_header("if-none-match")
+    |> Enum.flat_map(&String.split(&1, ","))
+    |> Enum.map(&String.trim/1)
+    |> Enum.any?(fn candidate ->
+      candidate == "*" or strip_weak(candidate) == strip_weak(etag)
+    end)
+  end
+
+  defp strip_weak("W/" <> rest), do: rest
+  defp strip_weak(value), do: value
 
   @doc "Strong ETag from size + mtime."
   @spec etag_for(String.t()) :: String.t()
