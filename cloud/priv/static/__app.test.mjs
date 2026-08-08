@@ -5968,8 +5968,30 @@ test("C8: the verify badge colours by OUTCOME — green pass, red fail (text sta
 
 test("C8: the empty feed teaches, never apologises", () => {
   const html = hooks.timelineFeedHtml([], {});
-  assert.match(html, /Events will appear here as this Barkpark works/);
+  // The pin lands on the ENUMERATION, not just the opening clause: the clause
+  // alone stayed green through a full rewrite of what the console promises
+  // (measured, wave 51). It names only types a producer can write.
+  assert.match(
+    html,
+    /Events will appear here as this Barkpark works &mdash; health reports, disk-space reports, verification runs, and team actions, in order\./,
+  );
+  // No PROMISE of backups: the only sanctioned mention is the absence sentence
+  // pinned by the next case, which reads "Backups are NOT among them".
+  assert.doesNotMatch(html, /reports, backups,|backups, verification/i);
   assert.match(html, /empty-state/);
+});
+
+test("C8: the empty feed states the backup ABSENCE, never a backup verdict", () => {
+  const html = hooks.timelineFeedHtml([], {});
+  // Quotes the agent verbatim and states the absence of a MEASUREMENT. Never
+  // "No backup" and never "Backup failed": backup_ok is a plain bool whose
+  // false conflates no-probe / probe-failed / probe-errored.
+  assert.match(
+    html,
+    /Backups are not among them: the on-box agent reports “no backup probe wired”, so nothing here can tell you whether this instance is backed up\./,
+  );
+  assert.doesNotMatch(html, /No backup\b/);
+  assert.doesNotMatch(html, /Backup failed/);
 });
 
 test("C8: an audit 403 degrades to ONE quiet line, not an error state", () => {
@@ -13113,7 +13135,17 @@ test("D-04: the quiet line and teaching empty state survive the coalescing rewri
   const html = hooks.timelineFeedHtml(entries, { quietLine: "Audit entries are visible to team admins." });
   assert.match(html, /tlv-quiet/);
   assert.match(html, /tlv-coalesce/);
-  assert.match(hooks.timelineFeedHtml([], {}), /Events will appear here as this Barkpark works/);
+  // The FULL enumeration + the adjudicated backup-absence sentence, not the
+  // opening clause: the clause alone survives a rewrite of both (wave 51).
+  const empty = hooks.timelineFeedHtml([], {});
+  assert.match(
+    empty,
+    /Events will appear here as this Barkpark works &mdash; health reports, disk-space reports, verification runs, and team actions, in order\./,
+  );
+  assert.match(
+    empty,
+    /Backups are not among them: the on-box agent reports “no backup probe wired”, so nothing here can tell you whether this instance is backed up\./,
+  );
 });
 
 test("D-04: total over junk — nulls, garbled stamps, junk payloads never throw or NaN", () => {
