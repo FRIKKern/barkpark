@@ -86,6 +86,12 @@ check_file() {
     echo "     after your heredoc line and the smoke step is never seen. Re-indent the heredoc body." >&2
     echo "  2. The step was renamed: the boundary matches '      - name: ' containing 'Smoke test'." >&2
     echo "  3. The job was renamed from 'control-plane'." >&2
+    echo "  4. A line inside the Smoke test step's own 'run: |' body is indented EXACTLY six spaces and" >&2
+    echo "     starts with '- ' (a bullet inside an echo, say). The step boundary is every 6-space '- '" >&2
+    echo "     list item — that is what stops an UNNAMED trailing step from being absorbed into the smoke —" >&2
+    echo "     so such a line closes the step early and the invariants after it go unseen. This direction" >&2
+    echo "     fails CLOSED (you are reading this message, not an OK), but the fix is to re-indent the body," >&2
+    echo "     never to loosen the boundary back to '- name: '." >&2
     return 1
   fi
 
