@@ -90,6 +90,15 @@ x-control-plane: &control_plane
     # 0.0.0.0:587 to the internet from this same network, so trusting the whole
     # subnet would let it forge any client's IP.
     - TRUSTED_PROXY_PEERS=${TRUSTED_PROXY_PEERS:-172.18.0.1}
+    # Serving sha (dr-w20-s1): the commit this slot is running, surfaced by
+    # BarkparkCloud.Health.serving/0 on GET /health. Passthrough-only and
+    # deliberately WITHOUT a default — absent means git_sha: null, an honest
+    # "this box predates the reader", never an invented value. deploy/cp-deploy.sh
+    # exports it from the sha it just checked out, AFTER sourcing cloud/.env, so
+    # a stale .env value cannot win. Without this bare line compose passes
+    # NOTHING (see the rule at the top of this file) and the container reports
+    # null forever while looking built.
+    - BARKPARK_GIT_SHA
   restart: unless-stopped
 
 services:
