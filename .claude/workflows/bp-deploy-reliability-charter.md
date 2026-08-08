@@ -7363,3 +7363,550 @@ credential transmission.
 NO SEAL (a=FAIL on 57 residue rows). The headroom is BORROWED: `dr-backlog-never-started` now holds 318 of its
 own 500-row ceiling, so 365 is a countdown, not a solved problem — the paged roster is the real fix and is
 console-side backlog.
+
+---
+
+## Wave 25 — THE WIRE, THE JAM, AND THE CLASS THAT CUTS IT
+
+Ground re-derived on `origin/main` = **b97663730a7a98c39f05a607110bdad5981c81e4** (2026-08-08 17:03 +0200).
+Wave 25's own strategic direction quoted `2c2528847` and the survey quoted `6c6c34f17`; main moved twice
+during the wave. The primary checkout is 698 commits behind and does not even contain
+`scripts/check-deploy-smoke.sh` or `scripts/cloud-path-escape-check.sh` — **grep `origin/main`, never the
+worktree**; a builder who greps the primary checkout will conclude a live gate does not exist.
+
+### D436 — THE JAM IS FOUR CURE CLASSES, NOT ONE. THE CURE IS PROVEN LIVE, AND THE RED DOES NOT CARRY IT.
+
+Wave 25's direction said "six PRs BLOCKED on the ordering clause"; the digest said "five reds, all P4, and
+#10945 is UNSTABLE so the cure cannot reach it". **Both are wrong, and the verify round settled it by running
+the cure on real PRs.**
+
+**The cure works, twice, two ways.** On #10942: `bp task claim dr-w24-s1-… w25-verify` at 15:13:55Z → check
+green at 15:14:50Z — 55 seconds — and the PR moved `UNKNOWN/UNKNOWN` → **MERGEABLE / CLEAN**. The passing job
+names the new holder, so it is a live ledger read and not a grandfathered pass:
+`pr-task-gate: PASS: task 'dr-w24-s1-crown-schema-stops-losing-rows' is task-backed — in_progress, claimed by
+'w25-verify'`. On #10943 the re-fire was `gh run rerun 31262137686 --failed` with **zero PR mutation**:
+run_attempt 2, check-run 93114497762 (failure) superseded by 93119169619 (success) at the same head sha,
+PR MERGEABLE/CLEAN. A byte-identical `gh pr edit --body` also re-fires (new run started 3s later) but is the
+expensive form. **`--failed` re-run is the cheapest re-fire and D79 already said so** — this run confirms it
+for the LAPSED-claim red specifically, and retires the standing note "only a PUSH re-fires a sticky verdict".
+
+**RULED — four classes, four cures, in this order:**
+
+| class | PRs | cure |
+|---|---|---|
+| (a) already clean | #10942, #10943 | MERGE. #10942 is the schema gate for the recorder; it merges first |
+| (b) lapsed lease (P4) | #10944, #10945, #10946 | `bp task claim <id> <worker>` then `gh run rerun <run-id> --failed`. **#10945 BEFORE #10943 merges** — its base is #10943's branch, so a retarget converts its non-blocking UNSTABLE into a hard BLOCKED at the same head sha |
+| (c) empty PR + inherited red | #10947 | `changedFiles 0, additions 0, deletions 0` — merging it delivers zero bytes and would be a false-done INSIDE the epic about false-dones. Close it; re-file dr-w24-s6's actual content. Its only red is Sobelow, which is **red on origin/main itself** (3 Config.CSRF findings at router.ex 615/556/532) |
+| (d) conflicting | #10811 | rebase. Its 25 pass / 0 fail is TRUE on its own head bd102bb3a but STALE-BY-BASE — that sha is not an ancestor of main |
+
+**RULED — the red must carry the whole cure, three clauses, two of them missing today.** The P4 message names
+`bp task claim <id> <worker>` and stops. It never says (2) *"then re-fire: `gh run rerun ${{ github.run_id }}
+--failed` — the gate does not re-evaluate on its own; a claim alone leaves this check red"*, and it never says
+(3) *"do NOT release afterwards"*. Clause 3 is the dangerous one: `release.ex` `apply_release_update/2` merges
+`worker→nil, epoch+1, released_by, released_at` into the **surviving** claim and never touches `expired_at`,
+so a tidy-minded agent who claims, greens, then "cleans up" fires the ORDERING clause at
+`pr-task-gate.sh:394` and earns a red **no re-fire can clear**. Claiming is reversible; releasing is not.
+
+**RULED — a measurement trap that would have laundered a red into an absence.** `gh api
+repos/:o/:r/commits/<sha>/check-runs` defaults to `per_page=30`. `563350d77` carries **36** checks and
+`dd691f7f3` carries 34, so the bare one-liner returned NOTHING for "active task" — byte-identical to "the
+check never ran", which is exactly this epic's disease. Every tool, criterion and brief uses
+`gh api --paginate ".../check-runs?per_page=100"`. Related: pin check-runs by `(sha, name)`, never by id — the
+cure MINTS A NEW check-run id at the same sha.
+
+**RULED — a fifth fact nobody expected: there is no author→worker map.** `.github/pr-task-workers.json` does
+not exist, so `EXPECTED_WORKER` is empty and the script only enforces it when non-empty
+(`pr-task-gate.sh:402`). That is *why* a verifier's claim can legitimately green a builder's PR. It is by
+construction, not a hole — but it means P4 certifies "this PR was opened under a live claim", **not** "someone
+is still working this", and the green it produces does not decay.
+
+**LEDGER RESIDUE THE LEAD MUST HANDLE.** `dr-w24-s1` is held at **epoch 7** and `dr-w24-s2` at **epoch 8**, both
+by worker `w25-verify`. The original builders' epochs are dead: close as `bp task close <id> w25-verify 7|8`,
+or re-claim first. **DO NOT RELEASE EITHER.**
+
+### D437 — THE RECORDER IS SCHEMA-BLOCKED TWICE. BOTH BLOCKS CLEAR BEFORE ONE BYTE IS WRITTEN.
+
+**Block 1 — the both-legs collapse, proven on PROD, not reasoned.** Posting `cp` and `instance` for one sha in
+one batch returns **HTTP 200 `{"ok":true,"received":2,"recorded":1}`**. The live unique index is
+`platform_deliveries_sha_run_seen_index UNIQUE (sha, delivering_run_id, first_seen_at)` — **`target` is not in
+it** — and `on_conflict: :nothing` drops the second leg with a 200 and no error. psql confirms only the `cp`
+row survived. CP and instance are at the SAME sha in the normal post-merge state, so this is the DEFAULT
+outcome of the briefed write, not an edge case. Distinct `first_seen_at` per leg records 2; two different shas
+record 2 — the key is the sole cause. **#10942 is exactly this fix, so "s7 gated on #10942 LIVE ON PROD" is a
+proven hard gate, not a preference.**
+
+**Block 2 — the rollback hole, and it is worse than a missing column.** Measured on guerrilla's own live slot
+pair (green b97663730, idle blue c0e43440b — a `--rollback` today moves the box 2 commits BACK):
+
+```
+git rev-list --count b97663730..c0e43440b            ->  0     # a REAL 2-commit rollback
+git rev-list --count --left-right b97663730...c0e43440b -> 2  0
+git rev-list --count c0e43440b..b97663730            ->  2     # the forward deploy
+```
+
+A rollback and a no-op ("HEAD already deployed healthy — nothing to do") are **byte-identical under two-dot**:
+both `0`. The recorder would write zero rows while production silently reverted two commits.
+
+**RULED — the range primitive.** `git rev-list --count --left-right OLD...NEW` (three dots), with **three
+mandatory guards, each proven**: (a) **NEVER `|| echo 0`** — a gc'd or force-pushed-away sha makes git print
+`fatal: Invalid revision range` and exit **128**, and the repo's own idiom (`scripts/doctor.sh:27-28` and six
+ledger sites) launders that into a confident `0`; rc≠0 lands `transition=unknown` with counts NULL, never 0.
+(b) **NEVER pipe the git call** into `head`/`tail`/`wc`/`grep` — the pipe eats the rc; a verifier's own probe
+demonstrated it accidentally (`fatal:` printed, `rc=0` reported) and reported it rather than hiding it.
+(c) **BOX-ANCHORED**, and now for a second, structural reason beyond D424's fabrication argument: `deploy.yml`'s
+`instance` job checkout (line 150) sets NO `fetch-depth`, so it is depth-1 and ANY range there is
+`fatal: Invalid revision range`. Only `changes` (line 48) sets `fetch-depth: 0`.
+
+**RULED — two nullable columns ship BEFORE the writer, in wave 25.**
+- `previous_sha` (nullable string) — the ONLY thing that makes a row retro-classifiable. Once real rows exist
+  no later migration can recover where the box came from; adding it later is a backfill against rows that
+  cannot be reclassified. It also converts the un-recordable rollback ACT into a detectable EFFECT.
+- `transition` (nullable string) ∈ `forward | rollback | diverged | noop | unknown`. **Do NOT reuse
+  `barkparks.commit_ancestry`'s vocabulary** (`unknown|current|behind|ahead_of_main|diverged`, shipped
+  2026-08-08 in `cloud/lib/barkpark_cloud/github/commit_distance.ex`): that enum measures BOX-vs-MAIN, this one
+  measures PREVIOUS-vs-NEW. Different axes; a shared name is a false economy a reader cannot un-confuse. Say
+  the difference out loud in the moduledoc.
+- **REJECTED: a `rolled_back` boolean.** It is derivable from `transition` and structurally cannot express
+  `diverged` or `unknown`, so it would need widening on the first divergence — the exact backfill trap.
+- Safety is precedented: `20260808050000_add_commit_distance_to_barkparks.exs` added three nullable, no-default,
+  no-index columns the same day — catalog-only ALTER, no rewrite, nothing to backfill.
+
+**RULED — the recorder is a ONE-HOP Actions→CP SSH, and it posts BOTH legs.** The instance box has **no
+`/opt/barkpark/cloud/.env` at all** and `grep -c WORKER_TOKEN /opt/barkpark/.env` = 0 — it is network-reachable
+and credential-less (401). It CANNOT self-report; D409 is still literally true of the instance box. But the CP
+box holds `/root/.ssh/barkpark_indx` and reaches the instance box (proven: read guerrilla's HEAD from inside
+the CP). So one SSH hop gets both legs' git facts AND the only credential that can write them. **Zero new
+credentials, and the instance box's missing token stops mattering.**
+
+**RULED — the writer verifies via the 200 body, never a read-back.** `GET /v1/deliveries` is
+`require_user_or_pat` + `require_ability("read")` and **401s the CP's WORKER_TOKEN** (measured). A self-check
+that reads back what it wrote will 401 forever. Assert on `received`/`recorded`.
+
+**RULED — the CP box is a SHALLOW checkout.** `git rev-parse --is-shallow-repository` → `true`, 4054 commits
+(the instance is not shallow, 5524). A range reaching past `.git/shallow` exits 128, and the `|| echo 0` idiom
+turns that into `laundered_N=0` **on the very box the recorder runs from, with no rollback involved.** The cp
+leg needs `fetch --unshallow` or an explicit depth guard, and rc must be checked.
+
+**Payload contract, measured, all four answers honest:** `target` ∈ `cp|instance` only (`control-plane` →
+422 `target: is invalid`); `validate_required([:sha, :delivering_run_id, :first_seen_at])`; an EMPTY batch is
+`200 {received:0, recorded:0}` — a legitimate empty delivery, so the "two reflog entries at the same sha" case
+needs no special-casing; one bad row refuses the WHOLE batch with `422 {"error":"invalid_row","index":N}`.
+`delivering_run_id` is a plain string (length 1..64, no numeric constraint) — a prod row already carries
+`"w25-seam-probe"`, so a future box-side rollback writer can self-name without a schema change.
+
+### D438 — THE STALL BUCKET: EXCLUDE NEVER-STARTED RUNS, EXCLUDE SAME-SHA SIBLINGS, PRECEDENCE `self > stall > pickup`.
+
+D430 left "runs still queued at recorder time" unspecified. Settling it is not a taste call — one reading
+produces a **dead instrument**. Same second-by-second replay, two real runs:
+
+| rule | ordinary run 31263502489 (leg A **211s**) | the outlier 31121348964 (leg A **19,486s**) |
+|---|---|---|
+| A (clamp unstarted at now), siblings counted | **211s = 100.0%** | 19,440s = 99.8% |
+| A, siblings excluded | **211s = 100.0%** | 15,780s = 81.0% |
+| B (exclude unstarted), siblings counted | 186s = 88.2% | 19,440s = 99.8% |
+| **B + same-sha exclusion** | **0s = 0.0%** | **15,780s = 81.0%** |
+
+Rule A publishes "the GitHub platform starved us for the entire wait" on a completely normal 211-second wait,
+and pickup — D430's residual bucket — collapses to zero. B+same-sha separates the two regimes **0% vs 81%**.
+That is the whole difference between an instrument and a decoration.
+
+The 211s decomposes exactly and honestly with no residual: the PREVIOUS deploy run 31263346377's `instance`
+job ran 15:00:29→15:06:50; ours was created 15:03:30 and its first job started 15:07:01. `deploy.yml` carries
+`concurrency: group: deploy-production, cancel-in-progress: false`, so the two serialize →
+**self 200s + pickup 11s + stall 0s = 211s.** The true sentence is *"you waited behind our own previous
+deploy"*, not *"GitHub starved you"*.
+
+**Never-started is the MAJORITY, not an edge case: 51 of the last 100 `deploy.yml` runs started ZERO jobs, and
+all 51 are `conclusion=cancelled`** — our own concurrency group superseding stale pending runs. Rule A turns
+every one into a permanent stall vote. Rule A is also non-terminating in principle (a never-started run is
+"unpicked" forever), so it needs an arbitrary lookback constant — smuggling back the magic constant D430
+forbids. Rule B needs none.
+
+**RULED — precedence, because D430's "partition" is not one.** Measured on the same run: self = 200s,
+stall(B, no sha filter) = 186s, leg A = 211s. **200 + 186 = 386 > 211.** `self` wins, then `stall`, and
+`pickup` is the residual — `self` is the only bucket attributable to a specific identified cause.
+
+**RULED — the cost cap, sized off measurement.** Ordinary row: 3 list pages + 25 `/jobs` calls = 28 requests.
+The real 19,486s outlier: 50 requests (a genuine platform stall coincides with LOW run creation, so duration
+does not drive cost). The driver is **density** — peak 313 runs/hour, 2,922 runs on 2026-08-07. Mandatory:
+`per_page=100` on every call; candidate filter in order `created_at < our_min_start` → `updated_at >= our
+created_at` (free, off the run-list payload — cut 281 candidates to 26 `/jobs` calls, 10.8×) → `head_sha !=
+ours` → `workflow != deploy.yml` (deploy runs feed **self**); hard caps `MAX_JOBS_CALLS=300` and
+`MAX_LEG_A=7200s`; explicit `timeout-minutes` on the step. **`run_started_at` is NOT a cheap pickup proxy** —
+it differs from `created_at` in **1 of 281** runs.
+
+**RULED — fail closed to NULL, never 0, never partial.** Cap tripped, any non-200 (403 rate-limit especially),
+or any candidate with `jobs.total_count > 100` → `self/pickup/stall` all NULL with a reason string. A truncated
+scan under-counts stall silently, which is the exact failure this epic exists to kill. `queued_seconds` (the
+total) still writes — it needs only our own run's `/jobs`. Max jobs-per-run today is **7** repo-wide and **4**
+for `deploy.yml`, so truncation is latent, not live — but the API default page size is 30, only 4× that.
+
+**NOT MEASURED, and stated as such:** `GITHUB_TOKEN`'s real per-repo Actions budget. `/rate_limit` from an
+operator host reports the operator's PAT, not the runner token. That is precisely why the cap is
+self-imposed rather than budget-derived, and why the first real recorder run should log the runner's own
+`/rate_limit` so wave 26 can size it on evidence.
+
+### D439 — THE DEPLOY GATES ARE DISARMABLE BY THE RECORDER'S OWN SHELL. THAT IS FIXED FIRST, IN ITS OWN SLICE.
+
+Adding a recorder job to `deploy.yml` passes every gate — filters rc=0, smoke rc=0, all four path-escape
+dispatchers `false` — for a minimal stub, a realistic SSH+curl body and a D424-shaped body alike. So "can s7 be
+added" is YES, cleanly. **But two disarms are live on main and both are aimed exactly at the recorder.**
+
+**Disarm 1 — `check-deployyml-filters.sh`.** `extract_regexes()` (~line 62) is a whole-file
+`grep -oE "grep -qE '[^']+'"` and does not care which job the regex lives in. Reproduced end to end against the
+gate's own canonical bug: plain mutated file → `DRIFT templates/**` → **rc=1**; the same mutation plus a
+recorder whose shell holds `grep -qE '^(api|cloud|internal|deploy|cmd|connectors|templates|scripts)/'` →
+`ok templates/** -> …` → **rc=0, green**. `templates/**` is now "targeted" by a job that deploys nothing, and
+that regex is not contrived — it is the copy-paste of the neighbouring `changes` job. Worse: `--selftest`
+catches it when the recorder's regex DIFFERS, but a **verbatim copy** of the job filter defeats the selftest
+too (its sed mutation rewrites BOTH copies) and a real one-sided drift then reads GREEN. **Worst case: gate
+green, selftest green, deploy target gone.**
+
+**Disarm 2 — `check-deploy-smoke.sh`.** `extract_cp_smoke`'s awk sets `instep` only on `^      - name: ` lines,
+so a step appended to `control-plane` with `- run:` and **no `- name:`** is absorbed into the Smoke test step.
+Proven: deleting the real DB probe reds (`DRIFT no /v1/auth/login probe`); re-adding those strings in an
+unnamed trailing step turns it into `OK: the control-plane smoke can fail on a DB-dead box` while the actual
+smoke step has no DB probe at all. Its mirror hazard fails CLOSED but confusingly: a line indented exactly two
+spaces ending in `:` inside the control-plane job reassigns awk's `job` and yields
+`FAIL: no 'Smoke test' step found … the extractor is broken, not the workflow`.
+
+**Neither selftest has a CI caller.** `grep -rn -- "--selftest" .github/` finds 12 workflows calling OTHER
+scripts' selftests; these two have **zero**. Both gates run ONLY inside `deploy.yml`'s `changes` job —
+post-merge, plain mode. So the disarm ships green on the PR and then, post-merge, disarms the gate that was
+supposed to notice.
+
+**RULED, all three, in one slice that lands BEFORE the recorder:** (a) scope `extract_regexes` to the `changes`
+job (the same awk job-boundary technique `check-deploy-smoke.sh` already uses) so a recorder's shell cannot
+contribute regexes at all; (b) make `extract_cp_smoke` stop at the next `- ` list item, not just the next
+`- name:`; (c) register both `--selftest`s AND both plain runs in a PR-time workflow already triggered by
+`.github/workflows/**` — `doc-gates.yml` is the home, it already runs eight other selftests.
+**RULED additionally: the recorder MUST NOT write a single-quoted `grep -qE`.** Double quotes are proven NOT
+extracted (mutation still reds rc=1); `case` / `[[ ]]` / `grep -q` without `-E` are also safe. An anchored
+hex/HTTP-code ERE is harmless, but the rule is "double-quote everything" because the failure is silent.
+
+### D440 — THE RECORDER'S PR EARNS A REQUIRED CODE GATE BY ONE LINE, AND THAT LINE IS NOT OPTIONAL.
+
+D426 confirmed by re-running all four dispatchers against a changed-file set of only
+`.github/workflows/deploy.yml`: `cloud --match cloud` **false**, `elixir --match compile` **false**,
+`--match test` **false**, `console --match console` **false**. **A deploy.yml-only PR runs ZERO required code
+gates.** The only required context that can red is `PR references an active task`, which measures the ledger,
+not the code.
+
+The fix arrived from an unexpected direction. `scripts/cloud-path-escape-check.sh` censuses repo-root reads by
+resolving `"../…"` **string literals**. A corpus built as
+`Path.join(Path.expand("../../..", __DIR__), ".github/workflows/deploy.yml")` is INVISIBLE to it — the ratchet
+printed *"9 distinct repo-root read(s) … OK"* while the test was reading `deploy.yml`. That is a vacuous green
+minted by the guard whose whole job is removing vacuous greens. Declaring the corpus as
+`"../../../.github/workflows/deploy.yml"` LITERALS makes the ratchet refuse
+(`UNCOVERED repo-root read: .github/workflows/deploy.yml`), and adding that one exact path to `CLOUD_PATHS`
+flips `echo .github/workflows/deploy.yml | cloud-path-escape-check.sh --match cloud` from **false** to
+**true**. Selftest stays 159/160 passing.
+
+**RULED: the census arm and its one CLOUD_PATHS line ship in ONE commit.** The test alone REDS the ratchet;
+the line alone buys a Cloud-suite run nothing reads. This is the guard+fix co-merge shape, and here it is
+correct rather than the anti-pattern, because the fix is one line inside the same PR's blast radius.
+**COST, unmeasured and named:** every future `deploy.yml` edit now pays the full Cloud Elixir suite plus
+Postgres. The 60-day churn rate on `deploy.yml` was not measured the way `cch-w53-s2` measured
+`internal/provisioner`. If wave 26 finds that file churns hard, the answer is exempt-and-name, not un-declare.
+
+### D441 — LEG 3 KEYS ON THE WORKER-TOKEN WRITE ROUTES. NOT TABLES, NOT A FLOATING CORPUS.
+
+"Exactly twelve caller-less write routes" is **not reproducible, and twelve is not a property of the tree** —
+it is a property of an undeclared corpus. Measured four ways on b97663730: 36 caller-less paramless write
+routes (corpus = workflows+deploy+scripts+internal), 10 (adding `cloud/priv/static`), 7 (adding js/web/ts/mjs).
+None is 12. A number that swings 7→36 on the corpus definition cannot be a gate.
+
+**Tables are worse.** `grep -rl platform_deliveries cloud/lib internal` returns THREE files, so a
+table-granularity caller guard scores the empty crown **GREEN** — reproducing D427's hole inside the arm meant
+to close it. Of 29 `create table(:x)` migrations exactly one (`control_plane_meta`) scores zero: the table
+dimension is ~97% vacuous.
+
+**RULED — the grain is the WORKER-TOKEN SEAM: `/v1/internal/**` write routes, exactly 23, with a DECLARED
+corpus and ASSERTED exclusions.** Two caller-less literals today:
+- `/v1/internal/barkparks` (2 routes) — CALLED, but only from `internal/cli/hetzner_instance_cmd.go:246,274,300`,
+  and `internal/cli/**` is REFUSED BY NAME in `cloud-path-escape-check.sh`'s own prose. Allowlisted
+  `:called_out_of_corpus` with that reason.
+- `/v1/internal/platform-deliveries` — **THE CROWN HOLE**, `:no_caller`, with an OWED deletion the recorder
+  slice performs. 23 routes / 1 genuine hole has resolution; 121 routes / a floating 7–36 does not.
+
+**The exclusions are load-bearing and must be ASSERTED, not assumed.** `router.ex` names the route TWICE — the
+moduledoc route table at :175 and the handler at :6588 — so including the router would score the crown route
+called off its own documentation; the arm asserts that `callers/2` fed the router body returns non-empty, i.e.
+that the exclusion earns its keep. `cloud/test/**` is excluded because `platform_delivery_test.exs` hits the
+route eleven times while the recorder does not exist.
+
+**Mutation-proven 0→1→0 against the REAL `.github/workflows/deploy.yml`**, not a fixture: red on main with the
+crown row unallowlisted (`NEW caller-less write route(s): /v1/internal/platform-deliveries`), green once a
+recorder job with a LITERAL route path is appended, red again the moment it is removed.
+
+**RULED — THE INTERPOLATION TRAP REACHES THE RECORDER'S BRIEF.** Suffix concatenation IS seen (the CLI's
+`"/v1/internal/barkparks/"+id+"/deprovision"` scores called). Splitting the path across variables is NOT: an
+appended real recorder using `CP=…/v1/internal; KIND=platform; curl "$CP/$KIND-deliveries"` still redded.
+**The recorder MUST write `/v1/internal/platform-deliveries` as ONE literal string** or it ships a recorder its
+own guard reds. The arm documents this false-red with a message that says so — but the honest risk is that a
+hurried builder "fixes" the red by adding an allowlist row instead of a literal, and the row's reason text is
+the only thing between that and a false-done.
+
+**RULED — one residual closed rather than named.** `cch-w52-bl` measured a scanner fail-open on the one-liner
+route spelling (`post "/x", do: …`). Zero one-liners exist in `router.ex` today (measured 0), so the arm carries
+a LOOSE-vs-STRICT count assertion that reds on the first one.
+
+### D442 — THE DELETION LAW IS RATIFIED, BUT NOT ON WAVE AGE. A WAVE-AGE CLOCK IS ANTI-CORRELATED WITH SEVERITY.
+
+Re-derived on b97663730 — **"reader surface" means a client that can put bytes in front of a human**
+(`internal/`, `cloud/priv/static/`, `web/`, `js/`), never a serializer:
+
+| instrument | reader hits | landed | wave | waves reader-less | wave-age law at N≥5 |
+|---|---|---|---|---|---|
+| `publish_clock` | 0 | 2026-08-07 #10244 | W12 | 13 | DELETE |
+| `build_slots` | 0 | 2026-08-07 #10399 | W15 | 10 | DELETE |
+| `runner_queue_len` | 0 | same slice | W15 | 10 | DELETE |
+| `coalesced_attempts` | 1 — a COMMENT saying it is NOT rendered | 2026-08-07 #10519 | W18 | 7 | DELETE, stayed by #10811 |
+| `commit_distance` / `commit_ancestry` | 0 | 2026-08-08 #10756 | W23/24 | 1 | **SURVIVES — too young** |
+
+**`commit_distance` is not merely reader-less: `git grep commit_distance origin/main -- cloud/lib/barkpark_cloud/web/`
+is EMPTY.** No serializer emits it at all. It is written hourly by `UpdateStatusWorker → Registry.refresh_commit_distance/2`
+into three columns that never leave the database. It is the epic's freshest, most complete
+instrument-with-no-consumer — **and a wave-age clock SPARES it while deleting the four old ones. The law would
+be anti-correlated with severity.**
+
+**RULED — the clock runs from FIRST EMISSION WITHOUT A RENDERED-BYTES READER, N = 5 waves.** Three riders:
+1. **STAY:** an instrument named by an OPEN PR with a passing content gate is stayed. Exactly one qualifies
+   today — `coalesced_attempts`, stayed by #10811, which lands both a Go field and a renderer and DELETES the
+   census's own `:unread` allowlist row. Without this rider the law would delete the instrument the merge train
+   is one rebase from connecting.
+2. **INSTRUMENTS ONLY.** A TABLE or a CORPUS is never deletable. `dr-w11-followup-publish-instant-has-no-reader`
+   guards `content_publishes` (a table of real rows) and `dr-w12-bl-build-clock-has-no-reader`'s substrate is
+   120,427 rows of per-stage `deployments.console` timestamps — that is DATA. The law deletes instruments; the
+   task wins on the substrate. Split those rows, do not close them.
+3. **RE-DERIVE, NEVER INHERIT.** D401's six-name violator register is already stale: the rollout brake
+   (`app.js:8748` + two rendered-bytes harnesses), `LivePerAttempt`/`Residual`
+   (`cloud_deploy_census_cmd.go:487-490,521-522`) and the fleet-digest audience (`app.js:8754`) are all
+   DISCHARGED. A law seeded from charter prose would delete three instruments that have readers.
+
+**Disposition of the six give-it-a-reader tasks:** LAW WINS on `dr-w14-s6-followup-site-deployments-envelope-unread`
+(publish_clock, 13 waves, and D-prose already notes its route 401s). TASK WINS on
+`dr-w11-followup-publish-instant-has-no-reader` (a table), on `dr-w12-bl-build-clock-has-no-reader`'s console
+timestamps (data), on `dr-w12-s6-followup-serialize-deferral-columns` (co-scoped — #10811 lands its
+`coalesced_attempts` leg), and on `dr-w5-followup-5xx-reaches-no-eyes` (a DUPLICATE of `dr-w6-s5`, which owns
+the thread and is jammed by its OWN criterion 10 forbidding the files the fix needs).
+`dr-bl-w9-per-route-latency-histogram-reaches-no-eyes` is **UNPROVEN either way — its emitter was never dated**;
+do not quote it. **And the class is at least 13 tasks, not six** — a law ratified against six silently applies
+to thirteen. `avgDurationMs` (api search intelligence, 24,832 crystals, zero readers) is a REAL violator
+OUTSIDE this epic's fence: cite as precedent, never as a target.
+
+### D443 — GYLDENDAL: THE HYPOTHESIS IS REFUTED, AND THE TRUTH IS SHARPER AND MORE UNCOMFORTABLE.
+
+Wave 25's direction proposed "an un-deployed guard sat merged for two days" (this epic's own thesis causing the
+disclosure) or "a second unguarded writer". **It is NEITHER, and the digest's refutation was a timezone error.**
+
+The carve-out commit `fe4e1e9db` is stamped `Wed Jul 8 13:46:14 2026 **+0200**` = **11:46:14 UTC**. It was
+pulled onto the control plane at **11:47:14 UTC** (CP reflog). The attach job row is **11:48:34 UTC**. The
+carve-out landed **80 seconds** before the attach it enabled — "~2h BEFORE" only if you read +0200 as UTC.
+
+The chain, proven: `487814d63` introduced `barkparks.custom_host` AND its url leg
+(`provisioning_fqdn_taken?/1`) in the SAME commit — there was never a guardless window — and it was live on the
+CP from 2026-07-06 15:08:04 UTC, **44h20m** before the attach. The pre-carve-out predicate matched
+`b.url == "https://" <> norm` with no exclusions, and ghost row `b1259514` has held
+`url='https://gyldendal.barkpark.cloud'` since 2026-06-29. **Any attach of that host in that 44-hour window was
+structurally refused. The attach SUCCEEDED — so post-carve-out code was serving.** The attach's own success is
+the proof the guard was live and working right up until it was removed. And `fe4e1e9db`'s message names the
+target row: *"A June-29 pre-registry-era provisioning attempt squatted gyldendal.barkpark.cloud forever."* Its
+one false premise is in its own text: *"the ghost row itself stays untouched — it is dead weight, not a
+conflict."* The ghost is not dead weight; it carries `admin_token_encrypted` and is swept every 15 minutes.
+
+**SECOND-WRITER: REFUTED BY GREP.** `barkparks.custom_host` has exactly one cast site
+(`registry/barkpark.ex:773`), one caller (`registry.ex:5279 set_custom_host/2`, which always runs
+`custom_host_taken?/2`) and one route (`web/router.ex:4109`). No `update_all`, no raw `execute`, no admin
+bypass, no Go-side write.
+
+**SAY THIS OUT LOUD, because it is the opposite of the comfortable story:** the CP deploy path here was FAST
+(80s pull→serving) and CORRECT. The lesson for a reliability epic is adjacent and sharper — **a predicate
+hotfix shipped in 80 seconds with nothing asking what it released BESIDES the one row it was aimed at.** It is
+a reporting failure in exactly one sense: nothing anywhere reported that a guard's coverage had shrunk.
+
+**THE HARM IS LIVE, MEASURED TODAY.** `b1259514` (team "yo", plan forever/ACTIVE) holds
+`url=https://gyldendal.barkpark.cloud`, `custom_host` NULL, `last_seen_at` NULL, `admin_token_encrypted`
+PRESENT. DNS resolves that name to `116.203.98.0` — team **Gyldendal**'s box — which answers HTTP 200 with
+`ssl_verify_result=0` and `via: 1.1 Caddy`. `Usage.instance_base_url/1` reads `url` (not host, not custom_host),
+`instance_admin_token/1` decrypts, `instance_api_headers/1` puts it in `Authorization: Bearer`, and
+`UsageSamplerWorker` sweeps on crontab `7,22,37,52`. `usage_samples` for that row: **1,376, latest 15:07
+today** — and retention truncates at 2026-07-25 while the collision began 2026-07-08, so **1,376 is a FLOOR
+over the retained window, not the total**. Never quote it as the disclosure count.
+
+**RULED — the abandonment predicate, in priority order:**
+1. **HARD BLOCK — never release a name claim from a row that still holds a credential
+   (`admin_token_encrypted IS NOT NULL`) or is still being sampled (a `usage_samples` row within 24h).** A row
+   whose url is still being dialled with a decrypted admin credential is BY DEFINITION not abandoned, because
+   the platform itself is still acting on it. This is stronger than billing because it is about what the
+   platform is DOING, not what the customer is PAYING — and it is the leg that would have prevented this.
+2. **AND no active subscription.** Independently blocks all three of today's releasable rows. The carve-out's
+   exact predicate returns THREE rows right now and **all three are on ACTIVE subscriptions** (yo/forever,
+   Gyldendal/supporter, Guerrilla/forever) — a **0-for-3 precision record on live data**. `last_seen_at IS NULL`
+   does not mean abandoned; it means the agent never phoned home, equally consistent with a paid box that was
+   mis-provisioned and never fixed.
+3. The refusal copy names WHICH leg refused, so the next operator hotfixing a stuck attach can see the cost of
+   widening it.
+4. **An operator-driven release path is the correct home for "unstick this one customer"** — explicit, audited,
+   revoking the credential first. Rider 1 would have refused the gyldendal hotfix outright; that is the correct
+   outcome, and it means rider 4 is not optional, it is the replacement.
+
+**#10944 MERGING IS NOT A CLOSE.** Its own body concedes *"This does NOT heal the live gyldendal row."* It is
+honest and it is still a false-done at the EPIC level if wave 25 reports the class as handled. Remediation is
+an OPERATOR act — null `b1259514.url` (with no url the code degrades to `:not_live` and the sampler stops), and
+rotate team yo's instance admin token; treat it as DISCLOSED, not suspected. Do NOT delete rows.
+**One more thing the owner should see:** `f5e1392e` — the row that TOOK the name — is ITSELF an abandoned ghost
+by the same predicate (`last_seen_at` NULL, offline, 1,377 unreachable samples). Its claim survives only
+because `other_barkpark_custom_host?/2` has no abandonment carve-out. The platform sweeps BOTH sides of the
+collision while a live Caddy answers 200 for the name.
+
+**A deploy-reliability finding fell out of the forensics:** the control plane retains **no deployed-image
+provenance** — `docker images` shows only current layers, so the CP git reflog is the ONLY surviving deploy
+history, and reflogs expire (default 90 days). This evidence is gone by early October. That is itself an
+argument for the recorder.
+
+### D444 — THE SEAL IS AN HONEST NO-SEAL, AND ITS TOKEN MAY NOT BE QUOTED BARE.
+
+Re-run from a fresh detached worktree at today's head, verbatim:
+
+```
+SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=57 considering=0
+  successor=am-bl-idle-p95-anomaly epic=task-fb4fb869490b4213 mode=live
+  stubbed=0 waived=0 roster=135 repo=<worktree> head=b97663730     [exit 1]
+```
+
+**MANDATORY CAVEAT SENTENCE, required on every citation:** `b=PASS` and `c=PASS` are scored off **Cloud Console
+Hardening's** flat registers, not off deploy-reliability. `PERMANENT_HUMAN_GATES` (:257) and `KNOWN_DEFECTS`
+(:281) are module-level constants with no epic fence; `--epic` parameterizes clause (a) ONLY. The run prints
+its own tell — all three gates come back `parent=cloud-console-hardening-epic in-epic-roster=false` and pass
+anyway. **Epic-independence proven by mutation:** running the same binary with `--epic dr-backlog-never-started`
+emits the SAME six CCH defects and the SAME three gates and still scores `b=PASS c=PASS`. For
+deploy-reliability, **clause (a) is the only DR-specific letter in that token**, and a green would print a
+Cloud Console defect as DR's residue.
+
+**137 vs 135 is DRAFT DOUBLE-COUNTING, not two missing tasks.** `bp task get`'s `child_count` counts draft
+overlays; the predicate queries the published dataset. The two extras are
+`drafts.dr-w24-s3-custom-host-cannot-steal-a-url` and `drafts.dr-w24-s5-the-rulings-become-readable`, both with
+published counterparts already in the 135. Same class explains the backlog's 333 vs 319 (14 drafts, zero
+non-draft rows missing). **135 and 319 are the correct denominators.** Side finding worth a minute: the s5
+DRAFT is STALER than its published row (7/9 vs 8/9) — publishing it would REGRESS the criteria count.
+
+**Clause (a) is EXACTLY ONE LEVEL DEEP.** `fetchRoster` is a single non-recursive `filter[parent_id]` query,
+called exactly twice (EPIC and SUCCESSOR). `dr-backlog-never-started` IS in the read path — it is orphan #1 —
+but its **319 published open children are not**. Live rows in the two-level subtree = 57 + 319 = **376**, and
+the gauge says 57. **The honest sentence, and the only permitted one: "57 unforwarded direct children, plus 319
+never-started rows one level below that clause (a) structurally cannot see."**
+
+**orphans 334 → 57 is a FILING fact, not a progress fact.** Zero of the drop is finished work: `dr-w24-s6`
+(still open at 6/8) reparented ~277 rows. It is DISCLOSED, not laundered — but **a wave Paper citing 334→57 as
+improvement would manufacture exactly the false green this gauge exists to prevent.** As long as residue can be
+reparented under an in-roster sub-parent, the orphan count is reducible by a FILING ACT with no work done; the
+gauge is currently gameable in a way its own honest refusals do not cover. **That hole is unfiled and is filed
+by this wave.**
+
+**The cliff is disarmed but real.** `--successor dr-backlog-never-started` is REFUSED by R6
+(`SUCCESSOR-INSIDE-EPIC`, 1 hop) before any clause runs — so the obvious forwarding choice cannot mint a false
+green. The genuine cliff is `fetchRoster`'s refusal at `docs.length >= ROSTER_PAGE_LIMIT` (500), which fails
+CLOSED — mutating the limit to 100 produced `INFRA-FAULT … code=ROSTER-TRUNCATED`, exit 2, never a seal. Today:
+epic 135/500 = **365 rows of headroom**; backlog 319/500 = **181**, burning ~4× faster. Naming as `--successor`
+any task OUTSIDE the epic with ≥500 published children is the fatal choice.
+
+**The fix is fenced.** Epic-keyed registers plus a paged/recursive roster live in
+`cloud/priv/static/__preview__/*`, ceded to the console epic by D402;
+`dr-bl-seal-predicate-epic-keyed-register` is already filed as a CONSOLE-SIDE DEPENDENCY. DR cannot ship it
+without a written dispensation. **SEALING WHILE THE CROWN HAS NEVER HELD AN AUTOMATED ROW REMAINS THE MOST
+EXPENSIVE FALSE GREEN THIS EPIC COULD COMMIT.**
+
+### D445 — THE READER HAS ONE HOME. THE OTHER TWO ROWS ARE DISPOSED, IN WRITING.
+
+Three live open 0-met tasks describe one reader. **`dr-w24-s8-timeline-reaches-a-human` survives** on four
+separable grounds: it is the only one parented to the EPIC GOAL (both rivals sit under
+`dr-backlog-never-started`, the 333-row holding pen); it is scope-pure (`dr-w23-s3`'s criteria 1–3 are the
+deploy.yml WRITER — verbatim leg 2's recorder — so building from it hands one builder both the workflow writer
+and the CLI reader, defeating the "a jam cannot strand both" fence); it alone encodes
+`after: ["dr-w24-s1-crown-schema-stops-losing-rows"]` machine-readably; and it strictly subsumes
+`task-47b7a5f80ccb5e61`, whose GH ref **#10767 is not a pull request** (`Could not resolve to a PullRequest`),
+so nothing is in flight against it.
+
+**RULED — dispositions, applied to the rows:**
+- `dr-w23-s3-timeline-reaches-a-human` → **SPLIT AND SUPERSEDED**, not duplicated. Criteria 1–3 move to the
+  recorder slice; criteria 4–6 (rendered-table assertion, three named wait buckets, no percentage without its
+  unit) are carried and strengthened by `dr-w24-s8`. **Do not build from it.**
+- `task-47b7a5f80ccb5e61` → **DUPLICATE, closed.** Strict subset of `dr-w24-s8` criteria 1 and 5.
+- **`dr-w24-s8` criterion 7 is STRUCK.** It instructs a builder to WIDEN `dr-w23-s3`'s criterion 6 — a row we
+  are closing. Left standing, the builder is sent to patch a closed task and will either fabricate the evidence
+  or stall.
+- **Criterion 3 (three wait buckets) is HELD** behind #10942's DEPLOY: `to_json/1` on main emits exactly 10
+  keys with `queued_seconds` a single scalar; the three split columns are `+` lines in #10942 only. A fixture
+  authored at the 13-key shape passes a Go test while the live command renders three permanent UNKNOWNs.
+- **Criterion 9 (live prod run) is DEFERRED, and marked deferred rather than stamped.** The crown's rows were
+  all hand-posted; a builder could satisfy it today by pasting a surveyor's own hand-POSTed row and it would
+  look identical to success. It waits for a row whose `delivering_run_id` is a REAL Actions run id, and its
+  evidence asserts on **`delivering_run_id` SHAPE** — never on "the table is non-empty". The crown held 3 rows
+  at digest and **2 an hour later**; two of three were junk (a `w25-seam-probe` row and an all-zeros sentinel
+  with run id `"0"`, already filed as `dr-w24-bl-sha-validator-admits-all-zeros`).
+
+**RULED — three build-time facts that would each have cost a cycle.**
+- **`@go_tag_floor` is EXACT equality (`==`), not a floor**, pinned at 225 — and **#10811 moves it to 227** in
+  the same file. Brief the TECHNIQUE (set the floor absurdly high, read the refusal's own count), **NEVER a
+  number**. The measured value with the reader's structs today is 237, and it is 237 only because `count` and
+  `scope` already exist in the file-global union — **mutation proof: deleting `Count` and `Scope` from
+  `DeliveriesPage` leaves the measured number at 237**, so the floor is structurally blind to two of the
+  reader's own envelope keys. The general fix (`dr-w23-s6-register-per-struct-unread`) is filed and UNBUILT, so
+  the reader ships its OWN per-struct pin.
+- **`internal/cloudclient/**` IS in `CLOUD_PATHS`**, so a cloudclient PR DOES run the Cloud suite (proven on
+  #10811, `Cloud control-plane (test)` pass 1m43s). The wave-23 note "a Go-only PR never runs the Cloud job" is
+  false for this package — the reader is protected pre-merge. The zero-required-gate finding is about the
+  RECORDER's `deploy.yml`-only PR, and stands.
+- **`CC=clang` FAILS on this host** (`cc`/`clang` resolve to a Claude wrapper: `# runtime/cgo … unknown option
+  '-E'`). Every Go and Elixir gate command in every brief uses **`CC=/usr/bin/clang`**.
+- **`bp cloud deliveries <sha>` collides one word from `bp cloud webhook deliveries <instance> <webhook-id>`**
+  (`cloud_webhook_cmd.go:87`), which means a tenant's webhook delivery log — the opposite subject. The reader
+  MUST name the population it read in its header line, or a human reads a platform deploy record as their own
+  site's webhook log. No task mentions this.
+
+### D446 — THE `current` LIE'S LAST UNFENCED HUMAN SURFACE IS THE DIGEST EMAIL.
+
+`commit_distance` proves five prod boxes sit 1 / 268 / 633 / 927 / **2,509** commits behind while reading
+`update_state = current`. #10943 repairs `bp cloud status` only. `cloud/priv/static/app.js:5679`
+(`classifyBp`) is the twin surface and is **FENCED** by Cloud Console wave 55. But
+`cloud/lib/barkpark_cloud/notifications/digest_email.ex:54-55` counts
+`Enum.count(barkparks, &(&1.update_state == "current"))` straight into the **email subject line** —
+`"Barkpark fleet digest — N current / M behind / P paused"` — and is unfenced. **RULED: the digest reads
+`commit_ancestry`/`commit_distance` beside `update_state` and a box with `commit_ancestry == "behind"` is
+NEVER counted `current`.** This is not an 841st email producer; it is an existing one told to stop lying.
+The build reads the schema fields directly (they are on the `%Barkpark{}` struct at
+`registry/barkpark.ex:213-215`), so it does not wait on #10943's serialization.
+
+**AND NOTED, NOT FIXED:** `app.js`'s `ATTENTION_RANK` has NINE kinds where Go has ELEVEN (`strained` and
+`filling` were never mirrored), and `attention_order.json` is read only by Go files — the JS predicate has NO
+cross-surface assertion. Console-side; filed to backlog.
+
+### The wave 25 plan — 8 slices, three rounds
+
+**Fable is unavailable; every slice builds on Opus at medium.** Round-1 file sets are disjoint. Round-2 and
+round-3 slices do NOT dispatch beside their dependencies and each carries an `AFTER <task_id> MERGES` line as
+the first line of its brief. **One file forces the round split**:
+`cloud/test/barkpark_cloud/payload_key_set_census_test.exs` is touched by slice 2 (the `@go_tag_floor` line)
+and slice 7 (the caller arm at the tail) — and is ALSO contended by three open PRs (#10811 CONFLICTING,
+#10945, #10943). It is a war zone; nothing shares it inside one round.
+
+| # | round | task | surface | why it is here |
+|---|---|---|---|---|
+| 1 | 1 | `dr-w25-s1-gate-red-carries-the-cure` | `scripts/pr-task-gate.sh` + its harness | D436. An entire wave was built, PR'd and gate-greened and silently did not land |
+| 2 | 1 | `dr-w25-s2-deliveries-reaches-a-human` | `internal/cloudclient/`, `internal/cli/`, one fixture, the census FLOOR LINE | D445. Fixture-gated, buildable today, decoupled from the writer so a jam cannot strand both |
+| 3 | 1 | `dr-w25-s3-crown-records-a-rollback` | migration + `platform_delivery.ex` | D437. `previous_sha` + `transition` must land BEFORE the writer or the first honest rows are already wrong |
+| 4 | 1 | `dr-w25-s4-deploy-gates-stop-being-disarmable` | `scripts/check-deployyml-filters.sh`, `scripts/check-deploy-smoke.sh`, `doc-gates.yml` | D439. The recorder's own shell can disarm both gates. This lands first |
+| 5 | 1 | `dr-w25-s5-ghost-carveout-keeps-a-live-name` | `cloud/lib/barkpark_cloud/registry.ex` | D443. **HIGH-FLIP-RISK: the abandonment predicate (tenancy + credential reachability)** |
+| 6 | 1 | `dr-w25-s6-digest-stops-calling-a-stale-box-current` | `notifications/digest_email.ex` | D446. The last unfenced human surface carrying the measured lie |
+| 7 | 2 | `dr-w25-s7-census-scores-a-caller-less-producer` | census test tail + one `CLOUD_PATHS` line | D440 + D441. **AFTER slice 2 merges** (same file). **HIGH-FLIP-RISK: the caller predicate's corpus** |
+| 8 | 3 | `dr-w25-s8-crown-gets-its-writer` | `.github/workflows/deploy.yml` | D437 + D438. **AFTER slices 3, 4 and 7 merge, AND #10942 is LIVE ON PROD** |
+
+**Lead acts this wave, which no slice substitutes for** (D436): merge #10942 then #10943; claim+re-fire
+#10945 BEFORE #10943 merges, then #10944 and #10946; close #10947 as empty; rebase #10811; close `dr-w24-s1`
+as `w25-verify 7` and `dr-w24-s2` as `w25-verify 8` and **release neither**; and the gyldendal OPERATOR act
+(null `b1259514.url`, rotate team yo's admin token) which no merge performs.
+
+**Seal state after this wave.** Unchanged and honest: `NO-SEAL a=FAIL b=PASS c=PASS orphans=57 roster=135
+head=b97663730`, exit 1 — with D444's caveat sentence attached, and the residue stated as **57 direct plus 319
+one level below that clause (a) cannot see**.
