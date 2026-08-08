@@ -12724,8 +12724,12 @@ defmodule BarkparkCloud.Web.Router do
   # per broadcast, with a heartbeat comment every 25s so an idle stream isn't
   # reaped by a fronting proxy. A failed chunk (client gone) ends the loop; :pg
   # auto-unsubscribes the dying process.
+  #
+  # The loop carries the connecting user's id because it must OUTLIVE its own
+  # credential check — see `sse_loop/3`.
   defp stream_events(conn, team_id) do
     :ok = Events.subscribe(team_id)
+    user_id = conn.assigns.current_user.id
 
     conn =
       conn
@@ -12735,36 +12739,107 @@ defmodule BarkparkCloud.Web.Router do
       |> send_chunked(200)
 
     case Plug.Conn.chunk(conn, ": connected\n\n") do
-      {:ok, conn} -> sse_loop(conn)
+      {:ok, conn} -> sse_loop(conn, user_id, System.monotonic_time(:millisecond))
       {:error, _} -> conn
     end
   end
 
-  defp sse_loop(conn) do
+  # The parked stream, and the ONE thing to understand about it: authentication
+  # happened once, at connect, and the credential is already gone by the time we
+  # get here (an `?ticket=` is BURNED inside the connect transaction). So the loop
+  # cannot re-verify a token — it remembers `user_id` and re-asks the only
+  # question that survives: does this user still have a live session at all?
+  #
+  # Before cch-w53-s4 it asked nothing. "Sign out everywhere" stamped every
+  # session row revoked and this loop kept chunking team events to the signed-out
+  # device forever — measured across two heartbeats at ~t+55s, with no bound at
+  # all except the client hanging up. For the console SPA that self-heals (the
+  # refetch each event triggers 401s and bounces to login); for a client that
+  # only READS — curl, a script, a stolen laptop — nothing ended it, and the
+  # frames are not all contentless (`site.deploy.stage` carries site/deployment/
+  # stage, `barkpark.suspended` carries a barkpark_id).
+  #
+  # THE BOUND IS ONE HEARTBEAT, NOT IMMEDIACY. The heartbeat tick ALWAYS
+  # rechecks, so an idle stream dies within ~25s of the revoke. The event path
+  # rechecks too but THROTTLED to the same window, so a chatty team cannot turn
+  # every broadcast into a query. Worst case a revoked stream sees frames for one
+  # more window; before, it saw them for its whole life.
+  #
+  # NOT COVERED, deliberately: per-row revoke (`DELETE /v1/account/sessions/:id`)
+  # does not end that device's stream, because the ACTING session keeps the count
+  # >= 1. Binding a stream to its minting session needs a `user_tokens` column
+  # that does not exist — filed as
+  # cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream.
+  defp sse_loop(conn, user_id, checked_at) do
     receive do
       {:bpcloud_event, event} ->
-        case encode_sse_frame(event) do
-          {:ok, frame} ->
-            case Plug.Conn.chunk(conn, frame) do
-              {:ok, conn} -> sse_loop(conn)
-              {:error, _} -> conn
-            end
+        case sse_session_check(user_id, checked_at, sse_recheck_ms()) do
+          :revoked ->
+            end_revoked_sse(conn, user_id)
 
-          :error ->
-            # An unencodable event must NOT crash (and so close) the whole SSE
-            # stream — the event is only an invalidation hint, safely dropped.
-            # Log and keep parking for the next (good) event / heartbeat.
-            Logger.error("sse_loop: dropping unencodable event #{inspect(event)}")
-            sse_loop(conn)
+          {:live, checked_at} ->
+            case encode_sse_frame(event) do
+              {:ok, frame} ->
+                case Plug.Conn.chunk(conn, frame) do
+                  {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+                  {:error, _} -> conn
+                end
+
+              :error ->
+                # An unencodable event must NOT crash (and so close) the whole SSE
+                # stream — the event is only an invalidation hint, safely dropped.
+                # Log and keep parking for the next (good) event / heartbeat.
+                Logger.error("sse_loop: dropping unencodable event #{inspect(event)}")
+                sse_loop(conn, user_id, checked_at)
+            end
         end
     after
-      25_000 ->
-        case Plug.Conn.chunk(conn, ": ping\n\n") do
-          {:ok, conn} -> sse_loop(conn)
-          {:error, _} -> conn
+      sse_heartbeat_ms() ->
+        # `0` forces the check: the heartbeat is the guaranteed recheck point,
+        # and it is what makes the revocation bound a bound.
+        case sse_session_check(user_id, checked_at, 0) do
+          :revoked ->
+            end_revoked_sse(conn, user_id)
+
+          {:live, checked_at} ->
+            case Plug.Conn.chunk(conn, ": ping\n\n") do
+              {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+              {:error, _} -> conn
+            end
         end
     end
   end
+
+  # `{:live, checked_at}` (possibly the SAME checked_at, when the throttle window
+  # has not elapsed) or `:revoked`. Throttled by monotonic time, never wall clock.
+  defp sse_session_check(user_id, checked_at, recheck_ms) do
+    now = System.monotonic_time(:millisecond)
+
+    cond do
+      now - checked_at < recheck_ms -> {:live, checked_at}
+      Accounts.user_has_live_session?(user_id) -> {:live, now}
+      true -> :revoked
+    end
+  end
+
+  # End a stream whose user has no live session left. Returning `conn` ends the
+  # chunked response, which the client sees as the stream closing; the SPA's
+  # error handler remints and gets a 401, which is its normal path to /login.
+  # Logged because a stream ending for AUTHORISATION reasons is otherwise
+  # indistinguishable from a network drop in the access log.
+  defp end_revoked_sse(conn, user_id) do
+    Logger.info("sse_loop: ending stream, no live session for user #{user_id}")
+    conn
+  end
+
+  # The idle heartbeat cadence, and the throttle window for the liveness recheck
+  # on the event path. Overridable ONLY so a test can observe the recheck without
+  # sleeping 25 seconds per assertion — production reads the defaults.
+  defp sse_heartbeat_ms,
+    do: Application.get_env(:barkpark_cloud, :sse_heartbeat_ms, 25_000)
+
+  defp sse_recheck_ms,
+    do: Application.get_env(:barkpark_cloud, :sse_recheck_ms, 25_000)
 
   # Encode one event as an SSE `data:` frame. A Jason failure (an unencodable
   # payload) returns :error so the loop can SKIP this frame instead of raising

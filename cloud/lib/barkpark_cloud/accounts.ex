@@ -775,20 +775,50 @@ defmodule BarkparkCloud.Accounts do
 
   `opts[:except]` keeps ONE token alive (by plaintext) so a password-change
   caller is not logged out of their own in-flight tab. Returns `{:ok, count}` —
-  the number of rows stamped revoked.
+  the number of SESSION rows stamped revoked, which is the number the console
+  reports back as `{revoked: N}`; the `"sse"` tickets swept below are NOT counted
+  (they are plumbing, and inflating N would put a new unsupported number on the
+  screen in place of the old one).
+
+  ## Why this ALSO sweeps the user's live `"sse"` stream tickets (cch-w53-s4)
+
+  A `"sse"` ticket is a 60-second bearer for `GET /v1/events` riding the same
+  polymorphic `user_tokens` table. Leaving it alone left a measured hole: a
+  ticket minted one second before "sign out everywhere" still opened a fresh
+  authenticated stream AFTER the revoke, for the rest of its TTL. So the sweep
+  is `context in ["session", "sse"]`.
+
+  THE WIDENING STOPS THERE, and both fences are load-bearing:
+
+    * NOT `"pat"` — a PAT is a programmatic credential a human never sees a
+      browser prompt for; killing one on a password change is the silent
+      breakage this carve-out exists to prevent (pinned by accounts_test's
+      "sign out everywhere revokes sessions but NOT the user's PATs").
+    * This is a `user_id + context` SWEEP, and it is correct ONLY here, on the
+      sign-out-everywhere / password-change path. The per-ticket burn in
+      `consume_sse_ticket/1` stays MATCHED-ROW-ONLY: making that one a sweep is
+      charter D28's two-tab mutual-eviction storm (tab B's mint kills tab A's
+      unconsumed ticket, A 401s, A remints, B dies, forever).
+
+  The `:except` plaintext is a SESSION token, so it never spares an `"sse"` row:
+  the surviving tab's pre-minted ticket dies with the rest and the client remints
+  on the next stream error (app.js already remints on every error, because a 401
+  is terminal for `EventSource`). That is one extra round trip on the caller's
+  own tab, deliberately traded for closing the 60s window.
   """
   @spec revoke_all_user_sessions(User.t() | binary(), keyword()) :: {:ok, non_neg_integer()}
   def revoke_all_user_sessions(user, opts \\ []) do
     uid = user_id(user)
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    # context == "session" ONLY: "sign out everywhere" / a password change must
-    # never silently revoke the user's live PATs (programmatic credentials).
-    base =
+    live =
       from t in UserToken,
         where: t.user_id == ^uid,
-        where: t.context == "session",
         where: is_nil(t.revoked_at)
+
+    # context == "session" ONLY: "sign out everywhere" / a password change must
+    # never silently revoke the user's live PATs (programmatic credentials).
+    base = from t in live, where: t.context == "session"
 
     query =
       case Keyword.get(opts, :except) do
@@ -797,7 +827,45 @@ defmodule BarkparkCloud.Accounts do
       end
 
     {count, _} = Repo.update_all(query, set: [revoked_at: now])
+
+    # Second statement, not a widened first one, so the reported count stays a
+    # count of SESSIONS. Unredeemed stream tickets are dead weight the moment
+    # the sessions behind them are gone.
+    {_tickets, _} =
+      Repo.update_all(from(t in live, where: t.context == "sse"), set: [revoked_at: now])
+
     {:ok, count}
+  end
+
+  @doc """
+  Does `user` still hold at least ONE live session? The cheap existence half of
+  `list_user_sessions/1`, for callers that only need the boolean.
+
+  Exists for the SSE loop (`GET /v1/events`), which authenticates ONCE at connect
+  and then parks: without a recheck, a stream opened before "sign out everywhere"
+  kept delivering team events forever, and the confirm sheet's promise that every
+  other device is signed out was true of the ROWS and false of the CHANNEL. The
+  loop calls this on each heartbeat tick and ends the stream when it goes false,
+  which bounds revocation at one heartbeat rather than never.
+
+  `context == "session"` matches the two credentials that can open a stream (a
+  session bearer, or an `"sse"` ticket that only a live session could have
+  minted), and deliberately does NOT count PATs — a PAT cannot open `/v1/events`,
+  so counting one would keep a revoked human's stream alive off a machine
+  credential.
+  """
+  @spec user_has_live_session?(User.t() | binary()) :: boolean()
+  def user_has_live_session?(user) do
+    uid = user_id(user)
+    now = DateTime.utc_now()
+
+    Repo.exists?(
+      from t in UserToken,
+        where: t.user_id == ^uid,
+        where: t.context == "session",
+        where: is_nil(t.revoked_at),
+        where: is_nil(t.expires_at) or t.expires_at > ^now
+    )
   end
 
   @doc """
