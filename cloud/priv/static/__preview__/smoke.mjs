@@ -1680,7 +1680,8 @@ const EXPECTATIONS = {
       for (const verb of ["archive", "resurrect", "adopt", "audit"]) {
         assert.ok(card.includes("bp cloud instance " + verb + " Production"), "the " + verb + " command chip renders");
       }
-      assert.ok(card.includes("a stopped server still bills"), "the foot renders the conduit's own pause sentence");
+      assert.ok(card.includes("bills for as long as it exists"), "the foot renders the conduit's own pause sentence");
+      assert.ok(!card.includes("archive it instead"), "the foot never prescribes archiving as a way to stop paying (cch-w55-s2)");
       assert.ok(card.includes('data-life-verb="decommission"'), "the typed-confirm Decommission anchors the foot");
       // The golden-path verify card fills its slot off the events feed
       // (no verify event in the fixture → the honest never-run invite).
@@ -2256,7 +2257,7 @@ const EXPECTATIONS = {
       }
       assert.ok(matrix.includes("cap-mark"), "a supported cell shows an affirmative mark");
       assert.ok(matrix.includes("cap-dash"), "an unsupported cell shows a dash");
-      assert.ok(matrix.includes("Hetzner has no pause primitive"), "a false cell carries the server-owned gap reason verbatim");
+      assert.ok(matrix.includes("bills for as long as it exists"), "a false cell carries the server-owned gap reason verbatim");
       assert.ok(matrix.includes("Adopt needs an existing resource-group import"), "the azure adopt gap renders verbatim");
       // dev-tier `fake` is FILTERED — it is never a matrix column.
       assert.ok(!matrix.includes(">Fake<"), "the dev-tier provider is filtered out of the matrix");

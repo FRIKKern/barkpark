@@ -1256,7 +1256,7 @@ const lifecycleCapabilities = {
     hetzner: {
       tier: "prod",
       capabilities: { archive: true, resurrect: true, adopt: true, audit: true, pause: false },
-      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+      gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
     },
   },
   default_gap: "Not supported by this provider.",
@@ -1278,7 +1278,7 @@ const settingsProviderCapabilities = {
         core: true, catalog: false, labels: true, pause: false,
         archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
       },
-      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+      gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
     },
     azure: {
       tier: "prod",

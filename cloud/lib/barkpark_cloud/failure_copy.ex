@@ -746,10 +746,23 @@ defmodule BarkparkCloud.FailureCopy do
     "Adopt is a snapshot-based clone-swap on Hetzner; Azure has no equivalent yet, so the same verb would quietly mean something different."
   end
 
-  # Hetzner pause: a stopped Hetzner server still bills for its resources, so we
-  # don't offer a pause that lies about cost — archive releases it instead.
+  # Hetzner pause: the vendor bills a server for as long as it EXISTS, powered on
+  # or off — "you pay for a server that has completed the creation process for as
+  # long as it exists, regardless of whether it is turned on or not" and "we will
+  # bill you for your servers until you delete them, independent of their state"
+  # (https://docs.hetzner.com/cloud/billing/faq/). So we offer no pause.
+  #
+  # RETRACTED (cch-w55-s2): this clause used to prescribe "archive it to stop
+  # paying". Archive stops nothing — `runNeutralArchive`
+  # (internal/cli/cloud_instance_archive_cmd.go) SSH-collects a bundle and
+  # returns without touching power or existence, and the `--fast` path takes a
+  # snapshot whose `--stop` is "never a hard stop"
+  # (internal/cli/hetzner_instance_cmd.go). The box keeps billing, and the same
+  # vendor page bills snapshots "per gigabyte per month" — so the old remedy
+  # strictly INCREASED the bill. Deletion is the only charge-stopping act, and
+  # this plane has no archive-then-delete path to promise.
   def capability_gap_reason("hetzner", "pause") do
-    "Hetzner boxes can't be paused — a stopped server still bills. Archive it to stop paying and resurrect it later."
+    "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge."
   end
 
   # Catalog: the provider doesn't publish a normalized size-and-region catalog
