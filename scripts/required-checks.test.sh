@@ -2777,6 +2777,294 @@ else
 fi
 
 
+# ── 21 ───────────────────────────────────────────────────────────────────────
+# §19 reds when the page UNDERSTATES a gate, §20 when it OVERSTATES one. Neither
+# covers OMISSION, and omission is the shape that was actually on the page: on
+# 2026-08-08 merge-gates.md — 744 lines, canonical-for: merge-gates, opening with
+# "Why a PR cannot be merged until every gate below is green" — had ZERO hits
+# across `nothing ran`, `not applicable`, `not dispatched`, `::notice`, `did not
+# run`. Meanwhile three of the four required contexts routinely conclude GREEN
+# having dispatched nothing: on merged #10565 (head bb15f596d, a single ledger
+# `.md`) the per-commit check-runs read `Cloud control-plane (compile + format) |
+# skipped`, `Cloud control-plane (test) | skipped`, `Cloud gate | success` with
+# one annotation; #10450 (head 5a43bf893) is the same shape. The PLUMBING is
+# honest — each path-gated aggregator emits a `::notice` saying so, and
+# scripts/gate-announces-skips.test.sh pins the DELIVERED title from inside the
+# `Elixir gate` aggregator's own `needs:`. The PAGE a human reads was silent.
+#
+# WHAT THIS SECTION HOLDS: both sides of one roster, neither side typed here.
+# Side A is the emission set, grepped out of `.github/workflows/` — a gate is an
+# emitter iff its workflow contains `::notice title=<gate>: green — nothing ran`.
+# Side B is the table under merge-gates.md's `| Gate | … nothing ran … |` header.
+# It reds when a gate EMITS and the page does not list it (the omission that was
+# there), when the page lists a gate whose workflow no longer emits (the stale
+# claim), when the page's `—` row claims a gate does not emit while it does, and
+# when the page's `Required context` column disagrees with
+# `.github/required-checks.json`. It also reds when a REQUIRED context is absent
+# from the roster entirely, which is what keeps `PR references an active task` —
+# the path-unfiltered fourth, exempt by construction — on the page.
+#
+# THE MATCHER IS A TABLE PARSE, NOT A PHRASE MATCHER, AND THAT IS THE POINT.
+# §19 and §20 each needed three construction rules learned by measured failure
+# (D559), because both must read English about checks. This section refuses that
+# problem instead of re-solving it: the disclosure's machine-checkable part is a
+# THREE-COLUMN ROSTER, so the doc side is `awk -F'|'` over the rows under one
+# header, and no sentence anywhere else on the page — or in the repo — can enter
+# the report. The false-positive census below is therefore about SELECTION (does
+# the parser grab a neighbouring table?) rather than about interpretation, and
+# it is run against the live page and against a decoy-table specimen.
+#
+# WHAT IT CANNOT DO: it holds the roster, not the prose around it. The
+# taxonomy paragraph, the quoted annotation and the `gh api` recipe are ordinary
+# doc content — deleting them leaves the table intact and this section green.
+# The clause that DOES bite on a table left standing over a dead emission is
+# clause 5; a page that keeps a correct table beside wrong prose is out of reach
+# here, as it is for every other doc guard in this file.
+section "21. every gate that announces \`green — nothing ran\` is disclosed on merge-gates.md, and every gate the page says announces it still does"
+
+# SIDE A. Derived: the annotation title IS the contract, so a gate is an emitter
+# iff its workflow prints one. `<workflow basename>\t<gate name>`.
+rc21_emitters() { # <workflow-dir>
+  local f
+  for f in "$1"/*.yml; do
+    [ -f "$f" ] || continue
+    { grep -o '::notice title=[^:]*: green — nothing ran::' "$f" || true; } \
+      | sed 's/^::notice title=//; s/: green — nothing ran::$//' \
+      | while IFS= read -r g; do
+          [ -n "$g" ] && printf '%s\t%s\n' "$(basename "$f")" "$g"
+        done
+  done | sort -u
+}
+
+# SIDE B. The roster rows under the page's own header. `<gate>\t<workflow
+# basename or ->\t<required yes|no>`. The header is matched on BOTH the leading
+# `Gate` cell and the phrase the roster is about, so no other table on this page
+# — the doc-gates step roster, the break-glass table — can be selected instead.
+rc21_doc_roster() { # <doc>
+  awk -F'|' '
+    function clean(s) {
+      gsub(/`/, "", s); gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s
+    }
+    /^\|[[:space:]]*Gate[[:space:]]*\|/ && /nothing ran/ { t = 1; next }
+    t && $0 !~ /^\|/ { t = 0 }
+    t && /^\|[[:space:]]*-{2,}/ { next }
+    t {
+      g = clean($2); src = clean($3); req = clean($4)
+      if (g == "") next
+      n = split(src, p, "/"); if (n > 1) src = p[n]
+      print g "\t" src "\t" req
+    }
+  ' "$1"
+}
+
+# The one driver every clause below re-runs, so no mutation exercises a
+# look-alike. `MISSING` = emits, page silent. `STALE` = page claims an emission
+# the workflow no longer makes (both directions of the `—` row included).
+# `REQ` = the page's required column disagrees with the spec. `UNLISTED` = a
+# required context the roster does not carry at all. `UNRESOLVED` = a side that
+# came back empty, which must refuse rather than pass.
+rc21_report() { # <workflow-dir> <spec-json> <doc>
+  local emit roster gates ctx g src req file
+  emit="$(rc21_emitters "$1")"
+  roster="$(rc21_doc_roster "$3")"
+  if [ -z "$emit" ]; then
+    printf 'UNRESOLVED\tno workflow under %s emits `gate: green — nothing ran` — side A derived empty\n' "$1"
+    return
+  fi
+  if [ -z "$roster" ]; then
+    printf 'UNRESOLVED\t%s carries no `| Gate | … nothing ran … |` roster — the page side derived empty\n' "$3"
+    return
+  fi
+  gates="$(cut -f2 <<<"$emit" | sort -u)"
+
+  # 1. emits ⇒ listed, with the right workflow named.
+  while IFS=$'\t' read -r file g; do
+    [ -n "$g" ] || continue
+    if ! awk -F'\t' -v g="$g" -v f="$file" '$1 == g && $2 == f { found = 1 }
+                                            END { exit !found }' <<<"$roster"; then
+      printf 'MISSING\t%s\t%s emits the notice and the page does not disclose it against that workflow\n' "$g" "$file"
+    fi
+  done <<EOF
+$emit
+EOF
+
+  # 2. listed ⇒ still emits (and a `—` row means it must NOT emit).
+  while IFS=$'\t' read -r g src req; do
+    [ -n "$g" ] || continue
+    if [ "$src" = "—" ] || [ "$src" = "-" ]; then
+      if grep -qxF "$g" <<<"$gates"; then
+        printf 'STALE\t%s\tthe page says it does not announce, but a workflow emits the notice for it\n' "$g"
+      fi
+    elif ! awk -F'\t' -v g="$g" -v f="$src" '$2 == g && $1 == f { found = 1 }
+                                             END { exit !found }' <<<"$emit"; then
+      printf 'STALE\t%s\tthe page says %s emits the notice for it; that workflow does not\n' "$g" "$src"
+    fi
+    # 3. the required column is the spec's, not the page's opinion.
+    if jq -e --arg c "$g" '.protection.required_status_checks.checks
+                           | any(.context == $c)' "$2" >/dev/null; then
+      [ "$req" = "yes" ] || printf 'REQ\t%s\tthe page says required=%s; required-checks.json lists it as a required context\n' "$g" "$req"
+    else
+      [ "$req" = "no" ] || printf 'REQ\t%s\tthe page says required=%s; required-checks.json does not list it\n' "$g" "$req"
+    fi
+  done <<EOF
+$roster
+EOF
+
+  # 4. every required context appears in the roster — including the exempt one.
+  while IFS= read -r ctx; do
+    [ -n "$ctx" ] || continue
+    awk -F'\t' -v c="$ctx" '$1 == c { found = 1 } END { exit !found }' <<<"$roster" \
+      || printf 'UNLISTED\t%s\ta required context the roster does not carry — a merger cannot tell whether its green ran anything\n' "$ctx"
+  done <<EOF
+$(jq -r '.protection.required_status_checks.checks[].context' "$2")
+EOF
+}
+
+RC21_EMIT="$(rc21_emitters "$REPO_ROOT/.github/workflows")"
+RC21_EMIT_LIST="$(cut -f2 <<<"$RC21_EMIT" | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+RC21_MISSING_EMITTER=""
+for g in 'Cloud gate' 'Console gate' 'Elixir gate'; do
+  grep -qxF "$g" <<<"$(cut -f2 <<<"$RC21_EMIT")" || RC21_MISSING_EMITTER="$RC21_MISSING_EMITTER $g"
+done
+if [ -n "$RC21_EMIT" ] && [ -z "$RC21_MISSING_EMITTER" ]; then
+  ok "derived the announcing gates from the workflow sources, nothing typed: $RC21_EMIT_LIST"
+else
+  bad "side A did not derive the announcing gates (missing:${RC21_MISSING_EMITTER:- none}) — the section would hold an empty roster and pass"
+fi
+
+# CLAUSE 2 — the doc side selects the roster and NOTHING else on a 700-line page
+# carrying several other tables. The count is asserted against the parse itself
+# so a selection that silently widened would have to widen visibly.
+RC21_ROSTER="$(rc21_doc_roster "$MERGE_GATES_DOC")"
+RC21_ROWS="$(printf '%s\n' "$RC21_ROSTER" | { grep -c . || true; } | tr -d ' ')"
+if [ "$RC21_ROWS" -ge 4 ] && ! grep -q 'Doc budgets' <<<"$RC21_ROSTER" \
+   && ! grep -qE '^[0-9]+\b' <<<"$RC21_ROSTER"; then
+  ok "the page's roster parses to $RC21_ROWS gate rows and pulls in no row from any other table on the page"
+else
+  bad "the roster parse is wrong — it read $RC21_ROWS rows and they are not all gate rows:"
+  printf '%s\n' "$RC21_ROSTER" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 3 — THE FALSE-POSITIVE CENSUS, direction one: the live page, unmodified.
+RC21_OUT="$(rc21_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")"
+if [ -z "$RC21_OUT" ]; then
+  ok "every gate that announces \`green — nothing ran\` is on the page against its own workflow, every required context is rostered, and the required column matches the spec"
+else
+  bad "merge-gates.md and the workflows disagree about which required greens ran nothing:"
+  printf '%s\n' "$RC21_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 4 — THE FALSE-POSITIVE CENSUS, direction two: a DECOY page. Ordinary
+# prose that talks about gates at length, plus a three-column table that is not
+# the roster. A parser keyed on "a markdown table near the word gate" would take
+# the decoy and report every real emitter MISSING; this one takes neither, and
+# refuses (UNRESOLVED) rather than passing on an empty page side.
+RC21_DECOY="$TMP/rc21-decoy.md"
+cat > "$RC21_DECOY" <<'MD'
+## Gates
+
+`Cloud gate`, `Console gate` and `Elixir gate` are the path-gated aggregators.
+Nothing ran on this head is a thing people say about them in passing.
+
+| Gate | Owner | Notes |
+| --- | --- | --- |
+| `Cloud gate` | platform | green — nothing ran is a phrase in this cell |
+| `Elixir gate` | api | see above |
+MD
+RC21_DECOY_ROWS="$(rc21_doc_roster "$RC21_DECOY" | { grep -c . || true; } | tr -d ' ')"
+# The corpus figure is REPORTED, not asserted, on §20 clause 6's precedent: the
+# shipped matcher is only ever pointed at merge-gates.md, so a second file
+# growing this table shape is a fact worth seeing and never a reason for a
+# merge-blocking suite to red. The assertion is on the fixed specimen.
+RC21_CORPUS=0
+while IFS= read -r md; do
+  [ -n "$(rc21_doc_roster "$md")" ] && RC21_CORPUS=$((RC21_CORPUS + 1))
+done <<EOF
+$(find "$REPO_ROOT" -name .git -prune -o -name node_modules -prune -o -name _build -prune \
+    -o -name '*.md' ! -path "$MERGE_GATES_DOC" -print)
+EOF
+if [ "$RC21_DECOY_ROWS" -eq 0 ] \
+   && grep -q '^UNRESOLVED' <<<"$(rc21_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_DECOY")"; then
+  ok "…and a decoy page — gate prose plus a three-column table that is NOT the roster — parses to 0 rows and makes the section REFUSE, never pass (in-repo census: $RC21_CORPUS other .md file(s) parse to any roster row at all)"
+else
+  bad "the roster parser selected a table that is not the roster ($RC21_DECOY_ROWS rows) — the selection is keyed too loosely"
+fi
+
+# CLAUSE 5 — MUTATION, DIRECTION 1 (the omission that was actually there). Drop
+# `Cloud gate`'s row from a copy of the page: the gate still emits, so it must be
+# reported MISSING by name. Paired with a non-vacuity assertion — the run must
+# still be silent about `Console gate`, or a broken parse could buy the red.
+RC21_DOC_DROP="$TMP/rc21-doc-drop.md"
+grep -v '^| `Cloud gate` |' "$MERGE_GATES_DOC" > "$RC21_DOC_DROP"
+RC21_DROP_OUT="$(rc21_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_DOC_DROP")"
+if grep -q '^MISSING	Cloud gate	' <<<"$RC21_DROP_OUT" \
+   && ! grep -q 'Console gate' <<<"$RC21_DROP_OUT"; then
+  ok "…and DELETING the \`Cloud gate\` row reds it BY NAME while the rest of the roster stays green — the section reads the roster, not the page's length"
+else
+  bad "removing a rostered gate from the page changed nothing (or reddened the whole table) — the omission direction does not work:"
+  printf '%s\n' "$RC21_DROP_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 6 — MUTATION, DIRECTION 2 (the page outliving the emission). Strip the
+# `::notice` from cloud.yml in a SCRATCH workflow tree and change not one byte of
+# the page: the roster's claim is now false and must be reported STALE. This is
+# the clause that makes the ratchet two-sided — a gate that quietly stops
+# disclosing cannot leave a page still promising that it does.
+RC21_WF="$TMP/rc21-workflows"
+rm -rf "$RC21_WF"; mkdir -p "$RC21_WF"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$RC21_WF/"
+grep -v 'title=Cloud gate: green' "$REPO_ROOT/.github/workflows/cloud.yml" > "$RC21_WF/cloud.yml"
+RC21_STALE_OUT="$(rc21_report "$RC21_WF" "$SPEC" "$MERGE_GATES_DOC")"
+if grep -q '^STALE	Cloud gate	' <<<"$RC21_STALE_OUT" \
+   && ! grep -q 'Elixir gate' <<<"$RC21_STALE_OUT"; then
+  ok "…and STRIPPING the notice from a scratch \`cloud.yml\` (page untouched) reds \`Cloud gate\` as STALE while \`Elixir gate\` stays green — the emission side is read from source"
+else
+  bad "deleting the emission left the page's claim unchallenged — the section is one-directional:"
+  printf '%s\n' "$RC21_STALE_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 7 — the `—` row is a CLAIM, not a blank. `PR references an active task`
+# is the exempt fourth: path-unfiltered, always dispatched, so its green is a
+# verdict. Flip its cell to name a workflow and the row becomes an emission claim
+# no workflow supports.
+RC21_DOC_FAKE="$TMP/rc21-doc-fake.md"
+sed 's@^| `PR references an active task` | — |@| `PR references an active task` | `.github/workflows/pr-task-gate.yml` |@' \
+  "$MERGE_GATES_DOC" > "$RC21_DOC_FAKE"
+if grep -q '^STALE	PR references an active task	' \
+     <<<"$(rc21_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_DOC_FAKE")"; then
+  ok "…and claiming the path-unfiltered \`PR references an active task\` announces a nothing-ran green reds too — the exempt row is held, not ignored"
+else
+  bad "the exempt row can be turned into an unsupported emission claim without a red — the em-dash cell is being treated as a blank"
+fi
+
+# CLAUSE 8 — the required column and the roster's completeness are read from the
+# SPEC. Grow a copy to five contexts: the new one is not on the page, so it must
+# come back UNLISTED. This is what forces a future required context to be
+# disclosed as ran-something or ran-nothing before it can sit next to a merge
+# button.
+RC21_SPEC5="$TMP/rc21-spec5.json"
+jq '.protection.required_status_checks.checks += [{"context": "Fifth gate", "app_id": 15368}]' "$SPEC" > "$RC21_SPEC5"
+if grep -q '^UNLISTED	Fifth gate	' \
+     <<<"$(rc21_report "$REPO_ROOT/.github/workflows" "$RC21_SPEC5" "$MERGE_GATES_DOC")"; then
+  ok "…and adding a context to a COPY of the spec makes the page's roster come back incomplete — the required set is parsed, never typed here"
+else
+  bad "growing the spec changed nothing — the required-context side of this section is hardcoded"
+fi
+
+# CLAUSE 9 — and the required column itself can lose. `Security gate` emits the
+# same notice and is NOT required; the page says so. Flip that cell to `yes` and
+# the spec must contradict it.
+RC21_DOC_REQ="$TMP/rc21-doc-req.md"
+sed 's@^\(| `Security gate` | `.github/workflows/security.yml` \)| no |$@\1| yes |@' \
+  "$MERGE_GATES_DOC" > "$RC21_DOC_REQ"
+if grep -q '^REQ	Security gate	' \
+     <<<"$(rc21_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_DOC_REQ")"; then
+  ok "…and promoting \`Security gate\` to required on the page contradicts \`.github/required-checks.json\` and reds — the weakest green on the roster cannot be dressed up"
+else
+  bad "the page can call a non-required gate required without a red — the third column is decorative"
+fi
+
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."

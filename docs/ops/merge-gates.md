@@ -215,6 +215,81 @@ aggregators' `needs:` from `.github/workflows/`, the required contexts from
 `.github/required-checks.json` — and reds if this page ever again describes a
 transitive upstream of a required aggregator as unable to stop a merge.
 
+### NOT APPLICABLE — the required green that ran nothing
+
+The two classes above are both about whether a **red** can block. There is a
+third class, and it is the one a merger meets on most PRs: **a required
+aggregator that is PATH-GATED concludes GREEN when the diff touched none of its
+declared path sets.** That green means **NOT APPLICABLE to this diff** — never
+"the suite passed". Nothing was compiled, nothing was tested, no job was
+dispatched, and the check-run still reads `pass` next to the merge button.
+
+Measured on merged PRs, not inferred: on #10565 (head `bb15f596d`, a single
+ledger `.md`) the per-commit check-runs read `Cloud control-plane (compile +
+format) | skipped`, `Cloud control-plane (test) | skipped`, `Cloud gate |
+success` with one annotation. #10450 (head `5a43bf893`) is the same shape.
+`gh pr checks 10565` prints `Cloud gate  pass  4s` and stops there — the
+disclosure is one API call or one UI click further on, which is why this page
+has to tell you it exists.
+
+Each path-gated aggregator emits the disclosure itself, as a `::notice`
+annotation on its own check-run. The roster below is the contract §21 of
+`scripts/required-checks.test.sh` holds both sides of; `—` in the second column
+means that gate does not emit, because it is not path-gated at all.
+
+| Gate | Emits `gate: green — nothing ran` from | Required context |
+| --- | --- | --- |
+| `Cloud gate` | `.github/workflows/cloud.yml` | yes |
+| `Console gate` | `.github/workflows/console-harness.yml` | yes |
+| `Elixir gate` | `.github/workflows/elixir.yml` | yes |
+| `Security gate` | `.github/workflows/security.yml` | no |
+| `PR references an active task` | — | yes |
+
+So three of the four required contexts can go green having dispatched nothing.
+The fourth, `PR references an active task`, is **exempt by construction**: its
+workflow carries no `paths:` filter and no `changes` dispatcher, so it executes
+on every PR and its green is a verdict about that PR. `Security gate` emits the
+same notice but is not required — a red one cannot block a merge, so its green
+is the weakest of the five.
+
+The annotation says it in its own words. `Cloud gate`, verbatim from
+`cloud.yml`:
+
+```
+NOTHING CLOUD RAN on this head.
+Cloud gate is green because this diff touched none of its declared path sets,
+NOT because anything was tested.
+Not dispatched: <the job list>
+Green here means NOT APPLICABLE to this diff. Read it as 'no Cloud job
+executed', never as 'the Cloud suite passed'.
+```
+
+**Where a merger reads it.** The check-run page in the GitHub UI shows the
+annotation inline. From a terminal, `gh pr checks <pr>` will not show it —
+resolve the check-run id for the head SHA and read the annotations:
+
+```bash
+gh api "repos/FRIKKern/barkpark/commits/$(gh pr view <pr> --json headRefOid -q .headRefOid)/check-runs" \
+  -q '.check_runs[] | select(.name|test("gate$")) | "\(.name)\t\(.conclusion)\tann=\(.output.annotations_count)\t\(.id)"'
+gh api repos/FRIKKern/barkpark/check-runs/<id>/annotations \
+  -q '.[] | "\(.annotation_level)\t\(.title)\t\(.message)"'
+```
+
+`ann=0` on a gate that reports green means it really ran; `ann=1` with that
+title means it ran nothing. The emission is pinned by
+`scripts/gate-announces-skips.test.sh`, which runs inside the `Elixir gate`
+aggregator's own `needs:` graph and asserts the DELIVERED annotation title, so a
+gate that quietly stopped disclosing reds a required context.
+
+**This page's own change pays that cost.** A diff confined to `scripts/` and
+`docs/` scores `CLOUD:false CONSOLE:false COMPILE:false TEST:false`, so the PR
+carrying this very section merges under four greens that ran none of it. One
+check does execute on it: `Required-check spec gate` is path-unfiltered and runs
+`scripts/required-checks.test.sh` on every PR — but it is in no required
+aggregator's `needs:` and carries no required name, so it cannot block a merge.
+Four greens plus one unenforced green is the real coverage of a docs-and-scripts
+PR; read it that way rather than as five gates agreeing.
+
 ## Security gates (Sobelow + mix_audit)
 
 `.github/workflows/security.yml` (filed by `task-a41fc4590b2c2eb1`) adds two
