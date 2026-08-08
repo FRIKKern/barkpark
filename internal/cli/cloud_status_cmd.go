@@ -17,10 +17,12 @@ package cli
 // ranking itself.
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/mattn/go-runewidth"
@@ -522,6 +524,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	renderStatusBucket(out, "ATTENTION", "attention", ranked)
 	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
 	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
+	renderStatusDeploy(out, cfg, ranked)
 	return exitOK
 }
 
@@ -645,6 +648,175 @@ func renderStatusRows(out *writer, rows []rankedBarkpark) {
 	}
 }
 
+// --- the deploy line (dr-w19-s7) ---------------------------------------------
+//
+// `bp cloud status` answered "is the box up" and never "does the box ship".
+// On 2026-08-07 the fleet's live rate read 27.4% (3.65 attempts per live
+// deployment) against 91.7–95.6% three weeks earlier, and every row on this
+// screen still said `ok` — the box WAS up. The deploy section below is that
+// missing sentence, and nothing more.
+//
+// IT IS A GAUGE, NEVER A FENCE (charter D330). There is deliberately NO new
+// attention rung, NO verdict arm and NO hardcoded floor here: any threshold
+// calibrated on healthy July makes today permanently red, which is precisely
+// the over-alarm objection wave 18 levelled at raw absorption. The over-alarm
+// problem MOVES with the term; swapping terms does not solve it. So the rate is
+// printed WITH its denominator, under its window, and it never changes a
+// status, a rank or a bucket — the decision-32 vocabulary is untouched.
+//
+// IT REFUSES ABOVE ALL: below the census's own @min_sample (deploy_ledger.ex
+// :264) the line is UNMETERED with the reason, never a percentage and never a
+// green. It refuses the same way when the control plane sends no per-site
+// `live` at all, when it sends no min_sample, and when the census or the site
+// list could not be read — four distinct absences, four distinct sentences,
+// none of them a zero.
+
+// statusDeployWindow is the width of the pinned window the deploy line is taken
+// over: ONE DAY. The period is daily and not hourly because that is where the
+// census's @min_sample of 200 is actually reachable — 6 of 432 hourly buckets
+// clear it (0 of 20 in the post-cut regime, max hour 100, half the floor)
+// against 20 of 21 daily buckets. An hourly line would be UNMETERED forever.
+const statusDeployWindow = 24 * time.Hour
+
+// statusDeployNow is the clock the window is computed against — a package var
+// (the deployCensusNow idiom) so a test can pin the window it asserts.
+var statusDeployNow = func() time.Time { return time.Now().UTC() }
+
+// statusDeployBox is one box's fold of the census site rows attributed to it.
+//
+// LiveKnown is the honesty bit: a control plane predating #10519 sends site rows
+// with no `live` key, DeployCensusSite.Live decodes to nil, and summing nils
+// would report every box as shipping nothing. One nil row poisons the whole
+// box's live count, which is the correct direction — a partial sum is not a
+// measurement.
+type statusDeployBox struct {
+	Volume    int
+	Live      int
+	Sites     int
+	LiveKnown bool
+}
+
+// statusDeployFold attributes census site rows to boxes via the site list
+// (census rows carry site_id; cloudclient.Site carries BarkparkID), and returns
+// the per-box fold plus the rows it could NOT attribute — a site the fleet
+// listing does not cover is reported, never silently dropped into nobody's
+// numbers.
+func statusDeployFold(census cloudclient.DeployCensus, sites []cloudclient.Site) (map[string]*statusDeployBox, int, int) {
+	owner := make(map[string]string, len(sites))
+	for _, s := range sites {
+		if id := strings.TrimSpace(s.BarkparkID); id != "" {
+			owner[s.ID] = id
+		}
+	}
+	boxes := make(map[string]*statusDeployBox, len(owner))
+	orphanRows, orphanVolume := 0, 0
+	for _, row := range census.Sites {
+		bid, attributed := owner[row.SiteID]
+		if !attributed {
+			orphanRows++
+			orphanVolume += row.Volume
+			continue
+		}
+		b := boxes[bid]
+		if b == nil {
+			b = &statusDeployBox{LiveKnown: true}
+			boxes[bid] = b
+		}
+		b.Volume += row.Volume
+		b.Sites++
+		// READ POSITIVELY OFF THE WIRE. `Volume - Failed - Deferred` is
+		// forbidden: it folds in-flight, cancelled and residual rows back into
+		// live and re-creates the unnamed remainder dr-w16-s2 deleted.
+		if row.Live == nil {
+			b.LiveKnown = false
+		} else {
+			b.Live += *row.Live
+		}
+	}
+	return boxes, orphanRows, orphanVolume
+}
+
+// statusDeployLine renders ONE box's deploy line: the live rate with its
+// denominator, or the named refusal. Every arm that is not a measurement says
+// UNMETERED and says why; none of them is ever a 0%.
+func statusDeployLine(b *statusDeployBox, minSample int) string {
+	if b == nil || b.Volume == 0 {
+		return "no deploy rows in this window — nothing was attempted here, which is not the same as nothing failing"
+	}
+	if !b.LiveKnown {
+		return fmt.Sprintf("UNMETERED — %d attempted; this control plane sends no per-site `live`, so whether anything shipped is unknown (never read this as zero)", b.Volume)
+	}
+	if minSample <= 0 {
+		return fmt.Sprintf("UNMETERED — %d attempted, %d live; this control plane sent no min_sample, so nothing says whether a percentage on this sample is a measurement", b.Volume, b.Live)
+	}
+	if b.Volume < minSample {
+		return fmt.Sprintf("UNMETERED — %d attempted is below the census min_sample of %d (%d live); a percentage on this sample would be noise", b.Volume, minSample, b.Live)
+	}
+	return fmt.Sprintf("live %d/%d (%s)", b.Live, b.Volume, pctOf(float64(b.Live), float64(b.Volume)))
+}
+
+// statusDeployReadFailure renders a census that could NOT be read, reusing the
+// verb's own refusal sentences (deployCensusMessage) so `bp cloud status` and
+// `bp cloud deployments` cannot tell an operator two different stories about the
+// same 403. A non-census error (transport, a proxy) still names itself.
+func statusDeployReadFailure(from, to time.Time, err error) string {
+	var ce *cloudclient.DeployCensusError
+	if errors.As(err, &ce) {
+		return deployCensusMessage(from, to, ce)
+	}
+	return "could not read the deploy census for your team: " + err.Error() + ". Nothing was read: this is NOT a fleet with zero failures."
+}
+
+// renderStatusDeploy prints the DEPLOY section: one line per box in the same
+// rank order as the tables above, carrying the box's live rate WITH its
+// denominator over a pinned DAILY window — or the refusal that stopped it being
+// a number.
+//
+// TABLE ONLY, ON PURPOSE. `-o json` emits the decision-15 ranked structure whose
+// keys scripts already consume; this section costs two extra control-plane reads
+// and is a human triage line, so it does not silently change that contract.
+// `bp cloud deployments` is the machine-readable reader of the same census.
+func renderStatusDeploy(out *writer, cfg *Config, ranked []rankedBarkpark) {
+	to := statusDeployNow().UTC().Truncate(time.Second)
+	from := to.Add(-statusDeployWindow)
+
+	out.outf("")
+	out.outf("DEPLOY · period: DAILY · window %s", deployCensusWindowPhrase(from, to))
+	out.outf("  live_rate is a GAUGE and not a fence: it carries its own denominator, refuses a percentage below the census min_sample, and changes no status above.")
+
+	census, cerr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
+	if cerr != nil {
+		out.outf("  NOT READ — %s", statusDeployReadFailure(from, to, cerr))
+		return
+	}
+	sites, serr := cfg.CloudClient().ListSites(cloudCtx())
+	if serr != nil {
+		out.outf("  NOT ATTRIBUTED — the census was read (%d attempted rows over this window) but the site list was not: %s. Without it a census row cannot be tied to a box; `bp cloud deployments` reads the same window fleet-wide.",
+			census.Volume, serr.Error())
+		return
+	}
+
+	boxes, orphanRows, orphanVolume := statusDeployFold(census, sites)
+	width := 0
+	for _, r := range ranked {
+		if n := runewidth.StringWidth(r.BP.Name); n > width {
+			width = n
+		}
+	}
+	for _, r := range ranked {
+		name := sanitizeCell(r.BP.Name)
+		pad := width - runewidth.StringWidth(r.BP.Name)
+		if pad < 0 {
+			pad = 0
+		}
+		out.outf("  %s%s  %s", name, strings.Repeat(" ", pad), statusDeployLine(boxes[r.BP.ID], census.MinSample))
+	}
+	if orphanRows > 0 {
+		out.outf("  %d census site row(s) (%d attempted) belong to no box in this fleet listing and are in NO line above — run `bp cloud deployments` to see them.",
+			orphanRows, orphanVolume)
+	}
+}
+
 // printCloudStatusHelp writes `bp cloud status` usage.
 func printCloudStatusHelp(out *writer) {
 	const help = `bp cloud status — your fleet, triaged (charter decision 15).
@@ -692,8 +864,19 @@ WHAT IT SHOWS
   Manage the policy with 'bp cloud autoupdate' and the fleet rollout with
   'bp cloud rollout'.
 
+  A DEPLOY section follows the tables: one line per box carrying its live rate
+  WITH its denominator (live 525/1914) over a pinned DAILY window of the team
+  deploy census — because a box can be perfectly 'ok' and still ship nothing.
+  It is a GAUGE, not a fence: no status, rank or bucket above reads it, and
+  below the census min_sample the line says UNMETERED and why, never a
+  percentage and never a green. The same four absences the census has are four
+  distinct sentences here (census unreadable, sites unattributable, no per-site
+  live from an older control plane, sample below the floor) and not one of them
+  renders as a zero. 'bp cloud deployments' is the full, machine-readable read
+  of the same census; the DEPLOY section is table-output only.
+
 OUTPUT
-  -o table   ranked, bucketed, colored (default on a tty)
+  -o table   ranked, bucketed, colored (default on a tty), plus the DEPLOY lines
   -o json    the ranked structure: {ok, count, buckets, barkparks[]}
   -o yaml    the same, as YAML`
 	out.outf("%s", help)

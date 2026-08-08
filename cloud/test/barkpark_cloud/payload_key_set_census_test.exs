@@ -890,6 +890,28 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
              "trusting the UNREAD arm on any cohort key."
   end
 
+  # D260'S BLIND SPOT, ONE STRUCT OVER (dr-w19-s7). The guard above pins the
+  # cohort keys to `DeployCensus` — the FLEET struct — and `site_row/2` emits its
+  # own per-site `live`. Because `live` is already a tag on DeployCensus, the
+  # FILE-GLOBAL union greened `DeployCensusSite` while it carried six fields and
+  # no Live at all: the wire's per-site success decoded to nothing, and no test
+  # in this file could say so. Measured, not predicted — a real 200 on a team
+  # credential returned {"failed":1,"live":109,"deferred":325,"volume":435}.
+  test "D260: site_row/2's `live` is declared on DeployCensusSite ITSELF, not merely on DeployCensus" do
+    src = Go.source(@cloudclient)
+
+    assert "live" in Go.struct_tags(src, "DeployCensusSite"),
+           "`live` is emitted by site_row/2 but is NOT a json tag on DeployCensusSite itself. " <>
+             "The UNREAD arm cannot catch this: `live` is already a tag on DeployCensus, so the " <>
+             "FILE-GLOBAL union greens the per-site key while nothing decodes it."
+
+    # The collision is REAL, not hypothetical: the fleet struct declares the same
+    # name, which is exactly what makes the union blind here.
+    assert "live" in Go.struct_tags(src, "DeployCensus"),
+           "DeployCensus no longer declares `live` — re-derive this blind spot before trusting " <>
+             "the UNREAD arm on any per-site key."
+  end
+
   # ---------------------------------------------------------------------------
   # The two arms
   # ---------------------------------------------------------------------------
