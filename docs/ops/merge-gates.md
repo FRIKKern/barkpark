@@ -230,7 +230,14 @@ is harmless:
   `Boundary gate`) have silently left the list on regeneration. Read an absence
   from that file as "the sample did not see it", never as "no such gate exists";
   the ceiling is now filed there under **S4 PATHS-FILTERED** with that mechanism
-  written into its reason.
+  written into its reason. **That hand-added row will not survive the next
+  regeneration** (corrected on review): the generator's MERGE covers `_readme`
+  and the check LIST (a base-first union), but it emits `exclusions:` from the
+  array it just derived and never reads the committed one — and a paths-filtered
+  name cannot enter that array, because stage 2 iterates only names that rendered
+  on the sampled main heads. Re-add it by hand after any
+  `required-checks-generate.sh` run until the generator carries `.exclusions`
+  through base-first (filed).
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
