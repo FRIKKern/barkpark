@@ -191,6 +191,24 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :update_latest_release, :string
     field :update_checked_at, :utc_datetime_usec
 
+    # deploy-reliability W21 (S2) — the DERIVED freshness verdict, deliberately
+    # NOT a fifth `update_state` rung (a fifth rung excludes the row from the
+    # rollout that would fix it and can freeze the staging gate fail-CLOSED).
+    # `update_state` above is the box's own release-tag self-grade; these three
+    # are the control plane's own measurement of the commit it actually serves,
+    # from ONE unauthenticated GitHub compare call
+    # (`BarkparkCloud.GitHub.CommitDistance`), written hourly by
+    # `UpdateStatusWorker` through the narrow `commit_distance_changeset/2`.
+    #
+    # `commit_distance` is "commits of `main` this box does NOT have", and NULL
+    # means UNMEASURED — an empty `git_commit` (agent offline), a 404 on an
+    # unknown sha, and a rate-limit refusal all land NULL, never 0. Renderers
+    # must show NULL as unmetered and sort it to the TOP: a 0 there would be the
+    # same unearned green in a fresh column.
+    field :commit_distance, :integer
+    field :commit_ancestry, :string
+    field :commit_distance_checked_at, :utc_datetime_usec
+
     # isu-w4 fleet autoupdate policy — read by the AutoupdateRolloutWorker to
     # decide whether a `behind` instance may be auto-updated. OPT-OUT:
     # `autoupdate_enabled` defaults TRUE (ride new releases unless the team opts
@@ -576,6 +594,26 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_inclusion(:update_state, @update_states)
     |> validate_length(:update_running_release, max: 255)
     |> validate_length(:update_latest_release, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for the DERIVED commit-distance verdict (deploy-reliability
+  W21) — only the three freshness columns are castable, so mirroring a compare
+  result can never rename a Barkpark, reassign its Team, or (the point) touch
+  `update_state`. Written only by `Registry.refresh_commit_distance/2`.
+
+  Deliberately SEPARATE from `update_status_changeset/2` and
+  `health_changeset/2`: neither of those casts these fields, so an agent health
+  beat and the instance's own self-update mirror CANNOT write a freshness
+  verdict by accident. The ancestry is whitelisted against
+  `BarkparkCloud.GitHub.CommitDistance.ancestries/0` and the distance may never
+  be negative — an out-of-range value is a changeset ERROR, not a silent 0.
+  """
+  def commit_distance_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:commit_distance, :commit_ancestry, :commit_distance_checked_at])
+    |> validate_inclusion(:commit_ancestry, BarkparkCloud.GitHub.CommitDistance.ancestries())
+    |> validate_number(:commit_distance, greater_than_or_equal_to: 0)
   end
 
   @doc """
