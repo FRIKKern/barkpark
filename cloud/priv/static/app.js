@@ -200,6 +200,12 @@
     // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
+    // cch-w54-s1 — the 409 cch-w54-s2 introduces on a suspended instance. Inert
+    // until that slice merges; without the entry a `suspended` code toasts the
+    // bare word "suspended" through the key.replace fallback. It names the CP's
+    // own refusal, and claims nothing about the server's power state — nothing
+    // on the suspension path reaches the host.
+    suspended: "This instance is suspended — Barkpark Cloud won't act on it until the suspension is cleared.",
     // cch-w40-s1 (charter D447) — THE DEFAULT NOW STATES ONLY WHAT A BARE 403
     // PROVES. This key used to read "Only the team owner can manage billing."
     // (GR36, written when the billing writes were the only refusals that reached
@@ -1681,9 +1687,20 @@
 
   // Human labels for the seven S4 lifecycle-token states. `decommissioned` is an
   // in-flight teardown from the operator's seat, so it reads "Decommissioning".
+  //
+  // cch-w54-s1 — the `stopped` TOKEN keeps its name (it is the S4 vocabulary and
+  // its CSS hue), but its LABEL no longer says "Stopped". Nothing on the
+  // suspension path reaches the host: suspension is one UPDATE of three columns
+  // on the barkparks row, after which the control plane stops looking at the box
+  // (health sweeps and autoupdate skip it). There is no power action, no command
+  // channel, no traffic fence and no API gate behind that word, so the console
+  // painted an operational fact it does not perform. "Suspended" is what the
+  // control plane actually did. The (state, reason) manifest —
+  // cloud/test/barkpark_cloud/lifecycle_state_manifest_test.exs — reds if this
+  // label starts claiming a halt again.
   var LIFECYCLE_PILL_LABEL = {
     provisioning: "Provisioning", live: "Live", degraded: "Degraded",
-    stopped: "Stopped", archived: "Archived", decommissioned: "Decommissioning",
+    stopped: "Suspended", archived: "Archived", decommissioned: "Decommissioning",
     adopted: "Adopted",
   };
 
@@ -5780,12 +5797,31 @@
     return ev ? "Never reported · " + ev : "Never reported";
   }
 
+  // cch-w54-s1 — the three `suspended_reason` slugs the control plane writes,
+  // in a human sentence. Before this, statusOf rendered the raw column value —
+  // a quota-suspended box put the literal string `quota_exceeded` in front of a
+  // user. Each sentence names the reason and NOTHING about the server's power
+  // state: suspension is a flag on a row, and the box stays exactly as it was.
+  // An unrecognised slug is de-slugged rather than reprinted verbatim, so a new
+  // server-side reason degrades into readable English instead of snake_case.
+  var SUSPENDED_REASON_TEXT = {
+    billing_lapsed: "Subscription canceled — nothing deleted",
+    billing_past_due: "Payment past due — nothing deleted",
+    quota_exceeded: "Over your plan's instance limit — nothing deleted"
+  };
+  function suspendedReasonText(reason) {
+    if (typeof reason !== "string" || reason.trim() === "") return "Suspended by Barkpark Cloud";
+    if (SUSPENDED_REASON_TEXT[reason]) return SUSPENDED_REASON_TEXT[reason];
+    var words = reason.replace(/[_-]+/g, " ").trim();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+
   function statusOf(bp) {
     bp = bp || {};
     var kind = classifyBp(bp);
     if (kind === "removal_failed") return { role: "danger", label: "Removal failed", detail: bp.deprovision_error || "Teardown failed — retry removal" };
     if (kind === "failed") return { role: "danger", label: "Failed", detail: bp.provision_error || "Provisioning failed" };
-    if (kind === "suspended") return { role: "danger", label: "Suspended", detail: bp.suspended_reason || "Suspended for billing" };
+    if (kind === "suspended") return { role: "danger", label: "Suspended", detail: suspendedReasonText(bp.suspended_reason) };
     // cch-w34-s6: a box we have NEVER heard from gets its own word. It reaches
     // the neutral role that statusOf has always declared and never could render
     // — the console's own "Unknown" state, finally produced by the only thing
@@ -6305,7 +6341,9 @@
     var s = statusOf(bp);
     var role = s.role || "neutral";
     var stats = opts.stats || instanceCardStats(null);
-    var banner = (opts.sub && bp.suspended) ? suspendedCardBannerHtml(opts.sub) : "";
+    // cch-w54-s1 — the BOX travels with the subscription: the banner branches on
+    // `bp.suspended_reason`, and a quota suspension is not a billing suspension.
+    var banner = (opts.sub && bp.suspended) ? suspendedCardBannerHtml(opts.sub, bp) : "";
     var statsHtml = stats.map(function (st) {
       return '<div class="instance-card-stat">' +
         '<span class="instance-card-stat-k">' + esc(st.k) + "</span>" +
@@ -6453,14 +6491,44 @@
       '<button class="btn btn-primary btn-sm" id="overview-dunning-portal" type="button">Update payment method</button>' +
     "</div>";
   }
-  // The suspended instance-card banner (ratified strings, verbatim). {since_date}
-  // derives from the subscription's grace end (dunningDates.suspendMs).
-  function suspendedCardBannerHtml(sub) {
+  // The suspended instance-card banner. Takes the BOX as well as the
+  // subscription, because a suspension has TWO independent axes and only the box
+  // row knows which one fired (cch-w54-s1, charter D618/D620).
+  //
+  // BILLING axis (`billing_lapsed` / `billing_past_due`, written by
+  // Billing.cancel_subscription/1 and the grace-elapsed arm of mark_past_due/2):
+  // the money copy below is the right copy, and the restore IS backed —
+  // invoice.paid → recover_subscription/1 → Registry.resume_team_barkparks/1,
+  // with no plan change and so no ceiling to clip it.
+  //
+  // QUOTA axis (`quota_exceeded`, written by Billing.reconcile_plan_limit/1):
+  // the producer is never a payment event. A team can be fully paid and
+  // `status: "active"` and still hold a quota-suspended box — the money copy
+  // told that team their payment failed and that paying would restore it, which
+  // is not just unbacked but actively wrong GUIDANCE: reconcile_plan_limit keys
+  // STRICTLY on the reason and restores a quota row only when the team is back
+  // at or under its ceiling. It also carried a DATE the plane cannot produce —
+  // `suspended_at` is written but never serialized, so dunningDates substitutes
+  // `current_period_end`, a FUTURE renewal day rendered as a past suspension
+  // day. The quota arm therefore names the real cause, the two real remedies,
+  // and no date at all.
+  //
+  // Neither arm says the server is stopped: suspension is a flag on a row and
+  // reaches nothing on the host (see LIFECYCLE_PILL_LABEL above).
+  function suspendedCardBannerHtml(sub, bp) {
+    if (bp && bp.suspended_reason === "quota_exceeded") {
+      return '<div class="notice notice-warn suspended-card-banner" role="alert">' +
+        '<div class="suspended-card-title">Suspended — over your plan&rsquo;s instance limit</div>' +
+        '<p class="suspended-card-body">Your team has more instances than ' + esc(planName(sub && sub.plan)) +
+          " includes, so the newest ones are suspended. Nothing is deleted, and this is not a payment problem. " +
+          "Remove an instance, or move to a plan with a higher instance limit, and the suspended instances come back automatically.</p>" +
+      "</div>";
+    }
     var d = dunningDates(sub);
     var since = d ? "Suspended " + esc(fmtDay(d.suspendMs)) + " — payment failed" : "Suspended — payment failed";
     return '<div class="notice notice-warn suspended-card-banner" role="alert">' +
       '<div class="suspended-card-title">' + since + "</div>" +
-      '<p class="suspended-card-body">The server is stopped, not destroyed. Everything comes back exactly as it was the moment payment succeeds.</p>' +
+      '<p class="suspended-card-body">Nothing is deleted, and nothing on this server has been touched — Barkpark Cloud has stopped managing it. Everything comes back exactly as it was the moment payment succeeds.</p>' +
     "</div>";
   }
 
@@ -7081,8 +7149,11 @@
           : lc.failed
             ? cliToggle
             : lc.suspended
-              // A suspended server is STOPPED — an Open Studio button here
-              // would be a dead click. Teardown stays reachable via the card.
+              // cch-w54-s1 — a suspended box is one the control plane has
+              // stopped managing, not one that was stopped. The Studio link is
+              // withheld because Cloud declines to act on a suspended row, NOT
+              // because the click would be dead — the box may well still answer.
+              // Teardown stays reachable via the card.
               ? cliToggle
               : bp.host
                 ? updateBtn +
@@ -22104,6 +22175,10 @@
       // render, the fleet infra line, the row gate, and the optimistic reducer.
       // The DOM mount (wireLifecycleActions/runDecommission) is browser-verified.
       lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
+      // cch-w54-s1 — the DECLARED label map, exported so the manifest dump can
+      // report the two labels no input can reach (archived / adopted). The
+      // painted set itself is always read by RUNNING the fold, never from here.
+      LIFECYCLE_PILL_LABEL: LIFECYCLE_PILL_LABEL,
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,
       // cch-w46-s3: the rail's MOUNT and its authority-only repaint seam. Both
@@ -22151,7 +22226,7 @@
       rollbackRefusalTerminal: rollbackRefusalTerminal,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
-      classifyBp: classifyBp, statusOf: statusOf,
+      classifyBp: classifyBp, statusOf: statusOf, suspendedReasonText: suspendedReasonText,
       // cch-w34-s6: the never-reported renderers + the closed state enum the
       // harness asserts statusOf is total over.
       lastSeenText: lastSeenText, missedChecksText: missedChecksText,
