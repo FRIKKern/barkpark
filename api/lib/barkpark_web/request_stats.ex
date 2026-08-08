@@ -1,13 +1,15 @@
 defmodule BarkparkWeb.RequestStats do
   @moduledoc """
-  Rolling per-request throughput + latency aggregator for the Phoenix instance.
+  Rolling per-request throughput + latency aggregator for the Phoenix instance,
+  widened (anonymous-metering W1, charter D9/D10/D11) into the program's
+  baseline instrument: every sample now carries a **route class** and a
+  **three-valued auth state**, and the read shape states per-class anonymous
+  read rates WITH volume.
 
   Phoenix's `Plug.Telemetry` (endpoint.ex:75) emits `[:phoenix, :endpoint, :stop]`
-  with a `%{duration: native}` measurement on every request, but nothing on the
-  instance consumed it — the `Telemetry.Metrics.ConsoleReporter` is commented out
-  and `LiveDashboard` is dev-only. This module is the missing aggregator: a
-  supervised process that attaches to that event, keeps a bounded ~60s rolling
-  window of durations in an ETS ring, and derives:
+  with a `%{duration: native}` measurement on every request it sees, and hands
+  this handler the conn as `meta`. The handler keeps a bounded ~60s rolling
+  window of samples in an ETS ring and derives:
 
     * `req_per_s` — request count over the window divided by the *elapsed* window
       (`min(uptime, window)`), so a box that booted 5s ago reports an honest rate
@@ -21,12 +23,66 @@ defmodule BarkparkWeb.RequestStats do
       here:** an empty window rendered as `0.0` reads "this box is serving no
       errors", which is the single most reassuring sentence a meter can print and
       is a lie whenever it is printed about a box nobody has measured.
+    * `count` — the raw number of samples in the window. Rate without volume is
+      the D3-illegal half-sentence; `count` is what makes "12.4 req/s over 87
+      requests" sayable.
+    * `elapsed_s` — the elapsed seconds the rates were divided by
+      (`min(uptime, window)`), so a reader can reconstruct the division.
+    * `sampled_at` — UTC wall-clock at read time, stamping WHEN the window was
+      observed (the window itself runs on monotonic time).
+    * `classes` — per-route-class breakdown, `%{class => %{count, req_per_s,
+      authed, anon, auth_unknown}}`; `%{}` on an empty window (no fabricated
+      zero-rows for classes nobody observed).
 
-  The 5xx rate costs one extra ETS term and no new instrumentation: Phoenix
-  hands this handler the conn as `meta`, and therefore `conn.status`, and the
-  original write path **discarded it** — the whole meter was one bound variable
-  away (charter D75). It is the number that makes "healthy box, 0.22 5xx/s"
-  sayable at all.
+  ## Route classes — enum CLOSED at five (charter D9)
+
+    * `:lv_dead`    — `conn.private[:phoenix_live_view]` present: a LiveView
+      dead (HTTP) render.
+    * `:browser`    — routed HTML, non-LiveView.
+    * `:api`        — routed JSON.
+    * `:unrouted`   — `:phoenix_router` present but `Phoenix.Router.route_info/4`
+      returns `:error`: the router ran and matched nothing (where crawler storms
+      land as 404s).
+    * `:pre_router` — `:phoenix_router` absent: halted upstream of the router
+      (PublicShareGuard, body parsing, CORS) — or a synthetic emit with no conn.
+
+  `Phoenix.Router.route_info/4` is the ONLY door to a conn's `pipe_through`
+  (`:phoenix_route` never exists on the conn); `:public_root` is a scope tag,
+  not a pipeline. Cost note: `route_info/4` re-runs the compiled router match
+  once per request on the hot write path — a compiled pattern match,
+  microseconds, no DB.
+
+  **BLINDNESS — two traffic shapes this meter can NEVER see** (documented
+  non-classes, not bugs):
+
+    * `static_served` — `Plug.Static` (endpoint.ex:56) halts BEFORE
+      `Plug.Telemetry` (endpoint.ex:75), so a served static file emits ZERO
+      stop events. Static hits are structurally invisible here (L1-proven on
+      the live box: static 200s moved nothing).
+    * `lv_connected` — LiveView socket dispatch precedes all user plugs; even a
+      400/403 websocket handshake is invisible. A `check_origin` 403 storm
+      never appears on this meter.
+
+  ## Auth — three-valued by PIPELINE COVERAGE (charter D11)
+
+  Never assign absence. Per sample:
+
+    * `:authed`       — `conn.assigns[:api_token]` present at stop.
+    * `:anon`         — token absent AND the route's `pipe_through` intersects
+      `@auth_resolving_pipelines` (the pipelines that run a plug assigning
+      `:api_token`: OptionalToken / RequireToken / OptionalSessionToken /
+      RequireBearerOrSessionToken). An auth-resolving plug ran and resolved
+      nothing — that IS anonymous. An invalid Bearer on such a pipeline counts
+      as anon (OptionalToken assigns nothing for it).
+    * `:auth_unknown` — token absent AND no `:api_token`-resolving plug ran.
+      Bare `:browser` runs none, and LV identity resolves on the socket — so
+      `lv_dead`/`browser` honestly report `auth_unknown` for nearly all
+      traffic, by design. A signed-in browser session's dead render is
+      `auth_unknown`, and no anon counter may move for it. Pipelines that
+      resolve OTHER principals (`:scim`, `:ingest`, `:ticket_key`,
+      `:api_preview`, user sessions) are deliberately NOT in the allowlist:
+      their callers may be authenticated without `:api_token`, so counting
+      them anon would assign absence.
 
   **HONEST BOUND — read this before trusting the field.** The window is 60s and
   the ring lives in THIS slot's BEAM: it dies on every blue/green flip and reads
@@ -44,12 +100,17 @@ defmodule BarkparkWeb.RequestStats do
   `cloud-console-w5-agent-reqstats-beat`). A timer prunes expired rows so memory
   stays bounded to roughly one window's worth of samples.
 
-  The read shape — `%{req_per_s: float, p95_ms: integer | nil,
-  err_5xx_per_s: float | nil, window_s: integer}` — is pinned on the wire by
+  The read shape — the additive 8-key map `%{req_per_s, p95_ms, err_5xx_per_s,
+  window_s, count, elapsed_s, sampled_at, classes}` — is pinned on the wire by
   `BarkparkWeb.RequestStatsControllerTest` and in the pure math by
   `BarkparkWeb.RequestStatsTest`. Those two tests are the contract; a charter
   letter is not, because charters are rewritten per wave and the code does not
   follow.
+
+  D13 note: the route comment at `router.ex:1603-1613` still enumerates the
+  pre-class four-key shape. It is stale-benign, is refreshed by slice 8
+  (am-w2-s8-router-pipeline-lines), and router.ex must NOT be edited from this
+  module's slices.
   """
 
   use GenServer
@@ -57,6 +118,36 @@ defmodule BarkparkWeb.RequestStats do
   @window_ms 60_000
   @prune_every_ms 10_000
   @default_table :barkpark_request_stats
+
+  # The pipelines that run a plug which assigns `:api_token` on success
+  # (OptionalToken / RequireToken / OptionalSessionToken /
+  # RequireBearerOrSessionToken). This is the D11 auth-resolving allowlist:
+  # a token-absent sample is `:anon` ONLY when its route's pipe_through
+  # intersects this set — otherwise no auth plug ran and the honest value is
+  # `:auth_unknown`. Same-file pin: `BarkparkWeb.RequestStatsTest` pins this
+  # list verbatim so drift is deliberate, never accidental.
+  @auth_resolving_pipelines ~w(
+    access_principal
+    api
+    cycle_api
+    media_mutate
+    require_admin
+    require_chat_access
+    require_chat_host_admin
+    require_token
+    scoped_admin
+    scoped_api
+    scoped_browser
+    scoped_media_mutate
+    scoped_mutate
+    search_settings_admin
+    session_token_root
+    shared_docs_api
+    shared_media_api
+    shared_paper_browser
+    shared_studio_browser
+    soft_token
+  )a
 
   # ── Public API ────────────────────────────────────────────────────────────
 
@@ -66,35 +157,45 @@ defmodule BarkparkWeb.RequestStats do
   end
 
   @doc """
-  Current window stats: `%{req_per_s: float, p95_ms: integer | nil,
-  err_5xx_per_s: float | nil, window_s: integer}`.
+  The D11 auth-resolving pipeline allowlist (see the moduledoc). Exposed so the
+  pin test can hold the list still.
+  """
+  def auth_resolving_pipelines, do: @auth_resolving_pipelines
+
+  @doc """
+  Current window stats — the additive 8-key map `%{req_per_s: float,
+  p95_ms: integer | nil, err_5xx_per_s: float | nil, window_s: integer,
+  count: non_neg_integer, elapsed_s: float, sampled_at: String.t(),
+  classes: %{atom => map}}`.
 
   Falls back to an honest empty window (`req_per_s: 0.0`, `p95_ms: nil`,
-  `err_5xx_per_s: nil`) if the aggregator process is not running, so the exposed
-  route degrades to the truth rather than 500-ing. Note which one is `0.0`: no
-  requests observed IS a true rate of zero requests, but "no 5xx observed" is
-  unknowable from a window that holds nothing.
+  `err_5xx_per_s: nil`, `count: 0`, `classes: %{}`) if the aggregator process
+  is not running, so the exposed route degrades to the truth rather than
+  500-ing. Note which one is `0.0`: no requests observed IS a true rate of zero
+  requests, but "no 5xx observed" is unknowable from a window that holds
+  nothing.
   """
   def stats(name \\ __MODULE__) do
     GenServer.call(name, :stats)
   catch
     :exit, _ ->
       now = now_ms()
-      compute([], now, now, @window_ms)
+      compute([], now, now, @window_ms) |> put_sampled_at()
   end
 
   # ── Telemetry handler (write path — runs in the request process) ──────────
 
-  # `meta` is the conn Phoenix has always handed this handler and the handler has
-  # always thrown away. `conn.status` is the entire 5xx meter (D75) — no new
-  # event, no second table, no extra work on the request path beyond one term in
-  # the row. A conn without a status (a connection that never responded) lands
-  # `nil`, which counts as neither a 5xx nor a success.
+  # `meta` is the conn Phoenix has always handed this handler. `conn.status` is
+  # the 5xx meter (D75); the route class + auth state (D9/D11) ride the same
+  # event — no new event, no second table, one `route_info/4` match on the
+  # request path. The head stays permissive (a bare `meta`): a synthetic emit
+  # without a conn is classified defensively inside, never crashed on.
   @doc false
   def handle_event([:phoenix, :endpoint, :stop], %{duration: duration}, meta, %{table: table}) do
     duration_ms = System.convert_time_unit(duration, :native, :microsecond) / 1000
     key = {System.monotonic_time(:millisecond), System.unique_integer([:monotonic])}
-    :ets.insert(table, {key, duration_ms, status_of(meta)})
+    {route_class, auth_state} = classify(meta)
+    :ets.insert(table, {key, duration_ms, status_of(meta), route_class, auth_state})
     :ok
   rescue
     # A telemetry handler must NEVER take down the request it is measuring — a
@@ -111,22 +212,84 @@ defmodule BarkparkWeb.RequestStats do
   defp status_of(%{conn: %Plug.Conn{status: status}}) when is_integer(status), do: status
   defp status_of(_), do: nil
 
+  @doc """
+  Classify a stop-event `meta` into `{route_class, auth_state}` (charter D9/D11
+  — see the moduledoc for both enums). Total: any meta shape without a conn is
+  `{:pre_router, :auth_unknown}` — no router ran, no auth plug ran.
+  """
+  def classify(%{conn: %Plug.Conn{} = conn}) do
+    case conn.private do
+      %{phoenix_router: router} ->
+        case Phoenix.Router.route_info(router, conn.method, conn.request_path, conn.host) do
+          :error ->
+            {:unrouted, auth_state(conn, [])}
+
+          info when is_map(info) ->
+            {routed_class(conn), auth_state(conn, Map.get(info, :pipe_through) || [])}
+        end
+
+      _ ->
+        {:pre_router, auth_state(conn, [])}
+    end
+  end
+
+  def classify(_meta), do: {:pre_router, :auth_unknown}
+
+  defp routed_class(conn) do
+    cond do
+      Map.has_key?(conn.private, :phoenix_live_view) -> :lv_dead
+      format_of(conn) == "html" -> :browser
+      true -> :api
+    end
+  end
+
+  # The negotiated format when the `accepts` plug ran; when a routed conn
+  # halted before it (rare), fall back to what was actually served.
+  defp format_of(conn) do
+    case conn.private[:phoenix_format] do
+      format when is_binary(format) ->
+        format
+
+      _ ->
+        case Plug.Conn.get_resp_header(conn, "content-type") do
+          [ct | _] -> if ct =~ "html", do: "html", else: "json"
+          [] -> "json"
+        end
+    end
+  end
+
+  # D11 — never assign absence: authed needs the token PRESENT; anon needs an
+  # auth-resolving pipeline to have RUN and resolved nothing; everything else
+  # is the named unknown.
+  defp auth_state(conn, pipes) do
+    cond do
+      not is_nil(conn.assigns[:api_token]) -> :authed
+      Enum.any?(pipes, &(&1 in @auth_resolving_pipelines)) -> :anon
+      true -> :auth_unknown
+    end
+  end
+
   # ── Pure math (unit-tested directly; no process needed) ───────────────────
 
   @doc """
-  Derive the window stats from raw `{time_ms, duration_ms, status}` samples.
+  Derive the window stats from raw `{time_ms, duration_ms, status, route_class,
+  auth_state}` samples.
 
   `elapsed = min(now - started, window)` — a fresh boot reports over the time it
   has actually lived, never a fabricated full window. Empty window ⇒
   `req_per_s: 0.0` (true — zero requests were observed), `p95_ms: nil` (no
-  samples is not 0ms) and `err_5xx_per_s: nil` (no samples is not "no errors").
+  samples is not 0ms), `err_5xx_per_s: nil` (no samples is not "no errors"),
+  `count: 0`, `classes: %{}` (no fabricated per-class zero-rows).
 
   `status` may be `nil` for a sample whose response status was not knowable; such
   a sample counts toward throughput and latency but is never counted as a 5xx.
+
+  Returns 7 of the 8 payload keys — `sampled_at` is wall-clock at READ time and
+  is stamped by the callers, keeping this function pure.
   """
   def compute(samples, now_ms, started_ms, window_ms) do
     cutoff = now_ms - window_ms
-    in_window = for {t, d, s} <- samples, t >= cutoff, do: {d, s}
+    in_window = for {t, d, s, class, auth} <- samples, t >= cutoff, do: {d, s, class, auth}
     count = length(in_window)
 
     uptime_ms = max(now_ms - started_ms, 0)
@@ -157,15 +320,42 @@ defmodule BarkparkWeb.RequestStats do
           nil
 
         samples ->
-          errors = Enum.count(samples, fn {_d, s} -> is_integer(s) and s >= 500 and s < 600 end)
+          errors =
+            Enum.count(samples, fn {_d, s, _class, _auth} ->
+              is_integer(s) and s >= 500 and s < 600
+            end)
+
           Float.round(errors * 1000 / elapsed_ms, 3)
       end
+
+    # Per-class breakdown over the SAME window and elapsed seconds. Only classes
+    # actually observed appear — an empty window is `%{}`, and a class with no
+    # samples has no row (absence, not a fabricated zero).
+    classes =
+      in_window
+      |> Enum.group_by(fn {_d, _s, class, _auth} -> class end)
+      |> Map.new(fn {class, rows} ->
+        n = length(rows)
+        by_auth = Enum.frequencies_by(rows, fn {_d, _s, _class, auth} -> auth end)
+
+        {class,
+         %{
+           count: n,
+           req_per_s: Float.round(n * 1000 / elapsed_ms, 2),
+           authed: Map.get(by_auth, :authed, 0),
+           anon: Map.get(by_auth, :anon, 0),
+           auth_unknown: Map.get(by_auth, :auth_unknown, 0)
+         }}
+      end)
 
     %{
       req_per_s: req_per_s,
       p95_ms: p95_ms,
       err_5xx_per_s: err_5xx_per_s,
-      window_s: div(window_ms, 1000)
+      window_s: div(window_ms, 1000),
+      count: count,
+      elapsed_s: Float.round(elapsed_ms / 1000, 3),
+      classes: classes
     }
   end
 
@@ -214,9 +404,13 @@ defmodule BarkparkWeb.RequestStats do
     samples =
       state.table
       |> :ets.tab2list()
-      |> Enum.map(fn {{t, _uniq}, d, s} -> {t, d, s} end)
+      |> Enum.map(fn {{t, _uniq}, d, s, class, auth} -> {t, d, s, class, auth} end)
 
-    reply = compute(samples, now_ms(), state.started_at, @window_ms)
+    reply =
+      samples
+      |> compute(now_ms(), state.started_at, @window_ms)
+      |> put_sampled_at()
+
     {:reply, reply, state}
   end
 
@@ -225,9 +419,13 @@ defmodule BarkparkWeb.RequestStats do
     cutoff = now_ms() - @window_ms
     # ordered_set keyed by {time_ms, unique}: drop every row whose time is older
     # than the window. Bounds memory to ~one window (+ one prune interval). The
-    # head must carry the row's FULL arity — a 2-tuple pattern against 3-tuple
-    # rows matches nothing and the "prune" silently becomes an unbounded leak.
-    :ets.select_delete(state.table, [{{{:"$1", :_}, :_, :_}, [{:<, :"$1", cutoff}], [true]}])
+    # head must carry the row's FULL arity — a narrower pattern against the
+    # 5-tuple rows matches nothing and the "prune" silently becomes an unbounded
+    # leak. `RequestStatsTest` proves prune-still-deletes at this arity.
+    :ets.select_delete(state.table, [
+      {{{:"$1", :_}, :_, :_, :_, :_}, [{:<, :"$1", cutoff}], [true]}
+    ])
+
     schedule_prune()
     {:noreply, state}
   end
@@ -241,6 +439,11 @@ defmodule BarkparkWeb.RequestStats do
   # ── Internals ─────────────────────────────────────────────────────────────
 
   defp schedule_prune, do: Process.send_after(self(), :prune, @prune_every_ms)
+
+  defp put_sampled_at(payload) do
+    sampled_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+    Map.put(payload, :sampled_at, sampled_at)
+  end
 
   defp now_ms, do: System.monotonic_time(:millisecond)
 end
