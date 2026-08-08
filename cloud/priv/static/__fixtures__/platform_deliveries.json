@@ -1,0 +1,146 @@
+{
+  "note": "The CROSS-LANGUAGE fixture for the PLATFORM delivery record (GET /v1/deliveries, BarkparkCloud.PlatformDelivery). It is the one file both sides of that wire read: the Go reader `bp cloud deliveries <sha>` renders every scenario below in internal/cli/cloud_deliveries_cmd_test.go, and the key sets are what a serializer change has to move here before it can move anywhere. NOT the webhook delivery log — `bp cloud webhook deliveries` is a tenant instance's webhook send log and shares nothing with this file but a word.",
+
+  "population": "Barkpark's OWN deploys of this repo. These rows are NOT team-scoped and never can be: a platform deploy has no `sites` row and therefore no team_id, which is also why they cannot live in `deployments`. The envelope says so with scope=platform on every 200.",
+
+  "live_key_set": [
+    "build_seconds",
+    "carried",
+    "delivering_run_id",
+    "first_seen_at",
+    "merged_at",
+    "queued_seconds",
+    "recorded_at",
+    "serving_since",
+    "sha",
+    "target"
+  ],
+
+  "live_key_set_source": "PlatformDelivery.to_json/1 on origin/main — exactly ten keys, and every scenario row below carries all ten. A row missing a key is a reader deciding for itself what a NULL means; a row carrying an extra one is a serializer that shipped without this fixture following it.",
+
+  "pending_key_set_after_10942": [
+    "build_seconds",
+    "carried",
+    "delivering_run_id",
+    "first_seen_at",
+    "merged_at",
+    "queued_pickup_seconds",
+    "queued_seconds",
+    "queued_self_seconds",
+    "queued_stall_seconds",
+    "recorded_at",
+    "serving_since",
+    "sha",
+    "target"
+  ],
+
+  "pending_key_set_source": "PR #10942 (charter D430) splits the queue wait into three NULLABLE integers BESIDE the total, never replacing it: self (waiting on another deploy.yml run's build), stall (residual co-incident with >= 2 other workflows also created-but-unpicked) and pickup (the RESIDUAL, defined as what is left and never by a magnitude threshold). The delta to live_key_set is therefore EXACTLY those three additions and ZERO removals — asserted from Go, so the day #10942 lands, the reader's decoder and this file move together or the test reds.",
+
+  "null_clocks": {
+    "keys": ["merged_at", "queued_seconds", "build_seconds", "serving_since"],
+    "law": "These four are legitimately NULL on a live row and NULL means UNMETERED — never 0, never an epoch, never a blank cell. The recorder writes NULL when the query it needed failed or when the fact does not exist; a reader that coalesces them prints 'built in 0s' about a build nobody measured and '1970-01-01' about a sha that may never have gone live.",
+    "not_null": ["sha", "delivering_run_id", "first_seen_at", "recorded_at", "target", "carried"]
+  },
+
+  "envelope_key_set": ["count", "deliveries", "limit", "scope", "sha"],
+  "envelope_note": "`sha` on the envelope is the control plane's own normalised filter and is NULL when the caller named none, so it is a pointer on the Go side; `scope` is the literal population name and `count` is len(deliveries) for THIS page, not the size of the table.",
+
+  "scenarios": {
+    "fully_clocked": {
+      "why": "The FIRST and only real row the crown has ever held, copied from the live prod record (recorded 2026-08-08T12:23:21Z, read back through a PAT against https://barkpark.cloud/v1/deliveries). Every clock present, carried false: the run is this sha's own.",
+      "status": 200,
+      "body": {
+        "deliveries": [
+          {
+            "sha": "2e38228b0048901b166d915d222cfc47f6f470d6",
+            "delivering_run_id": "31255918184",
+            "first_seen_at": "2026-08-08T11:55:11.517221Z",
+            "merged_at": "2026-08-08T11:51:21Z",
+            "queued_seconds": 14,
+            "build_seconds": 216,
+            "serving_since": "2026-08-08T11:55:11.517221Z",
+            "target": "cp",
+            "carried": false,
+            "recorded_at": "2026-08-08T12:23:21.862544Z"
+          }
+        ],
+        "count": 1,
+        "sha": "2e38228b0048901b166d915d222cfc47f6f470d6",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
+    "all_null_clocks": {
+      "why": "The day-one rendering case, not a hypothetical: the recorder writes NULL for every clock it could not reach, and the row still exists because the sha WAS delivered. All four nullable clocks are NULL at once — the shape that a nil-coalescing reader renders as a flawless zero-second deploy that went live at the epoch.",
+      "status": 200,
+      "body": {
+        "deliveries": [
+          {
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "delivering_run_id": "31200000001",
+            "first_seen_at": "2026-08-06T09:14:02.100000Z",
+            "merged_at": null,
+            "queued_seconds": null,
+            "build_seconds": null,
+            "serving_since": null,
+            "target": "instance",
+            "carried": false,
+            "recorded_at": "2026-08-06T09:20:44.000001Z"
+          }
+        ],
+        "count": 1,
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
+    "carried": {
+      "why": "carried=true: ~36.7% of merged shas over the 8-day window (charter D429, measured at n=300) are delivered by a LATER sha's run rather than by one of their own, because 110 of 110 cancelled runs carry zero jobs. The queue and build clocks on this row measure THAT run, not this sha's, and a render that prints them silently attributes another commit's timings to this one.",
+      "status": 200,
+      "body": {
+        "deliveries": [
+          {
+            "sha": "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432",
+            "delivering_run_id": "31255918184",
+            "first_seen_at": "2026-08-08T11:55:11.517221Z",
+            "merged_at": "2026-08-08T11:38:02Z",
+            "queued_seconds": 14,
+            "build_seconds": 216,
+            "serving_since": "2026-08-08T11:55:11.517221Z",
+            "target": "cp",
+            "carried": true,
+            "recorded_at": "2026-08-08T12:23:21.862544Z"
+          }
+        ],
+        "count": 1,
+        "sha": "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
+    "unknown_sha_empty": {
+      "why": "An unknown sha is an HONEST EMPTY LIST at 200, never a 404 — the route exists and 'nothing was ever recorded for this sha' is the single most useful thing this table can say about a deploy that went silent. Confirmed live: before the first POST, the same read returned exactly this shape.",
+      "status": 200,
+      "body": {
+        "deliveries": [],
+        "count": 0,
+        "sha": "0123456789abcdef0123456789abcdef01234567",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
+    "unavailable_503": {
+      "why": "The typed refusal, and a REAL state rather than a defensive branch: deploy.yml's instance job fires on api/internal/deploy/connectors/templates and does NOT require the cloud/** merge that carries this migration, so an api-only merge posts to a control plane whose table does not exist. 503 (not 404, not 500) because the route exists and the caller should retry after the cloud release lands. `reason` is what makes it actionable; `detail` is the route's own sentence and a reader prints it verbatim.",
+      "status": 503,
+      "body": {
+        "error": "unavailable",
+        "reason": "platform_deliveries_missing",
+        "detail": "this control plane has not run the platform_deliveries migration yet — an api-only merge deploys the instance leg without the cloud/ one. Retry after the cloud release lands; nothing was recorded."
+      }
+    }
+  }
+}

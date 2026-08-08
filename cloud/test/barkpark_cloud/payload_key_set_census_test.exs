@@ -711,7 +711,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # guess, which is the whole reason this number is measured and not derived.
   # The emitted floor does NOT move: this branch writes no serializer.
   @emitted_floor 123
-  @go_tag_floor 225
+  @go_tag_floor 237
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 56 keys with the :when unwrap, 42 without.
