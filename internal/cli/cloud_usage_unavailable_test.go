@@ -94,6 +94,20 @@ func TestUsageStateSeverityRanksFailedReads(t *testing.T) {
 	}
 }
 
+// TestUsageStateSeverityUnknownTokenFailsClosed mirrors
+// cloud_status_cmd_test.go's attentionBucket("some_future_rung") == "attention"
+// pin: the roll-up's default arm had NO test, so an unranked state silently
+// landed on the healthy floor. An unknown is BLIND (above "live") but not
+// TRIPPED (below over_limit) — it must not fake a breach either.
+func TestUsageStateSeverityUnknownTokenFailsClosed(t *testing.T) {
+	if usageStateSeverity("some_future_rung") <= usageStateSeverity("live") {
+		t.Error("an unranked state must NEVER roll a row up as healthy as a live meter")
+	}
+	if usageStateSeverity("some_future_rung") >= usageStateSeverity("over_limit") {
+		t.Error("an unranked state is blind, not tripped — it must not outrank a real breach")
+	}
+}
+
 // TestFleetRowStateSurfacesACrashedHeadlineMeter: the whole point — a row whose
 // headline meter crashed can no longer roll up as if nothing happened.
 func TestFleetRowStateSurfacesACrashedHeadlineMeter(t *testing.T) {
