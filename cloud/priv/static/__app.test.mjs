@@ -2475,8 +2475,25 @@ test("gr-p5: operatorWarmPoolCardHtml renders ONE number — no bar, no percenta
 
 test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO Send-now button", () => {
   const empty = hooks.operatorDigestCardHtml([]);
-  assert.match(empty, /No fleet digest has been sent yet\./);
-  assert.match(empty, /daily at 06:00 UTC to the platform-operator addresses/);
+  // cch-w55-s3 — THE EMPTY CARD IS A QUERY ARTIFACT, AND NOW SAYS SO. It read
+  // "No fleet digest has been sent yet. The digest goes out daily at 06:00 UTC
+  // to the platform-operator addresses." Both halves after the clock were false:
+  // dr-w19-s5 moved the audience onto team-membership rows (team_member_emails/1,
+  // notifications.ex:432-439) and off platform_admin_emails/0, and the writer
+  // stamps a REAL team_id (notifications.ex:478) while this operator reader
+  // selects is_nil(d.team_id) (notifications.ex:912) — predicates that cannot
+  // intersect, so the card renders "nothing sent" forever on a fleet that mails
+  // a digest every morning. The reader is deliberately NOT changed by this slice
+  // (#10599, another epic); only the claim is.
+  assert.ok(!/No fleet digest has been sent yet/.test(empty),
+    "the card cannot observe send history, so it never asserts there is none");
+  assert.ok(!/platform-operator addresses/.test(empty),
+    "the digest no longer goes to platform_admin_emails/0");
+  assert.match(empty, /not the same as no digest having been sent/);
+  assert.match(empty, /so those receipts never land in this list/);
+  // The 06:00 UTC half is KEPT — it matches {"0 6 * * *", DailyDigestWorker}
+  // at cloud/config/config.exs:334 exactly, and it names the real audience.
+  assert.match(empty, /daily at 06:00 UTC to each team&rsquo;s own members|daily at 06:00 UTC to each team's own members/);
   const rows = hooks.operatorDigestCardHtml([
     { id: "d1", status: "sent", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 1, inserted_at: "2026-07-19T06:00:01.932308Z", last_error: null, http_status: null },
     { id: "d2", status: "failed", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 3, inserted_at: "2026-07-18T06:00:02.100000Z", last_error: "smtp timeout", http_status: null },
@@ -12804,6 +12821,33 @@ test("runwayStepModel: check marks vs digits, real instance-name hint, Open Stud
   assert.equal(hooks.runwayStepModel(ob, { studioId: "" })[2].action, "");
 });
 
+// cch-w55-s3 — THE THIRD STEP PROMISED DETECTION NOTHING PERFORMS, and the
+// sentence was asserted by NOTHING (grep "notice automatically" over this file
+// and every __preview__/*.mjs returned zero before this test existed, so the
+// string could be changed, or re-added, with no exit code anywhere).
+//
+// `Accounts.published_doc?/1` (accounts.ex:2764) derives the step from an
+// `AgentEvent` of type "content" with `payload->>'published_count' > 0`. The
+// four `record_event/3` call sites in cloud/lib write "health" (router.ex:1378),
+// "space" (router.ex:1423), "verify" (router.ex:2627) and "status"
+// (health/staleness_worker.ex:91) — never "content" — and the agent's HTTP
+// surface has no content endpoint, so no producer exists and none was built
+// here. The manual ack (`ack_onboarding_step/2`, router.ex:1701) is unreachable
+// too: {action:"skip"} is the only onboarding action app.js POSTs.
+test("cch-w55-s3: the published-document step never promises the plane will notice", () => {
+  const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  const step = [...hooks.runwayStepModel(ob, { instanceName: "Production", studioId: "b1" })][2];
+  assert.equal(step.hint, "We can't see this from here — the step won't tick itself");
+  assert.ok(!/notice automatically|automatically/i.test(step.hint),
+    "no producer writes a 'content' agent event, so nothing notices a published document");
+  // The Studio link survives the retraction: publishing is still the real move,
+  // and that action IS backed (it opens the box's own Studio).
+  assert.equal(step.action, "Open Studio →");
+  // …and the whole runway carries the retraction, not just the model row.
+  const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
+  assert.ok(!/notice automatically/i.test(card), "the rendered runway makes no detection promise either");
+});
+
 test("runwayProgressText / runwayCardHtml: 'N of 3 done' + role-gated dismiss", () => {
   const ob = { completed: false, steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
   assert.equal(hooks.runwayProgressText(ob), "2 of 3 done");
@@ -14115,6 +14159,28 @@ test("readOnlyPlanCardHtml: the non-owner view is a button-free summary reusing 
   const trial = hooks.readOnlyPlanCardHtml({ plan: "trial", status: "active", trial_days_remaining: 9 });
   assert.ok(trial.includes("Free trial") && trial.includes("9 days left"), "trial summary carries the countdown");
   assert.ok(!/<button/i.test(trial) && !/Pick a plan below/i.test(trial), "no CTA and no misleading 'pick a plan below' (the grid is hidden for members)");
+  // cch-w55-s3: the member's card used to stop after "free while your trial
+  // runs." — the owner card's SECOND sentence deleted. Both notification
+  // renderers warn (notifications/render.ex:99, event_email.ex:163/:168, the
+  // latter written for the non-owner), so the one person who can neither
+  // subscribe nor save the box was the only one not told it goes away.
+  assert.ok(trial.includes("When the trial ends, the instance is torn down."),
+    "the plain member is told the teardown half too");
+});
+
+// cch-w55-s3 — THE PAIR PIN. Neither tagline was positively asserted anywhere,
+// so the two trial cards could (and did) drift apart sentence by sentence. This
+// test reds if EITHER arm loses the teardown clause, which is what makes the
+// asymmetry a build failure rather than a reading exercise.
+test("cch-w55-s3: both trial cards — owner and member — carry the same teardown sentence", () => {
+  const sub = { plan: "trial", status: "active", trial_days_remaining: 9 };
+  const TAGLINE = "A real dedicated instance, free while your trial runs. When the trial ends, the instance is torn down.";
+  const owner = hooks.trialCardHtml(sub);
+  const member = hooks.readOnlyPlanCardHtml(sub);
+  assert.ok(owner.includes(TAGLINE), "the OWNER card states the teardown (backed by TrialExpiryWorker)");
+  assert.ok(member.includes(TAGLINE), "and the read-only twin states it identically");
+  // The member card still omits every affordance — parity of WARNING, not of CTA.
+  assert.ok(!/<button/i.test(member), "the member card gains the sentence, not a button");
 });
 
 // ════════════════════════════════════════════════════════════════════════════

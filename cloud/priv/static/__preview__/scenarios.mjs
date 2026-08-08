@@ -244,7 +244,14 @@ const suspendedInstance = bpBase({
   version: "0.9.2",
   last_seen_at: tMinus(3600),
   suspended: true,
-  suspended_reason: "Payment failed — subscription past due",
+  // cch-w55-s3 — a PLANE-LEGAL reason slug. This fixture used to carry the human
+  // sentence "Payment failed — subscription past due", which no producer in
+  // cloud/lib can ever write: the only three values written are `billing_lapsed`
+  // (Billing.cancel_subscription/1), `billing_past_due` (maybe_enforce/1) and
+  // `quota_exceeded` (Billing.reconcile_plan_limit/1), and router.ex:9383 ships
+  // the raw column. A fixture vouching for copy the plane cannot emit certifies
+  // nothing.
+  suspended_reason: "billing_past_due",
   provision_status: "succeeded",
 });
 
@@ -3401,7 +3408,8 @@ export const SCENARIOS = {
           url: "https://marketing-2b9c4.barkpark.cloud", host: "marketing-2b9c4.barkpark.cloud",
           health_status: "up", agent_status: "online", version: "0.2.25",
           region: "hel1", server_type: "cx22", channel: "prod", autoupdate_enabled: false,
-          provider: "azure", suspended: true, suspended_reason: "Payment failed — subscription past due",
+          // cch-w55-s3 — plane-legal slug (see the `suspended_reason` note above).
+          provider: "azure", suspended: true, suspended_reason: "billing_past_due",
           provision_status: "succeeded",
         }),
         bpBase({
