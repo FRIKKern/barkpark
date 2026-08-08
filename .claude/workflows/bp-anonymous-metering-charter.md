@@ -325,3 +325,36 @@ not satisfy origin's mix.lock).
 ## Wave log
 
 <!-- one row per wave: date · wave paper · slices merged · the number that moved (rate WITH volume, pinned window) -->
+
+### Wave 2026-08-08 — wave 1 (paper `anonymous-metering-wave-2026-08-08`)
+
+**Landed (built, reviewed, gate-green, PRs open — the lead merges in program order):** all three
+round-1 slices; nothing stalled.
+
+- `am-w1-s1-request-stats-route-class` — PR #10839, branch
+  `loop-epic/requeststats-states-per-class-anonymous--0-r` (reviewer branch: builder commit +
+  mix-format fix). RequestStats is now the program's baseline instrument: 5-tuple ETS rows,
+  D9 five-class enum, D11 three-valued auth off a 20-pipeline allowlist (reviewer re-derived it
+  independently from router.ex — exact match), additive 8-key payload, prune matchspec widened
+  and mutation-proven. Gate 38/0. **THE PROGRAM'S FIRST MERGE — merge before #10841/#10842.**
+- `am-w1-s2-robots-policy-both-surfaces` — PR #10841, branch
+  `loop-epic/robots-txt-states-the-real-policy-on-api-1`. api robots.txt = the D15 policy bytes;
+  cloud = the D617 three-file Disallow-all (file + `only:` token + byte-for-byte test). Reviewer
+  re-ran the allowlist mutation (red 404/200, green on restore). Gate 5/0 + guard OK + 2/0.
+  Live smoke (criterion 3) is post-deploy lead work: guerrilla.barkpark.cloud + barkpark.cloud.
+- `am-w1-s3-reader-dedupe-and-harness` — PR #10842, branch
+  `loop-epic/one-anonymous-paper-view-costs-15-dead-l-2`. The number that moved (deterministic
+  full-population harness counts, not sampled rates — D10's stated exemption): one anonymous
+  paper view on the pinned three-shape fixture went **22 dead / 44 both-leg statements at
+  merge-base `5b68852f4` → 15 / 30**, driven-task N+1 slope 4.0 → 0.0 stmts/citing-task/leg.
+  The harness (`reader_query_baseline_test.exs`) is permanent and carries the pid-filter
+  vacuous-green trap as a live test. Gate 42/0. Merges only after #10839.
+
+**Next wave (W2, in dependency order):** merge round 1 first, then dispatch
+`am-w2-s4-render-cache-and-single-flight` (scored on s3's harness + s1's meter),
+`am-w2-s5-gate-a-browser-shadow-limiter` + `am-w2-s6-gate-b-socket-hooks` (D2 SHADOW LAW:
+log-only, kill switch, env budgets), `am-w2-s7-quiz-spawn-budget`, `am-w2-per-class-carriage`
+(D12 with teeth: six-site checklist, decoded-but-unrendered = RED), and DEAD LAST
+`am-w2-s8-router-pipeline-lines` (D7, + the D13 comment refresh). `am-hg-ai-crawler-stance`
+stays a human gate; `am-bl-idle-p95-anomaly` becomes interpretable once s1's per-class split is
+live — read the meter before triaging it.
