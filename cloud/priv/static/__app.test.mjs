@@ -18952,12 +18952,16 @@ test("cch-w51-s2 arm B: internal/agent/report.go still emits the quoted sentinel
 //      wired; an internal/-only walk is blind to the exact file a real probe
 //      would land in.
 // `cfg.BackupProbe != nil` and `BackupProbe func() (bool, string, error)` are
-// correctly NOT matches. `== nil` WOULD be a false positive (the second `=`
-// satisfies \S); no such line exists today, and the honest fix if one appears
-// is to narrow the predicate here, not to delete the arm. Comment lines are
-// skipped so a doc line like `// BackupProbe: …` cannot red it either.
+// correctly NOT matches. `== nil` WOULD have been a false positive under the
+// bare `[:=]` form (the second `=` satisfies \S), so the `=` alternative
+// carries a `(?!=)`: a COMPARISON is not a wiring, and a guard that reds on
+// `if cfg.BackupProbe == nil` would be reding on the very line that proves no
+// probe is wired. The narrowing is strict — `BackupProbe: fn` and
+// `BackupProbe = fn` both still match, and both plants below were re-run.
+// Comment lines are skipped so a doc line like `// BackupProbe: …` cannot red
+// it either.
 test("cch-w51-s2 arm C: no non-test BackupProbe assigner exists under internal/ or cmd/", () => {
-  const ASSIGNER = /BackupProbe\s*[:=]\s*\S/;
+  const ASSIGNER = /BackupProbe\s*(?::|=(?!=))\s*\S/;
   const wirings = [];
   let scanned = 0;
   for (const tree of BACKUP_GO_TREES) {
