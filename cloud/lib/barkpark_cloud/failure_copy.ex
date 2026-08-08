@@ -171,21 +171,34 @@ defmodule BarkparkCloud.FailureCopy do
   The DB stays RAW by design: only the JSON/email boundary scrubs, so ops
   recovery via `Repo.get(ProvisionJob, id).console` and the logs is unaffected.
 
-  ## Two orders, and which path owns which (deploy-reliability W2 S4)
+  ## ONE order, and the two entry points that carry it (dr-w22-s1)
 
-  `humanize/1` is `classify |> scrub |> strip_ansi` and MUST stay that way: its
-  first step matches producer-anchored prefixes, and an escape run can sit
-  between the prefix and the text, so stripping first changes what the
-  classifier reads.
+  `scrub/1`'s key clause opens with `(?<![A-Za-z0-9])`, and a CSI run parks an
+  alphanumeric (`m`) immediately LEFT of the key — so a colourised
+  `\\e[31mclient_secret=…\\e[0m` hides its key from the scrub, and the scrub then
+  leaves the value in place. Measured over 2,000 random values: 2000/2000 leaked
+  under `scrub |> strip_ansi`, 0/2000 under `strip_ansi |> scrub`. THE STRIP
+  MUST RUN FIRST, on every path.
 
-  A RAW-LOG path has no classify step, and for it that order is WRONG.
-  `scrub/1`'s key clause keeps the key and redacts up to the next delimiter, so
-  a colourised `\\e[31mclient_secret=…\\e[0m` hides its value behind bytes the
-  scrub then leaves in place — measured 2000/2000 leaked under
-  `scrub |> strip_ansi` and 0/2000 under `strip_ansi |> scrub`. Any path that
-  renders a raw capture without classifying it must be
-  `strip_ansi() |> scrub()`. Pinned by
-  "raw-log order: strip_ansi BEFORE scrub…" in `failure_copy_test.exs`.
+    * `raw/1` = `strip_ansi |> scrub` — the RAW-LOG entry point. Any boundary
+      that renders a remote capture without classifying it calls this.
+    * `humanize/1` = `classify |> strip_ansi |> scrub` — classify FIRST, because
+      its prefixes are anchored on the producer's template and an escape run can
+      sit between the prefix and the text (`BUILD failed (exit 12): \\e[22m`), so
+      stripping first would change what the classifier reads. The strip then
+      runs BEFORE the scrub, for the reason above.
+
+  deploy-reliability W2 S4 shipped `humanize/1` as `classify |> scrub |>
+  strip_ansi`, which leaked the SAME 2000/2000 on the unclassified terminal arm
+  — in clean cleartext, because the trailing strip removed the escape bytes the
+  scrub had been blocked by. Pinned now by
+  "raw-log order: strip_ansi BEFORE scrub…" AND by a `humanize/1` assertion on a
+  colourised non-prefixed key, in `failure_copy_test.exs`.
+
+  RESIDUAL, stated rather than hidden: the OSC shape
+  `"\\e]0;t\\ainapi_key=<secret>"` leaks under BOTH orders — stripping the OSC
+  leaves the `n` of `in` flush against the key, which re-blocks the same
+  lookbehind. Not closed here.
 
   Provider-prefixed credentials (including our own `bppat_`/`bpcs_`) are
   order-INDEPENDENT — that clause matches the token itself — so the order only
@@ -360,26 +373,43 @@ defmodule BarkparkCloud.FailureCopy do
   def strip_ansi(other), do: other
 
   @doc """
+  Fold a RAW remote capture — a console line, an ssh stderr fold, a provider
+  body — for a person's screen: strip the terminal control sequences, THEN
+  redact the secret-shaped substrings.
+
+  This is the raw-log entry point, and the order is the whole point of it. A
+  bare `scrub/1` on a colourised capture is a live leak: the CSI parks an
+  alphanumeric immediately left of the key, the scrub's key clause never fires,
+  and the value ships verbatim (dr-w22-s1 measured it byte-identical to input
+  through `Router.call/2` on three display boundaries). Call this, never
+  `scrub/1` alone, wherever a capture reaches a reader unclassified.
+
+  Non-binaries pass through unchanged (both halves no-op). Idempotent.
+  """
+  @spec raw(term()) :: term()
+  def raw(value), do: value |> strip_ansi() |> scrub()
+
+  @doc """
   Map a raw internal deploy/provision failure string to human-facing copy, with
   secret-shaped substrings redacted.
 
-  The scrub runs AFTER classification and WRAPS the whole `cond` — see the
-  moduledoc for why either change is a live regression. Passes `nil` and
-  non-binary reasons through unchanged; unrecognized reasons pass through
-  scrubbed.
+  `classify/1` runs FIRST — its prefixes are anchored on the producer's template
+  and an escape run can sit between the prefix and the text
+  (`BUILD failed (exit 12): \\e[22m`), so stripping first would change what the
+  classifier reads. Passes `nil` and non-binary reasons through unchanged;
+  unrecognized reasons pass through stripped and scrubbed.
 
-  deploy-reliability W1 S2: `strip_ansi/1` runs LAST, after the scrub, for the
-  same ordering reason the scrub runs after `classify/1` — the classifier's
-  prefixes are anchored on the producer's template and an escape run can sit
-  between the prefix and the text (`BUILD failed (exit 12): \\e[22m`), so
-  stripping first would change what the classifier reads. Stripping last only
-  ever removes bytes no reader wanted.
+  dr-w22-s1: `strip_ansi/1` then runs BEFORE the scrub, not after it. The
+  unclassified terminal arm of the `cond` IS a raw-log path, and under the
+  previous `scrub |> strip_ansi` it leaked a colourised `api_key=…` 2000/2000 —
+  in clean cleartext, because the trailing strip removed the very bytes that had
+  blocked the scrub. See the moduledoc; the tail is now `raw/1`'s order.
   """
   @spec humanize(term()) :: term()
   def humanize(nil), do: nil
 
   def humanize(reason) when is_binary(reason),
-    do: reason |> classify() |> scrub() |> strip_ansi()
+    do: reason |> classify() |> strip_ansi() |> scrub()
 
   def humanize(other), do: other
 
