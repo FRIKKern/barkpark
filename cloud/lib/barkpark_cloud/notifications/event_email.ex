@@ -209,10 +209,24 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   # and renders the CLASS ONLY, never the raw capture this line appends, so the
   # boundary the sentence above protects still holds: the verbatim provider bytes
   # remain an email-only courtesy for a reader forwarding them to support.
+  #
+  # deploy-reliability W20 S4 (charter D354): `strip_ansi/1` BEFORE `scrub/1`,
+  # never a bare scrub. `failure_copy.ex:184-187` rules that any path rendering a
+  # RAW capture without classifying it must be `strip_ansi() |> scrub()`, and
+  # states the measurement behind the order: 2000/2000 leaked under
+  # `scrub |> strip_ansi`, 0/2000 under `strip_ansi |> scrub`. This IS such a
+  # path — it never classifies — and it stripped nothing, so a colourised
+  # `\e[31mapi_key=…\e[0m` off the build PTY defeated the scrub's key clause
+  # (whose `(?<![A-Za-z0-9])` lookbehind is satisfied by the `m` of `\e[31m`) and
+  # shipped the credential to an operator's inbox in cleartext. Only the ORDER
+  # changes here: the capture itself is still rendered in full and unreordered.
   defp detail(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
-      d when is_binary(d) and d != "" -> "\n\n#{FailureCopy.scrub(d)}"
-      _ -> ""
+      d when is_binary(d) and d != "" ->
+        "\n\n#{d |> FailureCopy.strip_ansi() |> FailureCopy.scrub()}"
+
+      _ ->
+        ""
     end
   end
 
@@ -244,12 +258,29 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   # An unclassified reason humanizes to the scrubbed reason itself. Emitting both
   # would print the same paragraph twice, so in that case the capture stands
   # alone exactly as it does today.
+  #
+  # deploy-reliability W20 S4 (charter D354): the capture is
+  # `strip_ansi() |> scrub()`, the raw-log order `failure_copy.ex:184-187` rules,
+  # not the bare scrub this line shipped — same defect as `detail/1` above.
+  #
+  # The STRIPPED reason is also what `humanize/1` reads, and that is load-bearing
+  # rather than tidiness. `humanize/1` ends `… |> scrub() |> strip_ansi()`, so on
+  # its PASS-THROUGH arm (an unclassified reason returns itself from `classify/1`)
+  # it scrubs colourised bytes — the very order that leaks. Feeding it a reason
+  # with no escapes left in it makes that arm land on exactly `capture`, which
+  # keeps the `^capture` equal-arm below firing for an unclassified reason (a
+  # colourised one would otherwise fall to the `cause` arm and print the leaky
+  # pass-through paragraph ABOVE the clean capture). On a CLASSIFIED reason
+  # `classify/1` returns a literal carrying no secret shape, and stripping a
+  # capture's escapes before the classifier only removes bytes no clause anchors
+  # on. The classified arm's copy is untouched by this slice.
   defp cause_then_capture(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
       d when is_binary(d) and d != "" ->
-        capture = FailureCopy.scrub(d)
+        stripped = FailureCopy.strip_ansi(d)
+        capture = FailureCopy.scrub(stripped)
 
-        case FailureCopy.humanize(d) do
+        case FailureCopy.humanize(stripped) do
           ^capture -> "\n\n#{capture}"
           cause -> "\n\n#{cause}\n\n#{@capture_heading}\n\n#{capture}"
         end
