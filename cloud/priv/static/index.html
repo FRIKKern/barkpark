@@ -476,7 +476,11 @@
           <header class="view-head">
             <div>
               <h1>Environment variables</h1>
-              <p class="dim">Team-wide values injected into your instances at boot. Keys are visible; values are encrypted and never shown again.</p>
+              <!-- cch-w53-s1: this header renders BEFORE app.js paints and survives every
+                   panel error state, so it was a second, independent custody claim. It
+                   promised delivery to every instance; nothing on any instance consumes
+                   these values, so it now states storage only. -->
+              <p class="dim">Team-wide values, stored encrypted. They are not delivered to any instance yet — nothing running or newly provisioned reads them. Keys are visible; values are never shown again.</p>
             </div>
           </header>
 

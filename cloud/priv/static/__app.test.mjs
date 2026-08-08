@@ -262,12 +262,18 @@ function oauthDom() {
   const center = mk("div");
   const card = mk("div"); card.id = "login-card";
   center.appendChild(card);
+  // cch-w53-s1: the real index.html carries a #twofa-card slot beside #login-card
+  // (the shared challenge card mounts into it). bootOAuth can now route a
+  // two-factor exchange response there, so the sandbox must carry the slot too —
+  // without it the branch degrades to showAuthError and the pin proves nothing.
+  const twofa = mk("div"); twofa.id = "twofa-card"; twofa.hidden = true;
+  center.appendChild(twofa);
   authScreen.appendChild(center);
 
   const stack = mk("div"); stack.id = "toast-stack";
   stack.appendChild = (n) => { n.parentNode = stack; toasts.push(n); return n; };
 
-  const byId = { "auth-screen": authScreen, "login-card": card, "toast-stack": stack };
+  const byId = { "auth-screen": authScreen, "login-card": card, "twofa-card": twofa, "toast-stack": stack };
   const doc = {
     querySelector(sel) {
       const id = String(sel).replace(/^#/, "");
@@ -277,7 +283,7 @@ function oauthDom() {
     getElementById(id) { return doc.querySelector("#" + id); },
     createElement: mk,
   };
-  return { document: doc, authScreen, card, center, toasts };
+  return { document: doc, authScreen, card, twofa, center, toasts };
 }
 
 // A location whose `hash` SETTER is recorded. That is the whole point: the old
@@ -503,6 +509,40 @@ test("cch-w10: a refused exchange lands NO session and reuses the existing gener
   assert.equal(r.dom.toasts.length, 1);
   assert.match(r.dom.toasts[0].innerHTML, /Sign-in failed/);
   assert.match(r.dom.toasts[0].innerHTML, /We couldn&#39;t complete that sign-in\. Please try again\./);
+});
+
+test("cch-w53-s1: a two-factor exchange response opens the challenge card, NOT the failure toast", async () => {
+  // DEFENSIVE, and today unreachable: POST /v1/auth/oauth/exchange has no
+  // two_factor_enabled? check in its with-chain, so it never answers a challenge.
+  // The round-2 slice makes it answer one — and before this branch existed that
+  // response fell into the generic "Sign-in failed" toast, i.e. a permanent,
+  // unactionable dead end for exactly the accounts that enrolled in 2FA. This
+  // feeds the synthesized shape and pins the challenge path.
+  const r = await driveBootOAuth({
+    hash: "#oauth_code=code-for-a-2fa-account&team=t-1",
+    status: 200,
+    payload: { two_factor_required: true, challenge_token: "CHALLENGE-TOKEN" },
+  });
+
+  // The exchange still happened, and it still installed NOTHING — a challenge is
+  // not a session.
+  assert.equal(r.fetch.calls.length, 1);
+  assert.equal(r.local.getItem("bpcloud.session"), null);
+  assert.equal(r.session.getItem("bpcloud.session"), null);
+  assert.equal(hooks.handleOAuthReturn(), false, "no landing flag off a challenge");
+
+  // THE PIN: the challenge card is mounted and visible, the login form is out of
+  // the way, and the generic failure copy is NOWHERE — that toast is what this
+  // branch exists to prevent.
+  assert.equal(r.dom.toasts.length, 0, "a challenge must not paint a sign-in failure");
+  assert.equal(r.dom.twofa.hidden, false, "the #twofa-card slot must be shown");
+  assert.match(r.dom.twofa.innerHTML, /Two-factor authentication/);
+  assert.match(r.dom.twofa.innerHTML, /id="tfa-submit"/);
+  assert.equal(r.dom.card.hidden, true, "the login form gives way to the card");
+
+  // render() still ran exactly once, so the logged-out shell is painted underneath
+  // the card rather than the card mounting into an empty document.
+  assert.equal(r.renderCalls, 1);
 });
 
 test("cch-w10: an /#oauth_error landing scrubs by REPLACE and never calls the exchange", async () => {
@@ -1626,6 +1666,32 @@ test("gr-p5-2fa: GR52b — the account 2FA surface has NO rate-limited state any
     assert.ok(!/\brate[ -]?limit|\b429\b|too many|try again in|\d+\s*seconds?/i.test(html),
       "no throttling copy in the " + phase + " state");
   }
+});
+
+test("cch-w53-s1: the 2FA on-state qualifies its promise — password sign-in only", () => {
+  // The unqualified sentence claimed a protection the plane does not hold:
+  // /v1/auth/oauth/exchange mints a full session with no two_factor_enabled?
+  // check, and find_or_birth_oauth_user!/3 resolves an incoming IdP identity onto
+  // an EXISTING password account by verified email — so a linked provider is a
+  // code-free door into a 2FA-enrolled account. Latent (no provider is armed in
+  // prod), which is why this is a copy retraction and the mechanism is round 2.
+  const html = hooks.accountTwoFactorPanelHtml({ phase: "on", codes: [] });
+  assert.ok(
+    html.includes("Codes from your authenticator app are required when you sign in with a password."),
+    "the promise must be scoped to password sign-in",
+  );
+  assert.ok(
+    html.includes("Signing in through a linked provider does not ask for one."),
+    "the provider door must be stated, not implied",
+  );
+  // THE RETRACTED SHAPE: the bare, unconditional sentence must never return. The
+  // negative is what makes this a pin rather than a restatement.
+  assert.ok(!/required when you sign in\.(?!\S)/.test(html.replace(/&#39;/g, "'")),
+    "the unqualified promise must not come back");
+  // The qualifier must not trip the GR52b throttling ban (a "30 seconds" style
+  // addition reds test 53 with an unrelated-looking message) — assert here too so
+  // the reason is legible at the site that owns this sentence.
+  assert.ok(!/\brate[ -]?limit|\b429\b|too many|try again in|\d+\s*seconds?/i.test(html));
 });
 
 test("gr-p5-2fa: the on-state is read FREE from /v1/me — no GET /v1/account/two-factor call site", () => {
@@ -8151,6 +8217,91 @@ test("G-06: envVarsPanelHtml — admin gets the add FORM + save-row; a member is
   // The empty-state copy invites an admin, stays quiet for a member.
   assert.match(hooks.envVarsPanelHtml([], { role: "admin" }), /Add one below/);
   assert.ok(!hooks.envVarsPanelHtml([], { role: "member" }).includes("Add one below"));
+});
+
+// ── cch-w53-s1 · THE ENV CUSTODY RETRACTION, PINNED SO IT CANNOT COME BACK ──
+// MEASURED GROUND: the control plane ships `env: Registry.resolved_env_for_barkpark/1`
+// in every provision claim, but provisioner.JobSpec declares no `env` json tag and
+// decodes with a bare json.Unmarshal — the map is dropped with no error, and a live
+// managed box's /opt/barkpark/.env carries platform keys only. So every sentence
+// that told a user these values reach an instance was false, and each was pinned by
+// NOTHING: the whole retraction was free-green. These three tests are the pins.
+// They are deliberately NEGATIVE (ban the claim) as well as positive (require the
+// honest shape), because a future well-meaning rewrite is exactly the failure mode.
+
+// The vocabulary of the retracted claim. Any of these back in the env surface means
+// the console is again promising a delivery no code performs.
+const ENV_CUSTODY_LIES = /injected into your instance|values injected|at boot\b|at the next boot|removes it from every instance/i;
+
+test("cch-w53-s1: envVarsPanelHtml never re-claims boot-time injection", () => {
+  const vars = [{ id: "e1", key: "K", scope: "team", is_secret: true, is_shown_once: false }];
+  for (const role of ["admin", "member"]) {
+    const html = hooks.envVarsPanelHtml(vars, { role });
+    assert.ok(!ENV_CUSTODY_LIES.test(html),
+      "the env panel must not claim these values reach an instance (" + role + ")");
+  }
+  // And it still says the true thing, so the retraction is not just a deletion.
+  const admin = hooks.envVarsPanelHtml(vars, { role: "admin" });
+  assert.match(admin, /Stored encrypted for your team/);
+  assert.match(admin, /not delivered to any instance/i);
+  // The already-filed, out-of-scope sentences are untouched (cch-w52 backlog owns
+  // them) — this pin must not be read as licence to re-cut them here.
+  assert.match(admin, /Values are encrypted at rest and never shown again after you save/);
+});
+
+test("cch-w53-s1: index.html's env header carries no injection claim either", () => {
+  // A SECOND, INDEPENDENT sentence in a DIFFERENT file: it renders before app.js
+  // paints and survives every panel error state, so an app.js-only fix leaves the
+  // lie standing on screen. Scoped to the #view-env section so unrelated copy
+  // elsewhere in the document cannot green or red this by accident.
+  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const start = html.indexOf('id="view-env"');
+  assert.ok(start > 0, "the env view must be locatable in index.html");
+  const end = html.indexOf("</section>", start);
+  assert.ok(end > start, "the env view must be a closed section");
+  const section = html.slice(start, end);
+  assert.ok(!ENV_CUSTODY_LIES.test(section),
+    "index.html's env header must not claim these values reach an instance");
+  assert.match(section, /stored encrypted/i);
+  assert.match(section, /not delivered to any instance/i);
+});
+
+test("cch-w53-s1: the delete sheet claims no containment it cannot perform", () => {
+  // Source-sliced rather than rendered: confirmDeleteEnvVar writes through
+  // openModal (DOM), and the sentence — not the wiring — is what regressed.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const start = src.indexOf("function confirmDeleteEnvVar(");
+  const end = src.indexOf("function ", start + 10);
+  assert.ok(start > 0 && end > start, "confirmDeleteEnvVar must be locatable");
+  const region = src.slice(start, end);
+  assert.ok(!ENV_CUSTODY_LIES.test(region),
+    "the delete sheet must not claim a removal from any instance");
+  // The loss it CAN speak to survives verbatim — smoke.mjs env-populated and
+  // env-write-once-409 both read this substring.
+  assert.ok(region.includes("can't be recovered"), "the honest loss clause must survive");
+  assert.match(region, /No instance changes/);
+});
+
+test("cch-w53-s1: the sign-out-everywhere sheet makes NO timing claim", () => {
+  // "immediately" was measured false — an already-open SSE stream kept delivering
+  // team events ~55s past revoke_all_user_sessions. "within 25 seconds" would be
+  // false too until the mechanism slice lands, so the sheet must state the outcome
+  // and nothing about when. This pin bans BOTH shapes.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const start = src.indexOf('title: "Sign out everywhere else?"');
+  assert.ok(start > 0, "the sign-out-everywhere confirm must be locatable");
+  const region = src.slice(start, start + 2000);
+  const bodyAt = region.indexOf("bodyHtml:");
+  const confirmAt = region.indexOf("onConfirm:");
+  assert.ok(bodyAt > 0 && confirmAt > bodyAt, "the sheet's bodyHtml must precede onConfirm");
+  const body = region.slice(bodyAt, confirmAt);
+  assert.ok(body.includes("Every other browser and device is signed out."),
+    "the outcome must still be stated plainly");
+  assert.ok(!/immediately|instantly|right away|within\s*\d+|\d+\s*second/i.test(body),
+    "the sign-out sheet must promise no timing the plane cannot hold");
+  // The two accurate clauses stay.
+  assert.match(body, /This device stays signed in/);
+  assert.match(body, /can sign back in with their password/);
 });
 
 test("G-06: envAddFormHtml — write-only (never a value read-back affordance)", () => {
