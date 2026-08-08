@@ -885,9 +885,18 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Lift suspension on every Barkpark a `team` owns — billing recovered. Bulk
+  Lift suspension on every Barkpark a `team` owns, WHATEVER suspended it. Bulk
   `UPDATE`, idempotent via the `suspended == true` guard (a second call clears
   nothing). Clears the reason + timestamp. Returns `{:ok, count}`.
+
+  NOT THE BILLING PATH ANY MORE (cch-w55-s4). This used to read "billing
+  recovered" and was called by both billing recovery sites; being reason- and
+  mode-blind, it lifted `"quota_exceeded"` flags a downgrade had set and revived
+  `self_hosted` rows `suspend_team_barkparks/2` refuses to touch. Billing now
+  calls `resume_billing_suspended/1`. Nothing in `lib/` calls this function
+  today — it is kept as the deliberate BLANKET lift (an operator-scale "clear
+  every suspension for this team"), and a new caller must mean that, not
+  "recover a payer". If you want the billing axis, you want the other one.
   """
   @spec resume_team_barkparks(Team.t() | binary()) :: {:ok, non_neg_integer()}
   def resume_team_barkparks(team) do
