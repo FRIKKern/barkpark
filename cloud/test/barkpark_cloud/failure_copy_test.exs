@@ -708,11 +708,27 @@ defmodule BarkparkCloud.FailureCopyTest do
     refute FailureCopy.capability_gap_reason("azure", "resurrect") =~ "Azure has no archives"
   end
 
-  test "hetzner pause gap explains a stopped Hetzner box still bills → archive instead" do
+  test "hetzner pause gap names deletion — the only act that stops the charge (cch-w55-s2)" do
     reason = FailureCopy.capability_gap_reason("hetzner", "pause")
     assert reason =~ "Hetzner"
     assert reason =~ "bill"
-    assert reason =~ "Archive"
+    assert reason =~ "Deleting"
+
+    # WHY THE OLD ASSERTION WAS WRONG. This arm used to read `assert reason =~
+    # "Archive"`, pinning the copy "Archive it to stop paying and resurrect it
+    # later." It passed for the whole time the sentence was false: no archive
+    # path in this tree touches a server's power or existence (the portable
+    # `runNeutralArchive` SSH-collects a bundle and returns; the `--fast` path's
+    # `--stop` is "never a hard stop"), and Hetzner bills a server "for as long
+    # as it exists, regardless of whether it is turned on or not" AND bills
+    # snapshots "per gigabyte per month"
+    # (https://docs.hetzner.com/cloud/billing/faq/). The prescribed remedy
+    # therefore INCREASED the operator's bill. A substring assertion can only
+    # pin the words we chose, never their truth — so the retraction is pinned
+    # negatively too: archiving must never again be sold as a way to stop
+    # paying.
+    refute reason =~ "Archive"
+    refute reason =~ "stop paying"
   end
 
   test "catalog gap is generic across kinds and names the fixed-defaults fallback" do

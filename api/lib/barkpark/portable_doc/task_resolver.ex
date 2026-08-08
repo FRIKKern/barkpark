@@ -46,10 +46,85 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   def resolve(blocks, fetch, agg_fetch \\ nil)
 
   def resolve(blocks, fetch, agg_fetch) when is_list(blocks) and is_function(fetch, 1) do
-    Enum.map(blocks, &resolve_block(&1, fetch, agg_fetch))
+    {fetch, agg_fetch} = memoized_fetchers(blocks, fetch, agg_fetch)
+    resolve_list(blocks, fetch, agg_fetch)
   end
 
   def resolve(blocks, _fetch, _agg_fetch), do: blocks
+
+  # ── query-map memo (am-w1-s3 reader dedupe) ─────────────────────────────────
+  #
+  # Two task blocks carrying the SAME query map used to run the same substrate
+  # read twice — once per block. `resolve/3` now pre-scans the tree for query
+  # maps that appear MORE THAN ONCE (under exactly the guards `resolve_block/3`
+  # itself fetches under), evaluates each duplicated query a single time, and
+  # serves the repeats from the memo. A query that appears once keeps its
+  # original in-place evaluation (order and count byte-identical to before);
+  # `preview/2` is untouched — its per-block rescue contract stays as is.
+  defp memoized_fetchers(blocks, fetch, agg_fetch) do
+    {row_queries, agg_queries} = collect_query_maps(blocks, {[], []})
+
+    {memoize(row_queries, fetch),
+     if(is_function(agg_fetch, 1), do: memoize(agg_queries, agg_fetch), else: agg_fetch)}
+  end
+
+  defp memoize(queries, fun) do
+    duplicated =
+      queries
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_q, n} -> n > 1 end)
+      |> Map.new(fn {q, _n} -> {q, fun.(q)} end)
+
+    if duplicated == %{} do
+      fun
+    else
+      fn q -> Map.get_lazy(duplicated, q, fn -> fun.(q) end) end
+    end
+  end
+
+  # Collect every query map `resolve_block/3` would fetch, walking the same
+  # three container shapes (`children` / `blocks` / `columns`). Row and
+  # aggregate queries pool separately — they run against different fetchers.
+  defp collect_query_maps(blocks, acc) when is_list(blocks) do
+    Enum.reduce(blocks, acc, &collect_block_queries/2)
+  end
+
+  defp collect_query_maps(_blocks, acc), do: acc
+
+  defp collect_block_queries(%{"type" => type, "query" => query}, {rows, aggs})
+       when type in @snapshot_types and is_map(query) do
+    {[query | rows], aggs}
+  end
+
+  defp collect_block_queries(%{"type" => @detail_type, "query" => query}, {rows, aggs})
+       when is_map(query) do
+    {[query | rows], aggs}
+  end
+
+  defp collect_block_queries(%{"type" => type, "query" => query}, {rows, aggs})
+       when type in @dataviz_types and is_map(query) do
+    {rows, [query | aggs]}
+  end
+
+  defp collect_block_queries(%{"children" => children}, acc) when is_list(children) do
+    collect_query_maps(children, acc)
+  end
+
+  defp collect_block_queries(%{"blocks" => blocks}, acc) when is_list(blocks) do
+    collect_query_maps(blocks, acc)
+  end
+
+  defp collect_block_queries(%{"columns" => cols}, acc) when is_list(cols) do
+    cols
+    |> Enum.filter(&is_list/1)
+    |> Enum.reduce(acc, &collect_query_maps/2)
+  end
+
+  defp collect_block_queries(_block, acc), do: acc
+
+  defp resolve_list(blocks, fetch, agg_fetch) when is_list(blocks) do
+    Enum.map(blocks, &resolve_block(&1, fetch, agg_fetch))
+  end
 
   @doc """
   Build the LIVE-TASK PREVIEW channel for `blocks` — the DISPLAY-ONLY twin of
@@ -235,11 +310,11 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   # stay an unresolved query on every surface.
   defp resolve_block(%{"children" => children} = block, fetch, agg_fetch)
        when is_list(children) do
-    Map.put(block, "children", resolve(children, fetch, agg_fetch))
+    Map.put(block, "children", resolve_list(children, fetch, agg_fetch))
   end
 
   defp resolve_block(%{"blocks" => blocks} = block, fetch, agg_fetch) when is_list(blocks) do
-    Map.put(block, "blocks", resolve(blocks, fetch, agg_fetch))
+    Map.put(block, "blocks", resolve_list(blocks, fetch, agg_fetch))
   end
 
   defp resolve_block(%{"columns" => cols} = block, fetch, agg_fetch) when is_list(cols) do
@@ -247,7 +322,7 @@ defmodule Barkpark.PortableDoc.TaskResolver do
       block,
       "columns",
       Enum.map(cols, fn
-        col when is_list(col) -> resolve(col, fetch, agg_fetch)
+        col when is_list(col) -> resolve_list(col, fetch, agg_fetch)
         col -> col
       end)
     )

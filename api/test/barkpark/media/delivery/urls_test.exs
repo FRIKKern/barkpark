@@ -5,6 +5,7 @@ defmodule Barkpark.Media.Delivery.UrlsTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.Media.Delivery.Urls
+  alias Barkpark.Media.Storage.Access
   alias Barkpark.Media.Storage.MediaFile
 
   setup do
@@ -104,6 +105,170 @@ defmodule Barkpark.Media.Delivery.UrlsTest do
     test "returns empty map for non-image files" do
       file = non_image_file()
       assert Urls.rendition_urls(file) == %{}
+    end
+  end
+
+  # ── visibility-aware cache policy (charter http-edge-truth D12) ───────────
+
+  @public_policy "public, max-age=86400, must-revalidate"
+
+  defp tmp_blob! do
+    path = "/tmp/barkpark_urls_policy_#{System.unique_integer([:positive])}.bin"
+    File.write!(path, "bytes")
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  defp headers(visibility, req_headers \\ []) do
+    path = tmp_blob!()
+
+    conn =
+      Enum.reduce(req_headers, Plug.Test.conn(:get, "/media/files/x"), fn {k, v}, acc ->
+        Plug.Conn.put_req_header(acc, k, v)
+      end)
+
+    {Urls.put_file_cache_headers(conn, path, visibility), Urls.etag_for(path)}
+  end
+
+  describe "put_file_cache_headers/3 — visibility matrix" do
+    test ~s|"public" gets the short revalidated policy plus an etag| do
+      {conn, etag} = headers("public")
+
+      assert Plug.Conn.get_resp_header(conn, "cache-control") == [@public_policy]
+      assert Plug.Conn.get_resp_header(conn, "etag") == [etag]
+      assert conn.state != :sent
+    end
+
+    test ~s|"token" gets no-store and NO etag| do
+      {conn, _etag} = headers("token")
+
+      assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
+      assert Plug.Conn.get_resp_header(conn, "etag") == []
+    end
+
+    test ~s|"private" gets no-store and NO etag| do
+      {conn, _etag} = headers("private")
+
+      assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
+      assert Plug.Conn.get_resp_header(conn, "etag") == []
+    end
+
+    test "an unknown visibility value fails closed to no-store" do
+      {conn, _etag} = headers("wide-open-please")
+
+      assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
+      assert Plug.Conn.get_resp_header(conn, "etag") == []
+    end
+
+    test "a nil asset doc resolves to the public default (Access.visibility(nil))" do
+      # Defensive default only — there are zero such subjects in production;
+      # this is pinned here and NEVER claimed from a live transcript.
+      assert Access.visibility(nil) == "public"
+
+      {conn, etag} = headers(Access.visibility(nil))
+
+      assert Plug.Conn.get_resp_header(conn, "cache-control") == [@public_policy]
+      assert Plug.Conn.get_resp_header(conn, "etag") == [etag]
+    end
+  end
+
+  describe "put_file_cache_headers/3 — non-public arm is inert to conditionals" do
+    test ~s|a matching etag on a "private" asset still returns the full body| do
+      path = tmp_blob!()
+      etag = Urls.etag_for(path)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", etag)
+        |> Urls.put_file_cache_headers(path, "private")
+
+      refute conn.state == :sent
+      assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
+      assert Plug.Conn.get_resp_header(conn, "etag") == []
+    end
+
+    test ~s|a star conditional on a "token" asset still returns the full body| do
+      path = tmp_blob!()
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", "*")
+        |> Urls.put_file_cache_headers(path, "token")
+
+      refute conn.state == :sent
+      assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
+    end
+  end
+
+  # ── If-None-Match conformance, RFC 9110 §13.1.2 (charter D11) ─────────────
+  # Own labelled hunk: these are red against the old `[^etag | _]` pin-match,
+  # which honoured ONLY a lone, exact, strong tag.
+
+  describe "put_file_cache_headers/3 — If-None-Match conformance" do
+    test "an exact strong tag still 304s" do
+      path = tmp_blob!()
+      etag = Urls.etag_for(path)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", etag)
+        |> Urls.put_file_cache_headers(path, "public")
+
+      assert conn.status == 304
+    end
+
+    test "a weak validator (W/) 304s" do
+      path = tmp_blob!()
+      etag = Urls.etag_for(path)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", "W/" <> etag)
+        |> Urls.put_file_cache_headers(path, "public")
+
+      assert conn.status == 304
+    end
+
+    test "a comma-separated list containing the tag 304s" do
+      path = tmp_blob!()
+      etag = Urls.etag_for(path)
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", ~s|"stale-1", | <> etag <> ~s|, "stale-2"|)
+        |> Urls.put_file_cache_headers(path, "public")
+
+      assert conn.status == 304
+    end
+
+    test "the star form 304s" do
+      path = tmp_blob!()
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", "*")
+        |> Urls.put_file_cache_headers(path, "public")
+
+      assert conn.status == 304
+    end
+
+    test "a non-matching validator does NOT 304" do
+      path = tmp_blob!()
+
+      conn =
+        :get
+        |> Plug.Test.conn("/media/files/x")
+        |> Plug.Conn.put_req_header("if-none-match", ~s|"not-the-tag"|)
+        |> Urls.put_file_cache_headers(path, "public")
+
+      refute conn.state == :sent
+      assert conn.status == nil
     end
   end
 

@@ -1269,16 +1269,53 @@ defmodule Barkpark.Content.Papers do
   """
   def get_public_document(type, slug, dataset \\ @paper_default_dataset)
       when is_binary(type) and is_binary(slug) do
+    case get_public_document_with_workspace(type, slug, dataset) do
+      {doc, _workspace} -> doc
+      nil -> nil
+    end
+  end
+
+  @doc """
+  `get_public_document/3` that ALSO returns the resolved Default `%Workspace{}`
+  — `{doc, workspace}` or `nil`. The am-w1-s3 reader dedupe seam: the public
+  reader needs the workspace row again after the read (theme identity), and
+  re-fetching what this resolve already loaded was a measured per-mount
+  statement. Same pinned-Default scoping, same fail-closed posture.
+  """
+  def get_public_document_with_workspace(type, slug, dataset \\ @paper_default_dataset)
+      when is_binary(type) and is_binary(slug) do
     case Barkpark.Tenancy.get_default_workspace() do
-      %{id: ws_id} when is_binary(ws_id) ->
-        case Content.get_document(slug, type, dataset, workspace_id: ws_id) do
-          {:ok, doc} -> doc
-          {:error, :not_found} -> nil
-        end
+      %{id: ws_id} = workspace when is_binary(ws_id) ->
+        # Typeless batched read + type pick, NOT `get_document/4`: the typed
+        # read pays an `owner_scoped?` schema round-trip on every call, pure
+        # overhead on this public pinned-tenant resolve (am-w1-s3). The scoping
+        # stack is the documented typeless-read precedent
+        # (`Query.resolve_docs_by_ids/3` — dataset + workspace_or_global +
+        # unconditional `scope_to_owner(nil)`, byte-identical for
+        # non-owner_scoped types whose rows carry a NULL `owner_id`, and the
+        # same unowned-rows-only posture `get_document/4` reaches for an
+        # anonymous caller when the type IS owner-scoped). The list return
+        # makes the type pick exact — a same-slug document of another type can
+        # never shadow the requested one.
+        doc =
+          [slug]
+          |> Content.resolve_docs_by_ids(dataset, workspace_id: ws_id)
+          |> Enum.find(&(&1.type == type))
+
+        doc && {doc, workspace}
 
       _ ->
         nil
     end
+  end
+
+  @doc """
+  `get_public_paper/2` that also returns the resolved Default `%Workspace{}` —
+  see `get_public_document_with_workspace/3`.
+  """
+  def get_public_paper_with_workspace(slug, dataset \\ @paper_default_dataset)
+      when is_binary(slug) do
+    get_public_document_with_workspace(@paper_type, slug, dataset)
   end
 
   @doc """

@@ -45,6 +45,39 @@ case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
     end
 end
 
+# SECRET_KEY_BASE, read and validated ONCE for every consumer (the endpoint
+# and the media-signing derive below both use this binding). The predicate is
+# on the RAW env string — at least 64 bytes, never trimmed, never decoded:
+# Plug enforces a 64-byte minimum at first session use, so a shorter value
+# boots clean and then 500s on /login and /studio. Prod refuses at boot with
+# the message below instead; dev/test keep their config-file defaults (nil
+# here). The refusal prints the LENGTH, never the value.
+secret_key_base =
+  case System.get_env("SECRET_KEY_BASE") do
+    skb when is_binary(skb) and byte_size(skb) >= 64 ->
+      skb
+
+    other ->
+      if config_env() == :prod do
+        got =
+          case other do
+            nil -> "it is not set"
+            short -> "got #{byte_size(short)} bytes"
+          end
+
+        raise """
+        SECRET_KEY_BASE must be at least 64 bytes (#{got}).
+
+        Phoenix derives cookie/session signing keys from it; Plug enforces a
+        64-byte minimum at first session use — a shorter value boots clean,
+        then 500s on /login and /studio.
+
+        Generate one: openssl rand -base64 64 — and set SECRET_KEY_BASE in
+        .env (compose) or /opt/barkpark/.env.
+        """
+      end
+  end
+
 # Continuous-canvas editor cutover: ON by default in PRODUCTION (the unified
 # <bp-paper-canvas> Obsidian-style editor). Dev/test stay OFF (the per-block
 # <bp-paper-editor>) so the flag-OFF byte-identical guarantee and its tests hold.
@@ -118,7 +151,7 @@ cloak_key =
         BARKPARK_CLOAK_KEY is not set.
 
         Generate one with:
-            mix phx.gen.secret 32
+            openssl rand -base64 32
         and add to /opt/barkpark/.env as BARKPARK_CLOAK_KEY=<value>.
 
         This MUST be independent of SECRET_KEY_BASE so that key rotation
@@ -182,8 +215,12 @@ end
 
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
 # default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
-# REQUIRE it in prod. Base64 of 32 bytes — generate with `mix phx.gen.secret 32`
-# then base64. MUST be independent of BARKPARK_CLOAK_KEY and SECRET_KEY_BASE.
+# REQUIRE it in prod. Base64 of exactly 32 raw bytes — generate with
+# `openssl rand -base64 32`. MUST be independent of BARKPARK_CLOAK_KEY and
+# SECRET_KEY_BASE. A SET value is validated in EVERY env (an empty or
+# wrong-length key would otherwise pass boot and only be rejected by LocalKek
+# at the FIRST encrypted-field seal, an unbounded time after boot); the
+# nil branch stays prod-gated.
 case System.get_env("BARKPARK_KEK") do
   nil ->
     if config_env() == :prod do
@@ -198,6 +235,21 @@ case System.get_env("BARKPARK_KEK") do
     end
 
   kek ->
+    case Base.decode64(kek) do
+      {:ok, raw} when byte_size(raw) == 32 ->
+        :ok
+
+      _ ->
+        raise """
+        BARKPARK_KEK must be the base64 encoding of exactly 32 raw bytes.
+
+        Generate one: openssl rand -base64 32 — it MUST be independent of
+        BARKPARK_CLOAK_KEY and SECRET_KEY_BASE; LocalKek would otherwise
+        reject this key at the FIRST encrypted-field seal, an unbounded time
+        after boot.
+        """
+    end
+
     # MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
     # lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
     # sealed by a prior KEK and re-wraps them under the current one. Set it to the
@@ -519,11 +571,12 @@ media_signing_secret =
 
     _ ->
       if config_env() == :prod do
-        skb =
-          System.get_env("SECRET_KEY_BASE") ||
-            raise "SECRET_KEY_BASE required to derive media signing secret"
-
-        Base.encode64(:crypto.hash(:sha256, "barkpark-media:" <> skb), padding: false)
+        # Derives from the hoisted, already-validated SECRET_KEY_BASE binding
+        # at the top of this file (>= 64 raw bytes or the boot refused).
+        Base.encode64(
+          :crypto.hash(:sha256, "barkpark-media:" <> secret_key_base),
+          padding: false
+        )
       end
   end
 
@@ -730,16 +783,8 @@ if config_env() == :prod do
   config :barkpark, Barkpark.Repo, repo_opts
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
-  # A default value is used in config/dev.exs and config/test.exs but you
-  # want to use a different value for prod and you most likely don't want
-  # to check this value into version control, so we use an environment
-  # variable instead.
-  secret_key_base =
-    System.get_env("SECRET_KEY_BASE") ||
-      raise """
-      environment variable SECRET_KEY_BASE is missing.
-      You can generate one by calling: mix phx.gen.secret
-      """
+  # It is read and validated ONCE at the top of this file (>= 64 raw bytes or
+  # boot refusal); the endpoint config below consumes that hoisted binding.
 
   host =
     case System.get_env("PHX_HOST") do
@@ -848,9 +893,21 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  # Non-empty is the only requirement — no byte floor: the JWT HMAC accepts
+  # any key length, and inventing a floor here would refuse working deployments.
   preview_secret =
-    System.get_env("PREVIEW_JWT_SECRET") ||
-      raise "environment variable PREVIEW_JWT_SECRET is missing. Generate with: mix phx.gen.secret"
+    case System.get_env("PREVIEW_JWT_SECRET") do
+      val when is_binary(val) and val != "" ->
+        val
+
+      _ ->
+        raise """
+        PREVIEW_JWT_SECRET must be set to a non-empty value.
+
+        Generate one: openssl rand -base64 48 — and set PREVIEW_JWT_SECRET in
+        .env (compose) or /opt/barkpark/.env.
+        """
+    end
 
   config :barkpark, :preview,
     secret: preview_secret,

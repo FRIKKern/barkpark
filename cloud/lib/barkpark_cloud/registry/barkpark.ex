@@ -22,8 +22,13 @@ defmodule BarkparkCloud.Registry.Barkpark do
       "we are no longer serving you", not "you are down" (Coolify-anchor:
       `Team::subscriptionEnded()`). Set in bulk by
       `Registry.suspend_team_barkparks/2` on lapse, cleared by
-      `resume_team_barkparks/1` on recovery. `suspended_reason` is
-      `"billing_lapsed"` | `"billing_past_due"`.
+      `Registry.resume_billing_suspended/1` on recovery (cch-w55-s4: it was the
+      reason-blind `resume_team_barkparks/1`, which lifted flags the billing
+      axis never set). `suspended_reason` on that axis is `"billing_lapsed"` |
+      `"billing_past_due"` — but it is NOT only those two: the quota reconciler
+      writes `"quota_exceeded"` through the single-row
+      `Registry.suspend_barkpark/2` (`Billing.reconcile_plan_limit/1`), so any
+      reader treating this column as a two-value billing enum is wrong.
 
   A server can be reachable while its agent is offline, or vice-versa; collapsing
   them would lose that signal. `last_seen_at` is the agent's last health report.
@@ -565,9 +570,15 @@ defmodule BarkparkCloud.Registry.Barkpark do
   Narrow changeset for a billing-suspension write — only the three suspension
   columns are castable, so a billing-triggered suspend/resume can never rename a
   Barkpark or reassign its Team (the same containment posture as
-  `health_changeset/2`). Used by `Registry.suspend_team_barkparks/2` /
-  `resume_team_barkparks/1` for the single-row path; the bulk path uses
-  `Repo.update_all`.
+  `health_changeset/2`). Used by the SINGLE-ROW helpers —
+  `Registry.suspend_barkpark/2` and `Registry.unsuspend_barkpark/1`, the quota
+  reconciler's axis. The three BULK helpers
+  (`suspend_team_barkparks/2`, `resume_team_barkparks/1`,
+  `resume_billing_suspended/1`) never reach this changeset: they issue a
+  `Repo.update_all` and so bypass every validation here. (cch-w55-s4 review:
+  this doc named the two bulk functions as the single-row path, which is
+  backwards — a reader trusting it would expect `validate_length/3` to run on a
+  billing suspend, and it does not.)
   """
   def suspend_changeset(barkpark, attrs) do
     barkpark

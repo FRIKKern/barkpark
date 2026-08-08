@@ -885,9 +885,18 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Lift suspension on every Barkpark a `team` owns — billing recovered. Bulk
+  Lift suspension on every Barkpark a `team` owns, WHATEVER suspended it. Bulk
   `UPDATE`, idempotent via the `suspended == true` guard (a second call clears
   nothing). Clears the reason + timestamp. Returns `{:ok, count}`.
+
+  NOT THE BILLING PATH ANY MORE (cch-w55-s4). This used to read "billing
+  recovered" and was called by both billing recovery sites; being reason- and
+  mode-blind, it lifted `"quota_exceeded"` flags a downgrade had set and revived
+  `self_hosted` rows `suspend_team_barkparks/2` refuses to touch. Billing now
+  calls `resume_billing_suspended/1`. Nothing in `lib/` calls this function
+  today — it is kept as the deliberate BLANKET lift (an operator-scale "clear
+  every suspension for this team"), and a new caller must mean that, not
+  "recover a payer". If you want the billing axis, you want the other one.
   """
   @spec resume_team_barkparks(Team.t() | binary()) :: {:ok, non_neg_integer()}
   def resume_team_barkparks(team) do
@@ -904,12 +913,64 @@ defmodule BarkparkCloud.Registry do
     {:ok, count}
   end
 
+  @doc """
+  cch-w55-s4: lift ONLY the suspensions a paid invoice is entitled to lift — the
+  billing axis, on `mode == "managed"` rows. The reason-and-mode-scoped twin of
+  `suspend_team_barkparks/2`, and the one the billing recovery paths call.
+
+  WHY IT IS NOT `resume_team_barkparks/1`. That function's entire `where` is
+  `team_id and suspended == true`: no reason scope and no mode scope, while its
+  suspend twin has both. So a paid invoice used to clear a `"quota_exceeded"`
+  flag the billing axis never set — a team downgraded from `support_plus` to
+  `supporter` ended with FIVE live boxes on a three-box plan, with nothing
+  scheduled to re-suspend them — and it revived a `self_hosted` row that
+  `suspend_team_barkparks/2` had refused to touch (count 0).
+
+  WHY BOTH REASONS, not just `"billing_lapsed"`. `Billing.maybe_enforce/1`
+  stamps `"billing_past_due"` when a grace window elapses. A resume scoped to
+  `"billing_lapsed"` alone would strand those boxes FOREVER — trading an
+  over-grant for a permanent under-restore (it reds
+  `billing_lifecycle_test.exs`'s dunning-recovery arms). The billing axis owns
+  exactly these two reasons, and this function lifts exactly them.
+
+  One bulk `UPDATE`; idempotent (a second call clears nothing, count 0).
+  Returns `{:ok, count}`.
+  """
+  @spec resume_billing_suspended(Team.t() | binary()) :: {:ok, non_neg_integer()}
+  def resume_billing_suspended(team) do
+    tid = team_id(team)
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    {count, _} =
+      Barkpark
+      |> where(
+        [b],
+        b.team_id == ^tid and b.suspended == true and b.mode == "managed" and
+          b.suspended_reason in ["billing_lapsed", "billing_past_due"]
+      )
+      |> Repo.update_all(
+        set: [suspended: false, suspended_reason: nil, suspended_at: nil, updated_at: now]
+      )
+
+    {:ok, count}
+  end
+
   ## Quota reconciler suspension — the reversible plan-ceiling enforcement.
   #
   # A SEPARATE axis from the bulk billing-lapse suspend above: these single-row
   # helpers stamp/clear the `"quota_exceeded"` reason (driven by
-  # `Billing.reconcile_plan_limit/1`), so a downgrade suspend and a billing-lapse
-  # suspend never restore each other. All three reuse main's `suspend_changeset`
+  # `Billing.reconcile_plan_limit/1`).
+  #
+  # HOW FAR THE INDEPENDENCE ACTUALLY GOES (cch-w55-s4 retraction). This comment
+  # used to assert that "a downgrade suspend and a billing-lapse suspend never
+  # restore each other." That holds in the SUSPEND direction only: each side
+  # stamps its own reason and neither clears the other's. In the RESTORE
+  # direction it was FALSE — `resume_team_barkparks/1` is reason-blind and did
+  # clear `"quota_exceeded"` rows whenever a billing recovery ran. The billing
+  # recovery paths now call `resume_billing_suspended/1` above, which IS
+  # reason-scoped, so the independence holds both ways for those callers; a
+  # direct `resume_team_barkparks/1` call remains blanket by design and is not
+  # the billing axis. All three helpers below reuse main's `suspend_changeset`
   # and `suspended*` columns — no new schema.
 
   @doc """
@@ -3113,7 +3174,8 @@ defmodule BarkparkCloud.Registry do
   admin token itself NEVER leaves this function (not in the URL, not in the
   response, not logged) — only the short-lived ticket does.
 
-  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  Errors: `:suspended` (the billing verdict — checked FIRST, before the admin
+  token is decrypted), `:not_live` (no `url` yet — still provisioning/failed),
   `:no_admin_token` (row never got one; mirrors the `/credentials` 404),
   `:decrypt_failed` (tampered ciphertext, fail-closed), `:instance_error`
   (the instance call failed or returned a non-ticket).
@@ -3131,8 +3193,20 @@ defmodule BarkparkCloud.Registry do
   """
   @spec mint_studio_link(Barkpark.t(), String.t() | nil) ::
           {:ok, String.t()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+          | {:error, :suspended | :not_live | :no_admin_token | :decrypt_failed | :instance_error}
   def mint_studio_link(bp, user_email \\ nil)
+
+  # cch-w54-s2 — a SUSPENDED box mints nothing. `billing.ex`'s own
+  # cancel_subscription/1 calls suspension "data retained, access revoked"; until
+  # this clause existed no access was revoked — a suspended instance still handed
+  # back a redeemable ticket. Keyed on the BOOLEAN, not the reason: both
+  # producers set the same column, and the console paints one state from it
+  # (lifecyclePillState "stopped", Open Studio hidden), so the server is now
+  # congruent with the state the client already shows. It sits ABOVE the working
+  # clause deliberately: the refusal fires BEFORE reveal_admin_token/1, so the
+  # stored admin credential is never decrypted and no byte leaves the control
+  # plane for a suspended box.
+  def mint_studio_link(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
 
   def mint_studio_link(%Barkpark{url: url} = bp, user_email)
       when is_binary(url) and url != "" do
@@ -3220,7 +3294,8 @@ defmodule BarkparkCloud.Registry do
   payload: `{:ok, %{token, workspace_id, permissions, expires_at}}`. The
   caller must never log or audit the token value.
 
-  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  Errors: `:suspended` (the billing verdict — checked FIRST, before the admin
+  token is decrypted), `:not_live` (no `url` yet — still provisioning/failed),
   `:no_admin_token` (row never got one; mirrors `/credentials`),
   `:decrypt_failed` (tampered ciphertext, fail-closed),
   `:app_token_unsupported` (the instance 404s the mint route — a pre-exchange
@@ -3239,11 +3314,20 @@ defmodule BarkparkCloud.Registry do
              expires_at: String.t() | nil
            }}
           | {:error,
-             :not_live
+             :suspended
+             | :not_live
              | :no_admin_token
              | :decrypt_failed
              | :app_token_unsupported
              | :instance_error}
+  # cch-w54-s2 — the strictly-worse sibling of the studio-link hole, and the
+  # reason gating studio-link alone was refused: this token is DURABLE
+  # (read+write+chat, long expiry) and member-reachable, so one mint through a
+  # suspended box outlives the suspension entirely. Same physics as the clause
+  # above: boolean-keyed, above the working clause, so the refusal beats
+  # reveal_admin_token/1 and the instance is never called.
+  def mint_app_token(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
+
   def mint_app_token(%Barkpark{url: url} = bp, user_email)
       when is_binary(url) and url != "" and is_binary(user_email) and user_email != "" do
     case reveal_admin_token(bp) do

@@ -1800,3 +1800,70 @@ func TestReapLeakedPredecessors_DeleteFailureMarksOrphaned(t *testing.T) {
 		t.Errorf("undeletable predecessor %q was not marked orphaned for the sweep", leaked.Name)
 	}
 }
+
+// TestDeprovisionByIP_SweepIsNarrowedWhenTheIPIsShared — the co-tenant half of
+// the DNS story, made load-bearing by cch-w54-s6's by-value sweep (wave review).
+//
+// TestDeprovisionByIP_IPReuseMatchesByFQDNLabel above pins the SERVER half: on a
+// recycled IP, only the box whose identity label matches is deleted. Nothing
+// pinned the DNS half, and the sweep is by VALUE — so a job running at a shared
+// address would delete EVERY A record pointing there, including the live
+// co-tenant's. The by-name delete it replaced could not do that.
+//
+// Two things are asserted, and the second is the one that would have been a
+// customer outage:
+//
+//  1. our own platform record still dies (the job still does its job), and
+//  2. the co-tenant's record SURVIVES — at a shared address the step degrades
+//     to the by-name delete rather than sweeping an address we do not hold
+//     exclusively.
+//
+// Both list orders are exercised, because the identity scan used to `break` on
+// the first match and therefore only ever noticed a stranger listed FIRST.
+func TestDeprovisionByIP_SweepIsNarrowedWhenTheIPIsShared(t *testing.T) {
+	for _, order := range []string{"ours-created-first", "stranger-created-first"} {
+		t.Run(order, func(t *testing.T) {
+			ctx := context.Background()
+			prov := NewFakeProvider()
+
+			first, second := "mine-box", "other-box"
+			if order == "stranger-created-first" {
+				first, second = "other-box", "mine-box"
+			}
+			a, _ := prov.Create(ctx, ServerSpec{Name: first})
+			if _, err := prov.Create(ctx, ServerSpec{Name: second}); err != nil {
+				t.Fatalf("seed %s: %v", second, err)
+			}
+			// Force IP reuse: both managed boxes now carry the SAME address.
+			forceFakeServerIP(prov, second, a.IP)
+
+			_ = prov.LabelServer(ctx, "mine-box", FQDNLabelKey, "acme-1.barkpark.cloud")
+			_ = prov.LabelServer(ctx, "other-box", FQDNLabelKey, "other-2.barkpark.cloud")
+
+			dns := NewFakeDNS()
+			_ = dns.UpsertRecord(ctx, Record{Zone: "barkpark.cloud", Name: "acme-1", Type: "A", Value: a.IP})
+			_ = dns.UpsertRecord(ctx, Record{Zone: "barkpark.cloud", Name: "other-2", Type: "A", Value: a.IP})
+
+			wp := &WarmPool{Provider: prov, DNS: dns}
+			if err := wp.DeprovisionByIP(ctx, a.IP, "acme-1", "barkpark.cloud"); err != nil {
+				t.Fatalf("DeprovisionByIP: %v", err)
+			}
+
+			// The server half is unchanged: only our box died.
+			remaining, _ := prov.List(ctx)
+			if len(remaining) != 1 || remaining[0].Name != "other-box" {
+				t.Fatalf("IP-reuse deprovision deleted the wrong box; remaining=%+v, want only other-box", remaining)
+			}
+			// Our platform record is gone…
+			if vals, _ := dns.Resolve(ctx, "acme-1.barkpark.cloud"); len(vals) != 0 {
+				t.Errorf("our own A record survived the deprovision: %v", vals)
+			}
+			// …and the CO-TENANT'S record — the live box's — is untouched. A
+			// by-value sweep at this address would have taken it.
+			vals, _ := dns.Resolve(ctx, "other-2.barkpark.cloud")
+			if len(vals) == 0 {
+				t.Errorf("the co-tenant's live A record was swept away by a by-value delete at a shared IP")
+			}
+		})
+	}
+}

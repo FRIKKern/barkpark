@@ -418,7 +418,14 @@ defmodule BarkparkCloud.Web.Router do
   plug(Plug.Static,
     at: "/",
     from: :barkpark_cloud,
-    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html),
+    # robots.txt is APPENDED, never prepended: cloud-static-gz-guard.sh finds
+    # this allowlist by grepping for the opening of the list with index.html as
+    # its FIRST entry, so anything inserted ahead of index.html loses the guard
+    # its anchor. (Do not quote that literal in a comment either — the grep
+    # takes the first line that matches and would anchor on the prose.) It is
+    # also absent from the Dockerfile gzip line on purpose: at ~100 bytes the
+    # .gz sibling costs more than it saves.
+    only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html robots.txt),
     gzip: true,
     headers: %{"cache-control" => "no-cache"},
     cache_control_for_etags: "no-cache"
@@ -814,17 +821,33 @@ defmodule BarkparkCloud.Web.Router do
               end
 
             if ok? do
+              # Read the first factor BEFORE the burn below deletes the row that
+              # carries it.
+              first_factor = Accounts.two_factor_pending_first_factor(pending)
+
               Accounts.delete_two_factor_pending_tokens(user)
 
-              # ORIGIN "two_factor": reaching here means the password leg ALREADY
-              # passed (it minted the challenge token) and a second factor — an
-              # OTP or a recovery code — cleared too. Deliberately not split into
-              # otp-vs-recovery: the `ok?` cond above collapses both to a boolean
-              # before this point, and re-deriving which one fired would be a
-              # guess.
+              # ORIGIN, RESOLVED FROM WHATEVER MINTED THIS CHALLENGE — never
+              # assumed. A second factor — an OTP or a recovery code — cleared to
+              # reach here; deliberately not split into otp-vs-recovery, since the
+              # `ok?` cond above collapses both to a boolean before this point and
+              # re-deriving which one fired would be a guess.
+              #
+              # WHICH FIRST factor cleared is NOT a guess, though, and since
+              # cch-w53-s6 it is no longer assumed to be the password. The plain
+              # "two_factor" still means what its old comment said — the password
+              # leg passed and minted this token. An OAuth-minted challenge
+              # (POST /v1/auth/oauth/exchange) carries its provider here on the
+              # pending token's own `sent_to`, and the session says so: stamping
+              # an IdP sign-in as a password sign-in would be exactly the
+              # misattribution this surface exists to avoid.
               case Accounts.create_user_session_token(
                      user,
-                     session_opts(conn) ++ [origin: "two_factor"]
+                     session_opts(conn) ++
+                       case first_factor do
+                         "oauth:" <> _ -> [origin: first_factor <> "+two_factor"]
+                         _ -> [origin: "two_factor"]
+                       end
                    ) do
                 {:ok, token} ->
                   team = Accounts.primary_team(user)
@@ -1207,8 +1230,13 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # POST /v1/auth/oauth/exchange {code} → 200 {token, team_id} | 401
-  # {error: "invalid_code"}. The second half of the cch-w10 handoff: the SPA boots,
+  # POST /v1/auth/oauth/exchange {code}
+  #   → 200 {token, team_id}                             — no second factor, signed in
+  #   → 200 {two_factor_required: true, challenge_token}  — 2FA user, step two
+  #   → 401 {error: "invalid_code"}
+  #   → 429 {error: "rate_limited"}
+  #
+  # The second half of the cch-w10 handoff: the SPA boots,
   # reads the one-time code off its own fragment, and trades it here for the real
   # session token — over a request whose credential is in the BODY, never in a
   # response header.
@@ -1251,11 +1279,40 @@ defmodule BarkparkCloud.Web.Router do
 
       :ok ->
         with true <- is_binary(code),
-             {user, origin} <- Accounts.consume_oauth_exchange_code(code),
-             {:ok, token} <-
-               Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: origin]) do
-          team = Accounts.primary_team(user)
-          json(conn, 200, %{token: token, team_id: team && team.id})
+             {user, origin} <- Accounts.consume_oauth_exchange_code(code) do
+          if Accounts.two_factor_enabled?(user) do
+            # cch-w53-s6 — THE SECOND FACTOR IS NOT OPTIONAL ON THIS LEG EITHER.
+            # A verified IdP identity is ONE factor, and `get_or_create_user_from_oauth`
+            # links by verified email on purpose (accounts.ex:139), so a password
+            # account that enrolled in TOTP is reachable through here the moment a
+            # provider is configured. Minting a session at this point would let
+            # control of an email address stand in for the enrolled second factor.
+            #
+            # NEVER A HARD REFUSE — the answer is the challenge shape the password
+            # leg already returns above, because an OAuth-born account can be
+            # passwordless (User.oauth_changeset hashes 32 random bytes) with a
+            # synthetic `@oauth.users.barkpark.cloud` address the emailed reset
+            # can never reach. Refusing them here would be permanent.
+            case Accounts.create_two_factor_pending_token(user, origin) do
+              {:ok, pending} ->
+                json(conn, 200, %{two_factor_required: true, challenge_token: pending})
+
+              # Falls in with the single refusal below rather than leaking a
+              # changeset: the code is already burned, so a retry is the sign-in,
+              # not a repair.
+              {:error, %Ecto.Changeset{}} ->
+                json(conn, 401, %{error: "invalid_code"})
+            end
+          else
+            case Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: origin]) do
+              {:ok, token} ->
+                team = Accounts.primary_team(user)
+                json(conn, 200, %{token: token, team_id: team && team.id})
+
+              {:error, %Ecto.Changeset{}} ->
+                json(conn, 401, %{error: "invalid_code"})
+            end
+          end
         else
           # ONE generic refusal for unknown / burned / expired / malformed, exactly
           # like the callback's single redirect: a prober must not learn which.
@@ -2626,7 +2683,9 @@ defmodule BarkparkCloud.Web.Router do
   # ADMIN-gated + team-scoped, fail-closed: require_team_admin 401s an
   # unauthenticated caller and 403s a member who is not owner/admin; a barkpark in
   # ANOTHER team (or no such id) is the SAME 404 — NO existence leak for a
-  # non-member. 404 "no_admin_token" when the row never got one (ip-only succeed /
+  # non-member. 409 "suspended" when the box is under a billing suspension (the
+  # credential is not revealed while access is revoked — cch-w54-s2).
+  # 404 "no_admin_token" when the row never got one (ip-only succeed /
   # pre-feature instance); 500 if the stored ciphertext fails to decrypt.
   get "/v1/barkparks/:id/credentials" do
     # RBAC (rbac-roles): reveals a live admin credential → team admin (owner/admin) only.
@@ -2643,6 +2702,20 @@ defmodule BarkparkCloud.Web.Router do
         team = conn.assigns.current_team
 
         case Registry.get_barkpark(conn.path_params["id"]) do
+          # cch-w54-s2 — a SUSPENDED box reveals nothing. Suspension is billing's
+          # "data retained, access revoked", and this route hands back the
+          # PLAINTEXT instance admin token — the strongest credential the control
+          # plane holds. Keyed on the boolean the console already paints
+          # ("stopped"), and placed ABOVE the reveal so the ciphertext is never
+          # decrypted. Same 409 shape as the two mint routes below.
+          %Barkpark{team_id: tid, suspended: true} when tid == team.id ->
+            json(conn, 409, %{
+              error: "suspended",
+              detail:
+                "This instance is suspended. The admin credential is not revealed " <>
+                  "until the suspension is cleared."
+            })
+
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             case Registry.reveal_admin_token(bp) do
               {:ok, nil} ->
@@ -2677,7 +2750,9 @@ defmodule BarkparkCloud.Web.Router do
   #
   # USER-authed + TEAM-SCOPED, fail-closed: any member of the owning team may
   # open Studio; a wrong-team / nonexistent / malformed id is the SAME 404 (no
-  # existence leak). 409 not_live while provisioning; 404 no_admin_token for
+  # existence leak). 409 suspended when the box is under a billing suspension
+  # (no ticket is minted and the instance is never called — cch-w54-s2);
+  # 409 not_live while provisioning; 404 no_admin_token for
   # pre-feature instances (parity with /credentials); 502 when the instance
   # call fails; 500 on tampered ciphertext.
   post "/v1/barkparks/:id/studio-link" do
@@ -2708,6 +2783,28 @@ defmodule BarkparkCloud.Web.Router do
                 })
 
                 json(conn, 200, %{url: url})
+
+              # cch-w54-s2 — the box is suspended: no ticket is minted and the
+              # instance is never called. Distinct slug from `not_live` (which
+              # means "still provisioning") because this is a verdict the owner
+              # resolves, not a wait.
+              #
+              # REVIEW (cch-w54 wave review) — the detail deliberately does NOT
+              # say "until the subscription is current". `suspended` is one
+              # column written by TWO independent producers, and only one of them
+              # is money: `Billing.reconcile_plan_limit/1` suspends for
+              # `quota_exceeded` on a team that is fully paid and `status:
+              # "active"`. Naming the subscription here would tell that team the
+              # same falsehood cch-w54-s1 just removed from the instance-card
+              # banner. "Until the suspension is cleared" is true on both axes and
+              # is the same vocabulary as the console's ERRORS.suspended string.
+              {:error, :suspended} ->
+                json(conn, 409, %{
+                  error: "suspended",
+                  detail:
+                    "This instance is suspended. Studio access is closed until the " <>
+                      "suspension is cleared."
+                })
 
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
@@ -2745,7 +2842,10 @@ defmodule BarkparkCloud.Web.Router do
   # mint their own app token; a wrong-team / nonexistent / malformed id is the
   # SAME 404 (no existence leak). Rate-limited per IP (`app_token:<ip>` bucket,
   # 10/min — each hit costs a server-side admin-authed instance call; peer-ip
-  # physics fixed by cch-w1-peer-ip-pin, PR #5305). 409 not_live while
+  # physics fixed by cch-w1-peer-ip-pin, PR #5305). 409 suspended when the box
+  # is under a billing suspension — the token this route mints is DURABLE, so
+  # minting one through a suspended box would outlive the suspension
+  # (cch-w54-s2). 409 not_live while
   # provisioning; 409 app_token_unsupported when the instance predates the
   # mint route (charter D8 — the client maps it to manual token paste);
   # 404 no_admin_token for pre-feature instances; 502 when the instance call
@@ -2780,6 +2880,18 @@ defmodule BarkparkCloud.Web.Router do
                 })
 
                 json(conn, 200, payload)
+
+              # cch-w54-s2 — the box is suspended: no app token is minted and the
+              # instance is never called. This one matters most of the three —
+              # the credential it withholds is durable read+write+chat and would
+              # outlive the suspension that was supposed to revoke access.
+              {:error, :suspended} ->
+                json(conn, 409, %{
+                  error: "suspended",
+                  detail:
+                    "This instance is suspended. New app tokens are not issued until " <>
+                      "the suspension is cleared."
+                })
 
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
@@ -12662,8 +12774,12 @@ defmodule BarkparkCloud.Web.Router do
   # per broadcast, with a heartbeat comment every 25s so an idle stream isn't
   # reaped by a fronting proxy. A failed chunk (client gone) ends the loop; :pg
   # auto-unsubscribes the dying process.
+  #
+  # The loop carries the connecting user's id because it must OUTLIVE its own
+  # credential check — see `sse_loop/3`.
   defp stream_events(conn, team_id) do
     :ok = Events.subscribe(team_id)
+    user_id = conn.assigns.current_user.id
 
     conn =
       conn
@@ -12673,36 +12789,107 @@ defmodule BarkparkCloud.Web.Router do
       |> send_chunked(200)
 
     case Plug.Conn.chunk(conn, ": connected\n\n") do
-      {:ok, conn} -> sse_loop(conn)
+      {:ok, conn} -> sse_loop(conn, user_id, System.monotonic_time(:millisecond))
       {:error, _} -> conn
     end
   end
 
-  defp sse_loop(conn) do
+  # The parked stream, and the ONE thing to understand about it: authentication
+  # happened once, at connect, and the credential is already gone by the time we
+  # get here (an `?ticket=` is BURNED inside the connect transaction). So the loop
+  # cannot re-verify a token — it remembers `user_id` and re-asks the only
+  # question that survives: does this user still have a live session at all?
+  #
+  # Before cch-w53-s4 it asked nothing. "Sign out everywhere" stamped every
+  # session row revoked and this loop kept chunking team events to the signed-out
+  # device forever — measured across two heartbeats at ~t+55s, with no bound at
+  # all except the client hanging up. For the console SPA that self-heals (the
+  # refetch each event triggers 401s and bounces to login); for a client that
+  # only READS — curl, a script, a stolen laptop — nothing ended it, and the
+  # frames are not all contentless (`site.deploy.stage` carries site/deployment/
+  # stage, `barkpark.suspended` carries a barkpark_id).
+  #
+  # THE BOUND IS ONE HEARTBEAT, NOT IMMEDIACY. The heartbeat tick ALWAYS
+  # rechecks, so an idle stream dies within ~25s of the revoke. The event path
+  # rechecks too but THROTTLED to the same window, so a chatty team cannot turn
+  # every broadcast into a query. Worst case a revoked stream sees frames for one
+  # more window; before, it saw them for its whole life.
+  #
+  # NOT COVERED, deliberately: per-row revoke (`DELETE /v1/account/sessions/:id`)
+  # does not end that device's stream, because the ACTING session keeps the count
+  # >= 1. Binding a stream to its minting session needs a `user_tokens` column
+  # that does not exist — filed as
+  # cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream.
+  defp sse_loop(conn, user_id, checked_at) do
     receive do
       {:bpcloud_event, event} ->
-        case encode_sse_frame(event) do
-          {:ok, frame} ->
-            case Plug.Conn.chunk(conn, frame) do
-              {:ok, conn} -> sse_loop(conn)
-              {:error, _} -> conn
-            end
+        case sse_session_check(user_id, checked_at, sse_recheck_ms()) do
+          :revoked ->
+            end_revoked_sse(conn, user_id)
 
-          :error ->
-            # An unencodable event must NOT crash (and so close) the whole SSE
-            # stream — the event is only an invalidation hint, safely dropped.
-            # Log and keep parking for the next (good) event / heartbeat.
-            Logger.error("sse_loop: dropping unencodable event #{inspect(event)}")
-            sse_loop(conn)
+          {:live, checked_at} ->
+            case encode_sse_frame(event) do
+              {:ok, frame} ->
+                case Plug.Conn.chunk(conn, frame) do
+                  {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+                  {:error, _} -> conn
+                end
+
+              :error ->
+                # An unencodable event must NOT crash (and so close) the whole SSE
+                # stream — the event is only an invalidation hint, safely dropped.
+                # Log and keep parking for the next (good) event / heartbeat.
+                Logger.error("sse_loop: dropping unencodable event #{inspect(event)}")
+                sse_loop(conn, user_id, checked_at)
+            end
         end
     after
-      25_000 ->
-        case Plug.Conn.chunk(conn, ": ping\n\n") do
-          {:ok, conn} -> sse_loop(conn)
-          {:error, _} -> conn
+      sse_heartbeat_ms() ->
+        # `0` forces the check: the heartbeat is the guaranteed recheck point,
+        # and it is what makes the revocation bound a bound.
+        case sse_session_check(user_id, checked_at, 0) do
+          :revoked ->
+            end_revoked_sse(conn, user_id)
+
+          {:live, checked_at} ->
+            case Plug.Conn.chunk(conn, ": ping\n\n") do
+              {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+              {:error, _} -> conn
+            end
         end
     end
   end
+
+  # `{:live, checked_at}` (possibly the SAME checked_at, when the throttle window
+  # has not elapsed) or `:revoked`. Throttled by monotonic time, never wall clock.
+  defp sse_session_check(user_id, checked_at, recheck_ms) do
+    now = System.monotonic_time(:millisecond)
+
+    cond do
+      now - checked_at < recheck_ms -> {:live, checked_at}
+      Accounts.user_has_live_session?(user_id) -> {:live, now}
+      true -> :revoked
+    end
+  end
+
+  # End a stream whose user has no live session left. Returning `conn` ends the
+  # chunked response, which the client sees as the stream closing; the SPA's
+  # error handler remints and gets a 401, which is its normal path to /login.
+  # Logged because a stream ending for AUTHORISATION reasons is otherwise
+  # indistinguishable from a network drop in the access log.
+  defp end_revoked_sse(conn, user_id) do
+    Logger.info("sse_loop: ending stream, no live session for user #{user_id}")
+    conn
+  end
+
+  # The idle heartbeat cadence, and the throttle window for the liveness recheck
+  # on the event path. Overridable ONLY so a test can observe the recheck without
+  # sleeping 25 seconds per assertion — production reads the defaults.
+  defp sse_heartbeat_ms,
+    do: Application.get_env(:barkpark_cloud, :sse_heartbeat_ms, 25_000)
+
+  defp sse_recheck_ms,
+    do: Application.get_env(:barkpark_cloud, :sse_recheck_ms, 25_000)
 
   # Encode one event as an SSE `data:` frame. A Jason failure (an unencodable
   # payload) returns :error so the loop can SKIP this frame instead of raising
