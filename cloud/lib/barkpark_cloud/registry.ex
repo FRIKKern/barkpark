@@ -4434,14 +4434,18 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  @doc """
-  Decrypt one env var's value. Returns `{:ok, plaintext}` or `:error` (tampered
-  ciphertext fails closed). A `is_shown_once` var is `{:error, :write_once}` —
-  write-once values are never revealed (compliance posture).
-  """
-  @spec reveal_env_var(EnvVar.t()) :: {:ok, binary()} | :error | {:error, :write_once}
-  def reveal_env_var(%EnvVar{is_shown_once: true}), do: {:error, :write_once}
-  def reveal_env_var(%EnvVar{value_encrypted: ciphertext}), do: Vault.decrypt(ciphertext)
+  # A per-row reveal helper lived here and refused an `is_shown_once` row with
+  # `{:error, :write_once}`. It was DELETED in wave 56 — not because write-once is
+  # wrong, but because no production caller could ever reach the guard: it had zero
+  # non-test callers, and the env-var HTTP surface is exactly three routes
+  # (`GET /v1/env-vars`, which never returns values; POST; DELETE) with no reveal
+  # route at all. The only thing that could make the refusal fire was the test that
+  # asserted it. A guard that cannot lose is worse than no guard — it reads as
+  # protection the system does not actually provide, and it makes the write-once
+  # posture look enforced on a read path that does not exist. Write-once is still
+  # enforced where a caller can actually hit it: `put_env_var/2` refuses a rewrite
+  # of an `is_shown_once` row. If a reveal path is ever wanted, it arrives with the
+  # route that needs it, and the guard becomes losable again.
 
   @doc """
   The resolved, DECRYPTED env map for a provisioned `barkpark`: its Team's

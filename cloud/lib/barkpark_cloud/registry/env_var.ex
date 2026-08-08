@@ -22,9 +22,12 @@ defmodule BarkparkCloud.Registry.EnvVar do
   plaintext through `BarkparkCloud.Registry.Vault.encrypt/1` (AES-256-GCM)
   before the changeset, the field is `redact: true` so it stays out of logs /
   inspect, and it is NEVER serialized in the API. Decryption happens on demand
-  in the context (`reveal_env_var/1`, `resolved_env_for_barkpark/1`), never as a
-  stored column. This is the exact seam `Provider.encrypted_token` and
-  `Site.env_encrypted` already ride.
+  in the context — `Registry.resolved_env_for_barkpark/1`, the ONLY decrypting
+  reader (its sole lib caller is the provision-claim payload builder) — never as a
+  stored column. There is no reveal path: no route returns a value, and the
+  per-row reveal helper that once implied one was deleted in wave 56.
+  This is the exact seam `Provider.encrypted_token` and `Site.env_encrypted`
+  already ride.
 
   ## Flags (mirroring Coolify)
 
