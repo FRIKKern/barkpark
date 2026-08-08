@@ -357,6 +357,17 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PaperReaderCsp)
   end
 
+  # Reader conditional (http-edge-truth D9/D10/D11): weak time-bucketed ETag +
+  # honored 304 for the FLAT paper reader spellings. Layered AFTER
+  # :paper_reader_csp so the 304 branch can delete the freshly-nonced CSP that
+  # plug just minted (a 304 delivering a new nonce would permanently break the
+  # cached reader's inline scripts). Self-gates to `.../papers/:slug` paths, so
+  # on the shared `:public_root` bucket it is a pure no-op for the sheets/quiz
+  # sibling readers. See BarkparkWeb.Plugs.PaperRevisionHeaders @moduledoc.
+  pipeline :paper_revision_headers do
+    plug(BarkparkWeb.Plugs.PaperRevisionHeaders)
+  end
+
   # :scoped_browser + the :docs share gate (P4) — the scoped STUDIO pipeline.
   # An anonymous request for a `:docs`-shared scope is pre-resolved by
   # RequireShareScope (read-only; LiveScope attaches the server-side write
@@ -1181,7 +1192,7 @@ defmodule BarkparkWeb.Router do
   # modules are fully qualified. Expands to nothing until a plugin contributes
   # a `:public_root` route.
   scope "/" do
-    pipe_through([:browser, :paper_reader_csp])
+    pipe_through([:browser, :paper_reader_csp, :paper_revision_headers])
 
     plugin_routes(scope: :public_root)
   end
