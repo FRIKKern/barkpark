@@ -26,6 +26,15 @@ defmodule BarkparkCloud.GitHub.CommitDistance do
   | `behind`         | `"ahead_of_main"` | `0`      | serves commits NOT on `main` (missing none)  |
   | `diverged`       | `"diverged"`    | `ahead_by` | both: missing N *and* carrying unknown code  |
 
+  NOTE THE ARGUMENT ORDER, because the sibling leg of this wave uses the other
+  one. `compare/<base>...<head>` reports HEAD relative to BASE. Here base is the
+  SERVED commit and head is `main`, so the API's `"ahead"` means *main* is ahead
+  — i.e. the box is BEHIND, which is why the rung is named for the box and not
+  for the API. The deploy-workflow assertion (`.github/workflows/deploy.yml`,
+  dr-w21-s1) passes them the other way round — base = the run's sha, head = the
+  served sha — so there `"ahead"` means the box is fine. Both are correct; only
+  one of them can be read without checking which side is base.
+
   `distance` has ONE meaning in every rung — **commits of `main` the box does
   not have** — so the column is a single unit and never mixes "behind by" with
   "ahead by". The loudness of `ahead_of_main` / `diverged` lives in `ancestry`,
@@ -72,8 +81,15 @@ defmodule BarkparkCloud.GitHub.CommitDistance do
 
     * The anonymous budget is **60 requests/hour per SOURCE IP**, shared with
       anything else calling GitHub from that address. A 403 is therefore a
-      NORMAL outcome, and it lands `unknown`/`nil` — `x-ratelimit-remaining: 0`
-      is read only to log *why*, never to fabricate a distance.
+      NORMAL outcome, and it lands `unknown`/`nil` rather than a fabricated
+      distance. It is classified by STATUS ALONE: the injected transport
+      (`Billing.HttpClient.request/1`) returns only `%{status, body}` and
+      DISCARDS response headers, so `x-ratelimit-remaining` and
+      `x-ratelimit-reset` are not available here and a budget refusal is
+      indistinguishable from any other 403. The safety half of the rule holds
+      (a refusal never becomes a 0); the diagnostic half does not, and widening
+      the shared transport to carry headers is deliberately not this slice's
+      job.
     * EGRESS from the control-plane container to `api.github.com` is UNPROVEN by
       any test — the first real hourly sweep is the proof.
     * This changes NO autoupdate behaviour: `update_state` and every gate that

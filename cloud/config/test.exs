@@ -29,6 +29,18 @@ config :barkpark_cloud,
 config :barkpark_cloud,
   studio_link_http_client: BarkparkCloud.StudioLinkFakeHttpClient
 
+# deploy-reliability W21 (S2): the commit-distance compare client is UNSET in
+# test, so the whole suite fails CLOSED on the network. The module's default is
+# the real verified-TLS Billing.HttpClient (deliberate — the hourly sweep must
+# work in prod with no config change), which means any test that PERFORMS
+# UpdateStatusWorker without programming its own responder would otherwise make
+# a live, rate-limited call to api.github.com. With this seam nil, such a test
+# gets `{:error, :http_client_not_configured}` -> the "unknown" rung, and
+# commit_distance_test.exs's own cases keep injecting per-test as they already
+# do. nil is the SAFE reading here: the module treats an unconfigured client as
+# unmeasured, never as distance 0.
+config :barkpark_cloud, BarkparkCloud.GitHub.CommitDistance, http_client: nil
+
 # hetzner-proxy: swap the server-side Hetzner API fan-out for the in-process
 # per-path fake (same seam shape as notifications/studio-link above).
 config :barkpark_cloud,
