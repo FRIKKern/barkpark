@@ -12,9 +12,35 @@ defmodule BarkparkCloud.Health do
   BEAM is running and when the VM came up. A control plane whose DB is down
   must STILL be able to say which commit it is: that is precisely the state you
   most want a sha for.
+
+  ## Clock vocabulary (charter D417)
+
+  One vocabulary across the box and the plane, so a human diffing one against
+  the other compares like with like:
+
+  * `serving_sha` — the commit whose code is EXECUTING. Here it is an alias of
+    the existing `git_sha`, read from the SAME source in the same call.
+  * `serving_since` — RESERVED, on every surface, for the instant this sha was
+    FIRST OBSERVED SERVING. Durable; a no-op restart must never move it.
+  * `process_since` — when THIS BEAM started. Moves on every restart.
+
+  The plane does not have a durable serving record yet, so `serving_since`
+  here is still the process clock (see `serving/0`) and is emitted with an
+  explicit basis string saying so. Do NOT diff it against the box's
+  `serving_since` until it is durable.
   """
 
   alias BarkparkCloud.Repo
+
+  # The honest label on a gauge a `docker restart` can IMPROVE. Emitted next to
+  # `serving_since` so nobody has to read this module to know what the number
+  # is. Its wording is asserted over the wire in health_test.exs — the test is
+  # the guard that this label cannot be quietly dropped.
+  @serving_since_basis "process-derived: this is when THIS BEAM started, not when this sha was " <>
+                         "first observed serving. A bare restart that deploys nothing moves it " <>
+                         "FORWARD, which makes any lag measured against it read SMALLER. Use " <>
+                         "serving_sha to decide what is deployed; do not read this as a deploy " <>
+                         "timestamp and do not compare it to the box's serving_since."
 
   @type result :: {:ok, map()} | {:error, map()}
 
@@ -22,7 +48,8 @@ defmodule BarkparkCloud.Health do
   Probe the control plane's own liveness.
 
   Round-trips `SELECT 1` to the Repo. On success returns
-  `{:ok, %{db: :up, checked_at: <utc_datetime>, git_sha: ..., serving_since: ...}}`.
+  `{:ok, %{db: :up, checked_at: <utc_datetime>, git_sha: ..., serving_sha: ...,
+  serving_since: ..., process_since: ..., serving_since_basis: ...}}`.
   """
   @spec health() :: result()
   def health do
@@ -51,15 +78,46 @@ defmodule BarkparkCloud.Health do
     (`cloud/docker-compose.yml`, bare `- BARKPARK_GIT_SHA`) carries no default
     and why `deploy/cp-deploy.sh` exports it AFTER sourcing `cloud/.env` — a
     stale `.env` value must not be able to win.
-  * `serving_since` is VM-derived (`:erlang.monotonic_time/0` against
+  * `serving_sha` is the SAME value as `git_sha`, read in the same call from
+    the same source — the D417 name for "the commit whose code is executing".
+    `git_sha` is NOT renamed away: `/health` is anonymous and already live, so
+    a bare rename would break an unknown live reader. Both keys, one read.
+  * `process_since` is VM-derived (`:erlang.monotonic_time/0` against
     `:erlang.system_info(:start_time)`), never env-derived, so config cannot
     fake it. It answers "how long has this PROCESS been up", NOT "how long has
-    this SHA been live" — in a container those coincide because the VM starts
-    when the slot boots, but do not read it as a deploy timestamp.
+    this SHA been live".
+  * `serving_since` currently carries that SAME process-derived instant, which
+    is why `serving_since_basis` ships beside it saying so in plain words.
+
+  D417 PLACEHOLDER — READ THIS BEFORE COMPARING SURFACES. On this surface
+  `serving_since` is a PLACEHOLDER for a durable first-observed-serving record
+  that the control plane does not keep yet. Proved by run, not by reading: two
+  BEAMs running this exact body back to back reported lag 6,334 ms -> 263 ms,
+  with `serving_since` moving FORWARD 6.4 s — a 24x "improvement" from changing
+  nothing about what is deployed. The box (`ServingMemory`) uses this name for
+  the DURABLE instant, and renders an ISO-8601 string where this renders a
+  `%DateTime{}`. Do NOT compare the plane's `serving_since` to the box's until
+  this one is durable; compare `serving_sha` instead, and use `process_since`
+  when you mean uptime. Making it durable is a separate slice.
   """
-  @spec serving() :: %{git_sha: String.t() | nil, serving_since: DateTime.t()}
+  @spec serving() :: %{
+          git_sha: String.t() | nil,
+          serving_sha: String.t() | nil,
+          serving_since: DateTime.t(),
+          process_since: DateTime.t(),
+          serving_since_basis: String.t()
+        }
   def serving do
-    %{git_sha: System.get_env("BARKPARK_GIT_SHA"), serving_since: vm_started_at()}
+    sha = System.get_env("BARKPARK_GIT_SHA")
+    process_since = vm_started_at()
+
+    %{
+      git_sha: sha,
+      serving_sha: sha,
+      serving_since: process_since,
+      process_since: process_since,
+      serving_since_basis: @serving_since_basis
+    }
   end
 
   defp vm_started_at do
