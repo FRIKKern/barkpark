@@ -7301,3 +7301,65 @@ seal or census number taken from the primary checkout is a fact about a 678-comm
 the product — quote `repo=`/`head=` or do not quote the number. And `mix test` against a fresh
 `MIX_TEST_PARTITION` fails on an unmigrated Oban table: the incantation is
 `mix ecto.create --quiet && mix ecto.migrate && mix test <file>`, all three with the same partition.
+
+### Wave 2026-08-08 (wave 24) — REVIEWED · Paper `deploy-reliability-wave-24-2026-08-08` · grade **A**
+
+**WHAT LANDED.** Six of eight slices built; two deferred by the sequenced-rounds law (s7 and s8 both wait on
+s1). Six PRs opened by the reviewer on final branches, every one gate-green on the tree that was reviewed:
+
+| Slice | Task | Final branch | PR | Gate on the final tree |
+|---|---|---|---|---|
+| s1 crown re-key | `dr-w24-s1-crown-schema-stops-losing-rows` | `…the-crown-stops-losing-a-delivery-row-on-0-r` | #10942 | 31/0 from a DROPPED-and-recreated DB, `down/0` exercised |
+| s2 commit distance | `dr-w24-s2-commit-distance-reaches-the-cli` | `…a-box-2-493-commits-behind-can-no-longer-1-r` | #10943 | go build/vet/test green + 29/0 Elixir + gofmt |
+| s3 custom host | `dr-w24-s3-custom-host-cannot-steal-a-url` | `…a-custom-host-can-no-longer-steal-a-host-2-r` | #10944 | 4/0 (23/0 with the attach suite), mutation reds |
+| s4 census Side C | `dr-w24-s4-census-grows-a-schema-arm` | `…the-census-grows-an-arm-that-can-see-a-c-3-r` | #10945 | 22/0 AFTER reconciliation with s2 |
+| s5 papers readable | `dr-w24-s5-the-rulings-become-readable` | `…the-two-rulings-the-owner-is-owed-become-4` | #10946 | 4 papers × HTTP 200 |
+| s6 seal headroom | `dr-w24-s6-roster-buys-back-seal-headroom` | `…the-epic-buys-back-the-headroom-it-needs-5` | #10947 | NO-SEAL a=FAIL b=PASS c=PASS roster=135, re-run independently |
+
+**THE WAVE'S REAL FINDING, and it is a merge finding.** s2 and s4 were dispatched in the same round and
+CONTRADICT each other: s4's headline test asserts the three `commit_*` columns are unserialized, and s2 emits
+all three. Neither builder saw the other; both flagged the wrong neighbour (#10811). Merged in either order
+unreconciled, main goes red on the second merge — the stale-green window this repo has been broken by before.
+The reviewer resolved it in the direction the arm's own design demands: the three allowlist rows DELETED,
+`@schema_unserialized_floor` re-measured 26 → 23 off the file's own refusal line (never by subtracting three),
+the "names the three columns" test flipped into a tripwire asserting they are now EMITTED and Go-decoded, and a
+sibling test (`suspended_at`) keeping the arm from rotting into a tautology. #10945 is therefore STACKED on
+#10943 and must merge after it.
+
+**Reviewer fixes, in place.** s1: a stale section header naming the superseded key. s2: the `-o json` row map
+shipped un-gofmt'd. s3: the six-spelling normalisation test reused ONE hostname, so the first iteration's victim
+row stood for the whole loop — every later spelling would have passed on that row's claim even if it normalised
+to nothing; each variant now gets its own host, and the isolated loop was mutation-proved to red. s4: the
+reconciliation above. s5 and s6 needed nothing.
+
+**WHAT STALLED.** Nothing was built and abandoned. Three honest non-closures the lead inherits: (1) s6's
+criterion 1 is PROVEN but reads unmet, because `bp task stamp --met` refuses it with `merge_gated_criterion` —
+the guard matches the marker textually in that criterion's OWN stored wording. The builder correctly declined
+the lead-only `--merge-gated` override and filed `dr-w24-bl-merge-gate-marker-false-positives`. (2) s1's
+criterion 3 (a prod re-read showing the all-zeros probe gone) cannot exist before the migration runs on prod;
+stamped a MISS with the pre-merge read attached rather than flipped. (3) `dr-w24-s1`'s discovered follow-up
+could not be filed at all — guerrilla's `/v1/data/mutate` answered 500 `unknown_error` then timed out across
+four attempts, so it lives in the task's now-line. Guerrilla 500s intermittently throughout this wave, which is
+fitting and is itself unreported.
+
+**NEXT WAVE — the dispatch order is the deliverable.** Merge round 1 in this order: **#10942 (s1) FIRST** —
+`cloud/Dockerfile` migrates while the OLD slot still serves and that slot's `insert_all` infers ON CONFLICT
+from the index s1 drops, so no writer may land in the same deploy ahead of it. Then #10943 (s2), then #10945
+(s4, which GitHub retargets to main once #10943 lands), then #10944 (s3), #10946 (s5), #10947 (s6). #10811 and
+#10720 both touch files these PRs touch; whichever lands second must RE-MEASURE the `==` floors and the
+`statusRowKeys` set, never sum them.
+
+Then dispatch the two deferred slices, each as its dependency merges: `dr-w24-s7-crown-gets-its-writer` the
+moment s1 is live on prod (it is the writer the re-keyed table exists for, and the table stays a producer with
+zero callers until it lands), and `dr-w24-s8-timeline-reaches-a-human` after s7 — s8 renders the three queue
+splits s1 added and the delivery rows s7 writes, so dispatching it earlier renders an empty table honestly and
+pointlessly. Beyond round 2, the highest-value un-taken thread is the one s3 could not close: the
+abandoned-ghost carve-out releases a name claim on `last_seen_at IS NULL` without asking about billing
+(`dr-w24-bl-ghost-carveout-releases-billed-name`), which may be the actual path the live gyldendal steal took —
+one prod query confirms or kills it, and it outranks everything else because it is a live cross-tenant
+credential transmission.
+
+**Seal state after this wave.** Roster 447 → 135 against `ROSTER_PAGE_LIMIT` 500. Verdict still an honest
+NO SEAL (a=FAIL on 57 residue rows). The headroom is BORROWED: `dr-backlog-never-started` now holds 318 of its
+own 500-row ceiling, so 365 is a countdown, not a solved problem — the paged roster is the real fix and is
+console-side backlog.
