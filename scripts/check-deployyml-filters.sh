@@ -63,9 +63,26 @@ extract_paths() {
 }
 
 # Every job-filter regex: the `grep -qE '<re>'` patterns the `changes` job uses
-# to decide which target changed.
+# to decide which target changed — and ONLY those.
+#
+# Scoped to the `changes` job by the same 2-space job-boundary technique
+# check-deploy-smoke.sh's extract_cp_smoke uses, because an unscoped grep over
+# the whole file let the workflow DISARM ITS OWN GATE: any other job whose shell
+# happens to contain a single-quoted `grep -qE '^(...|templates|...)/'` — a
+# deploy RECORDER classifying the same paths is the obvious one — was harvested
+# as if it were a dispatch filter, so stripping `templates` from the real
+# instance filter still read `OK ... 7 path(s) ... target at least one deploy
+# job` at rc=0. Worse, a VERBATIM copy defeated `--selftest` too: the drift the
+# gate exists for became invisible in the exact run meant to prove the gate can
+# lose. A regex outside the `changes` job dispatches nothing, so it may not
+# answer for a path.
 extract_regexes() {
-  grep -oE "grep -qE '[^']+'" "$1" | sed -E "s/^grep -qE '//; s/'$//"
+  awk '
+    /^  [a-zA-Z0-9_-]+:/ {
+      job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
+    }
+    job == "changes"
+  ' "$1" | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'$//"
 }
 
 # A path glob reduced to ONE representative file path, which is what the job
@@ -89,7 +106,11 @@ check_file() {
   local regexes
   regexes="$(extract_regexes "$yml")"
   if [ -z "$regexes" ]; then
-    echo "FAIL[$label]: no 'grep -qE' job filters found — the extractor is broken, not the workflow" >&2
+    echo "FAIL[$label]: no 'grep -qE' job filters found inside the 'changes' job — the extractor is broken, not the workflow" >&2
+    echo "Cause: extract_regexes ends the job at the next line indented exactly two spaces and ending in ':'," >&2
+    echo "so a 2-space-indented heredoc body (or any such line) inside the job truncates the scan. Re-indent it," >&2
+    echo "or teach the awk boundary about it — do NOT widen the scan back to the whole file (a regex outside the" >&2
+    echo "'changes' job dispatches nothing and would let a new job green this gate for free)." >&2
     return 1
   fi
 
@@ -153,14 +174,14 @@ selftest() {
   local real="$REPO_ROOT/$DEPLOY_YML_DEFAULT"
   local rc=0
 
-  echo "selftest 1/3: the real workflow passes"
+  echo "selftest 1/4: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/3: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  echo "selftest 2/4: dropping 'templates' from the instance regex must FAIL (the original bug)"
   sed "s/|connectors|templates)\//|connectors)\//" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
@@ -173,7 +194,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/3: an unexplained targetless path must FAIL"
+  echo "selftest 3/4: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   if cmp -s "$real" "$tmp/orphan.yml"; then
@@ -184,6 +205,30 @@ selftest() {
     rc=1
   else
     echo "  ok: the gate reds on a path no job targets"
+  fi
+
+  echo
+  echo "selftest 4/4: another job's own regex must NOT rescue a drifted dispatch filter"
+  # The disarm shape, verbatim: strip `templates` from the instance filter AND
+  # append a recorder job whose shell carries a copy of the same regex. Before
+  # extract_regexes was scoped to `changes`, this read OK at rc=0.
+  sed "s/|connectors|templates)\//|connectors)\//" "$real" > "$tmp/disarm.yml"
+  cat >> "$tmp/disarm.yml" <<'YML'
+
+  selftest-recorder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates)/'; then echo instance; fi
+YML
+  if ! grep -q 'selftest-recorder' "$tmp/disarm.yml"; then
+    echo "SELFTEST FAIL: the recorder job was not appended" >&2
+    rc=1
+  elif check_file "$tmp/disarm.yml" "disarm" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: a non-dispatching job's regex greened the gate — it is disarmable again" >&2
+    rc=1
+  else
+    echo "  ok: only the 'changes' job's own filters answer for a path"
   fi
 
   rm -rf "$tmp"
