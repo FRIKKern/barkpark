@@ -6808,3 +6808,496 @@ deploy.yml writes the per-carried-sha row and `bp cloud deliveries <sha>` render
 on the cloud side can detect that**) and s6 (after s4 merges). Then the two written rulings need a READER: both
 of s7's Papers return `422 semantic_empty` from `bp paper view`, so the owner can only reach them on the web —
 worth thirty seconds to confirm before the lever question is put to them at all.
+
+---
+
+## WAVE 24 — CONNECT THE NERVE
+
+Twenty-three waves built a nervous system and never connected the nerve. The epic's residue is not two dozen
+unrelated bugs; it is ONE bug, two dozen times: a producer and a consumer that both exist, both merged, both
+correct, and were never joined. The failure numerator has been frozen since 2026-08-07T10:02:55Z and S-1a
+already retires "deployments fail" on the failure arm. What survives verbatim in the wish is **"and nothing
+reports it"** — and the thing reporting nothing is no longer a missing instrument. It is six built instruments
+with no wire, plus a Paper reader that 422s on the two rulings the owner is personally owed.
+
+### D422 — THE CROWN'S KEY IS AMENDED TO `(sha, delivering_run_id, target)`. D410 IS SUPERSEDED ON THIS POINT.
+
+D410 fixed the key at `(sha, delivering_run_id, first_seen_at)` **verbatim, without `target`** — and that key
+LOSES DATA on every deploy, silently, with an HTTP 200. Proven live, twice, by two independent verifiers. One
+batch carrying `target: "cp"` and `target: "instance"` for one sha on one run with one run-scoped timestamp
+returned `{"ok":true,"received":2,"recorded":1}` against **prod**, and `stored_targets=["cp"]` against a local
+migrated DB — the instance leg was destroyed by `on_conflict: :nothing`. Posted as two separate calls (the
+natural deploy.yml shape, since cp and instance are two jobs in ONE run and share `GITHUB_RUN_ID`), the
+instance leg returns `{recorded: 0, received: 1}` — **byte-identical to a legitimate idempotent retry**.
+
+The two properties are MUTUALLY EXCLUSIVE under today's key, because `first_seen_at` is caller-supplied with
+no server default: a run-stable clock makes retries idempotent and eats the instance leg; a per-post clock
+saves both legs and duplicates on retry (proven: one delivery posted three times with the stamp shifted by 1s
+and by 1µs gave `row_count=3`). Only a key containing `target` and containing NO clock gives both. Under the
+mutated key the same two probes returned `recorded: 2 / row_count=2 / ["instance","cp"]` and
+`recorded: 1, then 0, then 0 / row_count=1`.
+
+COST OF THE RE-KEY IS ONE ASSERTION: `21 tests, 1 failure`, and the single failure is the structural pin
+*"the index in the DATABASE names all three columns"*. **D385's load-bearing guarantee survives untouched** —
+*"the SAME sha delivered by TWO runs at the same first sighting keeps BOTH rows"* still passes, because the two
+runs differ on `delivering_run_id`. Dropping the clock from the identity does not weaken the carried-delivery
+case at all; it only removes the trap.
+
+FREE NOW, NOT LATER. `GET /v1/deliveries` returns `count: 2` (one honest row for the serving sha, one all-zeros
+sentinel a verifier posted to prove the collision). Neither is a `(sha, run, target)` duplicate of the other, so
+`CREATE UNIQUE INDEX … (sha, delivering_run_id, target)` succeeds today with no dedup step. The window closes
+the moment a writer runs. **Re-derive the count immediately before cutting the migration; do not trust this
+line.** The sentinel row is deliberate probe residue and the same migration deletes it.
+
+BOUND TO THE KEY: `target` stays `NOT NULL`. Postgres NULLs never compare equal, so a future wave making
+`target` nullable would silently disable the constraint and the collision would return as duplication.
+
+WHAT THE RE-KEY GIVES UP, stated rather than smuggled: a genuinely SECOND delivery of the same sha by the same
+run to the same target (a blue/green re-flip inside one workflow run) can no longer be a second row. That is
+correct — same run + same target + same sha IS a retry — but it is a real semantic narrowing and the migration
+comment says so.
+
+### D423 — `carried` MUST EXPRESS UNKNOWN, AND AN UNCLASSIFIED DB ERROR MUST NOT BE A 500.
+
+`carried` is `NOT NULL DEFAULT false` at the DB **and** `default: false` on the Ecto field, so "unknown" is
+structurally inexpressible in both directions: an omitted key silently becomes measured-false — the exact 36.7%
+lie this epic exists to end — and an explicit `null` is not caught by `validate_required`, reaches `insert_all`,
+raises `not_null_violation`, and `classify/1` (which tags ONLY `:undefined_table`) lets it fall through to the
+router's **500 `record_failed`**. That is the epic's own banned shape, beside a migration whose comment already
+rules that a run reporting no duration "must read as unknown, never as 0".
+
+RULED: drop the NOT NULL and the Elixir field default in the same free-while-small migration, AND classify
+`not_null_violation` as a typed 422 rather than a 500. The classifier half is NOT optional under any reading —
+the nullability half is the weaker call, and it is taken because a box-side writer does not know `carried`.
+
+### D424 — THE FAN-OUT IS BOX-ANCHORED. A RUNNER-ANCHORED RECORDER FABRICATES THE SERVING SHA.
+
+The direction briefed a runner-side `git rev-list base..head` off deploy.yml's `changes` job. **Refuted by
+measurement, and the defect is worse than an under-count.** `cp-deploy.sh:44` runs `git pull --ff-only origin
+main`, which takes origin/main AT PULL TIME, not `github.sha`. Run 31252819791 (headSha `8af8c2ad`,
+cp=success) left the CP box on `5b68852f` — a charter-only merge that does not even trigger deploy.yml. A
+runner-anchored writer would have recorded `serving_sha=8af8c2ad` over a 3-commit range; the box actually
+delivered `31bbb79b..5b68852f` = **7 commits**, ending on a sha no run has. Wrong sha, four commits missing, and
+the crown's first rows would lie about what production is running.
+
+The under-count is real and large on the arm nobody weighted: over 40 successful runs, **cp skipped 4/40,
+instance skipped 23/40 (57.5%)**, and because the base advances on every success regardless of which target ran,
+the instance ranges read runner 2 / box 16 and runner 3 / box 11. Fourteen and eight commits serving on
+guerrilla with no delivery row, forever. The runner base also degrades silently to a ONE-COMMIT range when the
+last successful run expires from retention.
+
+This is a reconciliation of two already-ratified decisions, not a third option: D410 already says
+*"`git rev-list OLD..NEW` IS the fan-out, and it is box-truthful"* and D409 already says *"The box has NO
+WORKER_TOKEN — do not plan a box→CP push."* RULED: a NEW job in `.github/workflows/deploy.yml` SSHes the box
+with the `DEPLOY_SSH_KEY`/`CP_HOST` pair the workflow already holds, reads the box's own range, and POSTs from
+the box to `https://barkpark.cloud`.
+
+**`needs:` RULING.** `needs: [changes, control-plane, instance]` with `if: always() && github.ref ==
+'refs/heads/main'`. NEVER `needs: control-plane` alone — it skips on the 4/40 cp-skipped runs, and `needs:
+instance` would skip on 23/40, surfacing nothing for exactly the carried population the wave exists to surface.
+A box-anchored recorder is idempotent: if the box did not move, base == head, the range is empty, zero rows —
+and the guerrilla reflog proves the empty case is real and visible (`HEAD@{3} == HEAD@{4} == 2673eb00`).
+`always()` here launders no red: this job carries no `continue-on-error` and sits in no reporter's `needs:`.
+
+**THE REFLOG IS NOT ONE-ENTRY-PER-RUN.** `b7f4f2ad` is a cp=success run that is an ancestor of the box HEAD and
+appears in NO reflog entry, because a deploy against an already-current box logs "Already up to date" and writes
+nothing. An absent entry is a LEGITIMATE EMPTY DELIVERY, never an error.
+
+**THE INSTANCE BOX IS NOT MONOTONE.** `instance-deploy.sh` uses `reset --hard FETCH_HEAD`, not `pull --ff-only`
+(its own comment at :27 explains why), and the live guerrilla reflog reads `reset: moving to FETCH_HEAD` on every
+entry. `git rev-list OLD..NEW` remains correct as a SET under divergence, but any code treating the range as a
+monotone "commits behind" counter must not assume ancestry.
+
+### D425 — THE WRITER'S SEAM IS PROVEN END TO END, WITH ZERO NEW CREDENTIALS.
+
+The assumption that, if false, killed the wave's spine. It holds, and it was exercised rather than reasoned.
+`docker exec <cp> printenv WORKER_TOKEN` reports present and non-empty on the live control plane;
+`set -a; . cloud/.env; set +a` on the box put a working token in scope and the POST authenticated on the first
+try. PDS-D716 verbatim puts `.github/workflows/**` OUT of the PDS fence (`bp-pds-charter.md:15028`), so the
+slice is legal with zero dispensation.
+
+**THE RECORDER MUST NOT DISCOVER A PORT.** Both blue/green slots bind `127.0.0.1` only (live: green is
+`127.0.0.1:4101->4100/tcp`, Caddy line 2 reads `reverse_proxy localhost:4101`), so no runner can reach a slot
+directly — but posting from the box to `https://barkpark.cloud/v1/internal/platform-deliveries` returns 200 and
+Caddy resolves the live slot. The recorder is slot-agnostic with no Caddyfile parsing and no blue/green branch.
+It must NOT copy `cp-deploy.sh`'s `http://localhost:${TARGET_PORT}` probes — those deliberately target the IDLE
+slot before the flip; the recorder wants the LIVE one.
+
+Full seam quoted: `{"ok":true,"received":1,"recorded":1}`, byte-identical replay `{"recorded":0}`, a bare
+`{sha:…}` body → 422 `deliveries_required`, no Authorization → 401, and a PAT read-back returning `count:1` with
+every clock intact. The migration HAS landed on prod (200, never the typed 503). The crown's emptiness is now
+confirmed by its own reader rather than inferred from a grep.
+
+REFUSED, on purpose: a runner-side POST is technically possible (the internal route answers 401 from outside,
+not 404) but would require `WORKER_TOKEN` as a NEW GitHub secret. SSH-then-curl keeps the zero-new-credentials
+property the whole slice rests on. The route's public reachability means `WORKER_TOKEN` is the only thing
+between the open internet and the platform's delivery record — out of this wave's fence, filed to whoever owns
+the CP's Caddy config.
+
+### D426 — D414 IS CORRECTED: THE LAUNDERED GREEN IT NAMES IS ALREADY CLOSED. THE REAL HOLE IS DISPATCH.
+
+D414 asserts *"only `Security gate` has a shape ratchet asserting `needs ≡ decide()`"*. Re-run against
+origin/main, **it reds**: adding an un-decided leaf to `console-gate`'s `needs:` gives
+`FAIL — needs_without_decide = 'laundry-leaf', wanted ''` / `200 passed, 5 failed`, and the untested other
+direction — a blocking job in `cloud.yml` absent from the aggregator's `needs:` — gives
+`FAIL — blocking_not_in_needs = 'deliveries-recorder-guard'` / `149 passed, 10 failed`. Both ratchets run in
+unfiltered, blocking `path-escape` jobs and both selftests are green on unmutated origin/main (cloud 159/0,
+console 205/0). A register job that ships without its `decide()` line CANNOT merge today.
+
+**WHAT IS ACTUALLY OPEN, AND IT IS NOT ABOUT AGGREGATOR WIRING.** No required gate can red on a
+`deploy.yml`-only PR — not just Cloud. All three dispatchers return `false` for that changed-file set
+(`cloud --match cloud` false, `console --match console` false, `elixir --match compile/test` false), and the
+fourth required context measures the PR's *ref*, not its code. This is not a projection: **PR #10606**, whose
+whole diff is `deploy.yml` + `check-deploy-smoke.sh`, published three green gates each carrying its own
+confession — `Cloud gate: green — nothing ran | Not dispatched: compile test`, and the same for Console and
+Elixir. The framing is *"the gate is not asked"*, never *"the gate lies"* — the gates CONFESS.
+
+**AND WIDENING `CLOUD_PATHS` ALONE IS SELF-REFERENTIALLY GREEN.** Adding `deploy.yml` to the set works
+mechanically (`--check` OK, `--match cloud` true, `160 passed, 0 failed`) but its ONLY new assertion is
+GENERATED FROM THE SET IT ASSERTS — delete the line later and the assertion deletes itself, nothing reds, and
+the recorder is undefended again. Contrast a path backed by a real read: deleting `deploy/site-deploy.sh` from
+`CLOUD_PATHS` fails `--check` by name and gives `156 passed, 2 failed`.
+
+RULED, both halves: (1) `deploy.yml` enters `CLOUD_PATHS` **if and only if** the same PR lands a `cloud/test`
+file that actually READS `deploy.yml` — which converts an undefended declaration into a defended one and makes
+slice 1's own lane able to run tests at all; (2) D414's "adopt and widen" is amended to mean **ADD A THIRD ARM**
+to the shipped `payload_key_set_census`, not tighten the two key-set arms, which are the wrong instrument for a
+column that never reaches a wire.
+
+### D427 — THE CENSUS GROWS A SCHEMA-UNSERIALIZED ARM. THE KEY-SET ARMS STRUCTURALLY CANNOT SEE THE CROWN LIE.
+
+Both existing arms take two INPUTS: EMITTED (keys a censused serializer literally writes) and DECLARED (json
+tags in `internal/cloudclient`). `commit_distance`/`commit_ancestry`/`commit_distance_checked_at` are in
+NEITHER — they are schema columns no serializer emits and no Go tag names. The suite is `13 tests, 0 failures`
+on exactly the tree where the wave's headline defect lives. This is not a gap in the arms; it is a class of hole
+their coordinate system cannot address.
+
+PROTOTYPED AND MUTATION-PROVEN BOTH WAYS. Side C = Ecto schema field names off the AST, compared against the
+paired serializer's emitted keys, reusing the file's existing `Extract` verbatim. On three pairs it measures
+UNSERIALIZED = 26 (Barkpark 17, PlatformDelivery 2, Deployment 7) and **names all three `commit_*` columns on
+arrival**. It loses in both directions: `walker: :broken` moves the floor 26 → 93 so an `==` floor reds, and
+wiring `commit_distance` into `barkpark_json/4` moves Barkpark 17 → 16, forcing the allowlist row's deletion in
+the same commit.
+
+SCOPE IS THE RISK, NOT ALLOWLIST SIZE. Scoped to the CENSUSED pairs the one-time cost is 26 rows, five of which
+collapse under one class rule (`*_encrypted` = credential, never on a wire) — cheaper than the 27 rows the
+existing allowlist already carries. Pointed at the whole tree it is 28 schemas and 252 `field :` declarations.
+RULED: the schema arm is driven by the SAME `@pairs` owner (schema declared per pair, never auto-discovered);
+a pair without a schema (query projections) simply carries none.
+
+MIS-PAIR TRIPWIRE REQUIRED. Name-guessing a pair is a live hazard: `delivery_json/1` is the NOTIFICATIONS
+serializer, not `platform_deliveries` (whose real serializer is `PlatformDelivery.to_json/1`), and the mis-pair
+manufactured 10 false rows out of 11 fields. A pair whose emitted∩fields is near-empty must red as MIS-PAIRED,
+not as ten holes.
+
+AND THE CROWN HOLE IS A THIRD DISEASE THE NEW ARM STILL CANNOT SEE. `platform_deliveries` has a schema, a
+writer route, a reader route and a serializer — the schema arm scores it GREEN. What is missing is a CALLER. Do
+not let a green schema arm be read as "the wire is connected".
+
+### D428 — THE MERGE ORDER, AND THE ONE ACT THAT WOULD BREAK IT.
+
+All five open DR PRs **PASS** `scripts/pr-task-gate.sh` right now — exit 0, five for five, run from origin/main
+against the live ledger with each PR's real `createdAt`. Every backing task is `open` with `claim.worker: null`,
+`previous_worker` + `expired_at` set and NO `released_at` — the gate's open branch, with `open_lead` of
+7151/2645/7154/1330/1737 seconds. `created_at` does not move on `synchronize`, so the verdict is
+push-invariant, and the script says the cost out loud: *"A PR opened under a live claim therefore passes
+forever, however long it then sits."* This is D79 extended verbatim to all five.
+
+**THE OPERATIONAL RULE IS THEREFORE INVERTED FROM THE PANIC.** Rebase and force-push freely. NEVER close/reopen,
+NEVER re-cut onto a fresh PR (fresh `created_at` past every lapse → genuine red), and **NEVER re-claim-then-
+release** — a voluntary release stamps `released_at >= expired_at` and fires the ORDERING CLAUSE for a
+DEFINITIVE red. The proposed cure is the only cheap thing that can break the patient.
+
+Two phantoms retired: the "five PRs are red / lease expired" alarm is not real, and the one historical gate
+FAILURE on #10722/#10720 reads `no task reference found on the PR` — a missing `Task:` trailer at open, cleared
+by a body edit through the workflow's `edited` trigger with no push at all. Also false: the red
+`Re-land advisory` on both — the merged-tree diffstats are +415/−26 and +300/−8; neither is already on main.
+
+ORDER, derived with `git merge-tree` against today's main and re-derived against a synthetic tree with the
+predecessors merged: **#10722 → #10757 → #10720 → #10811 → #10129.** #10722 first for a reason stronger than
+cleanliness: it is the only OTHER PR touching `.github/workflows/deploy.yml`, so it must land before this wave
+cuts the crown-writer job into that file — and it REWRITES `scripts/check-deploy-smoke.sh`, which deploy.yml's
+own `changes` job runs on every main push (a bad version jams every subsequent production deploy, and PRs never
+exercise it). Both gates pass on the merged tree: `filters rc=0`, `smoke rc=0`, 14 invariants ok.
+
+MERGE ONE AT A TIME. Four of the five fire real production deploys into `concurrency: deploy-production` with
+`cancel-in-progress: false`, so a burst queues four serial cp+instance deploys — manufacturing precisely the
+queue-wait stall this wave exists to measure, in the same window the crown records its first rows ever.
+
+**#10129 IS A LEAD CALL, NOT A BUILDER'S.** D185 already RULES that this epic does not rebase it (a textual
+rebase silently mints two unratified ladder rulings and its fixture ships `tone:""` which main's vocabulary pin
+now forbids). The lead notes' "rebase-not-close #10129" overrides a ratified decision. The tension is recorded;
+this wave does not slice it, and D185 stands until the lead supersedes it in writing.
+
+### D429 — THE TIMELINE'S NUMBERS, RE-DERIVED AT N=300. NONE OF THE FIVE SURVIVE VERBATIM.
+
+Window: the 300 most recent `deploy.yml` runs, 2026-07-31T20:49:47Z → 2026-08-08T11:51:21Z.
+
+- **D384 CONFIRMED and strengthened.** `run.startedAt == run.createdAt` on **300/300**; and
+  `min(job.started_at) == created_at` on **0 of 190** — the job field is never degenerate, so the split point
+  is safe. 110 of 110 cancelled runs carry ZERO jobs, and there were zero targetless successes, so
+  "not delivered by its own run" == cancelled, exactly.
+- **THE POINT-TEST FIGHT IS A DENOMINATOR FIGHT.** 88.9% over slow rows (legA ≥ 60s, D383's own population),
+  40.0% over all 190 rows with jobs, 58.0% over all 300. Neither surveyor was wrong; both printed a bare
+  percentage whose denominator was in the other's head — D376's trap at the population level.
+- **D411's 95.6%/57.9% DOES NOT REPRODUCE under any denominator/outlier combination.** Slow rows give
+  **93.8% BY ROW** and **45.6% BY SECONDS with the single 19,486s stall IN / 90.8% with it OUT**. That one row
+  is 49.7% of all slow leg-A seconds, so the seconds figure is not a stable statistic at all.
+- **CARRIED: 36.7% (110/300) over 8 days, NOT 51.2%.** The recent-80 slice reproduces 51.2% exactly, and
+  per-day it is 23.8–30.4% on quiet days against 48.9% (08-07) and 52.0% (08-08) — **the epic's own wave days**.
+  "Measure on a quiet host" at the platform level. Print 36.7% with its window; never print 51.2% without
+  saying it is a burst-day slice measured during our own waves.
+- **PICKUP p50 = 4.0s is definition-invariant** across four variants. **p90 = 10.2–11.0s** — the inherited 10s
+  reproduces, the survey's 14s does not. p95 diverges wildly (12.8s vs 153.8s); do not print p95.
+
+**RENDERING RULE.** `bp cloud deliveries <sha>` renders ONE sha and MUST NOT print a population percentage at
+all — it prints that sha's own SECONDS, attributed. Population percentages live in the charter and the wave
+Paper only, and there always as the PAIR with the outlier policy stated. `dr-w23-s3`'s criterion 6 is widened
+from *"no percentage without its unit"* to **"no percentage without its unit AND its outlier policy"**, and its
+Purpose text's three figures (500/500, 95.6%/57.9%, "92.0% is 3.6 points low") are restated as
+300/300, 93.8%/45.6%/90.8%, and a 4.9-point point-vs-interval gap.
+
+### D430 — SPLIT `queued_seconds` AT WRITE TIME, WITH A THRESHOLDLESS STALL BUCKET.
+
+Three nullable integers (self / pickup / stall) beside the total. Reasons in strength order: (1) CREDENTIAL
+SHAPE — client-side derivation would make `bp cloud deliveries` require a GitHub token with `actions:read` on
+top of the Barkpark PAT, destroying the wave's whole selling point of "a PAT, two commands", while the runner
+already holds `permissions: actions: read` + `github.token` for free; (2) the self bucket is NOT derivable from
+one run (it needs every other overlapping deploy run's build window) and the stall bucket needs a repo-wide
+cross-workflow query — 3+ round trips per rendered row; (3) the carried population needs a two-run join, and a
+carried sha's own run can never supply a job timestamp.
+
+**NOT SOLD ON RETENTION, which was REFUTED.** Run `25188277785`, created 2026-04-30 (~100 days old), still
+returns `total_count 4` with `started_at`. Retention is a settings-toggle risk, not a measured death; do not
+argue the split on it.
+
+**THE STALL BUCKET IS DEFINED STRUCTURALLY, NEVER BY A MAGNITUDE CONSTANT.** During the outlier's wait window,
+**47** runs of OTHER workflows carried job timestamps with p50 leg-A **8,887s** and **44/47 (93.6%) waiting
+>600s across 14 distinct workflows** — workflows that cannot share our concurrency group, so their wait cannot
+be our own queue. Partition of leg A, exhaustive:
+**self** = measured seconds of `[created_at, min(job.started_at)]` overlapping another deploy.yml run's build
+window; **stall** = residual seconds co-incident with ≥ 2 distinct OTHER workflows in this repo also holding a
+run created-but-unpicked (two independent workflows cannot share a concurrency group with each other and with
+us by accident; measured here it was 14); **pickup** = whatever is left, defined as the RESIDUAL and never as a
+threshold — so a regime shift in GitHub's pickup latency can never silently reclassify as stall, and the bucket
+that cannot be discovered empirically never carries the magic constant. If either query fails the columns are
+NULL, never 0 — the migration's existing law for `queued_seconds`/`build_seconds` extends verbatim.
+
+### D431 — THE COMMIT-DISTANCE RECORDER IS ALIVE AND HONEST. ONLY THE READER IS MISSING.
+
+The premise behind the "all three columns NULL including `checked_at`" alarm was a TIMING ARTEFACT: the BEAM
+carrying #10756 started 11:55:08Z, the hourly cron fires at :17, and the first post-deploy tick ran
+12:17:01–12:17:08Z and wrote all 8 rows. 5/8 carry an integer distance (Guerrilla 1, Gyldendal 2493, dooodo 911,
+gyl 252, jarl 617); the 3 NULL rows are EXACTLY the 3 rows whose `git_commit` is NULL — the module's
+contractual fail-closed unknown rung, never 0.
+
+**EGRESS TO api.github.com IS PROVEN BY DATA, NOT BY CURL** (curl is absent from the image). Local
+`git rev-list --count <sha>..origin/main` gives 2/912/253/618/2494 against recorded 1/911/252/617/2493 — every
+one EXACTLY local−1, because origin/main advanced by exactly one commit after the sweep. Five independent shas
+off by the same one is unreachable by any failure mode. This retires `commit_distance.ex`'s own moduledoc
+caveat *"EGRESS … is UNPROVEN by any test"*. Oban: 165 completed jobs, zero in any other state, zero rescue-arm
+errors in 4h of logs.
+
+**THE LIE IS NOW PROVABLE SIDE BY SIDE IN ONE ROW:** Gyldendal reads `commit_distance 2493`,
+`commit_ancestry behind`, `update_state current`. The truthful column and the lying column sit in the same row
+and only the lying one reaches a human. Readers remain ZERO — 7 files, none a serializer, route, CLI or console.
+
+**READER CONTRACT.** The recorder is anonymous-budget-bound (60 req/hr per source IP, shared) and a 403 is
+classified by STATUS ALONE, so a budget refusal is indistinguishable from any other 403 and lands `unknown`. A
+reader MUST render `unknown` / NULL distance as **UNMETERED sorted to the TOP**, never as "0 behind" — with 3
+live NULL rows this is a day-one rendering case, not a hypothetical.
+
+**CORRECTION TO THE DIRECTION.** "Shepherd #10720 for commit_distance" is WRONG: `gh pr diff 10720 | grep -c
+commit_distance` = **0**. #10720 renders `git_commit` plus an UNMETERED sentinel — a good, orthogonal,
+mergeable PR that removes a DIFFERENT blindness. The distance slice is a SEPARATE PR on top of it, and it must
+also fix the ATTENTION predicate, which today buckets on `UpdateState == "behind"` alone and therefore lets a
+2,493-behind box sit outside ATTENTION forever.
+
+**AND `update_state` IS NOT STRUCTURALLY INCAPABLE OF SAYING `behind`** — one live row says it right now. The
+honest, stronger mechanism is that **no release tag has been cut since 2026-07-08**, so every box that reached
+0.2.25 is pinned at `current` until someone tags again. State it that way.
+
+### D432 — GYLDENDAL IS NOT A TRIPLE-COUNT. IT IS A LIVE CROSS-TENANT CREDENTIAL DISCLOSURE.
+
+The finding was briefed as "one box triple-counted in the fleet list". It is three DIFFERENT servers on three
+DIFFERENT teams, all answering HTTP, and the real defect is far worse than a miscount: **the control plane is
+transmitting one team's decrypted instance admin bearer token to a different team's server, unattended, every
+~15 minutes — at least 1,365 times inside the 14-day retained sample window alone.**
+
+MECHANISM, end to end and all of it run. `gyldendal.barkpark.cloud` is held by row `b1259514` (team **yo**) in
+`url` AND by row `f5e1392e` (team **Gyldendal**) in `custom_host`. `dig` resolves it to **116.203.98.0** —
+team Gyldendal's box — and a curl to that FQDN returns 200 from that IP. Outbound, `Usage.instance_base_url/1`
+is literally `bp.url` and `Usage.instance_api_headers/1` puts `Authorization: Bearer <decrypted admin token>` on
+it; `UsageSamplerWorker` (crontab 7,22,37,52) walks every checkable barkpark, which b1259514 is. Proven by data:
+`usage_samples` holds 1,365 rows for b1259514 with every meter reading `unreachable` — the request WAS made and
+the foreign box refused it — and a probe with a dummy bearer to the exact sampler URL returns **401 from
+116.203.98.0**, i.e. the foreign box's application layer receives and evaluates the header.
+
+ROOT CAUSE, one line and it is a MISSING CROSS-CHECK, not bad data: `custom_host_taken?/2` checks Site domains,
+another row's `custom_host`, and foreign-team suffix nesting — it **NEVER checks another row's `url`**. The two
+partial unique indexes are disjoint, so neither can see the collision. Blast radius derived rather than assumed:
+the join of every `url` host against every `custom_host` returns **exactly 1 row** fleet-wide, and there are
+ZERO duplicate `url` values.
+
+INBOUND IS CLEAN: nothing resolves a barkpark by request hostname (the cloud router only compares `conn.host`
+to `dashboard_host`; the push relay is per-barkpark-id). One name-keyed gate is adjacent:
+`Registry.domain_registered?/1` — the `/v1/tls/ask` allowlist — resolves by hostname and knows nothing about
+url-held FQDNs (live: 200 for the contested name, 404 for both suffixed provisioning FQDNs).
+
+RULED, AS TWO ITEMS THAT MUST NOT BE CONFLATED:
+1. **SLICE (this wave):** add a `url`-host leg to `custom_host_taken?/2` plus a test that a domain already held
+   as another row's `url` is `:taken`. `registry.ex` is unfenced and no open PR touches it.
+2. **ESCALATION (human-gated, NOT a code slice):** a write-time pre-check does NOT heal the live row. Until an
+   operator acts, the platform keeps handing `yo`'s admin credential to another customer's server on a cron.
+   No row deletion is proposed — all three hosts are billed and two answer HTTP. Two honest mitigations that buy
+   time: rotate b1259514's instance admin token (it has demonstrably been transmitted to a third party), and/or
+   null its `url` (the code degrades cleanly to `:not_live`, stopping the transmission at the cost of an honest
+   "not live" badge on a box that is already unreachable).
+   **Shipping the slice and calling the tenancy issue closed would be a false-done.**
+
+COLLATERAL WORTH NAMING: team `yo` has no working address at all — TLS to its own IP dies at
+`tlsv1 alert internal error`, and ACME for that name can never validate again because the A record points at the
+other tenant. The console's honest reading of that box is "unreachable" — a real failure reported as a shrug,
+which is exactly this epic's theme.
+
+HIGH-FLIP-RISK, per E2: tenancy. A genuinely INDEPENDENT second reviewer is owed before merge.
+
+### D433 — THE PAPER 422 IS A WRITER DEFECT ON 41 PAPERS, THE READER IS NOT DOWN, AND A CONVERTER ALREADY SHIPS.
+
+Three corrections to the direction, all in the repair's favour. (1) It is **not a platform-wide reader outage**:
+`http-edge-truth-wave-2026-08-08` returns **200** on the same code path in the same minute. (2) The census is
+right about shape and wrong about impact: 727 published papers, 68 lack a top-level `blocks` list, but only
+**41 actually 422** — the other 27 store `body=null` + `body_html` and serve 200 through the HTML fallback.
+Three writer dialects, not one. (3) **A converter EXISTS** — `api/assets/paper-editor/src/convert.js` exports
+`tiptapInlineToPd` / `tiptapToBlock` / `tiptapToFullBlock`, pure, DOM-free and Node-runnable. The
+"no converter exists" claim is true only of `api/lib`.
+
+**CHARTER LINE 6809 IS REFUTED.** It says the owner "can only reach them on the web". The WEB reader 422s
+identically. The rulings are unreachable on EVERY surface.
+
+REPAIR PROVEN WITHOUT WRITING ANYTHING: 41/41 papers, 8,219 blocks emitted, zero unsupported node types; and
+via `mix run --no-start` against the real modules, 41/41 pass every predicate the reader applies —
+`valid_reader_blocks?` true, `Hollow.hollow?` false, `Render.render_blocks` producing 4,471,809 bytes with no
+crash. Because these papers store NO `body_html`, `cache_provenance/4` short-circuits to `:coherent`, so the
+reader returns 200. **The repair is a data write of the `blocks` field. No server change.**
+
+**THE TRAP A NAIVE CONVERTER SPRINGS.** PortableDoc's callout body is a SINGLE inline slot
+(`compose.ex:357` — *"the callout FLATTENS its single-paragraph body slot"*), so 6 multi-paragraph callouts +
+1 multi-paragraph blockquote silently drop everything after their first paragraph — 349 chars of THIS wave's own
+Paper among them. Spilling the extras into sibling `paragraph` blocks restores 41/41 text-identical. A builder
+who skips this ships a NEW SILENT LIE.
+
+**LEAVE THE 27 html_only PAPERS ALONE.** They render today, and writing blocks over them arms the divergence
+422 they currently dodge.
+
+RULED: repair the DR documents (this wave's Paper, wave 23, the seal ruling, the lever packet) this wave. The
+corpus-wide backfill of the remaining papers and the PRODUCER fix (reject at write time a paper body
+`reader_source` cannot classify — this wave's own disease at the document layer) are cross-epic hand-offs,
+filed.
+
+### D434 — THE SEAL RUNS AS AN HONEST NO-SEAL GAUGE, AND THE ROSTER HEADROOM IS THE WAVE'S MOST TIME-CRITICAL FACT.
+
+On a tree ACTUALLY at origin/main the shipped predicate prints
+`NO-SEAL a=FAIL b=PASS c=PASS orphans=351 successor=am-bl-idle-p95-anomaly roster=429 head=5deae282d`, exit 1.
+The survey's `b=FAIL defectFails=4` is CONFIRMED to be a **stale-tree artifact and nothing else**, reproduced
+both ways with the same binary in one session: the primary checkout is 678 commits behind AND not an ancestor of
+origin/main, its `cloud.yml` is 115 lines with zero occurrences of "Cloud gate", and all four failures cite that
+one missing aggregator. **Any wave quoting a seal number must quote `repo=`/`head=` with it and must run in a
+worktree at origin/main.**
+
+**THE 500-ROW CEILING IS FAIL-CLOSED, NOT FAIL-OPEN — and the cliff has already been hit one epic over.**
+Mutation proof: `ROSTER_PAGE_LIMIT = 100` against this epic gives `INFRA-FAULT … code=ROSTER-TRUNCATED`,
+exit 2, no verdict — crossing 500 is a REFUSAL, a total loss of the instrument. The UNMUTATED predicate against
+its own default epic `cloud-console-hardening-epic` returns *"came back FULL — 500 rows against a page limit of
+500"*, exit 2: **CCH can no longer evaluate its own seal today.** DR's headroom shrank 406 → 429 (+23) since
+D415 was written, leaving **71 rows**, and this wave consumes some of them directly.
+
+RULED: ratify **S-0a, S-1, S-4, S-6 and S-7** as charter decisions now — they are Papers-and-ledger acts
+requiring zero code and crossing no fence, and S-4a's "do not drain the roster by cancelling" is ALREADY
+mechanically enforced by the predicate's own `EMPTY-ROSTER` refusal. **S-2, S-3 and S-5 are NOT ratifiable this
+wave**: each rides in as a rung-1 register row in `cloud/priv/static/__preview__/seal-predicate.mjs`, which
+D402 cedes to Cloud Console. Ratifying only the first group and calling the ruling adopted would itself be a
+false green, because the unratifiable three carry the wish's surviving clause.
+
+**THE FALSE GREEN IS ONE REFUSAL AWAY AND D415 ALREADY NAMES IT.** `--epic` parameterizes clause (a) ONLY;
+`KNOWN_DEFECTS` and `PERMANENT_HUMAN_GATES` are flat module constants with no epic fence, so `defectFails` and
+`gateMissing` are structurally 0 for DR and clause (a) alone stands between this epic and a printed SEAL whose
+SCOPE block would name Cloud Console defects as DR's residue. Do not ratify anything that makes `a=PASS` follow
+mechanically before the epic-keyed-register fix lands.
+
+**THE CHEAPEST HIGH-VALUE ACT IS S-4c.** Re-parenting the never-started zero-criteria rows under a published
+sub-parent is the ONLY act that both discharges a seal criterion and buys back the evaluability the epic is
+about to lose. It cancels nothing (S-4a's forbidden act) and keeps every row findable in the tree.
+
+### D435 — THE DOOR READER GAP IS ALREADY BUILT. SHEPHERD #10811; DO NOT RE-CUT dr-w22-s5.
+
+CONFIRMED: the census reader prints the DEFERRAL total (`1434 deferred`) and never the DOOR population
+(1434 + 6 terminal). REFUTED, and this matters because it was the brief's evidence: *"the cause split is not
+rendered (grep for BOX_ hits only the test file)"* is a level-skip. `renderDeployCensus` echoes
+`census.Classes` and `census.Deferred` verbatim, so EVERY `BOX_*` name on the wire reaches the screen with its
+count, share and label — proven by rendering a door-shaped fixture with the origin/main binary. What is missing
+is the AGGREGATE and the CROSS-REFERENCE, not the causes.
+
+**PR #10811 IS THAT CROSS-REFERENCE**, open and 25/25 green, renderer-only, adding `deployCensusCapacityLine`
+which reads both cohorts off data already on the wire. Building the PR head and rendering the same fixture
+proves the "is it renderer-only?" question empirically: YES, by construction.
+
+RULED: `dr-w22-s5`'s acceptance criterion 2 (a server-side door term on
+`failure_reason LIKE '%409%box_at_capacity%'`) is retired as **SUPERSEDED-BY-D413**; the task closes on
+#10811's merge; it is NOT re-cut. The residue — the BOX_BUSY pair is the identical two-cohort split and is
+untouched, and no line names the door population as such — is filed as ONE follow-on to #10811, ~15 lines in
+the function #10811 already opened.
+
+FIVE KEYS THE CONTROL PLANE SENDS HAVE NO GO FIELD: `total_sites`, `truncated`, `coalesced_attempts`,
+`completeness`, `boundaries`. #10811 declares one. **`truncated` is the dangerous one** — the census clamps at
+50 sites and sets `truncated: true`, while the CLI's "… and N more" derives from its OWN display clamp, so a
+caller reading a >50-site fleet cannot tell it is reading a truncated population. This wave's own thesis inside
+the very file, and exactly what the new schema arm's sibling should red on.
+
+### THE WAVE PLAN
+
+Wave Paper: `deploy-reliability-wave-24-2026-08-08`. Epic task: `task-fb4fb869490b4213`.
+
+| # | round | slice | task | surface | gate |
+|---|---|---|---|---|---|
+| 1 | 1 | The crown's schema stops losing rows | `dr-w24-s1-crown-schema-stops-losing-rows` | `cloud/priv/repo/migrations/`, `platform_delivery.ex`, `router.ex` (writer arm), its test | `mix test test/barkpark_cloud/platform_delivery_test.exs` |
+| 2 | 1 | Commit distance reaches the wire and the CLI | `dr-w24-s2-commit-distance-reaches-the-cli` | `router.ex` (`barkpark_json/4`), `cloudclient/client.go`, `cloud_status_cmd.go` | `go build/vet/test ./internal/cli/...` |
+| 3 | 1 | A custom host cannot steal another row's url | `dr-w24-s3-custom-host-cannot-steal-a-url` | `registry.ex`, its test | `mix test test/barkpark_cloud/registry_custom_host_test.exs` |
+| 4 | 1 | The census grows a schema-unserialized arm | `dr-w24-s4-census-grows-a-schema-arm` | `payload_key_set_census_test.exs` | `mix test test/barkpark_cloud/payload_key_set_census_test.exs` |
+| 5 | 1 | The rulings become readable | `dr-w24-s5-the-rulings-become-readable` | `tooling/` repair script, Papers | `curl` status 200 on all four |
+| 6 | 1 | The roster buys back its seal headroom | `dr-w24-s6-roster-buys-back-seal-headroom` | bp ledger only | `seal-predicate.mjs` roster re-read |
+| 7 | 2 | The crown gets its writer | `dr-w24-s7-crown-gets-its-writer` | `.github/workflows/deploy.yml`, a `cloud/test` read, `CLOUD_PATHS` | `cloud-path-escape-check.sh --check --selftest` + the new test |
+| 8 | 2 | The timeline reaches a human | `dr-w24-s8-timeline-reaches-a-human` | `cloud_deliveries_cmd.go`, `cloudclient/client.go` | `go test ./internal/cli/ -run Deliver` |
+
+**Round-2 dependencies.** S7 AFTER S1 (posting both legs under the un-re-keyed index loses the instance row on
+every deploy, forever, with a 200 — the disease inside the crown). S8 AFTER S1 (it renders the three bucket
+columns S1 adds). Both carry the dependency as an "AFTER `<task_id>` merges" line at the TOP of their brief.
+
+**Known same-file adjacencies the lead must sequence.** S1 and S2 both touch `cloud/lib/barkpark_cloud/web/
+router.ex` but ~3,000 lines apart (the writer arm at ~:6476 vs `barkpark_json/4` at ~:9240) — auto-merge
+handles it; do not co-dispatch blindly. S4 touches `payload_key_set_census_test.exs`, which **#10811 also
+changes and is CONFLICTING** — S4 sequences behind #10811 and inherits `@go_tag_floor 227`, not 225. S2 touches
+`internal/cli/cloud_status_cmd.go`, which **#10720** also changes — per D428 the lead merges #10720 third, and
+S2's builder rebases onto it (#10720 adds a COMMIT column; S2 adds a BEHIND column).
+
+**HIGH-FLIP-RISK slices, per E2.** S3: the tenancy judgment — whether a `url`-held FQDN and a `custom_host`
+occupy one namespace, and whether the pre-check can be applied without breaking a legitimate re-attach — is a
+security/tenancy call decided on one live pair. S7: the reachability judgment — that a runner job SSHing the box
+and posting to the public domain reaches the LIVE slot on every deploy shape including a rollback — was proven
+once, by hand, on a quiet box. Both warrant a genuinely INDEPENDENT second reviewer before merge; the wave
+reviewer names it, the lead dispatches it.
+
+**The lead's own acts this wave, which no builder can do.** Merge in the D428 order, one at a time, waiting for
+each deploy run to reach success. Decide #10129 against D185 in writing before anyone touches it. Act on the
+D432 escalation — rotate or re-address `b1259514` — which is the only thing that stops a live cross-tenant
+credential transmission. Close `dr-w22-s5` on #10811's merge per D435. And close every merge-gated criterion.
+
+**The measurement discipline this wave adds to the standing list.** `docker compose logs … control_plane`
+names a service that DOES NOT EXIST on prod — the running slot is `control_plane_green` — and the error
+`service "control_plane" is not running` is trivially misread as "no matching log lines", a silent-failure shape
+this very epic exists to kill; run `docker compose ps` first. `curl` is ABSENT from the control-plane image, so
+an egress probe must be inferential (cross-check recorded values against a second source) or an `iex` rpc. A
+seal or census number taken from the primary checkout is a fact about a 678-commit-stale DIRECTORY, not about
+the product — quote `repo=`/`head=` or do not quote the number. And `mix test` against a fresh
+`MIX_TEST_PARTITION` fails on an unmigrated Oban table: the incantation is
+`mix ecto.create --quiet && mix ecto.migrate && mix test <file>`, all three with the same partition.
