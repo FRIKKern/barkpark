@@ -7,9 +7,9 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       customer FQDN; the apex / bare-IP shapes / shell-hostile junk all die at
       validation), normalization (lowercase / trim / trailing dot), and the
       cross-surface taken check: a Site domain, another barkpark's custom_host
-      (exact or, cross-team, as a parent of the new host), or a provisioning
-      FQDN each → `{:error, :taken}` (re-setting your OWN host is an
-      idempotent no-op, not a conflict)
+      (exact or, cross-team, as a parent of the new host), or ANOTHER row's
+      provisioning FQDN each → `{:error, :taken}` (re-setting your OWN host,
+      custom_host or url, is an idempotent no-op, not a conflict)
     * the attach_domain job queue — enqueue (one active per barkpark via the
       partial index), kind-filtered claim, succeed/fail with the
       deprovision-grade idempotency + claim-token fencing
@@ -242,8 +242,10 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       bp = barkpark_fixture(team_fixture())
       assert {:error, :taken} = Registry.set_custom_host(bp, @domain)
 
-      # Including the instance's OWN primary FQDN — it never needs attaching.
-      assert {:error, :taken} = Registry.set_custom_host(live, @domain)
+      # But NOT its own: a row attaching the FQDN it already serves shadows
+      # nobody, and refusing it would break a legitimate re-attach. Full
+      # coverage of the url leg lives in registry_custom_host_test.exs.
+      assert {:ok, %Barkpark{custom_host: @domain}} = Registry.set_custom_host(live, @domain)
     end
   end
 

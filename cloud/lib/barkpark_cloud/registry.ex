@@ -53,7 +53,7 @@ defmodule BarkparkCloud.Registry do
 
   # A barkpark row that has NEVER phoned home (last_seen_at nil) and is older
   # than this stops holding a name claim against custom-host attachment — see
-  # provisioning_fqdn_taken?/1. Every live instance reports within a minute of
+  # provisioning_fqdn_taken?/2. Every live instance reports within a minute of
   # provisioning, so 7 days of silence-from-birth is unambiguous abandonment.
   @abandoned_claim_after_days 7
 
@@ -5202,8 +5202,9 @@ defmodule BarkparkCloud.Registry do
   that, the host must not already be claimed by ANY other surface that answers
   on our boxes — a Site domain, another barkpark's `custom_host` (exact, or as
   a PARENT domain owned by a different team: `sub.barkpark.jarl.no` is refused
-  while `barkpark.jarl.no` belongs to someone else), or a provisioning FQDN
-  (any barkpark's `url`, clean or suffixed) — each of those would silently
+  while `barkpark.jarl.no` belongs to someone else), or ANOTHER barkpark's
+  provisioning FQDN (its `url` host, compared normalised — a url-held FQDN and
+  a custom_host are ONE namespace) — each of those would silently
   shadow or be shadowed by the attach. Taken → `{:error, :taken}`. The
   pre-check is check-then-write; the `barkparks_custom_host_unique_idx` unique
   constraint is the atomic backstop for a custom_host↔custom_host race
@@ -5234,14 +5235,14 @@ defmodule BarkparkCloud.Registry do
   # barkpark's custom_host (self is excluded — re-attaching your own host is an
   # idempotent no-op, not a conflict), a DIFFERENT team's custom_host as a
   # PARENT of `norm` (attach-domain V2: you may nest under your own attached
-  # domain, never under someone else's), or any barkpark's provisioning FQDN
-  # (`url` stores `https://<fqdn>` — including this barkpark's own primary
-  # FQDN, which never needs attaching).
+  # domain, never under someone else's), or ANOTHER barkpark's provisioning
+  # FQDN (`url` stores `https://<fqdn>`; self is excluded there too, so a row
+  # may attach the host it already answers on).
   defp custom_host_taken?(norm, %Barkpark{id: self_id, team_id: team_id}) do
     registered_site_domain?(norm) or
       other_barkpark_custom_host?(norm, self_id) or
       foreign_custom_host_suffix?(norm, team_id) or
-      provisioning_fqdn_taken?(norm)
+      provisioning_fqdn_taken?(norm, self_id)
   end
 
   # Does `norm` sit UNDER a custom_host owned by a different team? The stored
@@ -5272,9 +5273,24 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  defp provisioning_fqdn_taken?(norm) do
-    url = "https://" <> norm
-
+  # Does ANOTHER row already answer on `norm` as its provisioning FQDN? A
+  # url-held FQDN and a custom_host occupy ONE hostname namespace — the two
+  # partial unique indexes (`barkparks_url_unique_idx`,
+  # `barkparks_custom_host_unique_idx`) are DISJOINT and structurally cannot
+  # see across them, so this pre-check is the only guard there is.
+  #
+  # The host is compared NORMALISED, not string-equal to `"https://" <> norm`:
+  # scheme stripped, everything from the first character outside the hostname
+  # alphabet cut (port, path, query, fragment), trailing dot dropped, case
+  # folded — the same shape the changeset already produced for `norm`.
+  # Matching one exact spelling of the origin reads only one of the ways the
+  # column is written and lets the rest through.
+  #
+  # Self is EXCLUDED, exactly as `other_barkpark_custom_host?/2` does it: a row
+  # attaching the host it ALREADY serves (its own provisioning FQDN — e.g.
+  # re-attaching to re-run the DNS upsert after a repair) shadows nobody, so
+  # refusing it would only block a legitimate re-attach.
+  defp provisioning_fqdn_taken?(norm, self_id) do
     # ABANDONED rows do not hold a name claim. A row whose agent NEVER phoned
     # home (last_seen_at nil — every live instance reports within a minute of
     # provisioning), that is older than @abandoned_claim_after_days, and that
@@ -5286,7 +5302,15 @@ defmodule BarkparkCloud.Registry do
     cutoff = DateTime.add(DateTime.utc_now(), -@abandoned_claim_after_days, :day)
 
     Barkpark
-    |> where([b], b.url == ^url)
+    |> where([b], b.id != ^self_id)
+    |> where(
+      [b],
+      fragment(
+        "regexp_replace(regexp_replace(regexp_replace(lower(?), '^[a-z][a-z0-9+.-]*://', ''), '[^a-z0-9.-].*$', ''), '\\.+$', '') = ?",
+        b.url,
+        ^norm
+      )
+    )
     |> where(
       [b],
       not (is_nil(b.last_seen_at) and b.inserted_at < ^cutoff and
