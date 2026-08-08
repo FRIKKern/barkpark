@@ -569,11 +569,11 @@ mkdir -p "$gitrepo"
 SHA_PRE="$(cat "$gitrepo/.sha-pre")"
 SHA_POST="$(cat "$gitrepo/.sha-post")"
 
-cutoff_case() { # cutoff_case <label> <base_sha> <want_exit> <want_in_GITHUB_OUTPUT|-> [want_absent]
-  local label="$1" sha="$2" want="$3" wantout="$4" absent="${5:-}" got
+cutoff_case() { # cutoff_case <label> <base_sha> <want_exit> <want_in_GITHUB_OUTPUT|-> [want_absent] [want_in_stdout] [repo]
+  local label="$1" sha="$2" want="$3" wantout="$4" absent="${5:-}" saysub="${6:-}" repo="${7:-$gitrepo}" got
   local go="$fixtures/cutoff.output" ss="$fixtures/cutoff.summary" so="$fixtures/cutoff.out"
   : > "$go"; : > "$ss"; : > "$so"
-  ( cd "$gitrepo" && GITHUB_OUTPUT="$go" GITHUB_STEP_SUMMARY="$ss" BASE_SHA="$sha" \
+  ( cd "$repo" && GITHUB_OUTPUT="$go" GITHUB_STEP_SUMMARY="$ss" BASE_SHA="$sha" \
     bash --noprofile --norc -e -o pipefail "$fixtures/body.cutoff" ) > "$so" 2>&1
   got=$?
   cat "$ss" >> "$so"
@@ -585,6 +585,12 @@ cutoff_case() { # cutoff_case <label> <base_sha> <want_exit> <want_in_GITHUB_OUT
   fi
   if [ -n "$absent" ] && grep -qF -- "$absent" "$go"; then
     fail=$((fail+1)); printf 'FAIL %-40s GITHUB_OUTPUT contains %s and must not\n' "$label" "$absent"; return
+  fi
+  # What the step SAYS is part of the contract, not decoration: a grandfathered
+  # run is a green that verified nothing, and the only channel that reaches the
+  # check-run API is an annotation. Asserted on stdout+summary.
+  if [ -n "$saysub" ] && ! grep -qF -- "$saysub" "$so"; then
+    fail=$((fail+1)); printf 'FAIL %-40s output lacks %s (got: %s)\n' "$label" "$saysub" "$(tr '\n' ' ' < "$so")"; return
   fi
   pass=$((pass+1)); printf 'ok   %-40s (exit %s)\n' "$label" "$got"
 }
@@ -602,12 +608,46 @@ else
 fi
 
 cutoff_case "step cutoff: post-gate enforces"  "$SHA_POST" 0 "enforced=1"
-cutoff_case "step cutoff: pre-gate grandfathers" "$SHA_PRE" 0 "enforced=0"
+# REWRITTEN (wave 56 S4). This line used to read
+#   cutoff_case "step cutoff: pre-gate grandfathers" "$SHA_PRE" 0 "enforced=0"
+# and that expectation was WRONG — not about the exit code, about what the exit
+# code was allowed to mean. `enforced=0` makes every downstream step skip
+# (`if: enforced == '1'`), so this required context concluded SUCCESS having
+# verified no task at all, and on the check-run API that green is byte-identical
+# to one where a live claim was proven. The old assertion PINNED that silence as
+# correct: a run that said nothing passed, and so would a gate that had been
+# quietly disarmed. Grandfathering is still legitimate and still exits 0 — what
+# is no longer optional is SAYING SO on the channel that reaches the check run,
+# the same `nothing ran` disclosure the other three required contexts emit.
+cutoff_case "step cutoff: pre-gate grandfathers, and SAYS SO" "$SHA_PRE" 0 "enforced=0" "" \
+  "::notice title=PR task gate: green — nothing evaluated::"
 # The defect: an unresolvable base used to take the grandfather branch, which
 # skipped every downstream step and reported SUCCESS having checked nothing.
 # UNKNOWN must be a loud red, and must never write enforced= at all.
 cutoff_case "step cutoff: unknown base reds" "0000000000000000000000000000000000000000" 1 "-" "enforced="
 cutoff_case "step cutoff: garbage base reds" "not-a-sha-at-all" 1 "-" "enforced="
+
+# -- the rename tripwire: the cutoff must not outlive the file it tests for ----
+# The predicate is a hard-coded literal path to the workflow's OWN file. Move or
+# rename that file and the literal goes stale in silence: every open PR's base
+# lacks the path, so `enforced=0` FLEET-WIDE and the required context goes green
+# on every PR while checking nothing — and the PR performing the rename passes
+# too, because at ITS base the old path still exists. One rename, a disarmed
+# required gate, no red anywhere.
+# So the checkout is now self-checked: absent at HEAD = the cutoff cannot be
+# believed = FAIL CLOSED. This fixture is the guard's losing case — it hands the
+# step a base that DOES contain the gate (the enforcing path, i.e. the case that
+# would otherwise sail through) inside a checkout where the file has been
+# renamed away, and demands a red that names the reason.
+renamedrepo="$fixtures/basegit-renamed"
+cp -R "$gitrepo" "$renamedrepo" 2>/dev/null || { echo "TEST HARNESS FAIL: could not copy the hermetic base repo" >&2; exit 99; }
+(
+  cd "$renamedrepo" || exit 99
+  git mv .github/workflows/pr-task-gate.yml .github/workflows/pr-task-gate-renamed.yml
+  git commit -qm "rename the gate out from under its own predicate"
+) >/dev/null 2>&1 || { echo "TEST HARNESS FAIL: could not build the renamed-gate repo" >&2; exit 99; }
+cutoff_case "step cutoff: renamed gate fails closed" "$SHA_POST" 1 "-" "enforced=" \
+  "cannot trust its own cutoff" "$renamedrepo"
 
 # -- hotfix step: the emergency exit must engage regardless of LABEL ORDER -----
 # Until this block existed, `for _s in verify cutoff` extracted exactly two step

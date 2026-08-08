@@ -210,6 +210,35 @@ is harmless:
   this reason (elixir.yml:655). `plugin-node` is a third case again: blocking
   nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
 
+- **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
+  `gofmt drift ceiling (blocking)` (`.github/workflows/go-format.yml`) is a real,
+  working guard: it reds by name on any new off-roster gofmt drift and fails
+  closed on a vacuous scan (`OK: 739 Go files scanned; 0 off-roster drift`). It
+  is not required, not `needs:`-ed by any required aggregator, and — because
+  go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
+  is structurally ineligible to be required, since an absent context reports
+  `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
+  the same sense as doc-gates' 19 `(blocking)` steps below. Until 2026-08-08 it
+  appeared in **neither** `.github/required-checks.json` nor this page:
+  `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
+  caught by re-reading — `required-checks.json` is GENERATED from names observed
+  on sampled heads, and its own `_readme` concedes "EXCLUSIONS ARE WHAT THE
+  SAMPLE SAW, never a complete census", so **every paths-filtered workflow is
+  invisible to that census by construction**. The same mechanism loses rows in
+  the other direction with no report: four names once enumerated there
+  (`PR task gate self-test`, `Re-land advisory`, `Filebase aesthetics gate`,
+  `Boundary gate`) have silently left the list on regeneration. Read an absence
+  from that file as "the sample did not see it", never as "no such gate exists";
+  the ceiling is now filed there under **S4 PATHS-FILTERED** with that mechanism
+  written into its reason. **That hand-added row will not survive the next
+  regeneration** (corrected on review): the generator's MERGE covers `_readme`
+  and the check LIST (a base-first union), but it emits `exclusions:` from the
+  array it just derived and never reads the committed one — and a paths-filtered
+  name cannot enter that array, because stage 2 iterates only names that rendered
+  on the sampled main heads. Re-add it by hand after any
+  `required-checks-generate.sh` run until the generator carries `.exclusions`
+  through base-first (filed).
+
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
 `.github/required-checks.json` — and reds if this page ever again describes a
@@ -246,11 +275,34 @@ means that gate does not emit, because it is not path-gated at all.
 | `PR references an active task` | — | yes |
 
 So three of the four required contexts can go green having dispatched nothing.
-The fourth, `PR references an active task`, is **exempt by construction**: its
-workflow carries no `paths:` filter and no `changes` dispatcher, so it executes
-on every PR and its green is a verdict about that PR. `Security gate` emits the
-same notice but is not required — a red one cannot block a merge, so its green
-is the weakest of the five.
+The fourth, `PR references an active task`, is **exempt by construction** in the
+path-gating sense: its workflow carries no `paths:` filter and no `changes`
+dispatcher, so it executes on every PR. `Security gate` emits the same notice but
+is not required — a red one cannot block a merge, so its green is the weakest of
+the five.
+
+**The fourth had its own vacuous green, by a different mechanism, and until
+2026-08-08 it disclosed nothing.** `pr-task-gate.yml` grandfathers a PR whose
+base commit predates the gate, and every evaluating step below carries
+`if: enforced == '1'` — so a grandfathered run concludes SUCCESS having verified
+no task at all, byte-identical on the check-run API to one where a live claim was
+proven. It now emits its own annotation on that path,
+`::notice title=PR task gate: green — nothing evaluated::` ("NO TASK WAS CHECKED
+on this PR … Read it as 'no task check ran', never as 'this PR is task-backed'").
+It is deliberately **not** worded `nothing ran` and stays a `—` row in the table
+above: this green is not path-gating, and the roster that table holds is about
+path-gated aggregators. Two things bound the exposure. The grandfather test used
+to be a hard-coded literal path to the workflow's OWN file, so a rename would
+have silently grandfathered the entire open-PR fleet — and the renaming PR
+itself, whose base still had the old path; the cutoff now self-checks that path
+at HEAD and **fails closed** when it is absent, rather than certifying PRs on a
+predicate that no longer points at this gate
+(`scripts/pr-task-gate.test.sh`: `step cutoff: renamed gate fails closed`). And
+the grandfather branch is structurally unreachable for main-targeting PRs: a PR
+to `main` takes main's current head as its base, and the gate has been on main
+since 2026-07-07 (`9189854eb`). Re-derived 2026-08-08 over all 39 open PRs
+(including the one based on a `loop-epic/` branch): 39 of 39 base commits carry
+`.github/workflows/pr-task-gate.yml`, 0 missing, 0 unresolvable.
 
 The annotation says it in its own words. `Cloud gate`, verbatim from
 `cloud.yml`:
