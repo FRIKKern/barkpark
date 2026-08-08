@@ -12790,7 +12790,11 @@ test("instanceCardHtml: v4 anatomy — status accent, mono url, sparkline frame,
   const sub = { plan: "supporter", status: "past_due", current_period_end: "2026-08-01T00:00:00Z" };
   const shtml = hooks.instanceCardHtml(susp, { sub, stats: hooks.instanceCardStats(null) });
   assert.match(shtml, /suspended-card-banner/);
-  assert.match(shtml, /The server is stopped, not destroyed/);
+  // cch-w54-s1 — the card names what suspension WITHDREW (Cloud's management),
+  // never a stop it does not perform. Nothing on the suspension path reaches the
+  // host: it is one UPDATE of three columns on the barkparks row.
+  assert.match(shtml, /Barkpark Cloud has stopped managing it/);
+  assert.doesNotMatch(shtml, /The server is stopped/);
   assert.doesNotMatch(shtml, /Open Studio/); // suspended boxes get no Studio link
 });
 
@@ -12827,11 +12831,81 @@ test("overviewDunningBannerHtml (GR17): 'Your payment failed on {date}' + suspen
   assert.match(hooks.overviewDunningBannerHtml({ plan: "supporter", status: "past_due" }), /Your payment failed\. /);
 });
 
-test("suspendedCardBannerHtml (GR17): 'Suspended {date} — payment failed' + stopped-not-destroyed, verbatim", () => {
-  const html = hooks.suspendedCardBannerHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-04T12:00:00.000Z" });
+test("suspendedCardBannerHtml (GR17): 'Suspended {date} — payment failed' on the BILLING axis, verbatim", () => {
+  const sub = { plan: "supporter", status: "past_due", current_period_end: "2026-08-04T12:00:00.000Z" };
+  const html = hooks.suspendedCardBannerHtml(sub, { suspended: true, suspended_reason: "billing_past_due" });
   assert.match(html, /Suspended .+ — payment failed/);
-  assert.match(html, /The server is stopped, not destroyed\. Everything comes back exactly as it was the moment payment succeeds\./);
+  // cch-w54-s1 — clause 1 no longer claims a stop. Suspension writes three
+  // columns on the barkparks row and the control plane then stops LOOKING at the
+  // box (health sweeps + autoupdate skip it); there is no power action, no
+  // command channel, no traffic fence and no API gate behind that sentence.
+  // Clause 2 survives verbatim and is BACKED: invoice.paid →
+  // recover_subscription/1 → Registry.resume_team_barkparks/1.
+  assert.match(html, /Nothing is deleted, and nothing on this server has been touched — Barkpark Cloud has stopped managing it\. Everything comes back exactly as it was the moment payment succeeds\./);
+  assert.doesNotMatch(html, /The server is stopped/);
   assert.doesNotMatch(html, /suspended — not deleted/); // the card uses its OWN copy, never the banner's
+  // No reason, or a billing reason → the billing arm, unchanged.
+  assert.match(hooks.suspendedCardBannerHtml(sub, null), /payment failed/);
+  assert.match(hooks.suspendedCardBannerHtml(sub, { suspended: true, suspended_reason: "billing_lapsed" }), /payment failed/);
+});
+
+// ── cch-w54-s1 · THE QUOTA AXIS IS NOT THE BILLING AXIS ─────────────────────
+//
+// `suspendedCardBannerHtml` took only the subscription, and its call site gated
+// on `(opts.sub && bp.suspended)` — blind to the reason AND to sub.status. So a
+// team that owes NOTHING (status "active", every invoice paid) whose newest box
+// was suspended by Billing.reconcile_plan_limit/1 reads "payment failed" and a
+// promise that paying restores it. Paying restores nothing on that axis:
+// reconcile_plan_limit keys STRICTLY on the "quota_exceeded" reason and only
+// un-suspends once the team is back at or under its ceiling. That makes it wrong
+// GUIDANCE, not merely an unbacked promise.
+test("cch-w54-s1: a quota-suspended box on a FULLY PAID team is never told its payment failed", () => {
+  const paid = { plan: "supporter", status: "active", current_period_end: "2026-09-01T12:00:00.000Z" };
+  const quota = { id: "b9", name: "Overflow", host: "h", suspended: true, suspended_reason: "quota_exceeded", provision_status: "succeeded" };
+  const html = hooks.suspendedCardBannerHtml(paid, quota);
+
+  assert.doesNotMatch(html, /payment failed/, "a paid team is never told a payment failed");
+  assert.doesNotMatch(html, /the moment payment succeeds/, "paying does NOTHING on the quota axis");
+  // The real cause, and the two remedies that actually restore the box.
+  assert.match(html, /over your plan&rsquo;s instance limit/i);
+  assert.match(html, /Remove an instance, or move to a plan with a higher instance limit/);
+  assert.match(html, /come back automatically/); // backed by reconcile_plan_limit's restore arm
+  // NO DATE. suspended_at is written but never serialized, so the old copy
+  // substituted current_period_end — a FUTURE renewal day rendered as a PAST
+  // suspension day. The plane cannot produce this date, so the card omits it.
+  assert.doesNotMatch(html, /September|August|Suspended \w+ \d/);
+
+  // And it reaches the card through the real render path, not just the helper.
+  const card = hooks.instanceCardHtml(quota, { sub: paid, stats: hooks.instanceCardStats(null) });
+  assert.match(card, /suspended-card-banner/);
+  assert.doesNotMatch(card, /payment failed/);
+});
+
+// cch-w54-s1 — the raw `suspended_reason` column used to reach a user verbatim:
+// a quota-suspended box put the literal string `quota_exceeded` on screen.
+test("cch-w54-s1: suspendedReasonText humanises every reason the plane writes, and never prints a slug", () => {
+  assert.equal(hooks.suspendedReasonText("quota_exceeded"), "Over your plan's instance limit — nothing deleted");
+  assert.equal(hooks.suspendedReasonText("billing_lapsed"), "Subscription canceled — nothing deleted");
+  assert.equal(hooks.suspendedReasonText("billing_past_due"), "Payment past due — nothing deleted");
+  assert.equal(hooks.suspendedReasonText(""), "Suspended by Barkpark Cloud");
+  assert.equal(hooks.suspendedReasonText(null), "Suspended by Barkpark Cloud");
+  // An UNKNOWN server-side reason degrades into English, never snake_case.
+  assert.equal(hooks.suspendedReasonText("some_future_reason"), "Some future reason");
+  // …and that is what statusOf hands the pill.
+  const detail = hooks.statusOf({ host: "h", suspended: true, suspended_reason: "quota_exceeded" }).detail;
+  assert.equal(detail, "Over your plan's instance limit — nothing deleted");
+  assert.ok(!/quota_exceeded/.test(detail), "the raw column value never reaches a user");
+});
+
+// cch-w54-s1 — the pill LABEL is the console's loudest claim about a suspended
+// box, and it reached the DOM verbatim with zero guard. The TOKEN stays
+// `stopped` (it is the S4 vocabulary + its CSS hue); the WORD does not.
+test("cch-w54-s1: the lifecycle pill for a suspended box says Suspended, never Stopped", () => {
+  const pill = hooks.lifecyclePill({ host: "h", suspended: true });
+  assert.equal(pill.state, "stopped", "the S4 token is unchanged — the lie was the label");
+  assert.equal(pill.label, "Suspended");
+  assert.ok(!/stopped|shut down|powered off|halted/i.test(pill.label),
+    "nothing on the suspension path reaches the host, so no label may claim a halt");
 });
 
 test("overviewStatePick: past_due wins; trial+incomplete → runway; else none (mutual exclusivity)", () => {

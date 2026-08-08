@@ -1536,8 +1536,15 @@ const EXPECTATIONS = {
       assert.ok(!state.includes("runway-card"), "the runway is suppressed on the past-due path");
       const grid = (reg.get("overview-instances") || {}).innerHTML || "";
       assert.ok(grid.includes("suspended-card-banner"), "the suspended box carries the GR17 card banner");
-      assert.ok(grid.includes("The server is stopped, not destroyed"), "the suspended-card body renders verbatim");
+      // cch-w54-s1 — the card names what suspension actually withdrew (Cloud's
+      // management), not a stop nothing in this plane performs. The rendered
+      // DOM is the pin, so a helper that stopped being called would red here.
+      assert.ok(grid.includes("Barkpark Cloud has stopped managing it"), "the suspended-card body renders verbatim");
+      assert.ok(!grid.includes("The server is stopped"), "the console never paints a stop it does not perform");
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
+      // The pill beside it moved with the copy: the WORD is Suspended, and the
+      // `bp-inst--stopped` S4 token (the hue) is deliberately unchanged.
+      assert.ok(!/inst-life-label">Stopped</.test(grid), "no pill paints the literal word Stopped");
     },
   },
   // ── gr-p3 D-01: the v4 Fleet list + Archives (screens/01) ──────────────────
