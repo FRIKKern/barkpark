@@ -2460,6 +2460,61 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-08 — wave 52 REVIEW — grade A — five round-1 slices built, reviewed, gated, pushed and PR'd; two reviewer fixes
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| CROWN — the console stops offering an email transport the plane cannot carry | `cch-w52-s1-api-transport-leaves-the-console-and-a-manifest-reds-when-an-option-outruns-its-mechanism` | `loop-epic/crown-the-console-stops-offering-an-emai-0-r` | [#10646](https://github.com/FRIKKern/barkpark/pull/10646) | 38 elixir / 0 fail (162 across the wider family), 1004 js / 0 fail, `node --check` 0 |
+| A mute stops consuming the trial-warning budget | `cch-w52-s2-a-mute-stops-consuming-the-trial-warning-budget` | `loop-epic/a-muted-team-stops-permanently-spending--1` | [#10647](https://github.com/FRIKKern/barkpark/pull/10647) | 10 tests / 0 failures |
+| The audit vocabulary census, both indirection layers resolved | `cch-w51-s4-audit-vocabulary-bidirectional-census` | `loop-epic/the-audit-vocabulary-census-both-indirec-2` | [#10648](https://github.com/FRIKKern/barkpark/pull/10648) | 11 tests / 0 failures + an independent reviewer plant |
+| `required-checks-verify.sh` refuses when it declined to look | `cch-w51-s6-verify-refuses-when-it-declined-to-look` | `loop-epic/required-checks-verify-sh-refuses-when-i-3` | [#10649](https://github.com/FRIKKern/barkpark/pull/10649) | `required-checks.test.sh --hermetic` 166 passed / 0 failed, real worktree, unpiped |
+| The backup sentinel cross-fence pin, ARM A re-anchored | `cch-w51-s2-backup-sentinel-cross-fence-pin` | `loop-epic/the-backup-sentinel-cross-fence-pin-arm--4-r` | [#10650](https://github.com/FRIKKern/barkpark/pull/10650) | 1007 js / 0 fail + `console-path-escape-check.sh` OK, both wiring plants re-run |
+
+**What landed.** The wave's own axis — *a surface that certifies something nothing behind it can support* —
+paid in five registers. (1) THE CROWN: the `api` email transport is DELETED end to end, schema field, Vault
+write path, settings-view echo and console picker entry, with no migration (D594 keeps the column drop in round
+2, and removing the FIELD now is what makes that drop safe). Its guard ships in the same slice per D591 and can
+lose four ways; the FORWARD arm was RED on unmodified `main` naming `["api"]`, and the reviewer re-ran that
+mutation on the final tree. (2) A globally muted team no longer burns both trial-warning stamps on a notice
+nobody received — an `UPDATE … WHERE <stamp> IS NULL` claim that can never re-match was being spent before
+anything was proven sent, with **zero** Delivery rows at any status to show for it; un-muting now recovers the
+warning, and the test that pinned the defect as intended behaviour is rewritten in place under a header stating
+the reversal (D600). (3) The audit register gets a bidirectional census with both indirection layers resolved
+BY NAME — 55 declared, 51 produced, residue exactly four, each excused individually — plus a THIRD-LAYER GUARD
+that turns D598's "there is no third layer" from prose into something that reds. (4) `required-checks-verify.sh`
+stops returning 0 on the `enforced=false` path without having read live protection at all; the new probe is
+three-valued on purpose, because "I could not look" must never render as agreement, and §11's live clause —
+which previously ASSERTED the blindness as a requirement — now demands a named red. (5) The wave-51 backup
+sentinel is pinned across the deploy-reliability fence, paid for with one exact-file `CONSOLE_PATHS`
+declaration whose cost to that epic is written into the tree.
+
+**Reviewer fixes, both in place on the slice's own branch.** (a) `cch-w52-s1` deleted the transport but left
+`router.ex:4633` documenting `api_key?` as an accepted PUT body param and `mailer.ex:18` claiming the per-call
+override serves `"api"` — the same defect class as the slice, in the docs an SDK author reads. Folded into the
+crown branch rather than shipped separately, so `main` never advertises a transport it does not have.
+(b) `cch-w51-s2`'s arm-C predicate `/BackupProbe\s*[:=]\s*\S/` also matched `if cfg.BackupProbe == nil` — a
+false red waiting to fire on the very line whose existence is the guard's own premise. Narrowed to
+`/BackupProbe\s*(?::|=(?!=))\s*\S/`, both wiring plants re-run. The builder had filed both as follow-ups; both
+tasks are now stamped and CLOSED against this review pass rather than left open against work already done.
+
+**What stalled.** Nothing. Rounds 2 (`cch-w52-s3` carrier column + `api_key_encrypted` drop, `cch-w40-bl` send
+test) were not built BY DESIGN — both depend on the crown merging.
+
+**What the next wave must know.** (i) DISPATCH ORDER IS LOAD-BEARING: merge round 1 first, and merge #10646
+before either round-2 slice — `cch-w52-s3` drops the column the crown's field removal orphans (wave 30's
+ordering law, D594) and `cch-w40-bl` must assert against the post-shrink vocabulary or it bakes the crown
+defect into its own test. (ii) The crown's HIGH-FLIP-RISK judgment (reachability and blast radius of deleting
+`"api"`) still owes a genuinely INDEPENDENT second reviewer: the wave reviewer re-derived the repo-local half
+only and did not re-query prod. (iii) `run_ci` still carries the `enforced=false` blindness verbatim on the
+per-PR path, and `--deadlock` still reads only the spec — two filed, unbuilt holes, and the freshness one
+carries a real design conflict with `required-checks-apply.sh:236`. (iv) D595's unfiled crown-class finding —
+`router.ex:10738` ships `env:` in every provision claim under a comment saying the worker bakes it into the
+box, and nothing bakes anything — is still the strongest unbuilt candidate on this axis. (v) D602's five
+stale-open rows remain a LEAD bookkeeping chore, not a slice; until they close, `cch-w49-s6/s7` and
+`cch-w50-s4/s5` stay blocked on paperwork rather than on building.
+
+Paper: `cloud-console-hardening-wave-52-2026-08-08`.
+
 ### 2026-08-08 — wave 51 REVIEW — grade A− — three round-1 slices built, reviewed, pushed and PR'd; zero reviewer fixes needed
 
 | Slice | Task | Branch | PR | Gate re-run by the reviewer |
