@@ -7910,3 +7910,80 @@ as `w25-verify 7` and `dr-w24-s2` as `w25-verify 8` and **release neither**; and
 **Seal state after this wave.** Unchanged and honest: `NO-SEAL a=FAIL b=PASS c=PASS orphans=57 roster=135
 head=b97663730`, exit 1 — with D444's caveat sentence attached, and the residue stated as **57 direct plus 319
 one level below that clause (a) cannot see**.
+
+### Wave 2026-08-08 (wave 25) — REVIEWED · Paper `deploy-reliability-wave-25-2026-08-08` · grade **A**
+
+**All six round-1 slices built, reviewed, gate-green on their final state, PUSHED and PR'd.** Slices 7 and 8
+were NOT built, by design: the sequenced-rounds law holds them behind their dependencies (D441/D437). Nothing
+is merged — the lead merges.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The red carries the whole cure | `dr-w25-s1-gate-red-carries-the-cure` | `…carries-the-whole-cu-0-r` | [#11006](https://github.com/FRIKKern/barkpark/pull/11006) | `pr-task-gate.test.sh` **119 passed, 0 failed** (89 on main) |
+| `bp cloud deliveries <sha>` | `dr-w25-s2-deliveries-reaches-a-human` | `…renders-the-deli-1-r` | [#11007](https://github.com/FRIKKern/barkpark/pull/11007) | go build+vet+test green · cloud census 13/0 |
+| The crown records a rollback | `dr-w25-s3-crown-records-a-rollback` | `…tell-a-rollback--2` (builder's own) | [#11008](https://github.com/FRIKKern/barkpark/pull/11008) | `platform_delivery_test.exs` 35/0 |
+| The deploy gates stop being disarmable | `dr-w25-s4-deploy-gates-stop-being-disarmable` | `…two-gates-stop-bei-3-r` | [#11009](https://github.com/FRIKKern/barkpark/pull/11009) | six-command chained gate ALL GREEN |
+| The ghost carve-out keeps a live name | `dr-w25-s5-ghost-carveout-keeps-a-live-name` | `…stops-relea-4-r` | [#11010](https://github.com/FRIKKern/barkpark/pull/11010) | `registry_attach_domain_test.exs` 23/0 · 118/0 wider |
+| The digest stops calling a stale box `current` | `dr-w25-s6-digest-stops-calling-a-stale-box-current` | `…stops-counting-a--5-r` | [#11011](https://github.com/FRIKKern/barkpark/pull/11011) | digest + worker 25/0 |
+
+**What landed against the wish.** Four distinct silences closed, and each was closed at a producer rather than
+papered over at a reader. (1) The task gate's red now carries the whole cure — an entire wave was green and
+silently did not land because the message stopped one clause short of the re-fire; the reviewer widened it from
+the two briefed refusals to **all eight** a re-claim actually fixes, including the RELEASED one that is the
+terminal state the others warn about. (2) `platform_deliveries` acquired its **first human reader** in
+`bp cloud deliveries <sha>` — the record has shipped for a wave and nothing anywhere read a row out of it.
+(3) The crown learned `previous_sha` + `transition` **before its first honest row**, so a rollback stops being
+byte-identical to a no-op. (4) The two gates over `deploy.yml` stopped being disarmable **by the recorder's own
+shell** — both disarms were live on main, both aimed exactly at slice 8, and neither `--selftest` had a CI
+caller until this wave gave them one in `doc-gates.yml`. Plus the digest email, the last unfenced human surface
+counting a box 2,509 commits behind as `current`, and the ghost carve-out that was releasing a hostname the
+platform is still dialling with a live credential.
+
+**What the reviewer changed.** Five of six slices took review commits, none structural: the cure widened to all
+eight refusals (+21 harness cases); a `two_rows_one_sha` fixture scenario + multi-row render test for the
+delivery reader (**the default recorder shape, and no shipped scenario reached it**); the fourth
+broken-extractor cause named in `check-deploy-smoke.sh`'s refusal; the 24h sample window named as an attribute
+beside `@abandoned_claim_after_days`; and a rendering contradiction fixed in the digest — a tag-only `behind`
+box read `state: behind | 0 commits behind main`, which now says *"behind by its own release tag, not by
+commit"*. Slice 3 needed nothing.
+
+**HIGH-FLIP-RISK, re-derived independently (D443 / slice 5).** The reviewer re-derived the abandonment
+predicate against the SCHEMA rather than the builder's reasoning: `usage_samples.measured_at`/`barkpark_id` and
+`subscriptions.team_id`/`status` exist as the fragments assume (a wrong name would be a runtime 500 on a
+user-triggerable path); `('active','past_due')` is exactly `Billing.live_subscription/1`'s own set; and a
+`forever` comp IS an `active` subscriptions row, so leg 2 really does cover the two forever teams. **It
+agreed**, and the new refusal set is a strict SUPERSET of the old — no row refused before is released now. A
+genuinely independent second reviewer is still owed; the lead's own hand review of #11010 is that opinion.
+
+**Ledger.** Honest, and the best of the epic so far: six builders, six live claims, evidence stamped AS THEY
+WORKED (8/9, 11/12, 8/10, 9/10, 9/10, 9/10), lifecycle left `in_progress`, merge-gated criteria left OPEN for
+the lead. One ledger fix: `dr-w25-s3` criterion 8 (the PR body naming the migration as lead-ordered) became
+TRUE the moment the reviewer opened #11008 and was stamped → 9/10. Slices 7 and 8 correctly sit `open`,
+unclaimed. No task outside this wave was touched.
+
+**Filed, not taken:** `dr-w25-followup-reader-blind-to-transition` — a CROSS-SLICE gap the wave created. Slice 3
+emits `previous_sha`/`transition` (12 wire keys); slice 2's Go reader decodes exactly the pre-W25 ten and its
+fixture declares that shape. The moment both merge, the record carries the rollback verdict and its ONLY human
+reader silently drops it — **and nothing reds**, because the fixture pins are Go-side and an Elixir serializer
+change does not move them. That is the epic's own disease inside the epic's own instrument.
+
+**MERGE ORDER AND HAZARDS THE LEAD OWNS.** Land **#11009 FIRST** (D439 — the gates must be undisarmable before
+the recorder exists). Then #11006, #11011, #11010, #11007, #11008 in any order, with three collisions:
+`@go_tag_floor` on #11007 is EXACT equality measured at 237 on base `b97663730` — any sibling adding a json tag
+in `internal/cloudclient` (#10811 moves 225→227) reds main on the second merge, and the cure is a **999
+re-measure on the merged tree, never arithmetic**; #11008 carries a MIGRATION and contends with **#10942** on
+the same `@columns` list, schema block and `to_json/1` map — resolve by UNION and re-run its gate; #11010
+contends with **#10944**, which rewrites `provisioning_fqdn_taken?/1` outright — **resolve BY HAND; a naive
+`-X theirs` silently deletes the three new legs**, which is the exact failure this slice exists to prevent.
+
+**NOT CLOSED BY ANY MERGE.** The gyldendal transmission is LIVE and continues after #11010 lands: null
+`b1259514.url` and rotate team yo's instance admin token
+(`dr-w25-hg-gyldendal-operator-stops-the-transmission`). And D436's lead acts stand — merge #10942 then #10943,
+claim+re-fire #10945 BEFORE #10943 merges, then #10944 and #10946, close #10947 as empty, rebase #10811, close
+`dr-w24-s1` as `w25-verify 7` and `dr-w24-s2` as `w25-verify 8`, **releasing neither**.
+
+**Next wave.** Round 2 = `dr-w25-s7-census-scores-a-caller-less-producer` the moment #11007 merges (same file);
+round 3 = `dr-w25-s8-crown-gets-its-writer` once s3, s4 and s7 are in AND #10942 is LIVE ON PROD. Then the
+reader/serializer gap above. **Seal state unchanged and honest:** `NO-SEAL a=FAIL b=PASS c=PASS orphans=57
+roster=135`, with D444's caveat sentence attached — and the crown has still never held a row an automated
+writer put there.
