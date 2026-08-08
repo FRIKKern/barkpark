@@ -87,6 +87,8 @@ jobs:
           if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
       - name: Assert every on.push.paths entry has a deploy target
         run: bash scripts/check-deployyml-filters.sh
+      - name: Assert the control-plane smoke test can fail on a dead box
+        run: bash scripts/check-deploy-smoke.sh
 
   control-plane:
     needs: changes
@@ -114,10 +116,30 @@ jobs:
       - name: Smoke test
         # Through Caddy, not a direct port — blue/green means the live slot
         # alternates between :4100 and :4101; the domain always hits it.
+        #
+        # TWO probes, because the first one alone cannot fail on the failure
+        # that happened. `/` is `send_dashboard/1` -> send_file(200,
+        # priv/static/index.html) with ZERO Repo access in the path, and 404 was
+        # in the accept-list — so this gate certified a box serving nothing but a
+        # 404 handler (live proof, harmless: GET /definitely-not-a-route-xyz
+        # returns 404, which the old regex accepted). The DB probe below mirrors
+        # deploy/cp-deploy.sh:129-141, whose own comment names the incident: the
+        # '/' gate "stayed green through a 16h outage where every DB-backed route
+        # 500'd". Bad-creds login must answer EXACTLY 401 (a live auth stack over
+        # a live pool); 5xx or 000 fails the step. No credential, no auth — the
+        # address is deliberately invalid, on the reserved .example TLD.
+        # scripts/check-deploy-smoke.sh is the tripwire that stops either
+        # invariant regressing.
         run: |
           code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://barkpark.cloud/")"
           echo "https://barkpark.cloud/ = $code"
-          echo "$code" | grep -qE '^(200|301|302|404)$'
+          echo "$code" | grep -qE '^(200|301|302)$'
+          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            -X POST -H 'content-type: application/json' \
+            -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
+            "https://barkpark.cloud/v1/auth/login" || true)"
+          echo "https://barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
+          test "$dbcode" = "401"
 
   instance:
     needs: changes
