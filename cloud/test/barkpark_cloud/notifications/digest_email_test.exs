@@ -93,6 +93,20 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     assert summary.current == 0
   end
 
+  test "a tag-only behind box says WHICH producer called it behind, not '0 commits behind'" do
+    # REVIEW ADDITION. `behind` is reachable two ways and only one of them is a
+    # measurement. When the compare found NOTHING missing and the box's own
+    # release tag is what said `behind`, the measured distance is genuinely 0 —
+    # so the row used to read "state: behind | 0 commits behind main", which is
+    # a flat contradiction with the reason dropped on the floor. The counting
+    # test above already pinned the rung; this pins the BYTES a human reads.
+    line = DigestEmail.body(DigestEmail.summary([fresh_box(update_state: "behind")]))
+
+    assert line =~ "state: behind"
+    assert line =~ "behind by its own release tag, not by commit"
+    refute line =~ "| 0 commits behind main (measured 2026-08-08 03:11 UTC) |"
+  end
+
   test "the five measured rungs partition the fleet" do
     rows = [
       stale_box(),

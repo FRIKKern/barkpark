@@ -266,6 +266,16 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # 2,493 -> 2,509 between two measurements of the same box.
   defp distance_clause(%Barkpark{} = bp) do
     case freshness(bp) do
+      # THE ONE RUNG THE MEASUREMENT DID NOT PRODUCE. `behind` is reachable two
+      # ways: the compare found missing commits, or the compare found NONE and
+      # the box's own release tag said `behind` anyway (the self-report can only
+      # ever make the verdict worse). In the second case the measured distance is
+      # genuinely 0, so rendering the plain "0 commits behind main" beside the
+      # word `behind` reads as a contradiction and silently drops the only thing
+      # that explains it. Name the producer instead.
+      :behind when bp.commit_ancestry == "current" ->
+        "0 commits behind main (#{measured_at(bp)}) — behind by its own release tag, not by commit"
+
       :behind ->
         "#{commits(bp.commit_distance)} behind main (#{measured_at(bp)})"
 
