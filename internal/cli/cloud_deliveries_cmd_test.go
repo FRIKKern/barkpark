@@ -82,7 +82,7 @@ func deliveriesScenario(t *testing.T, fx deliveriesFixture, name string) (int, s
 	t.Helper()
 	sc, okScenario := fx.Scenarios[name]
 	if !okScenario {
-		t.Fatalf("fixture has no scenario %q — the five named scenarios are the contract", name)
+		t.Fatalf("fixture has no scenario %q — the named scenarios ARE the contract", name)
 	}
 	return sc.Status, string(sc.Body)
 }
@@ -281,6 +281,58 @@ func TestCloudDeliveriesCarriedSaysSoOutLoud(t *testing.T) {
 	ownOut, _, _ := runDeliveries(t, "table", "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432")
 	if strings.Contains(ownOut, "CARRIED") {
 		t.Fatalf("carried:false rendered the carried warning:\n%s", ownOut)
+	}
+}
+
+// TestCloudDeliveriesRendersEveryRowForOneSha (REVIEW ADDITION) pins the
+// MULTI-ROW path, which no other case reaches: every other scenario carries 0 or
+// 1 rows, so `if i > 0 { blank line }`, the per-row attribution, and the
+// carried/not-carried mix never executed. One sha having several rows is not an
+// edge case — the identity is (sha, delivering_run_id, first_seen_at) and the
+// normal post-merge shape is a cp leg and an instance leg — so a render that
+// silently dropped rows after the first, or ran two timelines together with no
+// separator, would have shipped fully green.
+func TestCloudDeliveriesRendersEveryRowForOneSha(t *testing.T) {
+	fx := loadDeliveriesFixture(t)
+	status, body := deliveriesScenario(t, fx, "two_rows_one_sha")
+	newDeliveriesServer(t, status, body)
+
+	stdout, stderr, code := runDeliveries(t, "table", "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	// BOTH runs are rendered, each with its own target — a reader must be able to
+	// see that the cp leg and the instance leg of one merge are two facts.
+	for _, want := range []string{
+		"run 31255918184", "target cp",
+		"run 31260000777", "target instance",
+		"2 deliveries recorded",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("multi-row render missing %q:\n%s", want, stdout)
+		}
+	}
+	// The two blocks are SEPARATED. Without the blank line the second run line
+	// abuts the first block's "first seen …" line and the two timelines read as
+	// one, which is precisely how a reader mis-attributes one leg's clocks.
+	first := strings.Index(stdout, "run 31255918184")
+	second := strings.Index(stdout, "run 31260000777")
+	if first < 0 || second < 0 || second < first {
+		t.Fatalf("rows rendered out of wire order (first=%d second=%d):\n%s", first, second, stdout)
+	}
+	if !strings.Contains(stdout[first:second], "\n\n") {
+		t.Fatalf("no blank line between the two delivery blocks:\n%s", stdout[first:second])
+	}
+	// Attribution is PER ROW, not per page: only the carried row warns, and only
+	// the row whose clocks are NULL says UNMETERED.
+	if strings.Count(stdout, "CARRIED — not this sha's own run") != 1 {
+		t.Fatalf("carried warning must appear on exactly the carried row:\n%s", stdout)
+	}
+	if !strings.Contains(stdout[second:], "waited     UNMETERED") {
+		t.Fatalf("the second row's NULL queue clock did not render UNMETERED:\n%s", stdout[second:])
+	}
+	if strings.Contains(stdout[first:second], "UNMETERED") {
+		t.Fatalf("the fully-clocked first row must not print UNMETERED:\n%s", stdout[first:second])
 	}
 }
 

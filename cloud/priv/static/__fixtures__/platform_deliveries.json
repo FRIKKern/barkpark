@@ -133,6 +133,43 @@
       }
     },
 
+    "two_rows_one_sha": {
+      "why": "REVIEW ADDITION. The row identity is (sha, delivering_run_id, first_seen_at), so ONE sha routinely has SEVERAL rows — the normal post-merge shape is the cp leg and the instance leg of the same merge, and a carried sha can additionally be re-delivered by a later run. Every other scenario here carries 0 or 1 rows, so the multi-row path (row ordering, the blank line between blocks, one carried row beside one that is not) never executed. That is the most likely place for an ugly-but-not-wrong render, and it is the DEFAULT outcome of the recorder slice 8 ships.",
+      "status": 200,
+      "body": {
+        "deliveries": [
+          {
+            "sha": "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+            "delivering_run_id": "31255918184",
+            "first_seen_at": "2026-08-08T11:55:11.517221Z",
+            "merged_at": "2026-08-08T11:51:21Z",
+            "queued_seconds": 14,
+            "build_seconds": 216,
+            "serving_since": "2026-08-08T11:55:11.517221Z",
+            "target": "cp",
+            "carried": false,
+            "recorded_at": "2026-08-08T12:23:21.862544Z"
+          },
+          {
+            "sha": "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+            "delivering_run_id": "31260000777",
+            "first_seen_at": "2026-08-08T12:41:09.004000Z",
+            "merged_at": "2026-08-08T11:51:21Z",
+            "queued_seconds": null,
+            "build_seconds": 940,
+            "serving_since": null,
+            "target": "instance",
+            "carried": true,
+            "recorded_at": "2026-08-08T12:52:00.000000Z"
+          }
+        ],
+        "count": 2,
+        "sha": "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
     "unavailable_503": {
       "why": "The typed refusal, and a REAL state rather than a defensive branch: deploy.yml's instance job fires on api/internal/deploy/connectors/templates and does NOT require the cloud/** merge that carries this migration, so an api-only merge posts to a control plane whose table does not exist. 503 (not 404, not 500) because the route exists and the caller should retry after the cloud release lands. `reason` is what makes it actionable; `detail` is the route's own sentence and a reader prints it verbatim.",
       "status": 503,
