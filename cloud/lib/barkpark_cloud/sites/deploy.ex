@@ -60,6 +60,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site, SiteArtifact}
   alias BarkparkCloud.Repo
+  alias BarkparkCloud.Sites.AutoDeployWorker
   alias BarkparkCloud.Sites.BoxRelay
   alias BarkparkCloud.Sites.NodePortAllocator
 
@@ -1169,6 +1170,57 @@ defmodule BarkparkCloud.Sites.Deploy do
   # chain could never be counted to its own limit.
   @deferral_scan_depth @max_consecutive_capacity_deferrals + 2
 
+  # THE HARD CEILING ON THE DEFER BACKOFF (deploy-reliability W20, charter D352).
+  # `AutoDeployWorker`'s `@unique [period: 300]` is compared against the job's
+  # `inserted_at`, NOT its `scheduled_at` (Oban 2.23.0 `Basic.since_period/3`), so
+  # a job scheduled further out than the period ages OUT of its own unique window
+  # while still pending: the next enqueue sees no conflict and mints a SECOND
+  # job — the fan-out this backoff exists to cut, reintroduced by the backoff.
+  # 240 < 300 with headroom, and the alternative repair (`timestamp: :scheduled_at`
+  # on the unique) is deliberately NOT taken: the cap is one number a test can
+  # pin, the timestamp swap changes the coalescing semantics of every caller.
+  @deferral_backoff_cap_seconds 240
+
+  @doc """
+  THE DEPTH-DERIVED DEFER WINDOW (deploy-reliability W20), in seconds.
+
+  A refused deploy re-fires as a fresh debounced `AutoDeployWorker` job. Until
+  now that job scheduled at the flat publish debounce (60s live —
+  `AUTODEPLOY_DEBOUNCE_S` is unset on the control plane), which knows nothing
+  about the build it is queueing behind: measured over 2,262 consecutive
+  deferrals, p50 61.6s apart with 1,441 of them inside the 55-75s band and only 4
+  below 55s. The clock, not the box, paced the chain — and 807 chains carried
+  2,268 rows (mean 2.81, p90 5, max 11).
+
+  The window is a MULTIPLE OF THE OPERATOR'S OWN DEBOUNCE, never an independent
+  constant: `depth` 1 waits exactly as long as today, and each further round of
+  the SAME chain waits one more window, capped at
+  `#{@deferral_backoff_cap_seconds}s`. An operator who has already stretched the
+  debounce past the cap keeps their own longer window (the cap must never make a
+  deferral MORE eager than a plain publish).
+
+  It does NOT make publishes go live faster — with one build slot per box the
+  wait is set by the slot, not by this clock. What it removes is repetition:
+  fewer permanent terminal `deferred` rows and fewer box POSTs per publish.
+  """
+  @spec deferral_backoff_seconds(pos_integer() | Site.t()) :: pos_integer()
+  def deferral_backoff_seconds(depth) when is_integer(depth) and depth >= 1 do
+    base = AutoDeployWorker.debounce_seconds()
+    min(base * depth, max(base, @deferral_backoff_cap_seconds))
+  end
+
+  # The window for a site whose CHAIN DEPTH IS NOT IN HAND — `AutoDeployWorker`'s
+  # `defer_behind_running_build/2`, which holds only the site and the in-flight
+  # deployment, mints no row of its own, and therefore has no `cause` to count a
+  # chain of. It reads the depth off the head of the site's own deployment stream
+  # (the same head-of-stream scan `defer/3` counts with, keyed on whatever cause
+  # that head row carries) and adds the round now being deferred.
+  #
+  # A site with no deferral at the head reads depth 1 — today's window, unchanged.
+  def deferral_backoff_seconds(%Site{} = site) do
+    deferral_backoff_seconds(current_deferral_depth(site) + 1)
+  end
+
   # A BOX-BUSY DEFERRAL (charter D9). Not a failure, not a drop — a settled row
   # that says "this build did not happen, and here is the rebuild that will".
   #
@@ -1240,7 +1292,10 @@ defmodule BarkparkCloud.Sites.Deploy do
         # safe: the debounced job is unique per site and schedules ~60s out, so a
         # rebuild that outlives a failed transition is the same coalesced job the
         # next publish would have fired anyway.
-        case requeue_rebuild(site.id) do
+        # THE RE-FIRE STOPS BEING BLIND (W20): the depth already in hand above
+        # picks the window, so round 4 of a chain no longer knocks on the same
+        # busy box on the same 60s clock that round 1 did.
+        case requeue_rebuild(site.id, deferral_backoff_seconds(prior + 1)) do
           {:ok, _job} ->
             _ =
               Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
@@ -1359,6 +1414,23 @@ defmodule BarkparkCloud.Sites.Deploy do
   # for a DIFFERENT cause — ends the count: a busy box and a full build queue are
   # two different stories, and counting them as one chain spends a site's whole
   # budget on causes that never repeated.
+  # The head-of-stream chain depth WITHOUT a cause in hand: take the cause from
+  # the head deferral row itself, then count with the same scan `defer/3` uses.
+  # Anything else at the head (a live build, a failure, nothing at all) is depth
+  # 0 — there is no chain to back off from.
+  defp current_deferral_depth(%Site{} = site) do
+    site
+    |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
+    |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
+    |> case do
+      [%{status: "deferred"} = head | _] ->
+        consecutive_deferrals(site, deferral_cause(head.stage, head.failure_reason))
+
+      _ ->
+        0
+    end
+  end
+
   defp consecutive_deferrals(%Site{} = site, cause) do
     site
     |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
@@ -1374,10 +1446,15 @@ defmodule BarkparkCloud.Sites.Deploy do
   # insert ALWAYS succeeds, so the re-queue-failure arm above — the one that
   # decides whether a lost publish is counted — was unreachable in a test and had
   # never been exercised at all. A check that cannot fail proves nothing.
-  defp requeue_rebuild(site_id) do
+  # The window travels with the re-queue (W20): `defer/3` already holds `prior`,
+  # so the depth is free here — it only had to be PLUMBED, since this arm is two
+  # hops from Oban. The process-local override keeps its arity-1 contract: it
+  # exists to make the re-queue FAILURE arm reachable under `testing: :manual`
+  # (where an insert always succeeds), and it does not care about the window.
+  defp requeue_rebuild(site_id, schedule_in) do
     case Process.get(:site_deploy_requeue) do
       fun when is_function(fun, 1) -> fun.(site_id)
-      _ -> BarkparkCloud.Sites.AutoDeployWorker.enqueue(site_id)
+      _ -> AutoDeployWorker.enqueue(site_id, schedule_in)
     end
   end
 
