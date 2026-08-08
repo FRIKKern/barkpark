@@ -389,7 +389,7 @@ case "$lifecycle" in
     # Repo.update_all, ttl_sweeper.ex:256/:269/:284, asserted at
     # ttl_sweeper_test.exs:126-128. schema.ex:147-161 warns about the hand-flip
     # in its own comment.)
-    [ "$worker" != "." ] || fail "task '${TASK_ID}' is in_progress but carries no claim.worker — that state comes from editing lifecycle_status directly (bp doc patch) instead of going through the claim/close engine. Re-claim it: bp task claim ${TASK_ID} <worker>"
+    [ "$worker" != "." ] || fail "task '${TASK_ID}' is in_progress but carries no claim.worker — that state comes from editing lifecycle_status directly (bp doc patch) instead of going through the claim/close engine. ${CURE}"
     actor="$worker"
     verdict="in_progress, claimed by '${worker}'"
     ;;
@@ -416,17 +416,17 @@ case "$lifecycle" in
     #
     # Every clause below is load-bearing; each one is a fixture in
     # scripts/pr-task-gate.test.sh.
-    [ "$claimed" = "yes" ] || fail "task '${TASK_ID}' is still 'open' and carries no claim at all — claim it before opening the PR (bp task claim ${TASK_ID} <worker>)"
+    [ "$claimed" = "yes" ] || fail "task '${TASK_ID}' is still 'open' and carries no claim at all — it was never claimed, so this PR was not opened under a live claim. ${CURE}"
     [ "$worker" = "." ] || fail "task '${TASK_ID}' is 'open' but its claim still names worker '${worker}' — that mixed state does not come from the claim/close engine (a reap nulls the worker). ${CURE}"
-    [ "$prev_worker" != "." ] || fail "task '${TASK_ID}' is still 'open' — its claim carries no previous_worker, so it was never claimed and reaped. Claim it before opening the PR (bp task claim ${TASK_ID} <worker>)"
-    [ "$lapse_age" != "." ] || fail "task '${TASK_ID}' is 'open' with a previous_worker but no readable claim.expired_at, so how long ago the claim lapsed cannot be established. Re-claim it: bp task claim ${TASK_ID} <worker>"
+    [ "$prev_worker" != "." ] || fail "task '${TASK_ID}' is still 'open' — its claim carries no previous_worker, so it was never claimed and reaped. ${CURE}"
+    [ "$lapse_age" != "." ] || fail "task '${TASK_ID}' is 'open' with a previous_worker but no readable claim.expired_at, so how long ago the claim lapsed cannot be established. ${CURE}"
     # THE ORDERING CLAUSE. Release MERGES into the surviving claim — it stamps
     # released_by/released_at and never previous_worker — so a task that was
     # reaped, re-claimed, then voluntarily RELEASED still carries the old
     # expired_at and would read as "just lapsed" without this. A release is a
     # worker walking away, which is exactly the state the gate exists to red.
     # Only an explicit "no" (released_at is absent or predates the reap) passes.
-    [ "$released_ge_expired" = "no" ] || fail "task '${TASK_ID}' is 'open' because its claim was RELEASED (released_at is at or after expired_at), not because a lease lapsed under a live PR — a released task is unowned. Claim it: bp task claim ${TASK_ID} <worker>"
+    [ "$released_ge_expired" = "no" ] || fail "task '${TASK_ID}' is 'open' because its claim was RELEASED (released_at is at or after expired_at), not because a lease lapsed under a live PR — a released task is unowned. ${CURE}"
     # THE FUTURE-CLOCK FLOOR. A reap can never stamp an expiry ahead of the
     # clock — the sweeper only reaps a claim whose expiry has already passed —
     # so a negative age is not "very recently lapsed"; it is a clock or a
@@ -434,7 +434,7 @@ case "$lifecycle" in
     # pass. Kept under P4 because P4 is PR-relative and would otherwise accept
     # any expiry stamped far enough forward: a one-field document edit would buy
     # an indefinite waiver. -300s of slack absorbs honest runner/ledger skew.
-    [ "$lapse_age" -ge -300 ] || fail "task '${TASK_ID}' is 'open' and its claim.expired_at is ${lapse_age#-}s in the FUTURE — a reap cannot stamp a future expiry, so this document (or one of the two clocks) cannot be trusted to say when the claim lapsed. Re-claim it: bp task claim ${TASK_ID} <worker>"
+    [ "$lapse_age" -ge -300 ] || fail "task '${TASK_ID}' is 'open' and its claim.expired_at is ${lapse_age#-}s in the FUTURE — a reap cannot stamp a future expiry, so this document (or one of the two clocks) cannot be trusted to say when the claim lapsed. ${CURE}"
     # THE LEASE PREDICATE, P4 (charter D58): the claim was LIVE when this PR was
     # OPENED — claim.expired_at >= pull_request.created_at. It replaces the old
     # wall-clock grace, which made the verdict a function of how long a PR sat in
@@ -459,7 +459,7 @@ case "$lifecycle" in
       absent)      fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT was not supplied, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read. The workflow passes it as PR_OPENED_AT: \${{ github.event.pull_request.created_at }} (.github/workflows/pr-task-gate.yml)" ;;
       unparseable) fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT ('${PR_OPENED_AT:-}') is not a readable ISO-8601 timestamp, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read" ;;
     esac
-    [ "$open_lead" != "." ] || fail "task '${TASK_ID}' is 'open' and the gate could not compare claim.expired_at with this PR's open time, so whether the claim was live when the PR opened cannot be established. Re-claim it: bp task claim ${TASK_ID} <worker>"
+    [ "$open_lead" != "." ] || fail "task '${TASK_ID}' is 'open' and the gate could not compare claim.expired_at with this PR's open time, so whether the claim was live when the PR opened cannot be established. ${CURE}"
     [ "$open_lead" -ge 0 ] || fail "task '${TASK_ID}' is 'open': the claim by '${prev_worker}' had ALREADY lapsed ${open_lead#-}s before this PR was opened, so this PR was not opened under a live claim. ${CURE}"
     actor="$prev_worker"
     verdict="open, but the claim by '${prev_worker}' was still live when this PR was opened (it lapsed ${open_lead}s after, and was reaped ${lapse_age}s ago)"

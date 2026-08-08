@@ -282,8 +282,24 @@ check "lapsed actor wrong worker"    1 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPE
 # exit code cannot see any of that: all three renderings exit 1 either way, so
 # these assert the WORDS. Delete any one clause from CURE and exactly the cases
 # below go red.
+# REVIEW ADDITION: the cure is owed by every refusal a re-claim actually fixes,
+# not just the two the brief named. All six 'open'/in_progress claim refusals
+# below land a reader in the same place — the ledger is wrong, a fresh claim is
+# the fix, and the check will not re-evaluate on its own. Leaving four of them
+# carrying only `bp task claim` reproduced the exact wave-24 stall on a narrower
+# input: the reader does the claim, watches the red sit, and gives up. The
+# RELEASED refusal is the sharpest of the four — it is the terminal state the
+# other messages warn about, so it is the one message a reader most needs the
+# re-fire clause on.
 for _who in "lapsed-before-open:1:TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN" \
-            "open-with-live-worker:1:TASK_ID=lapseworker PR_OPENED_AT=$PR_OPEN"; do
+            "open-with-live-worker:1:TASK_ID=lapseworker PR_OPENED_AT=$PR_OPEN" \
+            "never-claimed:1:TASK_ID=openone PR_OPENED_AT=$PR_OPEN" \
+            "no-previous-worker:1:TASK_ID=lapsenoprev PR_OPENED_AT=$PR_OPEN" \
+            "no-readable-expiry:1:TASK_ID=lapsenodate PR_OPENED_AT=$PR_OPEN" \
+            "unreadable-expiry:1:TASK_ID=lapsebadtime PR_OPENED_AT=$PR_OPEN" \
+            "future-expiry:1:TASK_ID=lapsefuture PR_OPENED_AT=$PR_OPEN" \
+            "released-claim:1:TASK_ID=lapsereleased PR_OPENED_AT=$PR_OPEN" \
+            "in-progress-no-worker:1:TASK_ID=claimless"; do
   _label="${_who%%:*}"; _rest="${_who#*:}"; _want="${_rest%%:*}"; _env="${_rest#*:}"
   check_says "$_label red gives the claim cmd" "$_want" "bp task claim " "$_env"
   check_says "$_label red says re-fire"        "$_want" "gh run rerun "  "$_env"
