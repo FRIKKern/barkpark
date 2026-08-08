@@ -429,6 +429,71 @@ provisioning-path humanization (`task-3b59e1ea682c03a1`, `cchi-w26-bl-two-unhuma
 
 <!-- one row per wave: date · wave paper · slices merged · the number that moved -->
 
+### Wave 2026-08-08 — "the platform is blind to itself" · Paper `deploy-reliability-wave-20-2026-08-08` · grade **A−**
+
+**Seven of eight slices built, reviewed, gate-green, PUSHED and PR'd.** The eighth
+(`dr-w20-s8`, the serving-sha assertion in the deploy smoke) is round 2 BY DESIGN — it reads the
+`/health` key slice 1 creates and edits the exact smoke step slice 2 rewrites.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The CP states its own sha (a CLOCK on `/health`) | `dr-w20-s1-control-plane-states-its-own-sha` | `…states-its-own-sha-a-s-0` | [#10605](https://github.com/FRIKKern/barkpark/pull/10605) | 25 tests, 0 failures · `--warnings-as-errors` clean |
+| The CP smoke stops accepting a 404 | `dr-w20-s2-cp-smoke-can-fail-on-a-dead-box` | `…smoke-stops-a-1` | [#10606](https://github.com/FRIKKern/barkpark/pull/10606) | 2 selftests OK · deploy.yml parses |
+| The route marker stops prefix-colliding | `dr-w20-s3-site-route-marker-stops-colliding` | `…prefix-colli-2-r` | [#10607](https://github.com/FRIKKern/barkpark/pull/10607) | 322/322 + 177/177 selftest PASS |
+| The raw capture strips ANSI before scrubbing | `dr-w20-s4-raw-capture-strips-ansi-before-scrub` | `…strips-ans-3` | [#10608](https://github.com/FRIKKern/barkpark/pull/10608) | 31 tests, 0 failures |
+| `bp cloud status` reads the deploy verdict | `dr-w19-s7-status-reads-the-deploy-verdict` | `…deploy-verdict-4` | [#10609](https://github.com/FRIKKern/barkpark/pull/10609) | build/vet/test green · 13 tests, 0 failures |
+| The fleet digest gets a real audience | `dr-w19-s5-digest-audience-and-brake-ruling` | `…real-audience-an-5-r` | [#10610](https://github.com/FRIKKern/barkpark/pull/10610) | 43 + 34 tests, 0 failures |
+| Depth-derived refusal backoff | `dr-w20-refusal-backoff-depth-derived` | `…on-the-def-6` | [#10611](https://github.com/FRIKKern/barkpark/pull/10611) | 28 tests, 0 failures · compile clean |
+
+**What landed.** The wave's spine is that the platform gains the ability to *lose*. Four instruments
+that previously could not report a failure now can: the CP can state which commit it serves (a CLOCK,
+no threshold — `git_sha` absent means `nil`, never an invented value); the CP deploy smoke stops
+accepting a 404 over a route with zero Repo access and gains the DB backstop the inner script had
+had all along, closing the PARTIAL-death class that ran for 16 hours; the site route marker becomes
+an IDENTITY, ending the class where `search` reported SWITCH ok + exit 0 + a public URL over a 404
+for 208 consecutive deploys; and the arm decision finally gets a durable channel (`emit ROUTE ok`),
+which is what makes route-arm incidence measurable at all — `route already armed` had appeared ZERO
+times in 1,178 durable .log files while firing hundreds of times.
+Two reporting rails stop lying: the alert email stops shipping colourised credentials in cleartext
+(the module's OWN ruling, violated at two call sites), and the daily fleet digest stops being
+addressed to an empty-by-construction allowlist — it now resolves a real per-team audience, ruled
+PER-TEAM because the body names instances and a fleet-wide blast would be a cross-team disclosure.
+`bp cloud status` gains the sentence it never had, as a GAUGE with its denominator and four distinct
+refusals, none of them a zero. And the refusal backoff stops re-firing on the same blind 60s clock
+that paced 2,262 consecutive deferrals.
+
+**What did NOT land, and must be said plainly.** Nothing is merged, so no AFTER number exists — this
+wave shipped instruments and repairs, not proof that 69% moved. The route fix stops the NEXT deploy
+lying; it does not repair the nine live Caddyfiles, so `search` stays a 404 until it redeploys. The
+digest's PAYLOAD is still release-freshness only and carries ZERO deploy-health data, so "the digest
+works" means "the digest is delivered", not "the fleet is reported on" — that is the higher-value
+half and it is still open. The CP serving-sha is L4 (built), not L1 (running), until someone quotes
+`curl -s https://barkpark.cloud/health | jq -r .git_sha` post-merge. And the backoff's real effect is
+a threshold question (supply ~0.95 vs demand ~4.9 builds/min) whose AFTER measurement nobody has
+scheduled.
+
+**Review fixes made in place** (two commits on `-r` branches):
+1. **s3** — the delimiter was anchored on `[[:space:]]`, sufficient only for markers the engines wrote
+   themselves. A marker hand-edited with `:` or `#` would read as NOT ARMED and get re-armed into a
+   DUPLICATE handle on a working site — the dangerous direction. Widened to `[^a-z0-9-]` (necessary
+   AND sufficient, since a sibling slug can only continue with `[a-z0-9-]`), plus six self-test rows
+   asserting the predicate directly. Mutation-proved: reverting reds exactly those rows.
+2. **s5** — the accounting still reported `instances: fleet.total` after the digest became per-team,
+   so `recipients=3 sent=3 instances=50` could mean twelve instances actually spoken for. Added
+   `covered`, pinned by a TELEMETRY assertion (a `capture_log` one would have read `""` and passed
+   vacuously, since the success arm logs at `:info` under a `:warning` Logger).
+
+**One builder claim REFUTED in review, in the safe direction.** The backoff slice's builder named as
+his top risk that `AUTODEPLOY_DEBOUNCE_S=150` yields a depth-2 window of 300s, re-opening the P7
+fan-out. It does not — `min(base*depth, max(base,240))` caps at 240. Verified by running the real
+function: base=150 gives `[150,240,240,240,240,240]`. The cap is sound.
+
+**What the next wave should take.** Dispatch order: merge round 1 (all seven), then `dr-w20-s8` once
+s1 and s2 are in. Then the payload half — `dr-w10-bl-digest-email-calls-a-sick-fleet-healthy` — which
+is now the single highest-value open row, because the digest is finally delivered and still says
+nothing about deploy health. Alongside it: the live-Caddyfile repair the route fix does not perform,
+and the post-merge AFTER measurements this wave earned the right to take.
+
 ### Wave 2026-08-05 — founding wave · Paper `deploy-truth-wave-1-2026-08-05` · grade **A−**
 
 **Five of six slices built, reviewed, gate-green, pushed and PR'd. Nothing merged yet — the lead merges.**
