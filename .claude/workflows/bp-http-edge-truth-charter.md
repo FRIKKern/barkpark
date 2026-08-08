@@ -297,3 +297,17 @@ written notice. E3's "supported" blessing is DAG-gated on E1's media fix (slice 
   (no-store branch needs a seeded subject); fonts content-stability refuted on cloud's own
   Inter-var.woff2 (2 blobs, one name). Verifier ledger rows committed alongside this charter
   revision.
+- 2026-08-08 (review) · `/papers/http-edge-truth-wave-2026-08-08` · W1 outcome: all four slices
+  built, reviewed, ZERO reviewer fixes needed, pushed as PRs #10834 (s1 reader conditional),
+  #10835 (s2 media visibility, HUMAN-GATED D13), #10836 (s3a statics no-cache), #10837 (s6 pin
+  suite). Reviewer re-ran every gate green in a fresh worktree (42+31+9+7 tests) PLUS an
+  octopus-merge integration smoke of all four: clean merge, 89 tests, 0 failures. Census
+  independently re-derived (exactly 11 cache-control sites in api/lib). HIGH-FLIP-RISK
+  re-derivations done: D12 mapping is sound (policy and access gate share `Access.visibility/1`
+  — the policy can never out-permit the gate); D10 CSP-on-304 remains Chrome-151-only observed —
+  independent second reviewer owed on #10834/#10835 before merge (lead dispatches, cch D182
+  shape). Grade A-. Merge order: s6 or s3a first (smallest), then s1, then s2 (reviewer-gated);
+  lead closes the merge-gated criteria (s1 c7, s2 c5-c7, s3a c4, s6 c3) with post-merge L1
+  transcripts per D13. Next wave: W2 slices 4 (Vary + query-ETag omission, closes bpb-step7 per
+  D17) and 5 (rendition content-addressing) once all W1 PRs merge; E2 notice
+  `het-w1-bl-e2-endpoint-notice` still open for the lead to relay.
