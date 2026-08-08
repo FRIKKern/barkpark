@@ -272,6 +272,67 @@ check "done needs no PR_OPENED_AT"        0 'TASK_ID=doneclosed'
 check "lapsed actor matches worker"  0 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=fable-tob"
 check "lapsed actor wrong worker"    1 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=nobody"
 
+# -- THE RED MUST CARRY THE WHOLE CURE, not a third of it ---------------------
+# Wave 24: six PRs green on every code gate sat red for hours on this one
+# required context. The message named the violation and handed over `bp task
+# claim` — and stopped there, one step short of landing anything. Re-claiming
+# does NOT re-fire this check (a ledger write is not a pull_request event), and
+# releasing the claim afterwards trips the ordering clause FOREVER (release
+# merges released_at into the surviving claim and never touches expired_at). An
+# exit code cannot see any of that: all three renderings exit 1 either way, so
+# these assert the WORDS. Delete any one clause from CURE and exactly the cases
+# below go red.
+# REVIEW ADDITION: the cure is owed by every refusal a re-claim actually fixes,
+# not just the two the brief named. All six 'open'/in_progress claim refusals
+# below land a reader in the same place — the ledger is wrong, a fresh claim is
+# the fix, and the check will not re-evaluate on its own. Leaving four of them
+# carrying only `bp task claim` reproduced the exact wave-24 stall on a narrower
+# input: the reader does the claim, watches the red sit, and gives up. The
+# RELEASED refusal is the sharpest of the four — it is the terminal state the
+# other messages warn about, so it is the one message a reader most needs the
+# re-fire clause on.
+for _who in "lapsed-before-open:1:TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN" \
+            "open-with-live-worker:1:TASK_ID=lapseworker PR_OPENED_AT=$PR_OPEN" \
+            "never-claimed:1:TASK_ID=openone PR_OPENED_AT=$PR_OPEN" \
+            "no-previous-worker:1:TASK_ID=lapsenoprev PR_OPENED_AT=$PR_OPEN" \
+            "no-readable-expiry:1:TASK_ID=lapsenodate PR_OPENED_AT=$PR_OPEN" \
+            "unreadable-expiry:1:TASK_ID=lapsebadtime PR_OPENED_AT=$PR_OPEN" \
+            "future-expiry:1:TASK_ID=lapsefuture PR_OPENED_AT=$PR_OPEN" \
+            "released-claim:1:TASK_ID=lapsereleased PR_OPENED_AT=$PR_OPEN" \
+            "in-progress-no-worker:1:TASK_ID=claimless"; do
+  _label="${_who%%:*}"; _rest="${_who#*:}"; _want="${_rest%%:*}"; _env="${_rest#*:}"
+  check_says "$_label red gives the claim cmd" "$_want" "bp task claim " "$_env"
+  check_says "$_label red says re-fire"        "$_want" "gh run rerun "  "$_env"
+  check_says "$_label red warns on release"    "$_want" "NO re-fire can clear" "$_env"
+done
+
+# The run id is INTERPOLATED when Actions supplies one, and degrades to a
+# readable literal when it does not. Both renderings are asserted because the
+# failure modes are opposite: a hardcoded placeholder in CI hands the reader a
+# command they must then go hunt the id for (and the check-runs API paginates at
+# 30, which is how a 36-check sha reported "no such run"), while a bare
+# `gh run rerun  --failed` outside CI reads as a broken command.
+check_says "re-fire interpolates the real run id" 1 "gh run rerun 29999999999 --failed" \
+  "TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN GITHUB_RUN_ID=29999999999"
+check_says "re-fire degrades outside Actions"     1 "gh run rerun <this run id> --failed" \
+  "TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN GITHUB_RUN_ID="
+
+# The refusal CITES the ordering clause by line number, which is the one part of
+# the message that rots silently: an edit above it shifts the clause and the
+# reader is sent to whatever now sits on that line. So read the citation back
+# OUT of the gate's own output and check what is actually there.
+: > "$fixtures/says.out"
+( TASK_ID=lapsestale PR_OPENED_AT="$PR_OPEN" LEDGER_BASE="$BASE" bash "$GATE" ) \
+  > "$fixtures/says.out" 2>&1
+cited_line="$(grep -oE 'pr-task-gate\.sh:[0-9]+' "$fixtures/says.out" | head -1)"
+cited_line="${cited_line##*:}"
+cited_src="$([ -n "$cited_line" ] && awk -v n="$cited_line" 'NR==n' "$GATE")"
+if [ -n "$cited_line" ] && printf '%s' "$cited_src" | grep -q 'released_ge_expired'; then
+  pass=$((pass+1)); printf 'ok   %-40s (line %s is the ordering clause)\n' "cited ordering-clause line is real" "$cited_line"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s cited line %s reads: %s\n' "cited ordering-clause line is real" "${cited_line:-<none>}" "${cited_src:-<nothing>}"
+fi
+
 # -- A 200 that carries no document is UNCHECKED, never an accusation (D59) ---
 # Both shapes used to print "task does not exist on the ledger" at a PR whose
 # task is fine. A genuine nonexistent task answers 404 and stays a definitive
