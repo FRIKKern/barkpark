@@ -1481,6 +1481,52 @@ defmodule BarkparkCloud.Web.Router do
   ## / regenerate / status. The secret + recovery codes are never echoed except
   ## the one-time recovery-code list and the enroll provisioning material.
 
+  # activity-audit-log (cch-w53-s3): turning 2FA ON and OFF is the most
+  # security-relevant act a PLAIN MEMBER can perform on their own account, and
+  # until this slice it left no trace under a console heading that promises
+  # "Who did what on your team — an append-only audit trail."
+  #
+  # BEST-EFFORT AND POST-COMMIT, deliberately. The state change has already
+  # happened (2FA is on / off) by the time this runs, so nothing here may turn
+  # into a 500: a user who cannot enable 2FA because the audit insert failed is
+  # a far worse security outcome than a missing row.
+  #
+  # THE nil-TEAM ARM IS REAL, NOT DEFENSIVE PADDING. `Auth.require_user/2`
+  # assigns `:current_team` on every request, but it resolves through
+  # `Accounts.primary_team/1`, which is `list_user_teams() |> List.first()` and
+  # returns nil for a membership-less user — while `AuditEvent.changeset`
+  # requires `team_id` (the column is `null: false`). So that user gets a LOGGED
+  # SKIP, never a crash and never a silent discard
+  # (cch-w51-bl-record-audit-errors-are-discarded-at-every-call-site).
+  #
+  # No metadata: there is nothing to say about enabling 2FA that is not the
+  # secret or the recovery codes.
+  defp audit_account_security(conn, action) do
+    user = conn.assigns.current_user
+
+    case conn.assigns[:current_team] do
+      nil ->
+        Logger.warning(
+          "audit #{action} SKIPPED for user #{user.id}: no current_team " <>
+            "(Accounts.primary_team/1 returned nil) and audit_events.team_id is null: false"
+        )
+
+      team ->
+        case Accounts.record_audit(%{
+               team_id: team.id,
+               actor_user_id: user.id,
+               action: action,
+               target_type: "user",
+               target_id: user.id
+             }) do
+          {:ok, _event} -> push_event(team.id, "audit")
+          {:error, cs} -> Logger.error("audit #{action} failed: #{inspect(cs)}")
+        end
+    end
+
+    :ok
+  end
+
   # POST /v1/account/two-factor/enroll → 200 {otpauth_uri, secret}
   # Generate + persist a pending (unconfirmed) TOTP secret and return the
   # provisioning material; the SPA renders the QR client-side from otpauth_uri.
@@ -1507,9 +1553,17 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       case Accounts.confirm_two_factor(conn.assigns.current_user, conn.body_params["code"] || "") do
-        {:ok, codes} -> json(conn, 200, %{recovery_codes: codes})
-        {:error, :invalid_otp} -> json(conn, 422, %{error: "invalid_otp"})
-        {:error, :not_enrolled} -> json(conn, 422, %{error: "not_enrolled"})
+        {:ok, codes} ->
+          # THIS is the enable moment — the 422 arms below changed nothing, so
+          # they stamp nothing.
+          audit_account_security(conn, "twofa.enabled")
+          json(conn, 200, %{recovery_codes: codes})
+
+        {:error, :invalid_otp} ->
+          json(conn, 422, %{error: "invalid_otp"})
+
+        {:error, :not_enrolled} ->
+          json(conn, 422, %{error: "not_enrolled"})
       end
     end
   end
@@ -1532,7 +1586,13 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
+      # The route is idempotent (it nulls the columns whether or not 2FA was on),
+      # so the audit row is gated on 2FA having ACTUALLY been enabled. A
+      # `twofa.disabled` row for a user who never enabled it would be a trail
+      # entry describing a change that did not happen.
+      was_enabled? = Accounts.two_factor_enabled?(conn.assigns.current_user)
       {:ok, _} = Accounts.disable_two_factor(conn.assigns.current_user)
+      if was_enabled?, do: audit_account_security(conn, "twofa.disabled")
       json(conn, 200, %{ok: true})
     end
   end
