@@ -9240,7 +9240,11 @@ defmodule BarkparkCloud.Web.Router do
   defp scrub_entry(%{} = entry, keys) when is_list(keys) do
     Enum.reduce(keys, entry, fn key, acc ->
       case Map.fetch(acc, key) do
-        {:ok, value} when is_binary(value) -> Map.put(acc, key, FailureCopy.scrub(value))
+        # dr-w22-s1: `raw/1`, never a bare `scrub/1`. These entries are UNclassified
+        # remote captures, and a CSI run immediately left of a key blocks the
+        # scrub's key clause — this boundary shipped `\e[31mapi_key=…\e[0m` back
+        # byte-identical to input on all three of its call sites.
+        {:ok, value} when is_binary(value) -> Map.put(acc, key, FailureCopy.raw(value))
         _ -> acc
       end
     end)
