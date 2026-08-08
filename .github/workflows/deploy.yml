@@ -87,8 +87,14 @@ jobs:
           if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
       - name: Assert every on.push.paths entry has a deploy target
         run: bash scripts/check-deployyml-filters.sh
-      - name: Assert the control-plane smoke test can fail on a dead box
-        run: bash scripts/check-deploy-smoke.sh
+      - name: Assert both smoke tests can fail on a dead or unmoved box
+        # --selftest, not the bare form: the bare form only reads the current
+        # workflow, so a tripwire that has gone blind still prints OK. The
+        # selftest plants negatives on temp copies and requires each to RED, so
+        # this step fails when the GUARD stops working, not only when the
+        # workflow does. (--selftest had zero callers repo-wide; nineteen
+        # sibling scripts already run theirs in CI.)
+        run: bash scripts/check-deploy-smoke.sh --selftest
 
   control-plane:
     needs: changes
@@ -141,6 +147,102 @@ jobs:
           echo "https://barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
 
+      - name: Assert the served commit is at-or-after this one
+        # ── THE BOX MUST HAVE MOVED ──────────────────────────────────────────
+        #
+        # Everything above proves the box is ALIVE. Nothing above proves it is
+        # NEW. A deploy that never flipped Caddy, or that coalesced and exited
+        # 0 without moving, passes every probe above while serving last week's
+        # tree — the exact shape this epic exists for.
+        #
+        # THE RULE IS ANCESTRY, NOT EQUALITY. deploy/cp-deploy.sh:44-58 does
+        # `git pull --ff-only origin main` and then exports
+        # BARKPARK_GIT_SHA="$(git rev-parse HEAD)" — tip-at-pull-time, never
+        # this run's headSha. And docs-only merges (572d51e13, 695a485ce) match
+        # none of on.push.paths, so they land on main with NO deploy run at all
+        # and ride out on the next unrelated deploy. Live: production serves
+        # 572d51e13, which is 10 commits AHEAD of 7f5f10b8d with behind_by 0.
+        # An equality assertion would red ten healthy merges and teach everyone
+        # to ignore this gate.
+        #
+        # THE ORACLE IS THE GITHUB COMPARE API, NOT `git merge-base`. This
+        # job's `actions/checkout@v4` is depth 1, so the served commit's object
+        # is simply absent: `git merge-base --is-ancestor` dies `fatal: Not a
+        # valid commit name` with RC=128, and an in-step `git fetch origin main`
+        # does not deepen a shallow clone. RC=128 and RC=1 are both non-zero, so
+        # the natural `if git merge-base …` form reports a CONFIGURATION failure
+        # as "the box is behind". The compare API's failure modes are
+        # HTTP-typed, need no checkout, and `contents: read` is already granted
+        # at the top of this workflow with `gh` preinstalled on ubuntu-latest.
+        #
+        # HONEST BOUND: /health's git_sha is System.get_env("BARKPARK_GIT_SHA")
+        # (health.ex:62), exported by cp-deploy.sh:58 from the CHECKOUT rather
+        # than compiled into the image. So this certifies "the deploy reached
+        # the Caddy flip with this tree", NOT "this running binary was built
+        # from this sha" — a stale docker build cache would still report it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          URL="https://barkpark.cloud/health"
+          # The reader this assertion depends on: dr-w20-s1 / PR #10605 added
+          # git_sha to /health. If the key vanishes, say THAT — not "behind".
+          READER="dr-w20-s1 / PR #10605 (/health git_sha)"
+          # Bounded settle window: Caddy's flip is not instantaneous. The cap is
+          # 180s and it EXPIRES INTO A FAILURE — never into a pass. It retries
+          # only on unreachable / 5xx / non-JSON / compare-API errors, and NEVER
+          # on a clean `behind` or `diverged`: retrying a real regression only
+          # delays the red.
+          SETTLE_WINDOW_S=180
+          body_file="$(mktemp)"
+          reason="never attempted"
+          deadline=$(( SECONDS + SETTLE_WINDOW_S ))
+          attempt=0
+          while :; do
+            attempt=$(( attempt + 1 ))
+            http="$(curl -s -o "$body_file" -w '%{http_code}' --max-time 15 "$URL" || echo 000)"
+            if [ "$http" = "000" ] || [ "$http" -ge 500 ] 2>/dev/null; then
+              reason="oracle unreachable or 5xx: HTTP $http from $URL"
+            elif ! jq -e . "$body_file" >/dev/null 2>&1; then
+              reason="$URL answered HTTP $http with a non-JSON body (mid-flip?)"
+            elif ! jq -e 'has("git_sha")' "$body_file" >/dev/null 2>&1; then
+              # MISSING-KEY ARM, split from the null arm on purpose: this is a
+              # broken reader, not a stale box, and it must not read as one.
+              echo "::error::$URL answered HTTP $http with NO \`git_sha\` key. This assertion depends on $READER. Nothing was compared — this deploy is UNVERIFIED, not healthy."
+              exit 1
+            else
+              # NULL ARM: `jq -r` would print the four-character string `null`
+              # and hand it to the compare API as if it were a sha. `-er` with
+              # `// empty` makes null and empty indistinguishable from absent
+              # HERE, and the has() arm above already split them.
+              served="$(jq -er '.git_sha // empty' "$body_file" || true)"
+              if [ -z "$served" ]; then
+                echo "::error::$URL returned \`git_sha\` as null/empty. $READER is emitting the key but not a value; refusing to compare a null. UNVERIFIED."
+                exit 1
+              fi
+              status="$(gh api "repos/${{ github.repository }}/compare/${{ github.sha }}...$served" --jq .status 2>&1)" || status="api-error: $status"
+              case "$status" in
+                api-error*)
+                  reason="compare API did not answer ($status)"
+                  ;;
+                *)
+                  if printf '%s' "$status" | grep -qE '^(ahead|identical)$'; then
+                    echo "OK: barkpark.cloud serves $served, at-or-after ${{ github.sha }} (compare: $status, attempt $attempt)"
+                    exit 0
+                  fi
+                  echo "::error::THE CONTROL PLANE DID NOT MOVE. barkpark.cloud serves $served; ${{ github.sha }} compares as '$status' against it (expected ahead|identical). The deploy exited 0 over a box that is not running this tree."
+                  exit 1
+                  ;;
+              esac
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::settle window (${SETTLE_WINDOW_S}s, $attempt attempts) expired with no verdict: $reason. Expiring into FAILURE: an unverified deploy is not a successful one."
+              exit 1
+            fi
+            echo "attempt $attempt: $reason — retrying in 10s"
+            sleep 10
+          done
+
   instance:
     needs: changes
     if: needs.changes.outputs.instance == 'true'
@@ -178,6 +280,82 @@ jobs:
           code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
+
+      - name: Assert the served commit is at-or-after this one
+        # Same rule as the control plane, same reasoning (see that step): the
+        # 200 above proves the instance is ALIVE, not NEW. instance-deploy.sh
+        # has a coalesce branch that exits 0 without moving the box, and a lost
+        # Caddy flip leaves the previous slot answering /api/schemas with 200
+        # forever. Ancestry, never equality.
+        #
+        # The instance publishes its sha at GET /status.json as `commit`
+        # (unauthenticated, api/lib/barkpark_web/router.ex, shipped in #6422) —
+        # a NINE-character short sha. The compare API accepts the short form
+        # verbatim; proved live 2026-08-08T04:11Z:
+        #   gh api repos/FRIKKern/barkpark/compare/2673eb009...572d51e13fa41fd4aace729661f6fc0119bfa8f2 \
+        #     --jq '.status,.ahead_by,.behind_by'   ->  ahead / 4 / 0
+        #
+        # HONEST BOUND: unlike /health's env-injected git_sha, `commit` here is
+        # baked at COMPILE time, so it certifies "the running release was built
+        # from this tree" — but it cannot distinguish a rebuilt-and-flipped box
+        # from one where the flip landed on a slot compiled moments earlier
+        # from the same tree. It proves the tree, not the restart.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          URL="https://guerrilla.barkpark.cloud/status.json"
+          READER="#6422 (/status.json commit)"
+          # Bounded settle window, cap 180s, EXPIRING INTO FAILURE. Retries only
+          # on unreachable / 5xx / non-JSON / compare-API errors — never on a
+          # clean `behind` or `diverged`.
+          SETTLE_WINDOW_S=180
+          body_file="$(mktemp)"
+          reason="never attempted"
+          deadline=$(( SECONDS + SETTLE_WINDOW_S ))
+          attempt=0
+          while :; do
+            attempt=$(( attempt + 1 ))
+            http="$(curl -s -o "$body_file" -w '%{http_code}' --max-time 15 "$URL" || echo 000)"
+            if [ "$http" = "000" ] || [ "$http" -ge 500 ] 2>/dev/null; then
+              reason="oracle unreachable or 5xx: HTTP $http from $URL"
+            elif ! jq -e . "$body_file" >/dev/null 2>&1; then
+              reason="$URL answered HTTP $http with a non-JSON body (mid-flip?)"
+            elif ! jq -e 'has("commit")' "$body_file" >/dev/null 2>&1; then
+              # MISSING-KEY ARM, split from the null arm: a broken reader is not
+              # a stale box and must not be reported as one.
+              echo "::error::$URL answered HTTP $http with NO \`commit\` key. This assertion depends on $READER. Nothing was compared — this deploy is UNVERIFIED, not healthy."
+              exit 1
+            else
+              # NULL ARM: `-er` with `// empty` so the literal string `null`
+              # never reaches the compare API as if it were a sha.
+              served="$(jq -er '.commit // empty' "$body_file" || true)"
+              if [ -z "$served" ]; then
+                echo "::error::$URL returned \`commit\` as null/empty. $READER is emitting the key but not a value; refusing to compare a null. UNVERIFIED."
+                exit 1
+              fi
+              status="$(gh api "repos/${{ github.repository }}/compare/${{ github.sha }}...$served" --jq .status 2>&1)" || status="api-error: $status"
+              case "$status" in
+                api-error*)
+                  reason="compare API did not answer ($status)"
+                  ;;
+                *)
+                  if printf '%s' "$status" | grep -qE '^(ahead|identical)$'; then
+                    echo "OK: guerrilla serves $served, at-or-after ${{ github.sha }} (compare: $status, attempt $attempt)"
+                    exit 0
+                  fi
+                  echo "::error::THE CONTENT INSTANCE DID NOT MOVE. guerrilla serves $served; ${{ github.sha }} compares as '$status' against it (expected ahead|identical). instance-deploy.sh exited 0 over a box that is not running this tree."
+                  exit 1
+                  ;;
+              esac
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::settle window (${SETTLE_WINDOW_S}s, $attempt attempts) expired with no verdict: $reason. Expiring into FAILURE: an unverified deploy is not a successful one."
+              exit 1
+            fi
+            echo "attempt $attempt: $reason — retrying in 10s"
+            sleep 10
+          done
 
   report-deploy-failure:
     # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
