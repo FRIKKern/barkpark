@@ -172,7 +172,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/warm-servers/:name/refreshed worker  mark a warm server refreshed
       GET     /v1/internal/warm-servers/count worker  the warm-pool depth
       DELETE  /v1/internal/warm-servers/:name worker  drop a warm server
-      POST    /v1/internal/platform-deliveries worker  record a BATCH of platform delivery rows for one delivering run (idempotent on sha+run+first_seen_at; 503 unavailable when the migration has not landed)
+      POST    /v1/internal/platform-deliveries worker  record a BATCH of platform delivery rows for one delivering run (idempotent on sha+run+target; 503 unavailable when the migration has not landed)
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
@@ -6572,7 +6572,10 @@ defmodule BarkparkCloud.Web.Router do
   # ~36% of merged shas have no run of their own and ride someone else's — so the
   # natural unit of the write is the run's whole batch, not a row.
   #
-  # IDEMPOTENT on (sha, delivering_run_id, first_seen_at): a retried deploy job
+  # IDEMPOTENT on (sha, delivering_run_id, target) — W24, charter D422, which
+  # amends D410. `target` is IN the key because deploy.yml's control-plane and
+  # instance jobs share one GITHUB_RUN_ID, so the W23 key ate the second leg of
+  # every deploy and still answered 200. A retried deploy job
   # re-posts the same batch and writes nothing. The 200 counts BOTH — `received`
   # is what the caller sent, `recorded` is what was new — so a re-post reads as
   # `{received: 3, recorded: 0}` instead of a fake success.
@@ -6608,6 +6611,19 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:invalid_row, index, errors}} ->
             json(conn, 422, %{error: "invalid_row", index: index, errors: errors})
+
+          # A required column arrived explicitly NULL (W24, D422). That is the
+          # CALLER's payload, not a broken crown, so it is a typed 422 that names
+          # the column — a 500 here told a deploy job the platform had failed and
+          # sent it retrying identical bytes forever.
+          {:error, {:null_column, column}} ->
+            json(conn, 422, %{
+              error: "null_column",
+              column: column,
+              detail:
+                "column `#{column}` arrived explicitly null and is required — " <>
+                  "omit the key entirely if the value is unknown"
+            })
 
           {:error, reason} ->
             Logger.error("platform_deliveries: record refused: #{inspect(reason)}")
