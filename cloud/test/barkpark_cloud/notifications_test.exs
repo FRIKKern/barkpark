@@ -517,6 +517,54 @@ defmodule BarkparkCloud.NotificationsTest do
       refute hd(emails).text_body =~ "orphan"
     end
 
+    # REVIEW FIX (w20): `instances` is the WHOLE fleet, and under per-team
+    # partitioning that stopped meaning "instances someone was told about" — an
+    # instance with a nil team_id, or one whose team has no members, is counted
+    # in `instances` and reaches nobody. `instances=3` beside `sent=1` would
+    # read as a digest that spoke for three instances when it spoke for one.
+    # `covered` is the honest denominator, and this test pins the GAP: the two
+    # numbers must be allowed to disagree, and the log must show both.
+    test "the accounting states how much of the fleet the digest actually spoke for" do
+      {team, [_member]} = team_with_members(1)
+      memberless = team_fixture()
+
+      fleet = [
+        barkpark_row(team, "owned"),
+        barkpark_row(memberless, "no-members"),
+        barkpark_row(memberless, "no-members-2")
+      ]
+
+      # Read off TELEMETRY, not the log line: this is the SUCCESS arm, which
+      # logs at :info, and config/test.exs pins the Logger to :warning — a
+      # capture_log assertion here would read "" and pass vacuously against any
+      # value of `covered` whatsoever. The telemetry metadata is the same map
+      # the log line renders from.
+      ref = make_ref()
+      test_pid = self()
+
+      :telemetry.attach(
+        "covered-#{inspect(ref)}",
+        [:barkpark_cloud, :notifications, :fleet_digest, :settled],
+        fn _event, measurements, metadata, _cfg ->
+          send(test_pid, {ref, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("covered-#{inspect(ref)}") end)
+
+      assert {:ok, %{sent: 1}} = Notifications.deliver_fleet_digest(fleet)
+
+      assert_receive {^ref, %{recipients: 1, sent: 1}, metadata}
+
+      # The whole fleet is still reported as the fleet — that number is not a lie,
+      # it is just not the reach.
+      assert metadata.instances == 3
+      # …and exactly ONE of those three instances belongs to a team that was
+      # actually mailed. A `covered: 3` here would be the overstatement.
+      assert metadata.covered == 1
+    end
+
     test "an empty fleet is a COUNTED loss: recipients=0 at WARNING, and nothing is sent" do
       log =
         ExUnit.CaptureLog.capture_log(fn ->

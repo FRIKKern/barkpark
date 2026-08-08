@@ -440,6 +440,19 @@ defmodule BarkparkCloud.Notifications do
           recipient <- Enum.uniq(recipients),
           do: {team_id, summary, recipient}
 
+    # HOW MUCH OF THE FLEET THIS DIGEST ACTUALLY SPEAKS FOR (review fix, w20).
+    #
+    # `instances` is the WHOLE fleet, and partitioning by team means it is no
+    # longer the same thing as "instances someone was told about": an instance
+    # whose `team_id` is nil, or whose team has no membership row, is in
+    # `instances` and in nobody's mail. Reporting only the fleet total would
+    # make `recipients=3 sent=3 instances=50` read as fifty instances reported
+    # on when it can mean twelve — an overstatement of reach, which is the exact
+    # failure mode this epic exists to remove. `covered` is the honest
+    # denominator: instances belonging to a team that a digest was built for.
+    covered_teams = MapSet.new(targets, fn {team_id, _summary, _recipient} -> team_id end)
+    covered = Enum.count(barkparks, &MapSet.member?(covered_teams, &1.team_id))
+
     case targets do
       # cch-w32-r2 / dr-w19-s5: NAMED CONSENTED — recipient-less by construction,
       # one level up. `Delivery.changeset/2` requires a recipient (delivery.ex:78)
@@ -454,7 +467,7 @@ defmodule BarkparkCloud.Notifications do
       [] ->
         account_fleet_digest(
           %{recipients: 0, sent: 0},
-          %{instances: fleet.total, reason: "no_team_recipients"}
+          %{instances: fleet.total, covered: 0, reason: "no_team_recipients"}
         )
 
         {:ok, :no_admins}
@@ -477,7 +490,7 @@ defmodule BarkparkCloud.Notifications do
 
         account_fleet_digest(
           %{recipients: length(recipients), sent: sent},
-          %{instances: fleet.total, reason: reason}
+          %{instances: fleet.total, covered: covered, reason: reason}
         )
 
         {:ok, %{sent: sent, recipients: recipients}}
@@ -515,7 +528,7 @@ defmodule BarkparkCloud.Notifications do
   defp log_fleet_digest(m, meta) do
     line =
       "fleet_digest phase=#{meta.phase} recipients=#{m.recipients} sent=#{m.sent} " <>
-        "instances=#{meta.instances}" <>
+        "instances=#{meta.instances} covered=#{Map.get(meta, :covered, 0)}" <>
         if(is_nil(meta.reason), do: "", else: " reason=#{meta.reason}")
 
     if m.sent < m.recipients or m.recipients == 0 do
