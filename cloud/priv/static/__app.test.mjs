@@ -13984,6 +13984,14 @@ test("G-04: the notification builders + routing helpers are exported", () => {
   assert.deepEqual([...hooks.notifMatrixColumns()].map((c) => c.type),
     ["email", "discord", "slack", "telegram", "pushover", "webhook"]);
   assert.deepEqual([...hooks.notifChannels], ["discord", "slack", "telegram", "pushover", "webhook"]);
+  // cch-w52-s1: the transport OFFER list is exactly the two transports the plane
+  // can carry. "api" was offered here (and by the schema, and by a Vault-encrypted
+  // key column) with NO adapter behind it — the alert rode the platform mailer and
+  // was logged `sent`. The Elixir half of this pin is
+  // cloud/test/barkpark_cloud/notifications/transport_manifest_test.exs ARM 4,
+  // which reads this same hook by evaluating app.js and compares it against
+  // `EmailSettings.transports/0`.
+  assert.deepEqual([...hooks.notifTransports], ["instance", "smtp"]);
 });
 
 // ── notifCellState: the honest per-cell truth ───────────────────────────────

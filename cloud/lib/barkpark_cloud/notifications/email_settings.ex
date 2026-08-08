@@ -15,7 +15,19 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     * `"instance"` — ride the platform `BarkparkCloud.Mailer` (the default; no
       per-team SMTP needed).
     * `"smtp"`     — the per-team SMTP relay in the `smtp_*` columns.
-    * `"api"`      — a hosted-provider key (the adapter itself is deferred).
+
+  cch-w52-s1 — there is no third option. `"api"` was offered by this schema, by
+  the console's segmented control and by a Vault-encrypted `api_key_encrypted`
+  column for as long as they existed, and NOTHING carried it: `deliver_alert/2`
+  has an `smtp` clause and a catch-all, there is no Swoosh adapter beyond
+  Local/Test/SMTP, and `config.exs` sets `:swoosh, :api_client, false`. An
+  "api" team's alert rode the platform mailer and was logged `sent`. The offer
+  is deleted rather than disclosed (charter D589; live prod carried zero such
+  rows). The schema FIELD goes now so the column drop can follow safely — Ecto
+  selects the full field list, so the field must stop being selected BEFORE the
+  column is dropped (D594; the migration is cch-w52-s3's).
+  `transport_manifest_test.exs` reds if an option ever outruns its mechanism
+  again.
 
   Transactional identity email (invite / reset / verify) NEVER consults this —
   it always rides the platform transport (see `Notifications.Transactional`).
@@ -35,7 +47,7 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @transports ~w(instance smtp api)
+  @transports ~w(instance smtp)
   @encryptions ~w(starttls tls none)
 
   # The per-event toggle columns, in one list so the dispatcher and the
@@ -64,7 +76,6 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     field :smtp_password_encrypted, :string, redact: true
     field :smtp_port, :integer
     field :smtp_encryption, :string
-    field :api_key_encrypted, :string, redact: true
     field :from_address, :string
     field :from_name, :string
 
@@ -127,7 +138,6 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
         :smtp_password_encrypted,
         :smtp_port,
         :smtp_encryption,
-        :api_key_encrypted,
         :from_address,
         :from_name,
         :last_test_sent_at

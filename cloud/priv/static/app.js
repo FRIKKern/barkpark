@@ -3271,10 +3271,16 @@
   ];
 
   // The email transport single-select (GR34: pill()/`.seg` segmented control).
+  //
+  // cch-w52-s1: TWO options, not three. "API" sat here offering a hosted-provider
+  // transport the control plane has no adapter for — an "api" team's alert rode
+  // the platform mailer and was logged `sent`. Every entry in this list must have
+  // a `deliver_alert/2` clause behind it; the bidirectional
+  // `transport_manifest_test.exs` reds (via `__bpTestHook.notifTransports`) if
+  // this list and `EmailSettings.transports/0` ever disagree.
   var NOTIF_TRANSPORTS = [
     { v: "instance", label: "Barkpark platform" },
-    { v: "smtp", label: "SMTP" },
-    { v: "api", label: "API" }
+    { v: "smtp", label: "SMTP" }
   ];
 
   // The chat channel roster (ChannelConfig.@types) + per-shape credential fields.
@@ -22550,6 +22556,10 @@
       // (loadNotifications/renderNotifications/save*/onNotifCellToggle) are
       // browser+smoke-verified.
       notifChannels: NOTIF_CHANNELS.map(function (c) { return c.type; }),
+      // cch-w52-s1: the console's email-transport OFFER list, read by the Elixir
+      // side (transport_manifest_test.exs ARM 4) so the console can never offer a
+      // transport `EmailSettings.transports/0` does not know.
+      notifTransports: NOTIF_TRANSPORTS.map(function (t) { return t.v; }),
       notifMatrixColumns: notifMatrixColumns, notifChannelState: notifChannelState,
       notifCellState: notifCellState, notifEventChannels: notifEventChannels,
       notifTransportLabel: notifTransportLabel,

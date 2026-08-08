@@ -201,7 +201,6 @@ defmodule BarkparkCloud.NotificationsTest do
       settings = Notifications.get_or_create_settings(team)
       view = Notifications.settings_view(settings)
       assert view.smtp_password == nil
-      assert view.api_key == nil
     end
   end
 

@@ -146,7 +146,7 @@ defmodule BarkparkCloud.Notifications do
 
   @doc """
   Update a Team's settings from request `attrs`. THE ENCRYPTION BOUNDARY: plaintext
-  secret keys (`smtp_host` / `smtp_username` / `smtp_password` / `api_key`) are run
+  secret keys (`smtp_host` / `smtp_username` / `smtp_password`) are run
   through `Registry.Vault.encrypt/1` into the `*_encrypted` columns before the
   changeset — exactly `Registry.connect_provider/3`. A blank/absent secret is
   DROPPED so a PUT that doesn't resend a password keeps the stored one.
@@ -173,7 +173,6 @@ defmodule BarkparkCloud.Notifications do
       |> put_encrypted("smtp_host", :smtp_host_encrypted, attrs)
       |> put_encrypted("smtp_username", :smtp_username_encrypted, attrs)
       |> put_encrypted("smtp_password", :smtp_password_encrypted, attrs)
-      |> put_encrypted("api_key", :api_key_encrypted, attrs)
       |> Map.put("team_id", settings.team_id)
 
     settings
@@ -213,7 +212,6 @@ defmodule BarkparkCloud.Notifications do
         smtp_password: mask(s.smtp_password_encrypted),
         smtp_port: s.smtp_port,
         smtp_encryption: s.smtp_encryption,
-        api_key: mask(s.api_key_encrypted),
         from_address: s.from_address,
         from_name: s.from_name,
         last_test_sent_at: s.last_test_sent_at,
@@ -699,8 +697,13 @@ defmodule BarkparkCloud.Notifications do
 
   # Deliver an ALERT email over the team's transport: "instance" → platform
   # adapter (no override); "smtp" → per-call gen_smtp config from the team's
-  # decrypted secrets; "api" → deferred, falls back to the platform transport so
-  # the alert still goes out rather than silently dropping.
+  # decrypted secrets.
+  #
+  # cch-w52-s1: the catch-all below is the "instance" arm and NOTHING ELSE.
+  # `EmailSettings.transports/0` is now exactly the set of clause heads here,
+  # and `transport_manifest_test.exs` reds — in BOTH directions — if a third
+  # option is ever offered without a clause, or a clause ever answers to a
+  # transport nobody can select.
   defp deliver_alert(%EmailSettings{transport: "smtp"} = settings, email) do
     case smtp_override(settings) do
       {:ok, override} -> Mailer.deliver(email, override)

@@ -4630,8 +4630,11 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # PUT /v1/notifications/settings {transport?, alerts_enabled?, smtp_*?, api_key?,
+  # PUT /v1/notifications/settings {transport?, alerts_enabled?, smtp_*?,
   # from_*?, <event toggles>?} → 200 {settings: <masked>} | 422 {error, details}.
+  # cch-w52-s1: `api_key?` was documented here and is GONE — the "api" transport
+  # it belonged to had no adapter behind it, so the parameter is no longer read.
+  # An SDK author reading a stale line here would send a field the plane drops.
   # Plaintext secrets are encrypted at rest by update_settings (Registry.Vault);
   # they are NEVER echoed back. A PUT that omits a secret keeps the stored one.
   #
@@ -4649,7 +4652,7 @@ defmodule BarkparkCloud.Web.Router do
 
       # activity-audit-log: the settings update + a `notifications.settings_changed`
       # audit event commit atomically. Detail records only the FIELD NAMES that were
-      # submitted (e.g. "smtp_password", "api_key") — never the plaintext secret
+      # submitted (e.g. "smtp_password", "smtp_username") — never the plaintext secret
       # values (those are Vault-encrypted at rest and never echoed).
       audited =
         Accounts.audit(
