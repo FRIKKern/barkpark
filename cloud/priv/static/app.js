@@ -1204,7 +1204,15 @@
 
     if (phase === "on") {
       return err +
-        '<p class="a2f-on-line">Codes from your authenticator app are required when you sign in.</p>' +
+        // cch-w53-s1 — QUALIFIED, because the mechanism is not unconditional.
+        // POST /v1/auth/oauth/exchange mints a full session with no
+        // two_factor_enabled? check, and find_or_birth_oauth_user!/3 resolves an
+        // incoming IdP identity onto an EXISTING password account by verified
+        // email — so a linked provider is a code-free door into a 2FA-enrolled
+        // account. Latent today (no provider carries creds in prod), which is
+        // why this is copy, not a claim of protection we cannot make.
+        '<p class="a2f-on-line">Codes from your authenticator app are required when you sign in with a password. ' +
+          "Signing in through a linked provider does not ask for one.</p>" +
         '<div class="a2f-on-actions">' +
           '<button class="btn-link am-link" type="button" id="a2f-regen">Regenerate recovery codes</button>' +
           '<button class="btn-link am-link a2f-off-link" type="button" id="a2f-disable">Turn off</button>' +
@@ -1375,7 +1383,13 @@
         title: "Sign out everywhere else?",
         confirmLabel: "Sign them out",
         busyLabel: "Signing out…",
-        bodyHtml: "Every other browser and device is signed out <b>immediately</b>. " +
+        // cch-w53-s1 — NO timing word. The old copy said "immediately", and it
+        // was measured false: an already-open SSE stream keeps delivering team
+        // events after revoke_all_user_sessions, unbounded (sse_loop/1 is a bare
+        // receive/after 25_000 park that re-reads no credential). A replacement
+        // timing ("within 25 seconds") would be false too until the mechanism
+        // slice lands, so this states the OUTCOME only — true before and after.
+        bodyHtml: "Every other browser and device is signed out. " +
           "This device stays signed in, and anyone signed out can sign back in with their password.",
         // Named so the recovery arm can RE-ISSUE the request (a recovery
         // handler that only calls busy() spins the button forever).
@@ -16399,10 +16413,26 @@
 
     api("POST", "/v1/auth/oauth/exchange", { code: ret.code }, { noAuth: true }).then(function (r) {
       renderOAuthPending(false);
-      if (r && r.ok && r.data && r.data.token) {
+      // SAME classifier the two password-login submit sites use (loginResponseKind),
+      // so the exchange cannot drift from /v1/auth/login on what a challenge looks
+      // like. Three outcomes, not two.
+      var kind = loginResponseKind(r);
+      if (kind === "session") {
         // OAuth sign-ins persist (there is no "remember me" checkbox in this flow).
         setSession({ token: r.data.token, team_id: r.data.team_id || ret.team || null }, true);
         oauthJustLanded = true;
+      } else if (kind === "two_factor") {
+        // cch-w53-s1, DEFENSIVE AND CURRENTLY UNREACHABLE. The exchange route does
+        // not yet check two_factor_enabled?, so it never answers a challenge — the
+        // round-2 slice (cch-w53-s6) makes it. Without this branch that response
+        // would fall into the generic "Sign-in failed" toast: a permanent,
+        // unactionable dead end for exactly the accounts that enrolled in 2FA.
+        // done() FIRST so render() paints the logged-out shell (#twofa-card is one
+        // of its slots); the card mounts into it immediately after, which is the
+        // same ordering showTwoFactorLoginCard gets from the login form.
+        done();
+        showTwoFactorLoginCard(r.data.challenge_token, true);
+        return;
       } else {
         // Degrades into the EXISTING generic failure copy — a burned, expired or
         // rate-limited code must not read differently from a refused consent.
@@ -19938,7 +19968,14 @@
     var canWrite = assignableRoles(ctx.role).length > 0;
     var out = '<section class="set-section">' +
       '<h2 class="set-h">Variables</h2>' +
-      '<p class="set-purpose">Injected into your instances at boot. Keys are visible; values are sealed once saved.</p>' +
+      // cch-w53-s1 — the injection claim is RETRACTED. The control plane ships
+      // `env:` in every provision claim, but provisioner.JobSpec declares no
+      // `env` json tag and decodes with a bare json.Unmarshal, so the value is
+      // dropped on the floor: nothing running or newly provisioned ever reads
+      // it. Stating storage (true) instead of delivery (false) — and NOT
+      // inventing a redeploy affordance, because no delivery path exists.
+      '<p class="set-purpose">Stored encrypted for your team. Values are not delivered to any instance yet — ' +
+        "nothing running or newly provisioned reads them. Keys are visible; values are sealed once saved.</p>" +
       (vars.length
         ? '<div class="set-list">' +
             vars.map(function (v) { return envVarRowHtml(v, canWrite); }).join("") +
@@ -20043,7 +20080,14 @@
   function confirmDeleteEnvVar(ctx, id, key) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Delete variable?</h2>' +
-      '<p class="modal-sub">Deleting <b>' + esc(key || "this variable") + "</b> removes it from every instance at the next boot. " +
+      // cch-w53-s1 — this used to claim a CONTAINMENT: that the delete took the
+      // value off every box at its next start. Nothing was ever placed on an
+      // instance, so nothing is removed from one; the sheet now scopes the loss
+      // to the stored row, which is all the delete actually touches. The
+      // "can't be recovered" clause is a live pin (smoke.mjs env-populated and
+      // env-write-once-409) — it survives verbatim.
+      '<p class="modal-sub">Deleting <b>' + esc(key || "this variable") + "</b> removes it from your team's stored variables. " +
+        "No instance changes, because nothing delivers these values to an instance today. " +
         "Its value is sealed, so it can't be recovered — you'd re-enter it to add it back.</p>" +
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Cancel</button>' +
