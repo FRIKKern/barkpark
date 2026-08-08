@@ -6,9 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 )
 
 // fakeDeprovisionControlPlane is an httptest-backed stand-in for the Elixir
@@ -276,5 +279,195 @@ func TestRunOnceDeprovisionEchoesClaimToken(t *testing.T) {
 				t.Errorf("body carried a claim_token key with no claim token: %s", rawBody)
 			}
 		})
+	}
+}
+
+// attachThenDeprovisionFixture wires the REAL attach → deprovision chain against
+// one shared fake zone: a managed box carrying its barkpark-fqdn identity label,
+// its platform A record as the go-live chain wrote it, and the seams both
+// AttachDomainWith and DeprovisionWith run through. Nothing is stubbed between
+// the two — the custom-domain record under test is written by the production
+// attach path, not seeded by the test.
+func attachThenDeprovisionFixture(t *testing.T) (Seams, *cloud.FakeProvider, *cloud.FakeDNS, cloud.Server) {
+	t.Helper()
+	ctx := context.Background()
+
+	prov := cloud.NewFakeProvider()
+	box, err := prov.Create(ctx, cloud.ServerSpec{Name: "bp-acme-t1-abc123"})
+	if err != nil {
+		t.Fatalf("create box: %v", err)
+	}
+	if err := prov.LabelServer(ctx, box.Name, cloud.FQDNLabelKey, "acme-t1."+Zone); err != nil {
+		t.Fatalf("label box: %v", err)
+	}
+
+	dns := cloud.NewFakeDNS()
+	if err := dns.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: "acme-t1", Type: "A", Value: box.IP}); err != nil {
+		t.Fatalf("seed platform record: %v", err)
+	}
+
+	seams := Seams{
+		Provider:  prov,
+		DNS:       dns,
+		RunnerFor: func(string) cloud.StepRunner { return &recordingAttachRunner{} },
+	}
+	return seams, prov, dns, box
+}
+
+// zoneNames returns the fake zone's records as sorted "name=value" lines — the
+// BEFORE/AFTER census the orphan assertions read.
+func zoneNames(t *testing.T, dns *cloud.FakeDNS, zone string) []string {
+	t.Helper()
+	recs, err := dns.ListRecords(context.Background(), zone)
+	if err != nil {
+		t.Fatalf("list zone %s: %v", zone, err)
+	}
+	names := []string{}
+	for _, r := range recs {
+		names = append(names, r.Name+"="+r.Value)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TestDeprovisionSweepsAttachedCustomDomainRecord is the orphan guard, driven
+// end to end through the REAL chain: AttachDomainWith upserts a SECOND A record
+// (the customer's custom host) into the platform zone at the box's IP, then
+// DeprovisionWith runs with the EXACT claim payload the control plane emits —
+// which carries the PLATFORM dns_label only, never the custom host.
+//
+// The by-name delete this replaced released the box and left
+// gyldendal.barkpark.cloud pointing at an address about to be recycled, with the
+// registry row (the only place custom_host lived) deleted right after, so the
+// leftover record was attributable to nothing. The sweep goes by VALUE, so BOTH
+// names die with the box and the zone is left empty.
+func TestDeprovisionSweepsAttachedCustomDomainRecord(t *testing.T) {
+	ctx := context.Background()
+	seams, prov, dns, box := attachThenDeprovisionFixture(t)
+
+	if err := AttachDomainWith(ctx, seams, AttachDomainSpec{
+		JobID:      "adjob-1",
+		IP:         box.IP,
+		CustomHost: "gyldendal." + Zone,
+		DNSLabel:   "gyldendal",
+		DNSZone:    Zone,
+		AppPort:    4000,
+	}); err != nil {
+		t.Fatalf("AttachDomainWith: %v", err)
+	}
+
+	before := zoneNames(t, dns, Zone)
+	if len(before) != 2 {
+		t.Fatalf("BEFORE deprovision the zone holds %v, want both the platform and the custom-host record", before)
+	}
+	t.Logf("BEFORE deprovision: %v", before)
+
+	if err := DeprovisionWith(ctx, seams, DeprovisionSpec{
+		JobID:    "dejob-1",
+		IP:       box.IP,
+		DNSLabel: "acme-t1", // the platform label — the ONLY DNS the claim carries
+		DNSZone:  Zone,
+	}); err != nil {
+		t.Fatalf("DeprovisionWith: %v", err)
+	}
+
+	after := zoneNames(t, dns, Zone)
+	t.Logf("AFTER deprovision: %v", after)
+	if len(after) != 0 {
+		t.Errorf("records survived the deprovision pointing at the released IP %s: %v — a custom-domain orphan", box.IP, after)
+	}
+	if vals, _ := dns.Resolve(ctx, "gyldendal."+Zone); len(vals) != 0 {
+		t.Errorf("the ATTACHED custom-domain record outlived the box: gyldendal.%s → %v", Zone, vals)
+	}
+	if vals, _ := dns.Resolve(ctx, "acme-t1."+Zone); len(vals) != 0 {
+		t.Errorf("the platform record outlived the box: acme-t1.%s → %v", Zone, vals)
+	}
+
+	remaining, _ := prov.List(ctx)
+	if len(remaining) != 0 {
+		t.Errorf("managed servers remaining = %d, want 0", len(remaining))
+	}
+}
+
+// TestDeprovisionSweepsRecordAtIPTheClaimNeverNamed asserts the tradeoff rather
+// than assuming it: the sweep removes EVERY A record in the zone that points at
+// the released IP — including one no claim payload ever mentioned (a re-attach
+// that overwrote custom_host on a live box strands exactly this shape). It is a
+// WIDER delete than a by-name delete, and that is the decision. It stays SCOPED
+// to the released address: a record at another IP is untouched.
+func TestDeprovisionSweepsRecordAtIPTheClaimNeverNamed(t *testing.T) {
+	ctx := context.Background()
+	seams, _, dns, box := attachThenDeprovisionFixture(t)
+
+	if err := dns.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: "forgotten", Type: "A", Value: box.IP}); err != nil {
+		t.Fatalf("seed forgotten record: %v", err)
+	}
+	if err := dns.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: "neighbour", Type: "A", Value: "203.0.113.77"}); err != nil {
+		t.Fatalf("seed neighbour record: %v", err)
+	}
+
+	if err := DeprovisionWith(ctx, seams, DeprovisionSpec{
+		JobID: "dejob-2", IP: box.IP, DNSLabel: "acme-t1", DNSZone: Zone,
+	}); err != nil {
+		t.Fatalf("DeprovisionWith: %v", err)
+	}
+
+	if vals, _ := dns.Resolve(ctx, "forgotten."+Zone); len(vals) != 0 {
+		t.Errorf("an unclaimed record at the released IP survived: forgotten.%s → %v", Zone, vals)
+	}
+	if vals, _ := dns.Resolve(ctx, "neighbour."+Zone); len(vals) != 1 {
+		t.Errorf("the sweep took a record at ANOTHER address: neighbour.%s → %v, want it untouched", Zone, vals)
+	}
+}
+
+// TestDeprovisionDeletesDriftedPlatformRecordByName covers the sweep's blind
+// spot honestly: a platform record whose value has drifted off the box IP is
+// invisible to a by-value sweep, so the by-name delete still runs behind it —
+// the label must never outlive the box it names.
+func TestDeprovisionDeletesDriftedPlatformRecordByName(t *testing.T) {
+	ctx := context.Background()
+	seams, _, dns, box := attachThenDeprovisionFixture(t)
+
+	if err := dns.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: "acme-t1", Type: "A", Value: "203.0.113.55"}); err != nil {
+		t.Fatalf("drift platform record: %v", err)
+	}
+
+	if err := DeprovisionWith(ctx, seams, DeprovisionSpec{
+		JobID: "dejob-3", IP: box.IP, DNSLabel: "acme-t1", DNSZone: Zone,
+	}); err != nil {
+		t.Fatalf("DeprovisionWith: %v", err)
+	}
+	if vals, _ := dns.Resolve(ctx, "acme-t1."+Zone); len(vals) != 0 {
+		t.Errorf("a drifted platform record outlived the box: acme-t1.%s → %v", Zone, vals)
+	}
+}
+
+// TestAttachExternalHostWritesNothingIntoPlatformZone is the scope probe for the
+// V2 EXTERNAL arm: an arbitrary customer-owned FQDN is attached by RESOLUTION
+// (the customer owns that zone), so the attach writes ZERO records into the
+// platform zone. Whatever dangles after a decommission lives in the CUSTOMER's
+// zone, is not ours to delete, and is a COPY problem — out of this sweep's scope
+// by construction rather than by assumption.
+func TestAttachExternalHostWritesNothingIntoPlatformZone(t *testing.T) {
+	ctx := context.Background()
+	seams, _, dns, box := attachThenDeprovisionFixture(t)
+	seams.LookupHost = func(context.Context, string) ([]string, error) { return []string{box.IP}, nil }
+
+	before := zoneNames(t, dns, Zone)
+	if err := AttachDomainWith(ctx, seams, AttachDomainSpec{
+		JobID:      "adjob-ext",
+		IP:         box.IP,
+		CustomHost: "barkpark.jarl.no",
+		AppPort:    4000, // an external host carries EMPTY platform DNS halves
+	}); err != nil {
+		t.Fatalf("AttachDomainWith (external): %v", err)
+	}
+	after := zoneNames(t, dns, Zone)
+	t.Logf("platform zone before external attach: %v; after: %v", before, after)
+	if len(after) != len(before) {
+		t.Errorf("an EXTERNAL attach wrote into the platform zone: before=%v after=%v", before, after)
+	}
+	if vals, _ := dns.Resolve(ctx, "barkpark.jarl.no"); len(vals) != 0 {
+		t.Errorf("an EXTERNAL attach created a platform record for barkpark.jarl.no → %v", vals)
 	}
 }

@@ -27,6 +27,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1693,10 +1694,13 @@ func (wp *WarmPool) SweepOrphans(ctx context.Context) (swept int, err error) {
 // FQDN is the box's globally-unique per-instance identity (<slug>-<teamid>.<zone>),
 // so requiring it as well guarantees we only ever delete THIS job's box.
 //
-// The server is deleted FIRST (stop billing), then the DNS A record. FULLY
-// IDEMPOTENT: no IP+FQDN match → no server delete (box already gone, or the IP
-// was reused by another instance — left untouched); DeleteRecord swallows
-// not-found. Runs on a fresh bounded context.
+// The server is deleted FIRST (stop billing), then the DNS — swept BY VALUE, so
+// an attached custom-domain record the claim payload never mentions dies with
+// the box instead of outliving it at a recycled address (see deprovisionDNS for
+// the mechanism and the wider-delete tradeoff). FULLY IDEMPOTENT: no IP+FQDN
+// match → no server delete (box already gone, or the IP was reused by another
+// instance — left untouched); the sweep of an already-clean zone deletes nothing
+// and DeleteRecord swallows not-found. Runs on a fresh bounded context.
 func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone string) error {
 	if wp.Provider == nil {
 		return fmt.Errorf("deprovision: a CloudProvider must be set")
@@ -1755,9 +1759,61 @@ func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone s
 		}
 	}
 
-	if wp.DNS != nil && dnsLabel != "" && dnsZone != "" {
-		if derr := wp.DNS.DeleteRecord(dctx, dnsZone, dnsLabel, "A"); derr != nil {
-			return fmt.Errorf("deprovision %s: delete DNS %s.%s: %w", ip, dnsLabel, dnsZone, derr)
+	if wp.DNS != nil && dnsZone != "" {
+		if derr := deprovisionDNS(dctx, wp.DNS, dnsZone, dnsLabel, ip); derr != nil {
+			return fmt.Errorf("deprovision %s: %w", ip, derr)
+		}
+	}
+	return nil
+}
+
+// deprovisionDNS tears the released box's DNS down BY VALUE, not by name.
+//
+// Why not by name: the attach-domain flow upserts a SECOND A record — the
+// customer's custom host — into the SAME zone at the SAME IP, and the
+// deprovision claim payload only ever carries the PLATFORM dns_label. Deleting
+// that one label releases the box while the custom host keeps resolving to an
+// address that is about to belong to somebody else, and the registry row that
+// remembered the custom host is deleted right after, so the leftover record is
+// attributable to nothing. The support-instance teardown was fixed out of this
+// exact by-name trap (cloud_support_cmd.go stepDNS, "by VALUE, not name — a
+// by-name delete leaves the go-live sibling standing"); the customer path now
+// rides the same sweep.
+//
+// THE TRADEOFF, ACCEPTED DELIBERATELY (the support path accepted it first): a
+// by-value sweep removes EVERY A record in the zone that points at this IP —
+// not only the two names we know about. That is the point (an unknown extra
+// name at a released address is exactly the orphan we are here to kill), but it
+// is a wider delete than a name delete, so it is a decision, not an accident.
+// On the pathological IP-reuse shape (two managed boxes sharing one address) it
+// would also take the other box's record; the identity fence above is what
+// keeps that shape from reaching here in the dangerous direction.
+//
+// A DNSProvider that cannot list records degrades to the old by-name delete
+// rather than failing the teardown: the server delete has already succeeded by
+// this point, and erroring here would strand the job with the box gone.
+func deprovisionDNS(ctx context.Context, dns DNSProvider, zone, label, ip string) error {
+	if _, ok := dns.(RecordLister); !ok {
+		if label == "" {
+			return nil
+		}
+		if derr := dns.DeleteRecord(ctx, zone, label, "A"); derr != nil {
+			return fmt.Errorf("delete DNS %s.%s: %w", label, zone, derr)
+		}
+		return nil
+	}
+
+	deleted, err := SweepARecordsByValue(ctx, dns, zone, ip)
+	if err != nil {
+		return fmt.Errorf("sweep DNS in %s for %s (deleted %v before the failure): %w", zone, ip, deleted, err)
+	}
+	// The platform label is swept too whenever its value still points at the box.
+	// If it does NOT (a drifted record, or one that was never written), the sweep
+	// cannot see it — so the by-name delete still runs, idempotently, rather than
+	// letting the label outlive the box it names.
+	if label != "" && !slices.Contains(deleted, label) {
+		if derr := dns.DeleteRecord(ctx, zone, label, "A"); derr != nil {
+			return fmt.Errorf("delete DNS %s.%s: %w", label, zone, derr)
 		}
 	}
 	return nil
