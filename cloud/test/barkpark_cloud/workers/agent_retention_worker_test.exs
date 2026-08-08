@@ -13,7 +13,7 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorkerTest do
   use BarkparkCloud.DataCase, async: true
   use Oban.Testing, repo: BarkparkCloud.Repo
 
-  alias BarkparkCloud.{Accounts, Registry, Usage}
+  alias BarkparkCloud.{Accounts, PlatformDelivery, Registry, Usage}
   alias BarkparkCloud.Registry.{AgentEvent, AgentToken}
   alias BarkparkCloud.Usage.Sample
   alias BarkparkCloud.Workers.AgentRetentionWorker
@@ -159,6 +159,44 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorkerTest do
     refute Repo.get(Sample, old)
     assert Repo.get(Sample, keep_boundary)
     assert Repo.get(Sample, keep_fresh)
+  end
+
+  ## 5b. platform_deliveries — the platform's own delivery record, kept 180 days.
+
+  # dr-w23-s2: one row per (sha, delivering run, first sighting). Backdated on
+  # `inserted_at` — the recorder's clock, the only one on that table a caller
+  # cannot supply, so a wrong `first_seen_at` can neither make a row immortal
+  # nor delete it early.
+  defp aged_delivery(days) do
+    sha = String.downcase(Base.encode16(:crypto.strong_rand_bytes(20)))
+
+    {:ok, %{recorded: 1}} =
+      PlatformDelivery.record_all([
+        %{
+          "sha" => sha,
+          "delivering_run_id" => "run-#{System.unique_integer([:positive])}",
+          "first_seen_at" => DateTime.utc_now()
+        }
+      ])
+
+    {1, _} =
+      Repo.update_all(from(d in PlatformDelivery, where: d.sha == ^sha),
+        set: [inserted_at: days_ago(days)]
+      )
+
+    sha
+  end
+
+  test "prunes platform_deliveries older than 180 days and keeps the window" do
+    old = aged_delivery(200)
+    keep_boundary = aged_delivery(179)
+    keep_fresh = aged_delivery(1)
+
+    assert {:ok, %{deliveries_deleted: 1}} = perform_job(AgentRetentionWorker, %{})
+
+    assert {:ok, []} = PlatformDelivery.list(sha: old)
+    assert {:ok, [_]} = PlatformDelivery.list(sha: keep_boundary)
+    assert {:ok, [_]} = PlatformDelivery.list(sha: keep_fresh)
   end
 
   ## 6. Idempotency — a clean run is a no-op and never raises.
