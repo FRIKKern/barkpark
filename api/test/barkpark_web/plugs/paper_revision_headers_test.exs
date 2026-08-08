@@ -71,11 +71,16 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
       assert conn304.status == 304
       assert conn304.resp_body == ""
       # RFC 9110 §15.4.5: the 304 re-emits the SAME validator + cache-control
-      # (Chrome merges 304 headers into the stored entry).
+      # (RFC 9111 §3.2 merge semantics — see the second-review ledger row).
       assert get_resp_header(conn304, "etag") == [etag]
 
+      # Second-review condition 2: pin the LITERAL policy on both sides — the
+      # old same-as-200 comparison was [] == [], vacuously green.
+      assert get_resp_header(conn200, "cache-control") ==
+               ["private, max-age=0, must-revalidate"]
+
       assert get_resp_header(conn304, "cache-control") ==
-               get_resp_header(conn200, "cache-control")
+               ["private, max-age=0, must-revalidate"]
 
       # D10: a 304 carrying a fresh nonce would permanently kill the cached
       # reader in every conforming browser — the 304 branch DELETES the policy.

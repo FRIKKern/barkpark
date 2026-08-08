@@ -27,10 +27,22 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   that otherwise turns a valid 304 into a same-URL redirect loop (the revived
   HTML's expired LV token dead-loops the client).
 
+  ## Cache policy (second-review condition 1)
+
+  Every matched published-paper response carries
+  `cache-control: private, max-age=0, must-revalidate` — the reader HTML
+  embeds per-visitor state (CSRF token, LiveView session token), so a shared
+  or proxy cache must never store it, and without an explicit policy the
+  ETag-only response left freshness to engine-variable heuristics (RFC 9111
+  §4.2.2). Same shape as `share_link_controller.ex` / `media_controller.ex`.
+
   ## The 304 branch (D10)
 
   RFC 9110 §15.4.5: the 304 re-emits the SAME `etag` + `cache-control` the
-  200 would carry (Chrome merges 304 headers into the stored entry). But the
+  200 would carry. Header update on 304 is MERGE, not replace (RFC 9111
+  §3.2 — absent fields are RETAINED; source-verified in Gecko, WebKit, and
+  Blink by the independent second review, ledger row
+  `csp-304-second-review-verdict-2026-08-08.md`). But the
   `content-security-policy` minted eagerly by `PaperReaderCsp` is DELETED:
   that policy allowlists a fresh nonce the cached HTML does not carry, so a
   304 delivering it would permanently break the revived reader's inline
@@ -134,7 +146,10 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   defp respond(conn, nil), do: conn
 
   defp respond(conn, %{released_revision_id: revision, content: content}) do
-    conn = maybe_put_revision(conn, revision)
+    conn =
+      conn
+      |> maybe_put_revision(revision)
+      |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
 
     if has_live_task_blocks?(content) do
       conn
