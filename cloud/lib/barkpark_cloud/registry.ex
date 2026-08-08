@@ -4447,22 +4447,38 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  @doc """
-  Decrypt one env var's value. Returns `{:ok, plaintext}` or `:error` (tampered
-  ciphertext fails closed). A `is_shown_once` var is `{:error, :write_once}` —
-  write-once values are never revealed (compliance posture).
-  """
-  @spec reveal_env_var(EnvVar.t()) :: {:ok, binary()} | :error | {:error, :write_once}
-  def reveal_env_var(%EnvVar{is_shown_once: true}), do: {:error, :write_once}
-  def reveal_env_var(%EnvVar{value_encrypted: ciphertext}), do: Vault.decrypt(ciphertext)
+  # A per-row reveal helper lived here and refused an `is_shown_once` row with
+  # `{:error, :write_once}`. It was DELETED in wave 56 — not because write-once is
+  # wrong, but because no production caller could ever reach the guard: it had zero
+  # non-test callers, and the env-var HTTP surface is exactly three routes
+  # (`GET /v1/env-vars`, which never returns values; POST; DELETE) with no reveal
+  # route at all. The only thing that could make the refusal fire was the test that
+  # asserted it. A guard that cannot lose is worse than no guard — it reads as
+  # protection the system does not actually provide, and it makes the write-once
+  # posture look enforced on a read path that does not exist. Write-once is still
+  # enforced where a caller can actually hit it: `put_env_var/2` refuses a rewrite
+  # of an `is_shown_once` row. If a reveal path is ever wanted, it arrives with the
+  # route that needs it, and the guard becomes losable again.
 
   @doc """
   The resolved, DECRYPTED env map for a provisioned `barkpark`: its Team's
   team-scoped vars, with the instance's own `barkpark`-scoped vars layered on top
   (most-specific-wins). Keys are env var names, values are plaintext.
 
-  This is the injection payload — called at provision-claim time and folded into
-  the Go worker's `claim_json` so the values reach the box's runtime env. ALWAYS
+  Called at provision-claim time and folded into the Go worker's `claim_json`
+  under the `env` key.
+
+  RETRACTED ON REVIEW (wave 56): this paragraph used to open "This is the
+  injection payload" and end "so the values reach the box's runtime env". It is
+  not an injection payload and the values reach nothing.
+  `internal/provisioner.JobSpec` declares no `env` field and every claim decode
+  is a bare `json.Unmarshal`, so the key is silently dropped by the only process
+  that could act on it. The console retracted the same claim in cch-w53-s1
+  ("Values are not delivered to any instance yet"); `lib` was still asserting the
+  opposite in two places, of which this was one. Building delivery is filed
+  separately — until it exists, this function resolves a map nobody consumes.
+
+  ALWAYS
   team-filtered (the never-leak-across-tenants invariant); a barkpark belongs to
   exactly one team, so resolution can only ever surface that team's secrets.
 
