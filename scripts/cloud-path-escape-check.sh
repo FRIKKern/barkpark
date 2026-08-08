@@ -86,6 +86,24 @@ set -euo pipefail
 #       moves the census — and unfiltered, the census would never run on the PR
 #       that moved it. Declared as a DIRECTORY because the census reads the whole
 #       package (every non-test .go), not one pinned file.
+#   internal/provisioner/** — cch-w53-s2.
+#       cloud/test/…/web/claim_payload_manifest_test.exs censuses the claim
+#       payloads the control plane RETURNS on the worker-token claim routes
+#       against the `json:"…"` tags reachable at each `json.Unmarshal` call site
+#       in this package. Go's encoding/json DISCARDS an unmodelled key in
+#       silence, and DisallowUnknownFields appears zero times here — so a key
+#       the plane ships and the worker has no field for is dropped with no
+#       error, no log line and no other failing test. The Go side is half that
+#       contract: deleting a JobSpec field, moving a decode site, or changing a
+#       field's TYPE moves the census, and unfiltered the census would never run
+#       on the PR that moved it. Declared as a DIRECTORY, exactly like
+#       internal/cloudclient/** above and for the same reason — the manifest
+#       reads the whole package (every non-test .go), not one pinned file, and
+#       the tolerated-dialect decode it depends on is an INLINE anonymous struct
+#       that no per-file pin would survive a move of. Cost measured over the last
+#       60 days: 48 commits touched internal/provisioner, 24 of which already
+#       dispatch this set, so 24 newly dispatch it — affordable against the
+#       47-of-54 that got `templates/**` REFUSED (D270).
 #
 # js/packages/create-barkpark-app/templates/** is the VENDORED-TEMPLATE DRIFT
 # TRIPWIRE, inherited verbatim from the workflow-level filter this shim
@@ -144,6 +162,7 @@ deploy/site-deploy.sh
 deploy/site-deploy-node.sh
 internal/cli/cloud/providers_capabilities.json
 internal/cloudclient/**
+internal/provisioner/**
 js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
 scripts/cloud-path-escape-check.sh
