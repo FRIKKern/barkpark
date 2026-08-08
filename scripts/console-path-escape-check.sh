@@ -127,6 +127,25 @@ set -euo pipefail
 # console-harness.yml's `changes` dispatcher runs, so one list drives dispatch
 # and coverage and the two cannot drift apart.
 #
+# `internal/agent/report.go` IS A CROSS-FENCE READ, AND THE FENCE IS TOLD
+# (wave 51 s2). The console's Timeline empty state quotes the on-box agent
+# verbatim — "the on-box agent reports 'no backup probe wired'" — and
+# __app.test.mjs pins that quote against the file that actually emits it
+# (report.go:596), so the emitter is an INPUT to a console assertion: reword the
+# Go literal and what the console tests conclude changes. Undeclared, the
+# harness would not re-run on that edit and the console would keep quoting a
+# string the agent no longer produces, with a green Console gate — the exact
+# green-by-construction shape this ratchet exists to kill.
+#
+# THE COST IS REAL, NAMED, AND OWED TO ANOTHER EPIC IN WRITING: internal/agent/
+# is inside the deploy-reliability fence, and this line means a
+# deploy-reliability PR touching report.go now fires the blocking Console gate.
+# That is the intended non-vacuity, not a side effect. It is ONE EXACT FILE and
+# never `internal/agent/**`: the harness reads exactly this file, and widening
+# it to the directory would bill that epic for edits the console cannot see.
+# The companion arm-C walk of `internal/` and `cmd/` is a WALK ROOT, not a read
+# (the ruling is in scan_files), so it correctly adds nothing here.
+#
 # `cloud/lib/**` IS THE WHOLE DIRECTORY, AND IT HAS TO BE (wave 30 S1). The
 # bidirectional notification census in `__app.test.mjs` walks EVERY `.ex` file
 # under `cloud/lib` to find the call sites that dispatch an alert — its universe
@@ -142,6 +161,7 @@ set -euo pipefail
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
+internal/agent/report.go
 .github/workflows/cloud.yml
 design/emit-fence.test.mjs
 cloud/test/barkpark_cloud/web/**
