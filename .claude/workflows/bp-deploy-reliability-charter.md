@@ -5599,3 +5599,446 @@ engines' marker predicates and `active_caddy_port`, `event_email.ex`'s two bare 
 `FailureCopy.strip_ansi/1`, and `emit ROUTE`'s position outside `@stage_names`. Three cited authorities were
 read for COVERAGE and found not to cover what they were cited for: D206 (files, does not authorise), D320
 (not in this charter), and the direction's "#10518 is open" (merged).
+
+
+## Wave 21 — exit 0 must mean the outcome happened (2026-08-08)
+
+Epic task `task-fb4fb869490b4213` · Wave 21 Paper `deploy-reliability-wave-21-2026-08-08`
+
+**NUMBERING NOTE.** This wave numbers from **D359**. `origin/main` now carries D337–D358 (wave 20, merged);
+D302–D336 are still stranded on six unmerged charter/wave-log PRs (#10522, #10496, #10612, #10407, #10173,
+#10133) and this wave cites none of them. Filed as `dr-w21-bl-charter-prs-strand-d302-d336`. Every charter
+fact below was read with `git show origin/main:`; the primary checkout's copy of this file is an 813-line
+stump and must never be read as the charter — **and must never be committed over it**, which is why this
+wave's charter edit was made in a worktree cut from `origin/main`, not in the primary checkout.
+
+### Decisions (wave 21)
+
+- **D359 — THE ANCESTOR RULE. EQUALITY BETWEEN `github.sha` AND THE SERVED SHA IS REFUSED, BY TWO
+  INDEPENDENT MECHANISMS.** `cp-deploy.sh:44-58` does `git pull --ff-only origin main` and sets
+  `NEW=$(git rev-parse HEAD)`, exporting `BARKPARK_GIT_SHA="$NEW"` — **tip-at-pull-time, never the run's
+  headSha** — so a run fired for one sha routinely delivers a DESCENDANT. Mechanism one, eviction: run
+  31235286567 fired for `7f5f10b8d`, five siblings were evicted as cancelled, and the box was already
+  serving `2673eb0`. Mechanism two, and far more common: `572d51e13` and `695a485ce` are **DOCS-ONLY**
+  commits matching none of `deploy.yml`'s paths, so they had **no deploy run at all** — yet production
+  serves `572d51e13`, delivered by a run fired for `6383ab46e`. Compare says `ahead 10 / behind_by 0`.
+  **RULING: the smoke asserts `git_sha` non-null AND `${{ github.sha }}` is an ANCESTOR of (or identical to)
+  the served sha. Equality would red ten healthy merges and teach the lead to ignore the gate.** This
+  RE-CUTS `dr-w20-s8` criterion 2 verbatim; that row is superseded by `dr-w21-s1` and the lead closes it
+  cancelled.
+
+- **D360 — THE ORACLE IS THE GITHUB COMPARE API, NOT `git merge-base`, ON FOUR INDEPENDENT COUNTS.**
+  `gh api repos/:repo/compare/${{ github.sha }}...$served --jq .status` → PASS on `ahead|identical`, FAIL on
+  `behind|diverged`. (a) **It needs no checkout.** `deploy.yml:99`'s control-plane checkout is a bare
+  `actions/checkout@v4` — depth 1 — and the served descendant's object is simply absent; simulated on a real
+  shallow clone, `git merge-base --is-ancestor` dies `fatal: Not a valid commit name`, **RC=128**. (b)
+  **`fetch-depth: 0` alone is not the fix**, and neither is depth-1-plus-a-fetch: a plain in-step
+  `git fetch origin main` **does not deepen** a shallow clone — RC stayed 128. The merge-base recipe costs
+  two coupled config changes AND a full-history clone on the deploy hot path. (c) **RC=128 is not RC=1**, and
+  the natural `if git merge-base …; then` form collapses "object absent" and "not an ancestor" into one
+  branch — reporting a CONFIGURATION failure as "the box is behind". Compare's failure modes are HTTP-typed.
+  (d) It **fail-closes on the jq-null trap for free**: `jq -r .git_sha` on `{"git_sha":null}` prints the
+  literal four characters `null`, and feeding that to compare returns **HTTP 404**. `contents: read` is
+  already granted at `deploy.yml:35` and `gh` is preinstalled. Belt-and-braces: assert the key explicitly
+  with `jq -er '.git_sha // empty'` first, so the message names the missing key rather than "Not Found".
+  Accepted cost: a network dependency on api.github.com in the deploy gate; a flaky red is the correct
+  failure direction here, a vacuous green is not.
+
+- **D361 — THE TRIPWIRE IS STRUCTURALLY BLIND TO THE ASSERTION THIS WAVE ADDS, AND ITS OWN `--selftest` HAS
+  ZERO CALLERS. MUTATION-PROVED.** `extract_cp_smoke` (`scripts/check-deploy-smoke.sh:52-60`) prints only
+  lines inside the control-plane step literally named `/Smoke test/`. A mutated `deploy.yml` carrying a new
+  `- name: Assert serving sha` step with a full `git_sha` + compare assertion matched **0** extractor lines,
+  and `check-deploy-smoke.sh` printed `OK` with **RC=0**. So the most natural implementation of the wave's
+  crown slice ships a green guard over a completely unguarded invariant. Compounding: `deploy.yml:91` runs
+  the guard **bare** and nothing repo-wide runs `--selftest`, while **nineteen** sibling scripts do run
+  theirs in CI. **RULING: extract the whole control-plane job's `run:` bodies (a second literal step name
+  goes blind again on the next rename), add a positive assertion that the comparison exists AND is the
+  ancestor form, plant four negatives including "move the assertion to a differently-named step", and change
+  `deploy.yml:91` to `--selftest`.**
+
+- **D362 — THE INSTANCE ALREADY STATES ITS SERVING COMMIT. D343's HEADLINE AND `dr-w20-s8`'s CRITERION 6 ARE
+  FALSE, AND LEG TWO MOVES FROM CAPABILITY TO CONSUMPTION.** `GET /status.json` emits `commit`,
+  unauthenticated, at `api/lib/barkpark_web/router.ex:1583` (`pipe_through(:api)` only), shipped 2026-07-28
+  in `c73f22a0b` (#6422). Live at 2026-08-08T03:44Z guerrilla returned `commit = "2673eb009"` — a **nine**-
+  character short sha — and the compare API accepts it verbatim (`ahead / 4 / 0`). So the instance leg of the
+  sha assertion is buildable TODAY and rides `dr-w21-s1`, not a future slice.
+  **The self-report has an exact silent-failure population, and it is the wrong one:** `commit` is present on
+  3 of 6 cloud boxes, and the three that omit the key entirely — dooodo `e221e7dd5`, muscle-1, Gyldendal
+  `c80168100` — are **exactly** the boxes whose serving code predates `c73f22a0b`, 5-for-5 by
+  `git merge-base --is-ancestor`. The field is absent precisely on the boxes stale enough to need it.
+  `Status.commit/1` documents "never nil, never absent … renders `unknown`", and that guarantee binds only
+  code that already contains it — which is the whole trap. **The registry's agent-derived `git_commit`
+  (5 of 6) is therefore the better oracle for a fleet verdict**, and `/status.json` is the right oracle for a
+  deploy-time assertion against the one box CI just moved.
+
+- **D363 — COMMIT DISTANCE IS COMPUTED ON THE CONTROL PLANE, OVER THE PUBLIC UNAUTHENTICATED COMPARE API,
+  INTO SEPARATE COLUMNS — NEVER A FIFTH `@update_states` RUNG.** This is the ruling that finally pays
+  `dr-bl-w6-update-state-current-is-an-unearned-green`, open since wave 6.
+  **The mechanism, by line:** `Registry.refresh_update_status/1` (`registry.ex:3710`) GETs the instance's
+  `/v1/admin/self-update` and persists its `check` block verbatim; `git_commit` appears nowhere in it. The
+  plane holds a commit for five of six boxes and grades freshness on a release TAG the box awards itself, so
+  2,468 commits of drift render as the same string `0.2.25`.
+  **Route 1, agent-side `rev-list --count HEAD..origin/main`, is REJECTED on truth grounds, not capability
+  grounds** (production really does wire a checkout, `cmd/barkpark-agent/main.go:103-105`): the only
+  `git fetch origin` on an instance lives INSIDE the update run (`instance-deploy.sh:301-302`,
+  `scripts/self-update.sh:41-42`) — nothing on a cron, nothing on the beat — so `origin/main` is frozen at
+  the last successful update and the 2,468-behind box would report ~0. It is most optimistic exactly where it
+  is most wrong: the unearned green with extra steps.
+  **Route 2, a CP-side ordered main-sha ledger, is REJECTED because it does not exist**: `deployments` is the
+  SITE build table whose `git_ref` is the customer CONTENT sha (`registry.ex:5509/:5673`), no migration under
+  `cloud/priv/repo/migrations` creates a commit index, and a ledger with a gap reports distance 0 — fail-OPEN.
+  **Route 3 is ADOPTED.** One call, `GET /repos/:repo/compare/<served>...main` with the BRANCH NAME as head
+  so GitHub resolves the tip server-side, answers ancestry AND distance: `identical` → current, `ahead` with
+  `ahead_by: N` → N behind and provably an ancestor, `behind`/`diverged` → a box serving code that is not on
+  main, which is its own loud row and has no reporter today. Verified live: identical → `identical 0 0`;
+  unknown sha → **404**, so a garbage or null commit fails CLOSED. Anonymous budget 60/h/IP. This copies a
+  decision the repo already made one layer down — `api/lib/barkpark/self_update/client/github.ex` calls this
+  exact endpoint and its own moduledoc rules the budget sufficient for an hourly check. Do **not** route it
+  through `BarkparkCloud.GitHub.Real`: `config.exs:95-96` defaults to `GitHub.Fake` and `runtime.exs:147`
+  swaps in `Real` only under an App credential its own moduledoc says has never existed. Use a new narrow
+  module over `Billing.HttpClient` (`:httpc`, verified TLS), client injected.
+  **THE SEPARATE-COLUMN RULING IS PROVED, NOT ASSERTED.** `@update_states` is
+  `~w(unknown current behind disabled)` (`registry/barkpark.ex:76`) with six live consumers, three of them
+  control flow. A scratch ExUnit run measured a fifth rung: the rollout candidate query (`registry.ex:3874`,
+  `where: b.update_state == "behind"`) returns the row for `"behind"` and **nil** for `"stale_commit"` — a
+  box graded by commit distance would be permanently excluded from the rollout that would fix it; and **one**
+  staging box in the new rung flips `staging_gate_open?()` (`registry.ex:4102-4114`) from **true to false**,
+  freezing every prod advancement, **fail-CLOSED**; and the settle check
+  (`autoupdate_rollout_worker.ex:86`) never fires, so the grace timer expires and the box is paused for
+  investigation. So: `commit_distance` + `commit_ancestry` + `commit_distance_checked_at`, a new narrow
+  changeset, no gate touched.
+  **THE NULL RUNG IS THE POINT.** muscle-1 reports `agent_status: offline`, `health_status: unknown`,
+  `git_commit: ""` — and still self-certifies `update_state: current` with a fresh `update_checked_at`,
+  because `refresh_update_status/1` reaches the box directly and never asks whether the row is otherwise
+  alive. A NULL sha, a 404 and a rate-limit refusal must ALL land `unknown` / `nil` and render UNMETERED,
+  **sorted to the TOP** — `ORDER BY commit_distance NULLS LAST` would bury exactly the boxes the leg exists
+  to surface, re-minting D343 in a fresh column on the box already lying hardest.
+  **The population, re-taken 2026-08-08T03:05Z against tip `572d51e13`, three oracles agreeing to the unit**
+  (`git rev-list --count`, positional index in `git log`, compare `ahead_by`): Guerrilla `2673eb009` **4** ·
+  gyl `f3ee2984d` **227** · jarl `952106581` **592** · dooodo `e221e7dd5` **886** · Gyldendal `c80168100`
+  **2,468** · muscle-1 **NULL**. All six read `current` at `0.2.25 == 0.2.25`, and **four** — not three, as
+  D343 says — also read `bucket: healthy, status: ok`. Every reported sha is an ancestor of main, so distance
+  is well-defined for all of them. Gyldendal additionally reads `health_status: down` in the registry while
+  its own `/status.json` answers `"status":"operational"`: three verdicts, no two consistent.
+
+- **D364 — THE `≥2`-CONCURRENT-BUILD REGIME WAS CLOSED BY A SHIPPED FIX, NOT BY A LULL — AND THAT FIX IS THIS
+  EPIC'S LARGEST UNREPORTED WIN. D350's MEASUREMENT STANDS; ITS MECHANISM CLAUSE IS FALSE AS WRITTEN.**
+  D350 reproduces to the digit on its own window (n=4,456: p50 1,101 ms at 0 builds → 3,487 at 1 → **8,631**
+  at ≥2 → 8,429 / 7,959 / 8,374; ≥2 held 12.01% of wall; peak concurrency 6), and its confound check runs the
+  wrong way for the null — the concurrency-0 bucket carries the HEAVIEST queries (result_count p50 687 vs
+  674-679) and banding to `result_count>=21` preserves the whole gradient.
+  **But "nothing caps cross-site build concurrency" conflates RUN concurrency with COMPILE concurrency, and
+  two caps exist.** The box-side fd-7 fleet flock (`site-deploy-common.sh:282 BUILD_GATE_SLOTS=1`,
+  fleet-wide on `/var/lock/barkpark-site-build.lock`) landed `3e27a4915` on 2026-07-30, a week before the
+  storm, and *structurally cannot* produce the observed signature — a flock lets all N units START and blocks
+  them inside `npm ci`, so parallel `started_at` persists. What stops starts is an ADMISSION DOOR:
+  `ef77af274` (#9827) added `@build_slot_capacity 1` to `api/lib/barkpark/sites/deploy_runner.ex`, a
+  GenServer-serialized refusal before a unit exists. **Its first refusal fired at 2026-08-06T22:29:27Z**,
+  matching the concurrency step to the second (last parallel fan-out: five runs started 22:20:44-49; first
+  sequential run 22:29:26, two sites refused one second later). From 2026-08-06T23Z through 2026-08-08T03Z
+  **every** hour has max concurrency exactly 1 and **0.00%** of wall at ≥2.
+  **Demand did not cool — it rose 5.5×**: runs/hour 35-41 → 48-51, and counting REQUESTS (runs + refusals)
+  2026-08-07T01Z carried 50 runs + 174 refusals = **224 requests/h** against 41 at 08-06T16Z. 1,757 door
+  refusals since, all logged at `[info]`.
+  **THE NUMBER: search p50 8,314 ms → 781 ms across the door** (n=2,572 pre / 3,029 post, split on
+  22:29:27Z) — a **10.6×** improvement in the largest customer-visible harm this epic has ever measured,
+  confirmed live at three novel queries (733 / 737 / 678 ms). Deploy success rose **197/351 (56%) → 657/666
+  (98.6%)** over the same boundary. **And nothing reported any of it.** `avgDurationMs` is emitted from
+  24,832 crystals (`search/intelligence.ex:961`) and rendered by nobody; `build_slots` / `runner_queue_len`
+  are served (`instance_site_deploy_controller.ex:64`) and consumed by nobody — and `build_slots` is a module
+  attribute, a constant, not a measurement. Concurrency is reconstructible only post-hoc from a **rotating
+  ~40-hour** `terminal.json` corpus, so if the door ever fails open the 8.3 s regime returns silently.
+  **D351's "77-92 ms idle floor" is REFUTED** — eight novel queries return **587-721 ms**. Its conclusion (no
+  cold path) survives; its number is 8× optimistic and must never become a baseline.
+  **Two measurement traps, both hit live:** the migration is named `create_media_search_events` and the PK is
+  still `media_search_events_pkey`, but the live relation is `search_intel_events` — querying the migration's
+  name returns `ERROR: relation "media_search_events" does not exist`, a FALSE "no data" if trusted; and the
+  table mixes `source=documents-api` (n=6,087, p50 5,695) with `source=federated` (n=982, p50 23), so any
+  unbanded p50 blends two populations. **D350's 6.9× ratio must not be re-used in any form.**
+  **CONSEQUENCE FOR D349.** D350 was the "fresh argument" D228(f) demanded for the demand cut. It has been
+  **discharged by a fix, not by a cut.** The packet ships with its harm marked REMEDIATED, in the PAST tense
+  with the cause named — never "dead since 08-06T22Z", which reads as a lull and invites its return — and the
+  concurrency lever struck as ALREADY PULLED rather than unavailable. It never quotes 8,631 ms or 6.9× as
+  today's customer experience. `dr-w21-hg-demand-cut-packet-regime-remediated`.
+
+- **D365 — THE FLEET BUILD CAP'S FAIL-OPEN IS STRUCTURALLY SILENT AND MEASURED AT ZERO: FILED, NOT BUILT.
+  THIS IS THIS EPIC'S FIFTH REFUSAL OVER AN EMPTY SET, AND THAT IS THE POINT.** `build_gate_acquire`
+  (`site-deploy-common.sh:311-341`) fails OPEN in three branches — no `flock(1)`, an undeletable lock dir
+  (falling back to a TMPDIR path, so two engines can resolve DIFFERENT paths and not serialize at all), an
+  unopenable lock file — each `return 0`, each reporting via `log()` (`:36`, stdout prose) and never `emit()`
+  (`:55`, the BPSTAGE protocol the plane parses at `sites/deploy.ex:1863`). The ONLY consumer of
+  `admission gate is OPEN` repo-wide is a `--self-test` assertion at `site-deploy.sh:1936`. So the box's only
+  cross-site cap can be entirely OFF while the plane reports exit 0.
+  **All three strings return `-- No entries --` over guerrilla's FULL journal retention** (back to
+  2026-07-29T16:49:38Z, 3.7 G — essentially the gate's whole life), as does the 900 s lapse refusal
+  `FLEET BUILD SLOT`, so **D38's honest bound still holds and did not silently expire**. The branches are
+  structurally unreachable today (`/usr/bin/flock` present, `/var/lock` `drwxrwxrwt`, lock file live with a
+  moving mtime), and the deployed script is byte-identical to `origin/main`
+  (sha256 `525f2ba9d0244…02825`), so the mechanism is not accidentally true via staleness.
+  **What IS non-empty is the queue**: 4,529 busy events in 7 days against 4,525 drains, paired by PID —
+  mean wait 94.8 s, **max 319 s** against a 900 s budget. Real headroom, and a gauge nothing reads: that is
+  `dr-w12-bl-build-clock-has-no-reader`, and the `log`→`emit` change belongs there as a rider.
+  **Re-derivation trap, mandatory:** `journalctl -g` prints `-- No entries --` on no match — ONE LINE — so
+  `| wc -l` reads 1 and is indistinguishable from a real hit. Print the matches; never count them.
+
+- **D366 — THE DELIVERY GAUGE IS DARK IN PRODUCTION, AND ITS TEST ASSERTS THE ONE ARM PRODUCTION NEVER
+  RUNS.** `bp cloud deployments -o table` against the live control plane renders, to every real operator:
+  `delivery — how long content waited to reach the web / NOT MEASURED — this control plane sends no delivery
+  census.` Cause, two live curls in one minute: the CLI reads `GET /v1/deploy-ledger/census` (the TEAM route,
+  `router.ex:3610`), which `Map.put`s only `:scope`; the `:delivery` node is added ONLY by
+  `deploy_census_json/2` (`:9523`), reachable ONLY from `GET /v1/operator/deploy-ledger/census` (`:3556`),
+  gated by `require_platform_operator` → **403** `{"error":"forbidden","scope":"platform",
+  "required":"platform_operator"}` to a real account token. **Wave 15's slice 3 shipped a reader onto a route
+  nobody can reach, and waves 16 and 18 pointed the human verb at a route that does not carry it.** And the
+  test carries the false belief in a comment — `cloud_deploy_census_cmd_test.go:871-876`: *"The route emits it
+  now … so an envelope that CARRIES the node must never render the sentence that says it doesn't"* — asserted
+  against a fixture it built itself. Textbook vacuous green, on this epic's own instrument.
+  **THE TENANCY TRAP, and it is why this is HIGH-FLIP-RISK:** `DeployLedger.delivery/3`
+  (`deploy_ledger.ex:1257`) accepts only `:site_limit` and `:as_of`; its query filters `inserted_at` and
+  `environment == "production"` and **nothing else** — it is FLEET-WIDE. A naive `Map.put(:delivery,
+  delivery(from, to))` onto the team route would put other teams' `site_id`s into a team-scoped body. The fix
+  threads `:site_ids` through, mirroring `census/3`. This pays `dr-w18-bl-team-census-has-no-delivery-node`,
+  which predicted the mechanism to the line number; no sibling row is filed.
+
+- **D367 — THE ARM DECISION IS NOW DURABLE AND STILL REACHES NO PLANE AT ALL, AND THE CHEAP PATH DOES NOT
+  EXIST.** Production launches transient systemd units and reconstructs status from files
+  (`deploy_runner.ex` `reconstruct/2`, ~:1290) — the in-process Port path whose `ingest_line` comment is
+  usually cited is NOT what prod uses. Neither of its two channels carries ROUTE. (1) **ZERO of 1,226 `.log`
+  files on guerrilla contain a `name=ROUTE` line**, and a known ROUTE-emitting run's log contains ZERO
+  `BPSTAGE` lines of any kind — because `emit()` writes to stdout and `$BARKPARK_SITE_STATUS_FILE`, never to
+  `$BARKPARK_SITE_LOG_FILE`, which only `log()` writes. The log tail structurally cannot carry a stage line.
+  (2) `fold_status_file` reads the file that DOES have ROUTE and discards it through
+  `parse_stage_line/2`'s `name in @stage_names` guard (`:278`). And the cloud plane has nothing either:
+  `deployments` has **no `log_tail` column at all**, and of **19,327** rows carrying `console` entries, **0**
+  contain "ROUTE" and **0** contain "BPSTAGE". So the reporting slice is strictly LARGER than hoped — a
+  sibling channel must be built, or ROUTE admitted to `@stage_names` (a D346 doctrine change, which must also
+  move the ExUnit pin D368 installs).
+  **Incidence today is 0 of 10, and the zero is five hours old.** 15 ROUTE emissions since the engines gained
+  it at 2026-08-08T02:36:09Z, all `status=ok`: 14 `already armed`, 1 `armed` — that one being
+  `search`/`37cf23399bde8804`, **D345's 208-deploy public 404, repaired and witnessed**. Coverage is 6/6 as a
+  clean step function at the engine mtime (the three non-emitting runs are each explained by timing, not by a
+  gap). All 10 live sites carry an identity-matched marker and serve 200; the six `proof-20260718-*` 404s
+  have **zero-byte** status files and fail the criterion's own predicate. But this is a POST-REPAIR zero
+  against D345's pre-fix n=208, and no new site has been created since — so it bounds "is anything broken
+  now" (no) and does **not** bound "how often does arming fail on a new site's first deploy".
+  **`dr-w19-bl-arm-route-incidence-then-fatal` therefore CANNOT honestly close as "counted, not fatal" until
+  a counter exists** — a verdict resting on a report that does not exist is the exact silence this epic is
+  about. The two rulings are coupled. Filed: `dr-w21-bl-route-decision-reaches-no-plane`. **Pre-loaded
+  vacuous-green trap:** dev/CI/macOS fall back to the in-process Port, where ROUTE WOULD land in `run.log` —
+  a test asserting "ROUTE reaches the log tail" passes in CI and is vacuous against prod.
+
+- **D368 — THREE DEFECTS IN THE GUARD FAMILY THIS EPIC LEANS ON HARDEST, AND A PREMISE CORRECTION.**
+  **The correction first: nothing removed assertion rows.** `git log --oneline 2514084d9..origin/main --
+  deploy/` is EMPTY — #10607 is still `deploy/`'s tip — so its 322/177 claim is honest. The 320/176 reading
+  is produced by the recipe: `git archive origin/main deploy | tar -x` omits the one file three rows are
+  guarded on (`site-deploy.sh:1544-1550`, `if [ -f "$RUNNER_EX" ]` over
+  `api/lib/barkpark/sites/deploy_runner.ex`). Add that one file and both totals land exactly on 322/322 and
+  177/177.
+  **(1) THE SKIP IS SILENT AND GREEN.** Delete `deploy_runner.ex` and the self-test prints
+  `320/320 checks passed` / `PASS` / exit 0 — no SKIP banner, no count assertion. Every OTHER conditional in
+  the file prints `[selftest] SKIP` AND is hard-failed by `BARKPARK_SELFTEST_REQUIRE_E2E=1`. This is the one
+  conditional that can disappear without saying so. Latent, not active.
+  **(2) THE GUARD RIDES THE WRONG PATH FILTER, AND THIS ONE IS ACTIVE.** `deploy-harnesses.yml` triggers on
+  `paths: ["deploy/**", …]` — `api/**` is not there. A PR adding `ROUTE` to `@stage_names` — the exact D346
+  violation these rows exist to catch — touches no `deploy/**` path, so the only assertion protecting the
+  doctrine **never fires on it**. The assertion works perfectly: mutating `@stage_names` reds exactly those
+  two rows (`310/322 FAILED (2)`). It is simply unreachable from the change that would break it. There is no
+  twin on a required lane (`git grep stage_names origin/main -- api/test` is EMPTY), and
+  **`Deploy harnesses` is not a required context** — the set is exactly
+  `["Elixir gate","PR references an active task","Cloud gate","Console gate"]`. **RULING: the durable fix is
+  an ExUnit pin on the required Elixir lane; the path-filter widening is belt-and-braces.**
+  **(3) THE NODE ENGINE'S HARDENING IS MUTATION-INVISIBLE.** #10607's review fix was applied verbatim in both
+  engines, but only the STATIC engine has rows that tell the two predicates apart: reverting the node
+  engine's `site_route_marker_re` from `([^a-z0-9-]|$)` to `([[:space:]]|$)` leaves it at **177/177 PASS**,
+  while the same mutation on the static engine reds exactly the two delimiter rows. The six direct-predicate
+  rows (`site-deploy.sh:1656-1667`) exist only in the static engine. An L4 claim in an L1 costume, in the
+  file governing every live site's public route.
+  **METHOD TRAP, MANDATORY:** do NOT mutate `site_route_marker_re` with `perl -pi -e` — the replacement
+  contains `$)`, which perl interpolates as the GID list variable, silently producing a garbage regex that
+  reds ~20 unrelated rows and looks exactly like a devastating finding. Use an exact-string replace in
+  python3.
+
+- **D369 — THE INSTANCE SMOKE COVERS THE DEAD-POOL CLASS AND NOTHING ELSE. D344 IS NARROWED, NOT
+  RETRACTED.** The narrow claim is TRUE and has FIRED: `/api/schemas` → `LegacyController.schemas/2` →
+  `Content.list_schemas/2` → `Repo.all()` (`content/schema.ex:104`), no cache anywhere, and run
+  30686555528 (2026-08-01T05:49:12Z) logged `guerrilla /api/schemas = 500` and failed the step. **But that
+  run's job list is `changes/success, instance/failure, control-plane/success` — no `report-deploy-failure`
+  job existed yet. The oracle's only true positive in repo history reported to nobody.** It is 1 of 115
+  failed runs across 2,054 runs, and over the 100 most recent runs it reached a conclusion on only 21 of 49
+  instance jobs — ~43% exposure.
+  **What it cannot lose on:** an EMPTY catalog (mutation-proved — the verbatim predicate passes on a 200 with
+  body `[]`; `legacy_controller.ex:109-123` has no emptiness check); the ENTIRE authenticated stack (the
+  route pipes through `[:api, LegacyDeprecation]` only, deliberately un-token-gated, live 200 with no
+  Authorization header); stale code; a deploy that exits 0 without moving (`instance-deploy.sh:311-315`
+  coalesces); a flip lost onto a live SIBLING slot serving old code (only a flip onto a DEAD port is caught).
+  **And one survey claim is also wrong:** the outer smoke does NOT duplicate the inner health gate — the
+  inner gate probes `http://localhost:${TARGET_PORT}/api/schemas` PRE-FLIP, direct to the slot, no Caddy, no
+  TLS, no DNS; the outer traverses public HTTPS through Caddy. The true duplicate is
+  `instance-deploy.sh:793-794`, which only LOGS. So the workflow smoke is the only place that public-path
+  predicate is ever asserted — a reason to strengthen it, not dismiss it.
+  Cheap wins available and filed: the bad-creds 401 probe transplants **unchanged** (live 401 on
+  `POST /v1/auth/login` with an invalid address, no credential introduced); a non-empty-body assertion is one
+  `jq length` away; `check-deploy-smoke.sh` has NO instance-side coverage by construction (`job ==
+  "control-plane"`); and the smoke step declares `GUERRILLA_HOST` as `env:` and never uses it, hardcoding the
+  URL. `dr-w21-bl-instance-smoke-cannot-fail-on-an-empty-catalog`.
+
+- **D370 — THE PDS FENCE IS FILE-SCOPED, NOT TREE-SCOPED, AND WAVE 20 CROSSED IT ON EXACTLY ONE FILE.**
+  Read from **PDS-D716** (`bp-pds-charter.md:15029-15046`, the last fence adjudication), not from the
+  paraphrase in `pds-bl-w49-post-flip-curl-only-logged`, which quotes the superseded wave-36 enumeration.
+  D716 rules `deploy/instance-deploy.sh` and `deploy/cp-deploy.sh` **IN-FENCE for PDS**, and in the same
+  breath **"FENCED OUT THIS WAVE, MEASURED: … `deploy/site-deploy*` … (deploy-reliability wave 1)"** — PDS
+  has already ceded `site-deploy*` to this epic by name. So `deploy/**` is split down the middle. Wave 20's
+  #10607 and #10563 touched ceded ground; **only `7f5f10b8d` (#10605) edited `cp-deploy.sh`, and that is the
+  single unnegotiated crossing** — already merged, uncontested, disclosed here rather than reverted (the
+  serving-sha clock this wave's crown depends on is inside it). Also load-bearing and re-confirmed: **any
+  `deploy/**` byte deploys BOTH production hosts** (`deploy.yml:79` `^(cloud|deploy|internal|cmd)/` → cp,
+  `:86` `^(api|internal|deploy|connectors|templates)/` → instance). And **#9644 is a GitHub ISSUE, not a PR**
+  (`gh api …/pulls/9644` → 404) — nothing was ever merged through it; reasoning that treats it as landed work
+  is reading a backlog row as a shipped fix.
+  The two cp-deploy silences D358 names are re-measured and **both are n=0**: across 150 successful
+  `deploy.yml` runs (118 with a CP job, the full ~7-day log-retention window), **118 `provisioner: active`**
+  and **118 `image-bake timer: enabled`**, with no other value ever; live CP shows `NRestarts=0`,
+  `Result=success`, and zero `Failed to start|entered failed state` in 30 days. A naive
+  `grep -ci failed` over that unit **over-counts 26-to-0** — every hit is an application-level warm-refresh
+  WARNING. Not built. (Note the filed row's line cites are 8 lines stale, drifted by #10605's own edit.)
+
+- **D371 — MERGE-TO-SERVING LAG IS MEASURABLE FOR THE FIRST TIME, NOTHING RECORDS IT, AND `serving_since` IS
+  THE WRONG KEY TO RECORD.** `Health.serving/0` computes `serving_since` live from `:erlang.monotonic_time/0`
+  against `:erlang.system_info(:start_time)`; `git grep serving_since origin/main -- cloud` outside tests
+  returns ONLY `health.ex`. No table, no column, no worker, no scrape — every read is a point sample the next
+  container replacement destroys. Live at 2026-08-08T03:14Z: #10616 merged 02:42:39Z as `572d51e13`,
+  `/health` reported that sha with `serving_since` 02:45:42.628915Z — **3m03.6s**. A 147-merge proxy over
+  ~55 h gives min 153 s / **p50 446 s** / p90 621 s / max 20,020 s, and the proxy OVERSTATES by ~55 s against
+  the one directly-observed pair, so the true p50 is ~6.5 min. **This does not contradict D337's cp p99 of
+  46.8 h** — that is time-to-coverage over long quiet periods; this is lag at merge cadence. Both are true
+  and a gauge must state its window.
+  **Two traps.** (a) `health.ex:54-58` says in its own docstring that `serving_since` answers "how long has
+  this PROCESS been up", NOT "how long has this SHA been live" — a bare `docker restart` resets it and makes
+  the lag read SMALLER than the truth: a gauge a restart can improve. Record `(sha, first_seen_at)`. (b) The
+  20,020 s outlier (run 31121348964) is **5h24m47s of GitHub runner QUEUE** before the first job's first
+  step; the deploy itself took 8m52s, no sibling deploy run existed in the window, and 99 unrelated workflows
+  created in the same ten minutes shared the starvation (median 3h25m). A single number will blame the deploy
+  pipeline for CI capacity: split merge→run-start from run-start→serving.
+  **Where it surfaces:** the deploy census is the only surface whose vocabulary already meets this epic's
+  honesty bar (refusal-capable quantiles, mandatory population, window, as-of, `STILL WAITING >= X`), and it
+  must be a SECOND block — the existing one's clock is `deployment row: inserted_at → became_live_at` over
+  SITE CONTENT. But the census AWAITS a command; `digest_email` is the only PUSHED surface and it renders
+  `Registry.Barkpark` rows only — **the control plane is not a row on any human surface** (`bp cloud status`
+  returns six rows, all customer boxes). `dr-w21-bl-merge-to-serving-lag-has-no-recorder`.
+
+- **D372 — D354's MERGED FIX COVERS ONE OF SIX DISPLAY BOUNDARIES, AND THE LEAK IS LIVE ON MAIN TODAY,
+  MUTATION-PROVED.** #10608 (`d8126c1ef`) fixed exactly the two sites D354 named (`event_email.ex:226`,
+  `:280-281`). Booting main's `FailureCopy` and A/B-ing seven PTY shapes with a **non-prefixed** 14-character
+  secret: `scrub |> strip_ansi` leaks in **5 of 7**, `strip_ansi |> scrub` in **1 of 7**, and **`humanize/1`
+  as shipped on main leaks in 5 of 7** — including `\e[31mapi_key=…`, `pass\e[1mword=…` and `Bea\e[0mrer …`.
+  `humanize/1` is `classify |> scrub |> strip_ansi` (`failure_copy.ex:382`) and its unclassified
+  pass-through arm IS a raw capture by D354's own definition; it reaches a customer's chat channel through
+  `render.ex:205` and the API through `router.ex:11024`. Separately `router.ex:11043` still ships
+  `failure_reason_raw: … |> scrub() |> strip_ansi()` — **the leaky order on a field literally named raw.**
+  **Main is internally inconsistent:** `failure_copy.ex:176` rules that raw captures must be
+  `strip_ansi |> scrub` and says `humanize` "MUST stay that way", while five of its own raw paths do the
+  opposite. **THE FIXTURE IS THE TRAP:** a first probe using an `sk_live_` value found NO leak, because the
+  #9731 provider-prefix clause catches those order-independently — a prefixed fixture makes the WRONG order
+  look safe, exactly as `failure_copy_test.exs:909-975` warns. #10019 still carries the unmerged remainder
+  (`FailureCopy.raw/1`, the `humanize/1` reorder with `classify` still first, `router.ex:11043`, and an
+  8-test HTTP/API boundary suite at a DIFFERENT path from main's 5-test email suite — neither covers the
+  other); it is 131 behind with 3 conflicts, all in notification/router plumbing, while `failure_copy.ex`
+  auto-merges CLEAN. **One residual hole neither fix closes:** the OSC shape (`\e]0;t\ain` + `api_key=`)
+  leaks under BOTH orders — stripping leaves `inapi_key=` and the `(?<![A-Za-z0-9])` lookbehind is blocked by
+  the `n`. `dr-w21-bl-raw-capture-order-still-leaks-on-five-boundaries`, priority 1.
+
+- **D373 — THE DEPTH-DERIVED BACKOFF IS DELIVERED AND THE OUTCOME IS FLAT, AND
+  `dr-w20-refusal-backoff-after-census` CANNOT CLOSE ON TONIGHT'S WINDOW.** #10611 merged 02:35:41Z but the
+  honest boundary is the first row on the new code, **02:39:14Z** — the containers both postdate the first
+  rung job, so container start time is not the live-since bound. **The mechanism is proved:** pairing every
+  post-boundary deferral to its AutoDeployWorker job on its own `site_id`, depths 1→9/9, 2→8/8, 3→5/5,
+  4→3/3, 5→3/3 matched `least(60*depth, 240)` exactly, **collapsed_to_60 = 0** — the Oban `site_id` unique
+  did not eat the longer delay, and the depth-3 gap is **121.0 s, min = max**, against a flat ~60 s at every
+  depth 2-9 before. Coalescing holds at the cap: zero overlapping pending pairs per site.
+  **But the outcome is FLAT and it was already flat.** attempts-per-live is **3.15 before and 3.15 after** on
+  the identical query; mean deferral depth went slightly UP (2.26 → 2.41). The apparent improvement the task
+  would credit (its stated BEFORE of 3.83) **predates the backoff** — a 3.15 was already measured on
+  pre-backoff code. Report FLAT; the criterion explicitly licenses it.
+  **Three hard bounds.** The AFTER window is 32 minutes, n=27 rows, 5 sites, right-censored — it structurally
+  cannot contain a long chain, so its apparent collapse is an artifact. Depths ≥4 (the 180 s and 240 s rungs)
+  are UNEXERCISED post-merge; the cap is unproven by run. And the abandonment question has **no base rate**:
+  all-time max depth is 9 against a bound of 12, only two rows ever exceeded 7, and 24 h of abandonment-shaped
+  failure reasons returns zero — so "no regression" here means "no power to detect one".
+  **A real semantics finding, and it undermines the framing every measurement in this epic has used:**
+  `defer/3` computes `prior = consecutive_deferrals(site, cause)` — keyed on **site + cause, not
+  content_rev** — so depth is a per-site consecutive-refusal streak that CROSSES publishes and resets only on
+  a success (observed live: one site ran depth 3 at one rev, depth 4 at another, went live at a third, then
+  reset to 1). Every "rows per (site, content_rev)" metric, **including D347's own baseline**, therefore
+  splits one real chain across several groups — and longer gaps make it worse. Re-take at ≥12 h.
+  **Unmeasurable by design, and worth a row:** when a plain 60 s publish enqueue conflicts with a pending
+  240 s defer job, Oban returns the existing job and writes NO row — so "a fresh publish inherits up to 240 s
+  of someone else's backoff" cannot be counted from `oban_jobs` at all.
+
+- **D374 — WHAT WAVE 21 REFUSED, AND WHY THE REFUSALS ARE THE POINT.** Four candidate slices died on
+  measurement, and each death is recorded so a later wave does not re-derive it from the same wish:
+  the build-gate fail-open (n=0 over the full journal, preconditions unreachable — D365); the cross-site
+  concurrency cap (already exists, already at its floor N=1, and the lever was already pulled — D364); the
+  two `cp-deploy.sh` silences (0 of 118 control-plane deploys — D370); and an arm-route fatal ruling (0 of 10
+  live sites, but a five-hour-old post-repair zero with no counter to make "counted" meaningful — D367). Set
+  against them, the three sets this wave DID build on are all measured non-empty: six boxes reading `current`
+  at 4 / 227 / 592 / 886 / 2,468 behind plus one NULL; a delivery gauge rendering `NOT MEASURED` to every
+  real operator on a 403-gated route; and a tripwire mutation-proved to print `OK` RC=0 over an unguarded
+  invariant. **This epic's discipline is not that it finds problems — it is that it can tell an empty set
+  from a full one, and says which out loud.**
+
+### Wave 21 plan — 6 slices, 5 in round 1, file sets disjoint within the round
+
+| # | Slice | Task id | Files | Round | Flip-risk |
+|---|---|---|---|---|---|
+| 1 | Both targets assert the served commit (ancestor rule, compare API), and the tripwire can see it | `dr-w21-s1-both-targets-assert-the-served-commit` | `.github/workflows/deploy.yml`, `scripts/check-deploy-smoke.sh` | 1 | **HIGH — the oracle choice (ancestor vs equality) and the extractor's proved blindness** |
+| 2 | The plane grades freshness by COMMIT DISTANCE, in its own columns | `dr-w21-s2-plane-grades-freshness-by-commit-distance` | migration + `registry/barkpark.ex`, `registry.ex`, `workers/update_status_worker.ex`, new `github/commit_distance.ex` + test | 1 | **HIGH — the NULL rung must render UNMETERED and sort to the TOP, never 0** |
+| 3 | `bp cloud status` stops dropping the commit the plane already stores | `dr-w21-s3-cloud-status-carries-the-commit` | `internal/cli/cloud_status_cmd.go` + test | 1 | — |
+| 4 | The commit-distance verdict reaches `/v1/barkparks` and `bp cloud status` | `dr-w21-s4-commit-distance-reaches-humans` | `web/router.ex` (`barkpark_json/4`), `cloud_status_cmd.go` + test | **2** — after slices 2 **and** 3 merge | — |
+| 5 | The deploy self-tests stop skipping silently; `@stage_names` gains a required-lane gate | `dr-w21-s5-deploy-selftests-stop-skipping-silently` | `deploy/site-deploy.sh`, `deploy/site-deploy-node.sh`, `deploy-harnesses.yml`, new api ExUnit pin | 1 | — |
+| 6 | The delivery gauge stops being dark: the TEAM census route carries a scoped delivery node | `dr-w21-s6-delivery-gauge-stops-being-dark` | `web/router.ex` (census region), `deploy_ledger.ex`, new test, one Go test comment | 1 | **HIGH — TENANCY: `delivery/3` is fleet-wide and a naive port leaks other teams' `site_id`s** |
+
+Slice 4 is round 2 for two hard reasons: it reads the three columns slice 2 creates, and it edits the exact
+projection slice 3 rewrites. Within round 1 every file set is disjoint — note in particular that slice 2 owns
+`registry*` while slice 6 owns `web/router.ex`'s deploy-ledger census region, and that slice 4's later edit to
+`barkpark_json/4` lands in the same file as slice 6 but a different region, so it rebases onto slice 6 rather
+than racing it. Every builder is Opus (Fable unavailable this run).
+
+**HIGH-FLIP-RISK, named for the reviewer:** slices 1, 2 and 6 each carry a judgment a second independent
+re-derivation should re-take before merge — the sha oracle, the UNMETERED rung, and the delivery node's
+tenancy scoping. The wave spawns ONE reviewer, so dispatching a genuinely independent second reviewer on
+those three is a manual lead step; review's job is to NAME when independence is owed.
+
+**Filed, not built (the visible backlog this wave seeded):**
+`dr-w21-bl-merge-to-serving-lag-has-no-recorder` · `dr-w21-bl-build-gate-fail-open-is-silent` ·
+`dr-w21-bl-route-decision-reaches-no-plane` · `dr-w21-bl-instance-smoke-cannot-fail-on-an-empty-catalog` ·
+`dr-w21-hg-demand-cut-packet-regime-remediated` ·
+`dr-w21-bl-raw-capture-order-still-leaks-on-five-boundaries` (priority 1 — a live secret leak) ·
+`dr-w21-bl-charter-prs-strand-d302-d336`.
+
+**What the lead owes on merge, beyond the six merge-gates.** Close the eight rows that are one lead-close
+from done, all of them on PRs verified green (zero FAILURE/CANCELLED/TIMED_OUT checks, all four blocking
+gates SUCCESS on each): `dr-w18-s1` and `dr-w19-s1` on **#10518** — the same PR, **counted once** —
+`dr-w19-s2`/#10562, `dr-w19-s3`/**#10563** (the link D355 warned would otherwise be lost),
+`dr-w19-s4`/#10564, `dr-w19-s5`/#10610, `dr-w20-s1`/#10605, `dr-w20-s4`/#10608. Three further rows
+(`dr-w20-s2`, `dr-w20-s3`, `dr-w19-s7`) each need one line added to a **merged** PR body — an owner ruling,
+not a mechanical fix, because back-filling evidence into a merged body is the shape this epic distrusts.
+Close `dr-w20-s8` as **cancelled** (superseded by `dr-w21-s1`, D359/D362). And D355's open-PR dispositions,
+re-derived on today's main: **#10129** CLOSE (118 behind, 6 conflicts, and its clean half sits in a file
+`#10519` rewrote); **#10400** its reds are NOT stale-green — the rebase reproduces CI exactly (4 failures: a
+test calling `DeployLedger.not_attempted_classes/0`, which exists on no branch, plus three reachability reds
+for two new publics with zero callers), so "rebase and fix" needs a real fix, and a close is equally
+defensible; **#10086** RE-CUT, exactly 1 conflict (`internal/cloudclient/client.go`); **#10019** RE-CUT but
+**not tiny** — now 3 conflicts because it collides with its own merged sibling #10608, and D372 shows two
+thirds of it is NOT superseded.
+
+**Coverage.** Both fleets reported in full — no survey deficit and no verify deficit. Every premise this wave
+builds on was smoke-tested against `origin/main` before it reached a brief: `router.ex:1583`'s `/status.json`
+route, `deploy_runner.ex:278`'s `@stage_names`, `registry/barkpark.ex:76`'s `@update_states`,
+`registry.ex:3710`, `health.ex`, `deploy_ledger.ex`, `billing/http_client.ex`,
+`self_update/client/github.ex`, both deploy engines, `check-deploy-smoke.sh`, `deploy.yml` and
+`deploy-harnesses.yml` — fifteen files, all present. Three inherited premises were read for COVERAGE and
+found NOT to cover what they were cited for: **D343**'s "nobody has a sha reader" (false since #6422 —
+D362), **D350**'s "nothing caps cross-site build concurrency" (false as written, and false by the time it was
+published — D364), and **#9644 as a merged PR** (it is an open ISSUE — D370). Two further inherited numbers
+were refuted outright: **D351**'s 77-92 ms idle floor (measured 587-721 ms) and the assignment premise that
+three deploy self-test rows had been removed (they were never removed — D368).
