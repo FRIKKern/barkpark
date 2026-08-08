@@ -524,9 +524,9 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// unknown"; the distance itself is tri-state below.
 		"commit_ancestry":            r.BP.CommitAncestry,
 		"commit_distance_checked_at": r.BP.CommitDistanceCheckedAt,
-		"autoupdate_paused":      r.BP.AutoupdatePaused,
-		"pinned_release":         r.BP.PinnedRelease,
-		"channel":                r.BP.Channel,
+		"autoupdate_paused":          r.BP.AutoupdatePaused,
+		"pinned_release":             r.BP.PinnedRelease,
+		"channel":                    r.BP.Channel,
 	}
 	// Tri-state: only emit autoupdate_enabled when the CP actually reported it, so
 	// -o json is as honest as the table (nil = policy unknown, never a fake false).
