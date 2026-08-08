@@ -88,6 +88,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_running_release: "v1.2.0",
         update_latest_release: "v1.10.0",
         update_checked_at: checked,
+        commit_ancestry: "behind",
+        commit_distance: 42,
+        commit_distance_checked_at: checked,
         autoupdate_enabled: true,
         autoupdate_paused: true,
         pinned_release: "v1.2.0"
@@ -99,6 +102,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_running_release: "v1.10.0",
         update_latest_release: "v1.10.0",
         update_checked_at: checked,
+        commit_ancestry: "current",
+        commit_distance: 0,
+        commit_distance_checked_at: checked,
         autoupdate_enabled: true,
         autoupdate_paused: false,
         pinned_release: nil
@@ -110,6 +116,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_running_release: "v1.9.0",
         update_latest_release: "v1.9.0",
         update_checked_at: nil,
+        commit_ancestry: "behind",
+        commit_distance: 7,
+        commit_distance_checked_at: checked,
         autoupdate_enabled: false,
         autoupdate_paused: false,
         pinned_release: nil
@@ -124,25 +133,27 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert summary.latest == "v1.10.0"
 
     # Subject reflects the counts exactly.
+    # dr-w25-s6: the rungs are the control plane's MEASURED `commit_ancestry`,
+    # not the box's release-tag self-grade, and `unmeasured` is always shown.
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 1 current / 2 behind / 1 paused"
+             "Barkpark fleet digest — 1 current / 2 behind / 0 unmeasured / 1 paused"
 
     body = DigestEmail.body(summary)
 
     # Header: totals + semver-aware latest (v1.10.0 beats v1.9.0 — a lexical max fails).
-    assert body =~ "Fleet: 3 instances — 1 current, 2 behind, 1 paused."
+    assert body =~ "Fleet: 3 instances — 1 current, 2 behind, 0 unmeasured, 1 paused."
     assert body =~ "Latest available release: v1.10.0"
 
     # Per-instance honest lines: running -> latest, state, flags, last checked.
     assert body =~
-             "- Acme (acme): v1.2.0 -> v1.10.0 | state: behind | pinned=v1.2.0, paused | checked 2026-07-10 05:17 UTC"
+             "- Acme (acme): v1.2.0 -> v1.10.0 | state: behind | 42 commits behind main (measured 2026-07-10 05:17 UTC) | pinned=v1.2.0, paused | checked 2026-07-10 05:17 UTC"
 
     assert body =~
-             "- Beta (beta): v1.10.0 -> v1.10.0 | state: current | checked 2026-07-10 05:17 UTC"
+             "- Beta (beta): v1.10.0 -> v1.10.0 | state: current | 0 commits behind main (measured 2026-07-10 05:17 UTC) | checked 2026-07-10 05:17 UTC"
 
     # autoupdate-off flag + a never-checked instance render honestly.
     assert body =~
-             "- Gamma (gamma): v1.9.0 -> v1.9.0 | state: behind | autoupdate off | checked never"
+             "- Gamma (gamma): v1.9.0 -> v1.9.0 | state: behind | 7 commits behind main (measured 2026-07-10 05:17 UTC) | autoupdate off | checked never"
   end
 
   test "an empty fleet renders a clear no-instances digest without crashing" do
@@ -150,7 +161,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert summary.total == 0
 
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 0 paused"
+             "Barkpark fleet digest — 0 current / 0 behind / 0 unmeasured / 0 paused"
 
     body = DigestEmail.body(summary)
     assert body =~ "Fleet: 0 instances."
