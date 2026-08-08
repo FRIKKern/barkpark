@@ -227,11 +227,17 @@ slot_running() { systemctl is-active --quiet "barkpark-site@$(slot_inst "$1")" 2
 #
 # `grep -qw` IS NOT THE FIX: `-w` treats `-` as a NON-word character, so
 # `…ROUTE:search` still word-matches `…ROUTE:search-capstone`. Anchor the
-# DELIMITER instead — whitespace or end-of-line. valid_slug() is
-# `^[a-z0-9][a-z0-9-]{0,62}$`, so the slug carries no ERE metacharacter and
-# interpolates literally into grep -E AND awk's dynamic regex alike.
+# DELIMITER instead — and the delimiter is "any character a slug cannot
+# contain", NOT "whitespace". valid_slug() is `^[a-z0-9][a-z0-9-]{0,62}$`, so a
+# sibling can only ever continue the marker with `[a-z0-9-]`; rejecting exactly
+# that class is necessary AND sufficient. Whitespace-only would still be right
+# for markers this engine writes (always `# …:<slug> — …`) but would read a
+# HAND-EDITED marker (`…:<slug>:` / `…:<slug>#`) as not-armed and re-arm a
+# working route into a DUPLICATE handle — the dangerous direction. The slug
+# carries no ERE metacharacter (a `-` LAST in a bracket expression is literal),
+# so it interpolates literally into grep -E AND awk's dynamic regex alike.
 # ---------------------------------------------------------------------------
-site_route_marker_re() { printf 'BARKPARK_SITE_ROUTE:%s([[:space:]]|$)' "$SITE_SLUG"; }
+site_route_marker_re() { printf 'BARKPARK_SITE_ROUTE:%s([^a-z0-9-]|$)' "$SITE_SLUG"; }
 has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
 
 # ---------------------------------------------------------------------------

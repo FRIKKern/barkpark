@@ -185,17 +185,27 @@ atomic_symlink_swap() { # <tmp-link> <dest-link>
 #
 # `grep -qw` IS NOT THE FIX. `-w` treats `-` as a NON-word character, so
 # `…ROUTE:search` still word-matches `…ROUTE:search-capstone`. What separates
-# them is the DELIMITER: anchor the marker to whitespace-or-end-of-line. Every
-# armed block writes `# BARKPARK_SITE_ROUTE:<slug> — …`, so a space always
-# follows; a hypothetical marker at end-of-line matches too.
+# them is the DELIMITER.
 #
-# Safe to interpolate raw: valid_slug() is `^[a-z0-9][a-z0-9-]{0,62}$`, which
-# carries no ERE metacharacter (a `-` outside a bracket expression is literal),
-# so the same string is a correct pattern for grep -E AND for awk's dynamic
-# regex. Both engines carry this pair verbatim — arm, disarm, the active-port
-# read and the port flip must all agree, or one of them re-opens the defect.
+# THE DELIMITER IS "ANY CHARACTER A SLUG CANNOT CONTAIN", NOT "WHITESPACE".
+# valid_slug() is `^[a-z0-9][a-z0-9-]{0,62}$`, so a sibling slug can only ever
+# continue the marker with `[a-z0-9-]` — rejecting exactly that class is what
+# makes this an identity, and it is BOTH necessary and sufficient. Keying on
+# whitespace alone would be sufficient for markers THIS script writes (it always
+# writes `# BARKPARK_SITE_ROUTE:<slug> — …`, a space) but NOT for one a human
+# hand-edited into a live Caddyfile with `:` or `#` after the slug — and there
+# the failure is the DANGEROUS direction: the site reads as not-armed and gets
+# re-armed, producing a DUPLICATE handle on a route that was working. This
+# predicate governs the arm, the disarm and the port flip of every live site,
+# so it is written to be wrong in neither direction.
+#
+# Safe to interpolate raw: the slug charset carries no ERE metacharacter (a `-`
+# LAST in a bracket expression is literal), so the same string is a correct
+# pattern for grep -E AND for awk's dynamic regex. Both engines carry this pair
+# verbatim — arm, disarm, the active-port read and the port flip must all
+# agree, or one of them re-opens the defect.
 # ---------------------------------------------------------------------------
-site_route_marker_re() { printf 'BARKPARK_SITE_ROUTE:%s([[:space:]]|$)' "$SITE_SLUG"; }
+site_route_marker_re() { printf 'BARKPARK_SITE_ROUTE:%s([^a-z0-9-]|$)' "$SITE_SLUG"; }
 has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
 
 # ---------------------------------------------------------------------------
@@ -1627,6 +1637,43 @@ FAKENPM
       grep -q '^BPSTAGE name=ROUTE status=ok build_id=px4 detail="already armed: ' "$PX/long2.out"
     check "prefix/reverse: still exactly two markers after four deploys" \
       [ "$(px_markers)" = 2 ]
+    # (3b) THE DELIMITER CLASS ITSELF, asserted directly on the predicate rather
+    #      than through a deploy — because the dangerous direction is a marker
+    #      this script did NOT write. Everything arm_caddy_site_route emits has a
+    #      SPACE after the slug, so a whitespace-only predicate would look green
+    #      forever here while reading a HAND-EDITED `…:<slug>:` marker in a live
+    #      Caddyfile as NOT ARMED and re-arming a working route into a duplicate
+    #      handle. The delimiter is therefore "any character a slug cannot
+    #      contain" ([^a-z0-9-]), which is what makes it right in BOTH
+    #      directions: it accepts every real delimiter and still rejects the only
+    #      thing a sibling slug can continue with.
+    echo "[selftest] the marker delimiter is 'not a slug character', not merely whitespace (D345)"
+    mrk() { # <slug> <line> -> 0 if the predicate says "this line is that slug's marker"
+      # ${SITE_SLUG:-}: the selftest runs with `set -u` and no slug of its own —
+      # the deploy path is what sets this global.
+      local __save="${SITE_SLUG:-}" __rc=0
+      printf '%s\n' "$2" > "$PX/mrk.txt"
+      SITE_SLUG="$1"; has_site_route_marker "$PX/mrk.txt" || __rc=$?
+      SITE_SLUG="$__save"; return "$__rc"
+    }
+    check "delimiter: a space after the slug matches (what this script writes)" \
+      mrk search '# BARKPARK_SITE_ROUTE:search — static site'
+    check "delimiter: end-of-line matches" \
+      mrk search '# BARKPARK_SITE_ROUTE:search'
+    check "delimiter: a hand-edited ':' after the slug STILL reads as armed (no duplicate re-arm)" \
+      mrk search '# BARKPARK_SITE_ROUTE:search: static site'
+    check "delimiter: a hand-edited '#' after the slug STILL reads as armed" \
+      mrk search '# BARKPARK_SITE_ROUTE:search#1'
+    if mrk search '# BARKPARK_SITE_ROUTE:search-capstone — static site'; then
+      check "delimiter: a PREFIX sibling ('-') is REJECTED" false
+    else
+      check "delimiter: a PREFIX sibling ('-') is REJECTED" true
+    fi
+    if mrk search '# BARKPARK_SITE_ROUTE:search2 — static site'; then
+      check "delimiter: an alnum-extended sibling is REJECTED" false
+    else
+      check "delimiter: an alnum-extended sibling is REJECTED" true
+    fi
     # (4) DISARM is the same predicate, in its most destructive direction: a bare
     #     substring would excise the SIBLING's live block on this site's teardown.
     env PATH="$PX/bin:$FAKEBIN:$PATH" \
