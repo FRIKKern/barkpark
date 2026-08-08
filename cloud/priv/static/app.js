@@ -1881,11 +1881,20 @@
 
   // Pure render of the whole "bp CLI" card from its model (GR24, screens/02):
   // a head (title + lifecycle pill + conduit status), the command grid, then a
-  // foot where the pause verb's SERVER-OWNED gap sentence (on Hetzner: "a
-  // stopped server still bills — archive instead", failure_copy.ex owns the
-  // words) sits beside the destroy-tier Decommission…. A provider whose pause
-  // IS a capability gets pause as a normal command row and no foot sentence —
-  // the copy is always the conduit's, never invented here.
+  // foot where the pause verb's SERVER-OWNED gap sentence sits beside the
+  // destroy-tier Decommission…. A provider whose pause IS a capability gets
+  // pause as a normal command row and no foot sentence — the copy is always the
+  // conduit's, never invented here.
+  //
+  // cch-w55-s3 — THIS COMMENT NO LONGER PARAPHRASES THE HETZNER SENTENCE. It
+  // used to gloss it as an archive-as-a-cost-remedy, and carried that gloss for
+  // the whole time the remedy was false: no archive path in this tree touches a
+  // server's power or existence, and Hetzner bills a box for as long as it
+  // EXISTS, powered on or off (plus snapshots per GB/month), so the prescribed
+  // remedy INCREASED the bill. cch-w55-s2 retracted the sentence in
+  // failure_copy.ex, which owns the words; this comment stops restating them at
+  // all, because a paraphrase of copy another module owns is a second copy that
+  // no test pins and nothing keeps in step.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
     // The label sits in its own span so it stays neutral (--text) while the dot
