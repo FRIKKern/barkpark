@@ -6339,10 +6339,30 @@
   // Bound to me.onboarding server truth: three steps (subscription/instance/
   // published_doc), each `done` RECOMPUTED server-side on every read — so a step
   // finished outside the wizard self-heals on the next fetch (no client logic).
+  //
+  // cch-w55-s3 — THE THIRD STEP'S HINT NO LONGER PROMISES DETECTION. It read
+  // "We'll notice automatically", and nothing in this plane notices. The step is
+  // derived by `Accounts.published_doc?/1` (accounts.ex:2764) from an `AgentEvent`
+  // of type "content" carrying `payload->>'published_count' > 0`, and no such row
+  // has ever been written: the four `record_event/3` call sites in cloud/lib
+  // write "health" (router.ex:1378), "space" (router.ex:1423), "verify"
+  // (router.ex:2627) and "status" (health/staleness_worker.ex:91), and the
+  // agent's HTTP surface (/v1/agent/report, /commands, /results, /space) has no
+  // content endpoint, so even a willing agent could not post one. "content" is
+  // declared in AgentEvent's @types with a moduledoc describing a producer that
+  // does not exist. The manual fallback is no fallback either: `ack_onboarding_step/2`
+  // (router.ex:1701) exists server-side, but the ONLY onboarding action this file
+  // POSTs is {action:"skip"} (see the runway dismiss below), so the console
+  // offers no control that ticks this step.
+  // NO PRODUCER IS BUILT HERE — that would convert a dead hint into a live
+  // promise before anyone has decided what the agent can honestly observe. The
+  // hint is retracted to what is true: this step does not tick itself, and the
+  // "Open Studio →" action stays, because publishing is still the real next move.
+  // Pinned in __app.test.mjs (the old sentence was asserted by NOTHING).
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },
-    { key: "published_doc", label: "Publish your first document", hint: "We'll notice automatically", action: "Open Studio →" },
+    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →" },
   ];
   // Pure: the render model for the runway steps. done marks render a mint check,
   // pending steps render their ordinal digit. The instance-step hint carries the
@@ -8671,16 +8691,36 @@
   }
 
   // 4. FLEET DIGEST. A send LOG (rows ride the SHARED delivery-row grammar, the
-  // same helper the team-scoped notification log uses). Empty is the TRUE state
-  // in prod today: zero fleet_digest rows have ever been written (GR50).
+  // same helper the team-scoped notification log uses).
+  //
+  // cch-w55-s3 — THE OLD COMMENT ("Empty is the TRUE state in prod today: zero
+  // fleet_digest rows have ever been written") IS RETRACTED, and so is the copy
+  // that rested on it. Rows ARE written every morning; this list simply cannot
+  // see them. `deliver_fleet_digest/1` records `record_delivery(team_id,
+  // recipient, "fleet_digest", …)` with a REAL team_id (notifications.ex:478,
+  // where dr-w19-s5 moved the audience onto team-membership rows —
+  // `team_member_emails/1`, notifications.ex:432-439 — and off
+  // `platform_admin_emails/0`), while this operator reader
+  // `list_fleet_deliveries/1` selects `is_nil(d.team_id) and d.event ==
+  // "fleet_digest"` (notifications.ex:912). The two predicates cannot intersect,
+  // so this card is empty FOREVER on a fleet that mails a digest every morning —
+  // its emptiness is a query artifact, not a fact about sending.
+  // THE READER IS NOT TOUCHED HERE: that fix is filed separately and overlaps
+  // `dr-w20-bl-fleet-digest-receipts-have-no-team-reader` (#10599), another
+  // epic's row. This slice fixes only what the card SAYS, so it stops asserting
+  // a send history it cannot observe and stops naming an audience the plane no
+  // longer mails. The 06:00 UTC claim STAYS — it matches `{"0 6 * * *",
+  // BarkparkCloud.Workers.DailyDigestWorker}` at cloud/config/config.exs:334
+  // exactly. Pinned in __app.test.mjs.
   function operatorDigestCardHtml(list) {
     if (!Array.isArray(list)) {
       return '<p class="set-empty">Digest log unavailable — the send log didn\'t answer. ' +
         "That says nothing about the digest itself; this card just couldn't read it.</p>";
     }
     if (!list.length) {
-      return '<p class="set-empty">No fleet digest has been sent yet. ' +
-        "The digest goes out daily at 06:00 UTC to the platform-operator addresses.</p>";
+      return '<p class="set-empty">Nothing in this operator-scoped log — which is not the same as no digest having been sent. ' +
+        "The digest goes out daily at 06:00 UTC to each team's own members, and every send is recorded against that team, " +
+        "so those receipts never land in this list.</p>";
     }
     return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
   }
@@ -14454,6 +14494,18 @@
   // pure models as the owner card — planFromSub / billingStatusBadge /
   // billingStatusLabel / billingPeriodLine / planFeatsHtml — so the two views
   // never diverge; it just omits every affordance.
+  //
+  // cch-w55-s3 — THE TRIAL ARM NOW CARRIES THE TEARDOWN SENTENCE TOO. It said
+  // only "A real dedicated instance, free while your trial runs." — the owner
+  // card's second sentence deleted. Both notification renderers DO warn
+  // (notifications/render.ex:99, notifications/event_email.ex:163 and :168, the
+  // latter written specifically for the non-owner), so three of four surfaces
+  // named the teardown and the one person who can neither subscribe nor save the
+  // box was the one told only the pleasant half. Trial expiry is a REAL teardown
+  // (TrialExpiryWorker), so the sentence is backed. This is the GR36 plain-member
+  // asymmetry wave 49 fixed for prices, recurring on the teardown axis; both
+  // taglines are now positively pinned in __app.test.mjs so the pair cannot
+  // silently drift apart again.
   function readOnlyPlanCardHtml(sub) {
     var isTrial = !!sub && sub.plan === "trial";
     if (isTrial) {
@@ -14462,7 +14514,7 @@
       return '<div class="card plan-card">' +
           '<div class="plan-head"><span class="plan-name">Free trial</span>' +
             '<span class="trial-chip">' + esc(chip) + "</span></div>" +
-          '<p class="plan-tagline">A real dedicated instance, free while your trial runs.</p>' +
+          '<p class="plan-tagline">A real dedicated instance, free while your trial runs. When the trial ends, the instance is torn down.</p>' +
         "</div>";
     }
     var plan = planFromSub(sub);

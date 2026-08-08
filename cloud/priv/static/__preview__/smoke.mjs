@@ -2906,9 +2906,15 @@ const EXPECTATIONS = {
       assert.ok(warm.includes("there's no total to compare against"), "the honest no-denominator caption renders");
       assert.ok(!warm.includes("usage-bar") && !warm.includes("%"), "no bar and no percentage");
 
-      // 4. DIGEST — empty is the true state, and there is NO send-now button.
+      // 4. DIGEST — an EMPTY OPERATOR LIST, stated as the query artifact it is,
+      // and there is NO send-now button. cch-w55-s3: the card used to read "No
+      // fleet digest has been sent yet" — an assertion about send history it
+      // cannot make, because the writer stamps a real team_id
+      // (notifications.ex:478) and this reader filters is_nil(team_id) (:912).
       const digest = reg.get("op-digest-body").innerHTML || "";
-      assert.ok(digest.includes("No fleet digest has been sent yet"), "the honest empty state renders");
+      assert.ok(!digest.includes("No fleet digest has been sent yet"), "the card never asserts a send history it cannot read");
+      assert.ok(digest.includes("not the same as no digest having been sent"), "the honest empty state renders");
+      assert.ok(digest.includes("06:00 UTC"), "the one backed clock claim survives (config.exs:334)");
       assert.ok(!/Send (one )?now/i.test(page + digest), "no send-now button anywhere (GR40)");
     },
   },
@@ -2946,9 +2952,12 @@ const EXPECTATIONS = {
       assert.ok(warm.includes("The pool is empty right now"), "an empty pool reads as a designed state");
       assert.ok(!warm.includes("unavailable"), "an empty pool is never reported as unreadable");
       assert.ok(!warm.includes("usage-bar") && !warm.includes("%"), "no bar, no invented denominator");
-      // And the digest is honestly empty rather than absent.
+      // And the digest is honestly empty rather than absent — empty meaning this
+      // OPERATOR-SCOPED list holds nothing, never that no digest was sent
+      // (cch-w55-s3).
       const digest = reg.get("op-digest-body").innerHTML || "";
-      assert.ok(digest.includes("No fleet digest has been sent yet"), "the honest empty digest renders");
+      assert.ok(digest.includes("not the same as no digest having been sent"), "the honest empty digest renders");
+      assert.ok(!digest.includes("platform-operator addresses"), "the audience is team members, not platform admins (dr-w19-s5)");
     },
   },
   "operator-denied": {
