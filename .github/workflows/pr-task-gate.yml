@@ -16,7 +16,7 @@ name: pr-task-gate
 #     so it is exempt. This is why turning the gate on does NOT red the open-PR
 #     fleet. A PR rebased onto post-gate main adopts the rule.
 #
-#     THREE states, not two (charter D25). The cutoff used to test only
+#     FOUR states, not two (charter D25 + wave 56 S4). The cutoff used to test only
 #     `git cat-file -e "$BASE_SHA:<this file>"`, which cannot tell "the base
 #     resolves and the file is genuinely absent" from "BASE_SHA does not resolve
 #     at all" — both took the grandfather branch, every downstream step carries
@@ -24,6 +24,16 @@ name: pr-task-gate
 #     nothing. A guard that fails open is worse than no guard, and this was one
 #     inside the gate whose whole job is blocking. The commit is now resolved
 #     FIRST: unresolvable is UNKNOWN and fails loudly, never grandfathered.
+#     The fourth state is the predicate's own premise: the literal path it tests
+#     is a path to THIS FILE, so a rename makes it stale silently and
+#     grandfathers the entire open-PR fleet (and the renaming PR itself, whose
+#     base still has the old path). The path is now self-checked at HEAD —
+#     absent at HEAD means the cutoff cannot be believed, and the job FAILS
+#     CLOSED rather than certifying a PR it never evaluated.
+#     And when a PR IS legitimately grandfathered, the job now emits a
+#     `::notice title=PR task gate: green — nothing evaluated::` — the same
+#     nothing-dispatched disclosure the other three required contexts carry, on
+#     the only channel (annotations) that reaches the check-run API.
 #
 #   • Hotfix lane (D3): a `hotfix!` label passes the gate AND auto-files a
 #     linked override task (the durable record), rather than silently waiving
@@ -133,7 +143,27 @@ jobs:
           # and pipefail but does NOT clear -e. Every command below is therefore
           # either inside an `if`/`||` or is meant to abort the step.
           set -uo pipefail
-          # State 1 of 3 — can we resolve the base COMMIT at all? Anything that
+          GATE_PATH=".github/workflows/pr-task-gate.yml"
+          # State 1 of 4 — IS THE PREDICATE STILL POINTING AT THIS GATE?
+          # (cloud-console-hardening wave 56, slice 4.) The cutoff below asks whether a hard-coded
+          # LITERAL PATH exists at the base commit, and that literal is a path to
+          # THIS FILE. Rename or move the workflow and the literal goes stale
+          # silently: every subsequent PR's base lacks the path, so `enforced=0`
+          # fleet-wide, the required context goes green on EVERY PR while checking
+          # nothing — and the PR doing the rename grandfathers itself, because at
+          # ITS base the old path still exists. One rename disarms a required gate
+          # with no red anywhere.
+          # The literal is kept (it is legible, and deriving it from
+          # github.workflow_ref would move the failure mode rather than remove it),
+          # but it is now SELF-CHECKED against the checkout: the path must exist at
+          # HEAD. Present at HEAD + absent at base = a genuine pre-gate base.
+          # ABSENT AT HEAD = the literal no longer names this gate, so the cutoff
+          # cannot be believed at all — FAIL CLOSED, never grandfather.
+          if [ ! -f "$GATE_PATH" ]; then
+            echo "::error title=pr-task-gate cannot trust its own cutoff::This gate decides whether a PR predates it by testing for '${GATE_PATH}' at the PR's base commit, and that path DOES NOT EXIST in this checkout — so the workflow has been renamed or moved and the test now grandfathers every PR while checking nothing. Refusing to certify a PR on a predicate that no longer points at this gate. Fix: update GATE_PATH in the cutoff step (and scripts/pr-task-gate.test.sh) to the new path, in the same commit as the rename." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # State 2 of 4 — can we resolve the base COMMIT at all? Anything that
           # answers "no" here (a force-pushed base, a shallow fetch that missed,
           # a deleted branch) is UNKNOWN, not "old". Fail loudly: the gate must
           # never certify a PR it could not evaluate.
@@ -144,13 +174,25 @@ jobs:
             echo "::error title=pr-task-gate could not evaluate this PR::The base commit ${BASE_SHA} does not resolve in this checkout, even after fetching it, so the gate cannot tell whether this PR predates the gate. Refusing to grandfather what it cannot read — rebase the PR onto current main, or re-run this check." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          # States 2 and 3 — the base resolves, so the file test is now
-          # meaningful: present = enforced, absent = genuinely pre-gate.
-          if git cat-file -e "${BASE_SHA}:.github/workflows/pr-task-gate.yml" 2>/dev/null; then
+          # States 3 and 4 — the base resolves AND the literal still names this
+          # gate, so the file test is now meaningful: present = enforced, absent =
+          # genuinely pre-gate.
+          if git cat-file -e "${BASE_SHA}:${GATE_PATH}" 2>/dev/null; then
             echo "enforced=1" >> "$GITHUB_OUTPUT"
           else
             echo "enforced=0" >> "$GITHUB_OUTPUT"
             echo "This PR's base ($BASE_SHA) resolves but predates the pr-task-gate — grandfathered, not enforced." | tee -a "$GITHUB_STEP_SUMMARY"
+            # THE DISCLOSURE. Grandfathering makes every downstream step skip
+            # (`if: enforced == '1'`), so this required context reports SUCCESS
+            # having verified no task at all — byte-identical, on the check-run
+            # API, to a run where a live claim was proven. The other three required
+            # contexts each emit exactly this shape when nothing was dispatched
+            # (cloud.yml, console-harness.yml, elixir.yml); this one emitted
+            # nothing but a $GITHUB_STEP_SUMMARY line, which does NOT reach the
+            # check-run API (0 of 32 check-runs returned a non-null summary) while
+            # a bare ::notice:: does. ONE notice, never one per step — GitHub caps
+            # annotations at 10 per level per step and truncates the rest silently.
+            echo "::notice title=PR task gate: green — nothing evaluated::NO TASK WAS CHECKED on this PR.%0AThis gate is green because the PR's base commit ($BASE_SHA) predates the gate and was grandfathered, NOT because a task was found or its claim verified — every evaluating step was skipped.%0AGreen here means NOT APPLICABLE to this PR. Read it as 'no task check ran', never as 'this PR is task-backed'. Rebase onto current main to be evaluated for real."
           fi
 
       - name: Detect hotfix label
