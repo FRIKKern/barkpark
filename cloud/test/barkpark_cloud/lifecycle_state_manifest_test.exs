@@ -32,8 +32,34 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
     * PAINTED SET — the states the console can paint are pinned HERE, and the
       comparison loses in BOTH directions: a new painted state reds as an ADD, a
       state the fold can no longer reach reds as a STALE pin.
-    * FENCE — the `:fence` probe proves BY RUNNING that a suspended row is still
-      served, and refuses to report a fence it cannot attribute.
+    * FENCE — the fence probe proves BY RUNNING which door suspension closes: it
+      mints before the producer and again after it, and refuses to report a fence
+      it cannot attribute. RETRACTED: this line used to read "proves that a
+      suspended row is still served". That was true when this manifest was
+      derived and is FALSE now — `Registry.mint_studio_link/2` grew a
+      `%Barkpark{suspended: true}` clause answering `{:error, :suspended}`, so the
+      probe observes a fence. What it does NOT observe is a fence on the HOST's
+      traffic; see the split below.
+
+  ## THE SPLIT: `:cp_access_fence` vs `:traffic_fence`
+
+  A refusal is placed by WHAT IT REACHES, like every other class here.
+
+    * `:cp_access_fence` (NON-halting) — the control plane refuses to mint or
+      reveal a credential for a suspended row. The refusal fires inside Cloud,
+      before any transport to the box; the box keeps serving its own traffic to
+      everyone who already has a way in. This is the class the studio-link probe
+      observes.
+    * `:traffic_fence` (HALTING) — a block on the data plane itself: a Caddy route
+      pulled, a proxy answering 402, anything that leaves the customer's server
+      not serving.
+
+  QUOTE THIS ONLY THIS FAR: `:traffic_fence` is a DECLARED-EMPTY class. NO probe
+  in this file observes it, so it can only fail by someone deliberately labelling
+  a mechanism into it — a strictly weaker guarantee than the `:cp_flag` and
+  `:event` arms, which are read by running. It exists so that the day a real
+  data-plane block is wired, the crown fires instead of inheriting this file's
+  silence.
 
   ## KEYED ON (STATE, REASON), NEVER ON STATE ALONE
 
@@ -70,11 +96,15 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
 
   ## SCOPE — quote this guard's green for exactly this much, and no more
 
-    1. THE `:fence` PROBE COVERS ONE ACCESS PATH: studio-link minting. It shows
-       that Cloud does not refuse to mint against a suspended row. It says
-       nothing about the other doors into a box, and — because the instance
-       transport is the `StudioLinkFakeHttpClient` double — nothing about whether
-       the instance itself would answer.
+    1. THE FENCE PROBE COVERS ONE ACCESS PATH: studio-link minting. It shows that
+       Cloud DOES refuse to mint against a suspended row — a `:cp_access_fence`.
+       RETRACTED: this paragraph used to read "It shows that Cloud does not refuse
+       to mint against a suspended row"; that sentence is contradicted by
+       `Registry.mint_studio_link/2` on main and is withdrawn rather than left
+       standing next to a passing test. The probe still says nothing about the
+       other doors into a box, and — because the instance transport is the
+       `StudioLinkFakeHttpClient` double — nothing about whether the instance
+       itself would answer.
     2. `:power` AND `:agent_command` RESOLVE AS DECLARATIVE ABSENCES. There is no
        caller to run: the Hetzner catalog declares a `:poweroff` verb that
        nothing under `cloud/lib` invokes, and `GET /v1/agent/commands` returns a
@@ -101,14 +131,26 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
   ## ── The taxonomy: mechanism classes, placed by WHAT THEY REACH ─────────
 
   # A class is HALTING if running it can leave the customer's server not serving.
-  @halting_classes MapSet.new([:power, :fence, :agent_command])
+  #   :traffic_fence — a block on the data plane itself (a Caddy route pulled, a
+  #                    proxy answering 402). NOTHING observes this today; see the
+  #                    moduledoc's declared-empty note before quoting its green.
+  @halting_classes MapSet.new([:power, :traffic_fence, :agent_command])
 
   # A class is NON-HALTING if running it changes only what the CONTROL PLANE
-  # knows or says. Both members are here for a stated reason, asserted below:
-  #   :cp_flag — a boolean in a Postgres row does not reach the host.
-  #   :event   — an event is the control plane telling its own tabs what it
-  #              decided; the box is not a subscriber and never hears it.
-  @non_halting_classes MapSet.new([:cp_flag, :event])
+  # knows, says, or hands out. Each member is here for a stated reason, asserted
+  # below:
+  #   :cp_flag         — a boolean in a Postgres row does not reach the host.
+  #   :event           — an event is the control plane telling its own tabs what
+  #                      it decided; the box is not a subscriber and never hears
+  #                      it.
+  #   :cp_access_fence — the control plane refuses to MINT or REVEAL a credential
+  #                      for a suspended row (`mint_studio_link/2`,
+  #                      `mint_app_token/2`). The refusal fires inside Cloud,
+  #                      before any transport to the instance; the box keeps
+  #                      serving its own traffic to everyone who already has a
+  #                      way in. That is isolation of the control plane's own
+  #                      doors, not a halt.
+  @non_halting_classes MapSet.new([:cp_flag, :event, :cp_access_fence])
 
   # Words that assert the customer's server is not running. A state whose
   # observed mechanisms are all non-halting may not use one.
@@ -275,7 +317,7 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
     fence = fence_verdict(mint_before, reloaded)
 
     observed =
-      [{:cp_flag, flag?}, {:event, event?}, {:fence, elem(fence, 0) == :fence}]
+      [{:cp_flag, flag?}, {:event, event?}, {:cp_access_fence, elem(fence, 0) == :fence}]
       |> Enum.filter(&elem(&1, 1))
       |> Enum.map(&elem(&1, 0))
       |> MapSet.new()
@@ -313,9 +355,17 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
   defp fence_verdict({:ok, _link}, reloaded) do
     case Registry.mint_studio_link(reloaded) do
       {:ok, _link} ->
+        # THIS IS NOW THE FAILURE BRANCH. Cloud refuses to mint against a
+        # suspended row (`Registry.mint_studio_link/2`'s
+        # `%Barkpark{suspended: true}` clause), so reaching here means that
+        # refusal was deleted or weakened — not that all is well. The old text
+        # ("Cloud does not refuse to hand out access…, so nothing fences traffic
+        # away from it") is RETRACTED: it read as the expected outcome, and it
+        # conflated the credential desk with the data plane.
         {:no_fence,
-         "mint_studio_link SUCCEEDED against the suspended row — Cloud does not refuse to hand " <>
-           "out access to a suspended instance, so nothing fences traffic away from it"}
+         "mint_studio_link SUCCEEDED against the suspended row — the control-plane access fence " <>
+           "is GONE. Cloud is expected to answer {:error, :suspended} here; this says nothing " <>
+           "about the host's own traffic either way"}
 
       {:error, why} ->
         {:fence,
@@ -378,9 +428,27 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
            ":event is NON-halting — an event is the control plane telling its own browser tabs " <>
              "what it decided. The instance is not a subscriber and never hears it."
 
-    assert MapSet.member?(@halting_classes, :fence),
-           ":fence is halting — a refusal on the access path is the difference between a box a " <>
-             "customer can reach and one they cannot"
+    # THE SPLIT, and the reason it is a split rather than a reclassification.
+    # `mint_studio_link/2` now answers {:error, :suspended} for a suspended row
+    # (registry.ex, alongside `mint_app_token/2`'s identical arm). That refusal
+    # is REAL and it is a security fence — but it is placed by WHAT IT REACHES,
+    # like every other class here, and what it reaches is the control plane's own
+    # credential desk. Folding it into @halting_classes wholesale would take all
+    # three rows into the CROWN's else-branch and delete the `refute word =~
+    # @halt_words` check outright — this epic's thesis killed by this epic's own
+    # crown. So the access-path class is split in two, and only the half that
+    # reaches the data plane is halting.
+    assert MapSet.member?(@non_halting_classes, :cp_access_fence),
+           ":cp_access_fence is NON-halting — Cloud refusing to mint or reveal a credential " <>
+             "changes what the control plane HANDS OUT, not what the host serves. The refusal " <>
+             "fires before any transport to the box, and the box keeps answering everyone who " <>
+             "already has a way in. Moving this class into @halting_classes takes every crown " <>
+             "row into the else-branch and deletes the halt-word check."
+
+    assert MapSet.member?(@halting_classes, :traffic_fence),
+           ":traffic_fence is halting — a block on the data plane leaves the customer's server " <>
+             "not serving. NO probe observes it today (see the moduledoc); it is declared so a " <>
+             "real data-plane block can only be labelled into a halting class."
 
     for class <- [:power, :agent_command] do
       assert MapSet.member?(@halting_classes, class),
@@ -389,7 +457,7 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
 
     # Neither set may be emptied into the other's silence.
     assert MapSet.size(@halting_classes) == 3
-    assert MapSet.size(@non_halting_classes) == 2
+    assert MapSet.size(@non_halting_classes) == 3
   end
 
   test "CROWN: no (state, reason) whose observed mechanisms cannot halt a host is painted as a halt" do
@@ -505,7 +573,7 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
              "instead of reading the label map."
   end
 
-  test "FENCE: the probe proves BY RUNNING that a suspended row is still served" do
+  test "FENCE: the probe proves BY RUNNING that suspension fences the control plane's door, not the host" do
     obs = observe(%{state: "stopped", reason: "billing_lapsed", producer: :cancel_subscription})
 
     assert {:ok, _} = obs.mint_before,
@@ -519,11 +587,29 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
 
     {verdict, detail} = obs.fence
 
-    assert verdict == :no_fence,
-           "the fence probe reported #{inspect(verdict)}: #{detail}"
+    # THIS ARM IS THE ONE THAT WATCHES THE FENCE ITSELF. It was inverted when
+    # `mint_studio_link/2` grew its `%Barkpark{suspended: true}` clause: before
+    # that clause the probe reported :no_fence, and this arm asserted it. Deleting
+    # or weakening that clause in cloud/lib now REDS here, by name — which is the
+    # only reason the split below is safe to make.
+    assert verdict == :fence,
+           "the fence probe reported #{inspect(verdict)}: #{detail}. Cloud is expected to REFUSE " <>
+             "to mint against a suspended row — if that refusal is gone, a suspension fence was " <>
+             "deleted or weakened in cloud/lib, and this manifest must be re-derived by hand " <>
+             "rather than by editing this assertion."
 
-    assert detail =~ "SUCCEEDED against the suspended row"
-    refute MapSet.member?(obs.observed, :fence)
+    assert detail =~ "refused after it"
+    assert MapSet.member?(obs.observed, :cp_access_fence)
+
+    # …and that observation stays on the NON-halting side. This is the split's
+    # own tripwire: moving :cp_access_fence back into @halting_classes (the cheap
+    # way to buy a green crown, now wearing a different name) reds HERE as well as
+    # in TAXONOMY and CROWN.
+    assert MapSet.disjoint?(obs.observed, @halting_classes),
+           "the suspension producer now observes a HALTING mechanism " <>
+             "#{inspect(MapSet.intersection(obs.observed, @halting_classes) |> MapSet.to_list())} " <>
+             "— a credential refusal is not a halt, so either a real data-plane block was added " <>
+             "or :cp_access_fence was reclassified to buy a green crown."
   end
 
   test "FENCE: a broken precondition reports INDETERMINATE, never a fence" do
