@@ -2386,6 +2386,47 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-08 — wave 51 REVIEW — grade A− — three round-1 slices built, reviewed, pushed and PR'd; zero reviewer fixes needed
+
+| Slice | Task | Branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| CROWN — the Timeline stops naming three events nothing can produce | `cch-w51-s1-timeline-event-vocabulary-manifest-and-the-three-renderers-with-no-producer` | `loop-epic/crown-the-timeline-stops-naming-three-ev-0` | [#10613](https://github.com/FRIKKern/barkpark/pull/10613) | 1004/0 unit, 110 scenarios, census rc=0, path-escape OK |
+| `site.rolled_back` becomes storable | `cch-w51-s3-site-rolled-back-becomes-storable` | `loop-epic/site-rolled-back-becomes-storable-the-au-1` | [#10614](https://github.com/FRIKKern/barkpark/pull/10614) | 120 tests / 0 failures; `mix format` clean |
+| The merge ledger discloses the green that ran nothing | `cch-w51-s5-merge-gates-discloses-the-nothing-ran-green` | `loop-epic/the-merge-ledger-discloses-the-green-tha-2` | [#10615](https://github.com/FRIKKern/barkpark/pull/10615) | `required-checks.test.sh --hermetic` 160/0; doc-budgets + anchors PASS |
+
+**What landed.** Three registers, three different kinds of unsupportable claim, each fixed with a guard that
+was shown to lose. (1) The instance Timeline stops titling `backup`/`tls`/`content` — four real
+`Registry.record_event(` producers exist in `cloud/lib` and none of the three is among them — titles `space`,
+which is produced and rendered as a raw slug today, and replaces the "backups will appear here" promise with
+the absence of a MEASUREMENT quoting the agent verbatim (`internal/agent/report.go:596`). The new
+`__agent_event_vocabulary_census.mjs` reads its render side BY RUNNING `app.js` in a `node:vm` sandbox and
+refuses (exit 2) rather than greening when a side is unreadable. (2) `site.rolled_back` enters `@actions`, so
+a destructive event the router already writes and the console already labels stops being silently dropped by
+`validate_inclusion` under a discarded `{:error, changeset}`. (3) `merge-gates.md` gains a third class beside
+SUBSUMED and ADVISORY — the path-gated required green that means NOT APPLICABLE — with §21 holding both sides
+of its roster from source, and the page states its own PR's cost (four greens that ran none of it).
+
+**Reviewer's independent re-derivations (both HIGH-FLIP-RISK premises, re-derived not re-read).** The
+zero-producer premise: `grep -rn "record_event(" cloud/lib --include='*.ex'` → 7 hits, 4 producers
+(`router.ex:1318` health, `:1363` space, `:2492` verify, `staleness_worker.ex:91` status), the rest a `@spec`,
+a `def` and `@moduledoc` prose. Reachability: `router.ex:7967` gates `GET /v1/barkparks/:id/events` on
+`Auth.require_user` plus a team-scope nil check and nothing else — any team member reaches the empty state.
+Both mutation proofs were re-run by the reviewer rather than accepted: reverting the `@actions` token reds the
+same 120-test set twice, and restoring `merge-gates.md` from `origin/main` takes the spec suite from 160/0 to
+153 passed / 7 failed.
+
+**What stalled.** Nothing. The three deferred slices (`s2` backup sentinel, `s4` audit vocabulary census, `s6`
+verify-refuses) are round-2 by the sequenced-rounds law and were never dispatched this run.
+
+**What the next wave must take.** Dispatch order is fixed by dependency: merge #10613/#10614/#10615 first, then
+`cch-w51-s2` (needs s1's sentence on main — its arm A is red until then, and its `CONSOLE_PATHS` declaration
+makes a deploy-reliability PR touching `report.go` fire the Console gate), then `cch-w51-s4` (its arm (b) reds
+until s3 lands), then `cch-w51-s6` (shares `required-checks.test.sh` with s5). Residue named and unowned: the
+`_ = Accounts.record_audit(…)` call-site idiom discards the error at EVERY producer, so s4 closes the drift
+direction but not the swallowing; and `router.ex:7963`'s own doc comment still tells a reader the events feed
+surfaces `backup`, which the census cannot see because it reads call sites, not prose
+(`cch-w51-bl-events-route-doc-comment-names-backup`).
+
 ### 2026-08-08 — wave 51 DECIDE (6 slices cut: 4 round-1, 2 round-2 deferred by the sequenced-rounds law; D575-D587)
 
 | Slice | Task | Round | Surface |
