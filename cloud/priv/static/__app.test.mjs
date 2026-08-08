@@ -2475,22 +2475,25 @@ test("gr-p5: operatorWarmPoolCardHtml renders ONE number — no bar, no percenta
 
 test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO Send-now button", () => {
   const empty = hooks.operatorDigestCardHtml([]);
-  // cch-w55-s3 — THE EMPTY CARD IS A QUERY ARTIFACT, AND NOW SAYS SO. It read
-  // "No fleet digest has been sent yet. The digest goes out daily at 06:00 UTC
-  // to the platform-operator addresses." Both halves after the clock were false:
-  // dr-w19-s5 moved the audience onto team-membership rows (team_member_emails/1,
-  // notifications.ex:432-439) and off platform_admin_emails/0, and the writer
-  // stamps a REAL team_id (notifications.ex:478) while this operator reader
-  // selects is_nil(d.team_id) (notifications.ex:912) — predicates that cannot
-  // intersect, so the card renders "nothing sent" forever on a fleet that mails
-  // a digest every morning. The reader is deliberately NOT changed by this slice
-  // (#10599, another epic); only the claim is.
-  assert.ok(!/No fleet digest has been sent yet/.test(empty),
-    "the card cannot observe send history, so it never asserts there is none");
+  // cch-w55-s3 called the empty card a QUERY ARTIFACT and pinned copy that said
+  // so ("every send is recorded against that team, so those receipts never land
+  // in this list"), deferring the reader fix to #10599.
+  //
+  // cch-w56-s3 — THE READER IS FIXED, so that clause is now itself false and
+  // moves with it. list_fleet_deliveries/1 filters on the EVENT alone
+  // (notifications.ex:930); the old is_nil(d.team_id) half could never intersect
+  // the writer's is_binary(team_id) guard, so the log returned nothing on a
+  // fleet that mails a digest every morning. Proven by dispatch in
+  // router_operator_test.exs, and the guard reds by name when is_nil is re-added.
+  // Empty is therefore an HONEST empty: the list CAN see the receipts, so
+  // nothing in it means nothing was recorded. The card must say that and must
+  // not claim the receipts live somewhere this list cannot reach.
   assert.ok(!/platform-operator addresses/.test(empty),
     "the digest no longer goes to platform_admin_emails/0");
-  assert.match(empty, /not the same as no digest having been sent/);
-  assert.match(empty, /so those receipts never land in this list/);
+  assert.ok(!/never land in this list/.test(empty),
+    "the receipts DO land in this list now — the reader filters on the event alone");
+  assert.match(empty, /No digest send has been recorded yet/);
+  assert.match(empty, /an empty list means nothing was recorded/);
   // The 06:00 UTC half is KEPT — it matches {"0 6 * * *", DailyDigestWorker}
   // at cloud/config/config.exs:334 exactly, and it names the real audience.
   assert.match(empty, /daily at 06:00 UTC to each team&rsquo;s own members|daily at 06:00 UTC to each team's own members/);

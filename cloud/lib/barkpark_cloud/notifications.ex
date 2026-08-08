@@ -897,19 +897,37 @@ defmodule BarkparkCloud.Notifications do
   The platform-wide FLEET-DIGEST delivery log — the Operator-console analogue of
   `list_deliveries/2`, newest first, limit-capped.
 
-  Fleet-digest sends are recorded team-agnostic (`team_id: nil`,
-  `event: "fleet_digest"` — a platform-operator email belongs to no team), so
-  they are structurally INVISIBLE to the team-scoped `list_deliveries/2`
-  (`where team_id == ^tid` never matches a nil row). The `event` filter is
-  load-bearing, not cosmetic: user-scoped identity emails (password-reset /
-  verify) also carry a nil `team_id`, so `is_nil(team_id)` alone would leak them
-  — this surface is FLEET digests only. No team-scoping arg because these rows
-  belong to no team; the route gates on `require_platform_operator` instead.
+  RETRACTED (cch-w56-s3). This doc used to say fleet-digest sends are "recorded
+  team-agnostic (`team_id: nil` … a platform-operator email belongs to no team)".
+  That was FALSE about this module's OWN writer 420 lines above: since dr-w19-s5
+  moved the audience onto team-membership rows, `deliver_fleet_digest/1` builds
+  its targets under an `is_binary(team_id)` guard and the single
+  `record_delivery(team_id, recipient, "fleet_digest", …)` call always stamps a
+  REAL `team_id`. The nil-team fleet_digest shape is unreachable BY
+  CONSTRUCTION, not merely unwritten — so the old `is_nil(d.team_id) and …`
+  predicate here could never intersect the writer, and this log was empty
+  forever on a fleet that mails a digest every morning (measured by dispatch:
+  one real `deliver_fleet_digest/1` run wrote rows=1, this reader returned 0).
+
+  The filter is therefore the EVENT alone. That makes this surface CROSS-TEAM:
+  every team's digest receipts — including member email addresses — land on one
+  page. That is the seam's existing shape (`require_platform_operator`, and
+  `/v1/operator/fleet` is cross-team by name), but it is a DIFFERENT disclosure
+  from the per-team tenancy ruling `deliver_fleet_digest/1`'s own doc makes
+  above, so it is stated here rather than assumed.
+
+  The `event` filter is load-bearing, not cosmetic: it is now the ONLY filter.
+  Team-scoped alert rows (`past_due`, …) and user-scoped identity emails
+  (password-reset / verify) share this table, and only `event == "fleet_digest"`
+  keeps them out. No team-scoping arg: the route gates on
+  `require_platform_operator` instead. The team-scoped `list_deliveries/2` reads
+  the same rows for a team's own admins — it always could; these receipts are
+  not invisible to it.
   """
   @spec list_fleet_deliveries(pos_integer()) :: [Delivery.t()]
   def list_fleet_deliveries(limit \\ 50) do
     Delivery
-    |> where([d], is_nil(d.team_id) and d.event == "fleet_digest")
+    |> where([d], d.event == "fleet_digest")
     |> order_by([d], desc: d.inserted_at, desc: d.id)
     |> limit(^limit)
     |> Repo.all()

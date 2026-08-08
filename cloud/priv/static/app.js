@@ -8773,23 +8773,27 @@
   // 4. FLEET DIGEST. A send LOG (rows ride the SHARED delivery-row grammar, the
   // same helper the team-scoped notification log uses).
   //
-  // cch-w55-s3 — THE OLD COMMENT ("Empty is the TRUE state in prod today: zero
-  // fleet_digest rows have ever been written") IS RETRACTED, and so is the copy
-  // that rested on it. Rows ARE written every morning; this list simply cannot
-  // see them. `deliver_fleet_digest/1` records `record_delivery(team_id,
-  // recipient, "fleet_digest", …)` with a REAL team_id (notifications.ex:478,
-  // where dr-w19-s5 moved the audience onto team-membership rows —
-  // `team_member_emails/1`, notifications.ex:432-439 — and off
-  // `platform_admin_emails/0`), while this operator reader
-  // `list_fleet_deliveries/1` selects `is_nil(d.team_id) and d.event ==
-  // "fleet_digest"` (notifications.ex:912). The two predicates cannot intersect,
-  // so this card is empty FOREVER on a fleet that mails a digest every morning —
-  // its emptiness is a query artifact, not a fact about sending.
-  // THE READER IS NOT TOUCHED HERE: that fix is filed separately and overlaps
-  // `dr-w20-bl-fleet-digest-receipts-have-no-team-reader` (#10599), another
-  // epic's row. This slice fixes only what the card SAYS, so it stops asserting
-  // a send history it cannot observe and stops naming an audience the plane no
-  // longer mails. The 06:00 UTC claim STAYS — it matches `{"0 6 * * *",
+  // cch-w55-s3 retracted the older "zero fleet_digest rows have ever been
+  // written" claim: rows ARE written every morning, and that slice fixed the
+  // copy while deferring the reader to #10599.
+  //
+  // cch-w56-s3 — THE READER IS NOW FIXED, so the copy cch-w55-s3 left behind
+  // ("every send is recorded against that team, so those receipts never land in
+  // this list") is itself retracted. `list_fleet_deliveries/1` selected
+  // `is_nil(d.team_id) and d.event == "fleet_digest"` while the writer's
+  // `is_binary(team_id)` guard made the nil-team shape unreachable BY
+  // CONSTRUCTION — two predicates that cannot intersect. It now filters on the
+  // EVENT alone (notifications.ex:930), so a real `deliver_fleet_digest/1` run
+  // lands in this list, proven by dispatch through `Router.call/2` in
+  // router_operator_test.exs.
+  // The deferral to `dr-w20-bl-fleet-digest-receipts-have-no-team-reader`
+  // (#10599) is dropped: that row is REFUTED, not overlapping — the team-scoped
+  // `/v1/notifications/deliveries?event=fleet_digest` returned these receipts
+  // all along (owner rows=2, member rows=1, correctly self-scoped). The defect
+  // was operator-scope only.
+  // Empty is now an HONEST empty: this list can see the receipts, so nothing in
+  // it means nothing was recorded — the card says exactly that and no more. The
+  // 06:00 UTC claim STAYS — it matches `{"0 6 * * *",
   // BarkparkCloud.Workers.DailyDigestWorker}` at cloud/config/config.exs:334
   // exactly. Pinned in __app.test.mjs.
   function operatorDigestCardHtml(list) {
@@ -8798,9 +8802,9 @@
         "That says nothing about the digest itself; this card just couldn't read it.</p>";
     }
     if (!list.length) {
-      return '<p class="set-empty">Nothing in this operator-scoped log — which is not the same as no digest having been sent. ' +
-        "The digest goes out daily at 06:00 UTC to each team's own members, and every send is recorded against that team, " +
-        "so those receipts never land in this list.</p>";
+      return '<p class="set-empty">No digest send has been recorded yet. ' +
+        "The digest goes out daily at 06:00 UTC to each team's own members, and this log now carries every team's receipts, " +
+        "so an empty list means nothing was recorded — not that the receipts are elsewhere.</p>";
     }
     return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
   }
