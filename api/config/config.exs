@@ -225,8 +225,12 @@ config :barkpark, :default_cors_origins, []
 # fallback); dev.exs/test.exs set a local default.
 config :barkpark, :ingest_token, nil
 
+# The `E` modifier is LOAD-BEARING, not cosmetic: without it this compiled
+# Regex carries a source/opts pair that `mix release` cannot serialize into
+# sys.config on Elixir 1.19, and EVERY release build fails. `E` compiles the
+# pattern eagerly to a plain, releasable term.
 config :barkpark, :search_query_exclude_patterns, [
-  ~r/^(test|asdf|qwerty|foo|bar)$/i
+  ~r/^(test|asdf|qwerty|foo|bar)$/iE
 ]
 
 # Engine → retriever registry for the document search SEAM. The Indx plugin
