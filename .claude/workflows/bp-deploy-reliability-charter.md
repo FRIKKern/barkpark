@@ -6446,3 +6446,301 @@ census siting); this workflow spawns one reviewer, so that dispatch is a manual 
 `serving_since` IS the first-sighting instant; s7's brief names three keys (`serving_sha`/`serving_since`/
 `first_seen_at`). Pick one shape across both surfaces or a reader comparing box to plane will compare two
 different facts with the same name.
+
+---
+
+## Wave 23 — "WHAT HAPPENED TO MY MERGE" (2026-08-08)
+
+Wave Paper: `deploy-reliability-wave-23-2026-08-08`. Epic task: `task-fb4fb869490b4213`.
+
+**The wish's word "fail" has expired, and this wave says so in its own first paragraph.** The failure
+numerator moved twice in the last 33 hours and is otherwise flat; 2026-08-08 carried 1 failed row in 327.
+What is left is not lost deploys — it is COST, DEGRADATION and BLINDNESS: 71.1% of every deploy row is now
+refused at our own build door, and no surface a human reads says so. Wave 23 sells on that and never on
+failures.
+
+**Wave 23 also opens with a correction to itself.** Two of the three headline numbers this wave was handed
+did not survive re-measurement, and one of its own inherited premises was a stale checkout rather than a
+missing constant. Those corrections are D405, D406 and D407 and they bind every slice brief and every Paper
+sentence this wave writes.
+
+### Rulings
+
+**D405 — THE RATIO LAW, and the retirement of 1.87x.** Re-derived on pinned bounds on cloud-db-1:
+pre-door `[2026-08-05T10:36:54Z, 2026-08-06T22:29:27Z)` n=2,817 live 628 = 22.29%; post-door
+`[2026-08-06T22:29:27Z, 2026-08-08T10:22:00Z)` n=2,600 live 730 = 28.08%; equal length 35h52m33s;
+**ratio 1.26x**. The direction's 1.87x reproduces to the digit (7-day pre-door n=11,530 at 14.88% → 1.887x)
+and is ILLEGAL under D3, because a 7-day pre window against a 35.9-hour post window buys ~0.6x of its lift
+from a trend that predates the door (daily live-per-row was already 15.37% on 08-04 and 25.67% on 08-06).
+RULING — a before/after ratio is legal only when all four hold: (i) both windows pinned by explicit literal
+timestamps, never anchored to `now()`; (ii) the two windows EQUAL IN DURATION; (iii) both n ≥ 200 and both n
+printed beside the rate; (iv) the two populations COMPOSITIONALLY COMPARABLE — no class (status, surface,
+source) carrying ≥5% of one window's rows may be absent or below 1% in the other unless it is broken out and
+the ratio restated over the common sub-population. Failing (ii) or (iv) the ratio is not printed; failing (i)
+or (iii) nothing is printed at all. Corollary: "matched to the post-door window" is a MOVING target, so both
+bounds are frozen literals at print time and re-printing means re-deriving BOTH.
+
+**D406 — 657/666 = 98.6% IS RETIRED AS UNREPRODUCIBLE.** The pair implies 9 failures in its denominator.
+Post-door failed rows total 21. A suffix scan anchored at each of those 21 shows the only window containing
+exactly 9 failures carries 496 live, not 657; an hourly prefix scan from the door boundary goes
+636/656 → 637/657 → 665/685 and never pairs 657 with 666; no environment, source or trigger grouping produces
+it either. D376 itself only ever called it "the shape of" 698/718. BANNED STRINGS for this epic: `98.6%`,
+`657/666`, and the pre-door twin `197/351 / 56%` (also never reproduced, bounds never stated). The only legal
+successor sentence: *"Of the 751 post-door deploys that resolved either way, 730 went live (97.2%) — printed
+only beside the 1,849 rows (71.1% of 2,600) that never got a slot, over
+2026-08-06T22:29:27Z→2026-08-08T10:22:00Z."*
+
+**D407 — THE SEARCH IMPROVEMENT IS 7.0x ON `documents`, NOT 10.6x POOLED.** `search_intel_events.duration_ms`
+on guerrilla holds 50,110 timed rows back to 2026-07-02, so the claim IS retakeable. Pooled over the two
+pinned windows: 8,000 ms (n=6,226) → 775 ms (n=3,272) = 10.3x — the direction's magnitude reproduces. It is
+still not printable: the `federated` surface supplies 983 post-door rows at p50 23 ms and has ZERO pre-door
+rows in either window, a straight D405(iv) violation. Like-for-like on `documents`, the only surface present
+on both sides: **8,000 ms → 1,137 ms, 7.0x**. `10.6x`, `8,314 ms` and `781 ms` (already stale — 2026-08-08's
+pooled p50 is 35 ms) are banned as current numbers.
+
+**D408 — D382 IS CLEAN; THE SURVEY'S REFUTATION WAS A STALE CHECKOUT.**
+`@default_max_terminal_records 10_000` EXISTS on origin/main at `api/lib/barkpark/sites/deploy_runner.ex:247`,
+landed by `9edfd15a6` (#9727). The primary checkout is 664 commits behind and has no terminal-record machinery
+at all. Two traps produced the false absence and both are now epic law: (a) **grep `git show origin/main:`,
+never the worktree** — this checkout is L3 fiction for this epic; (b) **`git grep <needle> revA revB revC`
+DEDUPLICATES identical blobs across revs**, printing the hit under the first rev only, so two of three
+branches looked clean. The 17.7-day runway reproduces. `@max_tracked_runs 32` bounds MANIFESTS per SLUG, a
+different population, and origin/main's own comment at `:2071` says so verbatim. The prune sweep was RUN
+against origin/main's real module: 82 of 123 seeded files destroyed, every `.log` and `.terminal.json` gone,
+`serving-memory.json` untouched — so the box-side record cannot be pruned out from under the crown. The
+inverse is now the finding: **there is no siting that is both swept and safe** — anything not named
+`*.terminal.json` is never deleted by anything, on a box with no cron, tmpfiles.d or unit touching the dir.
+A per-delivery record sited there would grow forever. Retention must be DESIGNED IN, never inherited.
+
+**D409 — THE CROWN'S SITING: a NEW cloud-Postgres table, written CP-side, with ZERO new credentials.**
+Ratified against live probes, with four corrections to the siting's stated premise.
+1. `cp-deploy.sh` does NOT run migrations — the Docker CMD does, when the IDLE slot boots
+   (`cloud/Dockerfile:82`), while the OLD slot still serves. A brand-new additive table is expand-safe.
+2. The pg volume is **`cloud_cloud_pgdata`**, NOT `cloud_pgdata` (compose project prefix); any recipe quoting
+   the latter fails outright. It survives container replacement — proven three ways, including
+   `min(deployments.inserted_at)` predating the container serving it, and `cloud-db-1` Up 2 weeks while
+   `control_plane_blue` was Up 21 minutes.
+3. `deployments` cannot host the crown, and the decisive reason is not the missing columns: `site_id` is
+   `NOT NULL` with an FK to `sites`, and Barkpark's own platform deploys have no site row.
+4. **The table is `platform_deliveries` / `BarkparkCloud.PlatformDelivery`.** `deliveries`/`Delivery` is taken
+   twice — `notification_deliveries` + `BarkparkCloud.Notifications.Delivery`, and `deliveries` is already a
+   `bp cloud webhook` verb.
+The write path is the EXISTING worker-token surface: `WORKER_TOKEN` is already in `/opt/barkpark/cloud/.env`,
+the file `cp-deploy.sh` already sources, and `/v1/internal/*` is `Auth.require_worker` (proved live: 401
+without, `{"ready":2}` with). **The box has NO WORKER_TOKEN — do not plan a box→CP push.** Retention is 180
+days via a new clause in the existing `AgentRetentionWorker`, not a ninth instrument (~5 MB/year against a
+265 MB DB; `deployments` itself has no retention at all and grows ~1,270 rows/day — that is the unbounded
+table, and it already exists). **`deploy/cp-deploy.sh` stays untouched (PDS-D716).**
+
+**D410 — THE CROWN'S KEY IS `(sha, delivering_run_id, first_seen_at)`, AND IT IS CHEAPER THAN IT LOOKS.**
+D385's 36.5% is now PROVEN, not inferred: 179 of 180 non-success deploy runs carry ZERO jobs, so ~36% of
+merges have no run of their own to write a row from. D384 strengthens to **500/500** (`run_started_at ==
+created_at`), so a leg split on `run_started_at` measures nothing — split on `min(job.started_at)`. The
+carried-sha fan-out is already computed in three places and kept nowhere: deploy.yml's `changes` job resolves
+`base` = the headSha of the last SUCCESSFUL deploy run, and both deploy scripts bind `OLD`/`NEW`
+(`cp-deploy.sh:36/:45`, `instance-deploy.sh:152/:308`). `git rev-list OLD..NEW` IS the fan-out, and it is
+box-truthful. One row per carried sha, all sharing `delivering_run_id`.
+ORDERING HAZARD, and it is the one that can silently lose: deploy.yml's `instance` job fires on
+`^(api|internal|deploy|connectors|templates)/` and does NOT require the `cloud/**` merge that carries the
+migration, so an api-only merge runs the instance leg against a CP whose table does not exist yet. **The
+recorder must fail SOFT and SAY SO — a silent `|| true` rebuilds the exact blindness this wave sells against.**
+
+**D411 — LEG A GETS THREE BUCKETS, NOT TWO, AND ITS HEADLINE CARRIES ITS UNIT.** Full-width retake (500 runs,
+321 with job timestamps): 108 of 113 slow rows (95.6%) overlap another deploy.yml run's build window — D383's
+96.4% reproduces once the 5.4-hour outlier is excluded (108/112). BY SECONDS it is only 57.9%, because one run
+owns 39.0% of all slow queueing time. **"96.4% of slow deploys were queueing behind ourselves" is TRUE of rows
+and FALSE of time; printing it without the unit is the same class of failure D376 outlaws.** Occupancy must be
+an INTERVAL-OVERLAP test across the whole wait, not a point test at `created_at` (the point test reports 92.0%
+and is wrong). The 19,486 s outlier is explained: run 31121348964, `run_attempt: 1`, the ONLY deploy run in a
+9.7-hour span, waiting behind a repo-wide GitHub runner-allocation stall (30+ runs across 9 workflows; 14 jobs
+reaped at the identical instant 19:49:06Z) — and its head_sha `ef77af274` is the commit that introduced
+`@build_slot_capacity 1`. **The deploy that shipped the door waited 5h24m for a runner and nothing recorded
+it.** So leg A needs (a) our own `deploy-production` group, (b) GitHub pickup (p50 4.0 s, regime-invariant),
+(c) platform stall. Without (c) that row blames GitHub for an incident it cannot distinguish from normal
+pickup — the exact misattribution the leg split exists to prevent. Post-cap the BUILD halved (leg B p50 330 s
+→ 161 s) while the SHARE of runs queueing behind us ROSE 34.7% → 46.4%: a co-equal-term story, not a win story.
+
+**D412 — THE PAT SPLIT IS STRUCTURAL: the recorder and the reader are DIFFERENT CREDENTIALS.** Proved by live
+curl with a real minted-then-revoked `bpc_pat_` read PAT. `GET /v1/sites/:id/deployments` (which carries
+`publish_clock` and `next_cursor`) → **401**; `GET /v1/sites/:id/deployments/:dep_id` → **200**;
+`GET /v1/deploy-ledger/census` → 200; the operator twin → **401, not 403** (`require_platform_operator`
+delegates to `require_user`, which authenticates SESSION tokens only, so a PAT can never reach the allowlist
+check — any criterion reading "the operator twin 403s the machine principal" is unmeetable as written).
+CORRECTION: the config's `cloud_token` is a SESSION token, not a PAT; running the probe with it returns 200 on
+the list route and silently refutes nothing. Two consequences: `publish_clock` is not merely reader-less, it is
+UNREACHABLE by a machine principal; and `delivery` — the time-to-web census, the crown's own data — is added
+ONLY on the operator route (`deploy_census_json/2`), so no PAT can read it. **The crown's reader is a new
+PAT-reachable GET, never a node bolted to the 401'd list route.** Re-tiering that list route remains D219's
+cross-epic ruling, filed and not built.
+
+**D413 — THE DOOR'S DENOMINATOR RECONCILES EXACTLY, AND THE LIVE DEFECT IS NOT THE ONE dr-w22-s5 NAMED.**
+Live: `failure_reason LIKE '%409%box_at_capacity%'` across ALL statuses = **1,847** = box journal
+blue 1,084 + green 763. Zero fail-open leak; a single-slot grep undercounts 41.3%. But `deploy_ledger.ex`
+never reads `deferral_cause` in code — all five occurrences are comments or provenance strings — so the
+census carries no cause-column denominator bug. The REAL live defect: a box-capacity 409 that settles `failed`
+routes through the FAILED arm to **`ABANDONED_AT_CAPACITY`** (not `BOX_BUSY_409` — that is the separate
+non-abandoned `refusal_class("409")`) and lands IN the failure numerator, while 719 rows of the SAME physical
+cause sit in the deferral cohort under a different name **with no cross-reference on the rendered screen**.
+Frozen at 6 rows since 2026-08-07T10:02:23Z, live code path. Ship the cross-reference, not a denominator fix.
+Also: `journalctl -u barkpark` still prints `-- No entries --` (D378 unfixed), and **`live-auto` is the largest
+single door consumer at 418 of 1,847 refusals (22.6%) and has never been named by this epic.**
+
+**D414 — THE REGISTER IS A WIDENING OF TWO SHIPPED CENSUSES, AND THE OBVIOUS GATE SITING IS A LAUNDERED
+GREEN.** S3's "closed enumerated register" already exists twice: `payload_key_set_census_test.exs` (UNREAD +
+PHANTOM arms, set-equality both directions, 4 RULED RECONCILED + 23 KNOWN OPEN rows each with a required
+reason) and `deploy_signal_audience_census_test.exs`. Adopt and widen; do not mint a ninth instrument.
+PROVED BY MUTATION: adding a leaf job to `console-gate`'s `needs:` does NOT red required-checks-drift (166/0
+unchanged, no SUBSUMED row needed) and does NOT make the aggregator block — `console-gate`'s `decide()` is a
+hand-written enumeration of six `R_*` env vars, and running its real body with the new leaf at `failure` and
+every other upstream at `success` printed *"every upstream job either succeeded or was legitimately not
+dispatched"* and **EXIT=0**. Charter D19's laundered green, reproduced on origin/main. A register job must
+therefore ship job + `R_*` env + `decide "<job>" "${R_*}" "<gate>"` together, and only `Security gate` has a
+shape ratchet asserting `needs ≡ decide()`. Two further siting facts: `scripts/dr-instrument-register.json`
+dispatches ZERO gate jobs (false/false/false/false), while `api/test/**` is TRUE on both Elixir sets — which
+is D368's own standing remedy ("an ExUnit pin on the required Elixir lane"). And the honest dark population is
+**65, not 18**: a name-matching probe reports 18 because it cannot separate `DeploymentPage.NextCursor` (read)
+from `SiteDeploymentPage.NextCursor` (dark), or the narrow `Deployment.BuildLogURL` (rendered) from the wide
+`SiteDeployment.BuildLogURL` (dark). **The census's UNREAD arm is laundering FOUR keys TODAY**, on
+`site_deployment_json/3` → `SiteDeployment`: `artifact_url`, `detail`, `git_ref`, `image_tag` — emitted on the
+wide wire because the serializer pipes the narrow producer, declared only by the narrow Go struct, greened by
+a file-global tag union. `bp sites` prints all three; `bp cloud site status`, the wide path's ONE consumer,
+cannot. Same platform, two deploy readers, one silently poorer, census green.
+
+**D415 — THE SEAL PREDICATE IS ADOPTED READ-ONLY, AND D401-S4 + S6 AS WRITTEN ARE A TWO-STEP RECIPE FOR A
+FALSE SEAL.** Run live at origin/main against `--epic task-fb4fb869490b4213`:
+`SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=334 … roster=406`. `--epic` parameterizes clause (a)
+ONLY: `KNOWN_DEFECTS` (six `CCH-D*` rows) and `PERMANENT_HUMAN_GATES` (three ids, all
+`parent=cloud-console-hardening-epic`) are flat module constants with NO epic fence, and no refusal code
+checks epic-vs-register consistency — the file states the hazard in its own EMPTY-ROSTER prose and does not
+act on it. `ok = orphans===0 && defectFails===0 && gateMissing===0`, and for DR `defectFails=0` and
+`gateMissing=0` today, so clause (a) is the ONLY thing between DR and a green. Neutralizing exactly one
+refusal produced `VERDICT: SEAL … a=PASS b=PASS c=PASS … epic=task-fb4fb869490b4213` — a full green for
+deploy-reliability whose SCOPE block then names a *Cloud Console* defect as DR's residue. **S4 orders the
+re-parenting that makes `a=PASS` follow mechanically.** Corrections to the digest: `b-clean` is **6/6**, not
+2/6 (the 2/6 was the stale checkout; origin/main's `required-checks.json` now enforces four contexts);
+`ROSTER-TRUNCATED` does not trip — the roster is **406**, not 408, against a 500 limit, i.e. **94 rows of
+headroom before this epic can no longer evaluate its own seal**; the suite is 75/75. RULING: adopt the SHAPE.
+Adoption is READ-ONLY for this epic (D402's fence cedes `cloud/priv/static/__preview__/*` to console, so the
+epic-keyed-register fix is a console-side slice DR consumes, or a written dispensation). S3 and S4's
+re-parenting half map onto clauses (b) and (a); S0, S1 and S4's `met==total` half are written rulings or need
+a criteria leg the predicate does not have; S2 and S5 ride in as rung-1 register rows, never as new clauses.
+And a second epic (`tooling/grip/seal.mjs`, 486 lines, `ROOT_ID = "truth-grip-epic"`, zero imports from
+seal-predicate.mjs) already declined to adopt this file and minted its own, on written merits — so
+"do not mint a ninth instrument" is a policy this repo has already broken once. Note its header's indictment
+of seal-predicate.mjs is HISTORICAL: true at `3065237f5^`, closed by `799ed3241` (#6695).
+
+**D416 — DELIVERY IS A CLAIM PROBLEM, NOT A REBASE PROBLEM.** The three wave-21 branches are still absent from
+origin (`git ls-remote` empty for all three, re-derived twice this session). But the two PRs the recovery
+opened (#10720, #10722) are blocked by exactly ONE required context — `PR references an active task` — and the
+cause is a missing `Task:` trailer, not a lapsed lease, not CI, not a conflict. Their own slice tasks are
+`open` with `claim.worker: null` and `expired_at` 2026-08-08T05:05Z, i.e. lapsed **4h47m before the PRs
+opened**, so the P4 arm refuses them: running the real gate script locally printed *"had ALREADY lapsed 17267s
+before this PR was opened"* (rc=1), while the same script against an `in_progress`-with-worker task printed
+PASS (rc=0). **ORDER IS LOAD-BEARING: `bp task claim` FIRST, then edit the PR body, then one `edited` re-fire
+goes green.** A claim emits no GitHub event, so editing first burns the single re-fire on a still-red run.
+The same missing trailer also causes the "Re-land advisory" red — `reland-check.yml:45-54` runs a `grep` that
+matches nothing under `bash -e`, so the step dies before any overlap is evaluated; it is advisory and never
+blocks, and its extractor has NO backtick arm, so **write the id BARE**. #10711 is already MERGED. #10129 is
+NOT gate-dead — 29 SUCCESS / 7 SKIPPED / 0 fail on its pre-conflict head; it went DIRTY as main moved 135
+commits. REBASE IT, do not close it — but AFTER #10720, because two of its five conflicts are the exact two
+files #10720 changes. The three unpushed slices carry the identical lapsed-claim problem, so budget one
+`bp task claim` per slice BEFORE opening its PR. **`dr-w21-s5` touches `deploy/**`, and PDS-D716 states
+verbatim that merging any `deploy/**` byte deploys BOTH production hosts — it is HARNESS-FIRST and the lead
+orders it.**
+
+**D417 — THE ONE VOCABULARY.** Three names, each meaning exactly one thing on both surfaces. `serving_sha` =
+the commit whose code is EXECUTING (the plane's `git_sha` becomes an alias-and-deprecate, never a rename in
+place — `/health` is anonymous and already live). `serving_since` = RESERVED, everywhere, for the instant this
+sha was FIRST OBSERVED SERVING; durable; a no-op restart must never move it. `process_since` = the plane's
+CURRENT `serving_since` value, renamed to what it is. PROVED BY RUN, not by reading: two BEAMs running the
+exact `vm_started_at/0` body back to back gave lag 6,334 ms → **263 ms** with `serving_since` moving FORWARD
+6.4 s across a bare restart — a 24x "improvement" from changing nothing. The box's meaning is the one a human
+asked for and the plane's is the one that yields. `first_seen_at` and `serving_since` are the SAME fact in
+`ServingMemory`, so dr-w22-s7's criterion-2 triple re-mints the ambiguity it exists to remove: the triple is
+`{serving_sha, serving_since, process_since}`. Type drift rides along — the box renders an ISO-8601 STRING,
+the plane a `%DateTime{}` struct. And `ServingMemory` records `%{sha, first_seen_at}` with **no
+`delivering_run_id`**, so it reproduces D385's bug on exactly the ~36% of merges carried by someone else's
+run: widening it is a widening of a pushed branch, not a new instrument.
+
+**D418 — THE COLLAPSE TO `FailureCopy.raw/1`, AND THE SELECTOR THE REGISTER MUST USE.** The lead's priority-1
+premise is CLOSED: `router.ex` ships no bare `scrub` on origin/main (#10710). What survives is that nothing
+reds when a fifth boundary is added the same way, and the collapse was PROVED byte-safe by run: baseline
+127/127 green, post-collapse 127/127 green, full cloud suite **3296/0**, with `raw/1 == strip_ansi |> scrub`
+verified term-by-term on all four D387 shapes. It is 2.5 sites, not 3 — `event_email.ex:280`'s
+`stripped = FailureCopy.strip_ansi(d)` is load-bearing (`humanize(stripped)` feeds the `^capture` equal-arm)
+and cannot go. **The register's selector must therefore be `FailureCopy.scrub(`-based, not `strip_ansi(`-based**
+— post-collapse the tree has ZERO `scrub` callers outside the module and ONE legitimate surviving
+`strip_ansi` caller, so a strip-based gate reds on correct code and gets relaxed. Ban aliased-as forms too
+(`alias …FailureCopy, as: X`); zero imports exist today, which is what makes a module-qualified grep sound.
+Scope it to `cloud/lib`: `api/lib/…/codex/protocol.ex` has its own unrelated private `scrub/1` with 9 lines
+that false-positive a repo-wide grep. D387's fixture trap has a FIFTH axis: the OSC residual reproduces ONLY
+on the SPACELESS shape `"\e]0;t\ainapi_key=<s>"` — the charter's own prose renders it WITH a space, and the
+spaced variant is SAFE under both orders, i.e. copying D387's prose into a fixture yields the comforting
+answer. `raw/1` does NOT close the OSC shape; say so out loud in any PR that ships the collapse.
+
+**D419 — THE LEVER PACKET IS AN EXPERIMENT AND A RANKING, NOT A FIX, AND ITS OWN INPUTS ARE UNMEASURABLE
+TODAY.** `grep` over `cloud/lib` + `internal/cli` for any builds/min or supply rate returns nothing: the
+4.9-vs-0.95 oversubscription figure that carries the owner's decision has NO durable producer and no reader a
+human can reach. `@build_slot_capacity` is a module ATTRIBUTE with no env or config path, so every arm of a
+cap experiment requires a rebuild + restart of the box — and a restart is itself the confound (D417). Raising
+the cap is fenced by D180/D252. So the packet's FIRST question to the owner is whether to break that fence at
+all. Design: unit of analysis is the publish→live JOURNEY per `(site, publish event)` — never the deployment
+row, never `content_rev` (`deploy_ledger.ex:1199` already rules that key out because it COLLAPSES groups:
+1,474 of 3,106 repeat, one spanning 29.2h). Both hypotheses predict MORE deferrals, so deferral count decides
+nothing; the discriminator is the PAIR (delivery p90 under floored censoring, terminal-abandonment incidence).
+A full capacity chain costs 60+120+180+240×8 = **2,280 s ≈ 38 minutes** of pure backoff before abandonment, so
+depth is a BIASED proxy for wall clock and must never be the outcome variable. Shape: randomized-block
+interrupted time series on one box, blocks ≥2 h, first 45 min discarded as washout (chains in flight carry the
+previous arm's depth state). It must be a LOAD experiment — the ≥2-concurrent regime was closed by #9827, so
+waiting for it to recur is waiting for a bug. The free baseline that needs no cap change: record
+`scheduled_window_s` vs `actual_gap_s` per deferral — today the chain is CLOCK-paced (p50 gap 61.6 s over
+2,262 deferrals, 1,441 inside the 55-75 s band), and that one ratio separates "the cap hurts" from "our own
+backoff hurts". **RANK DEMAND REDUCTION FIRST:** 5 site rebuilds per publish on a shared `production` dataset;
+cutting demo sites 5→1 cuts λ 5x with zero code risk and no fence. "Working as designed; the only lever is
+fewer demo sites" remains a legitimate outcome and it is the owner's call.
+
+**D420 — WHAT THE LEDGER OWES, RE-DERIVED.** 408 children: 332 open · 66 done · 6 cancelled · 4 in_progress.
+Exactly ONE false-done in 408 (`dr-followup-start-reported-callers`, done at 0/4) and it is an
+UNDER-report — all four call sites are converted on main and the criteria were simply never flipped. ZERO
+stale-opens at `met==total`, so the lead-closes-siblings mirror class is CLEAN on this epic. **36** open rows
+are one criterion from done, not 3, and 24 of the 25 sampled have "MERGE-GATED (the LEAD closes this)" as the
+literal opening of their sole survivor. Three are gated on merges that ALREADY happened and are closable with
+zero work: `dr-w6-s1-land-the-stack` (#9888), `dr-w19-s2-deploy-yml-can-scream` (#10562), and — with a
+caveat — `dr-w5-s1-ladder-reaches-triage`, whose criterion 12 demands an independent SECOND review BEFORE
+merge that the charter records at `:1727` as *"still owed"* and that is now structurally unperformable
+(#9887 merged 2026-08-07). That is a THIRD instance of a class already filed twice
+(`dr-bl-w5-…` / `dr-w19-bl-merge-gated-paperwork-is-unsatisfiable`, both 0/4). `dr-w8-s6`'s gate names #10019,
+which is CLOSED and never merged — but its substance shipped via #10710/`8251f3a5c`, so REWORD and close
+`done`, never `cancelled`. `drafts.dr-w6-s3-…` is NOT a draft of the published row — it is a DUPLICATE doc
+updated 24 s AFTER that row closed 12/12; DISCARD it, do not publish. `dr-w2-s4` and `dr-w2-s6` are held out
+of the queue by a live NON-EXPIRING claim (`worker: dr-w6-s3-ledger-repair`, `expired_at: null`) and are
+closable NOW on the claim they already hold. Closes need a RE-CLAIM first: every target row has
+`claim.worker: null`, and `bp task close` requires the worker that HOLDS the claim (precedent: `dr-w6-s3` was
+closed at epoch 11 from a null-worker epoch-6 claim). And 7 children carry NO criteria at all — structurally
+unclosable and structurally unfalsifiable; the seal must give them criteria or exclude them BY NAME.
+
+**D421 — `bp` FRESHNESS IS A PREMISE, NOT A CONVENIENCE.** The installed `bp` is 664 commits stale and answers
+`unknown cloud command "deployments"` — a brief quoting that would tell its builder the census does not exist.
+Every brief citing `bp cloud deployments` carries this recipe verbatim:
+`S=/tmp/bpfresh; rm -rf $S; mkdir -p $S/src; git -C <repo> archive origin/main | tar -x -C $S/src && cd $S/src && CGO_ENABLED=0 go build -o $S/bp ./cmd/barkpark`.
+Three traps: the main package is `./cmd/barkpark`, NOT `./cmd/bp`; `git archive` needs `-C <repo>` because
+agent threads reset cwd between bash calls; `CGO_ENABLED=0` is required because the `cc` alias shadows the
+compiler. Never `make cli-install` as part of a proof.
+
+### Wave 23 slice table
+
+| # | Slice | Task | Round | Surface |
+|---|---|---|---|---|
+| 1 | Delivery: three stranded branches reach origin; two blocked PRs clear their gate | `dr-w23-s1-delivery-reaches-origin` | 1 | git/gh + bp |
+| 2 | The crown, cloud half: `platform_deliveries` + worker-token writer + PAT-reachable reader | `dr-w23-s2-platform-deliveries-table` | 1 | cloud/ |
+| 3 | The crown, wire half: deploy.yml writes the per-carried-sha row; `bp` renders the timeline | `dr-w23-s3-timeline-reaches-a-human` | 2 (after s2) | .github/ + internal/ |
+| 4 | The census table stops hiding `coalesced_attempts` and stops splitting one cause silently | `dr-w23-s4-census-table-stops-hiding` | 1 | internal/ |
+| 5 | `/health` names its process clock (D417) | `dr-w23-s5-health-names-its-clock` | 1 | cloud/ |
+| 6 | The per-struct UNREAD arm; the four laundered keys reach the wide reader | `dr-w23-s6-register-per-struct-unread` | 2 (after s4) | cloud/test + internal/ |
+| 7 | The two written rulings: the LEVER packet and the SEAL ruling | `dr-w23-s7-lever-and-seal-rulings` | 1 | Papers |
+| 8 | The ledger closes what is provably closable | `dr-w23-s8-ledger-closes-the-closable` | 1 | bp ledger |
+
+**HIGH-FLIP-RISK this wave:** slice 2 (the credential split — a worker-token writer beside a PAT-reachable
+reader, on a route family that is machine-only by construction) and slice 6 (whether the widened arm can
+actually LOSE, given D414's laundered-green proof). Both warrant a genuinely independent second reviewer
+before merge; this workflow spawns one, so that dispatch is a manual lead step.
