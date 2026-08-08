@@ -55,7 +55,20 @@ defmodule BarkparkCloud.Registry do
   # than this stops holding a name claim against custom-host attachment — see
   # provisioning_fqdn_taken?/1. Every live instance reports within a minute of
   # provisioning, so 7 days of silence-from-birth is unambiguous abandonment.
+  #
+  # SILENCE-FROM-BIRTH IS NOT ABANDONMENT ON ITS OWN. Measured 2026-08-08, this
+  # clock alone was 0-for-3 on live data: all three rows it would have released
+  # were on live subscriptions and one was still being polled every ~15 minutes
+  # with its decrypted admin bearer token. `provisioning_fqdn_claim/1` therefore
+  # guards it with three further legs; this constant is only the LAST of six.
   @abandoned_claim_after_days 7
+
+  # A `usage_samples` row inside this window is proof of an IN-FLIGHT
+  # platform→instance transmission (the sampler writes one row per checkable
+  # instance every ~15 min, crontab 7,22,37,52), so it is a hard block on
+  # releasing the row's name claim. Sized well above the sampler's own period so
+  # a couple of missed sweeps cannot look like silence — see claim_leg/2.
+  @recent_sample_window_hours 24
 
   # The four terminal reasons `reap_stale_deployments/0` stamps. Named so the
   # alert fan-out below can pair a reaped row with the reason it was just written
@@ -5387,7 +5400,7 @@ defmodule BarkparkCloud.Registry do
   def provisioning_fqdn_claim(host) when is_binary(host) do
     url = "https://" <> host
     cutoff = DateTime.add(DateTime.utc_now(), -@abandoned_claim_after_days, :day)
-    sample_cutoff = DateTime.add(DateTime.utc_now(), -24, :hour)
+    sample_cutoff = DateTime.add(DateTime.utc_now(), -@recent_sample_window_hours, :hour)
 
     Barkpark
     |> where([b], b.url == ^url)
@@ -5424,7 +5437,7 @@ defmodule BarkparkCloud.Registry do
 
       row.recent_sample ->
         {:held, :recent_usage_sample,
-         "row #{row.id} was sampled by the usage worker within the last 24h — the platform is still transmitting to this host"}
+         "row #{row.id} was sampled by the usage worker within the last #{@recent_sample_window_hours}h — the platform is still transmitting to this host"}
 
       row.live_subscription ->
         {:held, :active_subscription,
