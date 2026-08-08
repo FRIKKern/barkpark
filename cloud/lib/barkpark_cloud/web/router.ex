@@ -2633,7 +2633,9 @@ defmodule BarkparkCloud.Web.Router do
   # ADMIN-gated + team-scoped, fail-closed: require_team_admin 401s an
   # unauthenticated caller and 403s a member who is not owner/admin; a barkpark in
   # ANOTHER team (or no such id) is the SAME 404 — NO existence leak for a
-  # non-member. 404 "no_admin_token" when the row never got one (ip-only succeed /
+  # non-member. 409 "suspended" when the box is under a billing suspension (the
+  # credential is not revealed while access is revoked — cch-w54-s2).
+  # 404 "no_admin_token" when the row never got one (ip-only succeed /
   # pre-feature instance); 500 if the stored ciphertext fails to decrypt.
   get "/v1/barkparks/:id/credentials" do
     # RBAC (rbac-roles): reveals a live admin credential → team admin (owner/admin) only.
@@ -2650,6 +2652,20 @@ defmodule BarkparkCloud.Web.Router do
         team = conn.assigns.current_team
 
         case Registry.get_barkpark(conn.path_params["id"]) do
+          # cch-w54-s2 — a SUSPENDED box reveals nothing. Suspension is billing's
+          # "data retained, access revoked", and this route hands back the
+          # PLAINTEXT instance admin token — the strongest credential the control
+          # plane holds. Keyed on the boolean the console already paints
+          # ("stopped"), and placed ABOVE the reveal so the ciphertext is never
+          # decrypted. Same 409 shape as the two mint routes below.
+          %Barkpark{team_id: tid, suspended: true} when tid == team.id ->
+            json(conn, 409, %{
+              error: "suspended",
+              detail:
+                "This instance is suspended. The admin credential is not revealed " <>
+                  "until the suspension is cleared."
+            })
+
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             case Registry.reveal_admin_token(bp) do
               {:ok, nil} ->
@@ -2684,7 +2700,9 @@ defmodule BarkparkCloud.Web.Router do
   #
   # USER-authed + TEAM-SCOPED, fail-closed: any member of the owning team may
   # open Studio; a wrong-team / nonexistent / malformed id is the SAME 404 (no
-  # existence leak). 409 not_live while provisioning; 404 no_admin_token for
+  # existence leak). 409 suspended when the box is under a billing suspension
+  # (no ticket is minted and the instance is never called — cch-w54-s2);
+  # 409 not_live while provisioning; 404 no_admin_token for
   # pre-feature instances (parity with /credentials); 502 when the instance
   # call fails; 500 on tampered ciphertext.
   post "/v1/barkparks/:id/studio-link" do
@@ -2715,6 +2733,28 @@ defmodule BarkparkCloud.Web.Router do
                 })
 
                 json(conn, 200, %{url: url})
+
+              # cch-w54-s2 — the box is suspended: no ticket is minted and the
+              # instance is never called. Distinct slug from `not_live` (which
+              # means "still provisioning") because this is a verdict the owner
+              # resolves, not a wait.
+              #
+              # REVIEW (cch-w54 wave review) — the detail deliberately does NOT
+              # say "until the subscription is current". `suspended` is one
+              # column written by TWO independent producers, and only one of them
+              # is money: `Billing.reconcile_plan_limit/1` suspends for
+              # `quota_exceeded` on a team that is fully paid and `status:
+              # "active"`. Naming the subscription here would tell that team the
+              # same falsehood cch-w54-s1 just removed from the instance-card
+              # banner. "Until the suspension is cleared" is true on both axes and
+              # is the same vocabulary as the console's ERRORS.suspended string.
+              {:error, :suspended} ->
+                json(conn, 409, %{
+                  error: "suspended",
+                  detail:
+                    "This instance is suspended. Studio access is closed until the " <>
+                      "suspension is cleared."
+                })
 
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
@@ -2752,7 +2792,10 @@ defmodule BarkparkCloud.Web.Router do
   # mint their own app token; a wrong-team / nonexistent / malformed id is the
   # SAME 404 (no existence leak). Rate-limited per IP (`app_token:<ip>` bucket,
   # 10/min — each hit costs a server-side admin-authed instance call; peer-ip
-  # physics fixed by cch-w1-peer-ip-pin, PR #5305). 409 not_live while
+  # physics fixed by cch-w1-peer-ip-pin, PR #5305). 409 suspended when the box
+  # is under a billing suspension — the token this route mints is DURABLE, so
+  # minting one through a suspended box would outlive the suspension
+  # (cch-w54-s2). 409 not_live while
   # provisioning; 409 app_token_unsupported when the instance predates the
   # mint route (charter D8 — the client maps it to manual token paste);
   # 404 no_admin_token for pre-feature instances; 502 when the instance call
@@ -2787,6 +2830,18 @@ defmodule BarkparkCloud.Web.Router do
                 })
 
                 json(conn, 200, payload)
+
+              # cch-w54-s2 — the box is suspended: no app token is minted and the
+              # instance is never called. This one matters most of the three —
+              # the credential it withholds is durable read+write+chat and would
+              # outlive the suspension that was supposed to revoke access.
+              {:error, :suspended} ->
+                json(conn, 409, %{
+                  error: "suspended",
+                  detail:
+                    "This instance is suspended. New app tokens are not issued until " <>
+                      "the suspension is cleared."
+                })
 
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
