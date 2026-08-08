@@ -141,6 +141,32 @@ type Barkpark struct {
 	PinnedRelease        string `json:"pinned_release"`
 	Channel              string `json:"channel"`
 
+	// COMMIT DISTANCE (dr-w24-s2) — the control plane's own measurement of the
+	// commit the box actually serves, which is a DIFFERENT question from
+	// `UpdateState` above. UpdateState is the box's release-TAG self-grade; these
+	// three are one GitHub compare of the served sha against `main`. They
+	// disagree in production right now: rows read commit_distance 2493 /
+	// commit_ancestry "behind" / update_state "current", because no release tag
+	// has been cut since 2026-07-08 — a box that reached the newest tag stays
+	// `current` however far main runs ahead of it.
+	//
+	//   - CommitDistance — commits of `main` this box does NOT have. A POINTER on
+	//     purpose, the AutoupdateEnabled *bool idiom: nil is UNMEASURED (an empty
+	//     git_commit, a 404 on an unknown sha, or a rate-limit 403 — the shared
+	//     HTTP client discards headers, so a budget refusal is indistinguishable
+	//     from a missing sha and lands unknown). A plain int would render every
+	//     one of those as 0 — "even with main" — which is the disease this field
+	//     exists to cure, in a brand-new column.
+	//   - CommitAncestry — unknown | current | behind | ahead_of_main | diverged.
+	//     Empty means the CONTROL PLANE said nothing (a plane predating this
+	//     emission), which is distinct from a plane that measured and got
+	//     `unknown`.
+	//   - CommitDistanceCheckedAt — when the plane last asked (RFC3339), so a
+	//     consumer can age the reading. Empty on an older CP.
+	CommitDistance          *int   `json:"commit_distance"`
+	CommitAncestry          string `json:"commit_ancestry"`
+	CommitDistanceCheckedAt string `json:"commit_distance_checked_at"`
+
 	// On-demand VERIFY verdict (BP-ONB-09) — the cached headline of the last
 	// golden-path probe run the control plane persisted onto the row. Purely
 	// ADDITIVE and DECODED TOLERANTLY: an older control plane omits both and they

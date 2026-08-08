@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,7 +69,7 @@ const fillingDiskPercent = 90.0
 //  5. strained       — live && sustained load per core over the D67 fence
 //  6. filling        — live && disk_used_percent >= 90
 //  7. unreported     — live && the CP has never heard a byte from the box
-//  8. behind         — live && update_state = "behind"
+//  8. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
 //  9. removing       — deprovision_status ∈ {pending, claimed}
 //  10. provisioning  — no host, nothing failed
 //  11. ok            — live, healthy, current
@@ -114,7 +115,11 @@ func attentionStatus(b cloudclient.Barkpark) string {
 		return "strained"
 	case live && filling(b):
 		return "filling"
-	case live && b.UpdateState == "behind":
+	// TWO independent sources can say `behind`, and until dr-w24-s2 only the
+	// weaker one was read (see behindByCommits). The rung is UNCHANGED — same
+	// label, same rank 8, same bucket, same decision-32 vocabulary — it simply
+	// stops missing the boxes whose release-tag grade cannot express the gap.
+	case live && (b.UpdateState == "behind" || behindByCommits(b)):
 		return "behind"
 	case removing:
 		return "removing"
@@ -239,6 +244,104 @@ func unmeteredMarker(b cloudclient.Barkpark) string {
 	return "vitals unreadable — agent predates the vitals beat"
 }
 
+// --- commit distance (dr-w24-s2) ---------------------------------------------
+//
+// `update_state` is the box's RELEASE-TAG self-grade; `commit_ancestry` /
+// `commit_distance` are the control plane's own compare of the sha the box
+// actually serves against `main`. They answer different questions and they
+// disagree in production right now — one row reads commit_distance 2493,
+// commit_ancestry "behind", update_state "current" — because no release tag has
+// been cut since 2026-07-08, so every box that reached the newest tag is pinned
+// at `current` however far main runs ahead. (update_state is NOT structurally
+// incapable of saying `behind`: a live row says exactly that today, 0.2.24 vs
+// 0.2.25. It just cannot see an untagged gap.)
+//
+// The measurement has been written hourly and read by NOBODY: before this slice
+// no serializer, no CLI and no console carried it. These four functions are the
+// whole reader.
+
+// commitDistanceUnmetered is what the BEHIND column prints for a box the plane
+// asked about and could not grade. Loud on purpose, and never a number: a NULL
+// distance rendered as `0` would say "even with main" about a box nobody could
+// measure — an unearned green in a brand-new column. Three prod rows are NULL
+// today (the three whose git_commit is empty), and a GitHub rate-limit 403 is
+// indistinguishable from a 404 here (the shared HTTP client discards headers),
+// so this cell is a day-one case, not a hypothetical.
+const commitDistanceUnmetered = "UNMETERED"
+
+// behindByCommits reports whether the CONTROL PLANE measured this box as behind
+// `main`, independent of what the release-tag grade says. This is the arm that
+// was missing from attentionStatus: a 2,493-behind box whose update_state reads
+// `current` never entered ATTENTION, so the one honest column and the one
+// reassuring column sat in the SAME ROW and only the reassuring one reached a
+// human.
+func behindByCommits(b cloudclient.Barkpark) bool {
+	return strings.TrimSpace(b.CommitAncestry) == "behind"
+}
+
+// commitDistanceUnknown reports a box the plane MEASURED and could not grade —
+// an ancestry it did tell us, with no number behind it. It is deliberately NOT
+// true for a control plane that sent no ancestry at all: that plane predates the
+// emission and has said nothing, which is a different fact and must not push
+// every legacy row to the top of its bucket.
+func commitDistanceUnknown(b cloudclient.Barkpark) bool {
+	return strings.TrimSpace(b.CommitAncestry) != "" && b.CommitDistance == nil
+}
+
+// behindCell renders one row's commit distance for the BEHIND column. Empty ONLY
+// for a control plane that sent no ancestry (the older-CP rule the neighbouring
+// conditional columns already follow — the column then collapses out entirely
+// and the view is byte-identical to before). Once the plane speaks, every row
+// says something, and an ungradeable row says UNMETERED rather than a number it
+// does not have.
+func behindCell(b cloudclient.Barkpark) string {
+	ancestry := strings.TrimSpace(b.CommitAncestry)
+	if ancestry == "" {
+		return ""
+	}
+	if b.CommitDistance == nil {
+		return commitDistanceUnmetered
+	}
+	n := strconv.Itoa(*b.CommitDistance)
+	switch ancestry {
+	case "current":
+		// A MEASURED zero — the box serves a commit identical to main.
+		return "even"
+	case "behind":
+		return n
+	case "ahead_of_main":
+		return "ahead " + n
+	case "diverged":
+		// Missing n commits AND carrying code main does not have. Rendered, not
+		// ranked: widening the attention ladder is a charter decision, not this
+		// slice's (filed as dr-w24-followup-diverged-is-not-ranked).
+		return "diverged " + n
+	default:
+		return sanitizeCell(ancestry)
+	}
+}
+
+// behindDetail is the WHY for a row that is behind BY COMMITS — the sentence
+// that keeps the release-tag grade from reading as an all-clear beside it. A row
+// that is behind by its own release tag keeps the pre-existing "" (behind IS the
+// message there, and the UPDATE column already shows running → latest).
+func behindDetail(b cloudclient.Barkpark) string {
+	if !behindByCommits(b) {
+		return ""
+	}
+	reason := "behind main by an unmeasured number of commits"
+	if b.CommitDistance != nil {
+		reason = fmt.Sprintf("%d commits behind main", *b.CommitDistance)
+	}
+	// Name the disagreement explicitly when the tag grade says anything other
+	// than behind — that contradiction IS the finding, and an operator reading
+	// `current` elsewhere on the row deserves to be told why it is there.
+	if grade := strings.TrimSpace(b.UpdateState); grade != "" && grade != "behind" {
+		reason += " · release-tag grade still reads " + sanitizeCell(grade)
+	}
+	return reason
+}
+
 // round1 rounds to one decimal so a rendered load reads like an instrument, not
 // like a float dump.
 func round1(n float64) float64 { return math.Round(n*10) / 10 }
@@ -300,8 +403,10 @@ func attentionBucket(status string) string {
 // the control plane already told us, surfaced instead of hoarded: the
 // deprovision error for removal_failed, the provision error for failed, the
 // suspension reason for suspended, the measured vitals for strained/filling.
-// States whose row already explains itself (degraded shows health/agent, behind
-// IS the message) yield "".
+// States whose row already explains itself (degraded shows health/agent, a
+// release-tag `behind` IS the message) yield "". A box behind BY COMMITS is the
+// exception (dr-w24-s2): its release-tag grade is sitting on the same row saying
+// `current`, so the row does NOT explain itself and behindDetail says so.
 //
 // The UNMETERED MARKER rides on top of whatever the status said, on ANY row: a
 // box we cannot read is a fact about the reading, not about the verdict.
@@ -318,6 +423,10 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		reason = strainedReason(b)
 	case "filling":
 		reason = fillingReason(b)
+	case "behind":
+		// "" for a release-tag behind (the UPDATE column already says it); the
+		// commit-distance sentence for a box whose tag grade disagrees.
+		reason = behindDetail(b)
 	}
 	marker := unmeteredMarker(b)
 	switch {
@@ -359,6 +468,19 @@ func rankBarkparks(list []cloudclient.Barkpark) []rankedBarkpark {
 		if out[i].Rank != out[j].Rank {
 			return out[i].Rank < out[j].Rank
 		}
+		// Tiebreak ZERO (dr-w24-s2): an UNMETERED commit distance sorts to the
+		// TOP of its rank — the field's own contract (registry/barkpark.ex: "show
+		// NULL as unmetered and sort it to the TOP"). A box we could not grade is
+		// the one to look at first, not the one to bury under boxes we could.
+		//
+		// It sits INSIDE the rank, never across it, so the decision-15 ladder and
+		// the decision-32 fixture order are untouched; and it is keyed on
+		// commitDistanceUnknown, which is false for a control plane that sent no
+		// ancestry at all — so an older CP's whole fleet ties here and falls
+		// straight through to the name order it has always had.
+		if ui, uj := commitDistanceUnknown(out[i].BP), commitDistanceUnknown(out[j].BP); ui != uj {
+			return ui
+		}
 		// Tiebreak: name ascending, case-insensitive (charter decision 15).
 		ni, nj := strings.ToLower(out[i].BP.Name), strings.ToLower(out[j].BP.Name)
 		if ni != nj {
@@ -395,14 +517,30 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		"update_running_release": r.BP.UpdateRunningRelease,
 		"update_latest_release":  r.BP.UpdateLatestRelease,
 		"update_checked_at":      r.BP.UpdateCheckedAt,
-		"autoupdate_paused":      r.BP.AutoupdatePaused,
-		"pinned_release":         r.BP.PinnedRelease,
-		"channel":                r.BP.Channel,
+		// dr-w24-s2: the plane's own commit-distance measurement, beside the
+		// release-tag grade it contradicts. ancestry + checked_at are ALWAYS
+		// present (empty on a plane that predates the emission) so a script can
+		// tell "the plane said nothing" from "the plane measured and got
+		// unknown"; the distance itself is tri-state below.
+		"commit_ancestry":            r.BP.CommitAncestry,
+		"commit_distance_checked_at": r.BP.CommitDistanceCheckedAt,
+		"autoupdate_paused":          r.BP.AutoupdatePaused,
+		"pinned_release":             r.BP.PinnedRelease,
+		"channel":                    r.BP.Channel,
 	}
 	// Tri-state: only emit autoupdate_enabled when the CP actually reported it, so
 	// -o json is as honest as the table (nil = policy unknown, never a fake false).
 	if r.BP.AutoupdateEnabled != nil {
 		row["autoupdate_enabled"] = *r.BP.AutoupdateEnabled
+	}
+	// Tri-state, the same idiom: emit commit_distance only when the plane
+	// actually measured one. `"commit_distance": 0` for an ungradeable box would
+	// read "even with main" to every script that consumes this, which is exactly
+	// the lie the *int on the wire type exists to prevent — an absent key forces
+	// the consumer to branch, a zero invites it not to. commit_ancestry above
+	// carries the reason the number is missing.
+	if r.BP.CommitDistance != nil {
+		row["commit_distance"] = *r.BP.CommitDistance
 	}
 	return row
 }
@@ -567,6 +705,10 @@ func statusDash(s string) string {
 // renders byte-identical to before:
 //
 //   - UPDATE  running → latest (the behind marker) — only when versions are known
+//   - BEHIND  the plane's measured commit distance from main (dr-w24-s2) — only
+//     when the control plane emits an ancestry at all. Once on, every row says
+//     something: a number, `even`, or the loud UNMETERED. It is the column that
+//     contradicts UPDATE, and that is the point.
 //   - CHANNEL the release channel (prod/staging) — only when the CP emits it
 //   - POLICY  compact autoupdate flag (pin@tag / paused / off / auto)
 //   - DETAIL  the control plane's own reason for a failure/suspension
@@ -577,9 +719,13 @@ func statusDash(s string) string {
 func renderStatusRows(out *writer, rows []rankedBarkpark) {
 	// Decide which conditional columns this bucket needs.
 	withUpdate, withChannel, withPolicy, withDetail := false, false, false, false
+	withBehind := false
 	for _, r := range rows {
 		if updateCell(r.BP) != "" {
 			withUpdate = true
+		}
+		if behindCell(r.BP) != "" {
+			withBehind = true
 		}
 		if strings.TrimSpace(r.BP.Channel) != "" {
 			withChannel = true
@@ -598,6 +744,9 @@ func renderStatusRows(out *writer, rows []rankedBarkpark) {
 	}
 	if withChannel {
 		headers = append(headers, "CHANNEL")
+	}
+	if withBehind {
+		headers = append(headers, "BEHIND")
 	}
 	headers = append(headers, "HEALTH", "AGENT")
 	if withPolicy {
@@ -620,6 +769,17 @@ func renderStatusRows(out *writer, rows []rankedBarkpark) {
 		}
 		if withChannel {
 			row = append(row, statusDash(r.BP.Channel))
+		}
+		if withBehind {
+			// NOT statusDash on the VALUE: once the column is on, an ungradeable
+			// box reads UNMETERED, never an em dash and never 0. The em dash is
+			// reserved for its one honest use — a row the control plane sent no
+			// ancestry for at all.
+			cell := behindCell(r.BP)
+			if cell == "" {
+				cell = "—"
+			}
+			row = append(row, cell)
 		}
 		row = append(row, statusDash(r.BP.HealthStatus), statusDash(r.BP.AgentStatus))
 		if withPolicy {

@@ -870,3 +870,235 @@ func TestDeployCensusSiteDecodesLive(t *testing.T) {
 		t.Fatalf("a control plane sending no `live` must decode to nil, got %d", *older.Live)
 	}
 }
+
+// --- dr-w24-s2: the commit distance reaches the CLI ---------------------------
+//
+// The lie these tests exist for is measured, not hypothetical. Prod's registry
+// carries, ON ONE ROW: commit_distance 2493, commit_ancestry "behind",
+// update_state "current". The honest column and the reassuring column sit beside
+// each other and, before this slice, only the reassuring one reached a human —
+// the control plane has been measuring commit distance hourly with ZERO readers.
+//
+// update_state is not incapable of saying `behind` (a live row says it today).
+// It is pinned: no release tag has been cut since 2026-07-08, so every box that
+// reached the newest tag grades `current` however far main runs ahead of it.
+
+// behindProdRow is the real production shape, verbatim — the row this whole
+// slice exists for.
+func behindProdRow() cloudclient.Barkpark {
+	d := 2493
+	return cloudclient.Barkpark{
+		ID: "bp-1", Name: "guerrilla", Host: "h", URL: "https://guerrilla.barkpark.cloud",
+		LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+		UpdateState:    "current",
+		CommitDistance: &d, CommitAncestry: "behind",
+		CommitDistanceCheckedAt: "2026-08-08T12:17:01Z",
+	}
+}
+
+// TestCommitDistanceRowIsBehindNotOk is the predicate fix itself. MUTATION
+// TARGET: narrow attentionStatus's arm back to `live && b.UpdateState ==
+// "behind"` and this test REDS with status "ok" / bucket "healthy" — which is
+// exactly what prod renders today.
+func TestCommitDistanceRowIsBehindNotOk(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{behindProdRow()})
+	if got := ranked[0].Status; got != "behind" {
+		t.Fatalf("a 2,493-behind box classified %q — the commit measurement is not reaching the verdict", got)
+	}
+	if got := ranked[0].Bucket; got != "attention" {
+		t.Fatalf("bucket = %q, want attention: a box 2,493 commits behind cannot be healthy", got)
+	}
+	if want := attentionRank("behind"); ranked[0].Rank != want {
+		t.Fatalf("rank = %d, want the UNCHANGED behind rung %d (no new vocabulary)", ranked[0].Rank, want)
+	}
+}
+
+// TestCommitDistanceEntersAttentionBucketRendered is the same fact on RENDERED
+// BYTES: the row lands in ATTENTION, prints its distance, and the release-tag
+// grade never stands alone.
+func TestCommitDistanceEntersAttentionBucketRendered(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{behindProdRow()})
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "ATTENTION", "attention", ranked)
+	got := sout.String()
+
+	if !strings.Contains(got, "ATTENTION (1)") {
+		t.Fatalf("the box must be IN the attention bucket:\n%s", got)
+	}
+	if !strings.Contains(got, "BEHIND") {
+		t.Fatalf("the BEHIND column must appear once the plane emits an ancestry:\n%s", got)
+	}
+	if !strings.Contains(got, "2493") {
+		t.Fatalf("the measured distance must be printed:\n%s", got)
+	}
+	// `current` may appear ONLY inside the sentence that contradicts it. An
+	// unqualified `current` anywhere on this row is the defect.
+	const qualified = "2493 commits behind main · release-tag grade still reads current"
+	if !strings.Contains(got, qualified) {
+		t.Fatalf("the DETAIL must name the disagreement, want %q:\n%s", qualified, got)
+	}
+	if n := strings.Count(got, "current"); n != 1 {
+		t.Fatalf("`current` must appear exactly once, inside %q — got %d occurrences:\n%s", qualified, n, got)
+	}
+	if strings.Contains(got, "0 behind") {
+		t.Fatalf("no row may render `0 behind`:\n%s", got)
+	}
+}
+
+// TestBehindCellVocabulary pins every cell the column can print. The two that
+// matter: a NULL distance is UNMETERED (never 0, never blank), and a plane that
+// sent no ancestry at all yields "" so the column collapses out and an older CP
+// renders byte-identical to before.
+func TestBehindCellVocabulary(t *testing.T) {
+	n := func(v int) *int { return &v }
+	cases := []struct {
+		name string
+		bp   cloudclient.Barkpark
+		want string
+	}{
+		{"behind prints the number", cloudclient.Barkpark{CommitAncestry: "behind", CommitDistance: n(2493)}, "2493"},
+		{"measured zero is even", cloudclient.Barkpark{CommitAncestry: "current", CommitDistance: n(0)}, "even"},
+		{"unknown is UNMETERED", cloudclient.Barkpark{CommitAncestry: "unknown"}, "UNMETERED"},
+		{"behind with no number is UNMETERED", cloudclient.Barkpark{CommitAncestry: "behind"}, "UNMETERED"},
+		{"ahead names itself", cloudclient.Barkpark{CommitAncestry: "ahead_of_main", CommitDistance: n(3)}, "ahead 3"},
+		{"diverged names itself", cloudclient.Barkpark{CommitAncestry: "diverged", CommitDistance: n(5)}, "diverged 5"},
+		{"an older control plane says nothing", cloudclient.Barkpark{}, ""},
+	}
+	for _, c := range cases {
+		if got := behindCell(c.bp); got != c.want {
+			t.Errorf("%s: behindCell = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// The disease, stated as a test: nothing ungradeable renders "0".
+	for _, bp := range []cloudclient.Barkpark{
+		{CommitAncestry: "unknown"},
+		{CommitAncestry: "behind"},
+		{CommitAncestry: "unknown", CommitDistanceCheckedAt: "2026-08-08T12:17:01Z"},
+	} {
+		if got := behindCell(bp); got == "0" {
+			t.Errorf("an ungradeable box rendered %q — a NULL distance must never read as even with main", got)
+		}
+	}
+}
+
+// TestUnmeteredDistanceSortsToTheTop is the field's own contract
+// (registry/barkpark.ex: "show NULL as unmetered and sort it to the TOP"): the
+// box we could NOT grade is the first one an operator sees in its rank, not the
+// one buried under the boxes we could.
+func TestUnmeteredDistanceSortsToTheTop(t *testing.T) {
+	n := func(v int) *int { return &v }
+	// Names chosen so the pre-existing alphabetical tiebreak would put the
+	// unmetered box LAST — the sort key has to be doing the work, not luck.
+	fleet := []cloudclient.Barkpark{
+		{ID: "a", Name: "alpha", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+			UpdateState: "current", CommitAncestry: "behind", CommitDistance: n(617)},
+		{ID: "b", Name: "beta", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+			UpdateState: "current", CommitAncestry: "behind", CommitDistance: n(2493)},
+		{ID: "z", Name: "zulu", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+			UpdateState: "behind", CommitAncestry: "unknown", CommitDistanceCheckedAt: "2026-08-08T12:17:08Z"},
+	}
+	ranked := rankBarkparks(fleet)
+	if ranked[0].BP.Name != "zulu" {
+		t.Fatalf("order = %s,%s,%s — the UNMETERED box must sort to the top of its rank",
+			ranked[0].BP.Name, ranked[1].BP.Name, ranked[2].BP.Name)
+	}
+	// …and the metered rows keep their own alphabetical order underneath.
+	if ranked[1].BP.Name != "alpha" || ranked[2].BP.Name != "beta" {
+		t.Fatalf("metered rows lost their name order: %s then %s", ranked[1].BP.Name, ranked[2].BP.Name)
+	}
+
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "ATTENTION", "attention", ranked)
+	got := sout.String()
+	if !strings.Contains(got, "UNMETERED") {
+		t.Fatalf("a NULL distance must render UNMETERED:\n%s", got)
+	}
+	iUnmetered := strings.Index(got, "UNMETERED")
+	i617, i2493 := strings.Index(got, "617"), strings.Index(got, "2493")
+	if iUnmetered > i617 || iUnmetered > i2493 {
+		t.Fatalf("UNMETERED must be printed ABOVE every metered row (at %d, vs 617 at %d and 2493 at %d):\n%s",
+			iUnmetered, i617, i2493, got)
+	}
+}
+
+// TestOlderControlPlaneRendersWithoutTheBehindColumn is the compatibility rung:
+// a plane that predates the emission sends no ancestry, and the view must read
+// exactly as it did before this slice — no column, no sentinel, no reordering.
+func TestOlderControlPlaneRendersWithoutTheBehindColumn(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{
+		{ID: "a", Name: "alpha", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online", UpdateState: "current"},
+	})
+	if ranked[0].Status != "ok" {
+		t.Fatalf("status = %q: an unmeasured box must not be graded behind", ranked[0].Status)
+	}
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "HEALTHY", "healthy", ranked)
+	got := sout.String()
+	if strings.Contains(got, "BEHIND") || strings.Contains(got, "UNMETERED") {
+		t.Fatalf("an older control plane must render exactly as before:\n%s", got)
+	}
+}
+
+// TestStatusJSONCarriesCommitDistance pins the `-o json` projection: ancestry and
+// checked_at ALWAYS present (a script can tell "the plane said nothing" from "the
+// plane measured and got unknown"), the distance itself tri-state — present when
+// measured, ABSENT when not, never 0.
+func TestStatusJSONCarriesCommitDistance(t *testing.T) {
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{behindProdRow()})[0])
+	if row["commit_distance"] != 2493 {
+		t.Fatalf("commit_distance = %v, want 2493", row["commit_distance"])
+	}
+	if row["commit_ancestry"] != "behind" {
+		t.Fatalf("commit_ancestry = %v, want behind", row["commit_ancestry"])
+	}
+	if row["commit_distance_checked_at"] != "2026-08-08T12:17:01Z" {
+		t.Fatalf("commit_distance_checked_at = %v, want the plane's timestamp", row["commit_distance_checked_at"])
+	}
+	if row["status"] != "behind" || row["bucket"] != "attention" {
+		t.Fatalf("the JSON verdict must agree with the table: status=%v bucket=%v", row["status"], row["bucket"])
+	}
+
+	unknown := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{{
+		ID: "u", Name: "muscle-1", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+		UpdateState: "current", CommitAncestry: "unknown", CommitDistanceCheckedAt: "2026-08-08T12:17:08Z",
+	}})[0])
+	if v, present := unknown["commit_distance"]; present {
+		t.Fatalf("commit_distance must be ABSENT for an ungradeable box, got %v — a 0 there reads as even with main", v)
+	}
+	for _, k := range []string{"commit_ancestry", "commit_distance_checked_at"} {
+		if _, present := unknown[k]; !present {
+			t.Fatalf("%s must be present so a script can see WHY the distance is missing", k)
+		}
+	}
+}
+
+// TestBarkparkDecodesCommitDistance proves the wire type reads what router.ex
+// now emits, and that an omitted distance decodes to nil rather than 0.
+func TestBarkparkDecodesCommitDistance(t *testing.T) {
+	var measured cloudclient.Barkpark
+	if err := json.Unmarshal([]byte(`{"commit_distance":2493,"commit_ancestry":"behind","commit_distance_checked_at":"2026-08-08T12:17:01Z"}`), &measured); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if measured.CommitDistance == nil || *measured.CommitDistance != 2493 {
+		t.Fatalf("CommitDistance = %v, want 2493", measured.CommitDistance)
+	}
+	if measured.CommitAncestry != "behind" || measured.CommitDistanceCheckedAt == "" {
+		t.Fatalf("ancestry/checked_at did not decode: %+v", measured)
+	}
+
+	for _, body := range []string{`{}`, `{"commit_distance":null,"commit_ancestry":"unknown"}`} {
+		var bp cloudclient.Barkpark
+		if err := json.Unmarshal([]byte(body), &bp); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		if bp.CommitDistance != nil {
+			t.Fatalf("%s decoded CommitDistance = %d, want nil — a *int is the whole point", body, *bp.CommitDistance)
+		}
+	}
+}
