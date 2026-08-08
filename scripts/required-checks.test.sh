@@ -34,6 +34,42 @@
 #
 # --live mutates a throwaway branch in the repo (never main; it refuses) and
 # cleans up after itself.
+#
+# THE INTERPRETER GUARD, AND THE VACUOUS GREEN IT DELETES (wave 53)
+#
+# The shebang above only decides who runs this file when it is EXECUTED. An
+# agent or a human who types `sh scripts/required-checks.test.sh` overrides it,
+# and until wave 53 that invocation produced the exact defect this epic exists
+# to delete — a green nothing earned, inside the epic's own instrument:
+#
+#   sh scripts/required-checks.test.sh >/tmp/out 2>&1; echo "exit=$?"  ->  exit=0
+#   grep -c '^  ok' /tmp/out                                           ->  68
+#
+# 68 of 170 assertions, §18 never reached, and a SUCCESS exit code. bash reads a
+# script incrementally, so it ran a third of the file before parsing the first
+# `done < <(...)` process substitution, which bash in POSIX mode cannot parse;
+# the syntax error killed the shell mid-run and the exit status of the last
+# completed command — a passing assertion — was what the caller saw.
+#
+# CI WAS NEVER EXPOSED: both jobs in .github/workflows/required-checks-drift.yml
+# invoke this suite with `bash`. This was an agent- and human-facing trap, not a
+# CI hole, and it is recorded here as one.
+#
+# So the file now refuses a non-bash or POSIX-mode interpreter BEFORE the first
+# assertion, rather than trusting a shebang the caller may have bypassed. The
+# guard below must stay POSIX-parseable and must stay FIRST — anything it is
+# placed after is code a POSIX-mode shell has already run.
+
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "required-checks.test.sh: needs bash (this suite uses process substitution); run: bash scripts/required-checks.test.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "required-checks.test.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this suite's process substitution; run: bash scripts/required-checks.test.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
 
 set -euo pipefail
 
