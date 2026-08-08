@@ -23,7 +23,53 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
   Every verdict is resolved BY RUNNING on this booted BEAM. Nothing here is
   transcribed prose.
 
-    * CLOCK is read off `Application.get_env(:barkpark_cloud, Oban)[:plugins]`
+    * CLOCK is one of FIVE verdicts, and every one of them is RUN
+      (cch-w56-s2, charter D649–D652). `:synchronous` used to be a sixth — a
+      nullary clause returning a fixed sentence — and it is DELETED, not
+      renamed: it took no subject, read no config, touched no DB, so no state
+      could make it return `{:error, _}`. Swapping the clock labels between a
+      genuinely-absent row and a genuinely in-band row left the suite 6/6
+      green, which is this epic's own thesis violated by this epic's own
+      instrument. The replacements:
+
+        `:crontab_absent`            — the crontab equality read PLUS a
+          REQUIRED `%{pattern, roots}` search whose hit count must be ZERO. On
+          its own, "I looked at the crontab and it is not there" is
+          indistinguishable from "I failed to look anywhere else"; the search
+          is what makes the difference. Any hit reds, naming the hit.
+        `:crontab_row`               — the configured row, by equality.
+        `{:external_only, …, search}` — the mirror obligation: a local negative
+          RUN, plus a declared zero-hit search proving there is no in-tree
+          arming artefact either. Without it, `:external_only` becomes the
+          dumping ground for "I didn't look".
+        `{:in_band, subject}`        — RUNS the named guard with BOTH controls.
+          The positive control is mandatory and is the non-obvious half: an
+          in-band resolver that only checks the expired case PASSES when the
+          lookup is broken in every direction. Each `:in_band` payload names a
+          `file:symbol` the resolver actually calls.
+        `{:external_armed_here, path, arming_literal, cadence}` — the promise
+          is kept by a non-BEAM process, but this tree ARMS it. The arming
+          literal is asserted by equality against the pinned EXACT file, and
+          `cadence` is either `{:cadence, "<literal>"}` or `:no_cadence_in_tree`
+          — the resolver checks WHICHEVER IS DECLARED, so an invented interval
+          reds AND a lazily-declared `:no_cadence_in_tree` on a cadence-bearing
+          file reds. That second direction matters because the taxonomy pin at
+          the bottom of this file folds tuples with `elem(_, 0)` and CANNOT SEE
+          ARITY: a row downgraded to an arming-only payload walks straight
+          through the pin. The resolver, not the pin, closes that hole.
+
+      An `:external_armed_here` path must ALSO be declared in `CLOUD_PATHS`
+      (`scripts/cloud-path-escape-check.sh`), as an EXACT FILE and never a
+      directory (D270 — measured over 60 days: 145 newly-dispatching commits
+      for `.github/workflows/**`, 76 for `deploy/**`, 8 for the Caddy file),
+      or a PR editing the pinned file never dispatches this suite and the row
+      publishes green having never run. And the read must be a SINGLE `"../…"`
+      string literal: the escape census greps `"\.\./[^"]*"`, so a path spliced
+      through `Path.join/1` over a bare ".." segment is invisible to it. An arm
+      below that asserts this file contains no such splice.
+
+    * CLOCK's crontab half is read off
+      `Application.get_env(:barkpark_cloud, Oban)[:plugins]`
       — the crontab the application is CONFIGURED with — never off the text of
       `config/config.exs`. The full read is compared by EQUALITY against
       `@scheduled_crontab` pinned in this file. Equality, not a
@@ -75,6 +121,25 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
        That is what the ADD direction of `sold_capability_manifest_test.exs`
        does for the plan card's bullets, and it is deliberately NOT duplicated
        here — this file is a sibling guard, not an extension of that one.
+
+  ── WHAT THIS INSTRUMENT STILL CANNOT DO ───────────────────────────────────
+
+  It has NO ADD DIRECTION. Every arm below iterates `@register`, so the only
+  promises it can be wrong about are the ones somebody already wrote down. A
+  console sentence about a future act that has no row here is not "verified
+  absent" and not "verified present" — it is UNEXAMINED, and this file will
+  stay green while it rots. Nothing in this file notices a new promise
+  appearing in `cloud/priv/static/app.js`. Widening it is a copy census's job,
+  not a resolver's.
+
+  It also does not own the TLS claim end to end. The `custom_domain` row below
+  proves the EXTERNAL half — that this tree arms Caddy's on-demand ACME, and
+  that no renewal cadence lives in-tree because renewal is an internal of
+  Caddy's own binary. The in-BEAM half is
+  `sold_capability_manifest_test.exs`'s `{:route, :tls_ask_gate}` row, which
+  dispatches `/v1/tls/ask` with a 404→200 discriminator and proves the ask gate
+  is actually armed in this application. Neither row subsumes the other and
+  neither is duplicated here: read them together or you have half the claim.
   """
 
   # async: true — every DB touch is inside the SQL sandbox, the config reads are
@@ -84,6 +149,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
   use Oban.Testing, repo: BarkparkCloud.Repo
 
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.Accounts.{TeamInvitation, UserToken}
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
   alias BarkparkCloud.Workers.TrialExpiryWorker
@@ -120,8 +186,20 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # re-anchors the grace window to now+3d when the webhook passes no attrs,
     # which it never does. The one event that could fire the branch is the one
     # that pushes it out of reach.
+    # The ABSENT clock now costs a SEARCH as well as the crontab read: Oban is
+    # the only scheduler in this plane, so a non-Oban arming (a send_after, a
+    # :timer interval, a Quantum job) is exactly the thing a crontab-only read
+    # would miss while still saying "absent".
     {"billing_past_due", :suspend_on_grace_elapse} => %{
-      clock: :crontab_absent,
+      clock:
+        {:crontab_absent,
+         %{
+           pattern:
+             "Process\\.send_after|:timer\\.(send_after|send_interval|apply_interval)" <>
+               "|Quantum\\.|Crontab\\.",
+           roots: ["../../lib"],
+           why: "no NON-Oban timer arms this day anywhere in cloud/lib"
+         }},
       actor: {:unreachable, :grace_reanchors_on_every_delivery},
       effect: {:flag_only, :suspend_update_all}
     },
@@ -130,7 +208,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # /v1/billing/cancel with at_period_end: false → request_cancel/2 →
     # cancel_subscription/1, gated by team ownership + password only.
     {"billing_lapsed", :cancel_immediate} => %{
-      clock: :synchronous,
+      clock: {:in_band, :cancel_immediate_suspends},
       actor: {:synchronous_call, :request_cancel_immediate},
       effect: {:flag_only, :suspend_update_all}
     },
@@ -138,18 +216,66 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # "Your plan stays active until the end of the billing period." Nothing in
     # this plane reaches that boundary: no crontab row, nothing local reads
     # `cancel_at_period_end` to decide entitlement, and for a paid plan the
-    # named boundary has NO STORED VALUE at all.
+    # named boundary has NO STORED VALUE at all. The mirror obligation: a
+    # declared zero-hit search proving no CONFIGURED artefact in this tree names
+    # the boundary either, so "external only" is a finding and not a shrug.
     {"billing_lapsed", :cancel_at_period_end} => %{
-      clock: {:external_only, :stripe},
+      clock:
+        {:external_only, :stripe,
+         %{
+           pattern: "cancel_at_period_end|current_period_end",
+           roots: ["../../config"],
+           why: "no configured artefact in cloud/config names the boundary this copy promises"
+         }},
       actor: :none_local,
       effect: {:unread, :cancel_at_period_end}
     },
 
-    # The downgrade ceiling. Synchronous off the plan transition, no clock.
+    # The downgrade ceiling. In-band off the plan transition, no clock.
     {"quota_exceeded", :downgrade_suspend} => %{
-      clock: :synchronous,
+      clock: {:in_band, :reconcile_completes_in_band},
       actor: {:synchronous_call, :reconcile_plan_limit},
       effect: {:flag_only, :suspend_update_all}
+    },
+
+    # "Invitations expire after 7 days" (app.js:19564) / "expires in 7 days"
+    # (:19734). The deadline is enforced by ONE predicate — `i.expires_at >
+    # ^now` in `Accounts.get_live_invitation/1` (accounts.ex:1210), reachable
+    # UNAUTHENTICATED via GET /v1/invitations/:token — and by the same predicate
+    # in `accept_invitation/2`. Delete either and the console's sentence is
+    # enforced by nothing, on a path with no login in front of it.
+    {"team_invitation", :expire_after_seven_days} => %{
+      clock: {:in_band, :invitation_expiry},
+      actor: {:in_band_guard, :invitation_accept},
+      effect: {:refused, :no_membership_from_expired_invite}
+    },
+
+    # "It expires in an hour" (app.js:4958). `@reset_validity_minutes 60` at
+    # accounts.ex:103; the predicate lives inside `reset_password_by_token/2`'s
+    # FOR UPDATE txn (accounts.ex:1408). The EFFECT is the half worth asserting:
+    # a refused reset must leave the OLD password still authenticating and the
+    # attempted new one dead.
+    {"password_reset", :expire_after_one_hour} => %{
+      clock: {:in_band, :reset_expiry},
+      actor: {:in_band_guard, :reset_by_token},
+      effect: {:refused, :expired_reset_keeps_old_password}
+    },
+
+    # "Custom domains with automatic TLS" (app.js:14361, planFeatures). The
+    # renewing actor is Caddy's own binary — not this BEAM — but THIS TREE arms
+    # it: the rendered Caddyfile carries `on_demand_tls { ask <AskGateURL> }`.
+    # There is deliberately NO cadence: Caddy renews at ~2/3 of certificate
+    # lifetime as an internal of its own scheduler, and no interval for it
+    # exists anywhere in this repo. `:no_cadence_in_tree` is therefore a CHECKED
+    # claim, not a shrug — the resolver reds if the file carries a
+    # cadence-shaped token after all. The in-BEAM half of this claim lives in
+    # sold_capability_manifest_test.exs's {:route, :tls_ask_gate} row.
+    {"custom_domain", :auto_tls_renewal} => %{
+      clock:
+        {:external_armed_here, "../../../internal/caddyfile/caddyfile.go", "on_demand_tls {",
+         :no_cadence_in_tree},
+      actor: :none_local,
+      effect: {:absent, :local_cert_renewal}
     },
 
     # THE POSITIVE CONTROL — DISCHARGED. Hourly clock, real producer run, and
@@ -173,7 +299,7 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
   ## ── Fixtures ───────────────────────────────────────────────────────────
 
-  defp team_with_owner do
+  defp team_and_owner do
     n = System.unique_integer([:positive])
 
     {:ok, user} =
@@ -181,7 +307,47 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
     {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
     {:ok, _} = Accounts.add_member(team, user, "owner")
-    team
+    {team, user}
+  end
+
+  defp team_with_owner, do: team_and_owner() |> elem(0)
+
+  # Move a deadline into the past WITHOUT touching the guard: the row is real,
+  # only the clock has passed. This is the negative control every :in_band
+  # deadline resolver runs.
+  defp expire_invitation!(%TeamInvitation{id: id}) do
+    {1, _} =
+      Repo.update_all(from(i in TeamInvitation, where: i.id == ^id),
+        set: [
+          expires_at:
+            DateTime.add(DateTime.utc_now(), -60, :second) |> DateTime.truncate(:microsecond)
+        ]
+      )
+
+    :ok
+  end
+
+  defp expire_reset_tokens!(user_id) do
+    {n, _} =
+      Repo.update_all(
+        from(t in UserToken, where: t.user_id == ^user_id and t.context == "reset"),
+        set: [
+          expires_at:
+            DateTime.add(DateTime.utc_now(), -60, :second) |> DateTime.truncate(:microsecond)
+        ]
+      )
+
+    n
+  end
+
+  defp live_reset_token(user_id) do
+    Repo.one(
+      from(t in UserToken,
+        where: t.user_id == ^user_id and t.context == "reset" and is_nil(t.revoked_at),
+        order_by: [desc: t.inserted_at],
+        limit: 1
+      )
+    )
   end
 
   defp barkpark_fixture(team) do
@@ -258,10 +424,88 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     end
   end
 
-  defp resolve_clock(:crontab_absent) do
-    case crontab_agrees() do
-      {:ok, detail} -> {:ok, "ABSENT — #{detail}, and none of them reaches this promise"}
-      err -> err
+  # THE REQUIRED ZERO-HIT SEARCH. `:crontab_absent` and `:external_only` both
+  # claim "nothing here reaches that day"; on the crontab read alone that is
+  # indistinguishable from "I failed to look anywhere else". Every such row
+  # declares a `%{pattern, roots}` whose hit count must be ZERO, run over the
+  # working tree, and any hit reds NAMING the hit. A search that reads no files
+  # at all also reds — an empty corpus proves nothing.
+  defp zero_hit_search(%{pattern: pattern, roots: roots, why: why}) do
+    re = Regex.compile!(pattern)
+
+    files =
+      Enum.flat_map(roots, fn root ->
+        dir = Path.expand(root, __DIR__)
+        Path.wildcard(Path.join(dir, "**/*.{ex,exs}")) |> Enum.map(&{root, dir, &1})
+      end)
+
+    hits =
+      Enum.flat_map(files, fn {root, dir, path} ->
+        path
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.filter(fn {line, _n} -> Regex.match?(re, line) end)
+        |> Enum.map(fn {line, n} ->
+          {Path.join(root, Path.relative_to(path, dir)), n, String.trim(line)}
+        end)
+      end)
+
+    cond do
+      files == [] ->
+        {:error,
+         "the required zero-hit search read NO FILES under #{inspect(roots)} — a search over an " <>
+           "empty corpus is exactly the 'I failed to look' verdict this obligation exists to stop"}
+
+      hits != [] ->
+        {:error,
+         "the required zero-hit search (#{why}) HIT #{length(hits)} line(s): " <>
+           "#{inspect(Enum.take(hits, 3))} — the absence this row records is no longer true, so " <>
+           "re-derive the verdict rather than widening the pattern"}
+
+      true ->
+        {:ok,
+         "the required zero-hit search over #{length(files)} file(s) in #{inspect(roots)} found " <>
+           "nothing (#{why})"}
+    end
+  end
+
+  defp resolve_clock({:crontab_absent, search}) do
+    with {:ok, detail} <- crontab_agrees(),
+         {:ok, searched} <- zero_hit_search(search) do
+      {:ok, "ABSENT — #{detail}, and none of them reaches this promise; #{searched}"}
+    end
+  end
+
+  # THE FIFTH CLOCK. The promise is kept by a process that is not this BEAM, but
+  # THIS TREE arms it. Both halves are checked against the pinned file's bytes:
+  # the arming literal by equality, and whichever cadence shape was declared.
+  # `:no_cadence_in_tree` is not a way of declaring less — the resolver asserts
+  # the file carries ZERO cadence-shaped tokens, so a lazily-downgraded row reds.
+  @cadence_tokens "OnCalendar|OnUnitActiveSec|cron:|time\\.(Second|Minute|Hour|Duration)|[0-9]+d\\b"
+
+  defp resolve_clock({:external_armed_here, rel, arming, cadence}) do
+    path = Path.expand(rel, __DIR__)
+
+    case File.read(path) do
+      {:error, reason} ->
+        {:error,
+         "the pinned arming file #{rel} could not be read (#{inspect(reason)}) — an " <>
+           ":external_armed_here verdict rests entirely on that file's bytes, and it must also be " <>
+           "declared in CLOUD_PATHS or a PR moving it never runs this suite"}
+
+      {:ok, body} ->
+        found = cadence_hits(body)
+
+        cond do
+          not String.contains?(body, arming) ->
+            {:error,
+             "#{rel} no longer contains the arming literal #{inspect(arming)} — nothing in this " <>
+               "tree arms the external clock this promise rests on"}
+
+          true ->
+            resolve_cadence(rel, arming, cadence, found)
+        end
     end
   end
 
@@ -282,11 +526,15 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     end
   end
 
-  defp resolve_clock({:external_only, :stripe}) do
-    # Two things must hold for "external only": no local schedule reaches the
-    # boundary (the equality read), AND nothing local honours the flag when the
-    # day comes. The second is a RUN, not a reading.
-    with {:ok, detail} <- crontab_agrees() do
+  defp resolve_clock({:external_only, :stripe, search}) do
+    # Three things must hold for "external only": no local schedule reaches the
+    # boundary (the equality read), no in-tree artefact names it either (the
+    # MIRROR OBLIGATION — without it this verdict is the dumping ground for "I
+    # didn't look"), AND nothing local honours the flag when the day comes. The
+    # last is a RUN, not a reading.
+    with {:ok, detail} <- crontab_agrees(),
+         {:ok, searched} <- zero_hit_search(search) do
+      detail = "#{detail}; #{searched}"
       team = team_with_owner()
       {:ok, sub} = Billing.subscribe(team, "supporter")
       {:ok, sub} = sub |> Subscription.changeset(%{cancel_at_period_end: true}) |> Repo.update()
@@ -310,8 +558,222 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     end
   end
 
-  defp resolve_clock(:synchronous),
-    do: {:ok, "N/A — the act completes in-band on the request that triggers it"}
+  ## ── CLOCK: the IN-BAND verdicts ────────────────────────────────────────
+  #
+  # `:synchronous` used to live here as `defp resolve_clock(:synchronous), do:
+  # {:ok, "N/A — …"}` — a nullary constant that no state could make fail. It is
+  # DELETED, with no fallback clause: a surviving nullary clause is what a
+  # builder reaches for at 5pm. Every clause below RUNS the guard the row names,
+  # with BOTH CONTROLS. The positive control is the load-bearing half: a
+  # resolver that only checks the expired case passes with flying colours when
+  # the lookup is broken in every direction and no invitation link ever worked.
+
+  # "Invitations expire after 7 days" — Accounts.get_live_invitation/1,
+  # accounts.ex:1205, predicate `i.expires_at > ^now` at :1210.
+  defp resolve_clock({:in_band, :invitation_expiry}) do
+    {team, owner} = team_and_owner()
+    n = System.unique_integer([:positive])
+    email = "invitee-#{n}@example.com"
+
+    {:ok, %{invitation: inv, token: raw}} = Accounts.invite_member(team, email, "member", owner)
+    window_days = DateTime.diff(inv.expires_at, DateTime.utc_now()) / 86_400
+
+    cond do
+      # POSITIVE CONTROL — a LIVE invitation must be ADMITTED.
+      is_nil(Accounts.get_live_invitation(raw)) ->
+        {:error,
+         "IN-BAND GUARD DEAD ON THE POSITIVE ARM: accounts.ex:1205 refused a LIVE invitation " <>
+           "(expires_at #{inspect(inv.expires_at)}, #{Float.round(window_days, 2)} days out). An " <>
+           "expired-only check would call this row green while the console's invite link never " <>
+           "worked at all"}
+
+      window_days < 6.9 or window_days > 7.05 ->
+        {:error,
+         "the invitation window is #{Float.round(window_days, 2)} days, not the '7 days' the " <>
+           "console promises (app.js:19564) — accounts.ex:98 @invite_validity_days has moved and " <>
+           "the copy has not"}
+
+      true ->
+        :ok = expire_invitation!(inv)
+
+        case Accounts.get_live_invitation(raw) do
+          nil ->
+            {:ok,
+             "IN-BAND — accounts.ex:1205 admitted the live invitation " <>
+               "(#{Float.round(window_days, 2)}d window, the console's '7 days') and refused the " <>
+               "same token the moment expires_at moved into the past"}
+
+          %TeamInvitation{expires_at: at} ->
+            {:error,
+             "IN-BAND GUARD GONE: accounts.ex:1210 admitted an invitation whose expires_at is " <>
+               "#{inspect(at)} — the console's '7 days' is now enforced by NOTHING, on a route " <>
+               "(GET /v1/invitations/:token) with no login in front of it"}
+        end
+    end
+  end
+
+  # "It expires in an hour" — Accounts.reset_password_by_token/2,
+  # accounts.ex:1397, predicate at :1408 inside a FOR UPDATE txn.
+  defp resolve_clock({:in_band, :reset_expiry}) do
+    {_team, user} = team_and_owner()
+
+    {:ok, {_user, live_raw}} = Accounts.request_password_reset(user.email)
+    token = live_reset_token(user.id)
+    window_minutes = DateTime.diff(token.expires_at, DateTime.utc_now()) / 60
+
+    cond do
+      window_minutes < 59 or window_minutes > 60.5 ->
+        {:error,
+         "the reset window is #{Float.round(window_minutes, 2)} minutes, not the hour the console " <>
+           "promises ('It expires in an hour', app.js:4958) — accounts.ex:103 " <>
+           "@reset_validity_minutes has moved and the copy has not"}
+
+      # POSITIVE CONTROL — a LIVE link must WORK.
+      not match?({:ok, _}, Accounts.reset_password_by_token(live_raw, "a live control password")) ->
+        {:error,
+         "IN-BAND GUARD DEAD ON THE POSITIVE ARM: accounts.ex:1397 refused a LIVE reset link " <>
+           "(#{Float.round(window_minutes, 2)} minutes out). An expired-only check would call this " <>
+           "row green while every reset email in production was already dead on arrival"}
+
+      true ->
+        {:ok, {_user, dead_raw}} = Accounts.request_password_reset(user.email)
+        expired = expire_reset_tokens!(user.id)
+        true = expired >= 1
+
+        case Accounts.reset_password_by_token(dead_raw, "a password the clock should refuse") do
+          {:error, :invalid_token} ->
+            {:ok,
+             "IN-BAND — accounts.ex:1397 consumed a live link inside its hour " <>
+               "(#{Float.round(window_minutes, 2)} min window) and refused the same shape once " <>
+               "expires_at was in the past"}
+
+          other ->
+            {:error,
+             "IN-BAND GUARD GONE: accounts.ex:1408 answered #{inspect(other)} to an EXPIRED reset " <>
+               "link — the console's 'It expires in an hour' (app.js:4958) is enforced by NOTHING"}
+        end
+    end
+  end
+
+  # The in-band CANCEL. Here the two controls are BEFORE and AFTER: the box is
+  # live before the request and suspended by the request itself, with no day in
+  # between. A resolver that only looked at the end state would pass on a box
+  # that had been suspended all along.
+  defp resolve_clock({:in_band, :cancel_immediate_suspends}) do
+    team = team_with_owner()
+    {:ok, _sub} = Billing.subscribe(team, "supporter")
+    bp = barkpark_fixture(team)
+
+    before = reload_bp(bp)
+
+    cond do
+      before.suspended ->
+        {:error,
+         "the before-control failed: the box was ALREADY suspended before the cancel request, so " <>
+           "an in-band verdict here would be measuring nothing"}
+
+      true ->
+        {:ok, _} = Billing.request_cancel(team, false)
+        later = reload_bp(bp)
+
+        cond do
+          not later.suspended ->
+            {:error,
+             "the cancel request returned but the box is still live — this promise is NOT kept " <>
+               "in-band, so it needs a clock this register does not record"}
+
+          is_nil(later.suspended_at) ->
+            {:error, "the box is suspended but carries no suspended_at — re-derive this row"}
+
+          DateTime.diff(DateTime.utc_now(), later.suspended_at) > 60 ->
+            {:error,
+             "the suspension is stamped #{inspect(later.suspended_at)}, more than a minute before " <>
+               "now — that is not the request that just ran"}
+
+          true ->
+            {:ok,
+             "IN-BAND — the box was live before POST /v1/billing/cancel and suspended at " <>
+               "#{inspect(later.suspended_at)} by the request itself; no scheduled day involved"}
+        end
+    end
+  end
+
+  # The in-band DOWNGRADE ceiling, same before/after controls.
+  defp resolve_clock({:in_band, :reconcile_completes_in_band}) do
+    team = team_with_owner()
+    {:ok, sub} = Billing.subscribe(team, "support_plus")
+    boxes = for _ <- 1..4, do: barkpark_fixture(team)
+    {:ok, _} = sub |> Subscription.changeset(%{plan: "supporter"}) |> Repo.update()
+
+    suspended_now = fn -> Enum.count(boxes, &reload_bp(&1).suspended) end
+    before = suspended_now.()
+
+    cond do
+      before != 0 ->
+        {:error,
+         "the before-control failed: #{before} of 4 boxes were suspended by the plan write alone, " <>
+           "so this row cannot tell an in-band act from a pre-existing state"}
+
+      true ->
+        _ = Billing.reconcile_plan_limit(team)
+        later = suspended_now.()
+
+        if later == 1 do
+          {:ok,
+           "IN-BAND — 0 of 4 boxes were suspended after the plan write, 1 after the call that " <>
+             "the plan transition makes; the ceiling is enforced by the request, not by a clock"}
+        else
+          {:error,
+           "reconcile_plan_limit/1 left #{later} of 4 boxes suspended against a 3-box plan — the " <>
+             "in-band verdict for this row must be re-derived"}
+        end
+    end
+  end
+
+  defp resolve_cadence(rel, arming, :no_cadence_in_tree, []) do
+    {:ok,
+     "EXTERNAL, ARMED HERE — #{rel} carries #{inspect(arming)} and ZERO cadence-shaped tokens; " <>
+       "the renewing interval is an internal of the external binary, not a fact of this repo"}
+  end
+
+  defp resolve_cadence(rel, _arming, :no_cadence_in_tree, found) do
+    {:error,
+     "this row declares :no_cadence_in_tree, but #{rel} carries #{length(found)} cadence-shaped " <>
+       "token(s): #{inspect(Enum.take(found, 3))}. Declare {:cadence, \"<literal>\"} and let the " <>
+       "resolver check it — the taxonomy pin folds tuples with elem/2 and cannot see arity, so " <>
+       "this downgrade is invisible to everything except this clause"}
+  end
+
+  defp resolve_cadence(rel, arming, {:cadence, literal}, found) do
+    body = File.read!(Path.expand(rel, __DIR__))
+
+    cond do
+      not String.contains?(body, literal) ->
+        {:error,
+         "this row declares the cadence #{inspect(literal)}, which is NOT in #{rel} — an " <>
+           "invented interval is exactly the lore an :external_armed_here row must not carry"}
+
+      found == [] ->
+        {:error,
+         "this row declares a cadence but #{rel} carries no cadence-shaped token at all — either " <>
+           "the literal is not a cadence or the discriminator has stopped matching"}
+
+      true ->
+        {:ok,
+         "EXTERNAL, ARMED HERE — #{rel} carries #{inspect(arming)} and the declared cadence " <>
+           "#{inspect(literal)} (#{length(found)} cadence-shaped line(s))"}
+    end
+  end
+
+  defp cadence_hits(body) do
+    re = Regex.compile!(@cadence_tokens)
+
+    body
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _n} -> Regex.match?(re, line) end)
+    |> Enum.map(fn {line, n} -> {n, String.trim(line)} end)
+  end
 
   ## ── ACTOR ──────────────────────────────────────────────────────────────
 
@@ -425,6 +887,76 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     end
   end
 
+  # THE IN-BAND ACTOR. For a deadline promise the actor is the request that
+  # arrives after the day has passed — so it is resolved by making that request,
+  # both before the deadline (it must WORK) and after it (it must be refused).
+  defp resolve_actor({:in_band_guard, :invitation_accept}) do
+    n = System.unique_integer([:positive])
+    email = "invitee-#{n}@example.com"
+    {:ok, invitee} = Accounts.register_user(%{email: email, password: @password})
+
+    {live_team, live_owner} = team_and_owner()
+    {:ok, %{token: live_raw}} = Accounts.invite_member(live_team, email, "member", live_owner)
+
+    {dead_team, dead_owner} = team_and_owner()
+
+    {:ok, %{invitation: dead_inv, token: dead_raw}} =
+      Accounts.invite_member(dead_team, email, "member", dead_owner)
+
+    :ok = expire_invitation!(dead_inv)
+
+    case {Accounts.accept_invitation(live_raw, invitee),
+          Accounts.accept_invitation(dead_raw, invitee)} do
+      {{:ok, _membership}, {:error, :invalid_token}} ->
+        {:ok,
+         "RAN — accept_invitation/2 admitted the live invitation on team #{live_team.slug} and " <>
+           "refused the expired one on #{dead_team.slug} with :invalid_token"}
+
+      {{:ok, _}, other} ->
+        {:error,
+         "accept_invitation/2 answered #{inspect(other)} to an EXPIRED invitation — the deadline " <>
+           "is enforced on the lookup page but not on the accept path"}
+
+      {other, _} ->
+        {:error,
+         "the positive control failed: accept_invitation/2 answered #{inspect(other)} to a LIVE " <>
+           "invitation, so the negative arm below proves nothing"}
+    end
+  end
+
+  defp resolve_actor({:in_band_guard, :reset_by_token}) do
+    {_team, user} = team_and_owner()
+    {:ok, {_user, raw}} = Accounts.request_password_reset(user.email)
+    new_password = "the reset actor ran here"
+
+    case Accounts.reset_password_by_token(raw, new_password) do
+      {:ok, _updated} ->
+        # Single-use: the same link replayed must be refused, or "expired"
+        # would be the only thing standing between a leaked link and an
+        # account.
+        case Accounts.reset_password_by_token(raw, "a replay of the same link") do
+          {:error, :invalid_token} ->
+            if Accounts.get_user_by_email_and_password(user.email, new_password) do
+              {:ok,
+               "RAN — reset_password_by_token/2 consumed a live link (the new password now " <>
+                 "authenticates) and refused the replay of that same link"}
+            else
+              {:error,
+               "reset_password_by_token/2 returned {:ok, _} but the new password does not " <>
+                 "authenticate — the act the console promises did not happen"}
+            end
+
+          other ->
+            {:error, "the consumed reset link was accepted a SECOND time: #{inspect(other)}"}
+        end
+
+      other ->
+        {:error,
+         "the positive control failed: reset_password_by_token/2 answered #{inspect(other)} to a " <>
+           "LIVE link"}
+    end
+  end
+
   # NOT "unverified" — resolved by the same equality read that backs the clock,
   # plus the absence of any local reader (proven in the clock arm above).
   defp resolve_actor(:none_local) do
@@ -476,6 +1008,80 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     end
   end
 
+  # THE REFUSAL'S EFFECT. A guard that returns an error tuple and still writes
+  # is not a guard, so these arms observe the WORLD after the refusal, not the
+  # return value.
+  defp resolve_effect({:refused, :no_membership_from_expired_invite}) do
+    n = System.unique_integer([:positive])
+    email = "invitee-#{n}@example.com"
+    {:ok, invitee} = Accounts.register_user(%{email: email, password: @password})
+    {team, owner} = team_and_owner()
+
+    {:ok, %{invitation: inv, token: raw}} = Accounts.invite_member(team, email, "member", owner)
+    :ok = expire_invitation!(inv)
+
+    _ = Accounts.accept_invitation(raw, invitee)
+
+    case Accounts.get_membership(team, invitee) do
+      nil ->
+        {:ok,
+         "REFUSED — after an expired invite was presented, #{email} holds NO membership on " <>
+           "#{team.slug}; the refusal is a state, not just a return value"}
+
+      membership ->
+        {:error,
+         "an EXPIRED invitation still produced a membership (#{inspect(membership.role)} on " <>
+           "#{team.slug}) — the guard returns an error and writes anyway"}
+    end
+  end
+
+  defp resolve_effect({:refused, :expired_reset_keeps_old_password}) do
+    {_team, user} = team_and_owner()
+    {:ok, {_user, raw}} = Accounts.request_password_reset(user.email)
+    1 = expire_reset_tokens!(user.id)
+    attempted = "the password an expired link tried to set"
+
+    _ = Accounts.reset_password_by_token(raw, attempted)
+
+    cond do
+      is_nil(Accounts.get_user_by_email_and_password(user.email, @password)) ->
+        {:error,
+         "an EXPIRED reset link left the OLD password unusable — the refusal damaged the account " <>
+           "it was protecting"}
+
+      not is_nil(Accounts.get_user_by_email_and_password(user.email, attempted)) ->
+        {:error,
+         "an EXPIRED reset link CHANGED the password anyway — the console's 'It expires in an " <>
+           "hour' is enforced by nothing that matters"}
+
+      true ->
+        {:ok,
+         "REFUSED — after an expired reset link the old password still authenticates and the " <>
+           "password the link tried to set does not"}
+    end
+  end
+
+  # The Caddy row's effect: the renewal is NOT this plane's to produce. Read the
+  # tree rather than describing it — if cert-minting ever moves in-house, this
+  # row's whole external verdict has to be re-derived.
+  defp resolve_effect({:absent, :local_cert_renewal}) do
+    search = %{
+      pattern: "certmagic|renew_cert|obtain_cert|cert_renew",
+      roots: ["../../lib"],
+      why: "nothing in cloud/lib mints or renews a certificate"
+    }
+
+    case zero_hit_search(search) do
+      {:ok, detail} ->
+        {:ok,
+         "ABSENT LOCALLY — #{detail}; the renewal this copy promises is produced by Caddy's own " <>
+           "binary, and this plane only arms it"}
+
+      err ->
+        err
+    end
+  end
+
   defp resolve_effect({:unread, :cancel_at_period_end}) do
     team = team_with_owner()
     {:ok, sub} = Billing.subscribe(team, "supporter")
@@ -522,7 +1128,11 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
   # Read the tree, do not describe it: the only `poweroff` in cloud/lib is a
   # catalog entry, and nothing calls the verb.
   defp poweroff_is_an_uncalled_catalog_entry do
-    lib = Path.expand(Path.join([__DIR__, "..", "..", "lib"]))
+    # A SINGLE "../…" literal, deliberately: the escape census greps
+    # `"\.\./[^"]*"`, and a path spliced through Path.join/1 over a bare ".."
+    # produces the literal ".." and is invisible to it. There is an arm below
+    # asserting this file contains no such splice.
+    lib = Path.expand("../../lib", __DIR__)
 
     hits =
       Path.wildcard(Path.join(lib, "**/*.ex"))
@@ -625,6 +1235,25 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     assert detail =~ "kind: \"deprovision\""
   end
 
+  test "every repo-root read in this file is a single \"../…\" literal the escape census can see" do
+    # scripts/cloud-path-escape-check.sh greps `"\.\./[^"]*"` and requires every
+    # resolved repo-root read to be declared in CLOUD_PATHS. A read spliced as
+    # segment produces the literal ".." — which
+    # that grep does not match — so an :external_armed_here row written that way
+    # would publish green on PRs that never ran it. The split idiom IS live in
+    # this tree (billing_client_mirror_test.exs:70), so this is a real hole and
+    # this file closes it for itself.
+    source = File.read!(__ENV__.file)
+
+    refute Regex.match?(~r/Path\.join\(\[[^\]]*"\.\."/, source),
+           "this file builds a path by splicing \"..\" through Path.join/1 — the escape census " <>
+             "cannot see that read, so the file it points at need never be declared in " <>
+             "CLOUD_PATHS. Write it as a single \"../…\" string literal."
+
+    assert String.contains?(source, "\"../../../internal/caddyfile/caddyfile.go\""),
+           "the Caddy arming read is no longer a single literal — the census would stop seeing it"
+  end
+
   test "META: the register actually iterated every row and exercised every resolver kind" do
     # Without this, gutting a resolver to `{:ok, "fine"}` — or emptying
     # @register — would leave a green suite that compared nothing.
@@ -632,11 +1261,20 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
 
     assert length(resolved) == map_size(@register)
 
-    assert map_size(@register) == 6,
-           "the register seeded 6 rows; it now holds #{map_size(@register)}"
+    assert map_size(@register) == 9,
+           "the register seeded 9 rows; it now holds #{map_size(@register)}"
 
     reasons = @register |> Map.keys() |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> Enum.sort()
-    assert reasons == ["billing_lapsed", "billing_past_due", "quota_exceeded", "trial"]
+
+    assert reasons == [
+             "billing_lapsed",
+             "billing_past_due",
+             "custom_domain",
+             "password_reset",
+             "quota_exceeded",
+             "team_invitation",
+             "trial"
+           ]
 
     kind = fn
       tuple when is_tuple(tuple) -> elem(tuple, 0)
@@ -652,9 +1290,31 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     effect_kinds =
       @register |> Map.values() |> Enum.map(&kind.(&1.effect)) |> Enum.uniq() |> Enum.sort()
 
-    assert clock_kinds == [:crontab_absent, :crontab_row, :external_only, :synchronous]
-    assert actor_kinds == [:none_local, :producer_run, :synchronous_call, :unreachable]
-    assert effect_kinds == [:absent, :flag_only, :produced, :unread]
+    # NOTE the blind spot this pin has and the resolvers close: `kind` folds a
+    # tuple with elem/2, so payload ARITY IS INVISIBLE here. A row downgraded
+    # from {:external_armed_here, path, literal, cadence} to an arming-only
+    # payload walks straight through this line — resolve_cadence/4 is what reds.
+    assert clock_kinds == [
+             :crontab_absent,
+             :crontab_row,
+             :external_armed_here,
+             :external_only,
+             :in_band
+           ]
+
+    assert actor_kinds == [
+             :in_band_guard,
+             :none_local,
+             :producer_run,
+             :synchronous_call,
+             :unreachable
+           ]
+
+    assert effect_kinds == [:absent, :flag_only, :produced, :refused, :unread]
+
+    refute :synchronous in clock_kinds,
+           "the nullary :synchronous clock is back — it took no subject, read no config and " <>
+             "touched no DB, so no state could make it fail"
 
     # And every resolution reported a non-empty detail — a resolver that
     # returns {:ok, ""} is a resolver that measured nothing.

@@ -143,6 +143,19 @@ set -euo pipefail
 # extra rule enforces this — the ratchet below already does: a census read of an
 # undeclared repo-root file is an `UNCOVERED repo-root read` and exit 1.
 #
+# internal/caddyfile/caddyfile.go — cch-w56-s2. `promise_actor_manifest_test.exs`
+#     resolves the console's "Custom domains with automatic TLS" promise as
+#     `{:external_armed_here, …}`: the renewing actor is Caddy's own binary, and
+#     the only thing this tree can prove is that it ARMS it — the rendered
+#     Caddyfile carries `on_demand_tls { ask … }`. That assertion is an equality
+#     against THIS FILE's bytes, so an edit to it is an edit to the thing under
+#     test; undeclared, the row would publish green on the very PR that
+#     disarmed the promise. Declared as an EXACT FILE, never `internal/**` or
+#     `internal/caddyfile/**` (D270): measured over the last 60 days / 4663
+#     commits on main, this file appears in 8 newly-dispatching commits, against
+#     145 for `.github/workflows/**` and 76 for `deploy/**`. Directories are
+#     unaffordable at that ratio; exact files are nearly free.
+#
 # templates/astro-search-starter/src/lib/bp.ts — dr-w16-s1.
 # templates/search-starter/lib/markers.corpus-status.test.ts — dr-w16-s1.
 #     `deploy_ledger_test.exs` reads these TWO repo-root starter files and
@@ -160,6 +173,7 @@ CLOUD_PATHS='cloud/**
 .github/workflows/cloud.yml
 deploy/site-deploy.sh
 deploy/site-deploy-node.sh
+internal/caddyfile/caddyfile.go
 internal/cli/cloud/providers_capabilities.json
 internal/cloudclient/**
 internal/provisioner/**
