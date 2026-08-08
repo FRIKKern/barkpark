@@ -2265,10 +2265,23 @@ defmodule BarkparkCloud.Accounts do
   @doc """
   Mint a 2fa-pending token (#{@two_factor_pending_minutes} min TTL) for `user`.
   Returns the plaintext exactly once.
+
+  `first_factor` names WHAT ALREADY CLEARED before this challenge was minted, and
+  rides the row's `sent_to` — the same column, for the same reason, as
+  `create_oauth_exchange_code/2`'s `"oauth:<provider>"`. `nil` is the password leg
+  (`POST /v1/auth/login`), which is why it is the default: that caller established
+  the first factor itself and has nothing to carry.
+
+  cch-w53-s6 — it exists because `POST /v1/auth/oauth/exchange` can now mint one of
+  these too. Without the provider travelling here, the session the challenge
+  finally mints would be stamped `origin: "two_factor"`, whose own comment at the
+  challenge leg asserts the PASSWORD leg already passed — false for an IdP
+  sign-in, and the sessions security panel would say so out loud.
   """
-  @spec create_two_factor_pending_token(User.t()) ::
+  @spec create_two_factor_pending_token(User.t(), binary() | nil) ::
           {:ok, binary()} | {:error, Ecto.Changeset.t()}
-  def create_two_factor_pending_token(%User{} = user) do
+  def create_two_factor_pending_token(%User{} = user, first_factor \\ nil)
+      when is_binary(first_factor) or is_nil(first_factor) do
     plaintext = generate_token()
 
     expires_at =
@@ -2281,6 +2294,7 @@ defmodule BarkparkCloud.Accounts do
       user_id: user.id,
       context: "2fa_pending",
       token_hash: UserToken.hash_token(plaintext),
+      sent_to: first_factor,
       expires_at: expires_at
     })
     |> Repo.insert()
@@ -2311,6 +2325,37 @@ defmodule BarkparkCloud.Accounts do
   end
 
   def verify_two_factor_pending_token(_), do: nil
+
+  @doc """
+  Resolve a 2fa-pending token to the first factor that ALREADY cleared before it
+  was minted (the `sent_to` written by `create_two_factor_pending_token/2`), or
+  `nil` when the token is unknown, expired, or was minted by the password leg.
+
+  Read it BEFORE `delete_two_factor_pending_tokens/1` burns the row. Same
+  context-scoped, expiry-filtered lookup as `verify_two_factor_pending_token/1`,
+  deliberately: a caller must not be able to learn a first factor from a token the
+  verifier would refuse.
+
+  `nil` collapses the two honest "no OAuth here" answers — password-minted, and
+  minted before this column carried anything — into the one that stamps the
+  unqualified `"two_factor"`. That is the conservative direction: an unnamed first
+  factor degrades to the ORIGINAL origin rather than inventing a provider.
+  """
+  @spec two_factor_pending_first_factor(binary()) :: binary() | nil
+  def two_factor_pending_first_factor(plaintext) when is_binary(plaintext) do
+    hash = UserToken.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    query =
+      from t in UserToken,
+        where: t.token_hash == ^hash and t.context == "2fa_pending",
+        where: is_nil(t.expires_at) or t.expires_at > ^now,
+        select: t.sent_to
+
+    Repo.one(query)
+  end
+
+  def two_factor_pending_first_factor(_), do: nil
 
   @doc "Delete every 2fa-pending token for a user (after a successful challenge)."
   @spec delete_two_factor_pending_tokens(User.t()) :: {non_neg_integer(), nil}

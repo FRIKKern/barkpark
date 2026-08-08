@@ -821,17 +821,33 @@ defmodule BarkparkCloud.Web.Router do
               end
 
             if ok? do
+              # Read the first factor BEFORE the burn below deletes the row that
+              # carries it.
+              first_factor = Accounts.two_factor_pending_first_factor(pending)
+
               Accounts.delete_two_factor_pending_tokens(user)
 
-              # ORIGIN "two_factor": reaching here means the password leg ALREADY
-              # passed (it minted the challenge token) and a second factor — an
-              # OTP or a recovery code — cleared too. Deliberately not split into
-              # otp-vs-recovery: the `ok?` cond above collapses both to a boolean
-              # before this point, and re-deriving which one fired would be a
-              # guess.
+              # ORIGIN, RESOLVED FROM WHATEVER MINTED THIS CHALLENGE — never
+              # assumed. A second factor — an OTP or a recovery code — cleared to
+              # reach here; deliberately not split into otp-vs-recovery, since the
+              # `ok?` cond above collapses both to a boolean before this point and
+              # re-deriving which one fired would be a guess.
+              #
+              # WHICH FIRST factor cleared is NOT a guess, though, and since
+              # cch-w53-s6 it is no longer assumed to be the password. The plain
+              # "two_factor" still means what its old comment said — the password
+              # leg passed and minted this token. An OAuth-minted challenge
+              # (POST /v1/auth/oauth/exchange) carries its provider here on the
+              # pending token's own `sent_to`, and the session says so: stamping
+              # an IdP sign-in as a password sign-in would be exactly the
+              # misattribution this surface exists to avoid.
               case Accounts.create_user_session_token(
                      user,
-                     session_opts(conn) ++ [origin: "two_factor"]
+                     session_opts(conn) ++
+                       case first_factor do
+                         "oauth:" <> _ -> [origin: first_factor <> "+two_factor"]
+                         _ -> [origin: "two_factor"]
+                       end
                    ) do
                 {:ok, token} ->
                   team = Accounts.primary_team(user)
@@ -1214,8 +1230,13 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # POST /v1/auth/oauth/exchange {code} → 200 {token, team_id} | 401
-  # {error: "invalid_code"}. The second half of the cch-w10 handoff: the SPA boots,
+  # POST /v1/auth/oauth/exchange {code}
+  #   → 200 {token, team_id}                             — no second factor, signed in
+  #   → 200 {two_factor_required: true, challenge_token}  — 2FA user, step two
+  #   → 401 {error: "invalid_code"}
+  #   → 429 {error: "rate_limited"}
+  #
+  # The second half of the cch-w10 handoff: the SPA boots,
   # reads the one-time code off its own fragment, and trades it here for the real
   # session token — over a request whose credential is in the BODY, never in a
   # response header.
@@ -1258,11 +1279,40 @@ defmodule BarkparkCloud.Web.Router do
 
       :ok ->
         with true <- is_binary(code),
-             {user, origin} <- Accounts.consume_oauth_exchange_code(code),
-             {:ok, token} <-
-               Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: origin]) do
-          team = Accounts.primary_team(user)
-          json(conn, 200, %{token: token, team_id: team && team.id})
+             {user, origin} <- Accounts.consume_oauth_exchange_code(code) do
+          if Accounts.two_factor_enabled?(user) do
+            # cch-w53-s6 — THE SECOND FACTOR IS NOT OPTIONAL ON THIS LEG EITHER.
+            # A verified IdP identity is ONE factor, and `get_or_create_user_from_oauth`
+            # links by verified email on purpose (accounts.ex:139), so a password
+            # account that enrolled in TOTP is reachable through here the moment a
+            # provider is configured. Minting a session at this point would let
+            # control of an email address stand in for the enrolled second factor.
+            #
+            # NEVER A HARD REFUSE — the answer is the challenge shape the password
+            # leg already returns above, because an OAuth-born account can be
+            # passwordless (User.oauth_changeset hashes 32 random bytes) with a
+            # synthetic `@oauth.users.barkpark.cloud` address the emailed reset
+            # can never reach. Refusing them here would be permanent.
+            case Accounts.create_two_factor_pending_token(user, origin) do
+              {:ok, pending} ->
+                json(conn, 200, %{two_factor_required: true, challenge_token: pending})
+
+              # Falls in with the single refusal below rather than leaking a
+              # changeset: the code is already burned, so a retry is the sign-in,
+              # not a repair.
+              {:error, %Ecto.Changeset{}} ->
+                json(conn, 401, %{error: "invalid_code"})
+            end
+          else
+            case Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: origin]) do
+              {:ok, token} ->
+                team = Accounts.primary_team(user)
+                json(conn, 200, %{token: token, team_id: team && team.id})
+
+              {:error, %Ecto.Changeset{}} ->
+                json(conn, 401, %{error: "invalid_code"})
+            end
+          end
         else
           # ONE generic refusal for unknown / burned / expired / malformed, exactly
           # like the callback's single redirect: a prober must not learn which.
