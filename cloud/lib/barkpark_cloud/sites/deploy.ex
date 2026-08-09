@@ -1547,10 +1547,16 @@ defmodule BarkparkCloud.Sites.Deploy do
     # driver — retrying" arm — a NEW mis-report on a build that DID start, plus
     # an Oban retry of it. So the repair is speech: the line NAMES the deployment
     # and states both halves of what did not happen.
+    # THE SENTENCE WINS THE MERGE. `extra` is written UNDER the three fields
+    # this function exists to write, never over them: `fail/…` is the failure's
+    # only carrier, so a caller that passed a stray `:status` or
+    # `:failure_reason` key — by typo, or by reusing a map built for something
+    # else — must not be able to turn an abandonment into a different row than
+    # the one it just announced. Structure is additive here, by construction.
     attrs =
       Map.merge(
-        %{status: "failed", failure_reason: reason, detail: short_detail(reason)},
-        extra
+        extra,
+        %{status: "failed", failure_reason: reason, detail: short_detail(reason)}
       )
 
     case Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, attrs) do
