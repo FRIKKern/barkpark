@@ -11152,3 +11152,73 @@ reclaim D520 forbids writing as prose.
 reach claim in through a sanctioned key. A second independent re-derivation is owed before merge, and the lead
 dispatches it by hand.
 
+
+### Wave 2026-08-09 (wave 32) — REVIEWED · Paper `deploy-reliability-wave-32-2026-08-09` · grade **A**
+
+**Seven of seven round-1 slices built, reviewed, gate-green on their FINAL state, pushed and PR'd. Nothing
+merged — the lead merges.** The eighth slice (`dr-w31-fu-agency-reaches-the-cli`) was deferred to round 2 BY
+DESIGN, behind s2: both edit `internal/cloudclient/client.go`, in different regions. The reviewer changed four
+of the seven slices; three final branches are the builders' own heads.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The publish 500 becomes a 422 that names the wall's failures | `dr-w32-s1-ingest-wall-tuples-stop-500ing` | `…a-422-that-0-r` | [#11422](https://github.com/FRIKKern/barkpark/pull/11422) | 71 tests, 0 failures · format clean |
+| `deferred` is terminal; the ten-minute spin collapses | `dr-w7-followup-deploy-follow-spins-on-deferred` | `…stops-lying-on-the--1-r` | [#11423](https://github.com/FRIKKern/barkpark/pull/11423) | `go build ./... && go vet ./internal/cli/... && go test ./internal/...` all ok · gofmt clean |
+| Coverage reaches a human daily; the failed tail becomes visible | `dr-w32-s3-coverage-gauge-and-the-failed-tail` | `…reaches-a-human-every--2-r` | [#11424](https://github.com/FRIKKern/barkpark/pull/11424) | 187 cloud tests, 0 failures · `go test ./internal/cli/...` ok · format clean |
+| The crown alarm speaks, tolerates a first run, stops crying wolf | `dr-w32-s4-crown-alarm-speaks-then-stops-crying-wolf` | `…regains-its-voice-t-3` (unchanged) | [#11425](https://github.com/FRIKKern/barkpark/pull/11425) | 177 passed, 0 failed (was 137) · 5 mutation reverts |
+| The seven abandonments get their columns (**MIGRATION**) | `dr-w32-s5-abandonment-backfill-before-the-swap` | `…abandonments-get-th-4-r` | [#11426](https://github.com/FRIKKern/barkpark/pull/11426) | 175 tests, 0 failures · describe block 5/0 by name · format clean |
+| Sobelow's baseline follows its own three findings | `dr-w32-s6-sobelow-baseline-follows-the-shift` | `…its-own-three-5` (unchanged) | [#11427](https://github.com/FRIKKern/barkpark/pull/11427) | zero findings, **exit 0** (read directly, not through a pipe) |
+| The ledger stops overstating the epic by a third | `dr-w32-s7-reclaim-the-ledger-in-one-act` | `…overstating-its--6` (unchanged) | [#11428](https://github.com/FRIKKern/barkpark/pull/11428) | 300 children · open 149 / done 126 / cancelled 12 / in_progress 13 |
+
+**What landed.** The wave answered the owner's three questions in order and did not flinch on any of them.
+JOB ONE IS SETTLED: the fleet genuinely got well, and it is settled on the CHARTER-SANCTIONED time-keyed key
+rather than the chain key Strategize proposed — the cross-tab is the proof (`deferred|COVERED 471`,
+`failed|COVERED 33`, PENDING 0), so no charter amendment is owed and the struck word `superseded` does not
+ship. JOB TWO's live defect is cured at its root: 33 of 299 distinct trailing-24h 500s on guerrilla's LIVE slot
+were ONE bare `{:error, changeset}` catch-all handing a wall tuple to `traverse_errors/2`, and the wall's
+computed failures now reach the wire as a 422. JOB THREE is answered WIND DOWN, and the gauge that answer rests
+on ships in the same wave rather than being promised: `coverage_cohorts` rides the digest that already reaches a
+human at 06:00 every morning, over BOTH never-live cohorts, so the failed-terminating third of the tail stops
+being invisible.
+
+Around those three, the wave also stopped the fleet's own instruments from lying. `bp cloud site deploy` no
+longer burns ten minutes and prints "deploy in progress" over the 73.7% outcome the control plane had already
+settled. The crown reconciler's harness stopped measuring a `gh` that was still on PATH — 136/137 in CI on an
+ABSENCE assertion — and its rc=2, wrong five times in six, splits into a page and a warning without forgiving
+anything. `main` stopped being red on itself over a +18 line shift. And the epic's ledger stopped overstating
+its own remaining work by roughly a third.
+
+**What the reviewer changed.** Four slices, all in place, none redesigned. (1) s1's `dedup_unavailable` arm
+hand-rolled its whole JSON body and dropped `request_id` — the one field an operator needs to quote a transient
+outage, and the field the shared retry hint tells them to report; it now builds the envelope with
+`Errors.to_envelope/2` and replaces exactly the one hint D542 forbids. (2) s2 defaulted an empty deploy stage to
+`"PLAN"` (a plausible guess printed as a reading) and its poll-collapse test settled on poll #1; both fixed, with
+a `queued → building → deferred` test asserting exactly three polls. (3) s3's `cohort_clause/2` could KeyError a
+whole team's morning digest on a cohort missing one count, and the reviewer's independent re-derivation of the
+HIGH-FLIP-RISK judgment added the one sentence the shared vocabulary cannot carry: on the FAILED cohort, COVERED
+means the site is not stuck and never that the failure was repaired. (4) s5's non-vacuity fixture was an ordinary
+build failure; the neighbour with thousands of rows is the pre-W28 DEFERRED row, which also counts refusals — a
+test now pins that only the terminal-verdict prose is stamped, mutation-checked. Two Elixir files also arrived
+with `mix format --check-formatted` RED and were formatted.
+
+**Ledger fix.** `internal/cli/cloud_site_cmd.go` cites `dr-w32-bl-deploy-wait-for-live-flag` by slug in shipped
+code as where the liveness need is served, and that task did not exist. It is now filed and published, parented
+to the epic, with three criteria — because D543's exit-0 ruling makes that flag load-bearing for real CD rather
+than a nicety.
+
+**What the lead must know before merging.**
+`dr-w32-s5` (#11426) **MUST merge before** `dr-w28-rv-abandonment-predicate-replaces-the-prose-regex`, or the
+swap turns the whole historical abandonment cohort into a permanent zero the cleanup manufactured itself; and
+`dr-w32-s5-prod-abandonment-predicate-reading` is the real gate on that swap — HOLD it if the post-deploy
+read is not 7. `dr-w31-fu-agency-reaches-the-cli` dispatches only after #11423 merges. s3 is high-flip-risk: it
+has had ONE independent re-derivation (the reviewer's) and a genuinely independent second reviewer is still owed
+by hand. And 24 rows this wave left open are landed-but-unproven, named in
+`dr-w32-fu-24-landed-rows-need-eyes` — three of them carry a merge criterion whose own command FAILS on main
+today, which is a live contradiction between main and the ledger, not a bookkeeping lapse.
+
+**The next wave is a wind-down wave, not a feature wave.** Merge round 1, dispatch round 2, then run ONE
+maintenance-cadence wave whose only job is to close the exit: read the coverage gauge against the live corpus
+with the shipped code (nobody has), prove the crown's first-run round trip on its first real run, read the
+production abandonment predicate and release or hold the W28 swap, and clear the 24 landed-but-unproven rows.
+If that wave finds no new failing population — and on this evidence it will not — the epic seals and the digest
+becomes its standing instrument.
