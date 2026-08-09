@@ -726,7 +726,17 @@ func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployme
 		// spells out that the depth counts consecutive same-cause refusals rather
 		// than counting down to a drop), and that the operator must NOT re-publish
 		// by hand to make it happen.
-		out.outf("↺ site deploy deferred at %s — the box refused this round; nothing was built and nothing was switched, so visitors still see the previous build", sanitizeCell(siteOr(d.Stage, "PLAN")))
+		//
+		// THE STAGE IS QUOTED, NEVER GUESSED. An earlier cut defaulted an empty
+		// stage to "PLAN", which is the stage a deferral plausibly stops at — and
+		// a plausible guess printed as a reading is exactly the lie this epic
+		// exists to remove. A control plane that sends no stage gets a sentence
+		// that says so.
+		if st := strings.TrimSpace(d.Stage); st != "" {
+			out.outf("↺ site deploy deferred at %s — the box refused this round; nothing was built and nothing was switched, so visitors still see the previous build", sanitizeCell(st))
+		} else {
+			out.outf("↺ site deploy deferred before it named a stage — the box refused this round; nothing was built and nothing was switched, so visitors still see the previous build")
+		}
 		out.outf("  %s", siteDeferralLine(d))
 		out.outf("  a rebuild carrying this same content is already queued — do NOT re-publish to force it; watch it land with `bp cloud site status %s`", ref)
 		return siteDeployExit(d)

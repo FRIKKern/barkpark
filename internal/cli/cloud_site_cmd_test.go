@@ -50,6 +50,12 @@ type siteCP struct {
 	createResp fakeResp
 	deployResp fakeResp
 	pollResp   fakeResp
+	// pollSeq, when non-empty, answers the n-th poll with its n-th entry (the
+	// last entry repeats). pollResp models a stream that was ALREADY settled on
+	// the first read; a real deploy usually walks queued → building → <terminal>,
+	// and a test that only ever sees the terminal status on poll #1 cannot tell a
+	// status-specific early exit from a working terminal predicate.
+	pollSeq    []fakeResp
 	getResp    fakeResp
 	rollResp   fakeResp
 	deleteResp fakeResp
@@ -83,6 +89,20 @@ func newSiteCP(t *testing.T) *siteCP {
 	return &siteCP{t: t}
 }
 
+// pollAt is the response for the n-th (1-based) poll: pollSeq when a test set
+// one, otherwise the single pollResp every pre-existing test uses. Past the end
+// of pollSeq the last entry repeats, so a sequence ending in a non-terminal
+// status still exercises the full poll budget rather than falling off a cliff.
+func (cp *siteCP) pollAt(n int) fakeResp {
+	if len(cp.pollSeq) == 0 {
+		return cp.pollResp
+	}
+	if n > len(cp.pollSeq) {
+		return cp.pollSeq[len(cp.pollSeq)-1]
+	}
+	return cp.pollSeq[n-1]
+}
+
 // serve stands the fake up, seeds a cloud login pointed at it, and returns it.
 func (cp *siteCP) serve() *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +127,7 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.write(w, cp.artifactResp)
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++
-			cp.write(w, cp.pollResp)
+			cp.write(w, cp.pollAt(cp.pollHits))
 		// The LIST route (no trailing slash) — `bp cloud site status`'s second read.
 		// The poll case above matches ".../deployments/" WITH the slash, so before
 		// this case a bare list GET fell to the default arm and t.Fatal'd every
@@ -1030,6 +1050,66 @@ func TestRunCloudSiteDeployDeferredStopsPollingAndNamesTheRefusal(t *testing.T) 
 	}
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0 (charter D543)\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+}
+
+// TestRunCloudSiteDeployDeferredMidStreamStopsAtTheDeferral covers the stream the
+// fixture above cannot: a deploy that is genuinely in progress for two polls and
+// THEN defers, which is the likelier live sequence (the box accepts the row, walks
+// to BUILD, and only there discovers it is at capacity). The sibling test settles
+// on poll #1, so it would still pass if the loop had grown a status-specific early
+// exit rather than a working terminal predicate; this one pins that the loop keeps
+// polling while the row can still change and stops the moment it cannot.
+func TestRunCloudSiteDeployDeferredMidStreamStopsAtTheDeferral(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","stages":[]}}`}
+	cp.pollSeq = []fakeResp{
+		{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","stages":[{"name":"PLAN","status":"done"}]}}`},
+		{200, `{"deployment":{"id":"dep-1","status":"building","stage":"BUILD","stages":[{"name":"PLAN","status":"done"},{"name":"BUILD","status":"running"}]}}`},
+		{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","failure_class":"BOX_AT_CAPACITY_DEFERRED","failure_reason":"box_at_capacity — deferred: refusal 2 of 12 in this site's current chain — a rebuild carrying this content has been re-queued","stages":[{"name":"PLAN","status":"done"}]}}`},
+	}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	// Three polls: two that had to happen (the row could still change) and the
+	// one that settled it. Anything more is the ten-minute spin re-asking a
+	// settled row; anything less means the loop quit while the deploy was live.
+	if cp.pollHits != 3 {
+		t.Fatalf("polled %d times, want exactly 3 (queued, building, deferred)\nstdout:%s", cp.pollHits, stdout)
+	}
+	if strings.Contains(stdout, "in progress") {
+		t.Fatalf("a settled deferred row must never be narrated as in progress:\n%s", stdout)
+	}
+	for _, want := range []string{"deferred", "the box refused this round", "already queued"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the deferred verdict must say %q:\n%s\nstderr:%s", want, stdout, stderr)
+		}
+	}
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0 (charter D543)", code)
+	}
+}
+
+// TestRenderSiteDeployVerdictDeferredWithNoStageDoesNotInventOne pins the one
+// place this verdict could fabricate: an empty Stage. The first cut defaulted it
+// to "PLAN" — the stage a deferral plausibly stops at, printed as though it had
+// been read. A control plane that sends no stage must produce a sentence that
+// says no stage was named.
+func TestRenderSiteDeployVerdictDeferredWithNoStageDoesNotInventOne(t *testing.T) {
+	out, buf, errBuf := newTestWriter()
+	code := renderSiteDeployVerdict(out, testSiteID, cloudclient.SiteDeployment{
+		ID: "dep-1", Status: "deferred",
+		FailureReason: "box_at_capacity — deferred: refusal 1 of 12 in this site's current chain",
+	})
+	stdout := buf.String()
+	if strings.Contains(stdout, "PLAN") || strings.Contains(stdout, "BUILD") {
+		t.Fatalf("an absent stage must never be rendered as a named one:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "deferred before it named a stage") {
+		t.Fatalf("the no-stage deferral must say so out loud:\n%s\nstderr:%s", stdout, errBuf.String())
+	}
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0 (charter D543)", code)
 	}
 }
 
