@@ -2939,6 +2939,57 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 60 REVIEW (round 1 built, reviewed, PUSHED) — grade B+
+
+**WHAT LANDED — three slices, three PRs, all gates re-run green by the reviewer on the exact heads.**
+
+| slice | final branch | PR | gate on final state |
+|---|---|---|---|
+| `cch-w58-s6` the fleet row states the two verify columns | `loop-epic/the-fleet-row-states-the-two-verify-colu-0` | #11134 | `node --test __app.test.mjs` 1028/0, `__css_check` 0 err, `__binding_census` 79/79 |
+| `cch-w59-bl` census mutation arms assert AMONG-by-name | `loop-epic/both-mutation-arms-of-the-reader-less-ce-1` | #11135 | `mix test reader_less_instrument_census_test.exs` 13/0, format clean |
+| `cchi-w60` main-gate-watch's push arm deleted | `loop-epic/main-gate-watch-s-push-arm-reds-on-every-2-r` | #11136 | `bash scripts/main-gate-watch.test.sh` 56 passed / 0 failed (49 on main) |
+
+**THE WISH WAS PAID AT THREE DIFFERENT ALTITUDES, WHICH IS THE POINT.** A *user*-facing lie: the fleet
+list offered Open Studio on boxes the plane may never have reached and said nothing — the two columns
+were already on the wire and `grep -c verify_reachable app.js` was **0**. A *merge*-facing lie:
+`main-gate-watch`'s `push:` arm red on EVERY merge, because it evaluated main's tip ~19s after a merge
+when GitHub had created no check-run rows at all and MISSING is exit 1 by construction (2 of 2
+production runs failed on tip `026c5b1d78` while main was green; the same script 36 minutes later
+printed ok/ok/ok). And an *instrument*-facing lie: the reader-less census's own positive controls
+pattern-matched a SOLE-element violation list, so the first genuine co-resident finding would have read
+as the instrument breaking rather than as a finding.
+
+**EVERY GUARD IN THIS WAVE WAS PROVEN ABLE TO LOSE, BY MUTATION, NOT BY READING.** `cch-w58-s6` carries
+its own positive control that re-evaluates a MUTATED `app.js` in a fresh `vm` context and reds under
+both M1 (guard deleted) and M2 (the exact dishonest unconditional chip in `fleetRow`'s body that D718
+measured passing every console instrument) — and both mutations assert they changed the source, so the
+control cannot go vacuous. `cchi-w60` proved §3b and §11 by mutating the script (47/9) and by re-adding
+the trigger (55/1). The reviewer independently re-derived `cch-w59-bl`'s can-lose direction by
+repointing both arms at a non-existent key (13/2, restored 13/0).
+
+**REVIEWER FIX, ONE.** `cchi-w60` deletes the arm that red on every merge but NOT its cause: MISSING
+still cannot tell "no row created on this tip yet" from "this tip was never judged", and the measured
+creation delays are +7m15s / +9m52s / **+25m27s**, so a `*/30` slot landing inside that window still
+reds on a tip that is merely young. That residual is now stated in the workflow header with the
+age-aware fix named (the commit's own timestamp is the discriminator; `a5260f609` stays MISSING) and an
+owner — `cchi-w61-main-gate-watch-missing-conflates-young-tip`, filed and published this wave.
+
+**WHAT DID NOT BUILD, BY DESIGN.** Five round-2 slices were deferred under the sequenced-rounds law and
+must dispatch as their deps merge: `cch-w60-s4` (three-state refusal at both trigger seams, an honest
+409, four console arms) after #11102 + `cch-w58-s6`; then `cch-w58-followup` (the nine-rung reason gets
+a serializer and a reader), `cch-w60-s6` (a refused write leaves a NAMED audit row) and `cch-w60-s7`
+(the producer-exemption census learns the third column) after `cch-w60-s4`; and
+`cchi-w60-reader-less-census-derives-its-admission` after `cch-w59-bl` — that ordering is load-bearing,
+not cosmetic, because the derived-admission arm's FIRST correct finding would red the sole-element
+mutation test instead of its own.
+
+**WHAT THE NEXT WAVE MUST KNOW.** `cch-w60-s4` is the wave's real strategic move and it is
+HIGH-FLIP-RISK (a credential-egress judgment): an independent second reviewer is owed on it before
+merge. `cch-w58-s6` is narrower than the strategic direction asked for — the row now SAYS "never
+verified" beside a button that still opens Studio, which D696/D707 explicitly chose; if that choice is
+to be revisited, revisit it as a decision, not as a slice fix. And `cch-w58-s6` must be REBASED before
+merge (cut from `026c5b1d7`, which predates #11104); criterion 0 is that rebase requirement, D697.
+
 ### 2026-08-09 — wave 60 DECIDE (build in flight) — D713-D723
 
 **THE ARC IS REAL AND IT IS GATED ON A MERGE ONLY THE LEAD CAN PERFORM.** The crown fact held and
