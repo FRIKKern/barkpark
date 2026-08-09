@@ -425,13 +425,13 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:357), on the deliveries envelope",
       audience:
-        "nobody today — the timeline that renders these legs is the slice in flight, and until it lands no terminal, page or email carries the number",
+        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:89 decodes the leg and internal/cli/cloud_deliveries_cmd.go:450 renders it. HALF a reader, and the register says which half — see `reason`.",
       reason:
-        "zero rendered-bytes readers, hits in exactly three files (schema, migration, test), and never written on prod (0 of 1 rows non-null). Under a naive reading of D442 the cleanest delete target in the epic — and deleting it would delete the measurement the wave is building. D454: NOT exempted from the corpus, because exempting is how D441's corpus went vacuous. It is registered, it is scored, and its stay is named.",
-      disposition: :stay,
+        "RE-DECLARED 2026-08-09 (was `:stay`). The READER landed — internal/cloudclient/deliveries.go:89-91 decodes all three legs as *int and cloud_deliveries_cmd.go:450 renders them — so this row derives 5 readers and correctly redded as :rot under `:stay`. THE WRITER NEVER DID: cloud/lib/barkpark_cloud/platform_delivery.ex carries cast (:144), schema field (:173), validate (:249) and to_json emit (:452) and NO producer anywhere in cloud/lib computes a value (`grep -rn queued_self_seconds cloud/lib | grep -v platform_delivery.ex` is EMPTY), so the column is emitted ALWAYS-NULL and the terminal renders a hole. This census measures READERSHIP only, which is why `:has_reader` is true here while the number is still meaningless — the honest fact a plain green would hide. dr-w26-s5, the slice the old stay named as the writer's closer, DOES NOT EXIST (`bp task get dr-w26-s5` -> not_found), so nothing is queued to fill it. Deleting the row instead would have taken the guard with it (@register_floor 7 trips and the :780 pin fails); re-declaring keeps it and ADDS the :lost_reader direction.",
+      disposition: :has_reader,
       stay:
         {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "dr-w26-s3 builds the reader (the deliveries timeline renders the legs) and dr-w26-s5 builds the writer, both in THIS wave. If either misses, this row's red is the correct outcome and the honest line in the wave report — not a reason to widen the stay."}
+         "KEPT AS THE RECORD, not as a live stay (this row is now `:has_reader`, so the stay-validity test no longer reads it, but the :780 pin does). dr-w26-s3 built the reader and LANDED. dr-w26-s5 was named as the writer and was never filed as a task at all — `bp task get dr-w26-s5` returns not_found and FTS finds only s6, the w26 charter and the w26 paper. A stay naming a closer that does not exist is exactly the failure this register exists to catch, and the register could not catch it: nothing here derives task existence."}
     },
     %{
       key: "queued_pickup_seconds",
@@ -439,13 +439,13 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:358), on the deliveries envelope",
       audience:
-        "nobody today — same as its two siblings: the leg is emitted, and no surface renders it",
+        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:90 decodes the leg, cloud_deliveries_cmd.go:450 renders it — same half-a-reader state as its sibling",
       reason:
-        "same measured state as queued_self_seconds: zero rendered-bytes readers, three source hits, never written on prod. Registered rather than exempted (D454).",
-      disposition: :stay,
+        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as queued_self_seconds: the READER landed (internal/cloudclient/deliveries.go:90) and the WRITER never did — platform_delivery.ex casts, stores, validates and emits the column and no producer in cloud/lib computes it, so it is emitted always-null. `:has_reader` is a readership claim, not a claim that the number means anything. dr-w26-s5, the writer's named closer, is not a filed task.",
+      disposition: :has_reader,
       stay:
         {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "dr-w26-s3 builds the reader and dr-w26-s5 builds the writer, both in THIS wave. A missed slice reds this row; that red is the honest report."}
+         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3 built the reader and landed; dr-w26-s5 was never filed — `bp task get dr-w26-s5` returns not_found."}
     },
     %{
       key: "queued_stall_seconds",
@@ -454,12 +454,13 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:359), on the deliveries envelope",
       audience:
-        "nobody today — and this is the leg whose absence a platform operator would most need, which is exactly why it is not a delete target",
-      reason: "same measured state as its two siblings. Registered rather than exempted (D454).",
-      disposition: :stay,
+        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:91 decodes the leg, cloud_deliveries_cmd.go:450 renders it — and this is the leg whose absence a platform operator would most need, which is why an always-null render is worse here than anywhere else",
+      reason:
+        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as its two siblings: reader landed (internal/cloudclient/deliveries.go:91), writer never did (no producer in cloud/lib writes the column; platform_delivery.ex only casts/stores/validates/emits it), so the operator is shown a blank where the unowned stall should be. dr-w26-s5, named as the writer's closer, is not a filed task.",
+      disposition: :has_reader,
       stay:
         {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "dr-w26-s3 builds the reader and dr-w26-s5 builds the writer, both in THIS wave. A missed slice reds this row; that red is the honest report."}
+         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3 built the reader and landed; dr-w26-s5 was never filed — `bp task get dr-w26-s5` returns not_found."}
     },
     %{
       key: "failure_class",

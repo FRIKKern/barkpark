@@ -1226,6 +1226,66 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
     end)
   end
 
+  @doc """
+  A route's NAMESPACE — everything above its own last segment.
+
+  `/v1/internal/platform-deliveries` -> `/v1/internal`. This is the conjunct
+  `loose_mentions/3` takes a loose spelling against.
+  """
+  def namespace(path) do
+    path |> String.split("/") |> Enum.drop(-1) |> Enum.join("/")
+  end
+
+  @doc """
+  The LOOSE spellings of a route's own last segment: kebab (the URL spelling),
+  spaced prose, UpperCamel and lowerCamel.
+  """
+  def loose_spellings(path) do
+    seg = path |> String.split("/") |> List.last()
+    upper = seg |> String.replace("-", "_") |> Macro.camelize()
+    lower = String.downcase(String.at(upper, 0)) <> String.slice(upper, 1..-1//1)
+    [seg, String.replace(seg, "-", " "), upper, lower]
+  end
+
+  @doc "The snake_case spelling of a route's own last segment — the Postgres table name."
+  def snake_spelling(path) do
+    path |> String.split("/") |> List.last() |> String.replace("-", "_")
+  end
+
+  @doc """
+  Loose-spelling mentions of each route's own name in `bodies`, as
+  `{file, spelling}`. `spellings` supplies the spellings per path, so the loose
+  arm and the snake arm share ONE predicate.
+
+  THE NAMESPACE CONJUNCT, and why it is not a loosening. A loose spelling on its
+  own is not evidence of a caller. The last segment of
+  `/v1/internal/platform-deliveries` camelizes to `PlatformDeliveries`, which is
+  ALSO the Go client method for the unrelated READ route `GET /v1/deliveries`
+  (internal/cloudclient/deliveries.go:164), and its snake spelling
+  `platform_deliveries` is the Postgres table name. Both collide by substring
+  containment of a camelized noun, not by calling anything: `grep -c "/v1/internal"`
+  returns 0 in both colliding Go files. So a mention counts only when the SAME
+  FILE also types the route's namespace somewhere. A genuine split-across-lines
+  caller does type it — the trap shape pinned by "THE INTERPOLATION TRAP" is
+  `BASE="$CP/v1/internal"` followed by `curl -X POST "$BASE/platform-deliveries"`,
+  and its first line carries the namespace.
+
+  THE HONEST NARROWING: a caller that splits the NAMESPACE ITSELF across lines
+  escapes this arm and degrades to caller-less, which arm 1 covers with an
+  allowlist row. This arm no longer claims "no mention in ANY spelling"; it
+  claims "no mention in any spelling, by a file that also names the seam's
+  namespace" — and the wider claim is exactly what fired on a non-caller.
+  """
+  def loose_mentions(routes, bodies, spellings) do
+    for {_verb, path} <- routes,
+        ns = namespace(path),
+        {rel, body} <- bodies,
+        String.contains?(body, ns),
+        spelling <- spellings.(path),
+        String.contains?(body, spelling),
+        do: {rel, spelling}
+  end
+
   @doc "The routes with zero callers in `files`, sorted."
   def caller_less(root, routes, files) do
     root
@@ -1457,15 +1517,11 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
     # permanent red on the very PR that fixes the hole.
     bodies = Map.new(ctx.files, &{&1, File.read!(Path.join(ctx.root, &1))})
 
-    loose_hits =
-      for {_verb, path} <- ctx.caller_less,
-          spelling <- loose_spellings(path),
-          {rel, body} <- bodies,
-          String.contains?(body, spelling),
-          do: {rel, spelling}
+    loose_hits = Seam.loose_mentions(ctx.caller_less, bodies, &Seam.loose_spellings/1)
 
     assert loose_hits == [], """
-    a caller-less route's name appears in the corpus in a LOOSE spelling:
+    a caller-less route's name appears in the corpus in a LOOSE spelling, in a
+    file that ALSO names the route's namespace:
     #{inspect(loose_hits)}
 
     Either that IS a caller the fixed-string predicate could not see (split
@@ -1476,24 +1532,37 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
     # The snake_case spelling is the Postgres table name the PRODUCER uses, so
     # asserting zero on it tree-wide would measure the producer rather than a
     # caller. It is asserted zero OUTSIDE cloud/lib — where a caller would live.
-    snake =
-      for {_verb, path} <- ctx.caller_less,
-          spelling = String.replace(List.last(String.split(path, "/")), "-", "_"),
-          {rel, body} <- bodies,
-          not String.starts_with?(rel, "cloud/lib/"),
-          String.contains?(body, spelling),
-          do: {rel, spelling}
+    outside_producer =
+      Enum.reject(bodies, fn {rel, _} -> String.starts_with?(rel, "cloud/lib/") end)
+
+    # The SAME namespace conjunct. Repairing the loose arm alone leaves this one
+    # red on the identical collision, `platform_deliveries` in the two Go files.
+    snake = Seam.loose_mentions(ctx.caller_less, outside_producer, &[Seam.snake_spelling(&1)])
 
     assert snake == [],
            "a caller-less seam's snake_case name is outside the producer: #{inspect(snake)}"
   end
 
-  # kebab (the URL spelling), spaced prose, UpperCamel and lowerCamel.
-  defp loose_spellings(path) do
-    seg = path |> String.split("/") |> List.last()
-    upper = seg |> String.replace("-", "_") |> Macro.camelize()
-    lower = String.downcase(String.at(upper, 0)) <> String.slice(upper, 1..-1//1)
-    [seg, String.replace(seg, "-", " "), upper, lower]
+  test "THE NAMESPACE CONJUNCT can lose: the spelling alone is not a mention", ctx do
+    route = {:post, "/v1/internal/platform-deliveries"}
+    assert Seam.namespace("/v1/internal/platform-deliveries") == "/v1/internal"
+    assert Seam.snake_spelling("/v1/internal/platform-deliveries") == "platform_deliveries"
+    assert "PlatformDeliveries" in Seam.loose_spellings("/v1/internal/platform-deliveries")
+
+    # the collider: the camelized noun, no namespace anywhere in the file
+    collider = [{"internal/cloudclient/deliveries.go", ~s|func (c *Client) PlatformDeliveries()|}]
+    assert Seam.loose_mentions([route], collider, &Seam.loose_spellings/1) == []
+
+    # the caller: same noun, and the namespace typed on the LINE ABOVE
+    caller = [
+      {"scripts/x.sh", ~s|BASE="$CP/v1/internal"\ncurl -X POST "$BASE/platform-deliveries"|}
+    ]
+
+    assert [{"scripts/x.sh", _} | _] =
+             Seam.loose_mentions([route], caller, &Seam.loose_spellings/1)
+
+    # and the real corpus is clean under it, which is what arm 4 asserts
+    assert ctx.caller_less != []
   end
 
   test "THE INTERPOLATION TRAP: a path split across shell variables scores caller-less" do
