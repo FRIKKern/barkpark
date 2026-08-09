@@ -253,6 +253,141 @@ else
   bad "merge-gates.md does not carry the present-but-stale-pass case"
 fi
 
+# ═══ (j) the compute fault does not wear the credential fault's name ═════════
+section "(j) rc=3 is credential/spec ONLY; the compute fault has its own code"
+
+# For one release EVERY fault returned 3, and the workflow answered all of them
+# with "this run's credential cannot read the pull-request list". The 380 KB
+# E2BIG death was reported that way while the credential had just read 40 PRs
+# perfectly. Not one of the probes above ever exercised exit 3 — the arm that
+# mis-fired was the single arm with no mutation proof. These two probes are that
+# proof, and they are what makes the split observable rather than merely typed.
+
+# j: an unreadable SPEC is a spec fault → 3, and it says so.
+out="$(run_watch "$TMP/a.json" --spec "$TMP/no-such-spec.json")"; rc=$?
+[ "$rc" = "3" ] && ok "an unreadable spec exits 3 (configuration)" || bad "expected exit 3 for an unreadable spec, got $rc"
+grep -q "cannot read the required-check spec" <<<"$out" \
+  && ok "…and names the spec, not the payload" || bad "the spec fault did not name the spec: $out"
+
+# j: a payload that was READ but cannot be parsed is a COMPUTE fault → 4.
+printf 'this is not json, and it is 100%% readable\n' > "$TMP/j-broken.json"
+out="$(run_watch "$TMP/j-broken.json")"; rc=$?
+[ "$rc" = "4" ] && ok "an unparseable payload exits 4 (compute), NOT 3" \
+  || bad "expected exit 4 for an unparseable payload, got $rc — the compute fault is still wearing the credential fault's code"
+grep -q "COMPUTE FAULT" <<<"$out" && ok "…and the sentence says COMPUTE FAULT" || bad "no COMPUTE FAULT sentence: $out"
+grep -qiE "credential (can|could) ?not|cannot (read|list) (the )?pull.request" <<<"$out" \
+  && bad "the compute fault still claims the credential could not read — that is the exact false sentence this slice removes" \
+  || ok "…and never claims the credential could not read (it had just read the payload)"
+grep -qE "was READ \([0-9]+ bytes\)" <<<"$out" \
+  && ok "…and reports the bytes it successfully read, so 'it could not read' is refutable from the log" \
+  || bad "the compute fault does not report the payload size: $out"
+
+# The two codes must be documented where they are defined, or the doc drifts
+# off the arms exactly as it did before.
+grep -q "^#             4 = COMPUTE fault" "$WATCH" && ok "the script's own EXIT CODES header documents 4" \
+  || bad "EXIT CODES header does not document 4"
+grep -q "^#             3 = CONFIGURATION fault" "$WATCH" && ok "…and still documents 3 as configuration" \
+  || bad "EXIT CODES header lost its 3"
+grep -qE '^\s+4\) echo "::error::COMPUTE FAULT' "$WF" && ok "the workflow has its own arm and sentence for 4" \
+  || bad "the workflow has no 4) arm — an undefined-verdict fallthrough would call it 'not a verdict it defines'"
+grep -qE '^\s+3\) echo "::error::CONFIGURATION FAULT' "$WF" && ok "…and the 3 arm still speaks about the credential" \
+  || bad "the workflow lost its 3 arm"
+
+# ═══ (k) the payload is too big for argv, on BOTH kernels, and still computes ═
+section "(k) a payload above Linux MAX_ARG_STRLEN *and* macOS's total argv still computes"
+
+# THE BUG THIS OWNS. scripts/stale-verdict-watch.sh:286 used to hand the whole
+# PR list to jq as ONE argv word. Linux caps a single argv string at
+# MAX_ARG_STRLEN = 32 * PAGE_SIZE = 131072 bytes — independent of ARG_MAX
+# (2097152 on the same box), which is why the number an author checks says
+# there is room. The live 380699-byte payload was 2.9x over, execve failed
+# E2BIG, and every Linux run of this watch died before it classified anything.
+#
+# A 200 KB fixture would pass vacuously on a developer's Mac, which has no
+# per-argument cap — that blind spot is exactly how this shipped. So the bound
+# here is 1.1 MiB: above Linux's per-arg cap AND above macOS's ~1 MiB TOTAL
+# argv, so the probe is able to fail on both kernels. It is GENERATED, never
+# committed, and it asserts its own size so quietly shrinking it is a failure.
+MAX_ARG_STRLEN=131072
+SCALE_MIN=1153434   # 1.1 MiB
+BIG="$TMP/k-big.json"
+BIG_COMMITS="$TMP/k-commits.txt"
+
+# Realistic bulk: the required set (some rows stale, some fresh) plus the long
+# tail of non-required check runs a real PR carries.
+rows=140
+while :; do
+  jq -c -n --argjson req "$(printf '%s\n' "${CTX[@]}" | jq -R . | jq -s -c .)" \
+     --arg old "$OLD" --arg fresh "$FRESH" --argjson rows "$rows" '
+    [ range(0; $rows) as $i
+      | { number: (20000 + $i),
+          mergeable: (if $i % 4 == 0 then "CONFLICTING" else "MERGEABLE" end),
+          mergeStateStatus: (if $i % 4 == 0 then "DIRTY" else "CLEAN" end),
+          headRefOid: ("0123456789abcdef0123456789abcdef" + (1000000 + $i | tostring)),
+          updatedAt: "2026-08-01T00:00:00Z",
+          statusCheckRollup:
+            ( [ $req[] | { __typename: "CheckRun", name: ., status: "COMPLETED",
+                           conclusion: "SUCCESS",
+                           completedAt: (if $i % 4 == 0 then $old else $fresh end),
+                           detailsUrl: "https://github.com/FRIKKern/barkpark/actions/runs/00000000000/job/00000000000" } ]
+              + [ range(0; 44) as $k
+                  | { __typename: "CheckRun",
+                      name: ("advisory-context-\($k)-a-realistically-long-workflow-job-name"),
+                      status: "COMPLETED", conclusion: "SUCCESS",
+                      completedAt: $fresh,
+                      detailsUrl: "https://github.com/FRIKKern/barkpark/actions/runs/00000000000/job/00000000000" } ] ) } ]' \
+    > "$BIG"
+  [ "$(wc -c < "$BIG" | tr -d ' ')" -ge "$SCALE_MIN" ] && break
+  rows=$((rows * 2))
+  [ "$rows" -gt 20000 ] && break
+done
+
+# The commits payload was the SECOND argv word (`--argjson commits`): 6901 bytes
+# at COMMIT_PAGES=3 today, breaching the same ceiling at roughly
+# COMMIT_PAGES >= 54. It is moved off argv too, so it is sized past the cap here.
+: > "$BIG_COMMITS"
+i=0
+while [ "$i" -lt 9000 ]; do
+  printf '2026-07-%02dT%02d:%02d:00Z\n' $(( (i % 28) + 1 )) $(( (i / 60) % 24 )) $(( i % 60 )) >> "$BIG_COMMITS"
+  i=$((i + 1))
+done
+
+big_bytes="$(wc -c < "$BIG" | tr -d ' ')"
+commit_bytes="$(wc -c < "$BIG_COMMITS" | tr -d ' ')"
+[ "${big_bytes:-0}" -ge "$SCALE_MIN" ] \
+  && ok "the generated PR payload is ${big_bytes}B ≥ ${SCALE_MIN}B — over Linux's ${MAX_ARG_STRLEN}B per-arg cap AND over macOS's ~1 MiB total argv" \
+  || bad "the scale fixture is only ${big_bytes}B — below the ${SCALE_MIN}B bound this probe exists to cross"
+[ "${commit_bytes:-0}" -gt "$MAX_ARG_STRLEN" ] \
+  && ok "the generated commits payload is ${commit_bytes}B — over the ${MAX_ARG_STRLEN}B per-arg cap too (the second argv word)" \
+  || bad "the commits fixture is only ${commit_bytes}B — it does not cross the cap"
+
+out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+        bash "$WATCH" --fixture "$BIG" --commits "$BIG_COMMITS" --spec "$SPEC" \
+          --repo FRIKKern/barkpark 2>&1)"; rc=$?
+grep -qi "Argument list too long" <<<"$out" \
+  && bad "execve E2BIG: a payload still travels by argv (this is the original defect, reproduced)" \
+  || ok "no 'Argument list too long' — nothing large travels by argv any more"
+[ "$rc" = "1" ] \
+  && ok "the verdict COMPUTES over the oversized payload and reds on its stale greens (exit 1)" \
+  || bad "expected exit 1 over the scale fixture, got $rc — on Linux the pre-fix script died here with a false credential message"
+conf=$(( (rows + 3) / 4 ))
+grep -q "$rows open · $conf CONFLICTING" <<<"$out" \
+  && ok "…over the WHOLE population ($rows open · $conf CONFLICTING), not a truncated prefix" \
+  || bad "the population line does not match the generated fixture: $(grep 'open ·' <<<"$out")"
+grep -q "STALE: ${CTX[0]} passed at $OLD" <<<"$out" \
+  && ok "…and the staleness distance is measured against the oversized commit history" \
+  || bad "no staleness line over the scale fixture"
+
+# THE TRANSPORT ITSELF, asserted structurally: a future edit that puts either
+# payload back on the command line reds here even where the kernel would allow
+# it (a Mac, a small population), which is the case this watch could not see.
+grep -qE -- '^[^#]*--argjson (prs|commits) ' "$WATCH" \
+  && bad "a payload is back on argv (--argjson prs/commits) — that is the E2BIG defect returning" \
+  || ok "no payload travels by --argjson; only small scalars do"
+grep -q -- '--slurpfile prs_in' "$WATCH" && grep -q -- '--slurpfile commits_in' "$WATCH" \
+  && ok "both payloads travel by --slurpfile from a file (honest-gates D44's ratified idiom)" \
+  || bad "the payloads are not on --slurpfile"
+
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"
 
