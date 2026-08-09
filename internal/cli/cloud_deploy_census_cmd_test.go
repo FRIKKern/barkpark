@@ -887,7 +887,14 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 	// what finally makes this fixture's shape the shape production sends. The
 	// check itself is unchanged — it was never wrong about the RENDER, only
 	// about which route had ever produced its input.
-	if strings.Contains(stdout, "NOT MEASURED") {
+	//
+	// dr-w29-s2: the needle is now the DELIVERY sentence specifically. The
+	// section above this one (the deferral wait) has its own NOT MEASURED arm and
+	// this fixture carries no `deferral_wait` node, so a bare "NOT MEASURED"
+	// substring would fire on a sentence about a different census entirely. The
+	// check is unchanged in intent: a present delivery node may never render the
+	// sentence that says delivery was not measured.
+	if strings.Contains(stdout, "NOT MEASURED — this control plane sends no delivery census") {
 		t.Fatalf("the delivery node is present, yet the render still claims it was not measured:\n%s", stdout)
 	}
 
@@ -929,11 +936,322 @@ func TestCloudDeploymentsWithoutDeliverySaysNotMeasured(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
-	line := censusLineContaining(t, stdout, "NOT MEASURED")
+	// dr-w29-s2: pinned to the DELIVERY sentence — the deferral-wait section,
+	// which renders first and is also absent from this payload, has a NOT
+	// MEASURED sentence of its own.
+	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no delivery census")
 	if !strings.Contains(line, "NOT a fleet that delivers instantly") {
 		t.Fatalf("a missing delivery census must refuse out loud, not print nothing:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "STILL WAITING") {
 		t.Fatalf("nothing may be claimed about waiting when no delivery census was sent:\n%s", stdout)
 	}
+}
+
+// censusDeferralWaitEnvelope is the dr-w28-s4 / #11207 payload: the census PLUS
+// `deferral_wait`, the clock the `deferred` COUNT never had.
+//
+// The numbers are the shape a SHORT window really sends, and they are chosen to
+// expose the mask: `sample` 23 sits below p95's `min_sample` 200, and the
+// server's `cond` tests that FIRST, so `reason` says only "sample 23 below
+// min_sample 200" — while the very same node carries `unresolved_fraction`
+// 0.2581 against p95's 0.05 `headroom`, 5.2x over. A renderer that prints Reason
+// alone reports a small-sample problem and hides an identifiability one.
+//
+// p50 carries a value (min_sample 20, met) so the value branch renders too, and
+// `max` refuses with 11 rows PENDING, which is what puts a censored lower bound
+// in max's place.
+const censusDeferralWaitEnvelope = `{
+  "window": {"from": "2026-08-09T11:00:00Z", "to": "2026-08-09T12:00:00Z"},
+  "volume": 60,
+  "failed": 12,
+  "failure_rate": {"sample": 60, "pct": 20.0, "numerator": 12, "min_sample": 200, "refused": true, "reason": "sample 60 below min_sample 200"},
+  "classes": [],
+  "deferred": [
+    {"class": "BOX_BUSY_DEFERRED", "label": "the box was busy; re-queued", "count": 34,
+     "share": {"sample": 60, "pct": 56.7, "numerator": 34, "min_sample": 200, "refused": true, "reason": "sample 60 below min_sample 200"}}
+  ],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200,
+  "deferral_wait": {
+    "clock": "deferred row: inserted_at → the first later-MINTED live build on the same site and environment (time-keyed, never content_rev)",
+    "basis": "floored: a pending re-queue contributes its lower bound",
+    "as_of": "2026-08-09T12:00:00Z",
+    "population": {"deferred": 34, "covered": 23, "pending": 11, "unreadable": 0},
+    "outcomes": [
+      {"outcome": "covered", "label": "the site has since rebuilt", "count": 23},
+      {"outcome": "pending", "label": "no later live build exists yet", "count": 11},
+      {"outcome": "unreadable", "label": "the row carries no readable re-queue", "count": 0}
+    ],
+    "sample": 23,
+    "unresolved": 11,
+    "oldest_pending_seconds": 379.3,
+    "p50": {"quantile": 0.5, "label": "p50", "seconds": 241.14, "sample": 23, "unresolved": 11,
+            "unresolved_fraction": 0.2581, "headroom": 0.5, "min_sample": 20, "refused": false,
+            "reason": null, "basis": "floored: a pending re-queue contributes its lower bound"},
+    "p95": {"quantile": 0.95, "label": "p95", "seconds": null, "sample": 23, "unresolved": 11,
+            "unresolved_fraction": 0.2581, "headroom": 0.05, "min_sample": 200, "refused": true,
+            "reason": "sample 23 below min_sample 200",
+            "basis": "floored: a pending re-queue contributes its lower bound"},
+    "max": {"quantile": 1.0, "label": "max", "seconds": null, "sample": 23, "unresolved": 11,
+            "unresolved_fraction": 0.2581, "headroom": 0.0, "min_sample": 200, "refused": true,
+            "reason": "max is UNIDENTIFIABLE: 25.81% are unresolved, exceeding the 0.0% headroom max needs",
+            "basis": "floored: a pending re-queue contributes its lower bound"},
+    "min_sample": 200
+  }
+}`
+
+// censusDeferralWaitUnreadableEnvelope is THE HOLE, made reproducible: the
+// unresolved mass is entirely UNREADABLE. pending is 0, so
+// `oldest_pending_seconds` is null — there is no wait still running to bound —
+// yet `max` still refuses, because unreadable rows are unresolved. A renderer
+// that says "max refused, therefore print the censored bound" prints an EMPTY
+// CELL here: a fresh silent mis-report inside the section built to end them.
+const censusDeferralWaitUnreadableEnvelope = `{
+  "window": {"from": "2026-08-02T00:00:00Z", "to": "2026-08-09T00:00:00Z"},
+  "volume": 3200,
+  "failed": 40,
+  "failure_rate": {"sample": 3200, "pct": 1.25, "numerator": 40, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200,
+  "deferral_wait": {
+    "clock": "deferred row: inserted_at → the first later-MINTED live build on the same site and environment (time-keyed, never content_rev)",
+    "basis": "floored: a pending re-queue contributes its lower bound",
+    "as_of": "2026-08-09T00:00:00Z",
+    "population": {"deferred": 3138, "covered": 3132, "pending": 0, "unreadable": 6},
+    "outcomes": [
+      {"outcome": "covered", "label": "the site has since rebuilt", "count": 3132},
+      {"outcome": "pending", "label": "no later live build exists yet", "count": 0},
+      {"outcome": "unreadable", "label": "the row carries no readable re-queue", "count": 6}
+    ],
+    "sample": 3132,
+    "unresolved": 6,
+    "oldest_pending_seconds": null,
+    "p50": {"quantile": 0.5, "label": "p50", "seconds": 241.14, "sample": 3132, "unresolved": 6,
+            "unresolved_fraction": 0.0019, "headroom": 0.5, "min_sample": 200, "refused": false,
+            "reason": null, "basis": "floored: a pending re-queue contributes its lower bound"},
+    "p95": {"quantile": 0.95, "label": "p95", "seconds": 6793.6, "sample": 3132, "unresolved": 6,
+            "unresolved_fraction": 0.0019, "headroom": 0.05, "min_sample": 200, "refused": false,
+            "reason": null, "basis": "floored: a pending re-queue contributes its lower bound"},
+    "max": {"quantile": 1.0, "label": "max", "seconds": null, "sample": 3132, "unresolved": 6,
+            "unresolved_fraction": 0.0019, "headroom": 0.0, "min_sample": 200, "refused": true,
+            "reason": "max is UNIDENTIFIABLE: 0.19% are unresolved, exceeding the 0.0% headroom max needs",
+            "basis": "floored: a pending re-queue contributes its lower bound"},
+    "min_sample": 200
+  }
+}`
+
+// TestCloudDeploymentsDeferralWaitEveryEmittedKeyIsRead: the payload key-set
+// guard for `deferral_wait`. A strict decode (DisallowUnknownFields) fails on any
+// key the Go side does not know, and the per-field assertions below fail on any
+// key that decodes into a field nobody reads. Decode is NOT readership: this
+// node shipped in #11207, decoded at internal/cloudclient/client.go, and was
+// rendered to nobody until this slice.
+func TestCloudDeploymentsDeferralWaitEveryEmittedKeyIsRead(t *testing.T) {
+	var envelope struct {
+		DeferralWait json.RawMessage `json:"deferral_wait"`
+	}
+	if err := json.Unmarshal([]byte(censusDeferralWaitEnvelope), &envelope); err != nil {
+		t.Fatalf("fixture is not JSON: %v", err)
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(envelope.DeferralWait))
+	dec.DisallowUnknownFields()
+	var w cloudclient.DeployDeferralWait
+	if err := dec.Decode(&w); err != nil {
+		t.Fatalf("an emitted deferral_wait key is UNREAD by cloudclient: %v", err)
+	}
+
+	if !strings.Contains(w.Clock, "first later-MINTED live build") || !strings.Contains(w.Basis, "floored") ||
+		w.AsOf != "2026-08-09T12:00:00Z" {
+		t.Fatalf("clock/basis/as_of decoded wrong: %q %q %q", w.Clock, w.Basis, w.AsOf)
+	}
+	if w.Population.Deferred != 34 || w.Population.Covered != 23 || w.Population.Pending != 11 || w.Population.Unreadable != 0 {
+		t.Fatalf("population decoded wrong: %+v", w.Population)
+	}
+	if w.Sample != 23 || w.Unresolved != 11 || w.MinSample != 200 {
+		t.Fatalf("counts decoded wrong: sample=%d unresolved=%d min_sample=%d", w.Sample, w.Unresolved, w.MinSample)
+	}
+	if w.OldestPendingSeconds == nil || *w.OldestPendingSeconds != 379.3 {
+		t.Fatalf("oldest_pending_seconds decoded wrong: %v", w.OldestPendingSeconds)
+	}
+	if len(w.Outcomes) != 3 {
+		t.Fatalf("outcomes decoded wrong: %+v", w.Outcomes)
+	}
+	for i, want := range []cloudclient.DeployDeferralWaitOutcome{
+		{Outcome: "covered", Label: "the site has since rebuilt", Count: 23},
+		{Outcome: "pending", Label: "no later live build exists yet", Count: 11},
+		{Outcome: "unreadable", Label: "the row carries no readable re-queue", Count: 0},
+	} {
+		if w.Outcomes[i] != want {
+			t.Fatalf("outcome %d decoded wrong: %+v, want %+v", i, w.Outcomes[i], want)
+		}
+	}
+	if w.P50.Seconds == nil || *w.P50.Seconds != 241.14 || w.P50.Refused || w.P50.Quantile != 0.5 ||
+		w.P50.Label != "p50" || w.P50.Sample != 23 || w.P50.Unresolved != 11 ||
+		w.P50.UnresolvedFraction != 0.2581 || w.P50.Headroom != 0.5 || w.P50.MinSample != 20 ||
+		!strings.Contains(w.P50.Basis, "floored") {
+		t.Fatalf("p50 decoded wrong: %+v", w.P50)
+	}
+	// The refusing nodes' `seconds` MUST stay nil — a float64 field would have
+	// turned these nulls into 0.0s: a fleet whose re-queues look instant because
+	// nobody could measure them.
+	if w.P95.Seconds != nil || !w.P95.Refused || w.P95.Headroom != 0.05 || w.P95.UnresolvedFraction != 0.2581 ||
+		w.P95.Quantile != 0.95 || w.P95.Label != "p95" || w.P95.MinSample != 200 ||
+		w.P95.Reason != "sample 23 below min_sample 200" {
+		t.Fatalf("p95 decoded wrong: %+v", w.P95)
+	}
+	if w.Max.Seconds != nil || !w.Max.Refused || w.Max.Quantile != 1.0 || w.Max.Headroom != 0.0 ||
+		!strings.Contains(w.Max.Reason, "UNIDENTIFIABLE") {
+		t.Fatalf("max decoded wrong: %+v", w.Max)
+	}
+}
+
+// TestCloudDeploymentsDeferralWaitRefusesAndKeepsItsPopulation: the human
+// render, asserted on RENDERED BYTES. The Elixir payload-key census's render arm
+// is a text scan and greens a render that does not even compile, so the proof
+// that a human sees this has to be stdout.
+//
+// Everything about one quantile rides ONE line: the refusal token, the control
+// plane's reason VERBATIM, the identifiability facts BESIDE it (which is the
+// whole point — the reason names only the small sample) and the population it
+// was taken over, with its as-of.
+func TestCloudDeploymentsDeferralWaitRefusesAndKeepsItsPopulation(t *testing.T) {
+	newCensusServer(t, 200, censusDeferralWaitEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-09T11:00:00Z", "--to", "2026-08-09T12:00:00Z")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+
+	p95 := censusLineContaining(t, stdout, "p95 ")
+	for _, want := range []string{
+		"NO NUMBER",
+		"sample 23 below min_sample 200",
+		// The mask, broken: the reason names only the small sample, the line
+		// says unidentifiable as well.
+		"unresolved 11 = 25.81% vs headroom 5.00%",
+		"n=23", "covered 23 / pending 11 / unreadable 0 of 34 deferred · as of 2026-08-09T12:00:00Z",
+	} {
+		if !strings.Contains(p95, want) {
+			t.Fatalf("p95 line %q missing %q — the refusal, its reason, its identifiability and its population ride the SAME line", p95, want)
+		}
+	}
+
+	p50 := censusLineContaining(t, stdout, "p50 ")
+	for _, want := range []string{"4m1s", "unresolved 11 = 25.81% vs headroom 50.00%", "covered 23 / pending 11 / unreadable 0 of 34 deferred"} {
+		if !strings.Contains(p50, want) {
+			t.Fatalf("p50 line %q missing %q — a value may never travel without its population", p50, want)
+		}
+	}
+
+	// max refuses on an OPEN window, and its refusal carries the censored lower
+	// bound on the waits that are still running — on the SAME line.
+	maxLine := censusLineContaining(t, stdout, "max ")
+	for _, want := range []string{
+		"NO NUMBER",
+		"max is UNIDENTIFIABLE: 25.81% are unresolved, exceeding the 0.0% headroom max needs",
+		"STILL WAITING >= 6m19s", "11 row(s) not covered", "(as of 2026-08-09T12:00:00Z)",
+	} {
+		if !strings.Contains(maxLine, want) {
+			t.Fatalf("max line %q missing %q — a refused max must state the bound on the waits still running", maxLine, want)
+		}
+	}
+
+	// The control plane's own words for every cohort, and the zero counter with
+	// its denominator: `unreadable` is 0 over 34 deferred and still prints.
+	for _, want := range []string{
+		"the site has since rebuilt",
+		"no later live build exists yet",
+		"the row carries no readable re-queue",
+		"clock: deferred row: inserted_at",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the render dropped %q — outcome labels are the control plane's words, never a gloss:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "NOT MEASURED — this control plane sends no deferral-wait census") {
+		t.Fatalf("the deferral_wait node is present, yet the render claims it was not measured:\n%s", stdout)
+	}
+	// Negative assertions: nothing rendered as a comforting zero, and no
+	// quantile appeared as a bare number.
+	if strings.Contains(stdout, ">= 0s") || strings.Contains(stdout, "p95  0") || strings.Contains(stdout, "max  0") {
+		t.Fatalf("a refused quantile or an unset bound rendered as zero:\n%s", stdout)
+	}
+
+	// charter D245: acceptance for the emit is a RUN. This log IS the evidence.
+	t.Logf("`bp cloud deployments` against a control plane that emits `deferral_wait`:\n%s", stdout)
+}
+
+// TestCloudDeploymentsDeferralWaitUnreadableMassNeverPrintsAnEmptyCell: THE HOLE.
+// pending 0 and unreadable 6 means max refuses AND there is no pending wait to
+// bound, so `oldest_pending_seconds` is null. The bound's place must carry the
+// UNREADABLE count with the control plane's own label — never an empty cell,
+// never a 0s.
+func TestCloudDeploymentsDeferralWaitUnreadableMassNeverPrintsAnEmptyCell(t *testing.T) {
+	newCensusServer(t, 200, censusDeferralWaitUnreadableEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-02", "--to", "2026-08-09")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+
+	maxLine := censusLineContaining(t, stdout, "max ")
+	for _, want := range []string{
+		"NO NUMBER",
+		"NO BOUND — nothing is pending, yet 6 row(s) are UNREADABLE (the row carries no readable re-queue)",
+		"covered 3132 / pending 0 / unreadable 6 of 3138 deferred",
+		"(as of 2026-08-09T00:00:00Z)",
+	} {
+		if !strings.Contains(maxLine, want) {
+			t.Fatalf("max line %q missing %q — an unresolved mass that is entirely UNREADABLE must still be named", maxLine, want)
+		}
+	}
+	if strings.Contains(maxLine, "STILL WAITING") {
+		t.Fatalf("nothing is pending, so no wait may be claimed to be still running: %q", maxLine)
+	}
+	if strings.Contains(stdout, ">= 0s") {
+		t.Fatalf("an absent bound rendered as zero:\n%s", stdout)
+	}
+
+	p95 := censusLineContaining(t, stdout, "p95 ")
+	if !strings.Contains(p95, "1h53m14s") || !strings.Contains(p95, "covered 3132 / pending 0 / unreadable 6 of 3138 deferred") {
+		t.Fatalf("p95 line %q must carry its value AND its population", p95)
+	}
+
+	t.Logf("`bp cloud deployments` when the unresolved mass is entirely UNREADABLE:\n%s", stdout)
+}
+
+// TestCloudDeploymentsWithoutDeferralWaitSaysNotMeasured: against a payload with
+// no `deferral_wait` node (every control plane older than #11207), the reader
+// says NOT MEASURED and claims nothing. Silence there reads as "deferrals are
+// re-queued instantly", which is exactly the mis-report this epic exists to end:
+// the `deferrals` block above is a COUNT WITH NO CLOCK.
+func TestCloudDeploymentsWithoutDeferralWaitSaysNotMeasured(t *testing.T) {
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no deferral-wait census")
+	for _, want := range []string{"COUNT WITH NO CLOCK", "NOT a fleet that re-queues instantly"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("a missing deferral-wait census must refuse out loud:\n%s", stdout)
+		}
+	}
+	// Nothing may be claimed: no quantile, no bound, no population.
+	for _, forbidden := range []string{"STILL WAITING >= ", "NO BOUND", "deferred · as of"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("nothing may be claimed about the deferral wait when none was sent (%q):\n%s", forbidden, stdout)
+		}
+	}
+	t.Logf("`bp cloud deployments` against a control plane older than #11207:\n%s", stdout)
 }
