@@ -99,9 +99,61 @@
 #      which reader produced the answer. A read that cannot happen is rc 2, never
 #      a green.
 #
+# A GRACE IS A DEFERRAL, SO IT MUST LEAVE A DEBT BEHIND (charter D511).
+#
+# The serving check grants a grace to a serving sha whose process is younger than
+# SERVING_GRACE_SECONDS: a deploy may still be in flight and its recorder may not
+# have posted yet. That grace used to persist NOTHING, and the check only ever
+# reads the sha the box is serving RIGHT NOW, so the deferral had no deferred
+# re-read. Measured 2026-08-09: 4c8314c94's deploy run 31316124617 was CANCELLED
+# with zero jobs — no row could ever exist for it — yet barkpark.cloud served it
+# 13:34Z–13:42Z. Four consecutive runs graced it (ages -3s / 53s / 105s / 200s),
+# then the box moved to 02475d0ec and the accusation became UNMAKEABLE. Any sha
+# replaced inside 1200s was structurally unaccusable, which at today's merge
+# cadence is most of them.
+#
+# So a granted grace now writes `<sha> <first-seen-epoch>` to a RE-ASK LIST that
+# survives the run (--state-file / CROWN_STATE_FILE; $WORK is rm -rf'd by the
+# cleanup trap, so the list cannot live there). The boundary, stated explicitly:
+#
+#   * ENTERING the list: the ONLY writer is the serving grace. A sha the box
+#     serves, with no `cp` row, whose process is younger than the grace.
+#   * WHILE ON the list: every later run re-asks the crown about that sha,
+#     WHETHER OR NOT the box still serves it. Still no row → GRACED-UNRECORDED,
+#     exit 1. The grace is charged against FIRST-SEEN, not against process age,
+#     so one sha gets ONE grace window of SERVING_GRACE_SECONDS in total and
+#     never a fresh one per run.
+#   * CLEAN RETIREMENT: a `cp` row appearing for that sha. That is the only exit
+#     that means the system worked.
+#   * DIRTY RETIREMENT: REASK_MAX_SECONDS with no row. The sha has already been
+#     accused on every run in between, so ageing off ends an unbounded list
+#     rather than forgiving anything — and it is printed as an unreadable
+#     condition, never as silence.
+#   * NO LIST AT ALL (nothing carries the state file between runs): the re-read
+#     degrades to within-run only. That is a real hole, and it is the workflow's
+#     job to point CROWN_STATE_FILE at a path that persists.
+#
+# WHY A CLOCK IN THE FUTURE IS A FAULT AND NOT A KINDNESS
+#
+# `age` used to be an unguarded subtraction, so run 31316144030 printed "only -3s
+# old" and granted the grace. A serving_since AHEAD of now means the two clocks
+# disagree, and a guard that reads a disagreement as "probably in flight" has
+# chosen the comforting direction. A negative age is now its own printed fault
+# and the missing row is accused, not excused.
+#
+# THE SILENCE NAMES ITSELF
+#
+# Every `UNREADABLE=1` site goes through reason(), which both warns and appends
+# to a list the exit-2 sentence enumerates. It previously printed three counters
+# for eight sites — all four graced runs above printed `0 sha(s) unreadable, 0
+# run(s) with no job list, 0 row(s) with carried never measured` while exiting 2.
+# The reason for the silence must be inside the sentence that announces it.
+#
 # EXIT CODES  0 = reconciled — every delivering run has its row, every row has its
 #                 run, and the serving sha is recorded
-#             1 = BEHIND or WRONG (or SERVING-UNRECORDED), WITH COUNTS
+#             1 = BEHIND or WRONG (or SERVING-UNRECORDED, or GRACED-UNRECORDED
+#                 — a sha an earlier run graced and nothing ever recorded), WITH
+#                 COUNTS
 #             2 = could not read, or the population was empty (including a window
 #                 whose every delivering run PREDATES the recorder) — a WARNING
 #                 that is never counted clean. A rate with no denominator is
@@ -111,6 +163,7 @@
 # USAGE
 #   scripts/crown-reconcile.sh --repo FRIKKern/barkpark
 #   scripts/crown-reconcile.sh --window-hours 6
+#   scripts/crown-reconcile.sh --state-file /var/lib/crown/graced.txt
 #   scripts/crown-reconcile.sh --runs-fixture r.json --jobs-fixture j.json \
 #       --crown-fixture c.json --health-fixture h.json --now 2026-08-09T12:00:00Z
 #
@@ -138,6 +191,13 @@ GRACE_HOURS=6
 # be a deploy still in flight whose recorder has not posted yet. Younger than this
 # is a WARNING; older is a RED.
 SERVING_GRACE_SECONDS=1200
+# How long a graced sha stays on the RE-ASK LIST. It is accused on every run in
+# between, so this bounds the LIST, not the accusation. See the boundary above.
+REASK_MAX_SECONDS=86400
+# The re-ask list itself. It MUST outlive the run — $WORK is deleted by the
+# cleanup trap — so it defaults outside the working directory and the caller is
+# expected to point it somewhere that persists between runs.
+STATE_FILE="${CROWN_STATE_FILE:-${TMPDIR:-/tmp}/crown-reconcile-graced.txt}"
 # The instant `record-delivery` first existed: PR #11167, merge commit 67f4a6ab2.
 # Re-derivable by hand, which is why the commit is named beside it:
 #   TZ=UTC git show -s --format='%H %cd %s' --date=iso-strict 67f4a6ab2
@@ -174,6 +234,7 @@ while [ $# -gt 0 ]; do
     --crown-fixture) CROWN_FIXTURE="${2:-}"; shift 2 ;;
     --health-fixture) HEALTH_FIXTURE="${2:-}"; shift 2 ;;
     --now) NOW_OVERRIDE="${2:-}"; shift 2 ;;
+    --state-file) STATE_FILE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "unknown flag: $1"; exit 3 ;;
   esac
@@ -223,6 +284,53 @@ WIDE_EPOCH=$((CUTOFF_EPOCH - GRACE_HOURS * 3600))
 iso_of() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null; }
 CUTOFF_ISO="$(iso_of "$CUTOFF_EPOCH")"
 NOW_ISO="$(iso_of "$NOW_EPOCH")"
+
+# ── the named silences ───────────────────────────────────────────────────────
+# The ONLY way UNREADABLE is set. A condition that mutes part of the comparison
+# has to say which one it was, in the exit-2 sentence itself and not only in a
+# warning a reader may never scroll back to.
+UNREADABLE=0
+REASONS_FILE=""
+reason() { # <sentence>
+  UNREADABLE=1
+  warn "  $*"
+  [ -n "$REASONS_FILE" ] && printf '%s\n' "$*" >> "$REASONS_FILE"
+  return 0
+}
+
+# ── the re-ask list ──────────────────────────────────────────────────────────
+# Line format: `<sha> <first-seen-epoch>`, one per line, `#` comments ignored.
+# Deliberately NOT json: this file is written and read by this script alone, and
+# a line-oriented format needs no jq at all, so no payload can reach an argv word
+# (charter D486).
+state_load() { # -> $WORK/reask.txt
+  : > "$WORK/reask.txt"
+  local sha ts
+  [ -n "$STATE_FILE" ] || { reason "no re-ask list path was configured — a grace granted now cannot be re-asked on the next run"; return 0; }
+  [ -f "$STATE_FILE" ] || return 0
+  while read -r sha ts _; do
+    case "$sha" in ''|'#'*) continue ;; esac
+    case "$sha" in *[!0-9a-fA-F]*) reason "a re-ask list line did not start with a sha and was dropped: '$sha'"; continue ;; esac
+    case "${ts:-}" in ''|*[!0-9]*) reason "the re-ask entry for $sha carries no first-seen instant and was dropped"; continue ;; esac
+    printf '%s %s\n' "$sha" "$ts" >> "$WORK/reask.txt"
+  done < "$STATE_FILE"
+  return 0
+}
+
+state_first_seen() { # <sha> -> first-seen epoch, or empty
+  awk -v s="$1" '$1 == s { print $2; exit }' "$WORK/reask.txt" 2>/dev/null
+}
+
+state_save() { # <file of "sha epoch" lines to keep>
+  [ -n "$STATE_FILE" ] || return 0
+  mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null
+  {
+    printf '# crown-reconcile re-ask list — "<sha> <first-seen-epoch>". Written %s.\n' "$NOW_ISO"
+    sort -u "$1"
+  } > "$STATE_FILE" 2>/dev/null \
+    || reason "the re-ask list could not be written to $STATE_FILE — a grace granted now will not be re-asked"
+  return 0
+}
 
 # ── the two readers ──────────────────────────────────────────────────────────
 READER=""
@@ -378,7 +486,9 @@ select_reader || exit 3
 
 say "crown-reconcile — repo=$REPO reader=$READER window=${WINDOW_HOURS}h ($CUTOFF_ISO .. $NOW_ISO)"
 
-UNREADABLE=0
+REASONS_FILE="$WORK/reasons.txt"
+: > "$REASONS_FILE"
+state_load
 
 fetch_runs
 rc=$?
@@ -427,8 +537,8 @@ while IFS=' ' read -r id sha at; do
   case $? in
     0) printf '%s %s %s\n' "$id" "$sha" "$at" >> "$WORK/delivering.txt" ;;
     1) NONDELIVERING=$((NONDELIVERING + 1)) ;;
-    *) JOBS_UNREADABLE=$((JOBS_UNREADABLE + 1)); UNREADABLE=1
-       warn "  run $id: its job list could not be read — it is NOT counted as reconciled" ;;
+    *) JOBS_UNREADABLE=$((JOBS_UNREADABLE + 1))
+       reason "run $id: its job list could not be read — it is NOT counted as reconciled" ;;
   esac
 done < <(jq -r '.examined[] | "\(.id) \(.sha) \(.at)"' "$WORK/runs.json")
 
@@ -475,7 +585,7 @@ while IFS=' ' read -r id sha at; do
     fi
   else
     BEHIND_UNREADABLE=$((BEHIND_UNREADABLE + 1))
-    UNREADABLE=1
+    reason "the crown could not be asked about $sha (delivered by run $id) — that run is NOT counted as reconciled"
   fi
 done < "$WORK/delivering.txt"
 
@@ -496,8 +606,7 @@ if [ "$WIDE_SHAS" -eq 0 ]; then
   # Without a single delivering run in the widened window there is no ALIBI
   # source, and every row would be accused of being a ghost. That is the
   # comforting-direction mistake inverted — loud, but manufactured. Refuse.
-  UNREADABLE=1
-  warn "  no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
+  reason "no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
 elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
   jq --argjson cut "$CUTOFF_EPOCH" \
     '[.deliveries[]
@@ -512,8 +621,7 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
         continue
       elif [ "$carried" = "null" ]; then
         UNCLASSIFIED=$((UNCLASSIFIED + 1))
-        UNREADABLE=1
-        warn "  row $sha: 'carried' was never measured — it cannot be ruled correct or wrong, and is NOT counted clean"
+        reason "row $sha: 'carried' was never measured — it cannot be ruled correct or wrong, and is NOT counted clean"
         continue
       fi
       # The alibi the row states for ITSELF, first: the run the recorder says
@@ -533,17 +641,19 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
       # and `delivering_run_id` is read the same way for the same reason.
     done < <(jq -r '.[] | "\(.sha) \(if has("carried") and .carried != null then (.carried | tostring) else "null" end) \(if has("delivering_run_id") and .delivering_run_id != null and ((.delivering_run_id | tostring) != "") then (.delivering_run_id | tostring) else "-" end)"' "$WORK/recent-window.json" | sort -u)
   else
-    UNREADABLE=1
-    warn "  the recent-row page did not parse — the reverse direction was NOT checked"
+    reason "the recent-row page did not parse — the reverse direction was NOT checked"
   fi
 else
-  UNREADABLE=1
-  warn "  the recent-row page could not be read — the reverse direction was NOT checked"
+  reason "the recent-row page could not be read — the reverse direction was NOT checked"
 fi
 
 # ── SERVING: what the box says it is running, versus the crown ───────────────
 SERVING_RED=0
 SERVING_SHA=""
+SERVING_SKEW=0
+SERVING_SKEW_AHEAD=0
+SERVING_SINCE=""
+GRACED_THIS_RUN=""
 if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
   if [ -n "$HEALTH_FIXTURE" ]; then
     if [ -f "$HEALTH_FIXTURE" ]; then cp "$HEALTH_FIXTURE" "$WORK/health.json"; else : > "$WORK/health.json"; fi
@@ -552,29 +662,82 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
   fi
   SERVING_SHA="$(jq -r '.serving_sha // .git_sha // empty' "$WORK/health.json" 2>/dev/null)"
   if [ -z "$SERVING_SHA" ]; then
-    UNREADABLE=1
-    warn "  ${HEALTH_URL} did not name a serving sha — the serving check did NOT run"
+    reason "${HEALTH_URL} did not name a serving sha — the serving check did NOT run"
   else
     since="$(jq -r '.serving_since // empty' "$WORK/health.json" 2>/dev/null)"
+    SERVING_SINCE="$since"
     since_epoch="$(epoch_of "$since" 2>/dev/null || echo 0)"
     age=$((NOW_EPOCH - ${since_epoch:-0}))
     if crown_read "sha=$SERVING_SHA" "$WORK/rows-serving.json"; then
       cp_rows="$(jq --arg sha "$SERVING_SHA" '[.deliveries[] | select(.sha == $sha and .target == "cp")] | length' "$WORK/rows-serving.json" 2>/dev/null)"
       [ -n "$cp_rows" ] || cp_rows=0
       if [ "$cp_rows" -eq 0 ]; then
-        if [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt "$SERVING_GRACE_SECONDS" ]; then
-          UNREADABLE=1
-          warn "  the serving sha $SERVING_SHA has no cp row, but that process is only ${age}s old — a deploy may still be in flight, so this is a WARNING, not a verdict"
+        # The grace is charged against the FIRST time this sha was seen serving
+        # and unrecorded, not against the process age the box reports now. A sha
+        # already on the re-ask list cannot buy a fresh grace by being restarted,
+        # and no sha can be graced forever.
+        first_seen="$(state_first_seen "$SERVING_SHA")"
+        [ -n "$first_seen" ] || first_seen="$NOW_EPOCH"
+        graced_age=$((NOW_EPOCH - first_seen))
+        if [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt 0 ]; then
+          # A serving_since AHEAD of now means the clocks disagree. "Probably in
+          # flight" is the comforting reading of a disagreement, so this is a
+          # FAULT with its own sentence, and the missing row is accused.
+          SERVING_SKEW=1
+          SERVING_SKEW_AHEAD=$((0 - age))
+          SERVING_RED=1
+        elif [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt "$SERVING_GRACE_SECONDS" ] && [ "$graced_age" -lt "$SERVING_GRACE_SECONDS" ]; then
+          GRACED_THIS_RUN="$SERVING_SHA"
+          reason "SERVING GRACE: the serving sha $SERVING_SHA has no cp row, but that process is only ${age}s old — a deploy may still be in flight, so the accusation is DEFERRED to the next run rather than dropped (first seen $(iso_of "$first_seen"))"
         else
           SERVING_RED=1
         fi
       fi
     else
-      UNREADABLE=1
-      warn "  the crown could not be asked about the serving sha — the serving check did NOT run"
+      reason "the crown could not be asked about the serving sha — the serving check did NOT run"
     fi
   fi
 fi
+
+# ── THE DEFERRED RE-READ: every sha a grace was ever granted to ──────────────
+# A grace deferred an accusation; this is where the deferral is collected. The
+# question is asked of the CROWN, not of the box, so it survives the box moving
+# on to another sha — which is precisely what made 4c8314c94 unaccusable.
+GRACED_RED=0
+: > "$WORK/graced.txt"
+: > "$WORK/reask-keep.txt"
+while IFS=' ' read -r gsha gts; do
+  [ -n "$gsha" ] || continue
+  gage=$((NOW_EPOCH - gts))
+  if [ "$gsha" = "$GRACED_THIS_RUN" ]; then
+    # Its grace window is still open and this run already said so by name.
+    printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
+    continue
+  fi
+  if [ "$gage" -gt "$REASK_MAX_SECONDS" ]; then
+    reason "the graced sha $gsha aged off the re-ask list after ${REASK_MAX_SECONDS}s with no cp row — it was accused on every run in between, and the list is bounded, not forgiving"
+    continue
+  fi
+  if crown_read "sha=$gsha" "$WORK/rows-graced-$gsha.json"; then
+    grows="$(jq --arg sha "$gsha" '[.deliveries[] | select(.sha == $sha and .target == "cp")] | length' "$WORK/rows-graced-$gsha.json" 2>/dev/null)"
+    [ -n "$grows" ] || grows=0
+    if [ "$grows" -gt 0 ]; then
+      say "  note: the graced sha $gsha was recorded after all — retired from the re-ask list"
+      continue
+    fi
+    GRACED_RED=$((GRACED_RED + 1))
+    printf '%s %s\n' "$gsha" "$gts" >> "$WORK/graced.txt"
+    printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
+  else
+    reason "the crown could not be asked about the graced sha $gsha — it stays on the re-ask list and is NOT counted clean"
+    printf '%s %s\n' "$gsha" "$gts" >> "$WORK/reask-keep.txt"
+  fi
+done < "$WORK/reask.txt"
+
+if [ -n "$GRACED_THIS_RUN" ] && ! grep -q "^$GRACED_THIS_RUN " "$WORK/reask-keep.txt"; then
+  printf '%s %s\n' "$GRACED_THIS_RUN" "$NOW_EPOCH" >> "$WORK/reask-keep.txt"
+fi
+state_save "$WORK/reask-keep.txt"
 
 # ── the verdict ──────────────────────────────────────────────────────────────
 pct() { # <numerator> <denominator>
@@ -606,13 +769,22 @@ if [ "$WRONG" -gt 0 ]; then
     fi
   done < "$WORK/wrong.txt"
 fi
+if [ "$SERVING_SKEW" -gt 0 ]; then
+  say "SERVING-CLOCK-SKEW: barkpark.cloud reports serving_since ${SERVING_SINCE:-<none>}, which is ${SERVING_SKEW_AHEAD}s in the FUTURE. A grace granted off a clock that disagrees is not leniency, it is a fault — so the missing row below is ACCUSED rather than excused."
+fi
 if [ "$SERVING_RED" -gt 0 ]; then
   say "SERVING-UNRECORDED: barkpark.cloud reports it is SERVING ${SERVING_SHA} and the crown has no cp row for it — production is running a commit its own record has never heard of."
 fi
+if [ "$GRACED_RED" -gt 0 ]; then
+  say "GRACED-UNRECORDED: ${GRACED_RED} sha(s) were granted the serving grace on an earlier run and STILL have no cp row. The grace was a DEFERRAL, and this is the deferred accusation — it fires whether or not the box still serves them:"
+  while IFS=' ' read -r gsha gts; do
+    say "    ${gsha}  (first seen $(iso_of "$gts"), $((NOW_EPOCH - gts))s ago) — graced, then never recorded"
+  done < "$WORK/graced.txt"
+fi
 
-if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ]; then
+if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$GRACED_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${ROWS_EXAMINED} rows, serving-unrecorded=${SERVING_RED}, predates-writer=${PREDATES}/${DELIVERING}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${ROWS_EXAMINED} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}."
   exit 1
 fi
 
@@ -630,10 +802,20 @@ fi
 
 if [ "$UNREADABLE" != "0" ]; then
   say ""
-  say "COULD NOT FULLY READ: ${BEHIND_UNREADABLE} sha(s) unreadable, ${JOBS_UNREADABLE} run(s) with no job list, ${UNCLASSIFIED} row(s) with carried never measured. Everything that COULD be read reconciled, but this run is NOT clean."
+  REASON_COUNT="$(awk 'NF' "$REASONS_FILE" 2>/dev/null | wc -l | tr -d ' ')"
+  say "COULD NOT FULLY READ: ${REASON_COUNT} unreadable-or-deferred condition(s) fired. Everything that COULD be read reconciled, but this run is NOT clean. Each condition, by name:"
+  if [ "${REASON_COUNT:-0}" -eq 0 ]; then
+    # UNREADABLE was set without going through reason(). The counters this
+    # sentence used to print could be all zeros while it exited 2; an unnamed
+    # silence is now a stated bug rather than a row of noughts.
+    say "    - (unnamed — UNREADABLE was set without a reason, which is a BUG in this script)"
+  else
+    awk 'NF { c[$0]++; if (!($0 in seen)) { seen[$0] = 1; order[++n] = $0 } }
+         END { for (i = 1; i <= n; i++) printf "    - %s%s\n", order[i], (c[order[i]] > 1 ? " (x" c[order[i]] ")" : "") }' "$REASONS_FILE"
+  fi
   exit 2
 fi
 
 say ""
-say "RECONCILED: all ${RECONCILABLE} delivering run(s) in the window have their row, all ${ROWS_EXAMINED} row(s) in the window have their run, and the serving sha ${SERVING_SHA:-<not checked>} is recorded."
+say "RECONCILED: all ${RECONCILABLE} delivering run(s) in the window have their row, all ${ROWS_EXAMINED} row(s) in the window have their run, the serving sha ${SERVING_SHA:-<not checked>} is recorded, and no earlier grace is still owed a row."
 exit 0
