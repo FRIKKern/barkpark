@@ -70,6 +70,18 @@ defmodule BarkparkWeb.TasksControllerTest do
     doc
   end
 
+  # dr-w34-s4: a task that really lives at its BARE (published) doc_id.
+  # `mk_task!` can never produce one — `Content.Writer.create_document` forces
+  # every new row through `DraftId.draft_id/1` — so a twin pair can only be
+  # built by publishing (`drafts.<id>` → `<id>`, draft deleted) and then
+  # re-creating the draft alongside it. Returns the bare id.
+  defp mk_published_task!(bare_id, scope, content_extra) do
+    content = Barkpark.LabelFixtures.with_registered_labels(content_extra, @dataset)
+    _draft = mk_task!(bare_id, scope, content)
+    {:ok, _} = Content.publish_document(bare_id, "task", @dataset, scope)
+    bare_id
+  end
+
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   # axi-w2-s2: a card fixture with a caller-chosen TITLE (mk_task! pins
@@ -1330,6 +1342,63 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["children"] == []
       assert payload["child_count"] == 0
+    end
+
+    # dr-w34-s4 (twin collapse). `maybe_filter_parent_id/2` strips `drafts.`
+    # from BOTH sides, so a `drafts.<id>` shadow child is GUARANTEED to match
+    # its published parent: before `Tasks.Query.collapse_twins/1` a twinned
+    # child contributed TWO rows and +2 to child_count.
+    test "dr-w34-s4: a twinned child (t1 + drafts.t1) is counted ONCE",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("twin-root"), scope, %{})
+      child = mk_published_task!(uniq("twin-child"), scope, %{"parent_id" => root})
+
+      # The shadow twin: the SAME published id back under `drafts.`, parented
+      # at the DRAFT form of the epic id — exactly the row a /v1/data/mutate
+      # write mints — in the same workspace/project/dataset.
+      shadow = mk_task!(child, scope, %{"parent_id" => "drafts." <> root})
+      assert shadow.doc_id == "drafts." <> child
+
+      payload = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      assert Enum.map(payload["children"], & &1["doc_id"]) == [child]
+      assert payload["child_count"] == 1
+
+      # The index's `parent=` slice reads the SAME cardinality — one number,
+      # one meaning, across both surfaces.
+      index = conn |> authed() |> get("/v1/tasks", %{"parent" => root}) |> json_response(200)
+
+      index_ids = Enum.map(index["docs"], & &1["doc_id"])
+      assert index_ids == [child]
+      assert length(index_ids) == payload["child_count"]
+    end
+
+    # dr-w34-s4 NON-VACUITY: the test that lets the ruling LOSE. Tasks created
+    # via /v1/data/mutate live at `drafts.<id>` with NO published twin — a
+    # blanket `not like(doc_id, "drafts.%")` (studio_chat.ex's claim-lookup
+    # form) would silently delete that whole population from every epic's
+    # count, trading a documented over-count for an undocumented under-count.
+    # Twin collapse suppresses only a shadow whose DISTINCT twin exists, so an
+    # unpaired shadow survives. Swap the helper for the blanket exclusion and
+    # this test goes RED.
+    test "dr-w34-s4 non-vacuity: an UNPAIRED drafts.<id> child is still counted",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("orphan-root"), scope, %{})
+      published = mk_published_task!(uniq("orphan-pub"), scope, %{"parent_id" => root})
+
+      orphan = mk_task!(uniq("orphan-shadow"), scope, %{"parent_id" => "drafts." <> root})
+      assert String.starts_with?(orphan.doc_id, "drafts.")
+
+      payload = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      child_ids = Enum.map(payload["children"], & &1["doc_id"])
+      assert orphan.doc_id in child_ids
+      assert published in child_ids
+      assert payload["child_count"] == 2
+
+      index = conn |> authed() |> get("/v1/tasks", %{"parent" => root}) |> json_response(200)
+
+      assert index["docs"] |> Enum.map(& &1["doc_id"]) |> Enum.sort() == Enum.sort(child_ids)
     end
   end
 
