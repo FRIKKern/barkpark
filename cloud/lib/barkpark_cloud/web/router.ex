@@ -9404,6 +9404,13 @@ defmodule BarkparkCloud.Web.Router do
       update_running_release: bp.update_running_release,
       update_latest_release: bp.update_latest_release,
       update_checked_at: bp.update_checked_at,
+      # WHY the update verdict above is unknown, when it is. The
+      # UpdateStatusWorker writes this the moment a status probe cannot answer
+      # (`identity_refused`, a transport failure, an unparseable reply) — it is
+      # the plane's OWN measurement of the cause, and until now it had no reader
+      # anywhere outside its producer, so the console said "No update state
+      # reported yet" about a box that had in fact answered 401.
+      update_unavailable_reason: bp.update_unavailable_reason,
       # dr-w24-s2 COMMIT DISTANCE — the control plane's OWN measurement of the
       # commit each box actually serves (`BarkparkCloud.GitHub.CommitDistance`,
       # written hourly by the UpdateStatusWorker), beside the box's release-tag
