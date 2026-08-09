@@ -22,10 +22,16 @@
 #   (d) WINDOW EMPTY: nothing to compare is never a green            → exit 2
 #   (e) CROWN UNREADABLE: a read that did not happen is never green  → exit 2
 #   (f) SERVING-UNRECORDED: the box serves a sha with no cp row      → exit 1
-#   (g) that same shape, but the process is seconds old              → exit 2
-#       (a deploy in flight is a warning, never a fabricated verdict —
-#        and that warning must NAME the grace that fired, because the
-#        three counters it used to print were all zero every time)
+#   (t) THE SANDBOX ITSELF: a tool this harness "removes" is actually
+#       gone on BOTH machines — the old shim prepended an empty dir to
+#       /usr/bin, where a runner's `gh` lives, so an ABSENCE assertion
+#       measured a tool that was still there (137/137 local, 136/137 CI)
+#   (g) that same shape, but the process is seconds old              → exit 4
+#       (a deploy in flight is NOT YET DUE: a warning, never a page and
+#        never a green — and it must NAME the grace that fired, because
+#        the three counters it used to print were all zero every time)
+#   (g2) a grace in the same run as an unreadable condition           → exit 2
+#        (2 outranks 4: a deferral never launders a silence)
 #   (n) the graced sha is RE-ASKED on the next run and accused even
 #       after the box has moved on to a different sha                 → exit 1
 #   (n2) a cp row appearing is the only CLEAN retirement              → exit 0
@@ -39,8 +45,10 @@
 #   (j2) UNSET and SET-BUT-EMPTY are different statements about the PAT:
 #        empty is rc 3 with its own sentence, missing still falls through
 #        to the SSH reader CI actually uses                              → 3, 0
-#   (s) the RE-ASK LIST states itself over four states, and the three
+#   (s) the RE-ASK LIST states itself over its states, and the three
 #       fixtures that were byte-identical now DIFFER          → 2, 0, 0 + cmp
+#       …and a DECLARED first run is not a destroyed memory: the same
+#       absent file exits 0 with the caller's statement and 2 without   → 0, 2
 #   (o) WHICH READER ANSWERED is a verdict field: the same script,
 #       driven down the SSH transport against a control plane in effigy,
 #       names `route` when the route answers 200 and
@@ -158,7 +166,27 @@ health_json() { # <name> <serving_sha> <serving_since>
 
 # `gh` and `curl` are removed from PATH: a fixture run that reaches for either
 # is a bug this harness must catch, not tolerate.
+#
+# AND REMOVED HAS TO MEAN REMOVED ON BOTH MACHINES. This used to be an EMPTY
+# directory prepended to `/usr/bin:/bin:/usr/sbin:/sbin` — which removes nothing
+# at all when the tool being "removed" lives in one of those directories. On a
+# GitHub runner `gh` IS /usr/bin/gh, so the (j2) assertion that the SSH path
+# reaches `gh is required` was measuring a tool that was still there: 137/137
+# locally, 136/137 in CI, on an assertion whose whole point is an ABSENCE.
+# Locally `gh` sits in ~/bin, off that PATH, which is the only reason it passed.
+#
+# So the sandbox is a symlink FARM: exactly the tools crown-reconcile.sh is
+# ALLOWED to see, and PATH is set to it ALONE. A tool that is not named here is
+# absent on every machine, by construction, rather than by luck about where the
+# distribution put it.
 NOTOOLS="$TMP/notools"; mkdir -p "$NOTOOLS"
+SANDBOX_ALLOWED="awk basename bash cat cp date dirname grep head install jq mkdir mktemp mv printf rm sed sort tail tr wc"
+for t in $SANDBOX_ALLOWED; do
+  p="$(command -v "$t" 2>/dev/null)" || continue
+  [ -n "$p" ] && ln -sf "$p" "$NOTOOLS/$t"
+done
+# PATH for every probe: the farm and NOTHING else.
+SANDBOX_PATH="$NOTOOLS"
 # The re-ask list OUTLIVES a run by design, so every probe gets a FRESH one and
 # cannot inherit another arm's deferred accusation. An arm that wants two runs to
 # share a list — the whole point of the re-read — sets CR_STATE itself.
@@ -184,7 +212,7 @@ run_cr() { # <expected-rc> <label> [args…]
   # neutralising the ambient environment must not silently assert that fault on
   # every probe. `-u` says what these probes mean — no PAT was asked for.
   out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY \
-    PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" \
+    PATH="$SANDBOX_PATH" \
     CROWN_STATE_FILE="$state" \
     bash "$CR" --now "$NOW" "$@" 2>&1)"
   rc=$?
@@ -215,6 +243,50 @@ not_saw() { # <needle> <label>
     ok "$2"
   fi
 }
+
+section "(t) THE SANDBOX ITSELF — a tool this harness 'removes' must actually be gone"
+# An assertion about an ABSENCE is only worth what the absence is worth. This
+# section proves the sandbox on the machine it is running on, rather than
+# trusting that `gh` happens to live somewhere the old PATH did not name.
+case "$SANDBOX_PATH" in
+  *:*) bad "the sandbox PATH still contains a system directory ($SANDBOX_PATH) — a tool 'removed' here is only removed on machines that put it elsewhere, which is exactly the local-pass/CI-fail split being cured" ;;
+  "$NOTOOLS") ok "the sandbox PATH is the symlink farm ALONE — no system directory can re-supply a removed tool" ;;
+  *) bad "the sandbox PATH is neither the farm nor a farm-plus-system list: $SANDBOX_PATH" ;;
+esac
+for t in gh curl ssh docker; do
+  if (PATH="$SANDBOX_PATH"; command -v "$t" >/dev/null 2>&1); then
+    bad "$t is still reachable inside the sandbox — every probe that assumes it is gone is vacuous"
+  else
+    ok "$t is genuinely absent inside the sandbox"
+  fi
+done
+# …and the farm is not so empty that the script dies for the wrong reason. A
+# sandbox missing `jq` would make every probe exit 3 and several would still
+# 'pass' on their expected code.
+for t in bash jq date sed awk sort grep; do
+  if (PATH="$SANDBOX_PATH"; command -v "$t" >/dev/null 2>&1); then
+    ok "$t is present inside the sandbox, so a probe fails for the reason it names"
+  else
+    bad "$t is MISSING from the sandbox farm — probes would fail on the tool, not on the behaviour"
+  fi
+done
+
+# THE CI FAILURE, REPRODUCED ON PURPOSE. A directory that supplies `gh` stands in
+# for /usr/bin on a GitHub runner. Under the OLD shape — farm plus that directory
+# — the (j2) SSH-path probe never reaches "gh is required" (this is CI's 136/137).
+# Under the new shape it does. Two runs, one difference.
+SYSBIN="$TMP/sysbin"; mkdir -p "$SYSBIN"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$SYSBIN/gh"; chmod +x "$SYSBIN/gh"
+out="$(env -u CROWN_API_TOKEN CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key \
+  PATH="$SANDBOX_PATH:$SYSBIN" CROWN_STATE_FILE="$TMP/state-runner-emul.txt" \
+  bash "$CR" --window-hours 24 2>&1)"
+printf '%s\n' "$out" > "$TMP/last.out"
+not_saw "gh is required" "with a runner-shaped system directory on PATH, gh is NOT missing — the old shim's absence assertion was measuring nothing on CI"
+out="$(env -u CROWN_API_TOKEN CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key \
+  PATH="$SANDBOX_PATH" CROWN_STATE_FILE="$TMP/state-runner-emul2.txt" \
+  bash "$CR" --window-hours 24 2>&1)"
+printf '%s\n' "$out" > "$TMP/last.out"
+saw "gh is required" "and with the farm alone the SAME probe reaches the absence it asserts — on any machine"
 
 # ── the base fixture: two delivering runs, both recorded ─────────────────────
 RUNS_BASE="$(runs_json runs-base "$SHA_A:$IN1" "$SHA_B:$IN2")"
@@ -317,18 +389,40 @@ run_cr 1 "barkpark.cloud serves $SHA_D and no cp row exists" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_GHOST"
 saw "SERVING-UNRECORDED" "the serving check is its own named verdict"
 
-section "(g) the same shape, seconds old — a deploy in flight is a WARNING"
+section "(g) the same shape, seconds old — a deploy in flight is NOT YET DUE (rc 4)"
+# MEASURED, not predicted: rc=2 fired six times in crown-reconcile.yml's whole
+# history and FIVE of them were exactly this benign grace (four the same sha in
+# four consecutive minutes). It is now its own code, so the workflow can warn
+# instead of paging — WITHOUT the grace becoming silent, which is what the
+# assertions below hold down.
 HEALTH_FRESH="$(health_json health-fresh "$SHA_D" "2026-08-09T11:55:00Z")"
-run_cr 2 "the serving process is 300s old — too young to accuse" \
+run_cr 4 "the serving process is 300s old — too young to accuse, so NOT YET DUE" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
 not_saw "SERVING-UNRECORDED" "an in-flight deploy is never reported as a missing record"
 # The silence used to announce itself with three counters that were ALL ZERO on
 # every one of the four live runs that graced 4c8314c94 — the reason the run was
 # not clean was nowhere in the sentence that said it was not clean.
-saw "COULD NOT FULLY READ: 1 unreadable-or-deferred condition(s) fired" "the exit-2 sentence COUNTS the conditions that actually fired"
+saw "NOT YET DUE: 1 deferred condition(s) fired" "the rc-4 sentence COUNTS the deferrals that actually fired"
 saw "SERVING GRACE:" "and it NAMES the grace, rather than printing counters the grace does not move"
 not_saw "0 sha(s) unreadable" "the all-zero counter sentence is gone"
 saw "DEFERRED to the next run" "the grace says out loud that it is a deferral, not a dismissal"
+not_saw "COULD NOT FULLY READ" "a deferral is no longer reported as a condition that could not be READ"
+not_saw "RECONCILED:" "and it is still not a green — a deferral is neither a page nor a pass"
+
+section "(g2) A DEFERRAL NEVER LAUNDERS A SILENCE — 2 outranks 4"
+# The regression the split invites: one benign grace in the same run as a real
+# unreadable condition, downgrading the page to a warning. The unreadable row
+# below ('carried' never measured) and the young serving process both fire.
+CROWN_GRACE_AND_SILENCE="$(crown_json crown-grace-and-silence \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" instance omit "$IN1" 1)")"
+run_cr 2 "a grace AND an unmeasured row in the same run — the silence wins" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_GRACE_AND_SILENCE" --health-fixture "$HEALTH_FRESH"
+saw "SERVING GRACE:" "the deferral still fires and is still named"
+saw "COULD NOT FULLY READ" "and the run is still reported as one that could not be fully read"
+not_saw "NOT YET DUE:" "rc 4 does not get to speak over a condition that could not be read"
 
 section "(n) THE DEFERRED RE-READ: a graced sha is re-asked after the box moves on"
 # The live defect, in fixture form. 4c8314c94 was served 13:34–13:42Z with no row
@@ -336,7 +430,7 @@ section "(n) THE DEFERRED RE-READ: a graced sha is re-asked after the box moves 
 # graced it; at 13:42:23Z the box moved to another sha and the accusation became
 # permanently unmakeable. Run N grants the grace; run N+1 must still accuse.
 CR_STATE="$TMP/state-reask.txt"; rm -f "$CR_STATE"
-run_cr 2 "run N: $SHA_D is served, 300s old, unrecorded — graced" \
+run_cr 4 "run N: $SHA_D is served, 300s old, unrecorded — graced" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
 if grep -q "^$SHA_D " "$CR_STATE" 2>/dev/null; then
   ok "the graced sha and its first-seen instant were PERSISTED to the re-ask list"
@@ -354,7 +448,7 @@ CR_STATE=""
 
 section "(n2) a row appearing is the ONLY clean retirement"
 CR_STATE="$TMP/state-retire.txt"; rm -f "$CR_STATE"
-run_cr 2 "run N: $SHA_D graced again, on its own list" \
+run_cr 4 "run N: $SHA_D graced again, on its own list" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
 CROWN_RECORDED_D="$(crown_json crown-recorded-d \
   "$(row "$SHA_A" cp false "$IN1" 1)" \
@@ -459,7 +553,7 @@ section "(j) configuration faults are 3 — never a verdict, never a warning"
 run_cr 3 "an unknown flag" --runs-fixture "$RUNS_BASE" --nonsense
 run_cr 3 "--window-hours that is not a number" --runs-fixture "$RUNS_BASE" --window-hours soon
 run_cr 3 "--now that is not an instant" --runs-fixture "$RUNS_BASE" --now yesterday
-out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$TMP/state-config.txt" bash "$CR" --window-hours 24 2>&1)"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" CROWN_STATE_FILE="$TMP/state-config.txt" bash "$CR" --window-hours 24 2>&1)"
 rc=$?
 printf '%s\n' "$out" > "$TMP/last.out"
 if [ "$rc" = "3" ]; then ok "no fixture and no credential → exit 3"; else bad "no credential → exit $rc, wanted 3"; fi
@@ -470,7 +564,7 @@ section "(j2) UNSET and SET-BUT-EMPTY are different statements about the PAT"
 # CI path, so an operator who exported an empty token was silently answered by a
 # reader they did not choose. The two halves of this section are the whole point
 # — the empty one must FAULT, and the missing one must still WORK.
-out="$(env -u CP_HOST -u DEPLOY_SSH_KEY CROWN_API_TOKEN= PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$TMP/state-emptypat.txt" bash "$CR" --window-hours 24 2>&1)"
+out="$(env -u CP_HOST -u DEPLOY_SSH_KEY CROWN_API_TOKEN= PATH="$SANDBOX_PATH" CROWN_STATE_FILE="$TMP/state-emptypat.txt" bash "$CR" --window-hours 24 2>&1)"
 rc=$?
 printf '%s\n' "$out" > "$TMP/last.out"
 if [ "$rc" = "3" ]; then ok "CROWN_API_TOKEN set but EMPTY → exit 3"; else bad "an empty CROWN_API_TOKEN → exit $rc, wanted 3 (a reader asked for and not supplied is a CONFIGURATION fault)"; fi
@@ -481,7 +575,7 @@ not_saw "CONFIG: no way to read the crown" "the empty-PAT fault is DISTINGUISHAB
 # MISSING PAT is not a fault. It falls through to the CP_HOST + DEPLOY_SSH_KEY
 # reader deploy.yml already uses. `gh` is off PATH here, so the run dies later,
 # at the RUN LIST — which is exactly the proof that select_reader let it past.
-out="$(env -u CROWN_API_TOKEN CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$TMP/state-sshpath.txt" bash "$CR" --window-hours 24 2>&1)"
+out="$(env -u CROWN_API_TOKEN CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key PATH="$SANDBOX_PATH" CROWN_STATE_FILE="$TMP/state-sshpath.txt" bash "$CR" --window-hours 24 2>&1)"
 rc=$?
 printf '%s\n' "$out" > "$TMP/last.out"
 saw "reader-transport=ssh" "with no PAT and CP_HOST + DEPLOY_SSH_KEY present, the SSH reader is selected — the working CI path is NOT broken"
@@ -500,10 +594,48 @@ CR_STATE="$STATE_ABSENT"; CR_NOSEED=1
 run_cr 2 "ABSENT: the path is configured and the file is not there" $(base_args)
 CR_NOSEED=0; CR_STATE=""
 saw "— ABSENT; loaded 0 entry(ies), dropped 0 malformed line(s)." "ABSENT prints its own state, its path and its counts"
-saw "either this is the first run ever or the memory was destroyed" "ABSENT is a REASON, not a silent early return"
+saw "the memory was destroyed between runs or the fetch that would have carried it failed" "ABSENT is a REASON, not a silent early return"
 saw "COULD NOT FULLY READ" "a destroyed memory is NOT counted clean"
 not_saw "RECONCILED:" "it never asserts 'no earlier grace is still owed a row' over a list it does not have"
 cp "$TMP/last.out" "$TMP/out-absent.txt"
+
+# ── A FIRST RUN IS NOT A DESTROYED MEMORY ────────────────────────────────────
+# /var/lib/crown-reconcile/graced.txt has never been written on CP_HOST, so the
+# ABSENT arm above is the state production is ACTUALLY in — and it pages. The
+# distinguishing fact belongs to the CALLER, who holds the store, so it is
+# stated: CROWN_STATE_FIRST_RUN=1. Both halves are proven, because a tolerance
+# that also swallows a destroyed memory is the laundering it is meant to avoid.
+STATE_FIRST="$TMP/state-first-run.txt"; rm -f "$STATE_FIRST"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$STATE_FIRST" CROWN_STATE_FIRST_RUN=1 \
+  bash "$CR" --now "$NOW" $(base_args) 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "0" ]; then ok "ABSENT-FIRST-RUN: the caller states the store has never held a list → exit 0"; else bad "a declared first run → exit $rc, wanted 0 (the operator's first delivered crown alarm must not be about a file that never existed)"; printf '%s\n' "$out" | sed 's/^/       | /' >&2; fi
+saw "— ABSENT-FIRST-RUN; loaded 0 entry(ies)" "a first run names itself as its own state, not as PRESENT-EMPTY"
+saw "this is a FIRST RUN, not a destroyed memory" "and it says which of the two absences it is"
+not_saw "COULD NOT FULLY READ" "a first run is not an unreadable condition"
+
+# The other half, and the one that keeps the tolerance honest: the SAME absent
+# file WITHOUT the caller's statement still pages. A run that could not REACH the
+# store cannot make the claim, so transport silence lands here.
+STATE_DESTROYED="$TMP/state-destroyed.txt"; rm -f "$STATE_DESTROYED"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$STATE_DESTROYED" \
+  bash "$CR" --now "$NOW" $(base_args) 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "2" ]; then ok "the identical absence with NO first-run statement still exits 2 — a destroyed memory is not tolerated"; else bad "an unclaimed absent list → exit $rc, wanted 2 (the first-run tolerance is swallowing a destroyed memory)"; fi
+not_saw "ABSENT-FIRST-RUN" "an absence nobody vouched for is never reported as a first run"
+
+# A value that is not the literal 1 is NOT a claim: a typo must not buy silence.
+STATE_TYPO="$TMP/state-typo.txt"; rm -f "$STATE_TYPO"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$STATE_TYPO" CROWN_STATE_FIRST_RUN=true \
+  bash "$CR" --now "$NOW" $(base_args) 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "2" ]; then ok "CROWN_STATE_FIRST_RUN=true is not the literal 1, so it is not a claim → exit 2"; else bad "a non-1 first-run value → exit $rc, wanted 2"; fi
 
 STATE_EMPTY="$TMP/state-empty.txt"; seed_state "$STATE_EMPTY"
 CR_STATE="$STATE_EMPTY"
@@ -551,7 +683,7 @@ saw "— PRESENT-EMPTY; loaded 0 entry(ies), dropped 2 malformed line(s)." "a co
 # eviction signature, and it only reads if BOTH halves are always printed.
 STATE_WROTE="$TMP/state-wrote.txt"; seed_state "$STATE_WROTE"
 CR_STATE="$STATE_WROTE"
-run_cr 2 "a grace is granted, so the run must say what it wrote" \
+run_cr 4 "a grace is granted, so the run must say what it wrote" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
 CR_STATE=""
 saw "RE-ASK LIST: wrote 1 entry(ies) to $STATE_WROTE" "state_save closes symmetrically with what it persisted"
@@ -560,7 +692,7 @@ saw "RE-ASK LIST: wrote 1 entry(ies) to $STATE_WROTE" "state_save closes symmetr
 # `--state-file ""` is how a caller says "no list at all" out loud; an unset
 # CROWN_STATE_FILE falls back to the temp-directory default, which is the
 # separate (and also printed) hole below.
-out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" bash "$CR" --now "$NOW" --state-file "" $(base_args) 2>&1)"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" bash "$CR" --now "$NOW" --state-file "" $(base_args) 2>&1)"
 rc=$?
 printf '%s\n' "$out" > "$TMP/last.out"
 if [ "$rc" = "2" ]; then ok "UNCONFIGURED: no path at all → exit 2"; else bad "an unconfigured re-ask list → exit $rc, wanted 2"; fi
@@ -569,7 +701,7 @@ saw "RE-ASK LIST: <none> [nowhere] — UNCONFIGURED" "UNCONFIGURED prints on the
 # A path under a temp directory is named as the hole it is, rather than implying
 # a memory it does not have — this is what the production workflow's default was.
 STATE_TMP="${TMPDIR:-/tmp}/crown-reconcile-harness-$$.txt"; seed_state "$STATE_TMP"
-out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$STATE_TMP" bash "$CR" --now "$NOW" $(base_args) 2>&1)"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" CROWN_STATE_FILE="$STATE_TMP" bash "$CR" --now "$NOW" $(base_args) 2>&1)"
 printf '%s\n' "$out" > "$TMP/last.out"
 rm -f "$STATE_TMP"
 saw "does NOT survive a run boundary" "a state file in a temp directory says so, instead of passing for persistence"
@@ -619,7 +751,7 @@ run_fake() { # <expected-rc> <label> <http> <via>
   CR_N=$((CR_N + 1))
   state="$TMP/state-fake-$CR_N.txt"
   seed_state "$state"
-  out="$(env -u CROWN_API_TOKEN PATH="$FAKE:$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" \
+  out="$(env -u CROWN_API_TOKEN PATH="$FAKE:$SANDBOX_PATH" \
     CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key \
     CR_FAKE_RUNS="$RUNS_FAKE" CR_FAKE_JOBS="$TMP/jobs-fake.json" \
     CR_FAKE_ROWS="$TMP/rows-fake.json" CR_FAKE_HEALTH="$HEALTH_FAKE" \
@@ -676,7 +808,7 @@ if [ -f "$SCREAM" ]; then
 else
   bad "missing $SCREAM — the scream step invokes a script that is not there"
 fi
-for n in 0 1 2 3; do
+for n in 0 1 2 3 4; do
   if grep -q "^            $n)" "$WF"; then ok "the case arm for rc $n exists"; else bad "rc $n has no case arm of its own"; fi
 done
 if [ -f "$SPEC" ] && grep -q "crown-reconcile" "$SPEC"; then
@@ -694,6 +826,56 @@ elif printf '%s' "$RC2_ARM" | grep -q 'exit 0'; then
   bad "the rc=2 arm still exits 0 — a SILENCE is being laundered into a green run conclusion"
 else
   ok "the rc=2 SILENCE arm exits non-zero"
+fi
+
+# …AND THE SPLIT DOES NOT PUT THE SILENCE BACK. rc 4 is the benign in-flight
+# deferral and MUST warn rather than page; rc 2 stays a page. Asserting both on
+# the same file is what stops the split from sliding back into laundering — a
+# future edit that maps 2 to a warning, or 4 to an error, reds here.
+RC4_ARM="$(grep '^            4)' "$WF" | head -1)"
+if [ -z "$RC4_ARM" ]; then
+  bad "there is no rc=4 case arm — the NOT-YET-DUE deferral would fall to the catch-all and page, which is the false alarm being cured"
+else
+  if printf '%s' "$RC4_ARM" | grep -q 'exit 0'; then
+    ok "the rc=4 NOT-YET-DUE arm exits 0 — a benign in-flight grace does not page"
+  else
+    bad "the rc=4 arm does not exit 0 — the deferral still pages, and five of the last six rc=2 firings were exactly this"
+  fi
+  if printf '%s' "$RC4_ARM" | grep -q '::warning::'; then
+    ok "and it is a ::warning — the deferral is still SAID, not swallowed into a clean green"
+  else
+    bad "the rc=4 arm is silent or an error; a deferral must be announced as a warning"
+  fi
+  if printf '%s' "$RC4_ARM" | grep -q '::error::'; then
+    bad "the rc=4 arm is an ::error — that is the page this split exists to stop"
+  else
+    ok "the rc=4 arm does not raise an error annotation"
+  fi
+fi
+# The script and the workflow must agree on what 4 MEANS: an rc the yml handles
+# and the script never returns is decoration, and the reverse is a page.
+if grep -q '^#             4 = NOT YET DUE' "$CR"; then
+  ok "crown-reconcile.sh documents rc 4 in its own EXIT CODES block"
+else
+  bad "$CR never defines rc 4, but $WF has a case arm for it — the workflow is handling a code the script does not produce"
+fi
+if grep -q '^  exit 4$' "$CR"; then
+  ok "and it actually exits 4 somewhere"
+else
+  bad "$CR documents rc 4 and never exits with it"
+fi
+# The deferral must not be able to become UNREADABLE again by accident: defer()
+# is the only writer of the deferral counter, exactly as reason() is of UNREADABLE.
+if [ "$(grep -c '^  DEFERRED=\$((DEFERRED + 1))$' "$CR")" = "1" ]; then
+  ok "the deferral counter is incremented in exactly one place — inside defer()"
+else
+  bad "DEFERRED is incremented outside defer() — that deferral would print as unnamed"
+  grep -n 'DEFERRED=' "$CR" >&2
+fi
+if grep -q 'defer "SERVING GRACE' "$CR"; then
+  ok "the serving grace goes through defer(), not reason() — it is a deferral, not a silence"
+else
+  bad "the serving grace no longer calls defer() — if it went back to reason() the benign grace pages again"
 fi
 
 # An INPUT that can break this harness must be able to TRIGGER it.
@@ -753,6 +935,40 @@ fi
 for phrase in "Re-ask list — fetch from the control plane" "Re-ask list — write back to the control plane" "if: always()"; do
   if grep -qF "$phrase" "$WF"; then ok "the workflow carries: $phrase"; else bad "the workflow is missing '$phrase' — the list cannot make a round trip"; fi
 done
+
+# THE WRITE-BACK IS ATOMIC. `cat > graced.txt` truncates the remote file before
+# the first byte arrives, so a stream that dies mid-write leaves a SHORT list —
+# indistinguishable from one that legitimately drained, which forgives every
+# accusation past the cut. Both halves are asserted: the temp file AND the move.
+if grep -qF "cat > /var/lib/crown-reconcile/graced.txt'" "$WF"; then
+  bad "the write-back still redirects straight onto graced.txt — a truncating write can leave a short list that reads as a drained one"
+else
+  ok "the write-back does not truncate graced.txt in place"
+fi
+if grep -qF "mv -f /var/lib/crown-reconcile/graced.txt.tmp /var/lib/crown-reconcile/graced.txt" "$WF"; then
+  ok "the write-back is write-then-move — the next run reads the whole old list or the whole new one"
+else
+  bad "$WF never renames a temp file over graced.txt, so the write is not atomic"
+fi
+
+# THE FIRST-RUN STATEMENT IS THE CALLER'S, AND ONLY A CALLER THAT LOOKED MAY
+# MAKE IT. The remote command must decide it, the reconcile step must carry it,
+# and a fetch that FAILED must not.
+if grep -qF "CROWN_STATE_FIRST_RUN: \${{ steps.reask.outputs.first_run }}" "$WF"; then
+  ok "the reconcile step carries the fetch step's first-run finding, rather than hard-coding a tolerance"
+else
+  bad "$WF does not pass a first-run statement derived from the fetch — either the first run pages over a file that never existed, or the tolerance is asserted blind"
+fi
+if grep -qF "echo CR_LIST=FIRST-RUN" "$WF" && grep -qF "echo CR_LIST=PRESENT" "$WF"; then
+  ok "the remote command distinguishes a store that has never held a list from one that has"
+else
+  bad "$WF never asks the control plane whether the list exists — an absence cannot be classified from the runner alone"
+fi
+if grep -qF 'first_run=1' "$WF"; then
+  ok "the first-run claim is the literal 1 the script requires"
+else
+  bad "$WF never emits first_run=1, so the script will read the claim as unmade"
+fi
 
 section "(q) the re-ask boundary is STATED in the script, not only implemented"
 # A deferral whose retirement rule lives only in code is a rule the next reader
