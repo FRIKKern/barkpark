@@ -402,20 +402,50 @@ defmodule BarkparkCloud.Notifications do
   row and invents no recipient — charter D362 names this digest verbatim as a
   consented recipient-less withhold, and `Delivery.changeset/2` requires a
   recipient. It is also not a new alert PRODUCER (D14): it is one counted record
-  on an existing rail, at WARNING when the rail lost, so `journalctl -u
-  barkpark-cloud | grep fleet_digest` answers "did anyone get today's digest?"
-  without a metrics pipeline.
+  on an existing rail, at WARNING when the rail lost.
 
-  Scope, stated so it is not overclaimed: this fixes the ADDRESS, not the
-  PAYLOAD. `DigestEmail.summary/1` carries release-freshness only (total /
-  current / behind / paused / latest) and zero deploy-health data — re-addressing
-  it delivers a report that still says nothing about deploy failures. The payload
-  half is `dr-w10-bl-digest-email-calls-a-sick-fleet-healthy`.
+  ## HOW TO ANSWER "did anyone get today's digest?" (dr-w27-s8)
+
+  READ THE `notification_deliveries` ROW — `event = "fleet_digest"`, and its
+  `status`, `recipient` and `inserted_at`. It is the ONLY durable witness that a
+  digest left this control plane.
+
+  This used to say `journalctl -u barkpark-cloud | grep fleet_digest`, and that
+  instruction has never worked on any host this code has run on. There is no
+  such systemd unit (`systemctl list-units --all | grep -c barkpark-cloud`
+  returns 0; `journalctl -u barkpark-cloud` returns "-- No entries --"): the
+  control plane is a docker container with a json-file log driver, and a
+  blue/green recreation deletes that file. The 2026-08-09T06:00:00Z send — the
+  first digest ever received by a human — left ZERO surviving log lines across
+  all five containers, while its four delivery rows are still there. The
+  `account_fleet_digest/2` telemetry event and log line remain useful LIVE; they
+  are not evidence after the fact.
+
+  READ `status = "sent"` FOR EXACTLY WHAT IT IS: `Mailer.deliver/1` returned
+  `{:ok, _}`, i.e. the message was ACCEPTED BY OUR OWN RELAY. postfix on this
+  box keeps no per-message log on any collected sink (`maillog_file` empty, no
+  rsyslog, queue empty), so acceptance by the recipient's MTA — let alone
+  arrival in a human inbox — is not provable from here and must not be claimed.
+
+  Scope, as of dr-w27-s8: dr-w19-s5 fixed the ADDRESS and this rail now also
+  carries the PAYLOAD. `DigestEmail.summary/2` takes a `:deploy` reading from
+  `DigestEmail.deploy_health/1`, so the delivered body names the fleet's deploy
+  doors, their deferral mass and their post-door failure rate — or the word
+  UNMEASURED. Before that, a digest that arrived said nothing whatsoever about
+  deploy failures (`dr-w10-bl-digest-email-calls-a-sick-fleet-healthy`).
   """
   @spec deliver_fleet_digest([term()]) ::
           {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
   def deliver_fleet_digest(barkparks) when is_list(barkparks) do
     fleet = DigestEmail.summary(barkparks)
+
+    # THE PAYLOAD READING, taken ONCE for this run (dr-w27-s8). Every team's
+    # summary renders the same deploy-health block off it, so two recipients of
+    # the same run can never be shown different numbers, and the ledger is read
+    # twice a day rather than once per recipient. `deploy_health/1` never
+    # raises: an unreadable ledger renders as UNMEASURED inside the email
+    # instead of failing the send.
+    deploy = DigestEmail.deploy_health()
 
     # WHO gets what, resolved before anything is sent. Two reasons this is a
     # separate pass and not one fused comprehension:
@@ -434,7 +464,7 @@ defmodule BarkparkCloud.Notifications do
           is_binary(team_id),
           recipients = team_member_emails(team_id),
           recipients != [],
-          summary = DigestEmail.summary(rows),
+          summary = DigestEmail.summary(rows, deploy: deploy),
           recipient <- Enum.uniq(recipients),
           do: {team_id, summary, recipient}
 
@@ -501,9 +531,17 @@ defmodule BarkparkCloud.Notifications do
   #
   # Two observable seams, neither of which needs a read route or a metrics
   # pipeline: a `:telemetry` event (a test, or a future reporter, can attach) and
-  # one key=value line that `grep fleet_digest` finds in journald. WARNING when
-  # the run lost anyone — `recipients=0` is the loss this slice exists to make
-  # visible, and a partial send is the same class one degree softer.
+  # one key=value line in the container log. WARNING when the run lost anyone —
+  # `recipients=0` is the loss this slice exists to make visible, and a partial
+  # send is the same class one degree softer.
+  #
+  # NEITHER SEAM SURVIVES THE DAY (dr-w27-s8). This used to promise
+  # `journalctl -u barkpark-cloud`; no such systemd unit has ever existed on this
+  # host, the log is a docker json file, and a blue/green recreation deletes it —
+  # the 06:00 send on 2026-08-09 left no surviving line anywhere. To ask AFTER
+  # the fact whether a digest left, read the `notification_deliveries` row
+  # (`event = "fleet_digest"`), and read `status = "sent"` as "accepted by our
+  # own relay", never as "reached a human inbox".
   #
   # `safely/1`: accounting is a side path on a best-effort operator email. It
   # must never be able to break the send it is counting.

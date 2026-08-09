@@ -321,4 +321,198 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     assert body =~ "| pinned=v0.2.20, paused, autoupdate off | checked"
     assert body =~ "2509 commits behind main"
   end
+
+  ## 8. dr-w27-s8 — THE DIGEST NAMES DEPLOY HEALTH
+  ##
+  ## The digest reached a human for the first time ever at 2026-08-09T06:00:00Z
+  ## (four notification_deliveries rows, event=fleet_digest, status=sent) and
+  ## the payload was deploy-blind: it told four people nothing about the fleet's
+  ## deploy failures. These tests read the BYTES of the block that fixes that,
+  ## and they exist mostly to pin what it is NOT allowed to say.
+  ##
+  ## `summary/2` takes the reading as an argument, so every case below is
+  ## exercised without a database: these are the exact shapes
+  ## `deploy_health/1` folds `DeployLedger.census/3` into.
+
+  @read_at ~U[2026-08-09 06:00:00Z]
+
+  defp window(label, door, deferred, failed, rate) do
+    %{
+      label: label,
+      from: DateTime.add(@read_at, -86_400, :second),
+      to: @read_at,
+      door: door,
+      deferred: deferred,
+      failed: failed,
+      rate: rate
+    }
+  end
+
+  defp measured_rate(numerator, denominator) do
+    %{
+      sample: denominator,
+      pct: Float.round(numerator * 100 / denominator, 2),
+      numerator: numerator,
+      min_sample: 200,
+      refused: false,
+      reason: nil,
+      basis: "attempted rows in the window"
+    }
+  end
+
+  defp refused_rate(denominator, reason) do
+    %{
+      sample: denominator,
+      pct: nil,
+      numerator: 0,
+      min_sample: 200,
+      refused: true,
+      reason: reason,
+      basis: "attempted rows in the window"
+    }
+  end
+
+  defp health(windows) do
+    %{windows: windows, measured_at: @read_at, unmeasured: false, reason: nil}
+  end
+
+  test "the digest body names the deploy doors — and every rate carries its deferred population" do
+    deploy =
+      health([
+        window("last 24h", 852, 564, 53, measured_rate(53, 852)),
+        %{
+          window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156))
+          | from: DateTime.add(@read_at, -604_800, :second)
+        }
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "Deploy health (control-plane deploy ledger, read 2026-08-09 06:00 UTC):"
+
+    # THE BINDING SHAPE: door, deferrals and the post-door rate on ONE line.
+    assert body =~
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 852 attempted, of which 564 deferred by a busy box — 6.22% failed post-door (53 of 852 attempted)."
+
+    assert body =~
+             "  last 7d (2026-08-02 06:00 UTC to 2026-08-09 06:00 UTC): 9,156 attempted, of which 3,043 deferred by a busy box — 67.5% failed post-door (6,180 of 9,156 attempted)."
+  end
+
+  test "a rate can never be rendered without its door and its deferrals beside it" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    [line] = for l <- String.split(body, "\n"), l =~ "failed post-door", do: l
+
+    # Every number the percentage depends on is on the SAME line as the
+    # percentage. A future refactor that splits them apart reds here.
+    assert line =~ "852 attempted"
+    assert line =~ "564 deferred"
+    assert line =~ "6.22%"
+  end
+
+  test "a window with no rows renders UNMEASURED — never 0%, never healthy" do
+    deploy =
+      health([window("last 24h", 0, 0, 0, refused_rate(0, "sample 0 below min_sample 200"))])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): UNMEASURED — no deploy rows at all in this window. A window with nothing in it is not a healthy fleet."
+
+    # The reassuring readings a zero window must never be able to produce.
+    refute body =~ "0% failed"
+    refute body =~ "0.0% failed"
+    refute body =~ "failed post-door"
+    assert body =~ "is not a healthy fleet"
+  end
+
+  test "a refused rate keeps its counts and withholds only the ratio" do
+    deploy =
+      health([window("last 24h", 74, 12, 3, refused_rate(74, "sample 74 below min_sample 200"))])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 74 attempted, of which 12 deferred by a busy box — failure rate UNMEASURED (sample 74 below min_sample 200); 3 of 74 attempted are settled failures"
+
+    refute body =~ "% failed post-door"
+  end
+
+  test "a send that supplied no reading says so — the omission cannot render as a clean fleet" do
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()]))
+
+    assert body =~ "Deploy health: UNMEASURED — this send supplied no deploy-ledger reading."
+    refute body =~ "failed post-door"
+  end
+
+  test "an unreadable ledger renders UNMEASURED with the failure's own words" do
+    deploy = DigestEmail.deploy_health(now: @read_at)
+
+    # No sandbox is checked out in this async case, so the ledger read cannot
+    # succeed — which is precisely the production failure mode being pinned: the
+    # digest still renders, and it renders UNMEASURED rather than reassuring.
+    assert %{unmeasured: true, windows: [], reason: reason} = deploy
+    assert reason =~ "the deploy ledger"
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+    assert body =~ "Deploy health: UNMEASURED — the deploy ledger"
+    refute body =~ "failed post-door"
+  end
+
+  test "the digest never prints a lifetime deploy rate" do
+    deploy =
+      health([
+        window("last 24h", 852, 564, 53, measured_rate(53, 852)),
+        window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156))
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The all-time numerator's honest freeze point is 2026-08-08T14:55:28.776961
+    # at 18,640 — a number that is stale the moment it is written down. Only
+    # windows this send pinned itself may be reported.
+    refute body =~ "lifetime"
+    refute body =~ "all-time"
+    refute body =~ "18,640"
+    refute body =~ "18640"
+
+    # ...and every window it DOES report names both of its own bounds.
+    assert body =~ "2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC"
+  end
+
+  test "the deploy block reaches the actual email struct, not just body/1" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+
+    email =
+      DigestEmail.build(
+        DigestEmail.summary([stale_box()], deploy: deploy),
+        "ops@example.com"
+      )
+
+    assert email.text_body =~ "852 attempted, of which 564 deferred by a busy box"
+  end
+
+  test "an empty fleet still reports deploy health — sites deploy even when no instance is registered" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    body = DigestEmail.body(DigestEmail.summary([], deploy: deploy))
+
+    assert body =~ "No instances are registered yet"
+    assert body =~ "852 attempted, of which 564 deferred"
+  end
+
+  test "MUTATION: the rendered percentage is DERIVED from the reading, not baked" do
+    six = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    sixty = health([window("last 24h", 852, 564, 575, measured_rate(575, 852))])
+
+    six_body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: six))
+    sixty_body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: sixty))
+
+    assert six_body =~ "6.22% failed post-door (53 of 852 attempted)"
+    assert sixty_body =~ "67.49% failed post-door (575 of 852 attempted)"
+
+    # If the block ever stops reading the reading, these two bodies become
+    # identical and this reds.
+    refute six_body == sixty_body
+  end
 end

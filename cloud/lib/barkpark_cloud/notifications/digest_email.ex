@@ -51,17 +51,84 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   builds the `%Swoosh.Email{}` with the same four-line Swoosh pattern
   `Notifications.EventEmail` uses (`new/0 |> to |> from(Mailer.from) |> subject |>
   text_body`) — one platform From, plain text, no HTML polish (YAGNI).
+
+  ## dr-w27-s8 — THE DIGEST THAT ARRIVES NAMES DEPLOY HEALTH
+
+  This email reached a human for the first time in its recorded life at
+  2026-08-09T06:00:00Z (four `notification_deliveries` rows, `event=fleet_digest`,
+  `status=sent`). dr-w19-s5 fixed the ADDRESS and said out loud that it had not
+  fixed the PAYLOAD: the summary above carries RELEASE FRESHNESS ONLY, so the
+  first digest anybody ever received told four people nothing whatsoever about
+  the fleet's deploy failures. `deploy_health/1` is the payload half.
+
+  What the block is allowed to say, and the rules are binding:
+
+    * **DERIVED AT RENDER TIME, NEVER BAKED.** Every number comes from
+      `DeployLedger.census/3` over a window pinned at send time. No constant in
+      this module is a measurement, and no measurement outlives the send that
+      took it.
+    * **EVERY POST-DOOR RATE PRINTS ITS DEFERRED POPULATION BESIDE IT.** A
+      failure percentage over the attempted door is unreadable without the
+      deferral mass inside that door — a box refusing a slot is the fleet
+      working as designed, and the two windows disagree by an order of magnitude
+      about how much of the door it is. So the line is always
+      `<door> attempted, of which <deferred> deferred … — <pct> failed`, and a
+      rate cannot be rendered on its own.
+    * **UNMEASURED RENDERS AS UNMEASURED.** A refused rate (sample below
+      `DeployLedger.min_sample/0`, or a window straddling the deferred-status
+      vocabulary boundary), a window with no rows at all, or a ledger this
+      process could not read, all render the word UNMEASURED with the reason
+      that produced it. Never 0%, never "healthy" — an unmeasured fleet reading
+      as a green one is the exact defect this epic exists to remove.
+    * **NO LIFETIME RATE.** The all-time numerator's honest freeze point is
+      2026-08-08T14:55:28.776961 at 18,640, which is not the instant anybody
+      would read it as, so the digest reports only windows it pins itself.
   """
   import Swoosh.Email
 
+  alias BarkparkCloud.DeployLedger
   alias BarkparkCloud.Mailer
   alias BarkparkCloud.Registry.Barkpark
+
+  # The doors the digest reports, in the order a human reads them: what just
+  # happened, then whether it is normal. TWO windows and not one, because a
+  # single door cannot tell a bad day from a bad week — and on the corpus that
+  # motivated this block they disagreed by an order of magnitude (a 24h door of
+  # 852 against a 7d door of 9,156, with wildly different deferral shares).
+  @deploy_windows [{"last 24h", 86_400}, {"last 7d", 604_800}]
 
   @typedoc """
   One box's freshness rung, decided by the control plane's OWN commit
   measurement rather than the box's release-tag self-report.
   """
   @type freshness :: :current | :behind | :diverged | :ahead | :unmeasured
+
+  @typedoc """
+  One deploy door, as the digest reports it: the attempted population, the
+  deferral mass INSIDE that population, and the post-door failure rate — the
+  three always travelling together so a percentage can never be printed alone.
+  """
+  @type deploy_window :: %{
+          label: String.t(),
+          from: DateTime.t(),
+          to: DateTime.t(),
+          door: non_neg_integer(),
+          deferred: non_neg_integer(),
+          failed: non_neg_integer(),
+          rate: map()
+        }
+
+  @typedoc """
+  The deploy-health reading, or a NAMED refusal to have one. `unmeasured: true`
+  means this send could not read the ledger at all and `windows` is empty; an
+  individual window can also be unmeasured on its own (refused rate, or no rows).
+  """
+  @type deploy_health :: %{
+          windows: [deploy_window()],
+          measured_at: DateTime.t() | nil,
+          unmeasured: boolean(),
+          reason: String.t() | nil
+        }
 
   @typedoc "The pre-computed fleet roll-up the subject + body render from."
   @type summary :: %{
@@ -73,6 +140,7 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
           unmeasured: non_neg_integer(),
           paused: non_neg_integer(),
           latest: String.t() | nil,
+          deploy: deploy_health(),
           instances: [Barkpark.t()]
         }
 
@@ -90,9 +158,16 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
   The five rungs partition the fleet: `current + behind + diverged + ahead +
   unmeasured == total`, always. `paused` is a policy flag that cuts across them.
+
+    * `deploy` — the deploy-health reading (dr-w27-s8), passed IN as `:deploy`
+      rather than measured here so this function stays pure. A caller that
+      supplies nothing gets an UNMEASURED reading with that fact as its reason —
+      the omission surfaces in the delivered email instead of rendering as a
+      fleet with no deploy failures. `Notifications.deliver_fleet_digest/1`
+      supplies one from `deploy_health/1`.
   """
-  @spec summary([Barkpark.t()]) :: summary()
-  def summary(barkparks) when is_list(barkparks) do
+  @spec summary([Barkpark.t()], keyword()) :: summary()
+  def summary(barkparks, opts \\ []) when is_list(barkparks) do
     counts = Enum.frequencies_by(barkparks, &freshness/1)
 
     %{
@@ -104,9 +179,76 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       unmeasured: Map.get(counts, :unmeasured, 0),
       paused: Enum.count(barkparks, & &1.autoupdate_paused),
       latest: latest_release(barkparks),
+      deploy:
+        Keyword.get(
+          opts,
+          :deploy,
+          unmeasured_deploy(nil, "this send supplied no deploy-ledger reading")
+        ),
       instances: barkparks
     }
   end
+
+  @doc """
+  READ the deploy ledger for the windows this digest reports — the one impure
+  call in this module, kept here (rather than in the caller) so the measurement
+  and the sentences that render it live in the same file and cannot drift.
+
+  Both bounds of every window are PINNED at `:now` (defaults to
+  `DateTime.utc_now/0`) and handed to `DeployLedger.census/3` explicitly: a
+  floating "now minus 24h" cannot be compared against itself tomorrow, and two
+  unpinned windows are how a volume collapse gets read as a repair.
+
+  IT CANNOT BREAK THE SEND IT DESCRIBES. A ledger read that raises, or that
+  EXITS (a `DBConnection` timeout is an exit, not an exception, and this control
+  plane has produced them under swap pressure), yields an UNMEASURED reading
+  carrying the failure's own words — the digest still goes out, and it goes out
+  saying it does not know rather than saying nothing is wrong.
+  """
+  @spec deploy_health(keyword()) :: deploy_health()
+  def deploy_health(opts \\ []) do
+    now =
+      opts
+      |> Keyword.get(:now, DateTime.utc_now())
+      |> DateTime.truncate(:second)
+
+    try do
+      %{
+        windows: Enum.map(@deploy_windows, &window_health(&1, now)),
+        measured_at: now,
+        unmeasured: false,
+        reason: nil
+      }
+    rescue
+      e -> unmeasured_deploy(now, "the deploy ledger could not be read: #{Exception.message(e)}")
+    catch
+      :exit, reason ->
+        unmeasured_deploy(now, "the deploy ledger read exited: #{inspect(reason)}")
+    end
+  end
+
+  defp window_health({label, seconds}, now) do
+    from = DateTime.add(now, -seconds, :second)
+
+    # `site_limit: 0` because this block reports the fleet's RATE, never a
+    # per-site league table: the digest is delivered per team, and a named list
+    # of the busiest sites would be the cross-team disclosure the per-team
+    # partition exists to prevent. Counts and percentages name nobody.
+    census = DeployLedger.census(from, now, site_limit: 0)
+
+    %{
+      label: label,
+      from: from,
+      to: now,
+      door: census.volume,
+      deferred: Enum.reduce(census.deferred, 0, &(&1.count + &2)),
+      failed: census.failed,
+      rate: census.failure_rate
+    }
+  end
+
+  defp unmeasured_deploy(measured_at, reason),
+    do: %{windows: [], measured_at: measured_at, unmeasured: true, reason: reason}
 
   @doc """
   The freshness rung of ONE instance — the single decision the counts, the
@@ -153,6 +295,8 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     """
     #{header(s)}
 
+    #{deploy_block(s)}
+
     No instances are registered yet — nothing to report.
 
     #{footer()}
@@ -164,6 +308,8 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
     """
     #{header(s)}
+
+    #{deploy_block(s)}
 
     Instances:
     #{lines}
@@ -221,6 +367,77 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       if(ahead > 0, do: ["#{ahead} ahead of main"], else: []) ++
       ["#{Map.get(s, :unmeasured, 0)} unmeasured", "#{p} paused"]
   end
+
+  # THE DEPLOY-HEALTH BLOCK (dr-w27-s8). Four shapes, and three of them are the
+  # word UNMEASURED — because every way this reading can be absent is a way the
+  # old payload was silently reassuring. A missing `:deploy` key is the fourth
+  # and is treated the same as an explicit refusal: a summary map built without
+  # one has not measured anything, whoever built it.
+  defp deploy_block(%{deploy: %{unmeasured: true, reason: reason}}),
+    do: "Deploy health: UNMEASURED — #{reason}."
+
+  defp deploy_block(%{deploy: %{windows: []}}),
+    do: "Deploy health: UNMEASURED — the ledger returned no windows to report."
+
+  defp deploy_block(%{deploy: %{windows: windows} = d}) do
+    "Deploy health (control-plane deploy ledger, read #{format_ts(d.measured_at)}):\n" <>
+      Enum.map_join(windows, "\n", &deploy_line/1)
+  end
+
+  defp deploy_block(_s),
+    do: "Deploy health: UNMEASURED — this send supplied no deploy-ledger reading."
+
+  # ONE DOOR. The attempted population and the deferral mass inside it are
+  # printed BEFORE the percentage and on the same line, so the rate cannot be
+  # quoted without them: a busy box refusing a slot is the fleet working as
+  # designed, and it was 66% of one of these doors and 6% of the other.
+  defp deploy_line(%{door: 0} = w) do
+    "  #{w.label} (#{span(w)}): UNMEASURED — no deploy rows at all in this window. " <>
+      "A window with nothing in it is not a healthy fleet."
+  end
+
+  defp deploy_line(w) do
+    "  #{w.label} (#{span(w)}): #{number(w.door)} attempted, of which " <>
+      "#{number(w.deferred)} deferred by a busy box — #{rate_clause(w)}."
+  end
+
+  # The rate node's OWN refusal, carried through verbatim. The counts survive a
+  # refusal (they are real rows); it is the ratio that is withheld, exactly as
+  # `DeployLedger.census/3` withholds it one level up.
+  defp rate_clause(%{rate: %{refused: true, reason: reason}} = w) do
+    "failure rate UNMEASURED (#{reason}); #{number(w.failed)} of #{number(w.door)} " <>
+      "attempted are settled failures"
+  end
+
+  defp rate_clause(%{rate: %{pct: pct}} = w) when is_number(pct) do
+    "#{pct}% failed post-door (#{number(w.failed)} of #{number(w.door)} attempted)"
+  end
+
+  # A rate node that is neither refused nor a number is a producer this renderer
+  # does not understand. It renders as UNMEASURED and never as a percentage —
+  # the one direction this block is never allowed to fail in.
+  defp rate_clause(w),
+    do:
+      "failure rate UNMEASURED (the ledger returned no usable rate); " <>
+        "#{number(w.failed)} of #{number(w.door)} attempted are settled failures"
+
+  defp span(%{from: from, to: to}), do: "#{format_ts(from)} to #{format_ts(to)}"
+
+  # Thousands-grouped, because these doors run to five figures and `9156` reads
+  # as a different order of magnitude than `9,156` at a glance.
+  defp number(n) when is_integer(n) and n < 0, do: "-" <> number(-n)
+
+  defp number(n) when is_integer(n) do
+    n
+    |> Integer.to_string()
+    |> String.graphemes()
+    |> Enum.reverse()
+    |> Enum.chunk_every(3)
+    |> Enum.map_join(",", &Enum.join/1)
+    |> String.reverse()
+  end
+
+  defp number(n), do: to_string(n)
 
   defp footer do
     "This is an automated operator digest from Barkpark Cloud."
