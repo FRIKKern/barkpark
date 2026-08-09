@@ -571,9 +571,17 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   defp cohort_clause(%{cohort: cohort, population: 0}, _maturity),
     do: "no #{cohort} rows"
 
-  defp cohort_clause(%{cohort: cohort} = c, maturity) do
-    "#{number(c.covered)} of #{number(c.population)} #{cohort} rows have since been " <>
-      "covered by a later live build, #{number(c.never_covered)} still not after " <>
+  # EVERY COUNT THIS SENTENCE PRINTS IS NAMED IN THE HEAD, so a cohort missing
+  # one of them falls to the refusal clause below instead of raising a KeyError
+  # inside the interpolation. The daily digest is the carrier this epic's
+  # wind-down reading rides on; a shape it cannot read must cost that one clause,
+  # never the whole morning email.
+  defp cohort_clause(
+         %{cohort: cohort, population: population, covered: covered, never_covered: never} = c,
+         maturity
+       ) do
+    "#{number(covered)} of #{number(population)} #{cohort} rows have since been " <>
+      "covered by a later live build, #{number(never)} still not after " <>
       "#{duration(maturity)}" <>
       cohort_tail(c)
   end
@@ -585,7 +593,10 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # could classify is not a healthy one.
   defp cohort_tail(c) do
     parts =
-      [{Map.get(c, :too_young, 0), "too young to judge"}, {Map.get(c, :unreadable, 0), "unreadable"}]
+      [
+        {Map.get(c, :too_young, 0), "too young to judge"},
+        {Map.get(c, :unreadable, 0), "unreadable"}
+      ]
       |> Enum.filter(fn {n, _} -> is_integer(n) and n > 0 end)
       |> Enum.map(fn {n, what} -> "#{number(n)} #{what}" end)
 
