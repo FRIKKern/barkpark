@@ -10009,3 +10009,168 @@ superseded, and **read #11174's test BODY before closing it** — its `empty fle
 sites deploy even when no instance is registered` case is absent REPO-WIDE and is the one genuine unresolved
 loss among the three closes; refresh the reclaim row per D507 rather than filing a third; discard the four
 draft-twin clusters; close `dr-w28-s1` on D495's reading and `dr-w28-s4-followup` on its own 3/3.
+
+### Wave 2026-08-09 (wave 28) — REVIEWED · Paper `deploy-reliability-wave-28-2026-08-09` · grade **A**
+
+**Seven of seven slices built, reviewed, gate-green on their final state, pushed and PR'd. Nothing merged — the
+lead merges.** No slice was deferred to round 2; the file sets were disjoint by owner and all seven dispatched
+in parallel.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The crown records what the BOX served | `dr-w28-s1-crown-records-what-the-box-served` | `…the-sha-the-box-served-0` (unchanged) | [#11203](https://github.com/FRIKKern/barkpark/pull/11203) | check-deployyml-filters + check-deploy-smoke, both OK |
+| A reconciler that can say BEHIND or WRONG | `dr-w28-s2-crown-reconciler-can-say-behind-or-wrong` | `…the-crown-is-b-1` (unchanged) | [#11205](https://github.com/FRIKKern/barkpark/pull/11205) | 41 passed, 0 failed · live rc=1 on today's data |
+| The watch stops dying on its own payload | `dr-w28-s3-watch-stops-dying-on-its-own-payload` | `…stops-dying-on-i-2` (unchanged) | [#11206](https://github.com/FRIKKern/barkpark/pull/11206) | 53 passed, 0 failed (was 35 probes) |
+| The deferral wait becomes a number | `dr-w28-s4-the-deferral-wait-becomes-a-number` | `…an-op-3-r` | [#11207](https://github.com/FRIKKern/barkpark/pull/11207) | 99 tests, 0 failures · go build/vet/test clean |
+| The digest's deploy health is per team | `dr-w28-s5-digest-deploy-health-is-per-team` | `…is-scoped-to--4` (unchanged) | [#11208](https://github.com/FRIKKern/barkpark/pull/11208) | 180 tests, 0 failures |
+| An abandoned publish stamps its own columns | `dr-w28-s6-abandonment-stamps-its-own-columns` | `…the-depth-bo-5-r` | [#11209](https://github.com/FRIKKern/barkpark/pull/11209) | 73 tests, 0 failures |
+| No seal reading from a stale checkout | `dr-w28-s7-no-seal-reading-from-a-stale-checkout` | `…from-a-stale-6-r` | [#11210](https://github.com/FRIKKern/barkpark/pull/11210) | 56 passed, 0 failed (was 52) |
+
+**What landed, against the wish's own verbs.** The wish asked for the failures that are *still silent or still
+mis-reported*, and for the reporting to be made *able to lose*. Wave 28 found four silences and one mis-report,
+and closed all five.
+
+STILL SILENT: (1) `record-delivery` anchored every row on `$GITHUB_SHA` while both deploy scripts pull
+`origin/main`'s TIP — so eight of nine crown rows named a sha the target never served, and `a95bc7ca9`, the
+commit BOTH boxes are serving right now, had **zero rows**. s1 anchors the row on what the box itself reports
+and makes the `/health` disagreement set `delivered=false` instead of nulling one column and shipping the row
+green. (2) Nothing read the Actions API and `platform_deliveries` together, so a gated-off recorder and a run
+that never reached the job were both invisible; s2's reconciler reds on today's real data at **18 of 21
+delivering runs BEHIND** plus the serving-unrecorded `a95bc7ca9`. (3) The deferral was a COUNT with no clock —
+"re-queued, not lost" with no number behind it — so a fleet improving its failure rate by relabelling 409s as
+`deferred` read as a fleet getting better; s4 gives the re-queue a p50/p95/max with its population beside it.
+(4) All seven live abandonments carried NULL `deferral_depth`/`bound`/`cause` and were findable only by a prose
+`LIKE` scan; s6 stamps the three values the call site was already holding.
+
+STILL MIS-REPORTED: s3 is the wave's sharpest finding. The stale-verdict watch had **never once evaluated its
+population** — it handed a ~380 KB payload to jq as one argv word against Linux's `MAX_ARG_STRLEN` (131,072,
+independent of the much larger `ARG_MAX`, which is why the number an author would check says there is room) —
+and the workflow reported the E2BIG as *"this run's credential cannot read the pull-request list"*, which was
+false: the credential had just read 41 PRs. It computed a correct verdict on macOS the whole time, which is how
+it survived review. Both payloads now travel by `--slurpfile`, and the compute fault gets its own exit code, its
+own workflow arm and its own sentence that prints the bytes it DID read.
+
+ABLE TO LOSE: s4 also fixes a D8 INVERSION — `abandoned_class/1`'s `_unnamed` fallthrough answered
+`UNCLASSIFIED`, so a new box code word made the ABANDONED count go DOWN while UNCLASSIFIED went up, and
+"abandonments fell" was a taxonomy gap wearing an improvement's clothes. s5 closes a tenancy leak (a fleet-wide
+deploy total inside a per-team email, reaching two teams that own zero sites) AND deletes a daily false alarm (a
+site-less team was told every morning that "a window with nothing in it is not a healthy fleet"). s7 makes a
+seal reading taken over the wrong tree **unquotable** rather than merely wrong — which is the failure mode that
+produced this wave's own direction quoting `a=FAIL b=FAIL` off a pre-cch-w9 sibling worktree.
+
+**What did NOT land, and must be said plainly.** Nothing is merged, so no AFTER number exists. Every s4 number
+is from constructed fixtures — criterion 8 is stamped an honest MISS, not glossed, and no live p50/p95/max is
+quoted anywhere in that slice's code, tests or evidence. s2's CI read path (SSH + `WORKER_TOKEN` + the postgres
+fallback) has **never executed anywhere**; its live red came through the operator PAT. s1 was proved entirely
+offline — nothing exercised the real Actions expression context or a real `/tmp/pd-jobs.json`. s6 writes columns
+**no consumer reads yet**, deliberately, and nobody backfills the seven existing NULL rows. s7's runner is an
+affordance, not a fence: anyone can still invoke the predicate directly and quote the result.
+
+**Review fixes made in place** (three commits on `-r` branches):
+1. **s4** — the merge blocker the builder correctly predicted and was fenced out of fixing.
+   `payload_key_set_census_test.exs` red two ways on `deferral_wait` (*emitted and decoded by NOBODY*, plus the
+   anti-vacuity floor). The reviewer landed the BETTER half of the filed fix rather than an allowlist row:
+   `internal/cloudclient` now DECODES it (`DeployDeferralWait` + three companions, every optional field a
+   pointer so an older control plane's absence never renders as zero seconds). A wait number no reader decodes
+   is a number nobody reads — the epic's own disease. Both floors re-measured by the file's documented
+   999-technique to 142 / 255, never summed.
+2. **s6** — `fail/3`'s new optional map was merged OVER the `status`/`failure_reason`/`detail` the function
+   exists to write, so a caller passing a stray `:status` key could turn an abandonment into a different row
+   than the one it just announced. Reversed: the sentence wins the merge, structure is additive by construction.
+3. **s7** — closed the slice's own self-named sharpest blind spot. `tok()` matches field NAMES and both post-run
+   refusals are guarded by `[ -n … ]`, so renaming `head=` or `b-unavailable=` in the fenced predicate would
+   make the runner silently stop checking and VOUCH for a tree it never verified — a fail-OPEN that every
+   existing probe missed, since all of them drive a stand-in predicate. Four probes now bind the parser to
+   `origin/main`'s REAL emitter, asserted on a `VERDICT-TOKEN`-emitting line (not file-wide, which the
+   surrounding prose would have satisfied), with a disarm proving the greps are load-bearing. D402 stays
+   byte-clean.
+
+**HIGH-FLIP-RISK, re-derived independently.** s5's tenancy judgment was re-derived from the route tier rather
+than from the builder's reasoning: `/v1/deploy-ledger/census` is already scoped to the caller's own team sites,
+so a fleet-wide total in a per-team digest hands teams an aggregate their own API refuses them, and for the two
+zero-site teams the entire number is other teams' activity. **The reviewer AGREES.** The load-bearing test was
+mutation-proved independently — deleting `site_ids:` reds 2/32 with the platform total (`9 attempted` vs the
+scoped `7 attempted`). s1's sha semantics were likewise re-derived: the reviewer ACCEPTS the builder's deviation
+from brief item 3 (the range ENDS at the served sha rather than overwriting every carried row's `sha`), because
+the literal reading collapses N carried rows onto one identity `(sha, delivering_run_id, target)` and destroys
+them. **A genuinely independent second reviewer on s5 is still owed before merge** — one reviewer agreeing is
+not two, and this workflow spawns one.
+
+**Ledger audit: clean.** All seven slice tasks claimed, stamped as the builders worked, and left `in_progress`
+with only merge-gated criteria open for the lead — no false-done anywhere, and s4's criterion 8 honestly
+`--miss`ed. No task outside this wave was touched. The reviewer stamped its own fixes as `review_note` fields,
+stamped and pulsed `dr-w28-s4-followup-payload-key-census-deferral-wait` (all three criteria met, left
+`in_progress` because the fix rides an unmerged branch), and filed two new children of `task-fb4fb869490b4213`:
+`dr-w28-rv-abandonment-predicate-replaces-the-prose-regex` (make s6's columns actually replace the prose regex,
+and DECIDE the backfill of the seven NULL rows) and
+`dr-w28-rv-crown-reconcile-ci-read-path-has-never-executed` (prove or delete the SQL fallback on the first
+scheduled run; decide whether BEHIND needs a start-date floor so it can converge post-s1).
+
+**NEXT WAVE.** Merge round 1 in this order — s3 and s7 are free (scripts only, no product coupling); s2 after
+s1, because s2's BEHIND rate only converges once s1's recorder writes rows the box agrees with; s6 before or
+with the reader task, since it writes the columns that task reads; s4 and s5 are independent, and s5's merge
+must close #11174 as superseded. Then the wave's own theme repeats one level up: **wave 28 built four new
+instruments and merged none of them, so the epic's reporting surface is now wider than its proven surface.**
+The next wave should be a PROVING wave, not a building one — read s1's first post-merge rows back, watch s2's
+first scheduled run name which reader answered, read s4's census off the live ledger with a timestamp, and read
+s5's next 06:00Z body out of `notification_deliveries`. Every one of those is a merge-gated criterion already
+written down and waiting.
+
+### Wave 2026-08-09 (wave 29) — REVIEWED · Paper `deploy-reliability-wave-29-2026-08-09` · grade **A**
+
+**Eight of eight slices built, reviewed, gate-green on their final state, pushed and PR'd. Nothing merged — the
+lead merges.** No slice was deferred to round 2; the eight file sets were disjoint and all eight dispatched in
+parallel. This was the PROVING wave wave 28 asked for, and it found that three of the epic's own instruments
+were mis-reporting: the reconciler was accusing a correct row, the watch's only green in its life was blind,
+and the seal runner refused every perfect tree it was ever pointed at.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The crown's reconciler stops manufacturing a WRONG | `dr-w29-s1-crown-reconciler-stops-manufacturing-a-wrong` | `…stops-manufacturi-0` (unchanged) | [#11252](https://github.com/FRIKKern/barkpark/pull/11252) | 63 passed, 0 failed · live rc 1→0 |
+| The deferral wait reaches a human on `bp cloud deployments` | `dr-w29-s2-deferral-wait-reaches-a-human-on-the-census` | `…a-human-on-bp--1` (unchanged) | [#11253](https://github.com/FRIKKern/barkpark/pull/11253) | go build/vet/test green · gofmt clean |
+| The digest carries the wait, and the law gets a guard | `dr-w29-s3-digest-carries-the-wait-and-the-law-gets-a-guard` | `…sentence-carries-the-2` (unchanged) | [#11254](https://github.com/FRIKKern/barkpark/pull/11254) | 116 tests, 0 failures (baseline 108) |
+| The daily digest stops skipping days | `dr-w29-s4-daily-digest-stops-skipping-days` | `…silently-skipping-3` (unchanged) | [#11255](https://github.com/FRIKKern/barkpark/pull/11255) | 10 tests, 0 failures |
+| A blind watch run stops reporting green | `dr-w29-s5-blind-watch-run-stops-reporting-green` | `…that-classified-noth-4` (unchanged) | [#11256](https://github.com/FRIKKern/barkpark/pull/11256) | 66 passed, 0 failed (main 53) |
+| The seal runner stops refusing a perfect tree | `dr-w29-s6-seal-runner-stops-refusing-a-perfect-tree` | `…refusing-a-perfect-5` (unchanged) | [#11257](https://github.com/FRIKKern/barkpark/pull/11257) | 73 passed, 0 failed |
+| Abandonment reaches the machine surface | `dr-w29-s7-abandonment-reaches-the-machine-surface` | `…depth-bound-and-c-6-r` | [#11259](https://github.com/FRIKKern/barkpark/pull/11259) | go build/vet/test green · gofmt clean |
+| Main's own honesty gate goes green | `dr-w29-s8-mains-honesty-gate-goes-green` | `…honesty-gate-goes-green-7` (unchanged) | [#11270](https://github.com/FRIKKern/barkpark/pull/11270) | 177 passed, 0 failed · budgets PASS · format clean |
+
+**THE ONE REVIEWER FIX, and it was the wave's high-flip-risk call.** s7's builder ranked "the column and the
+prose disagree by one on an abandoned row" as their top risk and could not settle it without leaving their file
+set. The reviewer settled it in the producer rather than by re-reading the reasoning: `deploy.ex`'s abandonment
+arm is `fail(ctx, abandonment_reason(reason, prior + 1, cause))` and `fail/2` writes only `status` /
+`failure_reason` / `detail` — the `deferral_depth` / `deferral_bound` / `deferral_cause` triple is written on
+the DEFERRED arm alone. **On `main` today NO abandoned row has ever carried those columns.** PR #11209
+(`dr-w28-s6`, still open) is what starts writing them, with `deferral_depth: prior + 1` — the same number the
+sentence interpolates, pinned there by that PR's own `assert abandoned.failure_reason =~ "refused
+#{abandoned.deferral_depth} rebuilds in a row"`. Two consequences, both now in comments beside the code
+(`be4ce8def`): the off-by-one CANNOT occur, and `abandonment_bound` is unreachable until #11209 merges. **Merge
+#11209 before or with #11259.**
+
+**A LOG ENTRY THIS PR WOULD HAVE DROPPED.** The wave-29 charter PR's Decide phase rewrote the file's tail and
+deleted wave 28's REVIEWED entry wholesale. The reviewer restored it verbatim from `origin/main` in the same
+commit as this entry. The mirror of `merging-charter-pr-orphans-wave-log`: a charter PR can also orphan the
+PREVIOUS wave's log by overwriting the region it lives in. **Every future Decide phase must append to the tail,
+never rewrite it.**
+
+**LEDGER.** All eight slice tasks are honestly in_progress with N−1/N criteria stamped and evidence, the
+merge-gated criterion left open for the lead, and now-lines carrying real branch/commit/gate values as the
+builders worked. All four builder-filed follow-ups exist, published, parented to the epic
+(`dr-w29-s1-followup-run-id-alibi-is-self-reported`, `dr-push-delivery-worker-rolling-unique-window`,
+`dr-transport-silence-still-exits-zero`, `dr-seal-run-harness-runs-in-no-ci`). The reviewer filed one more that
+s8's builder named in their own review and correctly refused to build:
+`dr-merge-gates-roster-prose-is-gated-by-nothing` (§21 clause 2 asserts only `>= 4 rows`, so the sentence it
+just repaired can rot the same way). No ledger lie was found; the only ledger write was the PR/verdict pulse on
+each of the eight.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** Merge, then READ BACK — the same instruction wave 28 gave and this wave
+proved the value of. Merge order matters exactly once: **#11209 before #11259**. Then the merge-gated criteria
+across sixteen open slice tasks (waves 28 and 29) are the next wave's whole survey: the reconciler's first
+scheduled run after #11252, the 06:00Z tick after #11255 that must produce a digest on a day the old code would
+have eaten, `bp cloud deployments` read against the live control plane after #11253, and the watch's next run
+after #11256 which should now be able to report a 5. Three named residues remain unbuilt and are the honest
+candidates for slices: rc=2 is overloaded three ways in `stale-verdict-watch.sh` and a TRANSPORT SILENCE still
+exits green through the workflow (`dr-transport-silence-still-exits-zero` — structurally the same defect this
+wave just fixed one layer up, and worse, because there the payload was never read at all); the run-id alibi is
+self-reported and trades a false-positive-prone axis for a false-negative-prone one; and `seal-run.test.sh`
+runs in NO CI at all.
