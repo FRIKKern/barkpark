@@ -1255,3 +1255,230 @@ func TestCloudDeploymentsWithoutDeferralWaitSaysNotMeasured(t *testing.T) {
 	}
 	t.Logf("`bp cloud deployments` against a control plane older than #11207:\n%s", stdout)
 }
+
+// ─── A REFUSED SHARE NAMES THE WINDOW THAT WOULD ANSWER (dr-w30-s5) ──────────
+//
+// Measured against the live control plane on 2026-08-09: over the 7-day default
+// window all 14 failure-class shares refuse (the window STRADDLES the
+// deferred-settle boundary), while `--from 2026-08-05T21:13:50Z` answers every
+// one of them. The render had no way to say so, and an em-dash cell is a dead
+// end.
+//
+// The fixtures below are the THREE envelope shapes that decide what may be
+// said: a straddle refusal (the reason itself names the instant), a sample
+// refusal beside a boundary list (no --from can help, and the render must not
+// pretend otherwise), and an envelope with NO boundaries at all (nothing may be
+// invented). EVERY instant asserted below is supplied by the fixture — a
+// hardcoded boundary in the renderer fails the third test by appearing where
+// the envelope never sent it.
+
+// censusStraddleEnvelope: shares refused because the window straddles the
+// vocabulary boundary — the control plane's reason NAMES the instant, and the
+// `boundaries` list carries its derivation.
+const censusStraddleEnvelope = `{
+  "window": {"from": "2026-08-02T00:00:00Z", "to": "2026-08-09T00:00:00Z"},
+  "volume": 8678,
+  "failed": 3444,
+  "failure_rate": {"sample": 8678, "pct": null, "numerator": 3444, "min_sample": 200, "refused": true,
+    "reason": "the window STRADDLES the deferred settle status boundary at 2026-08-05T21:13:50Z (method: schema_commit, source: #9615) — a blend of two taxonomies, not a measurement"},
+  "classes": [
+    {"class": "DOC_ID_EMPTY", "label": "the cause went unrecorded", "count": 1149,
+     "share": {"sample": 3444, "pct": null, "numerator": 1149, "min_sample": 200, "refused": true,
+       "reason": "the window STRADDLES the deferred settle status boundary at 2026-08-05T21:13:50Z (method: schema_commit, source: #9615) — a blend of two taxonomies, not a measurement"}},
+    {"class": "BOX_500", "label": "the box errored on the deploy (HTTP 500)", "count": 399,
+     "share": {"sample": 3444, "pct": null, "numerator": 399, "min_sample": 200, "refused": true,
+       "reason": "the window STRADDLES the deferred settle status boundary at 2026-08-05T21:13:50Z (method: schema_commit, source: #9615) — a blend of two taxonomies, not a measurement"}}
+  ],
+  "deferred": [
+    {"class": "BOX_AT_CAPACITY_DEFERRED", "label": "the box was at its cap; re-queued", "count": 2539,
+     "share": {"sample": 8678, "pct": 29.26, "numerator": 2539, "min_sample": 200, "refused": false, "reason": null}}
+  ],
+  "not_attempted": [],
+  "sites": [],
+  "boundaries": [
+    {"subject": "deferred settle status", "instant": "2026-08-05T21:13:50Z", "method": "schema_commit", "source": "#9615",
+     "voids": "before this instant no row could settle deferred"},
+    {"subject": "deferred settle status", "instant": "2026-08-05T21:27:11.413210Z", "method": "first_observed_row",
+     "source": "min(inserted_at) where status = deferred", "voids": "corroborating twin"}
+  ],
+  "min_sample": 200
+}`
+
+// censusSampleRefusalEnvelope: the shares refuse for SAMPLE, on a window that
+// already sits wholly AFTER the boundary. Narrowing can only shrink the sample,
+// so there is no `--from` to suggest and the render must say that outright.
+const censusSampleRefusalEnvelope = `{
+  "window": {"from": "2026-08-08T00:00:00Z", "to": "2026-08-09T00:00:00Z"},
+  "volume": 74,
+  "failed": 31,
+  "failure_rate": {"sample": 74, "pct": null, "numerator": 31, "min_sample": 200, "refused": true,
+    "reason": "sample 74 below min_sample 200"},
+  "classes": [
+    {"class": "BOX_500", "label": "the box errored on the deploy (HTTP 500)", "count": 20,
+     "share": {"sample": 31, "pct": null, "numerator": 20, "min_sample": 200, "refused": true,
+       "reason": "sample 31 below min_sample 200"}}
+  ],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "boundaries": [
+    {"subject": "deferred settle status", "instant": "2026-08-05T21:13:50Z", "method": "schema_commit", "source": "#9615",
+     "voids": "before this instant no row could settle deferred"}
+  ],
+  "min_sample": 200
+}`
+
+// censusNoBoundaryEnvelope: a refused share on a control plane that names NO
+// boundary at all. Every fact a suggestion needs is missing, so the only honest
+// render is the refusal to guess one.
+const censusNoBoundaryEnvelope = `{
+  "window": {"from": "2026-08-08T00:00:00Z", "to": "2026-08-09T00:00:00Z"},
+  "volume": 74,
+  "failed": 31,
+  "failure_rate": {"sample": 74, "pct": null, "numerator": 31, "min_sample": 200, "refused": true,
+    "reason": "sample 74 below min_sample 200"},
+  "classes": [
+    {"class": "BOX_500", "label": "the box errored on the deploy (HTTP 500)", "count": 20,
+     "share": {"sample": 31, "pct": null, "numerator": 20, "min_sample": 200, "refused": true,
+       "reason": "sample 31 below min_sample 200"}}
+  ],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsRefusedShareNamesTheWindow: a straddle-refused share
+// prints the control plane's reason WITH its denominator, and the `--from` that
+// would keep the window inside one vocabulary — read out of the refusal the
+// fixture supplied, never hardcoded.
+func TestCloudDeploymentsRefusedShareNamesTheWindow(t *testing.T) {
+	newCensusServer(t, 200, censusStraddleEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+
+	note := censusLineContaining(t, stdout, "NO SHARE for")
+	// The population rides the refusal line: 2 of 2 class rows, denominated on
+	// the 3444 settled failures — never a bare "refused".
+	for _, want := range []string{"2 of 2 rows", "n=3444", "STRADDLES"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("refusal note %q missing %q", note, want)
+		}
+	}
+
+	remedy := censusLineContaining(t, stdout, "A WINDOW THAT COULD ANSWER")
+	for _, want := range []string{
+		"--from 2026-08-05T21:13:50Z",
+		"--to 2026-08-09T00:00:00Z",
+		"schema_commit",
+		"#9615",
+		"min_sample 200",
+	} {
+		if !strings.Contains(remedy, want) {
+			t.Fatalf("suggested window %q missing %q — the boundary, its provenance and the caveat all come off the envelope", remedy, want)
+		}
+	}
+
+	// THE DEFERRAL SHARES ARE A SEPARATE RENDER WITH A SEPARATE DENOMINATOR, and
+	// they did NOT refuse here — so no note may attach to them. A merged note
+	// would put a 3444-denominated refusal under rows denominated on 8678.
+	deferrals := stdout[strings.Index(stdout, "deferrals (in the volume"):]
+	if strings.Contains(deferrals, "NO SHARE for") {
+		t.Fatalf("a section whose shares all answered must carry no refusal note:\n%s", deferrals)
+	}
+	if !strings.Contains(deferrals, "29.3%") {
+		t.Fatalf("the deferral share must still render its own percentage:\n%s", deferrals)
+	}
+}
+
+// TestCloudDeploymentsSampleRefusalOffersNoImpossibleWindow: a share refused for
+// SAMPLE gets the boundary and the truth — no narrower `--from` can raise a
+// sample — rather than a trim that would make the refusal worse.
+func TestCloudDeploymentsSampleRefusalOffersNoImpossibleWindow(t *testing.T) {
+	newCensusServer(t, 200, censusSampleRefusalEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-08T00:00:00Z", "--to", "2026-08-09T00:00:00Z")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	note := censusLineContaining(t, stdout, "NO SHARE for")
+	if !strings.Contains(note, "sample 31 below min_sample 200") || !strings.Contains(note, "n=31") {
+		t.Fatalf("the sample refusal must be quoted with its denominator: %q", note)
+	}
+	remedy := censusLineContaining(t, stdout, "NO --from CAN UN-REFUSE THIS")
+	for _, want := range []string{"2026-08-05T21:13:50Z", "wholly after", "schema_commit"} {
+		if !strings.Contains(remedy, want) {
+			t.Fatalf("sample-refusal remedy %q missing %q", remedy, want)
+		}
+	}
+	if strings.Contains(stdout, "A WINDOW THAT COULD ANSWER") {
+		t.Fatalf("a sample refusal must NOT be offered a narrower window — that makes it worse:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsRefusedShareInventsNoWindow: with no `boundaries` in the
+// envelope there is nothing to build a suggestion on, and the render says so
+// instead of guessing an instant.
+func TestCloudDeploymentsRefusedShareInventsNoWindow(t *testing.T) {
+	newCensusServer(t, 200, censusNoBoundaryEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-08T00:00:00Z", "--to", "2026-08-09T00:00:00Z")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "NO WINDOW SUGGESTION") || !strings.Contains(stdout, "Nothing was invented") {
+		t.Fatalf("an envelope with no boundary must say so, not guess:\n%s", stdout)
+	}
+	// The one thing that must NEVER appear: an instant this control plane did
+	// not send. A hardcoded boundary would surface exactly here.
+	if strings.Contains(stdout, "2026-08-05T21:13:50Z") {
+		t.Fatalf("an instant the envelope never carried was rendered — the boundary is hardcoded somewhere:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsAnsweredSharesCarryNoNote: shares that produced a
+// percentage get no refusal note at all — this block is a note about refusals,
+// not a caption on every table.
+func TestCloudDeploymentsAnsweredSharesCarryNoNote(t *testing.T) {
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, _, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, unwanted := range []string{"NO SHARE for", "A WINDOW THAT COULD ANSWER", "NO WINDOW SUGGESTION"} {
+		if strings.Contains(stdout, unwanted) {
+			t.Fatalf("a census whose shares all answered printed %q:\n%s", unwanted, stdout)
+		}
+	}
+}
+
+// TestCloudDeploymentsForbiddenGetsNoWindowSuggestion: the CREDENTIAL refusal
+// keeps its own wording and acquires NO window suggestion — no window fixes a
+// token that lacks ability "read", and offering one would send the operator to
+// re-run a command that cannot succeed.
+func TestCloudDeploymentsForbiddenGetsNoWindowSuggestion(t *testing.T) {
+	newCensusServer(t, 403, `{"error":"forbidden","scope":"team","required":"read"}`)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	all := stdout + stderr
+	if code != exitAuth {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitAuth, all)
+	}
+	if !strings.Contains(all, "403 forbidden") || !strings.Contains(all, `ability "read"`) {
+		t.Fatalf("the credential refusal lost its own wording:\n%s", all)
+	}
+	for _, unwanted := range []string{"A WINDOW THAT COULD ANSWER", "NO --from CAN UN-REFUSE", "NO WINDOW SUGGESTION"} {
+		if strings.Contains(all, unwanted) {
+			t.Fatalf("a 403 acquired a window suggestion (%q) — no window fixes a credential:\n%s", unwanted, all)
+		}
+	}
+}
