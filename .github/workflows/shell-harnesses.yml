@@ -191,6 +191,7 @@ concurrency:
 jobs:
   doctor-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -205,6 +206,7 @@ jobs:
 
   merge-verb-table:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: bp-merge.sh syntax check
@@ -219,6 +221,7 @@ jobs:
   release-scan-verdict:
     name: release-scan.sh CI-verdict derivation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -239,6 +242,7 @@ jobs:
   zero-criteria-census:
     name: epic-zero-criteria-census.sh self-test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: python3 is present (the classifier is python3; absence would be exit 2)
@@ -266,6 +270,7 @@ jobs:
   webhook-fanout-guard:
     name: webhook-fanout-watch.sh mutation matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: jq is present (the row parser is jq; absence would be exit 3)
@@ -303,6 +308,7 @@ jobs:
   seal-run-guard:
     name: seal-run.sh probe matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         # FULL checkout, not a sparse one: with only scripts/ present the harness
@@ -334,6 +340,7 @@ jobs:
   registration-sample-bar:
     name: registration-sample.sh mutation matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: registration-sample.sh syntax check
@@ -353,6 +360,7 @@ jobs:
   console-path-ratchet:
     name: console-path-escape-check.sh classification matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: console-path-escape-check.sh syntax check
@@ -368,6 +376,7 @@ jobs:
   pds-harnesses:
     name: PDS census / parity / scratch-target harnesses
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: jq is present (pds-record-parity.test.sh exits 99 without it)
@@ -389,6 +398,7 @@ jobs:
   ci-failure-issue-filer:
     name: file-ci-failure-issue.sh behaviour matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: file-ci-failure-issue.sh syntax check
@@ -399,6 +409,7 @@ jobs:
   distribution-harnesses:
     name: install-cli / fetch-prebuilt / site-runtime-install harnesses
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: install-cli.sh syntax check
@@ -419,6 +430,7 @@ jobs:
   tooling-harnesses:
     name: reland-check / fleet-run-verdict / paper-reader-audit harnesses
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: python3 is present (reland_check.py is the classifier)
@@ -445,6 +457,7 @@ jobs:
   launcher-boot-selftest:
     name: bin/barkpark up/stop differential selftest
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
