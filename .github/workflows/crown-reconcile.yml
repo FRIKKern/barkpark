@@ -127,9 +127,18 @@ jobs:
 
       # The scream. file-ci-failure-issue.sh exits 1 when the alert was NOT
       # delivered, so a failure to page is itself a failure.
+      #
+      # THE VARIABLE NAME IS LOAD-BEARING. file-ci-failure-issue.sh reads
+      # GITHUB_TOKEN, not GH_TOKEN. This step shipped with only GH_TOKEN set, so
+      # the FIRST production run — 2026-08-09, run 31311406793 — died with
+      # "GITHUB_TOKEN is empty … the failure that triggered this alert is
+      # UNREPORTED". The reconciler screamed and nothing heard it. Every other
+      # caller in this repository (deploy.yml ×2, paper-readers, renew-mail-cert,
+      # codebase-intel) sets GITHUB_TOKEN; this one is now the same shape.
       - name: File the failure to a human
         if: failure() && github.event_name != 'pull_request'
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           CI_FAILURE_KEY: crown-reconcile
           CI_FAILURE_DETAIL: |

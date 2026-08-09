@@ -270,6 +270,33 @@ if grep -q "if: github.event_name != 'pull_request'" "$WF"; then ok "the product
 # absent, and a bare grep would red on the explanation.
 if grep -qE '^[[:space:]]*continue-on-error:' "$WF"; then bad "continue-on-error is present — this scream can be laundered to success"; else ok "no continue-on-error key anywhere"; fi
 if grep -q "file-ci-failure-issue.sh" "$WF"; then ok "it screams through scripts/file-ci-failure-issue.sh"; else bad "nothing files an issue when this reds"; fi
+
+# A scream that cannot be HEARD is the defect this section was already one
+# assertion short of catching. The first production run, 31311406793, reached
+# the scream step and died with "GITHUB_TOKEN is empty" — the step set GH_TOKEN,
+# and file-ci-failure-issue.sh reads GITHUB_TOKEN. Every other assertion above
+# was green.
+#
+# DERIVED, NOT QUOTED: the variable name is read out of the scream script itself,
+# so renaming it there reds here instead of rotting into a stale literal. If the
+# derivation stops working, that is a FAILURE — a pin that silently becomes an
+# empty string would pass `grep ""` against anything.
+SCREAM="$REPO_ROOT/scripts/file-ci-failure-issue.sh"
+if [ -f "$SCREAM" ]; then
+  SCREAM_TOKEN_VAR="$(sed -n 's/^token="\${\([A-Z_][A-Z_0-9]*\):-}".*/\1/p' "$SCREAM" | head -1)"
+  if [ -n "$SCREAM_TOKEN_VAR" ]; then
+    ok "the scream's token variable is derivable from its own source ($SCREAM_TOKEN_VAR)"
+    if grep -qE "^[[:space:]]*${SCREAM_TOKEN_VAR}:[[:space:]]*\\\$\{\{" "$WF"; then
+      ok "the scream step sets $SCREAM_TOKEN_VAR — the alert can actually be delivered"
+    else
+      bad "$WF never sets $SCREAM_TOKEN_VAR, so file-ci-failure-issue.sh will die 'empty' and the failure goes UNREPORTED"
+    fi
+  else
+    bad "could not derive the token variable from $SCREAM — this assertion would be vacuous, so it fails instead"
+  fi
+else
+  bad "missing $SCREAM — the scream step invokes a script that is not there"
+fi
 for n in 0 1 2 3; do
   if grep -q "^            $n)" "$WF"; then ok "the case arm for rc $n exists"; else bad "rc $n has no case arm of its own"; fi
 done
