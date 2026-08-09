@@ -970,6 +970,122 @@ func TestRunCloudSiteDeployCancelled(t *testing.T) {
 	}
 }
 
+// TestRunCloudSiteDeployDeferredStopsPollingAndNamesTheRefusal is the wave-32 cure
+// for the MAJORITY outcome (deploy-reliability charter D543). `deferred` is 73.7%
+// of settled deploy attempts (D209) and was terminal server-side all along
+// (registry/deployment.ex maps it to []), but it was missing from
+// cloudclient.SiteDeploymentTerminal — so with follow ON BY DEFAULT this exact
+// fixture used to burn all 300 polls (300 × 2s ≈ 10 min, one GET every 2s against
+// the very box that had just said it was at capacity) and then print
+// "… deploy in progress (stage BUILD)" over a row the control plane had already
+// settled. The refusal reason was on the wire from the FIRST poll and never shown.
+//
+// Two things are pinned here and they fail for different reasons: the poll count
+// (the ten minutes) and the sentence (the lie).
+func TestRunCloudSiteDeployDeferredStopsPollingAndNamesTheRefusal(t *testing.T) {
+	const deferredReason = "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
+
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[{"name":"PLAN","status":"done"}]}}`}
+	// The FIRST poll already settles deferred — nothing after it can ever change.
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","failure_reason":` + mustJSONString(deferredReason) + `,"failure_class":"BOX_AT_CAPACITY_DEFERRED","stages":[{"name":"PLAN","status":"done"}]}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	// THE TEN MINUTES. One poll, not siteDeployPollMax of them.
+	if cp.pollHits != 1 {
+		// siteDeployPoll is forced to 0 in tests, so the budget is quoted from the
+		// PRODUCTION interval (2s) rather than the harness's.
+		t.Fatalf("a deferred deploy polled %d times, want exactly 1 — deferred is terminal server-side, so anything above 1 is the CLI re-asking a row that can never change, and %d of them is the full siteDeployPollMax(%d)×2s ≈ 10 minute spin an operator sat through",
+			cp.pollHits, siteDeployPollMax, siteDeployPollMax)
+	}
+	// THE LIE. "in progress" is the sentence this test exists to keep out.
+	if strings.Contains(stdout, "in progress") {
+		t.Fatalf("a settled deferred row must never be narrated as in progress:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "site live") {
+		t.Fatalf("a deferred deploy never went live:\n%s", stdout)
+	}
+	// THE TRUTH, all three parts: what happened, how deep the chain is (through
+	// siteDeferralLine, so the depth arrives with its own honest gloss rather than
+	// as a bare countdown), and that the rebuild is already queued — an operator
+	// who re-publishes by hand here just deepens the chain.
+	for _, want := range []string{
+		"deferred",
+		"the box refused this round",
+		"visitors still see the previous build",
+		"refusal 3 of 12 consecutive",
+		"any successful deploy resets it to 0",
+		"zero-progress guard, not a countdown",
+		"already queued",
+		"do NOT re-publish",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the deferred verdict must say %q:\n%s\nstderr:%s", want, stdout, stderr)
+		}
+	}
+	// A deferral is not a drop, and the failure vocabulary must not leak onto it.
+	if strings.Contains(stdout, "failed") || strings.Contains(stderr, "failed") {
+		t.Fatalf("a deferral is a refusal, not a failure:\n%s\n%s", stdout, stderr)
+	}
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0 (charter D543)\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+}
+
+// TestRunCloudSiteDeployDeferredKeepsExitZero pins charter D543 — the exit code is
+// a DECISION, not an accident, and this test is what stops a future wave flipping
+// it on the reasoning that "it didn't go live". It didn't, and it also lost
+// nothing: wave 32 measured content coverage at 100.00% on settled deferrals
+// because the re-queued rebuild carries the same content and lands. Since deferral
+// is ~74% of deploy invocations, a non-zero exit here would break every
+// `deploy && notify` chain and every `set -e` script for an outcome that costs a
+// wait — cry-wolf on the operator surface, which is the failure this epic exists
+// to prevent. Callers that genuinely need liveness get an opt-in --wait-for-live
+// (dr-w32-bl-deploy-wait-for-live-flag), not a redefinition of this code.
+func TestRunCloudSiteDeployDeferredKeepsExitZero(t *testing.T) {
+	deferred := cloudclient.SiteDeployment{
+		ID: "dep-1", Status: "deferred", Stage: "BUILD",
+		FailureReason: "box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued",
+	}
+	if got := siteDeployExit(deferred); got != exitOK {
+		t.Fatalf("siteDeployExit(deferred) = %d, want %d — D543 decided deferred keeps exit 0; flipping it breaks every `deploy && notify` chain for ~74%% of invocations, and the honest fix is the SENTENCE, not the code", got, exitOK)
+	}
+	// The neighbours it must NOT be confused with: both are drops, both stay
+	// non-zero, so the ruling above is narrow rather than a blanket exit 0.
+	for _, drop := range []string{"failed", "cancelled"} {
+		if got := siteDeployExit(cloudclient.SiteDeployment{ID: "dep-2", Status: drop}); got != exitGeneric {
+			t.Fatalf("siteDeployExit(%q) = %d, want %d — a dropped deploy must never exit 0", drop, got, exitGeneric)
+		}
+	}
+
+	// And the machine lane agrees end to end: -o json emits the envelope carrying
+	// the deferred status and still exits 0, so a script reads the OUTCOME from the
+	// payload rather than inferring a failure from $?.
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","stages":[]}}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("deferred -o json exit=%d want %d", code, exitOK)
+	}
+	if cp.pollHits != 1 {
+		t.Fatalf("-o json polled %d times, want 1 — the machine lane must collapse too", cp.pollHits)
+	}
+	var env struct {
+		Deployment struct {
+			Status string `json:"status"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("deploy json not parseable: %v\n%s", err, stdout)
+	}
+	if env.Deployment.Status != "deferred" {
+		t.Fatalf("the envelope must carry the deferred status (that is how a script learns the outcome it cannot read from $?): %+v\n%s", env.Deployment, stdout)
+	}
+}
+
 // TestRunCloudSiteDeployCancelledJSON proves the machine path agrees with the human
 // one: -o json still emits the envelope, and the exit code is non-zero, so a script
 // that checks $? never treats a cancelled deploy as a shipped one.

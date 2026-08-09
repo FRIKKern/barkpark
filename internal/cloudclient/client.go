@@ -1665,15 +1665,30 @@ type SiteDeploymentPage struct {
 }
 
 // SiteDeploymentTerminal reports whether a deploy status is final. The status enum
-// has SIX values — queued, building, pushing, live, failed, cancelled — and exactly
-// three of them are the end of the road: live (success), failed (the build died),
-// and cancelled (someone stopped it). The CLI's stream loop polls until this is
-// true, so a terminal status missing from this set is not a cosmetic bug: the loop
-// would poll its full budget (300 × 2s ≈ 10 min) and then report the deploy as
-// still in progress. Both `cancelled` and `canceled` spellings count.
+// has SEVEN values — queued, building, pushing, live, failed, cancelled, deferred —
+// and exactly four of them are the end of the road: live (success), failed (the
+// build died), cancelled (someone stopped it), and deferred (the box refused the
+// round at its build cap). The CLI's stream loop polls until this is true, so a
+// terminal status missing from this set is not a cosmetic bug: the loop would poll
+// its full budget (300 × 2s ≈ 10 min) and then report the deploy as still in
+// progress. Both `cancelled` and `canceled` spellings count.
+//
+// DEFERRED IS TERMINAL, and the server is the authority on that: the transition
+// table in cloud/lib/barkpark_cloud/registry/deployment.ex maps "deferred" => [],
+// so a deferred row can never become anything else. It was absent from this set
+// until deploy-reliability wave 32, and since deferral is 73.7% of settled deploy
+// attempts (charter D209) the omission meant the MAJORITY outcome of
+// `bp cloud site deploy` spun the full ten minutes and then printed
+// "deploy in progress" over a settled refusal.
+//
+// TERMINAL IS NOT THE SAME QUESTION AS "HAS THE CONTENT REACHED THE WEB". A
+// deferred ROW is settled while the PUBLISH is not — the control plane re-queues a
+// rebuild carrying the same content — so the CLI's waiting predicate
+// (cli.siteDeployWaiting) deliberately keeps counting deferred as a wait and does
+// not read this function alone. Do not "simplify" the two back together.
 func SiteDeploymentTerminal(status string) bool {
 	s := strings.ToLower(strings.TrimSpace(status))
-	return s == "live" || s == "failed" || s == "cancelled" || s == "canceled"
+	return s == "live" || s == "failed" || s == "cancelled" || s == "canceled" || s == "deferred"
 }
 
 // SiteRollbackResult is a completed spawned-site rollback. Raw is the envelope
