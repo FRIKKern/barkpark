@@ -354,6 +354,53 @@ aggregator's `needs:` and carries no required name, so it cannot block a merge.
 Four greens plus one unenforced green is the real coverage of a docs-and-scripts
 PR; read it that way rather than as five gates agreeing.
 
+### PRESENT BUT STALE — the green that ran, and then stopped being true
+
+The three classes above are all about a check that is **absent** or **ran
+nothing**. There is a fourth, and it is the only one where the check really did
+execute the suite: **a CONFLICTING pull request keeps asserting the verdict it
+earned on a head main has since passed, and it re-dispatches nothing to refresh
+it.** GitHub dispatches on push. A conflicted PR cannot be merged and nobody
+pushes to it, so its runs are frozen at the instant they were created and the
+checks API answers SUCCESS forever.
+
+Measured, not inferred. Every workflow run on #10944's head was created at the
+push instant `2026-08-08T14:31:22Z` with `run_attempt=1`, and 49 commits have
+landed on main since. #10129's twelve runs all carry `2026-08-07T05:57:05Z` with
+100+ commits since, and the API still reports all four required contexts green.
+Re-derived 2026-08-09 over the live population: **22 CONFLICTING of 40 open**,
+of which **8 assert a full 4-of-4 green required set**, plus #6057 and #6086 at
+**1-of-1** — three of the four required contexts never rendered on them at all,
+a worse class the 4-of-4 framing hides entirely.
+
+`.github/workflows/stale-verdict-watch.yml` is the level check that says so:
+`*/30` cron, no `continue-on-error` anywhere, `if: github.event_name !=
+'pull_request'` so its name can never enter the required set. It reds while any
+conflicted PR asserts a green whose `completedAt` predates a commit on main, and
+that red cannot clear itself — only a rebase, a push, or a close clears it.
+
+Two counting traps it exists to avoid, both of which lie in the comforting
+direction:
+
+- **Count ALL-OF-PRESENT, never occurrences-of-SUCCESS.** #10722 and #10720
+  render FIVE required-named rollup entries, because `PR references an active
+  task` appears twice on one head: once FAILURE, once SUCCESS. Counting SUCCESS
+  occurrences still reaches 4, so the failing required context is laundered out
+  of the report. Occurrence-counting says TEN; all-of-present says EIGHT — a 25%
+  over-report. A context is green only when it rendered and *every* entry
+  carrying its name concluded SUCCESS.
+- **`mergeable` is LAZILY COMPUTED, and UNKNOWN is a warning row.** On
+  2026-08-09 the first `gh pr list` after a quiet period answered 39 UNKNOWN of
+  40 open; the second, 12 seconds later, answered 22 CONFLICTING / 18 MERGEABLE.
+  A naive `select(.mergeable == "CONFLICTING")` silently drops those rows and
+  prints a smaller, calmer number. Re-poll, and print whatever is still UNKNOWN
+  as a warning row rather than omitting it.
+
+Being merely **behind** main is not in this class and is never reported: main is
+`strict: false`, so a MERGEABLE PR behind main is exactly what the merge policy
+permits. Only a conflicted one is stuck. All four behaviours are mutation-proved
+over self-written fixtures in `scripts/stale-verdict-watch.test.sh`.
+
 ## Security gates (Sobelow + mix_audit)
 
 `.github/workflows/security.yml` (filed by `task-a41fc4590b2c2eb1`) adds two
