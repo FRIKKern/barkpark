@@ -11,6 +11,10 @@
 #     phrased as "find a failing required row" reports GREEN on
 #   * it must PASS on two independent known-green shas (f4abf4369, 0239dd4ee)
 #   * WAITING must be NEITHER                        (synthetic: status != completed)
+#   * it must NOT scream on a tip that is still being judged (2e72d2948, the
+#     recorded production red of run 31312071143: 36 rows, `Elixir gate` absent
+#     because the elixir run on the tip had not finished) — and it must scream on
+#     the SAME 36 rows once every workflow run on that tip is terminal
 #
 # The exclusion is proven by MUTATION rather than by reading the source: the
 # script is copied with EXCLUDED_CONTEXTS blanked, and the known-green sha is
@@ -170,11 +174,88 @@ cat > "$FX/protection-forbidden.json" <<'JSON'
 gh: Resource not accessible by integration (HTTP 403)
 JSON
 
+# ── the THIRD authority: the workflow runs on the tip (cch-w61) ──────────────
+# Recorded from repos/FRIKKern/barkpark/actions/runs?head_sha=a5260f609aa2bfe…
+# All NINE runs are `completed`. This is what makes a5260f609 a genuinely
+# never-judged tip rather than a young one, and it must keep screaming.
+cat > "$FX/a5260f609-runs.json" <<'JSON'
+{"total_count": 9, "workflow_runs": [
+  {"id": 31290083952, "name": "doc-gates",             "status": "completed", "conclusion": "cancelled"},
+  {"id": 31290083984, "name": "elixir",                "status": "completed", "conclusion": "cancelled"},
+  {"id": 31290083959, "name": "security",              "status": "completed", "conclusion": "cancelled"},
+  {"id": 31290084004, "name": "cloud",                 "status": "completed", "conclusion": "cancelled"},
+  {"id": 31290084003, "name": "required-checks-drift", "status": "completed", "conclusion": "cancelled"},
+  {"id": 31290083960, "name": "Deploy (production)",   "status": "completed", "conclusion": "cancelled"},
+  {"id": 31290083978, "name": "console-harness",       "status": "completed", "conclusion": "cancelled"},
+  {"id": 31290083964, "name": "breakglass-watch",      "status": "completed", "conclusion": "success"},
+  {"id": 31290083966, "name": "go-tests",              "status": "completed", "conclusion": "success"}
+]}
+JSON
+
+# 2e72d2948's runs AS OF 11:57:32Z, from the same endpoint: three of the
+# thirteen had not reached a terminal state yet (updated_at later than the
+# evaluation instant), and one of those three is `elixir` — run 31311871968,
+# created 11:52:33Z, terminal only at 11:59:07Z, whose `/jobs` returns
+# total_count: 0. No `Elixir gate` row COULD exist at 11:57:32Z.
+cat > "$FX/2e72d2948-runs.json" <<'JSON'
+{"total_count": 13, "workflow_runs": [
+  {"id": 31312071143, "name": "main-gate-watch",       "status": "in_progress", "conclusion": null},
+  {"id": 31312064644, "name": "breakglass-watch",      "status": "completed",   "conclusion": "success"},
+  {"id": 31311887504, "name": "crown-reconcile",       "status": "completed",   "conclusion": "failure"},
+  {"id": 31311871953, "name": "crown-reconcile",       "status": "completed",   "conclusion": "failure"},
+  {"id": 31311871959, "name": "console-harness",       "status": "completed",   "conclusion": "success"},
+  {"id": 31311871966, "name": "cloud",                 "status": "completed",   "conclusion": "success"},
+  {"id": 31311871946, "name": "required-checks-drift", "status": "completed",   "conclusion": "failure"},
+  {"id": 31311871947, "name": "security",              "status": "in_progress", "conclusion": null},
+  {"id": 31311871963, "name": "compose-smoke",         "status": "in_progress", "conclusion": null},
+  {"id": 31311871968, "name": "elixir",                "status": "queued",      "conclusion": null},
+  {"id": 31311871996, "name": "breakglass-watch",      "status": "completed",   "conclusion": "success"},
+  {"id": 31311871955, "name": "stale-verdict-watch",   "status": "completed",   "conclusion": "failure"},
+  {"id": 31311871972, "name": "doc-gates",             "status": "completed",   "conclusion": "success"}
+]}
+JSON
+
+# The SAME tip, one counterfactual away: every run terminal. Nothing is coming,
+# so an absent required row is a tip that was never judged.
+sed 's/"in_progress"/"completed"/g; s/"queued"/"completed"/g' \
+  "$FX/2e72d2948-runs.json" > "$FX/2e72d2948-runs-terminal.json"
+
+# A fresh merge tip whose workflows have all only just been created.
+cat > "$FX/runs-all-inflight.json" <<'JSON'
+{"total_count": 3, "workflow_runs": [
+  {"id": 900001, "name": "elixir", "status": "queued",      "conclusion": null},
+  {"id": 900002, "name": "cloud",  "status": "queued",      "conclusion": null},
+  {"id": 900003, "name": "console-harness", "status": "in_progress", "conclusion": null}
+]}
+JSON
+
+# A tip with no workflow run at all — nothing is in flight, so nothing is coming.
+cat > "$FX/runs-none.json" <<'JSON'
+{"total_count": 0, "workflow_runs": []}
+JSON
+
+# A 403 from the runs endpoint, as `gh` emits it, and a body that is not JSON.
+cat > "$FX/runs-forbidden.json" <<'JSON'
+gh: Resource not accessible by integration (HTTP 403)
+JSON
+printf 'not json at all\n' > "$FX/runs-garbage.json"
+
 OUT="$TMP/out.txt"
-run_watch() { # sha, check-runs fixture, [protection fixture], [script]
-  local sha="$1" runs="$2" prot="${3:-$FX/protection.json}" script="${4:-$WATCH}"
-  bash "$script" --sha "$sha" --protection-file "$prot" --check-runs-file "$runs" \
-    > "$OUT" 2>&1
+run_watch() { # sha, check-runs fixture, [protection fixture], [script], [workflow-runs fixture]
+  # THE FIFTH ARGUMENT IS THE POINT (cch-w61). Before this slice run_watch()
+  # passed only --sha/--protection-file/--check-runs-file, so a fix that read a
+  # THIRD authority and defaulted it to today's behaviour passed all 56
+  # assertions in this file unchanged while the production red persisted. Every
+  # new-behaviour case below drives its runs payload THROUGH this function, so
+  # the new input is exercised rather than merely available.
+  local sha="$1" runs="$2" prot="${3:-$FX/protection.json}" script="${4:-$WATCH}" wfruns="${5:-}"
+  if [ -n "$wfruns" ]; then
+    bash "$script" --sha "$sha" --protection-file "$prot" --check-runs-file "$runs" \
+      --runs-file "$wfruns" > "$OUT" 2>&1
+  else
+    bash "$script" --sha "$sha" --protection-file "$prot" --check-runs-file "$runs" \
+      > "$OUT" 2>&1
+  fi
   echo $?
 }
 
@@ -204,8 +285,16 @@ grep -q "0e9246447" "$OUT" && ok "0e9246447 output names the sha" || bad "0e9246
 # ═══ 3. THE PRESENCE ASSERTION — no verdict at all screams ═══════════════════
 section "3. FAIL/MISSING x3 on the cancelled sha a5260f609"
 
-rc="$(run_watch a5260f609 "$FX/a5260f609.json")"
-if [ "$rc" = "1" ]; then ok "a5260f609 -> FAIL/MISSING (exit 1)"; else bad "a5260f609 -> expected exit 1, got $rc"; cat "$OUT" >&2; fi
+# The runs fixture is passed on purpose (cch-w61): all NINE workflow runs on
+# this sha are terminal, so the run-status discriminator has nothing to wait for
+# and the scream must survive the fix intact.
+rc="$(run_watch a5260f609 "$FX/a5260f609.json" "$FX/protection.json" "$WATCH" "$FX/a5260f609-runs.json")"
+if [ "$rc" = "1" ]; then ok "a5260f609 -> FAIL/MISSING (exit 1), WITH its real runs payload (9 runs, all completed)"; else bad "a5260f609 -> expected exit 1, got $rc"; cat "$OUT" >&2; fi
+if ! grep -q "WAITING" "$OUT"; then
+  ok "a5260f609 is never softened to WAITING — nothing on that tip is in flight, so nothing is coming"
+else
+  bad "a5260f609 was softened to WAITING; the run-status rule is muting the never-judged case"
+fi
 n="$(grep -c "MISSING  " "$OUT")"
 if [ "$n" = "3" ]; then ok "a5260f609 reports MISSING on all THREE watched contexts"; else bad "a5260f609 expected 3 MISSING rows, got $n"; cat "$OUT" >&2; fi
 for c in "Cloud gate" "Console gate" "Elixir gate"; do
@@ -220,23 +309,22 @@ else
 fi
 grep -q "a5260f609" "$OUT" && ok "a5260f609 output names the sha" || bad "a5260f609 output does not name the sha"
 
-# ── 3b. THE EMPTY PAYLOAD — a tip nothing has registered on YET (cch-w60) ────
-# The fixture this file never had. The deleted `push:` trigger evaluated main's
-# tip ~19 seconds after a merge, when GitHub had created NO check-run rows on it
-# at all — the payload really is `{"check_runs": []}`. The three required rows
-# were created at +7m15s (Console), +9m52s (Cloud) and +25m27s (Elixir); 2 of 2
-# production push runs failed on tip 026c5b1d78 while main was in fact green.
+# ── 3b. THE EMPTY PAYLOAD — a tip nothing has registered on YET (cch-w61) ────
+# The fixture arrived in wave 60 and PINNED the conflation instead of fixing it:
+# on `{"check_runs": []}` the script printed MISSING x3 and exited 1, byte-
+# identical to the a5260f609 case above — a tip that really was judged and never
+# produced a required row. Wave 60's prose motivated the pin with the `push:`
+# trigger that has since been DELETED (§11), and asserted that the vocabulary
+# "does NOT distinguish absent-yet from never-judged". Both statements are now
+# false, and the assertions below are the INVERSION of the ones that pinned it,
+# not extra cases beside them.
 #
-# WHAT THIS SECTION REPORTS, STATED PLAINLY SO NOBODY MISREADS IT: on an empty
-# payload the script prints MISSING x3 and exits 1 — byte-identical to the
-# a5260f609 case above, which is a tip that WAS judged and simply never produced
-# a required row. The script's vocabulary does NOT distinguish "absent because
-# no row has been created yet" from "absent because the commit was never
-# judged". This section PINS that as the current behaviour; it does not endorse
-# it as correct. A MISSING row is therefore not evidence that a commit was
-# judged, and the fix for the trigger that made it fire on every merge is the
-# deletion asserted in §11 below, not a grace constant.
-section "3b. an EMPTY check-runs payload (a tip no workflow has registered on yet)"
+# WHAT THIS SECTION REPORTS NOW: absence is read against a THIRD authority, the
+# workflow runs on the tip. Same empty payload, two opposite verdicts —
+#   * a run on the tip still in flight -> WAITING, exit 2 (rows may still appear)
+#   * every run on the tip terminal     -> MISSING, exit 1 (nothing is coming)
+# The empty payload alone decides nothing, which is the whole repair.
+section "3b. an EMPTY check-runs payload, judged against the tip's workflow runs"
 
 cat > "$FX/empty-payload.json" <<'JSON'
 {"check_runs": []}
@@ -248,34 +336,197 @@ else
   bad "empty-payload fixture is not a literal empty check_runs array"
 fi
 
-rc="$(run_watch 026c5b1d7 "$FX/empty-payload.json")"
-if [ "$rc" = "1" ]; then
-  ok "empty payload -> MISSING/scream (exit 1) — this is the CURRENT behaviour, pinned, not endorsed"
+rc="$(run_watch 026c5b1d7 "$FX/empty-payload.json" "$FX/protection.json" "$WATCH" "$FX/runs-all-inflight.json")"
+if [ "$rc" = "2" ]; then
+  ok "empty payload + a run still in flight -> WAITING (exit 2) — INVERTS wave 60's pinned exit 1"
 else
-  bad "empty payload -> expected exit 1 (the documented current behaviour), got $rc"; cat "$OUT" >&2
+  bad "empty payload + in-flight run -> expected exit 2 (WAITING), got $rc"; cat "$OUT" >&2
 fi
-if [ "$rc" != "2" ]; then
-  ok "empty payload is NOT WAITING — exit 2 is keyed on the .status of an EXISTING row, so no row means no wait"
+if [ "$rc" != "1" ]; then
+  ok "empty payload is NOT a scream while the tip is still being judged — the false red is gone"
 else
-  bad "empty payload reported WAITING; §3b's prose and the workflow comment in main-gate-watch.yml are now stale"
+  bad "empty payload still screams while a workflow run on the tip is in flight"
 fi
 n="$(grep -c "MISSING  " "$OUT")"
-if [ "$n" = "3" ]; then
-  ok "empty payload reports MISSING on all THREE watched contexts"
+if [ "$n" = "0" ]; then
+  ok "empty payload + in-flight run reports ZERO MISSING rows — INVERTS the pinned '3 MISSING rows'"
 else
-  bad "empty payload expected 3 MISSING rows, got $n"; cat "$OUT" >&2
+  bad "empty payload + in-flight run expected 0 MISSING rows, got $n"; cat "$OUT" >&2
+fi
+if grep -q "no check run row YET" "$OUT"; then
+  ok "the WAITING row says YET, and names the in-flight workflow run that justifies it"
+else
+  bad "the WAITING row does not distinguish 'not yet' from 'never'"; cat "$OUT" >&2
 fi
 if ! grep -qE "^  ok       " "$OUT"; then
-  ok "empty payload produces no green row at all"
+  ok "empty payload produces no green row at all — WAITING is not a pass"
 else
   bad "empty payload produced a green row — a payload with zero rows cannot green anything"
 fi
-# The conflation, asserted rather than described: the empty-payload verdict is
-# indistinguishable from the genuinely-never-judged verdict.
-if grep -q "MAIN'S TIP DOES NOT CARRY A GREEN VERDICT" "$OUT"; then
-  ok "empty payload is INDISTINGUISHABLE from the never-judged sha a5260f609 — same MISSING vocabulary, same exit 1"
+# ...and the other direction, on the SAME payload: nothing running, nothing
+# coming. This is what stops WAITING from becoming the new vacuous green.
+rc="$(run_watch 026c5b1d7 "$FX/empty-payload.json" "$FX/protection.json" "$WATCH" "$FX/runs-none.json")"
+if [ "$rc" = "1" ]; then
+  ok "SAME empty payload, every run terminal -> MISSING/scream (exit 1) — emptiness alone excuses nothing"
 else
-  bad "empty payload no longer reaches the MISSING verdict; §3b's prose is stale"
+  bad "empty payload with no in-flight run -> expected exit 1, got $rc"; cat "$OUT" >&2
+fi
+n="$(grep -c "MISSING  " "$OUT")"
+if [ "$n" = "3" ]; then
+  ok "empty payload with nothing in flight still reports MISSING on all THREE watched contexts"
+else
+  bad "empty payload with nothing in flight expected 3 MISSING rows, got $n"; cat "$OUT" >&2
+fi
+if grep -q "MAIN'S TIP DOES NOT CARRY A GREEN VERDICT" "$OUT"; then
+  ok "the scream survives for a tip nothing is still judging"
+else
+  bad "the scream no longer reaches the MISSING verdict"
+fi
+
+# ── 3c. THE PRODUCTION RED, RECORDED (cch-w61) ───────────────────────────────
+# Scheduled run 31312071143 (2026-08-09T11:57:21Z) failed on tip 2e72d2948 with
+# `MISSING Elixir gate` / `ok Cloud gate` / `ok Console gate` while main was in
+# fact fine. The tip was 5m02s old (committed 11:52:30Z) and carried THIRTY-SIX
+# check-run rows — the failure shape is PARTIAL ROWS, not an empty payload, so
+# §3b alone could never have caught it. Recorded verbatim from
+# repos/FRIKKern/barkpark/commits/2e72d294860ac5750f2b3ed711e163ec90bbed98/check-runs,
+# truncated to rows started at or before 11:57:32Z, with rows that completed
+# after that instant restored to `in_progress`.
+section "3c. the recorded production red: 36 rows, Elixir gate absent (2e72d2948)"
+
+cat > "$FX/2e72d2948.json" <<'JSON'
+{"check_runs": [
+  {"name": "Crown reconcile harness", "status": "completed", "conclusion": "skipped", "started_at": "2026-08-09T11:52:33Z", "id": 93240791246},
+  {"name": "Stale verdict harness", "status": "completed", "conclusion": "skipped", "started_at": "2026-08-09T11:52:33Z", "id": 93240791311},
+  {"name": "Break-glass harness", "status": "completed", "conclusion": "skipped", "started_at": "2026-08-09T11:52:33Z", "id": 93240791420},
+  {"name": "Doc budgets + anchors", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:52:35Z", "id": 93240791074},
+  {"name": "Crown reconcile", "status": "completed", "conclusion": "failure", "started_at": "2026-08-09T11:52:36Z", "id": 93240791029},
+  {"name": "Break-glass watch", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:52:36Z", "id": 93240791039},
+  {"name": "Stale verdict watch", "status": "completed", "conclusion": "failure", "started_at": "2026-08-09T11:52:36Z", "id": 93240791093},
+  {"name": "Dispatch (console paths)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:52:48Z", "id": 93240810397},
+  {"name": "Console path-escape ratchet", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:52:48Z", "id": 93240810427},
+  {"name": "Billing tier floor (rendered)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:53:06Z", "id": 93240840686},
+  {"name": "Overflow guard (rendered)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:53:07Z", "id": 93240840680},
+  {"name": "CSSOM parity (authored CSS vs browser)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:53:07Z", "id": 93240840688},
+  {"name": "Console client unit harness", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:53:13Z", "id": 93240840705},
+  {"name": "Dispatch (cloud paths)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:53:46Z", "id": 93240911117},
+  {"name": "Cloud path-escape ratchet", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:53:47Z", "id": 93240911082},
+  {"name": "Required-check spec drift (advisory)", "status": "completed", "conclusion": "failure", "started_at": "2026-08-09T11:53:59Z", "id": 93240931789},
+  {"name": "Required-check spec gate", "status": "completed", "conclusion": "failure", "started_at": "2026-08-09T11:54:00Z", "id": 93240931862},
+  {"name": "Cloud control-plane (compile + format) (27.0, 1.18.1)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:54:03Z", "id": 93240937258},
+  {"name": "Cloud control-plane (test) (27.0, 1.18.1)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:54:04Z", "id": 93240937262},
+  {"name": "Crown reconcile harness", "status": "completed", "conclusion": "skipped", "started_at": "2026-08-09T11:54:12Z", "id": 93240956214},
+  {"name": "Crown reconcile", "status": "completed", "conclusion": "failure", "started_at": "2026-08-09T11:54:14Z", "id": 93240955993},
+  {"name": "Console gate", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:54:45Z", "id": 93241009571},
+  {"name": "Dispatch (compose-smoke paths)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:54:59Z", "id": 93241034142},
+  {"name": "Green arm (build, boot, in-container probes)", "status": "in_progress", "conclusion": null, "started_at": "2026-08-09T11:55:14Z", "id": 93241057932},
+  {"name": "Refusal arm (short SECRET_KEY_BASE refuses at boot)", "status": "in_progress", "conclusion": null, "started_at": "2026-08-09T11:55:14Z", "id": 93241057949},
+  {"name": "Dispatch (security paths)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:55:29Z", "id": 93241083329},
+  {"name": "Security gate shape ratchet", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:55:30Z", "id": 93241083264},
+  {"name": "Sobelow baseline does not swallow its own inline waivers (blocking)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:55:43Z", "id": 93241106504},
+  {"name": "Dependency CVE audit (mix_audit over mix.lock, blocking) (27.0, 1.18.1)", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:55:43Z", "id": 93241106517},
+  {"name": "Sobelow static analysis (regression gate, baseline .sobelow-skips) (27.0, 1.18.1)", "status": "in_progress", "conclusion": null, "started_at": "2026-08-09T11:55:43Z", "id": 93241106526},
+  {"name": "Cloud gate", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:56:30Z", "id": 93241185015},
+  {"name": "Break-glass harness", "status": "completed", "conclusion": "skipped", "started_at": "2026-08-09T11:57:13Z", "id": 93241262064},
+  {"name": "Break-glass watch", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T11:57:15Z", "id": 93241261642},
+  {"name": "Main gate watch harness", "status": "completed", "conclusion": "skipped", "started_at": "2026-08-09T11:57:22Z", "id": 93241277275},
+  {"name": "Main gate watch", "status": "in_progress", "conclusion": null, "started_at": "2026-08-09T11:57:24Z", "id": 93241276860},
+  {"name": "Security gate", "status": "in_progress", "conclusion": null, "started_at": "2026-08-09T11:57:32Z", "id": 93241288929}
+]}
+JSON
+
+n="$(jq '.check_runs | length' "$FX/2e72d2948.json")"
+if [ "$n" = "36" ]; then ok "2e72d2948 fixture carries 36 check-run rows — PARTIAL, not empty"; else bad "2e72d2948 fixture should carry 36 rows, carries $n"; fi
+if ! jq -e '[.check_runs[].name] | index("Elixir gate")' "$FX/2e72d2948.json" >/dev/null 2>&1; then
+  ok "2e72d2948 fixture has NO 'Elixir gate' row — the one absent required context"
+else
+  bad "2e72d2948 fixture grew an 'Elixir gate' row; it no longer reproduces run 31312071143"
+fi
+
+# THE VERDICT UNDER THE FIX. Same 36 rows, and the elixir run on this tip is not
+# terminal, so the absent row is WAITING rather than a scream.
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/2e72d2948-runs.json")"
+if [ "$rc" = "2" ]; then
+  ok "2e72d2948 (young tip, elixir run in flight) -> WAITING (exit 2) — production run 31312071143 would not have red"
+else
+  bad "2e72d2948 -> expected exit 2 (WAITING), got $rc"; cat "$OUT" >&2
+fi
+if ! grep -q "MISSING  Elixir gate" "$OUT"; then
+  ok "'Elixir gate' is no longer called MISSING on a tip whose elixir run has not finished"
+else
+  bad "'Elixir gate' is still MISSING on 2e72d2948 — the production red is NOT fixed"; cat "$OUT" >&2
+fi
+grep -q "elixir #31311871968 (status=queued)" "$OUT" \
+  && ok "the output names the elixir run 31311871968 as still in flight — the actual reason the row is absent" \
+  || bad "the output does not name the in-flight elixir run"
+grep -q "WAITING  Elixir gate" "$OUT" && ok "Elixir gate is reported WAITING by name" || bad "Elixir gate is not reported WAITING"
+grep -q "ok       Cloud gate" "$OUT" && ok "Cloud gate is still read as green on 2e72d2948" || bad "Cloud gate is no longer green on 2e72d2948"
+grep -q "ok       Console gate" "$OUT" && ok "Console gate is still read as green on 2e72d2948" || bad "Console gate is no longer green on 2e72d2948"
+
+# THE COUNTERFACTUAL, which is what keeps this from being a mute button: the
+# SAME 36 rows with every run on the tip terminal is a tip that finished being
+# judged without an Elixir verdict, and it must scream.
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/2e72d2948-runs-terminal.json")"
+if [ "$rc" = "1" ]; then
+  ok "2e72d2948 with every run terminal -> MISSING/scream (exit 1) — partial rows are not an excuse by themselves"
+else
+  bad "2e72d2948 with all runs terminal -> expected exit 1, got $rc"; cat "$OUT" >&2
+fi
+grep -q "MISSING  Elixir gate" "$OUT" && ok "the terminal counterfactual names Elixir gate as MISSING" || bad "the terminal counterfactual does not name Elixir gate"
+
+# THE GUARD MUST BE ABLE TO LOSE. Revert the discriminator in a specimen copy —
+# blank the in-flight accumulator — and the WAITING verdict above must collapse
+# back to the production red.
+sed 's/^    \[ "\$rstatus" = "completed" \] && continue$/    continue/' "$WATCH" > "$TMP/no-discriminator.sh"
+if ! cmp -s "$WATCH" "$TMP/no-discriminator.sh"; then
+  ok "specimen built: the run-status accumulator is neutralised (the sed CHANGED the source)"
+else
+  bad "the revert specimen is byte-identical to the shipped script — this mutation proves nothing"
+fi
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$TMP/no-discriminator.sh" "$FX/2e72d2948-runs.json")"
+if [ "$rc" = "1" ] && grep -q "MISSING  Elixir gate" "$OUT"; then
+  ok "without the discriminator 2e72d2948 reds again (exit 1, MISSING Elixir gate) — the fix is load-bearing"
+else
+  bad "reverting the discriminator changed nothing (exit $rc); the run-status arm is decorative"; cat "$OUT" >&2
+fi
+
+# ── 3d. THE THIRD AUTHORITY CANNOT FAIL OPEN ─────────────────────────────────
+# More endpoints is more ways to be blind. A runs read that cannot be trusted
+# must reach the SAME exit-3 vocabulary as an unreadable protection object,
+# never fall through to a verdict.
+section "3d. an unreadable runs payload is a CONFIGURATION FAULT, not a verdict"
+
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/runs-garbage.json")"
+if [ "$rc" = "3" ]; then ok "a non-JSON runs body -> exit 3 (UNREADABLE), not a verdict"; else bad "garbage runs body -> expected exit 3, got $rc"; cat "$OUT" >&2; fi
+grep -q "CONFIGURATION FAULT" "$OUT" && ok "the runs fault is labelled CONFIGURATION FAULT" || bad "the runs fault is not labelled"
+
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/runs-forbidden.json")"
+if [ "$rc" = "3" ]; then ok "a recorded 403 body from the runs endpoint -> exit 3, not a verdict"; else bad "403 runs body -> expected exit 3, got $rc"; cat "$OUT" >&2; fi
+
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/does-not-exist.json")"
+if [ "$rc" = "3" ]; then ok "a runs file that does not exist -> exit 3"; else bad "missing runs file -> expected exit 3, got $rc"; cat "$OUT" >&2; fi
+
+# The live arm classifies a credential failure as FORBIDDEN with the same
+# patterns the protection reader uses — asserted on the source because the
+# hermetic path cannot reach `gh`.
+if awk '/^read_workflow_runs\(\)/{f=1} f && /HTTP 401\|HTTP 403/{print "yes"; exit} f && /^}/{exit}' "$WATCH" | grep -q yes; then
+  ok "read_workflow_runs classifies 401/403 as FORBIDDEN, like the protection reader"
+else
+  bad "read_workflow_runs has no FORBIDDEN arm — an Actions 403 would not be distinguishable"
+fi
+# ...and prove the exit-3 routing can LOSE: delete the case that catches those
+# tokens and the garbage body stops being a fault.
+sed '/^  case "\$tip_runs" in$/,/^  esac$/d' "$WATCH" > "$TMP/runs-fault-swallowed.sh"
+if ! cmp -s "$WATCH" "$TMP/runs-fault-swallowed.sh"; then
+  ok "specimen built: the runs-fault case block is deleted (the sed CHANGED the source)"
+else
+  bad "the runs-fault specimen is byte-identical — this mutation proves nothing"
+fi
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$TMP/runs-fault-swallowed.sh" "$FX/runs-garbage.json")"
+if [ "$rc" != "3" ]; then
+  ok "without that case block an unreadable runs payload stops being a fault (exit $rc) — the routing is load-bearing"
+else
+  bad "deleting the runs-fault case block changed nothing; the exit-3 routing is decorative"
 fi
 
 # ═══ 4. WAITING is neither a pass nor a scream ═══════════════════════════════
