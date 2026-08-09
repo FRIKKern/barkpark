@@ -53,7 +53,12 @@ run_id="${GITHUB_RUN_ID:-}"
 command -v jq >/dev/null || die "jq is not installed; cannot parse the GitHub API response"
 command -v curl >/dev/null || die "curl is not installed; cannot reach the GitHub API"
 
-[ -n "$token" ] || die "GITHUB_TOKEN is empty — the workflow is missing 'permissions: issues: write' (or the token was not passed through to this step). The failure that triggered this alert is UNREPORTED."
+# The message names BOTH causes because the first one it named was the wrong
+# one: crown-reconcile.yml declared `permissions: issues: write` correctly and
+# still landed here, because its step set GH_TOKEN and this script reads
+# GITHUB_TOKEN. A diagnostic that names one cause when there are two sends the
+# reader to a file that is already correct.
+[ -n "$token" ] || die "GITHUB_TOKEN is empty. Two causes produce this, and the calling step decides which: (a) the step sets a DIFFERENT variable — GH_TOKEN is the common slip, this script reads GITHUB_TOKEN and nothing else; or (b) the workflow is missing 'permissions: issues: write'. Check the step's own env: block FIRST. The failure that triggered this alert is UNREPORTED."
 [ -n "$repo" ] || die "GITHUB_REPOSITORY is empty — cannot tell which repository to file against."
 
 title="CI failure: $key"

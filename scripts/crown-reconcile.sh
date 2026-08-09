@@ -153,6 +153,16 @@ FIXTURE_MODE=0
 epoch_of() { # <iso8601> -> seconds, or empty
   local iso="$1" plain
   [ -n "$iso" ] || return 1
+  # ISO-8601 ONLY, shape-checked BEFORE date(1) sees it. GNU date -d also
+  # accepts a relative grammar — `yesterday`, `now`, `2 hours ago` — so on a
+  # Linux runner `--now yesterday` PARSED and silently shifted the whole
+  # comparison window by a day, while BSD date on a mac refused it. The verdict
+  # must not depend on which date(1) the runner has, and a window this script
+  # cannot state is a window it must refuse.
+  case "$iso" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*) ;;
+    *) return 1 ;;
+  esac
   date -u -d "$iso" +%s 2>/dev/null && return 0
   # BSD/macOS date, where the harness usually runs. Fractional seconds and the
   # trailing Z are stripped first; `%%.*` alone would mangle an instant that has
