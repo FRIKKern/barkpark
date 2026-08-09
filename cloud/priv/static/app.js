@@ -12862,9 +12862,20 @@
   // the two typed 422s — not_rollbackable / no_previous — describe a site whose
   // shape can't change by retrying. A 409 (deploy in flight) and the generic
   // fallback stay transient: Try again is the honest recovery. Pure.
+  //
+  // cch-w63-s7 — `identity_refused` JOINS THEM, KEYED ON THE CODE, NOT THE STATUS.
+  // The site plane answers 409 when a box refuses our stored admin credential
+  // (Sites.Deploy mints {:error, 409, _, "identity_refused"}), and a refused
+  // credential does not become accepted by clicking again: Try again would
+  // re-POST into a permanent 409 forever. Keyed on the code alone, because the
+  // fact is the refusal, not the status the plane happens to hang it on — the
+  // same reason the instance seam's rollbackRefusalTerminal is code-keyed.
+  // NOTE the signature split: THIS predicate takes (status, data) and reads the
+  // site plane's FLAT {error:"code"} envelope; the instance seam's takes (code).
   function siteRollbackRefusalTerminal(status, data) {
     var err = (data && data.error) || {};
     var code = typeof err === "string" ? err : err.code;
+    if (code === "identity_refused") return true;
     return status === 422 && (code === "not_rollbackable" || code === "no_previous");
   }
 
@@ -12906,10 +12917,37 @@
           "back to. Use “Roll back to this” on an earlier deployment to rebuild from it instead.",
       };
     }
+    // cch-w63-s7 STATES WHAT THIS ARM IS: the site rollback route emits `error:
+    // "no_previous"` NOWHERE today — the box's typed `no_previous` exit reaches
+    // the wire as PROSE inside a `rollback_failed` detail (Sites.Deploy's
+    // rollback_copy), which the detail-relay arm below renders. It is kept, not
+    // deleted, because the plane is actively growing typed site codes (s3 minted
+    // the first one) and this is the correct reader for a word the plane already
+    // speaks; making it REACHABLE is a plane-side change, filed separately.
     if (status === 422 && code === "no_previous") {
       return {
         title: "Nothing to roll back to",
         body: "This site has only ever had one release — there's no previous release to return to yet.",
+      };
+    }
+    // cch-w63-s7 — THE CODE CHECK SITS ABOVE THE STATUS ARM, AND THE ORDER IS THE
+    // FIX. The site plane answers 409 for TWO different facts: a deploy really in
+    // flight on the box, and a box that refused our stored admin credential
+    // (Sites.Deploy's typed {:error, 409, _, "identity_refused"}, relayed flat by
+    // the site rollback route). Below the status arm this branch would be
+    // unreachable and the console would tell a human a busy-deploy story about a
+    // credential refusal. The sentence is #11337's instance-seam copy VERBATIM —
+    // rollbackConflictCopy("identity_refused"), composed from
+    // usageUnavailableText("unauthorized") — not a third wording for one fact
+    // (D734, D757). No remedy is offered that the control plane cannot perform,
+    // and no "check now": the hourly update probe is what notices the credential
+    // working again.
+    if (code === "identity_refused") {
+      return {
+        title: "The instance refused our credential",
+        body: "The rollback was never sent — " + usageUnavailableText("unauthorized") +
+          ". Barkpark Cloud stops asking a box that refused it; the hourly update " +
+          "check is what notices the credential working again.",
       };
     }
     if (status === 409) {
