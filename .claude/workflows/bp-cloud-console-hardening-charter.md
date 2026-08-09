@@ -2951,6 +2951,61 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 61 REVIEW — grade A−, six slices built, six delivered
+
+**Round 1 shipped six of six.** One merged during the wave; five are pushed with PRs open.
+`cch-w61-s1` (the scaffy `console-tests` anchor and the cch-w58-s6 group moved whole below the
+harness's last top-level await, the false "registration order is semantics-free" sentence corrected in
+all six homes, the generator's op-3 plant point moved FIRST→LAST so the replant cannot re-inject the
+corrected sentence into the position it warns against) **MERGED as `02475d0ec` (#11134)**, node 20 and
+node 22 both 1028/1028/0. `cch-w60-s4` → #11287, `cchi-w60-reader-less-census` → #11288,
+`cchi-w61-tdz-order` → #11289, `cchi-w61-main-gate-watch` → #11290, `cch-w61-s3-roster-pass` → #11292.
+Every branch is the reviewer's `-r`; four carry a review commit, #11289 is byte-identical to the
+builder's. Round-2 slices (`cch-w61-s2`, `cch-w58-followup-unavailable-reason-has-no-reader`) were NOT
+built by design and wait on their deps.
+
+**Where the console stopped saying what it had not measured.** The control plane no longer spends a
+decrypted admin credential on a box that already answered that credential 401, and — this is the half
+that matters for the wish — no longer relays *"we could not reach your box"* about a box that answered
+us: a `409 identity_refused` arm sits above the `502 instance_unreachable` catch-all on BOTH relays.
+Proven by transport silence (`requests() == []` asserted BEFORE any status) with the 202 the box would
+have answered programmed, and by four revert-reds quoted by name. Reviewer added the missing scope
+proof — a READ through `relay_admin/4` at a refuted box still reaches the wire — and made it lose:
+hoisting the clause one seam up reds exactly that one test.
+
+**Where the silence had no other surface.** `main-gate-watch` could not tell "no row created YET" from
+"never judged" and fired for real (run 31312071143 red on tip 2e72d2948, 36 rows present, `elixir` run
+with `total_count: 0` jobs). Fixed by a third authority — `actions/runs?head_sha` — read
+unconditionally: absent row + any non-terminal run = WAITING, absent row + all terminal = MISSING. No
+constant, so it cannot go stale. The age approach was measured and **rejected with numbers**: at a 28m
+grace, 7 of 17 distinct tips would be judged NEVER. Harness 79→83, wave 60's 56 assertions inverted in
+place rather than added beside.
+
+**Where a guard was made able to lose.** `scripts/console-tdz-order-check.mjs` derives the module
+boundary from the file, resolves transitively, subtracts shadows, and ships **committed fixtures it is
+asserted to red on in the same CI step** — each of its four mechanisms earned by a measurement, incl. a
+`--demo-no-regex-mask` that goes vacuously green on a file carrying a proven runtime failure. Paired
+with a console-local runtime declaration pinned by set-equality so a fourth `setup-node` job reds and
+names the intruder. Both live in the deliberately unfiltered path-escape job (D26).
+
+**Ledger.** 38 criteria-less open children → **0**, open 430 → 412 (−18), 109 criteria authored, zero
+rows destroyed, 16 out-of-scope rows cancelled-here + created-there per Standing Law 0. The reviewer
+independently re-derived the closing roster (838 children; 78/1/343/4/412; criteria-less open 0) and it
+reproduces exactly. Reviewer closed `cch-w61-s1` done (11/11) on the merge that landed mid-wave; the
+other five stay `in_progress` with only merge-gated or lead-gated rows open.
+
+**What the next wave must know.** (1) **Dispatch order is not optional**: merge round 1 first, then
+`cch-w61-s2` (needs s1 AND s4) and `cch-w58-followup-unavailable-reason-has-no-reader` (needs s4, same
+file). (2) **#11287 alone is an honesty REGRESSION** — until `cch-w61-s2` lands, the console renders the
+new 409 through transient-retry copy with a live Try-again button for a permanent condition. Land them
+together if at all possible. (3) **HIGH-FLIP-RISK, credential egress**: #11287 changes when a stored
+secret is spent; an independent second reviewer is owed and this workflow spawns only one. (4) The
+`actions: read` grant on #11290 is the one predictable post-merge surprise — `BREAKGLASS_TOKEN`
+overrides `github.token` and a fine-grained PAT without Actions:read will 403 every 30 minutes; the
+reviewer made that fault name its own remedy, but it is still unproven live. (5) New residual filed:
+`cchi-w61-scaffy-console-tests-anchor-position-is-only-prose` — s1's invariant is enforced by an English
+comment, and the TDZ guard catches the consequence, not the cause.
+
 ### 2026-08-09 — wave 61 DECIDE (build in flight) — D724-D735
 
 **THE CROWN SURVIVED A TWO-FRONT ATTACK AND THEN LOST HALF ITS SCOPE TO A BETTER MEASUREMENT.** Two
