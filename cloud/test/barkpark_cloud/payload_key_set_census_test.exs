@@ -1013,3 +1013,525 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     end
   end
 end
+
+# =============================================================================
+# THE WORKER-SEAM CALLER CENSUS — dr-w26-s4
+# =============================================================================
+
+defmodule BarkparkCloud.WorkerSeamCallerCensus do
+  @moduledoc """
+  Side C of the same wire: a write route the control plane SHIPS that nothing in
+  this tree ever calls.
+
+  The payload census above proves the two ends of a payload agree. It cannot see
+  the failure one level up — a producer that merged, is correct, and is joined to
+  NOTHING. `POST /v1/internal/platform-deliveries` has been live for two waves
+  with zero callers: the recorder was never wired, so the table it writes stays
+  empty, every read off it is honestly zero, and no test in this tree could tell
+  that from "nothing was delivered".
+
+  ## The corpus is POSITIVELY declared, and that is the whole ruling
+
+  A SUBTRACTIVE corpus ("everything except router.ex, cloud/test and
+  internal/cli") is vacuous here, measurably and on the day it lands:
+  `tooling/grip/ledger/crown-writer-seam-live-2026-08-08.md` carries the crown's
+  path twice, in curl RECIPES. Prose describing a route is not a caller. Under a
+  subtractive corpus this arm would have scored the crown CALLED and shipped
+  green — an instrument that certifies the exact hole it was built to find.
+
+  So the corpus is a positive declaration: five `@roots`, an `@extensions`
+  allowlist, and `@refused` by name. The `*.md` refusal is the LOAD-BEARING one
+  — `tooling/**` alone is a no-op (no tooling file with an allowlisted extension
+  carries the literal), and the suite asserts that rather than assuming it.
+
+  `internal/cli/**` STAYS IN. `scripts/cloud-path-escape-check.sh` refuses to
+  DISPATCH on it, and that is a CI-cost decision about which PRs pay for a
+  Postgres-backed suite. Borrowing it as a decision about what counts as a caller
+  is a category error: `internal/cli` is where `bp cloud` calls the worker seam,
+  and a corpus that could not see it would report caller-less about routes that
+  are called.
+
+  ## The predicate, and what it cannot see
+
+  Fixed string, never a regex: a route's literal PREFIX (up to its first
+  `:param`) and its literal TAIL (after its last `:param`) must appear on the
+  SAME LINE.
+
+  A CALL-SHAPED predicate — one that also demands `curl` / `http.NewRequest` / a
+  verb on that line — is REFUTED, not merely unused: measured on this tree it
+  scores 21 of 23 routes caller-less, because Go builds the path and issues the
+  request on different lines. A predicate that reds 21 true positives is not
+  stricter, it is broken.
+
+  What it cannot see is a path assembled across lines or shell variables
+  (`BASE="$CP/v1/internal"` … `"$BASE/platform-deliveries"`). That direction is
+  SAFE — an unseen caller scores caller-less, i.e. a FALSE RED a human resolves
+  by adding an allowlist row — and it is pinned as a unit test rather than left
+  as a hope.
+  """
+
+  # Anchored on this file's own directory: cloud/test/barkpark_cloud → repo root.
+  @default_repo_root Path.expand("../../..", __DIR__)
+
+  # The five roots. `.github/workflows` and `deploy` are where a CI recorder
+  # would live; `internal` and `scripts` are where the workers and the proof
+  # scripts live; `cloud/lib` is the plane calling its own seam.
+  @roots [".github/workflows", "cloud/lib", "deploy", "internal", "scripts"]
+
+  # Positive extension allowlist. Anything else is not a caller: `.json`, `.txt`,
+  # `.golden` and `.service` are data and fixtures, and `.md` is prose.
+  @extensions ~w(.go .sh .ex .exs .yml .yaml .py .mjs)
+
+  # Refused BY NAME, each for a measured reason:
+  #   tooling/**   ledger prose; not under @roots today, so this is belt-and-braces
+  #   *.md         prose. THE load-bearing refusal — see @moduledoc
+  #   router.ex    the producer itself. All 23 routes self-hit >= 2 (the route
+  #                line plus its own doc block), so including it scores 23/23 CALLED
+  #   *_test.go    two Go tests carry a contiguous deprovision literal
+  #   *_test.exs   the same shape on the Elixir side
+  @refused ["tooling/**", "*.md", "router.ex", "*_test.go", "*_test.exs"]
+
+  @doc "The five declared roots."
+  def roots, do: @roots
+
+  @doc "The declared extension allowlist."
+  def extensions, do: @extensions
+
+  @doc "The by-name refusals, as declared."
+  def refused, do: @refused
+
+  @doc """
+  The repo root, or a raise. NEVER a clean tree: a wrong root would walk nothing,
+  find no callers, and report all 23 routes caller-less — or, worse, parse no
+  routes at all and report a perfectly clean census over an empty population.
+  """
+  def repo_root!(root \\ @default_repo_root) do
+    sentinels = ["scripts/cloud-path-escape-check.sh", "cloud/lib/barkpark_cloud/web/router.ex"]
+    missing = Enum.reject(sentinels, &File.regular?(Path.join(root, &1)))
+
+    if missing != [] do
+      raise "worker-seam caller census: #{root} is not this repo root " <>
+              "(missing #{Enum.join(missing, ", ")})"
+    end
+
+    root
+  end
+
+  @doc """
+  The caller corpus: repo-relative paths, sorted. `roots` / `exts` / `refusals`
+  are parameters so the suite can MUTATE the declaration and prove each guard is
+  load-bearing, rather than asserting that today's list is today's list.
+  """
+  def corpus(root, roots \\ @roots, exts \\ @extensions, refusals \\ @refused) do
+    roots
+    |> Enum.flat_map(&walk(Path.join(root, &1), root))
+    |> Enum.filter(&(Path.extname(&1) in exts))
+    |> Enum.reject(&refused?(&1, refusals))
+    |> Enum.sort()
+  end
+
+  @doc "Corpus entries a refusal should have kept out. Empty, or the guard is gone."
+  def prose_in_corpus(files) do
+    Enum.filter(files, fn rel ->
+      String.ends_with?(rel, ".md") or String.starts_with?(rel, "tooling/") or
+        Path.basename(rel) == "router.ex" or String.ends_with?(rel, "_test.go") or
+        String.ends_with?(rel, "_test.exs")
+    end)
+  end
+
+  @doc "Every `/v1/internal/**` WRITE route in the router, as `{verb, path}`."
+  def write_routes(router_path) do
+    routes =
+      router_path
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.flat_map(fn line ->
+        case Regex.run(~r/^\s*(post|put|patch|delete)\s+"(\/v1\/internal[^"]*)"\s+do\s*$/, line) do
+          [_, verb, path] -> [{String.upcase(verb), path}]
+          nil -> []
+        end
+      end)
+
+    if routes == [] do
+      raise "worker-seam caller census: no write routes parsed from #{router_path}"
+    end
+
+    routes
+  end
+
+  @doc "A route's fixed-string `{prefix, tail}`; both must land on ONE line."
+  def split(path) do
+    segs = String.split(path, "/")
+    params = for {s, i} <- Enum.with_index(segs), String.starts_with?(s, ":"), do: i
+
+    case params do
+      [] ->
+        {path, ""}
+
+      _ ->
+        prefix = segs |> Enum.take(List.first(params)) |> Enum.join("/") |> Kernel.<>("/")
+
+        tail =
+          case Enum.drop(segs, List.last(params) + 1) do
+            [] -> ""
+            rest -> "/" <> Enum.join(rest, "/")
+          end
+
+        {prefix, tail}
+    end
+  end
+
+  @doc "Does ONE line call this route?"
+  def line_calls?(line, {prefix, tail}) do
+    String.contains?(line, prefix) and (tail == "" or String.contains?(line, tail))
+  end
+
+  @doc """
+  `%{route => [{file, line}, …]}` over the corpus. One pass per file, every route
+  tested per line.
+  """
+  def callers(root, routes, files) do
+    splits = Map.new(routes, fn r -> {r, split(elem(r, 1))} end)
+    empty = Map.new(routes, &{&1, []})
+
+    Enum.reduce(files, empty, fn rel, acc ->
+      root
+      |> Path.join(rel)
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.with_index(1)
+      |> Enum.reduce(acc, fn {line, n}, acc ->
+        Enum.reduce(routes, acc, fn route, acc ->
+          if line_calls?(line, splits[route]),
+            do: Map.update!(acc, route, &[{rel, n} | &1]),
+            else: acc
+        end)
+      end)
+    end)
+  end
+
+  @doc "The routes with zero callers in `files`, sorted."
+  def caller_less(root, routes, files) do
+    root
+    |> callers(routes, files)
+    |> Enum.filter(fn {_route, hits} -> hits == [] end)
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.sort()
+  end
+
+  defp walk(path, root) do
+    cond do
+      File.regular?(path) -> [Path.relative_to(path, root)]
+      File.dir?(path) -> path |> File.ls!() |> Enum.flat_map(&walk(Path.join(path, &1), root))
+      true -> []
+    end
+  end
+
+  defp refused?(rel, refusals) do
+    base = Path.basename(rel)
+
+    Enum.any?(refusals, fn
+      "tooling/**" -> String.starts_with?(rel, "tooling/")
+      "*" <> suffix -> String.ends_with?(base, suffix)
+      exact -> base == exact
+    end)
+  end
+end
+
+defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
+  @moduledoc """
+  Four arms, each able to lose:
+
+    1. NO NEW CALLER-LESS ROUTE — a write route shipped without a caller reds.
+    2. THE ALLOWLIST CANNOT ROT — a route that GAINED a caller reds, forcing the
+       row to be deleted. Without this the allowlist becomes a graveyard and arm
+       1 quietly stops covering every route in it.
+    3. THE CORPUS IS DECLARED — a floor on its size (a walk that silently
+       stopped recursing would otherwise report a clean tree) and an explicit
+       "prose entered the corpus" guard.
+    4. THE PREDICATE IS NOT THE PRODUCER — all 23 routes self-hit router.ex at
+       least twice, so including the producer would score them all called; and
+       the crown's LOOSE spellings are absent from the corpus, so its caller-less
+       verdict is not an artefact of predicate strictness.
+
+  Plus the SELF-DECLARATION: `cloud-path-escape-check.sh` is structurally blind
+  to this arm's reads, so the arm asserts its own dispatch coverage.
+  """
+
+  use ExUnit.Case, async: true
+
+  alias BarkparkCloud.WorkerSeamCallerCensus, as: Seam
+
+  @router Path.expand("../../lib/barkpark_cloud/web/router.ex", __DIR__)
+  @escape_check "scripts/cloud-path-escape-check.sh"
+
+  # Measured 2026-08-09: 634 files. The floor is a LOWER BOUND on the walk's
+  # liveness, not a headcount — a `File.ls!` that stopped recursing would report
+  # every route caller-less, which is at least loud; a filter that swallowed the
+  # corpus entirely would report a clean tree, which is not.
+  @corpus_floor 550
+
+  # RULED: write routes that ship with no caller in this tree. One row, one
+  # reason, and arm 2 deletes it the moment the route gains a caller.
+  @caller_less_allowlist [
+    {{"POST", "/v1/internal/platform-deliveries"},
+     "dr-w26-s4 — the crown's writer seam. Merged and correct for two waves, wired to NOTHING: no recorder in .github/workflows/deploy.yml, so platform_deliveries stays empty and every read off it is honestly zero. Delete this row the moment the recorder lands."}
+  ]
+
+  setup_all do
+    root = Seam.repo_root!()
+    files = Seam.corpus(root)
+    routes = Seam.write_routes(@router)
+
+    {:ok,
+     root: root, files: files, routes: routes, caller_less: Seam.caller_less(root, routes, files)}
+  end
+
+  # ---------------------------------------------------------------------------
+  # arm 1 — a write route with no caller
+  # ---------------------------------------------------------------------------
+
+  test "NO NEW CALLER-LESS ROUTE: every /v1/internal write route is called, or ruled", ctx do
+    allowlisted = MapSet.new(@caller_less_allowlist, &elem(&1, 0))
+    new = MapSet.difference(MapSet.new(ctx.caller_less), allowlisted)
+
+    assert MapSet.equal?(new, MapSet.new()), """
+    write route(s) shipped with NO caller anywhere in the declared corpus
+    (#{length(ctx.files)} files over #{Enum.join(Seam.roots(), ", ")}):
+
+    #{fmt_routes(new)}
+
+    A route nothing calls is a producer joined to nothing: it is correct, it is
+    merged, and the table behind it stays empty forever. Wire a caller, or add a
+    row to @caller_less_allowlist naming WHY it ships unwired and what closes it.
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # arm 2 — the allowlist cannot rot
+  # ---------------------------------------------------------------------------
+
+  test "THE ALLOWLIST CANNOT ROT: a ruled route that gained a caller reds", ctx do
+    allowlisted = MapSet.new(@caller_less_allowlist, &elem(&1, 0))
+    stale = MapSet.difference(allowlisted, MapSet.new(ctx.caller_less))
+
+    assert MapSet.equal?(stale, MapSet.new()), """
+    allowlisted route(s) now HAVE a caller — delete its allowlist row:
+
+    #{fmt_routes(stale)}
+
+    Keeping the row is how an allowlist becomes a graveyard: arm 1 stops covering
+    these routes, and a LATER caller-less regression on the same route ships
+    green.
+    """
+
+    for {route, reason} <- @caller_less_allowlist do
+      assert route in ctx.routes, "#{inspect(route)}: not a write route in #{@router}"
+      assert byte_size(reason) > 40, "#{inspect(route)}: a reason this short is not a ruling"
+
+      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|PR #\d+/,
+             "#{inspect(route)}: a ruled row must name the task or PR that closes it"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # arm 3 — the corpus is DECLARED, and prose stays out of it
+  # ---------------------------------------------------------------------------
+
+  test "THE CORPUS IS DECLARED: five roots, an extension allowlist, and no prose", ctx do
+    # MEASURED first, PINNED second. The order is load-bearing: if the literal
+    # pins ran first, every mutation of the declaration would red on "the list is
+    # not the list" and the guards below would never be REACHED — which is how a
+    # guard quietly stops being provable by mutation.
+    assert length(ctx.files) >= @corpus_floor,
+           "the corpus walk collapsed to #{length(ctx.files)} files (floor #{@corpus_floor}) — " <>
+             "a shrunken corpus reports caller-less about routes that ARE called"
+
+    prose = Seam.prose_in_corpus(ctx.files)
+
+    assert prose == [],
+           "prose entered the corpus: #{length(prose)} entries, e.g. " <>
+             "#{inspect(Enum.take(prose, 5))}. A file that DESCRIBES a route is not a caller — " <>
+             "one curl recipe in a ledger is enough to score this whole census green."
+
+    for rel <- ctx.files do
+      assert Path.extname(rel) in Seam.extensions(), "#{rel}: outside the extension allowlist"
+    end
+
+    assert Seam.roots() == [".github/workflows", "cloud/lib", "deploy", "internal", "scripts"]
+    assert Seam.extensions() == ~w(.go .sh .ex .exs .yml .yaml .py .mjs)
+    assert Seam.refused() == ["tooling/**", "*.md", "router.ex", "*_test.go", "*_test.exs"]
+
+    # internal/cli STAYS IN. The dispatcher's refusal to RUN on it is a CI-cost
+    # decision; borrowing it as a ruling about what counts as a caller would make
+    # the corpus lie, because internal/cli is where `bp cloud` calls the seam.
+    assert Enum.any?(ctx.files, &String.starts_with?(&1, "internal/cli/"))
+  end
+
+  test "MUTATION D: prose is refused TWICE, and the *.md refusal is the load-bearing one", ctx do
+    # tooling/ ALONE is a no-op: no tooling file with an allowlisted extension
+    # carries a route literal, so the verdict does not move.
+    with_tooling = Seam.corpus(ctx.root, Seam.roots() ++ ["tooling"])
+    assert Seam.caller_less(ctx.root, ctx.routes, with_tooling) == ctx.caller_less
+
+    # Dropping ONLY the extension allowlist still keeps prose out — the by-name
+    # refusal is the second layer.
+    ext_only = Seam.corpus(ctx.root, Seam.roots() ++ ["tooling"], Seam.extensions() ++ [".md"])
+    assert Seam.prose_in_corpus(ext_only) == []
+
+    # Dropping BOTH is D441's subtractive corpus, and it is VACUOUS: the crown
+    # scores CALLED off ledger prose that describes it in a curl recipe.
+    vacuous =
+      Seam.corpus(
+        ctx.root,
+        Seam.roots() ++ ["tooling"],
+        Seam.extensions() ++ [".md"],
+        Seam.refused() -- ["*.md", "tooling/**"]
+      )
+
+    offenders = Seam.prose_in_corpus(vacuous)
+    assert offenders != [], "the prose guard cannot fire — it is not a guard"
+    assert Enum.any?(offenders, &String.ends_with?(&1, ".md"))
+
+    assert Seam.caller_less(ctx.root, ctx.routes, vacuous) == [],
+           "prose in the corpus is supposed to LAUNDER the crown into 'called' — if it no " <>
+             "longer does, this mutation has stopped reproducing the vacuity it pins"
+  end
+
+  test "FAIL CLOSED: a wrong repo root RAISES rather than reporting a clean tree" do
+    assert_raise RuntimeError, ~r/is not this repo root/, fn ->
+      Seam.repo_root!(Path.join(System.tmp_dir!(), "definitely-not-the-barkpark-repo"))
+    end
+
+    assert_raise RuntimeError, ~r/no write routes parsed/, fn ->
+      Seam.write_routes(Path.expand("../../mix.exs", __DIR__))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # arm 4 — the predicate is not the producer, and not merely strict
+  # ---------------------------------------------------------------------------
+
+  test "THE PRODUCER SELF-HITS: every one of the 23 routes hits router.ex >= 2 times", ctx do
+    lines = @router |> File.read!() |> String.split("\n")
+
+    self_hits =
+      Map.new(ctx.routes, fn route ->
+        s = Seam.split(elem(route, 1))
+        {route, Enum.count(lines, &Seam.line_calls?(&1, s))}
+      end)
+
+    assert map_size(self_hits) == 23, "expected 23 write routes, saw #{map_size(self_hits)}"
+
+    {min_route, min_hits} = Enum.min_by(self_hits, &elem(&1, 1))
+
+    assert min_hits >= 2,
+           "#{inspect(min_route)} self-hits router.ex only #{min_hits}x — the by-name refusal " <>
+             "of router.ex is justified by the MINIMUM over all 23, never by a sample"
+
+    # LOOSE spellings of every CALLER-LESS route's own segment: zero in the
+    # corpus. That is what rules out the alternative explanation for arm 1's
+    # verdict — that the route IS called and the fixed-string predicate is simply
+    # too strict to see it. Nothing in the corpus mentions the seam at all, in
+    # any spelling, so strictness is not what made it caller-less.
+    #
+    # Scoped to the caller-less set on purpose, so it RETIRES itself: the moment
+    # a recorder lands, the route leaves this set and the assertion stops asking.
+    # Pinning the crown's spellings literally would have turned this into a
+    # permanent red on the very PR that fixes the hole.
+    bodies = Map.new(ctx.files, &{&1, File.read!(Path.join(ctx.root, &1))})
+
+    loose_hits =
+      for {_verb, path} <- ctx.caller_less,
+          spelling <- loose_spellings(path),
+          {rel, body} <- bodies,
+          String.contains?(body, spelling),
+          do: {rel, spelling}
+
+    assert loose_hits == [], """
+    a caller-less route's name appears in the corpus in a LOOSE spelling:
+    #{inspect(loose_hits)}
+
+    Either that IS a caller the fixed-string predicate could not see (split
+    across lines — fix the caller to build the path as one literal), or the
+    mention is prose that does not belong in a caller root.
+    """
+
+    # The snake_case spelling is the Postgres table name the PRODUCER uses, so
+    # asserting zero on it tree-wide would measure the producer rather than a
+    # caller. It is asserted zero OUTSIDE cloud/lib — where a caller would live.
+    snake =
+      for {_verb, path} <- ctx.caller_less,
+          spelling = String.replace(List.last(String.split(path, "/")), "-", "_"),
+          {rel, body} <- bodies,
+          not String.starts_with?(rel, "cloud/lib/"),
+          String.contains?(body, spelling),
+          do: {rel, spelling}
+
+    assert snake == [],
+           "a caller-less seam's snake_case name is outside the producer: #{inspect(snake)}"
+  end
+
+  # kebab (the URL spelling), spaced prose, UpperCamel and lowerCamel.
+  defp loose_spellings(path) do
+    seg = path |> String.split("/") |> List.last()
+    upper = seg |> String.replace("-", "_") |> Macro.camelize()
+    lower = String.downcase(String.at(upper, 0)) <> String.slice(upper, 1..-1//1)
+    [seg, String.replace(seg, "-", " "), upper, lower]
+  end
+
+  test "THE INTERPOLATION TRAP: a path split across shell variables scores caller-less" do
+    s = Seam.split("/v1/internal/platform-deliveries")
+
+    # positive control — one contiguous literal on one line IS a caller
+    assert Seam.line_calls?(~s|curl -X POST "$CP/v1/internal/platform-deliveries"|, s)
+
+    # the trap: the same recorder, assembled across two lines. NOT seen.
+    refute Seam.line_calls?(~s|BASE="$CP/v1/internal"|, s)
+    refute Seam.line_calls?(~s|curl -X POST "$BASE/platform-deliveries"|, s)
+
+    # The direction is SAFE: an unseen caller scores CALLER-LESS (a false red a
+    # human resolves with an allowlist row), never CALLED. This is the honest
+    # bound of a fixed-string predicate, pinned rather than hoped for.
+  end
+
+  # ---------------------------------------------------------------------------
+  # SELF-DECLARATION — the corpus declares itself into the dispatcher
+  # ---------------------------------------------------------------------------
+
+  test "SELF-DECLARATION: every root this arm walks is declared in CLOUD_PATHS", ctx do
+    body = ctx.root |> Path.join(@escape_check) |> File.read!()
+    [_, block] = Regex.run(~r/\nCLOUD_PATHS='([^']*)'/, body)
+    declared = block |> String.split("\n") |> Enum.reject(&(&1 == ""))
+
+    assert length(declared) >= 10, "CLOUD_PATHS collapsed to #{length(declared)} entries"
+
+    # cloud-path-escape-check.sh resolves `"../…"` literals out of cloud/lib and
+    # cloud/test. This arm has none that escape — it computes a repo root ONCE
+    # and joins plain relative names onto it — so the ratchet is structurally
+    # blind to every file it reads: it reported the same 10 repo-root reads
+    # before this arm existed and after it walked 634 files. The declaration is
+    # therefore VOLUNTARY, and a voluntary declaration nothing asserts is a
+    # comment. This is the assertion that makes it able to lose.
+    for root <- Seam.roots() do
+      assert Enum.any?(declared, &(&1 == root or String.starts_with?(&1, root <> "/"))),
+             "root #{root} is walked by this arm but nothing in CLOUD_PATHS covers it — " <>
+               "a PR editing it would SKIP the Cloud gate that runs this census"
+    end
+
+    # The four entries dr-w26-s4 added, by name. `.github/workflows/deploy.yml`
+    # is the one that matters most: before it, a deploy.yml-only PR dispatched
+    # NOTHING in this set, so the recorder could land — or vanish — with no code
+    # gate at all.
+    for entry <- ["cloud/lib/**", "deploy/**", "internal/**", ".github/workflows/deploy.yml"] do
+      assert entry in declared, "CLOUD_PATHS lost #{entry} — dr-w26-s4's declaration"
+    end
+  end
+
+  defp fmt_routes(set) do
+    case Enum.sort(set) do
+      [] -> "(none)"
+      rs -> Enum.map_join(rs, "\n", fn {verb, path} -> "  #{verb} #{path}" end)
+    end
+  end
+end
