@@ -99,6 +99,26 @@
 #      which reader produced the answer. A read that cannot happen is rc 2, never
 #      a green.
 #
+# AN EXPLICITLY-EMPTY PAT IS A CONFIGURATION FAULT, A MISSING ONE IS NOT
+# (charter D530).
+#
+# A MISSING CROWN_API_TOKEN is the CI path: it falls through to the SSH reader
+# above and returns 0, and making it fatal would break the only reader that
+# actually runs on a schedule today. But `CROWN_API_TOKEN=` — the variable SET
+# and EMPTY — is a different statement: a reader was explicitly asked for and is
+# not there. Both printed `reader=ssh`, IDENTICALLY, so an operator who exported
+# an empty token was silently downgraded to a reader they did not choose. Set
+# but empty is now rc 3, with its own sentence; unset still falls through.
+#
+# WHICH READER ANSWERED IS A VERDICT FIELD, NOT A `note:` (charter D531).
+#
+# `reader=ssh` names the TRANSPORT. It does NOT say whether the rows came from
+# `/v1/deliveries` or from the control plane's postgres container after a 401 to
+# the WORKER principal — and a live run printed that downgrade TEN times, as a
+# `note:` on stderr, behind a header that said only `reader=ssh`. The reader that
+# ANSWERED is now counted per read and printed as its own line beside the
+# verdict, and it rides the VERDICT sentence itself.
+#
 # A GRACE IS A DEFERRAL, SO IT MUST LEAVE A DEBT BEHIND (charter D511).
 #
 # The serving check grants a grace to a serving sha whose process is younger than
@@ -133,6 +153,44 @@
 #     degrades to within-run only. That is a real hole, and it is the workflow's
 #     job to point CROWN_STATE_FILE at a path that persists.
 #
+# THE RE-ASK LIST STATES ITSELF, BECAUSE AN ABSENT LIST LOOKED EXACTLY LIKE AN
+# EMPTY ONE (charter D533).
+#
+# `state_load` used to open with `[ -f "$STATE_FILE" ] || return 0` — a bare
+# silent early return — and the workflow set CROWN_STATE_FILE NOWHERE, so every
+# scheduled run wrote the list to a fresh ubuntu-latest VM that was then
+# destroyed. GRACED-UNRECORDED was STRUCTURALLY UNABLE TO FIRE in production,
+# and nothing said so: measured 2026-08-09 on this script's own base fixture, an
+# ABSENT state file and a PRESENT-but-header-only one produced output with the
+# SAME md5 (4b4399a7f447f078b11943d574892e3e), both ending in `RECONCILED: …
+# and no earlier grace is still owed a row` — an ASSERTION about a memory the
+# run did not have.
+#
+# So the list now states itself on EVERY run, in ONE line, over four states:
+#
+#   UNCONFIGURED   no path at all → already a reason(), so rc 2. Unchanged.
+#   ABSENT         a path, no file. A REASON: either the memory was wiped or
+#                  this is the first run ever, and a grace granted on a previous
+#                  run cannot be re-asked. NOT counted clean. PRESENT-EMPTY is
+#                  reachable (state_save writes its header unconditionally), so
+#                  ABSENT after the first run means DESTROYED.
+#   PRESENT-EMPTY  the file exists and holds nothing. NOT a fault — it is the
+#                  affirmative statement that nothing is owed.
+#   PRESENT        N entries loaded.
+#
+# and `state_save` closes symmetrically with `wrote M entry(ies)`. `wrote M>0`
+# followed by the next run's `loaded 0` is the eviction signature, readable with
+# no new instrument. D (dropped) is counted SEPARATELY from N so a corrupted
+# list cannot masquerade as a short one.
+#
+# WHERE THE LIST LIVES IS THE WORKFLOW'S DECISION, AND IT IS NOT actions/cache.
+# `actions/cache` evicts after 7 days SILENTLY, and a cache miss is
+# indistinguishable from an empty list — which is the exact defect above. The
+# workflow instead fetches and writes the list back over the SSH it already
+# holds, to /var/lib/crown-reconcile/ on CP_HOST, and names that location to
+# this script through CROWN_STATE_STORAGE so the printed line says WHERE the
+# memory was supposed to be, not just which local path was read.
+#
 # WHY A CLOCK IN THE FUTURE IS A FAULT AND NOT A KINDNESS
 #
 # `age` used to be an unguarded subtraction, so run 31316144030 printed "only -3s
@@ -158,7 +216,11 @@
 #                 whose every delivering run PREDATES the recorder) — a WARNING
 #                 that is never counted clean. A rate with no denominator is
 #                 refused.
-#             3 = CONFIGURATION fault only (no jq/gh, no credential, bad flag)
+#                 An ABSENT re-ask list is one of these conditions: a memory
+#                 that was destroyed cannot re-ask, so it is a named silence.
+#             3 = CONFIGURATION fault only (no jq/gh, no credential, bad flag,
+#                 or CROWN_API_TOKEN set but EMPTY — a reader asked for and not
+#                 supplied. UNSET is not a fault: it falls through to SSH.)
 #
 # USAGE
 #   scripts/crown-reconcile.sh --repo FRIKKern/barkpark
@@ -198,6 +260,12 @@ REASK_MAX_SECONDS=86400
 # cleanup trap — so it defaults outside the working directory and the caller is
 # expected to point it somewhere that persists between runs.
 STATE_FILE="${CROWN_STATE_FILE:-${TMPDIR:-/tmp}/crown-reconcile-graced.txt}"
+# WHERE that path is supposed to persist, in words, for the printed line. The
+# caller knows this and the script cannot: a path under $RUNNER_TEMP is a
+# destroyed VM unless something ships it off the box. Unset, it is derived
+# below, and a path that lives in a temp directory says so rather than implying
+# a memory it does not have.
+STATE_STORAGE="${CROWN_STATE_STORAGE:-}"
 # The instant `record-delivery` first existed: PR #11167, merge commit 67f4a6ab2.
 # Re-derivable by hand, which is why the commit is named beside it:
 #   TZ=UTC git show -s --format='%H %cd %s' --date=iso-strict 67f4a6ab2
@@ -303,17 +371,56 @@ reason() { # <sentence>
 # Deliberately NOT json: this file is written and read by this script alone, and
 # a line-oriented format needs no jq at all, so no payload can reach an argv word
 # (charter D486).
-state_load() { # -> $WORK/reask.txt
+
+# Where the list is SUPPOSED to persist, in words. Derived only when the caller
+# did not say, and a temp path is named as the hole it is rather than passed off
+# as a memory.
+state_storage() {
+  if [ -n "$STATE_STORAGE" ]; then printf '%s' "$STATE_STORAGE"; return 0; fi
+  [ -n "$STATE_FILE" ] || { printf 'nowhere'; return 0; }
+  case "$STATE_FILE" in
+    /tmp/*|/var/tmp/*|/private/tmp/*|"${TMPDIR:-/nonexistent-tmpdir}"*)
+      printf 'a temp directory — this does NOT survive a run boundary' ;;
+    *) printf 'a local path; set CROWN_STATE_STORAGE to say where it persists' ;;
+  esac
+}
+
+STATE_LOADED=0
+STATE_DROPPED=0
+STATE_STATE=""
+state_load() { # -> $WORK/reask.txt, and ONE printed line, always
   : > "$WORK/reask.txt"
   local sha ts
-  [ -n "$STATE_FILE" ] || { reason "no re-ask list path was configured — a grace granted now cannot be re-asked on the next run"; return 0; }
-  [ -f "$STATE_FILE" ] || return 0
-  while read -r sha ts _; do
-    case "$sha" in ''|'#'*) continue ;; esac
-    case "$sha" in *[!0-9a-fA-F]*) reason "a re-ask list line did not start with a sha and was dropped: '$sha'"; continue ;; esac
-    case "${ts:-}" in ''|*[!0-9]*) reason "the re-ask entry for $sha carries no first-seen instant and was dropped"; continue ;; esac
-    printf '%s %s\n' "$sha" "$ts" >> "$WORK/reask.txt"
-  done < "$STATE_FILE"
+  STATE_LOADED=0
+  STATE_DROPPED=0
+  if [ -z "$STATE_FILE" ]; then
+    STATE_STATE="UNCONFIGURED"
+    reason "no re-ask list path was configured — a grace granted now cannot be re-asked on the next run"
+  elif [ ! -f "$STATE_FILE" ]; then
+    # NOT silence, and NOT clean. state_save writes its header unconditionally,
+    # so after any run that reached the save the file EXISTS even holding zero
+    # entries. Absent therefore means one of exactly two things — the first run
+    # ever, or a memory that was destroyed — and neither can re-ask a grace an
+    # earlier run granted.
+    STATE_STATE="ABSENT"
+    reason "the re-ask list at $STATE_FILE does not exist — either this is the first run ever or the memory was destroyed between runs, and a grace granted on a previous run cannot be re-asked. NOT counted clean."
+  else
+    while read -r sha ts _; do
+      case "$sha" in ''|'#'*) continue ;; esac
+      case "$sha" in *[!0-9a-fA-F]*) STATE_DROPPED=$((STATE_DROPPED + 1)); reason "a re-ask list line did not start with a sha and was dropped: '$sha'"; continue ;; esac
+      case "${ts:-}" in ''|*[!0-9]*) STATE_DROPPED=$((STATE_DROPPED + 1)); reason "the re-ask entry for $sha carries no first-seen instant and was dropped"; continue ;; esac
+      STATE_LOADED=$((STATE_LOADED + 1))
+      printf '%s %s\n' "$sha" "$ts" >> "$WORK/reask.txt"
+    done < "$STATE_FILE"
+    if [ "$STATE_LOADED" -eq 0 ]; then
+      # An affirmative statement, not a fault: the file is there, it was read,
+      # and it says nothing is owed.
+      STATE_STATE="PRESENT-EMPTY"
+    else
+      STATE_STATE="PRESENT"
+    fi
+  fi
+  say "RE-ASK LIST: ${STATE_FILE:-<none>} [$(state_storage)] — ${STATE_STATE}; loaded ${STATE_LOADED} entry(ies), dropped ${STATE_DROPPED} malformed line(s)."
   return 0
 }
 
@@ -322,23 +429,52 @@ state_first_seen() { # <sha> -> first-seen epoch, or empty
 }
 
 state_save() { # <file of "sha epoch" lines to keep>
-  [ -n "$STATE_FILE" ] || return 0
+  local kept
+  kept="$(awk 'NF' "$1" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+  if [ -z "$STATE_FILE" ]; then
+    # state_load already said UNCONFIGURED and reason()'d it; the symmetric line
+    # still prints, because "wrote M, then loaded 0" is the eviction signature
+    # and it only reads if BOTH halves are always there.
+    say "RE-ASK LIST: wrote 0 entry(ies) to <none> — no path was configured, so ${kept} entry(ies) were DISCARDED."
+    return 0
+  fi
   mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null
-  {
+  if {
     printf '# crown-reconcile re-ask list — "<sha> <first-seen-epoch>". Written %s.\n' "$NOW_ISO"
     sort -u "$1"
-  } > "$STATE_FILE" 2>/dev/null \
-    || reason "the re-ask list could not be written to $STATE_FILE — a grace granted now will not be re-asked"
+  } > "$STATE_FILE" 2>/dev/null; then
+    say "RE-ASK LIST: wrote ${kept} entry(ies) to $STATE_FILE [$(state_storage)]."
+  else
+    reason "the re-ask list could not be written to $STATE_FILE — a grace granted now will not be re-asked"
+    say "RE-ASK LIST: FAILED to write ${kept} entry(ies) to $STATE_FILE [$(state_storage)]."
+  fi
   return 0
 }
 
 # ── the two readers ──────────────────────────────────────────────────────────
 READER=""
 SSH=""
+# WHICH reader actually produced rows, counted per read. The transport is known
+# before the first read; the reader is not, because the SSH transport carries
+# two of them and only a 401 to the WORKER principal decides which one answers.
+READS_ROUTE=0
+READS_SQL=0
+READS_FIXTURE=0
+READS_FAILED=0
+SQL_DOWNGRADE_HTTP=""
 select_reader() {
   if [ "$FIXTURE_MODE" = "1" ]; then
     READER="fixture"
     return 0
+  fi
+  # SET BUT EMPTY is not the same statement as UNSET. Unset means "I did not ask
+  # for the PAT reader" and falls through to the SSH reader below — the path CI
+  # actually runs, which must keep working. Empty means "I asked for the PAT
+  # reader and handed it nothing", and silently answering that with a different
+  # reader is the downgrade this guard exists to refuse.
+  if [ "${CROWN_API_TOKEN+set}" = "set" ] && [ -z "${CROWN_API_TOKEN}" ]; then
+    warn "CONFIG: CROWN_API_TOKEN is SET BUT EMPTY. A reader that was explicitly asked for and is not there is a configuration fault, not a silent downgrade to the CP_HOST + DEPLOY_SSH_KEY reader. UNSET it to choose the SSH reader deliberately, or give it a read-ability PAT."
+    return 3
   fi
   if [ -n "${CROWN_API_TOKEN:-}" ]; then
     READER="pat"
@@ -410,24 +546,28 @@ crown_read() {
   local qs="$1" out="$2" body http via
   case "$READER" in
     fixture)
-      [ -f "$CROWN_FIXTURE" ] || { warn "  crown fixture is unreadable: ${CROWN_FIXTURE:-<none>}"; return 2; }
+      [ -f "$CROWN_FIXTURE" ] || { READS_FAILED=$((READS_FAILED + 1)); warn "  crown fixture is unreadable: ${CROWN_FIXTURE:-<none>}"; return 2; }
       jq 'if type == "array" then {deliveries: .} else error("not an array") end' "$CROWN_FIXTURE" > "$out" 2>/dev/null \
-        || { warn "  crown fixture is not a JSON array of rows"; return 2; }
+        || { READS_FAILED=$((READS_FAILED + 1)); warn "  crown fixture is not a JSON array of rows"; return 2; }
+      READS_FIXTURE=$((READS_FIXTURE + 1))
       return 0
       ;;
     pat)
       http="$(curl -s -o "$WORK/body.json" -w '%{http_code}' --max-time 30 \
         -H "authorization: Bearer $CROWN_API_TOKEN" "$API_BASE/v1/deliveries?$qs")"
       if [ "$http" != "200" ]; then
+        READS_FAILED=$((READS_FAILED + 1))
         warn "  the crown answered HTTP ${http:-<none>} for ?$qs"
         return 2
       fi
       cp "$WORK/body.json" "$out"
+      READS_ROUTE=$((READS_ROUTE + 1))
       return 0
       ;;
     ssh)
       body="$($SSH "root@${CP_HOST}" "bash -s '$qs'" < "$WORK/remote.sh" 2>&1)"
       if [ $? -ne 0 ]; then
+        READS_FAILED=$((READS_FAILED + 1))
         warn "  the control plane was not reachable over SSH for ?$qs"
         return 2
       fi
@@ -435,14 +575,39 @@ crown_read() {
       http="$(printf '%s\n' "$body" | sed -n 's/^CR_HTTP=//p')"
       printf '%s\n' "$body" | sed -n 's/^CR_BODY=//p' > "$out"
       if [ ! -s "$out" ]; then
+        READS_FAILED=$((READS_FAILED + 1))
         warn "  the crown could not be read on the box for ?$qs: $(printf '%s\n' "$body" | sed -n 's/^CR_ERROR=//p')"
         return 2
       fi
-      [ "$via" = "sql" ] && warn "  note: the route answered HTTP $http to the WORKER principal — read via the control plane's postgres container instead"
+      if [ "$via" = "sql" ]; then
+        READS_SQL=$((READS_SQL + 1))
+        SQL_DOWNGRADE_HTTP="$http"
+      else
+        READS_ROUTE=$((READS_ROUTE + 1))
+      fi
       return 0
       ;;
   esac
   return 2
+}
+
+# WHICH reader answered, as a field — printed on every path that reaches a
+# verdict, and folded into the verdict sentence itself. The transport is in the
+# header; this is the reader, and the two are not the same fact.
+reader_answered() {
+  local names=""
+  [ "$READS_FIXTURE" -gt 0 ] && names="fixture"
+  [ "$READS_ROUTE" -gt 0 ] && names="${names:+$names+}route"
+  [ "$READS_SQL" -gt 0 ] && names="${names:+$names+}postgres-container"
+  printf '%s' "${names:-none}"
+}
+
+say_reader() {
+  local detail=""
+  if [ "$READS_SQL" -gt 0 ]; then
+    detail=" — the /v1/deliveries route answered HTTP ${SQL_DOWNGRADE_HTTP:-<none>} to the WORKER principal, so those rows came from the control plane's own postgres container, NOT from the route"
+  fi
+  say "READER: transport=${READER:-<none>}, answered by $(reader_answered) (route=${READS_ROUTE}, postgres-container=${READS_SQL}, fixture=${READS_FIXTURE}, unreadable=${READS_FAILED})${detail}"
 }
 
 # ── the runs ─────────────────────────────────────────────────────────────────
@@ -484,7 +649,7 @@ run_delivers() { # <run-id> -> 0 delivers / 1 does not / 2 could not read
 select_reader || exit 3
 [ "$READER" = "ssh" ] && write_remote_reader
 
-say "crown-reconcile — repo=$REPO reader=$READER window=${WINDOW_HOURS}h ($CUTOFF_ISO .. $NOW_ISO)"
+say "crown-reconcile — repo=$REPO reader-transport=$READER window=${WINDOW_HOURS}h ($CUTOFF_ISO .. $NOW_ISO)"
 
 REASONS_FILE="$WORK/reasons.txt"
 : > "$REASONS_FILE"
@@ -496,6 +661,7 @@ rc=$?
 if [ "$rc" != "0" ]; then
   say ""
   say "COULD NOT READ: the deploy.yml run list did not answer. Nothing was compared, and this is NOT a clean run."
+  say_reader
   exit 2
 fi
 
@@ -510,6 +676,7 @@ jq --argjson cut "$CUTOFF_EPOCH" --argjson wide "$WIDE_EPOCH" \
 if [ ! -s "$WORK/runs.json" ]; then
   say ""
   say "COULD NOT READ: the run list did not parse as an Actions runs payload. Nothing was compared."
+  say_reader
   exit 2
 fi
 
@@ -746,6 +913,8 @@ pct() { # <numerator> <denominator>
 }
 
 say ""
+say_reader
+say ""
 if [ "$PREDATES" -gt 0 ]; then
   say "PREDATES-WRITER: ${PREDATES} of ${DELIVERING} delivering run(s) were created before the record-delivery job existed (born ${RECORDER_BIRTH_ISO}, PR ${RECORDER_BIRTH_PR}, merge ${RECORDER_BIRTH_COMMIT}) — nothing could have recorded them, so they are NOT counted BEHIND. They are printed here rather than hidden by a narrower window:"
   while IFS=' ' read -r sha id; do
@@ -784,7 +953,7 @@ fi
 
 if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$GRACED_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${ROWS_EXAMINED} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${ROWS_EXAMINED} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
   exit 1
 fi
 
@@ -817,5 +986,5 @@ if [ "$UNREADABLE" != "0" ]; then
 fi
 
 say ""
-say "RECONCILED: all ${RECONCILABLE} delivering run(s) in the window have their row, all ${ROWS_EXAMINED} row(s) in the window have their run, the serving sha ${SERVING_SHA:-<not checked>} is recorded, and no earlier grace is still owed a row."
+say "RECONCILED: all ${RECONCILABLE} delivering run(s) in the window have their row, all ${ROWS_EXAMINED} row(s) in the window have their run, the serving sha ${SERVING_SHA:-<not checked>} is recorded, and no earlier grace is still owed a row — read by $(reader_answered), against a re-ask list that was ${STATE_STATE} with ${STATE_LOADED} entry(ies)."
 exit 0
