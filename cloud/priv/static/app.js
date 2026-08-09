@@ -9851,6 +9851,9 @@
     }
     if (err.code === "capability_unavailable") return "This instance needs an update to manage webhooks.";
     if (err.code === "not_live") return ERRORS.not_live;
+    // cch-w57-s4 — the proxy refuses a :mutate on a suspended box (409
+    // suspended) without ever calling it; say THAT, not "check the details".
+    if (err.code === "suspended") return ERRORS.suspended;
     var d = err.detail;
     if (d && typeof d === "object" && d.error) {
       var e2 = d.error;

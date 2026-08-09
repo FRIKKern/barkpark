@@ -10794,15 +10794,37 @@ defmodule BarkparkCloud.Web.Router do
   defp dispatch_instance_api(conn, team, bp, capability) do
     {:ok, entry} = InstanceApiCatalog.fetch(capability)
 
-    with {:ok, base} <- instance_base_url(bp),
-         {:ok, admin_token} <- instance_admin_token(bp),
-         {:ok, path} <- render_instance_path(conn, entry) do
-      relay_instance_api(conn, team, bp, entry, base, admin_token, path)
-    else
-      {:error, :not_live} -> instance_api_error(conn, 409, "not_live")
-      {:error, :no_admin_token} -> instance_api_error(conn, 404, "no_admin_token")
-      {:error, :decrypt_failed} -> instance_api_error(conn, 500, "decrypt_failed")
-      {:error, :bad_request} -> instance_api_error(conn, 400, "bad_request")
+    cond do
+      # cch-w57-s4 — a SUSPENDED box is not WRITTEN TO through the platform's
+      # stored admin credential. Isolation (D653) is "the control plane withholds
+      # new credentials and maintenance attention; nothing stops, nothing is
+      # deleted" — and a `:mutate` relayed with the decrypted admin token IS the
+      # platform touching a server the console's own banner says it has stopped
+      # managing (six of the nine v1 capabilities are `:mutate`, including
+      # test_send, which makes the box perform an outbound request).
+      #
+      # `:read` deliberately still relays (D673): it grants nothing durable — the
+      # contrast with the two MINT routes above, whose grants OUTLIVE the
+      # suspension — deletes nothing, and keeps a lapsed team able to SEE its own
+      # configuration. The webhooks tab is still offered, so blanking it would
+      # paint a transport excuse for a billing decision.
+      #
+      # Placed ABOVE `instance_admin_token/1` on purpose: the ciphertext is never
+      # decrypted on the refused path. Same 409 `suspended` slug as studio-link.
+      bp.suspended and entry.tier == :mutate ->
+        instance_api_error(conn, 409, "suspended")
+
+      true ->
+        with {:ok, base} <- instance_base_url(bp),
+             {:ok, admin_token} <- instance_admin_token(bp),
+             {:ok, path} <- render_instance_path(conn, entry) do
+          relay_instance_api(conn, team, bp, entry, base, admin_token, path)
+        else
+          {:error, :not_live} -> instance_api_error(conn, 409, "not_live")
+          {:error, :no_admin_token} -> instance_api_error(conn, 404, "no_admin_token")
+          {:error, :decrypt_failed} -> instance_api_error(conn, 500, "decrypt_failed")
+          {:error, :bad_request} -> instance_api_error(conn, 400, "bad_request")
+        end
     end
   end
 
