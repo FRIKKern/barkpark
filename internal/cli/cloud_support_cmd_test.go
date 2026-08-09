@@ -1768,3 +1768,26 @@ func TestCloudSupportRemoveDNSSkipNoURL(t *testing.T) {
 		t.Fatalf("the success line must carry the skip, not a clean verdict\nstdout:\n%s", stdout)
 	}
 }
+
+// TestSupportDNSForSatisfiesRecordLister observes the CALL SITE, not a rebuild
+// of it. supportDNSFor is declared to return cloud.DNSProvider — an INTERFACE —
+// so it is the one production wiring whose RecordLister satisfaction no
+// compile-time `var _ RecordLister` in package cloud can see: swap the body for
+// any other DNSProvider, or wrap it in a decorator that forwards only
+// DNSProvider, and the build stays green while deprovisionDNS (warmpool.go)
+// silently degrades from the by-VALUE A-record sweep to the by-NAME delete,
+// leaving custom-domain records pointing at an IP Hetzner hands to someone else.
+// cch-w57-s5's in-package table test cannot reach this seam (internal/cli/cloud
+// cannot import internal/cli); this arm closes it from the other side.
+func TestSupportDNSForSatisfiesRecordLister(t *testing.T) {
+	for _, tok := range []string{"", "token-from---dns-token"} {
+		p := supportDNSFor(tok)
+		if p == nil {
+			t.Fatalf("supportDNSFor(%q) returned nil — the remove-side sweep has no provider", tok)
+		}
+		if _, ok := p.(cloud.RecordLister); !ok {
+			t.Fatalf("supportDNSFor(%q) builds %T, which does NOT satisfy cloud.RecordLister: "+
+				"deprovisionDNS would take the by-name degrade arm for the whole fleet", tok, p)
+		}
+	}
+}
