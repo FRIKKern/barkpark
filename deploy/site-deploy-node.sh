@@ -880,9 +880,63 @@ FAKENPM
   # verdict: parse_stage_line/2 would fold it into `stages` and stage_exit_code/1
   # could turn a green deploy red. Report, never verdict (charter D327).
   RUNNER_EX="$(cd "$(dirname "$SELF")/.." && pwd)/api/lib/barkpark/sites/deploy_runner.ex"
-  if [ -f "$RUNNER_EX" ]; then
+  if [ ! -f "$RUNNER_EX" ]; then
+    # A silent skip here is the same vacuum as the flock skip below: extracted
+    # without api/, this row disappears and the suite still prints PASS at a
+    # lower total. Skip honestly on a partial checkout; NEVER in CI.
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - the DeployRunner @stage_names proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but $RUNNER_EX is missing — this engine was extracted without api/, so the only assertion that ROUTE stays OUTSIDE the runner's whitelist did not run; a skipped doctrine proof must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP DeployRunner @stage_names doctrine (ROUTE stays a report) — needs api/lib/barkpark/sites/deploy_runner.ex in the tree"
+  else
     check "DeployRunner's @stage_names still has no ROUTE arm (the node report cannot flip a verdict)" \
       sh -c "! grep -q '^  @stage_names .*ROUTE' '$RUNNER_EX'"
+  fi
+
+  # -------------------------------------------------------------------------
+  # THE MARKER DELIMITER CLASS (D345), asserted DIRECTLY on the predicate.
+  #
+  # #10607's fix landed in BOTH engines, but only the static engine could SEE
+  # it: every marker THIS script writes has a space after the slug, so reverting
+  # site_route_marker_re to a whitespace-only ([[:space:]]|$) predicate left this
+  # suite at 177/177 PASS while the same mutation red the static engine's two
+  # hand-edited-delimiter rows. The hardening in the file that governs every live
+  # Node site's public route was mutation-INVISIBLE — an L4 claim in an L1 suit.
+  #
+  # The dangerous direction is a marker this script did NOT write: a hand-edited
+  # `…:<slug>:` in a live Caddyfile reads as NOT ARMED under a whitespace-only
+  # predicate, and the arm re-writes a working route into a duplicate handle.
+  # So the delimiter is "any character a slug cannot contain" ([^a-z0-9-]),
+  # which is right in BOTH directions — it accepts every real delimiter and
+  # still rejects the only thing a sibling slug can continue with.
+  # -------------------------------------------------------------------------
+  echo "[selftest] the marker delimiter is 'not a slug character', not merely whitespace (D345)"
+  mrk() { # <slug> <line> -> 0 if the predicate says "this line is that slug's marker"
+    # ${SITE_SLUG:-}: the selftest runs with `set -u` and no slug of its own —
+    # the deploy path is what sets this global.
+    local __save="${SITE_SLUG:-}" __rc=0
+    printf '%s\n' "$2" > "$TD/mrk.txt"
+    SITE_SLUG="$1"; has_site_route_marker "$TD/mrk.txt" || __rc=$?
+    SITE_SLUG="$__save"; return "$__rc"
+  }
+  check "delimiter: a space after the slug matches (what this script writes)" \
+    mrk search '# BARKPARK_SITE_ROUTE:search — node site'
+  check "delimiter: end-of-line matches" \
+    mrk search '# BARKPARK_SITE_ROUTE:search'
+  check "delimiter: a hand-edited ':' after the slug STILL reads as armed (no duplicate re-arm)" \
+    mrk search '# BARKPARK_SITE_ROUTE:search: node site'
+  check "delimiter: a hand-edited '#' after the slug STILL reads as armed" \
+    mrk search '# BARKPARK_SITE_ROUTE:search#1'
+  if mrk search '# BARKPARK_SITE_ROUTE:search-capstone — node site'; then
+    check "delimiter: a PREFIX sibling ('-') is REJECTED" false
+  else
+    check "delimiter: a PREFIX sibling ('-') is REJECTED" true
+  fi
+  if mrk search '# BARKPARK_SITE_ROUTE:search2 — node site'; then
+    check "delimiter: an alnum-extended sibling is REJECTED" false
+  else
+    check "delimiter: an alnum-extended sibling is REJECTED" true
   fi
   check "slot a env RELEASE_DIR=n1"      grep -q "RELEASE_DIR=$N_SITE/releases/n1" "$SENV/selftest__a.env"
   # GNU stat first (-c; on Linux `stat -f` SUCCEEDS with filesystem info, so a
