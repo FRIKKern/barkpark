@@ -56,18 +56,64 @@
 # for as long as CI takes. WAITING is keyed on `.status` (anything that is not
 # `completed`), and it is NEITHER a pass NOR a scream: exit 2.
 #
+# A ROW THAT DOES NOT EXIST YET IS NOT A ROW THAT WILL NEVER EXIST (cch-w61)
+#
+# WAITING as described above is keyed on the `.status` of an EXISTING row, so it
+# says nothing about a context whose row has not been created at all — and that
+# is the shape the production failure actually had. Scheduled run 31312071143
+# (2026-08-09 11:57:21Z) red on tip 2e72d2948 with `MISSING Elixir gate` while
+# main was in fact fine: the tip was 5m02s old and carried THIRTY-SIX check-run
+# rows (Cloud gate and Console gate both green), but the `elixir` workflow run on
+# it (31311871968, created 11:52:33Z, terminal only at 11:59:07Z) had produced
+# NO JOBS YET — `actions/runs/31311871968/jobs` returns `total_count: 0` — so no
+# `Elixir gate` row COULD exist. Absence there meant "not yet", not "never".
+#
+# THE DISCRIMINATOR IS THE RUN STATUS, AND IT CARRIES NO CONSTANT
+#
+# A third authority answers it directly: `actions/runs?head_sha=<tip>`. If ANY
+# workflow run on the tip is not `completed`, this commit is still being judged,
+# and an absent required row is WAITING (exit 2). If every run on the tip is
+# terminal and a required row is still absent, the commit is done being judged
+# and never got a verdict — MISSING (exit 1). On the never-judged sha a5260f609
+# all 9 runs are `completed`, so it screams exactly as loudly as before.
+#
+# It is threshold-free, so it cannot go stale, and it needs no workflow-to-
+# context name mapping. Honest caveat: it is per-TIP, not per-context, so a tip
+# whose elixir run was cancelled while another workflow is still running waits
+# one extra tick before the scream lands. The header below already accepts a
+# 30-45 minute verdict lag, so that is affordable; being late is not being mute.
+#
+# WHY NOT AN AGE THRESHOLD (measured, and it is worse than it sounds)
+#
+# The obvious alternative — "a tip younger than the observed row-creation lag is
+# WAITING" — needs a constant, and the constant is both wrong and costly. The
+# inherited +7m15s/+9m52s/+25m27s triple is ONE tip; re-derived across nine main
+# tips the Elixir-gate lag runs 14m17s..27m37s, so 25m27s STILL false-reds.
+# Worse, simulating */30 ticks over the 100 main commits in
+# 2026-08-08T10:27:24Z..2026-08-09T11:59:03Z: 51 ticks, and at a 28m threshold 35
+# are still judged and 16 become WAITING — but of the 17 distinct tips a tick
+# ever landed on, SEVEN (dcfd083dd, 2e38228b0, 797950e89, 10cab42a3, b3b8a779b,
+# abfd8dd01, e8c32a946) would be judged NEVER, because a newer commit superseded
+# them before their grace expired. An age threshold converts a false red into a
+# never-measured tip — the vacuous silence this file exists to abolish, moved up
+# one level. The run-status rule has no such property. So NO age arm ships here:
+# `grep -c 'GRACE' scripts/main-gate-watch.sh` is 0.
+#
 # EXIT CODES  0 = every watched context PRESENT and green
-#             1 = SCREAM — at least one watched context RED or MISSING
-#             2 = WAITING — at least one still in flight, none red or missing
-#             3 = CONFIGURATION FAULT — protection unreadable, or a live
-#                 required context that is neither watched nor excluded
+#             1 = SCREAM — at least one watched context RED, or MISSING with
+#                 every workflow run on the tip already terminal
+#             2 = WAITING — at least one still in flight (an in-flight row, or
+#                 an absent row while a run on the tip is not `completed`)
+#             3 = CONFIGURATION FAULT — protection or the tip's workflow runs
+#                 unreadable, or a live required context that is neither watched
+#                 nor excluded
 #
 # USAGE
 #   scripts/main-gate-watch.sh
 #   scripts/main-gate-watch.sh --repo O/R --branch main
 #   # hermetic (the test harness; no network at all):
 #   scripts/main-gate-watch.sh --sha <sha> \
-#       --protection-file <f> --check-runs-file <f>
+#       --protection-file <f> --check-runs-file <f> [--runs-file <f>]
 
 set -uo pipefail
 
@@ -90,6 +136,7 @@ EXCLUDED_CONTEXTS="PR references an active task"
 
 PROTECTION_FILE=""
 CHECK_RUNS_FILE=""
+RUNS_FILE=""
 SHA_OVERRIDE=""
 REPO_OVERRIDE=""
 BRANCH_OVERRIDE=""
@@ -175,6 +222,49 @@ read_check_runs() {
   ' <<<"$body"
 }
 
+# ── authority 3: the workflow runs on the tip ────────────────────────────────
+# Prints TSV: name<TAB>status<TAB>id, one row per workflow run on this sha — or
+# the single token FORBIDDEN / UNREADABLE. This is the ONLY thing that can tell
+# "no row has been created yet" from "no row will ever be created", so a read
+# that fails must reach the exit-3 vocabulary and NOT fall through to a verdict:
+# a third endpoint is a third way to be blind, and a blind watch that reports
+# MISSING is just the false red under a new name.
+read_workflow_runs() {
+  local body sha repo
+  sha="$1"
+  if [ -n "$RUNS_FILE" ]; then
+    [ -f "$RUNS_FILE" ] || { echo "UNREADABLE"; return 0; }
+    body="$(cat "$RUNS_FILE")"
+  elif [ -n "$CHECK_RUNS_FILE" ]; then
+    # Hermetic and no runs fixture supplied: no run data is KNOWN, so nothing is
+    # known to be in flight. Only the test harness reaches this branch — the
+    # live path below always reads the endpoint, and cannot default to silence.
+    return 0
+  else
+    repo="${REPO_OVERRIDE:-$(spec_repo)}"
+    if [ -z "$repo" ]; then echo "UNREADABLE"; return 0; fi
+    body="$(gh api --paginate -X GET -f head_sha="$sha" -f per_page=100 "repos/$repo/actions/runs" 2>&1)" || {
+      if grep -qE 'HTTP 401|HTTP 403|Bad credentials|Resource not accessible by integration|Must have admin rights|equires authentication' <<<"$body"; then
+        echo "FORBIDDEN"; return 0
+      fi
+      echo "UNREADABLE"; return 0
+    }
+  fi
+  jq -e . >/dev/null 2>&1 <<<"$body" || { echo "UNREADABLE"; return 0; }
+  # Same slurp discipline as the check-run reader: `--paginate` on an OBJECT
+  # endpoint emits one document per page, and a run still in flight may sit on
+  # any of them.
+  jq -e -s 'all(.[]; .workflow_runs | type == "array")' >/dev/null 2>&1 <<<"$body" \
+    || { echo "UNREADABLE"; return 0; }
+  jq -r -s '
+    map(.workflow_runs // [])
+    | (add // [])
+    | .[]
+    | [(.name // ""), (.status // ""), (.id // 0)]
+    | @tsv
+  ' <<<"$body"
+}
+
 resolve_tip_sha() {
   local repo branch
   repo="${REPO_OVERRIDE:-$(spec_repo)}"
@@ -187,6 +277,7 @@ main() {
     case "$1" in
       --protection-file) PROTECTION_FILE="${2:-}"; shift 2 ;;
       --check-runs-file) CHECK_RUNS_FILE="${2:-}"; shift 2 ;;
+      --runs-file)       RUNS_FILE="${2:-}"; shift 2 ;;
       --sha)             SHA_OVERRIDE="${2:-}"; shift 2 ;;
       --repo)            REPO_OVERRIDE="${2:-}"; shift 2 ;;
       --branch)          BRANCH_OVERRIDE="${2:-}"; shift 2 ;;
@@ -260,7 +351,60 @@ EOF
     return 3
   fi
 
+  # ── the run-status discriminator ───────────────────────────────────────────
+  # Read BEFORE any verdict, and unconditionally: a watch that only reaches for
+  # this authority when it is about to scream would silently keep its old
+  # behaviour on the day the endpoint breaks.
+  local tip_runs inflight="" rname rstatus rid
+  tip_runs="$(read_workflow_runs "$sha")"
+  case "$tip_runs" in
+    FORBIDDEN)
+      red "CONFIGURATION FAULT — this run's credential cannot read the workflow runs on the tip (401/403)."
+      red "That read is what separates 'no check-run row has been created YET' from 'this commit was never"
+      red "judged'. Without it every young tip reads as never-judged, which is the false red this watch was"
+      red "repaired to stop emitting. This run FAILS rather than guessing."
+      red ""
+      # THE REMEDY, NAMED (added in review, cch-w61). Exit 3 is honest, but a
+      # fault that recurs every 30 minutes and does not say how to clear itself
+      # is how a watch gets muted by the people it is shouting at. This is the
+      # one predictable way the new read fails: the workflow runs `gh` under
+      # GH_TOKEN, which is `secrets.BREAKGLASS_TOKEN` when that secret exists and
+      # `github.token` otherwise. The workflow's own `permissions:` block already
+      # grants `actions: read`, so `github.token` is fine — but a fine-grained
+      # PAT in BREAKGLASS_TOKEN carries its own scope set and that grant does
+      # not reach it.
+      red "REMEDY: whatever credential \$GH_TOKEN carries needs Actions: read on this repository."
+      red "  This workflow's own permissions: block already grants actions: read, so the DEFAULT"
+      red "  github.token is sufficient. If secrets.BREAKGLASS_TOKEN is set, it OVERRIDES that token"
+      red "  and must carry the Actions: read permission itself — a fine-grained PAT without it 403s"
+      red "  here on every scheduled run while branch protection and check-runs still read fine."
+      return 3 ;;
+    UNREADABLE)
+      red "CONFIGURATION FAULT — the workflow runs on $sha could not be read (repos/<repo>/actions/runs)."
+      red "A watch that cannot see whether the tip is still being judged must not decide that it never was."
+      return 3 ;;
+  esac
+  while IFS="$(printf '\t')" read -r rname rstatus rid; do
+    [ -n "$rname" ] || continue
+    [ "$rstatus" = "completed" ] && continue
+    inflight="$inflight$rname #$rid (status=$rstatus)
+"
+  done <<EOF
+$tip_runs
+EOF
+
   say "main-gate-watch — tip $sha"
+
+  local first_inflight=""
+  if [ -n "$inflight" ]; then
+    first_inflight="$(printf '%s' "$inflight" | head -n 1)"
+    # Printed in FULL, not just the one row quoted below: when this watch says
+    # WAITING instead of MISSING, the reader's next question is always "waiting
+    # on WHAT", and answering it is the difference between an instrument and an
+    # excuse.
+    say "  still in flight on this tip — a row that is absent may yet appear:"
+    printf '%s' "$inflight" | while IFS= read -r line; do [ -n "$line" ] && say "    $line"; done
+  fi
 
   local screams="" waits="" name status conclusion found
   while IFS= read -r ctx; do
@@ -274,9 +418,20 @@ EOF
 $runs
 EOF
     if [ -z "$found" ]; then
-      # THE CASE THE WHOLE SLICE EXISTS FOR. Absence is not silence-is-golden;
-      # it means this commit was never judged.
-      say "  MISSING  $ctx — no check run at all on this sha"
+      if [ -n "$first_inflight" ]; then
+        # NOT YET, rather than NEVER (cch-w61). A workflow run on this tip has
+        # not reached a terminal state, so a row that does not exist may still
+        # be created — including by a run that has produced no jobs at all yet,
+        # which is exactly how run 31312071143 false-red on 2e72d2948.
+        say "  WAITING  $ctx — no check run row YET, and a workflow run on this sha is still in flight: $first_inflight"
+        waits="$waits$ctx (no row yet; still in flight: $first_inflight)
+"
+        continue
+      fi
+      # THE CASE THE WHOLE SLICE EXISTS FOR. Absence with every workflow run on
+      # the tip already terminal is not silence-is-golden; it means this commit
+      # is done being judged and never got a verdict.
+      say "  MISSING  $ctx — no check run at all on this sha, and every workflow run on it is terminal"
       screams="$screams$ctx (MISSING)
 "
       continue
@@ -303,7 +458,8 @@ EOF
     red "MAIN'S TIP DOES NOT CARRY A GREEN VERDICT — $sha"
     printf '%s' "$screams" | while IFS= read -r line; do [ -n "$line" ] && red "  $line"; done
     red ""
-    red "MISSING is not better than RED: it means the commit was never judged. Queued main runs collapse"
+    red "MISSING is not better than RED: it means the commit was never judged — and it is now only said when"
+    red "every workflow run on this tip is terminal, so it is never merely 'too early to tell'. Queued main runs collapse"
     red "to one (cloud.yml concurrency), so a tip with no verdict is a tip nobody measured."
     red "This is a LEVEL check. It reds on every run until the tip carries a green verdict on every"
     red "watched context — re-run the workflow on this sha, or land the fix that makes it green."
