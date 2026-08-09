@@ -30,6 +30,19 @@
 # outage, and GitHub's 60-day auto-disable of scheduled workflows in an inactive
 # repo.
 #
+# ONE MORE RESIDUAL, AND IT IS NOT SMALL (wave 60, added with the push-trigger
+# deletion below). Deleting `push:` removes the arm that red on EVERY merge, but
+# it does not remove the cause: MISSING cannot tell "no row has been created on
+# this tip YET" from "this tip was never judged". The required rows appeared at
+# +7m15s, +9m52s and +25m27s after a merge, so a scheduled slot landing inside
+# that window still reds on a tip that is merely young. It self-heals on the next
+# slot, so this is noise rather than a stuck scream — but it is noise on the one
+# workflow whose whole job is to be believed. The fix is age-aware and NOT done
+# here: the commit's own timestamp is readable, and a tip younger than the
+# observed row-creation lag with zero rows is WAITING, not MISSING — while
+# a5260f609 (old, judged, no required row) stays MISSING. Owner:
+# cchi-w61-main-gate-watch-missing-conflates-young-tip.
+#
 # WHY ITS NAME CAN NEVER ENTER THE REQUIRED SET
 #
 # This job reads two GitHub endpoints. Requiring an API-reading check gates every
@@ -47,8 +60,18 @@ on:
     # ~30-45 minutes", never "at :00 and :30".
     - cron: "*/30 * * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
+  # THERE IS NO `push:` TRIGGER, AND ADDING ONE IS A REGRESSION (wave 60, D721).
+  # It fired ~15-20s after a merge, when GitHub had created NO check-run rows on
+  # the new tip at all. WAITING (exit 2) is keyed on the `.status` of an EXISTING
+  # row, so an empty payload falls through to MISSING — exit 1 by construction.
+  # Production record: 2 of 2 push runs FAILED on tip 026c5b1d78 (MISSING x3)
+  # while main was in fact green; the byte-identical script on the SAME sha 36
+  # minutes later printed ok/ok/ok, rc=0. The three required rows were created at
+  # +7m15s (Console), +9m52s (Cloud) and +25m27s (Elixir), so no honest grace
+  # constant is smaller than the */30 cadence this file already runs on — the
+  # schedule arm IS the fix, and the header above already accepts a ~30-45 minute
+  # verdict lag. `scripts/main-gate-watch.test.sh` §11 reds if a push: trigger
+  # comes back, and §3b carries the empty-payload fixture that proves why.
   pull_request:
     # Deliberately narrow: this trigger exists ONLY so the harness below is not
     # orphaned. Being paths-filtered also keeps every name in this file out of
@@ -76,9 +99,9 @@ permissions:
 
 concurrency:
   group: main-gate-watch-${{ github.ref }}
-  # NEVER a literal `true`: on push-to-main that self-cancels the watch dark —
-  # which is the exact failure mode (a collapsed run leaving no verdict) this
-  # workflow was built to report.
+  # NEVER a literal `true`: on the main ref (schedule and workflow_dispatch both
+  # run there) that self-cancels the watch dark — which is the exact failure mode
+  # (a collapsed run leaving no verdict) this workflow was built to report.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
