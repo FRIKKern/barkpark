@@ -230,3 +230,14 @@ func splitFqdn(fqdn string) (label, zone string) {
 
 // compile-time assertion that *CloudDNS satisfies the interface.
 var _ DNSProvider = (*CloudDNS)(nil)
+
+// compile-time assertion that *CloudDNS also satisfies RecordLister — the
+// OPTIONAL capability deprovisionDNS (warmpool.go) type-asserts to choose the
+// by-VALUE sweep over the by-NAME delete. *CloudDNS is what production wires
+// (cmd/barkpark-provisioner/main.go, internal/cli/cloud_support_cmd.go), and
+// the assertion is a plain interface satisfaction, so dropping or renaming
+// ListRecords silently degrades the WHOLE FLEET to by-name teardown without a
+// single test going red. This line makes that a BUILD failure; the runtime
+// table test in dns_cloud_test.go covers the constructor-swap case this cannot
+// see.
+var _ RecordLister = (*CloudDNS)(nil)
