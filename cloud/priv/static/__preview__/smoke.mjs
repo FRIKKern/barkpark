@@ -3278,9 +3278,21 @@ const EXPECTATIONS = {
       const body = reg.get("instance-body");
       const html = (body || {}).innerHTML || "";
       assert.ok(html.includes("update-panel"), "the Updates panel must render — this box HAS a host");
-      assert.ok(html.includes("Checked 45m ago"), "the panel states when the probe last ran");
+      // cch-w63-s5 — THESE TWO ASSERTIONS WERE THE LIE, AND THEY ARE MOVED, NOT
+      // WORKED AROUND. They read `Checked 45m ago` + `Unknown` and justified it as
+      // "what update_state actually is for a refused box". update_state IS
+      // "unknown" — the wire's own word, and the data attribute below still pins
+      // it (charter D778) — but this fixture carries
+      // update_unavailable_reason:"identity_refused", i.e. the control plane
+      // NAMED the cause. The probe ran and the box refused it; nothing was
+      // "checked", so the panel must not say so.
+      assert.ok(html.includes("Tried 45m ago — the instance rejected our access credential"),
+        "the panel states what was TRIED and why it failed, echoing usageUnavailableText('unauthorized') verbatim");
+      assert.equal(html.includes("Checked"), false,
+        "…and never asserts a completed check about a probe the box refused");
+      assert.ok(html.includes("Could not check"), "the badge names the failure instead of shrugging");
       assert.ok(html.includes('data-update-state="unknown"'),
-        "…and the badge reads Unknown, which is what update_state actually is for a refused box");
+        "…while the STATE literal stays `unknown` — the label moved, the wire's word did not");
 
       const rb = body.querySelectorAll("[data-rollback]");
       assert.equal(rb.length, 1, "exactly one Roll back control renders");

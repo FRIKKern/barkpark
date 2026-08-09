@@ -543,4 +543,26 @@
 # account modal's sessions fold (.session-fold and its :hover), added when the
 # sessions list learned to collapse past five rows. Number recorded from the
 # parity run itself, MISSES 0 confirmed first.
-1307
+#
+# cch-w63-s5 MEASURED 2026-08-09 (the resting state stops asserting a check that
+# never happened): 1307 -> 1310, +3 authored rule heads, MISSES 0. WHY: the fleet
+# card's refused update chip. A box that answered our stored credential with a 401
+# rendered BYTE-IDENTICALLY to a box nobody had ever probed (measured over the
+# shipped bundle: fleetRow equal, both len 576 on a minimal fixture), so the chip
+# had to exist — and a chip whose class has no rule is an __css_check E2 red, while
+# one falling through to `--ready` would paint a credential refusal in the same
+# GREEN that elsewhere means "a newer release is waiting for you". The three heads
+# are the WARN role, stated explicitly: `.fleet-update-chip--refused`,
+# `.fleet-update-chip--refused .fleet-update-dot`, and
+# `[data-theme="dark"] .fleet-update-chip--refused` — each mirroring the `--ready`
+# and `--busy` trio directly above it, so the block stays symmetric.
+# MEASURED, NOT REASONED (D158), even though 1307 + 3 also equals 1310 and that
+# coincidence is not a measurement: cssom-parity.mjs was RUN against the stale 1307
+# and named the value in its own failure text — "!! BASELINE MISMATCH: 1310 authored
+# rule heads, sidecar baseline is 1307 (+3)" with "MISSES 0" on the same run, which
+# is what makes this an unrecorded ADD rather than a parity defect. That number was
+# written back verbatim and re-run to PARITY PASS.
+# FOR THE LEAD: this slice is the ROUND-1 SOLE HOLDER of app.css and this sidecar
+# (charter D774); three round-2 slices are sequenced behind it. D158 stands — re-run
+# the tool on the MERGED tree and write what it prints; never add deltas.
+1310

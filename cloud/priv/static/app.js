@@ -5941,6 +5941,14 @@
       var rel = bp.update_latest_release;
       return { state: "behind", label: (rel ? vRel(rel) : "A newer release") + " available" };
     }
+    // cch-w63-s5 — THE FLEET CARD WAS SILENT, NOT LYING, AND SILENCE IS WORSE
+    // HERE. Measured over the shipped bundle: fleetRow(a box that refused our
+    // credential) was byte-identical to fleetRow(a box nobody ever probed), so
+    // the list a person scans first could not distinguish "we cannot check this
+    // box" from "nothing to report". Still BACKEND-TRUE — the chip appears only
+    // when the control plane NAMED a cause (updateRefusalReason is the whitelist);
+    // an unknown-with-no-reason keeps its null and renders no chip.
+    if (updateRefusalReason(bp)) return { state: "refused", label: "Could not check" };
     return null;
   }
   function fleetUpdateChipHtml(bp) {
@@ -5950,6 +5958,13 @@
     // resolves every modifier to a real rule.
     if (u.state === "in-flight")
       return '<span class="fleet-update-chip fleet-update-chip--busy">' +
+        '<span class="fleet-update-dot" aria-hidden="true"></span>' + esc(u.label) + "</span>";
+    // The refusal chip takes the WARN role explicitly. Falling through to
+    // --ready would paint a credential refusal in the same green as "a newer
+    // release is waiting for you" — __css_check cannot catch that (both classes
+    // resolve), so the colour decision has to be in the diff, said out loud.
+    if (u.state === "refused")
+      return '<span class="fleet-update-chip fleet-update-chip--refused">' +
         '<span class="fleet-update-dot" aria-hidden="true"></span>' + esc(u.label) + "</span>";
     return '<span class="fleet-update-chip fleet-update-chip--ready">' +
       '<span class="fleet-update-dot" aria-hidden="true"></span>' + esc(u.label) + "</span>";
@@ -8226,25 +8241,112 @@
       bp.channel !== undefined;
   }
 
-  // The ONE update-state badge: current | behind | in-flight | unknown. An
-  // in-flight autoupdate (the trigger marker is set) OUTRANKS the cached verdict
+  // cch-w63-s5 — THE NINE MEASURED CAUSES OF "unknown". The control plane's
+  // persist_update_unknown (registry.ex) writes update_state:"unknown" from NINE
+  // distinct call sites and serializes WHICH one as `update_unavailable_reason`.
+  // The console read none of them, so a box that answered our credential with a
+  // 401 rendered identically to a box nobody had ever asked. This is the console's
+  // OWN whitelist, not the server's: a reason we do not recognise falls through to
+  // the honest grey "Unknown" with no sentence and no chip, because inventing a
+  // rendering for a name we have never seen is the same defect one layer up.
+  //
+  // THE SENTENCES ARE ECHOED, NOT MINTED (charter D734/D757): five come from
+  // usageUnavailableText (so the meter, the update modal and this rail say ONE
+  // thing about the same box), two from the ERRORS table, one from
+  // updateConflictCopy's decrypt_failed arm (charter D777 — ERRORS.no_admin_token's
+  // remedy sentence asserts there is no credential stored, which is FALSE about a
+  // box that HAS one and could not decrypt it), and exactly ONE is new.
+  var UPDATE_REFUSAL_TEXT = {
+    // The box ANSWERED. usageUnavailableText verbatim — same fact, same words.
+    identity_refused: usageUnavailableText("unauthorized"),
+    unreachable: usageUnavailableText("unreachable"),
+    instance_error: usageUnavailableText("instance_error"),
+    bad_shape: usageUnavailableText("bad_shape"),
+    // usageUnavailableText("refused") with ONE noun swapped: this rung is the
+    // update CHECK, not the usage read. NOT ERRORS.forbidden, which is about the
+    // HUMAN's authority — the box refused us, the person did nothing wrong.
+    forbidden: "the instance refused the check",
+    // THE ONE MINT (charter D684): a release that predates the self-update route
+    // refused nothing, so this must not read as a refusal — there is no shipped
+    // sentence for "this box is older than the feature".
+    no_self_update_route: "this release has no update-check route yet",
+    // The three that never built a request — full sentences with their own remedy,
+    // because these are the ones a person can act on.
+    no_admin_token: ERRORS.no_admin_token,
+    decrypt_failed: "The stored admin credential didn't decrypt on our side, so the check was never sent.",
+    not_live: ERRORS.not_live,
+  };
+
+  // THE THREE RUNGS THAT NEVER TOUCHED THE BOX. no_admin_token, decrypt_failed and
+  // not_live all return BEFORE persist_update_unknown's single HTTP request site is
+  // even built — yet the control plane stamps update_checked_at on all nine alike.
+  // "Tried 45m ago" on these three would be a SECOND manufactured claim planted
+  // inside the change whose whole purpose is deleting the first: they render their
+  // sentence with no clock at all.
+  var UPDATE_REFUSAL_UNCLOCKED = { no_admin_token: 1, decrypt_failed: 1, not_live: 1 };
+
+  // The reason ONLY when it is both recognised and actually load-bearing: a box
+  // whose update_state settled to behind/current was successfully checked, so a
+  // stale reason left on the row must never colour a good answer.
+  function updateRefusalReason(bp) {
+    bp = bp || {};
+    if (bp.autoupdate_triggered_at) return "";
+    var st = bp.update_state;
+    if (st === "behind" || st === "current" || st === "disabled") return "";
+    var r = bp.update_unavailable_reason;
+    return typeof r === "string" && UPDATE_REFUSAL_TEXT[r] ? r : "";
+  }
+
+  // The ONE update-state badge: current | behind | in-flight | disabled | unknown.
+  // An in-flight autoupdate (the trigger marker is set) OUTRANKS the cached verdict
   // — a rollout is actively landing. Roles reuse the --ok/--info/--warn/--neutral
   // token contract that statusPill already styles.
+  //
+  // THE RETURN SHAPE IS UNCHANGED — new state/role/label VALUES only, NEVER a new
+  // KEY: the harness round-trips this object through plain() and deepEquals the
+  // WHOLE thing, so one extra field reds four isu-w5 assertions (the identical
+  // constraint cch-w61-s2 wrote into updateConflict's own comment). The reason
+  // therefore rides the LABEL, and the rail beside it carries the sentence.
+  //
+  // "Unknown" SURVIVES and is correct: a box nobody has probed genuinely is
+  // unknown, and so is one whose reason this console does not recognise. The grey
+  // word was only ever a lie when a NAMED cause existed and was thrown away.
   function updateBadge(bp) {
     bp = bp || {};
     if (bp.autoupdate_triggered_at) return { state: "in-flight", role: "info", label: "Updating" };
     var st = bp.update_state;
     if (st === "behind") return { state: "behind", role: "info", label: "Update available" };
     if (st === "current") return { state: "current", role: "ok", label: "Up to date" };
+    // The tenth input, free: the CP sends "disabled" for an opted-out box and the
+    // operator console already reads it ("Autoupdate off"). The team-facing badge
+    // called it Unknown — a box that is deliberately not checked is not a mystery.
+    if (st === "disabled") return { state: "disabled", role: "neutral", label: "Autoupdate off" };
+    // A NAMED failure is not an unknown state; it is a known failure to check.
+    // The state literal stays "unknown" (charter D778) — it is the wire's own
+    // word and two preview sentinels read it — but the human-facing label stops
+    // shrugging, and takes the warn role usageMeterDisplay's "Could not measure"
+    // already uses for exactly this fact one card away.
+    if (updateRefusalReason(bp)) return { state: "unknown", role: "warn", label: "Could not check" };
     return { state: "unknown", role: "neutral", label: "Unknown" };
   }
 
   // "Checked 5m ago" / "Never checked" — the last-verified freshness line. Reuses
   // relTime; an absent/unparsable stamp reads honestly, never a bare "—".
-  function lastCheckedText(iso) {
-    if (!iso) return "Never checked";
+  //
+  // cch-w63-s5 — THE SECOND ARGUMENT IS THE POINT. This function could see only an
+  // ISO string, so it could only ever say "Checked <rel>": a box that REFUSED our
+  // probe rendered "Unknown · Checked 2 minutes ago", asserting a check that
+  // demonstrably never completed. It now takes the refusal reason too (absent →
+  // byte-identical to the shipped line), and a refusal never says "Checked":
+  //   • six rungs that really did reach the wire → "Tried <rel> — <sentence>"
+  //   • the three that returned before any request → the sentence, NO CLOCK
+  function lastCheckedText(iso, reason) {
+    var why = reason && UPDATE_REFUSAL_TEXT[reason] ? reason : "";
+    if (why && UPDATE_REFUSAL_UNCLOCKED[why]) return UPDATE_REFUSAL_TEXT[why];
+    if (!iso) return why ? "Not yet tried — " + UPDATE_REFUSAL_TEXT[why] : "Never checked";
     var rel = relTime(iso);
-    return rel === "—" ? "Never checked" : "Checked " + rel;
+    if (rel === "—") return why ? "Not yet tried — " + UPDATE_REFUSAL_TEXT[why] : "Never checked";
+    return why ? "Tried " + rel + " — " + UPDATE_REFUSAL_TEXT[why] : "Checked " + rel;
   }
 
   // A concise, HONEST label of the autoupdate policy. Precedence: a pin is the
@@ -8552,6 +8654,7 @@
     bp = bp || {};
     authority = authority || "grant";
     var b = updateBadge(bp);
+    var refusal = updateRefusalReason(bp);
     var running = bp.update_running_release
       ? vRel(bp.update_running_release)
       : (bp.version ? "v" + String(bp.version).replace(/^v/, "") : "—");
@@ -8578,7 +8681,12 @@
       railRow("Running", running) +
       railRow("Latest", latest) +
       railRow("Channel", channel) +
-      railRowPlain("Last checked", lastCheckedText(bp.update_checked_at)) +
+      // cch-w63-s5: the KEY moves with the value. "Last checked: Tried 45m ago —
+      // the instance rejected our access credential" would contradict itself in
+      // one line; a refusal is an update CHECK that did not land, so the row is
+      // labelled for the attempt, not for a completion that never happened.
+      railRowPlain(refusal ? "Update check" : "Last checked",
+        lastCheckedText(bp.update_checked_at, refusal)) +
       (verifyLine ? railRowPlain("Verification", cap(verifyLine)) : "") +
       (policy ? railRowHtml("Autoupdate", badge(policy.text, policy.dot)) : "");
 
@@ -22519,6 +22627,9 @@
       // (node-pinned); the DOM mounts (wireUpdatePanel/openPinModal/loadFleetRollout)
       // are browser-verified. Every helper degrades gracefully against an older CP.
       hasAutoupdatePolicy: hasAutoupdatePolicy, updateBadge: updateBadge,
+      // cch-w63-s5: the whitelist itself, so a test can drive all nine measured
+      // causes without re-deriving the reason names from the control plane.
+      updateRefusalReason: updateRefusalReason,
       lastCheckedText: lastCheckedText, autoupdatePolicyLabel: autoupdatePolicyLabel,
       autoupdateActions: autoupdateActions, updateConflict: updateConflict,
       updateConflictCopy: updateConflictCopy, forceUpdateBody: forceUpdateBody,

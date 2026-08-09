@@ -10633,6 +10633,137 @@ test("isu-w5: lastCheckedText reads Never checked for absent/unparsable, Checked
   assert.equal(hooks.lastCheckedText(new Date().toISOString()), "Checked just now");
 });
 
+// ── cch-w63-s5 · THE RESTING STATE STOPS ASSERTING A CHECK THAT NEVER HAPPENED ─
+// registry.ex's persist_update_unknown/2 writes update_state:"unknown" from NINE
+// call sites and names WHICH one on the wire as update_unavailable_reason. The
+// console read none of them: every one of the nine rendered the identical
+// "Unknown · Checked 45m ago" — a grey shrug beside a freshness claim about a
+// check that, for a refused box, demonstrably never completed.
+//
+// THESE ARE THE FAIL-BEFORE ASSERTIONS. Measured against pristine origin/main
+// bytes, this file's PREVIOUS content passed 1037/1037 with the whole defect
+// present — nothing pinned updateBadge's refused arm or its `disabled` arm, so
+// the guard could not lose. Each assertion below was run against origin/main's
+// app.js and failed there (identity_refused → "Unknown"; disabled → "Unknown";
+// the rail → "Checked 45m ago"; the chip → null).
+const W63S5_45M = () => new Date(Date.now() - 45 * 60 * 1000).toISOString();
+
+test("cch-w63-s5: a NAMED refusal stops reading as Unknown — nine measured causes, one warn badge", () => {
+  const at = W63S5_45M();
+  const badge = (reason) => hooks.updateBadge({ update_state: "unknown", update_unavailable_reason: reason, update_checked_at: at });
+  for (const reason of ["identity_refused", "unreachable", "instance_error", "bad_shape", "forbidden",
+    "no_self_update_route", "no_admin_token", "decrypt_failed", "not_live"]) {
+    assert.deepEqual(plain(badge(reason)), { state: "unknown", role: "warn", label: "Could not check" }, reason);
+  }
+  // THE STATE LITERAL IS KEPT (charter D778): "unknown" is the wire's own word
+  // and two preview sentinels read it. Only the human-facing label moved.
+  assert.equal(badge("identity_refused").state, "unknown");
+});
+
+test("cch-w63-s5: Unknown SURVIVES where it is true — never probed, garbage state, unrecognised reason", () => {
+  // A box nobody has asked genuinely IS unknown. The grey word was only ever a
+  // lie when a NAMED cause existed and the console threw it away.
+  assert.deepEqual(plain(hooks.updateBadge({})), { state: "unknown", role: "neutral", label: "Unknown" });
+  assert.deepEqual(plain(hooks.updateBadge({ update_state: "garbage" })), { state: "unknown", role: "neutral", label: "Unknown" });
+  // The whitelist is the CONSOLE's, not the server's: a reason we have never
+  // seen falls through to the grey word and emits NO chip, rather than the
+  // console inventing a rendering for a name it does not understand.
+  const invented = { update_state: "unknown", update_unavailable_reason: "server_invented_tomorrow", update_checked_at: W63S5_45M() };
+  assert.deepEqual(plain(hooks.updateBadge(invented)), { state: "unknown", role: "neutral", label: "Unknown" });
+  assert.equal(hooks.fleetUpdateChip(invented), null);
+  assert.equal(hooks.lastCheckedText(invented.update_checked_at, hooks.updateRefusalReason(invented)), "Checked 45m ago");
+  // A settled verdict is never recoloured by a stale reason left on the row.
+  assert.equal(hooks.updateRefusalReason({ update_state: "current", update_unavailable_reason: "unreachable" }), "");
+  assert.equal(hooks.updateRefusalReason({ update_state: "behind", update_unavailable_reason: "unreachable" }), "");
+  assert.equal(hooks.updateRefusalReason({ update_state: "unknown", update_unavailable_reason: "unreachable", autoupdate_triggered_at: "2026-07-10T00:00:00Z" }), "");
+});
+
+test("cch-w63-s5: `disabled` is a state, not a mystery — the team badge finally says what the operator console already said", () => {
+  // Nothing on origin/main pinned this input: updateBadge answered "Unknown" for
+  // a box that deliberately opted OUT of autoupdate, while operatorRowState one
+  // screen away has always rendered it correctly.
+  assert.deepEqual(plain(hooks.updateBadge({ update_state: "disabled" })),
+    { state: "disabled", role: "neutral", label: "Autoupdate off" });
+  // An in-flight rollout still outranks it, and a disabled box carries no refusal.
+  assert.equal(hooks.updateBadge({ update_state: "disabled", autoupdate_triggered_at: "2026-07-10T00:00:00Z" }).state, "in-flight");
+  assert.equal(hooks.updateRefusalReason({ update_state: "disabled", update_unavailable_reason: "not_live" }), "");
+});
+
+test("cch-w63-s5: the rail never says 'Checked' about a refusal — six rungs are clocked, THREE carry no clock at all", () => {
+  const at = W63S5_45M();
+  const rail = (reason) => hooks.lastCheckedText(at, reason);
+  // The six that really did reach the wire: the clock states the ATTEMPT.
+  assert.equal(rail("identity_refused"), "Tried 45m ago — the instance rejected our access credential");
+  assert.equal(rail("unreachable"), "Tried 45m ago — the instance was unreachable");
+  assert.equal(rail("instance_error"), "Tried 45m ago — the instance answered with an error");
+  assert.equal(rail("bad_shape"), "Tried 45m ago — the instance answered in an unexpected shape");
+  assert.equal(rail("forbidden"), "Tried 45m ago — the instance refused the check");
+  assert.equal(rail("no_self_update_route"), "Tried 45m ago — this release has no update-check route yet");
+  // THE THREE THAT NEVER BUILT A REQUEST. registry.ex returns at no_admin_token,
+  // decrypt_failed and not_live BEFORE the single HTTP request site — yet
+  // persist_update_unknown stamps update_checked_at on all nine alike. "Tried 45m
+  // ago" here would be a SECOND manufactured claim inside the change whose whole
+  // purpose is deleting the first.
+  assert.equal(rail("no_admin_token"), "No stored credentials for this instance — it may need a re-provision.");
+  assert.equal(rail("decrypt_failed"), "The stored admin credential didn't decrypt on our side, so the check was never sent.");
+  assert.equal(rail("not_live"), "The instance isn't live yet — wait for provisioning to finish.");
+  for (const reason of ["identity_refused", "unreachable", "instance_error", "bad_shape", "forbidden",
+    "no_self_update_route", "no_admin_token", "decrypt_failed", "not_live"]) {
+    assert.equal(rail(reason).includes("Checked"), false, reason + " must not assert a completed check");
+  }
+  // CHARTER D777: decrypt_failed does NOT take ERRORS.no_admin_token's remedy —
+  // "No stored credentials for this instance" is FALSE about a box that HAS a
+  // stored credential which failed to decrypt.
+  assert.equal(rail("decrypt_failed").includes("No stored credentials"), false);
+  // The one-argument form is byte-identical to the shipped line (the isu-w5 pins
+  // above call it that way and stay green).
+  assert.equal(hooks.lastCheckedText(at), "Checked 45m ago");
+  assert.equal(hooks.lastCheckedText(null, "identity_refused"), "Not yet tried — the instance rejected our access credential");
+});
+
+test("cch-w63-s5: the fleet card stops being silent — a refused box no longer renders byte-identically to a never-probed one", () => {
+  const at = W63S5_45M();
+  const REFUSED = {
+    id: "b1", name: "Gyldendal", host: "167.233.194.23", url: "https://167.233.194.23",
+    provision_status: "succeeded", update_state: "unknown",
+    update_unavailable_reason: "identity_refused", update_checked_at: at,
+  };
+  const NEVER_PROBED = Object.assign({}, REFUSED);
+  delete NEVER_PROBED.update_unavailable_reason;
+  delete NEVER_PROBED.update_checked_at;
+  // Measured over origin/main's shipped bundle these two were byte-for-byte
+  // equal — the list a person scans first could not tell "we cannot check this
+  // box" from "nothing to report".
+  assert.notEqual(hooks.fleetRow(REFUSED), hooks.fleetRow(NEVER_PROBED));
+  assert.deepEqual(plain(hooks.fleetUpdateChip(REFUSED)), { state: "refused", label: "Could not check" });
+  assert.equal(hooks.fleetUpdateChip(NEVER_PROBED), null);
+  const chip = hooks.fleetUpdateChipHtml(REFUSED);
+  // Static class literal, WARN role — never the ready GREEN, which on this row
+  // means "a newer release is waiting for you".
+  assert.match(chip, /class="fleet-update-chip fleet-update-chip--refused"/);
+  assert.equal(chip.includes("--ready"), false, "the refusal must not borrow the ready class");
+  assert.match(chip, />Could not check</);
+  assert.ok(hooks.fleetRow(REFUSED).includes("fleet-update-chip--refused"));
+  // The pill's own input is UNTOUCHED on this arm (withoutUpdateState is applied
+  // to `behind` only), so lifecycle and update availability stay orthogonal.
+  assert.ok(hooks.fleetRow(REFUSED).includes("fleet-row"));
+});
+
+test("cch-w63-s5: the Updates panel's rail row is labelled for the ATTEMPT when the check was refused", () => {
+  const at = W63S5_45M();
+  const html = hooks.updatePanelHtml({
+    id: "b1", name: "Gyldendal", host: "167.233.194.23", update_state: "unknown",
+    update_unavailable_reason: "identity_refused", update_checked_at: at,
+  });
+  assert.match(html, /Update check<\/span><span class="v plain">Tried 45m ago — the instance rejected our access credential</);
+  assert.equal(html.includes("Checked"), false, "'Last checked: Checked 45m ago' is the exact claim this slice deletes");
+  assert.match(html, /data-update-state="unknown"/); // charter D778 — the literal is kept
+  assert.match(html, /Could not check/);
+  // A box that WAS checked keeps the shipped row verbatim.
+  const ok = hooks.updatePanelHtml({ id: "b2", host: "h", update_state: "current", update_checked_at: at });
+  assert.match(ok, /Last checked<\/span><span class="v plain">Checked 45m ago</);
+});
+
 test("isu-w5: autoupdatePolicyLabel is null on older CP; pin > pause > manual > auto precedence", () => {
   assert.equal(hooks.autoupdatePolicyLabel({}), null); // no policy block → hidden chip
   // auto-riding a channel
