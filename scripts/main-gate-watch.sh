@@ -151,11 +151,19 @@ read_check_runs() {
   else
     repo="${REPO_OVERRIDE:-$(spec_repo)}"
     sha="$1"
-    body="$(gh api --paginate "repos/$repo/commits/$sha/check-runs" 2>&1)" || return 1
+    # per_page=100 keeps the common case to ONE page; --paginate still handles
+    # a repo that outgrows it. REVIEW (cch-w59): `gh api --paginate` on an
+    # OBJECT endpoint emits one JSON document PER PAGE, so the dedup below must
+    # slurp the whole stream (`jq -s`) before it groups — grouping per document
+    # would let an older re-run row on page 1 decide a context whose latest row
+    # is on page 2, which is the exact stale-verdict bug this watch exists to
+    # abolish.
+    body="$(gh api --paginate -X GET -f per_page=100 "repos/$repo/commits/$sha/check-runs" 2>&1)" || return 1
   fi
   jq -e . >/dev/null 2>&1 <<<"$body" || return 1
-  jq -r '
-    (if type == "array" then . else (.check_runs // []) end)
+  jq -r -s '
+    map(if type == "array" then . else (.check_runs // []) end)
+    | (add // [])
     | map({name, status, conclusion,
            started_at: (.started_at // ""), id: (.id // 0)})
     | sort_by(.started_at, .id)

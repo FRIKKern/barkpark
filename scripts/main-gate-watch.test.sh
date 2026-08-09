@@ -296,6 +296,40 @@ if [ "$rc" = "0" ]; then ok "red-then-green re-run -> PASS"; else bad "red-then-
 rc="$(run_watch cafe0002 "$FX/rerun-red-last.json")"
 if [ "$rc" = "1" ]; then ok "green-then-red re-run -> SCREAM"; else bad "green-then-red re-run -> expected exit 1, got $rc"; cat "$OUT" >&2; fi
 
+# ── 9b. THE PAGINATED STREAM (added in review, cch-w59) ──────────────────────
+# `gh api --paginate` on an OBJECT endpoint emits one JSON DOCUMENT PER PAGE,
+# not one merged object. A dedup that groups per document lets an older re-run
+# row on page 1 decide a context whose LATEST row is on page 2 — a permanent
+# stale FALSE RED, which is exactly how a watch gets muted. The reader slurps
+# the whole stream before grouping; these two fixtures are multi-document on
+# purpose and would have failed the pre-review reader.
+cat > "$FX/paged-rerun-green-last.json" <<'JSON'
+{"check_runs": [
+  {"name": "Elixir gate",  "status": "completed", "conclusion": "success", "started_at": "2026-08-09T01:00:00Z", "id": 1},
+  {"name": "Cloud gate",   "status": "completed", "conclusion": "failure", "started_at": "2026-08-09T01:00:00Z", "id": 2}
+]}
+{"check_runs": [
+  {"name": "Console gate", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T02:00:00Z", "id": 3},
+  {"name": "Cloud gate",   "status": "completed", "conclusion": "success", "started_at": "2026-08-09T02:00:00Z", "id": 4}
+]}
+JSON
+
+cat > "$FX/paged-rerun-red-last.json" <<'JSON'
+{"check_runs": [
+  {"name": "Elixir gate",  "status": "completed", "conclusion": "success", "started_at": "2026-08-09T01:00:00Z", "id": 1},
+  {"name": "Cloud gate",   "status": "completed", "conclusion": "success", "started_at": "2026-08-09T01:00:00Z", "id": 2}
+]}
+{"check_runs": [
+  {"name": "Console gate", "status": "completed", "conclusion": "success", "started_at": "2026-08-09T02:00:00Z", "id": 3},
+  {"name": "Cloud gate",   "status": "completed", "conclusion": "failure", "started_at": "2026-08-09T02:00:00Z", "id": 4}
+]}
+JSON
+
+rc="$(run_watch cafe0003 "$FX/paged-rerun-green-last.json")"
+if [ "$rc" = "0" ]; then ok "PAGED red-then-green re-run (rows on two pages) -> PASS"; else bad "PAGED red-then-green -> expected exit 0, got $rc"; cat "$OUT" >&2; fi
+rc="$(run_watch cafe0004 "$FX/paged-rerun-red-last.json")"
+if [ "$rc" = "1" ]; then ok "PAGED green-then-red re-run (rows on two pages) -> SCREAM"; else bad "PAGED green-then-red -> expected exit 1, got $rc"; cat "$OUT" >&2; fi
+
 # ═══ 10. it is offline ═══════════════════════════════════════════════════════
 section "10. offline: the hermetic path makes no API call"
 
