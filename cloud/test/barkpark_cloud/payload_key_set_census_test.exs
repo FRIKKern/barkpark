@@ -721,8 +721,24 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # anywhere in client.go would have ridden free, as `team` and `scope` did in
   # W19 S1). MERGE HAZARD, unchanged: these floors are `==`, so any other PR that
   # also moves them must be re-measured after this one lands, not summed with it.
+  # W26 S3 (the deliveries reader lands, decoding main's REAL 13-key wire shape):
+  # the go-tag floor moves 228 -> 243, MEASURED by the 999-technique on THIS
+  # merged tree — both floors set to 999 and the refusal printed "243 json tag(s)
+  # found in internal/cloudclient, floor is EXACTLY 999". It was NOT computed as
+  # 228 + 12, and that guess would have been wrong: the guess is off by three
+  # BOTH ways at once. `Go.all_tags/1` is a file-GLOBAL union of tag NAMES over
+  # internal/cloudclient/*.go, so `sha`, `count`, `scope`, `limit`, `target` and
+  # friends were already declared by unrelated structs and ride free, while
+  # deliveries.go contributes two structs' worth of genuinely new names
+  # (delivering_run_id, first_seen_at, merged_at, queued_seconds and the three
+  # queued_*_seconds, build_seconds, serving_since, carried, recorded_at,
+  # deliveries). Which names ride free is not the set a reader would guess, which
+  # is the whole reason this number is measured and never derived. The emitted
+  # floor does NOT move: this slice writes no serializer, it reads one.
+  # MERGE HAZARD, unchanged: these floors are `==`, so any other PR that also
+  # moves them must be re-measured after this one lands, never summed with it.
   @emitted_floor 126
-  @go_tag_floor 228
+  @go_tag_floor 243
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
