@@ -278,3 +278,122 @@ and the wiring is plainly present in `git show origin/main:` of the same path.
 ```
 bash /tmp/v10_partition.sh
 ```
+
+---
+
+# EXECUTION RECORD — dr-w32-s7, 2026-08-09
+
+The partition above is the plan. This is what was actually done to the ledger, and
+where the plan was wrong. Every close names a mergeCommit that
+`git merge-base --is-ancestor <oid> origin/main` accepted against `origin/main e913de82c881`;
+all 74 PR mergeCommits plus `f7a87c0a5946` passed that test, zero failures.
+
+## The plan said "close 76". 52 were closed. Here is the honest split.
+
+| bucket | rows | act |
+|---|---|---|
+| CLOSED done, mergeCommit quoted in the close reason | 52 | `bp task close … done` |
+| LEFT OPEN — a genuine WORK criterion is unproven | 21 | untouched, listed below |
+| LEFT OPEN — the criterion's OWN check FAILS on main today | 3 | untouched, listed below |
+| CANCELLED — zombie / absorbed | 2 | `bp task close … cancelled` |
+| DISCARDED — shadow `drafts.*` | 6 | `bp doc discard-draft` |
+
+**Why not 76.** The brief said the ~24 rows that are not at N−1 "need EYES". They got
+them: every one of the 76 rows was re-read from the server and each unmet criterion was
+classified as MERGE-GATED (lead-owned, satisfied by the merge itself), LEAD-PLUS (a
+post-merge live re-read, migration, or human review the merge does NOT prove), HUMAN
+(an independent security review), or WORK (the builder's own unfinished proof).
+
+* A row whose unmet criteria are all lead-owned was CLOSED. Its merge-gate criterion was
+  stamped `--merge-gated` with the mergeCommit as evidence; any LEAD-PLUS or HUMAN
+  criterion was NOT flipped — it was closed over with `--set criteria_override=…` naming
+  the index and saying in words that the verification was never performed. The row reads
+  done; the unproven criterion still reads unproven. That is the point.
+* A row with a WORK criterion was LEFT OPEN. A landed PR is not proof that the builder
+  ran the live probe the criterion demands, and flipping it would manufacture exactly the
+  false-done this repo has been burned by.
+
+## LEFT OPEN — a genuine WORK criterion is unproven (21)
+
+Column 3 is the 0-based index of each unmet WORK criterion.
+
+| doc_id | criteria | unproven WORK criteria |
+|---|---|---|
+| `dr-w1-s5-swallow-records-upstream-status` | 7/10 | 4, 7 |
+| `dr-w13-s5-cli-reads-columns-and-names-its-window` | 12/15 | 10, 11 |
+| `dr-w13-s6-publish-clock-first-caller` | 13/15 | 1 |
+| `dr-w18-s3-push-rail-can-lose` | 6/8 | 4 |
+| `dr-w19-s6-ledger-pays-its-debt` | 8/10 | 4 |
+| `dr-w19-s7-status-reads-the-deploy-verdict` | 10/12 | 9 |
+| `dr-w2-s1-recorder-build-id-keyed-log` | 8/10 | 6 |
+| `dr-w2-s7-scoped-search-permission-clamp` | 7/10 | 1 |
+| `dr-w20-refusal-backoff-depth-derived` | 6/9 | 0, 7 |
+| `dr-w20-s2-cp-smoke-can-fail-on-a-dead-box` | 7/10 | 2, 7 |
+| `dr-w20-s3-site-route-marker-stops-colliding` | 9/11 | 5 |
+| `dr-w21-s6-delivery-gauge-stops-being-dark` | 7/9 | 4 |
+| `dr-w24-s1-crown-schema-stops-losing-rows` | 7/9 | 3 |
+| `dr-w24-s6-roster-buys-back-seal-headroom` | 6/8 | 1 |
+| `dr-w27-s7-deploy-gates-can-see-a-broken-workflow` | 6/8 | 6 |
+| `dr-w28-s4-the-deferral-wait-becomes-a-number` | 8/10 | 8 |
+| `dr-w5-s2-beat-carries-load15-and-5xx` | 8/10 | 6 |
+| `dr-w5-s3-cp-lands-space-and-fixes-the-window` | 9/11 | 6 |
+| `dr-w5-s4-agent-binary-reaches-the-fleet` | 4/8 | 4, 5, 6 |
+| `dr-w8-s4-census-reaches-a-human` | 8/10 | 8 |
+| `dr-w30-s1-followup-carry-the-reask-list` | 0/2 | 0, 1 → CANCELLED as absorbed, see below |
+
+`dr-w8-s4`'s criterion 8 is the one worth reading: it demands `PLATFORM_ADMIN_EMAILS`
+be set on the serving control-plane container. It is not. The row is correctly open.
+
+## LEFT OPEN — the criterion's own check FAILS on main today (3)
+
+These three are the reclaim's own findings. Each PR is merged and an ancestor of main,
+and each row's merge criterion carries a command that was RUN here and did not pass.
+
+| doc_id | the check, run against origin/main e913de82c881 | result |
+|---|---|---|
+| `dr-w26-s3-deliveries-reader-stops-lying-about-carried` | `git show origin/main:internal/cloudclient/deliveries.go \| grep -c 'Carried \*bool'` | **0**, criterion demands 1 |
+| `dr-w26-s6-reader-less-instrument-guard-and-the-first-deletion` | `git grep -c publish_clock origin/main` | non-empty (charter 17, `reader_less_instrument_census_test.exs` 5, `deploy_ledger_reachability_test.exs` 1); criterion demands nothing |
+| `dr-w26-s7-delete-the-two-api-side-dark-instruments` | `git grep -c 'runner_queue_len\|build_slots' origin/main -- api/ cloud/ internal/ web/ js/` | hits in `instance_site_deploy_controller.ex` (4), `router.ex` (3), `deploy_runner_door_census_test.exs` (2); criterion demands nothing |
+
+A reclaim that closed these on ancestry alone would have papered over three live
+contradictions. They stay open on purpose.
+
+## CANCELLED (2)
+
+| doc_id | why |
+|---|---|
+| `dr-w30-s7-crown-reader-and-silence` | ZOMBIE. Shipped as #11365 `6f8a70167410b16ab8bd7046cf76443d2e203c09` (ancestor of main), re-filed and landed as `dr-w31-s2-crown-reader-state-and-silence`. Reads 0/9 — cancelled, not closed done, because no criterion on IT was ever proven. |
+| `dr-w30-s1-followup-carry-the-reask-list` | ABSORBED into the same #11365; `dr-w31-s2`'s own merge criterion names it "closed by it as absorbed" (GH #11314). Reads 0/2 — cancelled for the same reason. |
+
+## DISCARDED — shadow `drafts.*` (6, per D491)
+
+`bp doc discard-draft task <id>`, which keeps any published version:
+
+* `task-93206ca8fd299ae7`, `task-c075a65ad4a4e98d`, `task-baa72f67d96766ce` — the
+  byte-identical crown-reconcile triplet; twin `task-e04e0566ffc68738` is DONE. These had
+  no published version, so the discard removed the row entirely (verified: `bp task get
+  task-93206ca8fd299ae7` now answers `not_found`).
+* `dr-w24-s3-custom-host-cannot-steal-a-url`, `dr-w24-s5-the-rulings-become-readable`,
+  `dr-w27-s6-conflicted-pr-stops-asserting` — drafts shadowing published rows at LOWER
+  progress; the published rows survive (verified: `dr-w24-s3` still reads
+  `status=published lifecycle=open 6/7` after the discard).
+
+`drafts.dr-w26-hg-gyldendal-operator-packet-corrected` was LEFT ALONE — it is a genuine
+unpublished human gate, not litter.
+
+## Method notes for the next reclaim
+
+1. `bp task stamp` REFUSES a criterion whose text carries the MERGE-GATED marker unless
+   you pass `--merge-gated`. That guard is correct and it is why a builder cannot fake a
+   merge. A lead-authorised reclaim passes it explicitly.
+2. `bp task close` refuses while any criterion is unmet AS STORED and tells you to either
+   stamp it or `--set criteria_override="<why it is done anyway>"`. Criteria flipped in
+   the close command itself do not count — "that would be the closer grading its own
+   homework". Both halves of this act used that split deliberately.
+3. The claim response carries the epoch at `doc.claim.epoch`, NOT `doc.content.claim`.
+4. `bp` refuses any verb invoked with a piped stdin (`piped stdin is unused`); a script
+   driving it must pass `stdin=DEVNULL`.
+5. Guerrilla was returning `internal_error` 500s throughout this run and individual
+   `bp task get` calls took minutes. Roughly 15% of writes failed on the first attempt and
+   succeeded on retry. Any bulk ledger act needs per-row retry, and the failure is a
+   server 500, not a rejection.
