@@ -971,30 +971,34 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   # The dedup wall could not RUN. Nothing was written and nothing was refused on
   # the merits — so the caller's correct move is to RESEND THE SAME REQUEST, not
-  # to edit the paper. Hand-rolled rather than routed through render_error/2
-  # because the shared envelope stamps the plugin-veto hint on `halted`
-  # (errors.ex), which is the one sentence that would send an author editing a
-  # document that is fine (charter D542). Code + status stay byte-identical to
-  # what the shared envelope already emits (`halted` 409, docs/api-v1.md §9);
-  # only the FRAMING is corrected here, and `retry-after` makes the transience
-  # machine-readable. The honest 503 `dedup_unavailable` code is a vocabulary
-  # change filed on its own task.
-  defp dedup_unavailable_error(conn, reason) do
-    conn
-    |> put_resp_header("retry-after", "5")
-    |> put_status(:conflict)
-    |> json(%{
-      error: %{
-        code: "halted",
-        message: halt_message(reason),
-        hint:
-          "Transient: the duplicate-scan could not complete, so this paper was neither written nor refused on its merits. Resend the identical request. If it keeps failing the database is degraded — this is an outage to report, not a document to fix."
-      }
-    })
-  end
+  # to edit the paper. It is BUILT by the shared envelope (so code, message,
+  # status and — the part a hand-rolled body silently dropped — `request_id` stay
+  # byte-identical to what every other v1 error carries, and an operator can
+  # actually quote the failing request) and then has exactly ONE field replaced:
+  # the code-keyed `halted` hint, which reads "A plugin's lifecycle hook vetoed
+  # this write" and is the one sentence that would send an author editing a
+  # document that is fine (charter D542). The wire code/status stay `halted` 409
+  # (docs/api-v1.md §9) — the honest 503 `dedup_unavailable` code is a
+  # vocabulary change filed on its own task, because registering a new code
+  # forces an errors.ex + byte-capped docs edit.
+  @dedup_unavailable_hint "Transient: the duplicate-scan could not complete, so this paper was neither written nor refused on its merits. Resend the identical request. If it keeps failing the database is degraded — this is an outage to report, not a document to fix."
 
-  defp halt_message(reason) when is_binary(reason), do: reason
-  defp halt_message(reason), do: inspect(reason)
+  defp dedup_unavailable_error(conn, reason) do
+    env = Errors.to_envelope({:error, {:dedup_unavailable, reason}}, conn)
+
+    body =
+      env
+      |> Map.delete(:status)
+      |> Map.put(:hint, @dedup_unavailable_hint)
+
+    conn
+    # `retry-after` makes the transience machine-readable. 5s is a floor, not a
+    # measurement — nothing yet measures how long a saturated pool takes to
+    # recover, and a caller that retries later is never worse off.
+    |> put_resp_header("retry-after", "5")
+    |> put_status(env.status)
+    |> json(%{error: body})
+  end
 
   defp changeset_field_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
