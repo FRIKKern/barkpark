@@ -1328,9 +1328,13 @@ const EXPECTATIONS = {
         "the trial card must not promise a card-free path into a mode=subscription checkout");
       assert.ok(box.includes('class="trial-chip"'), "the countdown chip must render");
       assert.ok(box.includes("14 days left"), "the chip must carry the server's days-remaining");
-      // Trial expiry is a real teardown — the dunning suspend promise must NOT
-      // leak into trial copy.
-      assert.ok(!box.includes("suspended — not deleted"), "trial copy must never borrow the dunning suspend promise");
+      // Trial expiry is a real teardown — the dunning copy must NOT leak into
+      // trial copy. cch-w54-s5 retired "suspended — not deleted" from both
+      // dunning banners (the suspension it promised has no executor), so this
+      // inverse pin is RE-POINTED at the sentence that replaced it. Left on the
+      // dead phrase it would have gone vacuously green.
+      assert.ok(!box.includes("Isolation, not shutdown"), "trial copy must never borrow the dunning isolation sentence");
+      assert.ok(!box.includes("suspended — not deleted"), "nor the retired dunning suspend promise, if it ever returns");
       // The plan grid opens right below the CTA ("below" must be true) and
       // still names all three tiers with their actions. It states no ceiling
       // and no price — this actor is on plan "trial", which the catalog has no
@@ -1361,11 +1365,29 @@ const EXPECTATIONS = {
     check(reg) {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
-      // GR17 strings, data-driven: both date slots filled from current_period_end.
-      assert.ok(box.includes("Your card was declined on "), "the banner must open with the failed date");
-      assert.ok(box.includes("Your instances keep running until "), "the banner must carry the suspend date");
-      assert.ok(box.includes("then they're suspended — not deleted — and come right back the moment payment succeeds."),
-        "the suspended-not-deleted sentence must render verbatim");
+      // cch-w54-s5: DATELESS. Both date slots came off current_period_end, which
+      // mark_past_due/2 re-anchors to now+3d on every webhook delivery, and the
+      // suspension they pointed at has no executor on any production path. The
+      // banner now states the consequence entitled?/1 actually gates.
+      assert.ok(box.includes("Your card was declined. Nothing stops and nothing is deleted"),
+        "the banner must open with the honest isolation lead");
+      assert.ok(box.includes("this team can't launch a new instance until payment succeeds"),
+        "the banner must name the go-live gate, the one real consequence of a lapsed grace");
+      assert.ok(box.includes("Isolation, not shutdown — and it lifts the moment payment succeeds."),
+        "the isolation sentence must render verbatim, with the backed restore tail");
+      // The two negatives are scoped to the BANNER BODY by name — the card below
+      // it legitimately dates "since {started_at}", and suspendedCardBannerHtml
+      // (elsewhere on the console) legitimately says "Suspended".
+      const dunningBody = (box.match(/<p class="dunning-body">([\s\S]*?)<\/p>/) || [])[1] || "";
+      assert.ok(dunningBody.length > 0, "the dunning body must render");
+      assert.ok(!/suspend/i.test(dunningBody), "the past-due banner must promise no suspension");
+      assert.ok(!/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{1,2}\/\d{1,2}/.test(dunningBody),
+        "and must name no calendar day");
+      // The member-visible line beside it is dateless too (one edit inside
+      // billingPeriodLine moves the owner and non-owner twins together).
+      assert.ok(box.includes("Grace period running — new instance launches stop when it ends"),
+        "the plan-meta period line states the lapse without a sliding deadline");
+      assert.ok(!box.includes("Grace period ends "), "the retracted deadline must not survive anywhere on the screen");
       assert.ok(box.includes(">Past due<"), "the banner must carry the Past due title");
       assert.ok(box.includes(">Supporter<"), "the banner must chip the plan name");
       assert.ok(box.includes(">Update payment method<"), "the GR17 portal CTA must render verbatim");
@@ -1530,8 +1552,16 @@ const EXPECTATIONS = {
     what: "GR17 overview dunning banner + the suspended instance-card banner, verbatim, no runway",
     check(reg) {
       const state = (reg.get("overview-state") || {}).innerHTML || "";
-      assert.ok(state.includes("Your payment failed on"), "the GR17 overview banner lead sentence renders verbatim");
-      assert.ok(state.includes("they're suspended — not deleted"), "the GR17 keep-running sentence renders verbatim");
+      // cch-w54-s5: dateless, and ISOLATION rather than a suspension no code
+      // performs (maybe_enforce/1's suspend arm is unreachable in production).
+      assert.ok(state.includes("Your payment failed. Nothing stops and nothing is deleted"),
+        "the overview banner lead sentence renders verbatim");
+      assert.ok(state.includes("this team can't launch a new instance until payment succeeds"),
+        "the overview banner names the go-live gate, the one real consequence");
+      assert.ok(state.includes("Isolation, not shutdown."), "the isolation sentence renders verbatim");
+      assert.ok(!/suspend/i.test(state), "the overview banner must promise no suspension");
+      assert.ok(!/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{1,2}\/\d{1,2}/.test(state),
+        "and must name no calendar day — the failed-on day was back-computed from a sliding anchor");
       assert.ok(state.includes("Update payment method"), "the portal CTA renders");
       assert.ok(!state.includes("runway-card"), "the runway is suppressed on the past-due path");
       const grid = (reg.get("overview-instances") || {}).innerHTML || "";
