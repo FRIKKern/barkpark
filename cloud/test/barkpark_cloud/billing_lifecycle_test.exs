@@ -91,8 +91,9 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       assert Billing.entitled?(team)
       refute reload_bp(bp).suspended
 
-      # Simulate the grace window elapsing (what the deferred reconcile sweep
-      # detects): re-anchor the period end into the past and re-enforce.
+      # Simulate the grace window elapsing: re-anchor the period end into the past
+      # and re-enforce. No sweep detects this in production (charter D657 decided
+      # against one) — elapsed grace is felt at request time, via entitled?/1.
       past = DateTime.add(DateTime.utc_now(), -1, :day)
       {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
 
@@ -126,9 +127,11 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       assert Billing.entitled?(team)
       refute reload_bp(bp).suspended
 
-      # A repeat that carries an elapsed grace window STILL runs the write +
-      # maybe_enforce (the deferred-reconcile stand-in) even though it returns the
-      # already-past_due signal — the box is suspended, state stays correct.
+      # A repeat that carries an EXPLICIT elapsed grace window STILL runs the
+      # write + maybe_enforce even though it returns the already-past_due signal —
+      # the box is suspended, state stays correct. Note the explicit attrs: this
+      # is the ONLY way to reach maybe_enforce/1's suspend (the attr-less path
+      # always re-anchors forward — see the re-anchor describe block below).
       past = DateTime.add(DateTime.utc_now(), -1, :day)
 
       assert {:ok, :already_past_due} =
@@ -136,6 +139,39 @@ defmodule BarkparkCloud.BillingLifecycleTest do
 
       refute Billing.entitled?(team)
       assert %Barkpark{suspended: true, suspended_reason: "billing_past_due"} = reload_bp(bp)
+    end
+  end
+
+  # cch-w57-s2. billing.ex used to describe grace as a window that ends with the
+  # team's boxes suspended. It never does on the webhook path: mark_past_due/2
+  # opens with Map.put_new_lazy(attrs, :current_period_end, &default_grace_anchor/0),
+  # so every attr-less redelivery slides the deadline @grace_days further out and
+  # maybe_enforce/1's :gt -> :ok arm always wins. This block DRIVES that slide, so
+  # the retracted prose is pinned by behaviour: delete the put_new_lazy and it reds.
+  describe "mark_past_due/2 — the grace anchor slides FORWARD on every attr-less call" do
+    test "two attr-less calls move current_period_end further out (grace never elapses here)" do
+      {team, sub} = subscribed_team()
+      bp = barkpark_fixture(team)
+
+      assert {:ok, %Subscription{status: "past_due"}} = Billing.mark_past_due(sub)
+      first = reload(sub).current_period_end
+
+      assert %DateTime{} = first,
+             "mark_past_due/2 anchored NO grace window — an attr-less call must " <>
+               "set current_period_end (Map.put_new_lazy/3), or a past_due team is entitled forever"
+
+      # A webhook redelivery carrying no period end (the real invoice.payment_failed
+      # shape). The anchor is RE-applied, not left standing.
+      assert {:ok, :already_past_due} = Billing.mark_past_due(reload(sub))
+      second = reload(sub).current_period_end
+
+      assert DateTime.compare(second, first) == :gt,
+             "the grace anchor did NOT slide forward on the second attr-less call " <>
+               "(#{inspect(first)} -> #{inspect(second)}) — the docs claim it always re-anchors"
+
+      # And the consequence the prose now states: still entitled, box untouched.
+      assert Billing.entitled?(team)
+      refute reload_bp(bp).suspended
     end
   end
 
@@ -340,6 +376,98 @@ defmodule BarkparkCloud.BillingLifecycleTest do
 
     test "no subscription → {:error, :no_subscription}" do
       assert {:error, :no_subscription} = Billing.request_cancel(team_fixture(), true)
+    end
+  end
+
+  # cch-w57-s2. A Stripe Customer Portal un-cancel arrives as a
+  # customer.subscription.updated whose status is UNCHANGED ("active") and whose
+  # cancel_at_period_end flipped to false. That arm used to return {:ok, :ignored}
+  # and discard the payload, so the console kept the "Ending <date>" pill and hid
+  # the Cancel control forever — a state the control plane could not support.
+  describe "handle_webhook/2 — a portal un-cancel clears cancel_at_period_end" do
+    defp updated_active(sub, extra) do
+      event(
+        "customer.subscription.updated",
+        sub.gateway_customer_id,
+        Map.merge(%{"status" => "active"}, extra)
+      )
+    end
+
+    test "request_cancel(true) then an active update carrying false un-cancels the row" do
+      {team, sub} = subscribed_team()
+
+      assert {:ok, %Subscription{cancel_at_period_end: true}} = Billing.request_cancel(team, true)
+
+      raw = updated_active(sub, %{"cancel_at_period_end" => false})
+      result = Billing.handle_webhook(raw, sig())
+
+      # Assert the ROW first, so a regression names the stuck flag rather than a
+      # return-shape mismatch.
+      refute reload(sub).cancel_at_period_end,
+             "cancel_at_period_end is STUCK true after a portal un-cancel " <>
+               "(webhook returned #{inspect(result)}) — the console keeps showing the " <>
+               "Ending pill and refuses to offer Cancel again"
+
+      assert {:ok, %Subscription{cancel_at_period_end: false}} = result
+
+      # An un-cancel is not a status change: the row stays active and entitled.
+      assert reload(sub).status == "active"
+      assert Billing.entitled?(team)
+    end
+
+    test "a portal re-cancel on an active row sets the flag back to true" do
+      {_team, sub} = subscribed_team()
+      refute reload(sub).cancel_at_period_end
+
+      raw = updated_active(sub, %{"cancel_at_period_end" => true})
+      assert {:ok, %Subscription{cancel_at_period_end: true}} = Billing.handle_webhook(raw, sig())
+      assert reload(sub).cancel_at_period_end
+    end
+
+    test "an active update with NO cancel_at_period_end field leaves the flag alone" do
+      {team, sub} = subscribed_team()
+      {:ok, _} = Billing.request_cancel(team, true)
+
+      # Absent means "Stripe said nothing", NEVER false — a missing field must not
+      # silently un-cancel a team that asked to leave.
+      assert {:ok, :ignored} = Billing.handle_webhook(updated_active(sub, %{}), sig())
+      assert reload(sub).cancel_at_period_end
+
+      # A non-boolean is equally not an instruction.
+      raw = updated_active(sub, %{"cancel_at_period_end" => nil})
+      assert {:ok, :ignored} = Billing.handle_webhook(raw, sig())
+      assert reload(sub).cancel_at_period_end
+    end
+
+    test "an active update repeating the flag the row already holds is a no-op" do
+      {team, sub} = subscribed_team()
+      {:ok, _} = Billing.request_cancel(team, true)
+
+      raw = updated_active(sub, %{"cancel_at_period_end" => true})
+      assert {:ok, :ignored} = Billing.handle_webhook(raw, sig())
+      assert reload(sub).cancel_at_period_end
+    end
+
+    test "the un-cancel arm does NOT lift current_period_end from the payload" do
+      {team, sub} = subscribed_team()
+      {:ok, _} = Billing.request_cancel(team, true)
+      before = reload(sub).current_period_end
+
+      stripe_period_end = DateTime.utc_now() |> DateTime.add(24, :day) |> DateTime.to_unix()
+
+      raw =
+        updated_active(sub, %{
+          "cancel_at_period_end" => false,
+          "current_period_end" => stripe_period_end
+        })
+
+      assert {:ok, %Subscription{}} = Billing.handle_webhook(raw, sig())
+
+      assert reload(sub).current_period_end == before,
+             "current_period_end was written from webhook payload data (charter D672 refuses " <>
+               "this: one column carries the grace anchor, trial expiry AND the renewal date)"
+
+      assert Billing.entitled?(team)
     end
   end
 

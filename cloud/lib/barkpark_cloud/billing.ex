@@ -34,12 +34,16 @@ defmodule BarkparkCloud.Billing do
     * `billing_portal_url/2` — open a Stripe Customer Portal session for a team.
     * `request_cancel/2`     — customer-initiated cancel (grace or immediate).
 
-  NOT here (still deferred): invoices, proration / quantity changes, refunds,
-  per-tier quotas, and the nightly reconciliation sweep (designed as an Oban
-  `ReconcileWorker`, blocked on the missing `cloud/` Oban substrate). The plan
-  tiers (`free` / `supporter` / `support_plus`) are a `validate_inclusion` list
-  on `Subscription`, not a pricing engine — real prices/price-ids are the human
-  task cloud-17.
+  NOT here (still deferred): invoices, proration / quantity changes, refunds, and
+  per-tier quotas. The nightly reconciliation sweep is NOT among them — it is
+  decided against (charter D657) — grace is enforced synchronously at request time
+  by `entitled?/1`; nothing needs to wake up for it to end. Nor was it ever blocked
+  on a missing substrate: Oban is supervised in `application.ex` and 17 modules
+  under `cloud/lib` already `use Oban.Worker`.
+
+  The plan tiers (`free` / `supporter` / `support_plus`) are a `validate_inclusion`
+  list on `Subscription`, not a pricing engine — real prices/price-ids are the
+  human task cloud-17.
   """
   import Ecto.Query, warn: false
   require Logger
@@ -54,8 +58,12 @@ defmodule BarkparkCloud.Billing do
   @currency "usd"
 
   # The dunning grace window: how long a `past_due` team stays entitled after a
-  # failed payment before its managed boxes are suspended. Anchored deterministically
-  # at `mark_past_due` time (the Stripe Invoice object carries no period end), so the
+  # failed payment. What elapse costs the team is ISOLATION, not a stop: it flips
+  # `entitled?/1`, whose only lib call site outside this module is `router.ex`'s
+  # `entitled_or_trial_started?/1` go-live gate — so the team cannot LAUNCH A NEW
+  # INSTANCE. Nothing running stops, nothing is deleted, the deploy pipeline is
+  # untouched, and Hetzner and Stripe keep billing. Anchored deterministically at
+  # `mark_past_due` time (the Stripe Invoice object carries no period end), so the
   # grace is payload-shape-independent (Coolify keeps a past_due team running ~3 days).
   @grace_days 3
 
@@ -622,9 +630,32 @@ defmodule BarkparkCloud.Billing do
       "active" ->
         case subscription_by_customer(cus) do
           %Subscription{status: "past_due"} = sub -> recover_subscription(sub)
-          %Subscription{status: "active"} -> {:ok, :ignored}
+          %Subscription{status: "active"} = sub -> sync_cancel_flag(sub, object)
           _ -> activate_from_metadata(object)
         end
+
+      _ ->
+        {:ok, :ignored}
+    end
+  end
+
+  # An already-active row is not a no-op event: a Stripe Customer Portal
+  # UN-CANCEL (or a re-cancel) arrives as exactly this — status unchanged at
+  # "active", `cancel_at_period_end` flipped. Before cch-w57-s2 the whole payload
+  # was discarded, so a team that un-cancelled in the portal kept an "Ending" pill
+  # and no Cancel control in the console forever. Lift ONLY that one flag, and
+  # only when the payload STATES it as a boolean and it DIFFERS from the row — an
+  # absent field means "Stripe said nothing", never `false`.
+  #
+  # Deliberately NOT syncing `current_period_end` here (charter D672): that single
+  # column carries the dunning grace anchor, the trial expiry AND Stripe's renewal
+  # date, and both `entitled?/1` and `maybe_enforce/1` branch on exactly it — a
+  # payload-sourced write there can extend grace, suspend boxes in-band, or (on an
+  # absent field) write nil and leave an unpaid team entitled forever.
+  defp sync_cancel_flag(%Subscription{} = sub, object) do
+    case Map.get(object, "cancel_at_period_end") do
+      flag when is_boolean(flag) and flag != sub.cancel_at_period_end ->
+        update_status(sub, %{cancel_at_period_end: flag})
 
       _ ->
         {:ok, :ignored}
@@ -807,8 +838,16 @@ defmodule BarkparkCloud.Billing do
   Invoice object has no period end — only the Subscription object does) we anchor
   grace at `now + #{@grace_days}d` so a past_due team is NOT entitled forever. A
   past_due sub is STILL entitled within grace (Coolify keeps a past_due team
-  running and emails admins) — `maybe_enforce/1` only suspends the team's managed
-  boxes once the grace window has elapsed.
+  running and emails admins).
+
+  Grace elapse does NOT suspend anything on the webhook path. Because this
+  function re-anchors `current_period_end` `#{@grace_days}` days FORWARD on every
+  call that carries no explicit one (`Map.put_new_lazy/3`, below), `maybe_enforce/1`'s
+  `:gt -> :ok` arm always fires and its `Registry.suspend_team_barkparks/2` call is
+  unreachable in production — only a caller passing an explicit PAST
+  `current_period_end` (the tests do) reaches it. What elapsed grace actually costs
+  the team is ISOLATION: `entitled?/1` goes false and the go-live gate refuses to
+  launch a NEW instance. Nothing stops, nothing is deleted.
   """
   ## dunning-email-dedup: a first `active → past_due` transition returns the
   ## `%Subscription{}` (the router seam emails the team ONCE); a repeat call on a
@@ -816,9 +855,10 @@ defmodule BarkparkCloud.Billing do
   ## dunning event — returns `{:ok, :already_past_due}` so the router skips the
   ## duplicate email. This mirrors `recover_or_ignore/1`, which only recovers a
   ## sub that IS `past_due`. The transition is detected BEFORE the write, but the
-  ## write STILL runs on both paths: `past_due` stays set, the grace anchor
-  ## re-applies, and `maybe_enforce/1` re-runs — so the DB (and the deferred
-  ## reconcile's re-anchor-into-the-past) is idempotently correct either way.
+  ## write STILL runs on both paths: `past_due` stays set and `maybe_enforce/1`
+  ## re-runs. Note what the re-applied anchor does — it slides FORWARD, another
+  ## `@grace_days` out on every attr-less repeat, so a redelivery EXTENDS
+  ## grace rather than letting it elapse (billing_lifecycle_test.exs drives this).
   ## ONLY the email is de-duplicated.
   @spec mark_past_due(Subscription.t(), map()) ::
           {:ok, Subscription.t() | :already_past_due} | {:error, term}
@@ -875,11 +915,14 @@ defmodule BarkparkCloud.Billing do
     end
   end
 
-  # past_due is entitled while inside the grace window; past it (or with no known
-  # period end set explicitly in the past) the team's managed boxes are
-  # suspended with the softer "billing_past_due" reason. The nightly reconcile
-  # sweep (deferred, §6) is the belt-and-braces for a grace that elapses with no
-  # further webhook.
+  # past_due is entitled while inside the grace window; past it, the team's managed
+  # boxes are suspended with the softer "billing_past_due" reason. In PRODUCTION
+  # that suspend is unreachable: the only caller is `mark_past_due/2`, which
+  # re-anchors the period end `@grace_days` FORWARD whenever the caller supplies
+  # none, so the `:gt -> :ok` arm always wins. Only an explicit PAST
+  # `current_period_end` gets here. Nothing sweeps in behind it either — charter
+  # D657 decided against a nightly reconciler: a grace that elapses with no further
+  # webhook is enforced synchronously at request time by `entitled?/1`.
   defp maybe_enforce(%Subscription{status: "past_due", current_period_end: pe, team_id: tid}) do
     if is_nil(pe) or DateTime.compare(pe, DateTime.utc_now()) == :gt do
       :ok
