@@ -1279,6 +1279,49 @@ const censusCoverageEnvelope = `{
     "basis": "COVERAGE, and only coverage: a row counts as COVERED when THE SITE has since rebuilt",
     "as_of": "2026-08-09T12:00:00Z",
     "maturity_seconds": 86400,
+    "covering_bound": "left_only",
+    "never_covered_sites": [
+      {"site_id": "0f5f0a6e-2c1e-4a0f-9f2a-0c9f1d7a1111", "name": "Jarl Website", "slug": "jarl-website",
+       "environment": "production", "never_covered": 3},
+      {"site_id": "6b1f5c2d-9a44-4f21-b0d3-2a5e8c9f2222", "name": "Preview Box", "slug": "preview-box",
+       "environment": "preview", "never_covered": 2}
+    ],
+    "never_covered_sites_total": 7,
+    "never_covered_sites_truncated": true,
+    "cohorts": [
+      {"cohort": "deferred", "status": "deferred", "population": 2816, "covered": 2816,
+       "pending": 0, "unreadable": 0, "matured": 2816, "never_covered": 0, "too_young": 0,
+       "never_covered_by_environment": [], "oldest_pending_seconds": null},
+      {"cohort": "failed", "status": "failed", "population": 18640, "covered": 18630,
+       "pending": 10, "unreadable": 0, "matured": 18635, "never_covered": 5, "too_young": 5,
+       "never_covered_by_environment": [
+         {"environment": "production", "never_covered": 3},
+         {"environment": "preview", "never_covered": 2}
+       ],
+       "oldest_pending_seconds": 913247.0}
+    ]
+  }
+}`
+
+// The SAME envelope as a control plane older than dr-w34-s1 sends it: the
+// coverage node, with no covering_bound and no per-site breakdown at all. Held
+// as its own literal rather than cut out of the one above, because a fixture
+// built by string surgery breaks silently the moment the shape it cuts moves.
+const censusCoverageEnvelopeWithoutSites = `{
+  "window": {"from": "2026-08-09T11:00:00Z", "to": "2026-08-09T12:00:00Z"},
+  "volume": 60,
+  "failed": 12,
+  "failure_rate": {"sample": 60, "pct": 20.0, "numerator": 12, "min_sample": 200, "refused": true, "reason": "sample 60 below min_sample 200"},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200,
+  "coverage_cohorts": {
+    "clock": "the SAME clock as deferral_wait, applied to BOTH cohorts",
+    "basis": "COVERAGE, and only coverage: a row counts as COVERED when THE SITE has since rebuilt",
+    "as_of": "2026-08-09T12:00:00Z",
+    "maturity_seconds": 86400,
     "cohorts": [
       {"cohort": "deferred", "status": "deferred", "population": 2816, "covered": 2816,
        "pending": 0, "unreadable": 0, "matured": 2816, "never_covered": 0, "too_young": 0,
@@ -1342,6 +1385,95 @@ func TestCloudDeploymentsCoverageEveryEmittedKeyIsRead(t *testing.T) {
 	if deferred.OldestPendingSeconds != nil {
 		t.Fatalf("a null bound must stay nil, not 0.0: %v", deferred.OldestPendingSeconds)
 	}
+
+	// dr-w34-s1. The covering query's bound as a TOKEN, and the named tail with
+	// its two companions. Every one of these names — site_id, name, slug,
+	// environment, never_covered — already exists as a json tag elsewhere in
+	// internal/cloudclient, so the file-global tag union is structurally blind
+	// to a DeployCoverageSite declared with zero fields. DisallowUnknownFields
+	// above and the assertions below are what make that shape lose.
+	if c.CoveringBound != "left_only" {
+		t.Fatalf("covering_bound decoded wrong: %q — the reader cannot state a bound it did not read", c.CoveringBound)
+	}
+	if len(c.NeverCoveredSites) != 2 {
+		t.Fatalf("never_covered_sites decoded wrong: %+v", c.NeverCoveredSites)
+	}
+	want := cloudclient.DeployCoverageSite{
+		SiteID:       "0f5f0a6e-2c1e-4a0f-9f2a-0c9f1d7a1111",
+		Name:         "Jarl Website",
+		Slug:         "jarl-website",
+		Environment:  "production",
+		NeverCovered: 3,
+	}
+	if c.NeverCoveredSites[0] != want {
+		t.Fatalf("the named site decoded wrong: %+v (want %+v) — a struct that drops a field decodes every name to the zero value in silence", c.NeverCoveredSites[0], want)
+	}
+	// The list is CUT, and the cut says so: two rows out of seven.
+	if c.NeverCoveredSitesTotal != 7 || !c.NeverCoveredSitesTruncated {
+		t.Fatalf("the truncation companions decoded wrong: total=%d truncated=%v", c.NeverCoveredSitesTotal, c.NeverCoveredSitesTruncated)
+	}
+}
+
+// TestCloudDeploymentsCoverageSiteTagsAreOnTheStructItself: the D260 blind spot,
+// at its structural MAXIMUM. `site_id`, `name`, `slug`, `environment` and
+// `never_covered` are ALL already json tags on other structs in
+// internal/cloudclient, so the Elixir-side census's file-global UNREAD arm and
+// its exact @go_tag_floor would both stay green with DeployCoverageSite carrying
+// no fields at all — the control plane would emit the full named list and the
+// operator's terminal would drop every name on the floor. These are the
+// per-struct assertions the union cannot make.
+func TestCloudDeploymentsCoverageSiteTagsAreOnTheStructItself(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"site_id", cloudclient.DeployCoverageSite{SiteID: "s"}.SiteID, "s"},
+		{"name", cloudclient.DeployCoverageSite{Name: "n"}.Name, "n"},
+		{"slug", cloudclient.DeployCoverageSite{Slug: "g"}.Slug, "g"},
+		{"environment", cloudclient.DeployCoverageSite{Environment: "production"}.Environment, "production"},
+		{"never_covered", cloudclient.DeployCoverageSite{NeverCovered: 3}.NeverCovered, 3},
+	} {
+		if tc.got != tc.want {
+			t.Fatalf("DeployCoverageSite.%s does not carry its value", tc.name)
+		}
+	}
+
+	// And the decode is per-FIELD, not per-struct: a payload naming only one key
+	// must land on that key. This is what fails if a field is renamed or its tag
+	// is dropped while the struct still exists.
+	for _, tc := range []struct {
+		json string
+		want cloudclient.DeployCoverageSite
+	}{
+		{`{"site_id":"abc"}`, cloudclient.DeployCoverageSite{SiteID: "abc"}},
+		{`{"name":"Jarl"}`, cloudclient.DeployCoverageSite{Name: "Jarl"}},
+		{`{"slug":"jarl"}`, cloudclient.DeployCoverageSite{Slug: "jarl"}},
+		{`{"environment":"preview"}`, cloudclient.DeployCoverageSite{Environment: "preview"}},
+		{`{"never_covered":4}`, cloudclient.DeployCoverageSite{NeverCovered: 4}},
+	} {
+		dec := json.NewDecoder(strings.NewReader(tc.json))
+		dec.DisallowUnknownFields()
+		var got cloudclient.DeployCoverageSite
+		if err := dec.Decode(&got); err != nil {
+			t.Fatalf("%s is not decoded by DeployCoverageSite itself: %v", tc.json, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%s decoded to %+v, want %+v", tc.json, got, tc.want)
+		}
+	}
+
+	// The same assertion for the two companions and the bound, on the CONTAINER
+	// struct — a named list whose total decodes nowhere is a cut nobody can see.
+	dec := json.NewDecoder(strings.NewReader(`{"covering_bound":"left_only","never_covered_sites_total":9,"never_covered_sites_truncated":true}`))
+	dec.DisallowUnknownFields()
+	var c cloudclient.DeployCoverageCohorts
+	if err := dec.Decode(&c); err != nil {
+		t.Fatalf("the bound and the truncation companions are UNREAD by DeployCoverageCohorts: %v", err)
+	}
+	if c.CoveringBound != "left_only" || c.NeverCoveredSitesTotal != 9 || !c.NeverCoveredSitesTruncated {
+		t.Fatalf("decoded wrong: %+v", c)
+	}
 }
 
 // TestCloudDeploymentsCoverageRendersBothCohorts: the human render, on RENDERED
@@ -1387,7 +1519,95 @@ func TestCloudDeploymentsCoverageRendersBothCohorts(t *testing.T) {
 	if !strings.Contains(stdout, "never that the failure was repaired") {
 		t.Fatalf("the failed cohort's COVERED must state what it does NOT mean:\n%s", stdout)
 	}
+
+	// dr-w34-s1. THE NON-ZERO NAMES ITS SITES, on the bytes an operator reads.
+	// A never-covered count with no name sends a human looking through the whole
+	// fleet for the three rows that are dark.
+	for _, want := range []string{
+		"never-covered sites (2 of 7)",
+		"jarl-website",
+		"preview-box",
+		"3 row(s) never covered",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the named never-covered tail must reach the screen (%q):\n%s", want, stdout)
+		}
+	}
+	// …and the cut says so, with its own unbounded total, so a top-2 can never
+	// be read as the whole tail.
+	if !strings.Contains(stdout, "the list is CUT: 7 {site, environment} pair(s) are never-covered and 2 are printed") {
+		t.Fatalf("a truncated list must disclose its own population:\n%s", stdout)
+	}
+	// The covering query's bound, as a sentence, not as a paragraph to parse.
+	if !strings.Contains(stdout, "covering bound: LEFT ONLY") ||
+		!strings.Contains(stdout, "is the site stuck NOW") {
+		t.Fatalf("the covering bound must be stated:\n%s", stdout)
+	}
+	// This run pinned BOTH edges with --from/--to, so it says so — the sentence
+	// that separates a moving window from a fixed one.
+	if !strings.Contains(stdout, "window: BOTH edges pinned by --from/--to") {
+		t.Fatalf("a pinned window must be named as pinned:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "LEFT-TRUNCATED") {
+		t.Fatalf("a --from/--to window is not left-truncated:\n%s", stdout)
+	}
 	t.Logf("`bp cloud deployments` coverage section:\n%s", stdout)
+}
+
+// TestCloudDeploymentsCoverageDaysWindowDisclosesTruncation: the '0' in "reads 0,
+// 3 or 5". The DEFAULT window is 7 days wide and its left edge slides with the
+// clock, so a never-covered row written eight days ago is not in the population
+// AT ALL — and the same fleet answers 0 at --days 7 and 5 at --days 27 with not
+// one row changing. The number is right; the reading is what needs the sentence.
+func TestCloudDeploymentsCoverageDaysWindowDisclosesTruncation(t *testing.T) {
+	newCensusServer(t, 200, censusCoverageEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--days", "7")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	for _, want := range []string{
+		"window: LEFT-TRUNCATED",
+		"right edge at NOW",
+		"only --from/--to pins both edges",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("a --days window must disclose that it truncates (%q):\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "BOTH edges pinned") {
+		t.Fatalf("a --days window is not pinned on both edges:\n%s", stdout)
+	}
+	t.Logf("`bp cloud deployments --days 7` coverage window disclosure:\n%s", stdout)
+}
+
+// TestCloudDeploymentsCoverageWithoutSitesSaysNotNamed: an older control plane
+// sends the coverage node WITHOUT the per-site breakdown. That is not an empty
+// backlog and it is not a named one — the counts are real and WHICH sites they
+// belong to was never read. Three states, kept apart.
+func TestCloudDeploymentsCoverageWithoutSitesSaysNotNamed(t *testing.T) {
+	newCensusServer(t, 200, censusCoverageEnvelopeWithoutSites)
+	pinCensusClock(t, time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-09T11:00:00Z", "--to", "2026-08-09T12:00:00Z")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "sites: NOT NAMED") ||
+		!strings.Contains(stdout, "that is not the same as none") {
+		t.Fatalf("an absent per-site breakdown must refuse out loud:\n%s", stdout)
+	}
+	// An unstated bound is not "left only" either.
+	if !strings.Contains(stdout, "covering bound: NOT STATED") {
+		t.Fatalf("an absent covering_bound must say so rather than assume:\n%s", stdout)
+	}
+	// And nothing may be invented: no name, no cut, no zero.
+	for _, forbidden := range []string{"never-covered sites (", "the list is CUT", "sites: none"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("nothing may be claimed about WHICH sites when none were sent (%q):\n%s", forbidden, stdout)
+		}
+	}
 }
 
 // TestCloudDeploymentsWithoutCoverageSaysNotMeasured: an absent key is not an

@@ -2704,6 +2704,81 @@ defmodule BarkparkCloud.DeployLedgerTest do
       refute wait.p95.refused
       assert wait.p95.seconds == 60.0
     end
+
+    # THE RIGHT-EDGE LAW, ON THE DEFERRAL SIDE — WHERE IT HAD NO EXERCISE
+    # SURFACE AT ALL (dr-w34-s1).
+    #
+    # `live_marks/1` is bounded BELOW and deliberately not above, and D555
+    # measured the mutation that bounds it: promote it to `live_marks/2` with a
+    # `where: d.inserted_at <= ^as_of` and thread `as_of` from BOTH call sites.
+    # Applied at the coverage site (:1521) alone it reds one test — the pair
+    # `coverage_cohorts` already carries. Applied at the DEFERRAL site (:1349)
+    # ALONE it redded NOTHING, because every `@dwait_*` fixture in this block
+    # mints its covering live row INSIDE the window (`covered_deferrals!/3` puts
+    # it at `at + wait`), so the law was pinned on one of its two sites and
+    # unpinned on the other. This pair is the deferral side's positive offset.
+    test "a DEFERRED row is COVERED by a live build minted AFTER the window's `to` — the deferral clock is not right-bounded either",
+         %{site: site} do
+      deferred_at = DateTime.add(@dwait_from, 1_000, :second)
+      # POSITIVE offset from @dwait_to: outside the window, and the ONLY row in
+      # the table that can cover the deferral.
+      live_at = DateTime.add(@dwait_to, 3_600, :second)
+
+      deployments!(site, [
+        %{status: "deferred", content_rev: "rev-deferred", inserted_at: deferred_at},
+        %{
+          status: "live",
+          content_rev: "rev-live",
+          inserted_at: live_at,
+          became_live_at: live_at
+        }
+      ])
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      # The covering row is OUTSIDE the population — it is only ever a mark.
+      assert wait.population == %{deferred: 1, covered: 1, pending: 0, unreadable: 0}
+      assert wait.unresolved == 0
+      assert is_nil(wait.oldest_pending_seconds)
+
+      # AND THE FIXTURE CANNOT PASS BY ACCIDENT. If the covering row were inside
+      # the window, a right-bounded `live_marks` would still see it and this
+      # test would green on the mutated implementation. Asserting the offset
+      # itself is what makes the exercise surface real.
+      assert DateTime.compare(live_at, wait.as_of) == :gt
+    end
+
+    # THE MIRROR, so the assertion above cannot pass vacuously: identical
+    # fixture with the post-window live build REMOVED. This is where a
+    # right-bounded implementation would put the row WITH the live build
+    # present — PENDING at the window's own edge, an artefact of where the
+    # reader drew the boundary, reported as a fleet that never re-queued.
+    test "the same deferral with the post-window live build removed is PENDING — the law above is not vacuous",
+         %{site: site} do
+      deferred_at = DateTime.add(@dwait_from, 1_000, :second)
+
+      deployments!(site, [
+        %{status: "deferred", content_rev: "rev-deferred", inserted_at: deferred_at}
+      ])
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      assert wait.population == %{deferred: 1, covered: 0, pending: 1, unreadable: 0}
+      assert wait.unresolved == 1
+      assert wait.as_of == @dwait_to
+
+      # THE EXACT FLOOR, computed and not placeholdered: the window is
+      # @dwait_from ~U[2026-08-01] -> @dwait_to ~U[2026-08-08], i.e. 604_800s,
+      # and the row was written 1_000s into it. A bound that drifts with the
+      # fixture would let the number mean nothing.
+      assert DateTime.diff(@dwait_to, @dwait_from) == 604_800
+      assert wait.oldest_pending_seconds == 603_800.0
+
+      # `deferral_wait` publishes `oldest_pending_seconds`. The lower bound over
+      # in `delivery/3` is a DIFFERENT node with a different name, and conflating
+      # the two is how a reader ends up asserting against a key that is not here.
+      refute Map.has_key?(wait, :still_waiting_at_least_seconds)
+    end
   end
 
   ## ── 4b-bis. THE COVERAGE PARTITION, OVER BOTH NEVER-LIVE COHORTS ──────────
@@ -2881,6 +2956,14 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert failed.never_covered == 0
       assert failed.too_young == 0
       assert failed.never_covered_by_environment == []
+
+      # …and nothing never-covered names NOBODY. An empty list is the same
+      # honest zero the counts report, and it still carries its population, so
+      # "no sites are stuck" can never be confused with "the list was cut".
+      cohorts = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts
+      assert cohorts.never_covered_sites == []
+      assert cohorts.never_covered_sites_total == 0
+      refute cohorts.never_covered_sites_truncated
     end
 
     # THE MIRROR, so the assertion above cannot pass vacuously. Identical
@@ -2949,6 +3032,148 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert failed.never_covered == 0
       assert failed.never_covered_by_environment == []
       assert failed.oldest_pending_seconds == nil
+
+    end
+
+    # THE NON-ZERO NAMES ITS SITES (dr-w34-s1). A never-covered COUNT tells an
+    # operator that something is sitting dark and refuses to say what — and
+    # `coverage_cohorts/2` already SELECTED `site_id` and then threw it away in
+    # the merge, which is the single omission that made the split buildable by
+    # environment and never by site.
+    test "the never-covered tail is NAMED — site_id, name, slug and environment, pooled across BOTH cohorts",
+         %{site: site, team: team} do
+      other = site_fixture(team)
+      old = DateTime.add(@cov_to, -172_800, :second)
+
+      # Two production rows on one site, in the FAILED cohort.
+      deployments!(site, [
+        %{status: "failed", inserted_at: old},
+        %{status: "failed", inserted_at: DateTime.add(old, 60, :second)}
+      ])
+
+      # …and one preview row on another site, in the DEFERRED cohort. Pooled on
+      # purpose: a site is stuck or it is not, and which cohort stranded it is
+      # the cohorts' question, not this list's.
+      deployments!(other, [
+        %{status: "deferred", environment: "preview", inserted_at: old}
+      ])
+
+      cohorts = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts
+
+      assert cohorts.never_covered_sites == [
+               %{
+                 site_id: site.id,
+                 name: site.name,
+                 slug: site.slug,
+                 environment: "production",
+                 never_covered: 2
+               },
+               %{
+                 site_id: other.id,
+                 name: other.name,
+                 slug: other.slug,
+                 environment: "preview",
+                 never_covered: 1
+               }
+             ]
+
+      # The list reconciles with the counts it is a naming of: 2 + 1 == the two
+      # cohorts' never-covered totals.
+      [deferred, failed] = cohorts.cohorts
+      assert failed.never_covered == 2
+      assert deferred.never_covered == 1
+      assert cohorts.never_covered_sites_total == 2
+      refute cohorts.never_covered_sites_truncated
+
+      # A row TOO YOUNG to be never-covered is not named either — the list and
+      # the count answer to the SAME maturity fence, or the naming would accuse
+      # a site the count does not.
+      deployments!(site, [%{status: "failed", inserted_at: DateTime.add(@cov_to, -60, :second)}])
+      after_young = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts
+      assert after_young.never_covered_sites == cohorts.never_covered_sites
+    end
+
+    # THE LIST IS A TAIL, AND A TAIL HAS NO NATURAL SIZE. `census/3` learned
+    # this for `sites` at :1204 — "a reader who cannot tell a 50-site fleet from
+    # the top 50 of a larger one is reading a number with no population" — and a
+    # list that cut silently HERE would reproduce the exact anonymity this key
+    # exists to kill, one level down.
+    test "the named list is BOUNDED and says so, with its unbounded total beside it",
+         %{site: site} do
+      old = DateTime.add(@cov_to, -172_800, :second)
+
+      # 21 distinct {site_id, environment} groups — the key is the pair, so one
+      # site with 21 environments is 21 rows in the tail.
+      deployments!(
+        site,
+        for i <- 1..21 do
+          %{
+            status: "failed",
+            environment: "env-#{String.pad_leading(to_string(i), 2, "0")}",
+            inserted_at: DateTime.add(old, i, :second)
+          }
+        end
+      )
+
+      cohorts = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts
+
+      assert length(cohorts.never_covered_sites) == 20
+      assert cohorts.never_covered_sites_total == 21
+      assert cohorts.never_covered_sites_truncated
+
+      # The cut is on the LIST and never on the COUNT: the cohort still reports
+      # all 21 rows, so a truncated naming can never shrink the number it names.
+      [_deferred, failed] = cohorts.cohorts
+      assert failed.never_covered == 21
+    end
+
+    # THE COVERING QUERY'S BOUND, AS A TOKEN — and on the RIGHT NODE.
+    test "covering_bound rides on coverage_cohorts and NEVER on the window, which is bounded on both sides",
+         %{site: site} do
+      deployments!(site, [
+        %{status: "failed", inserted_at: DateTime.add(@cov_from, 1_000, :second)}
+      ])
+
+      census = DeployLedger.census(@cov_from, @cov_to)
+
+      assert census.coverage_cohorts.covering_bound == "left_only"
+
+      # `census/3`'s window is genuinely half-open [from, to) and bounded on
+      # BOTH sides. A bound key there would be a machine-readable falsehood, so
+      # the window carries no such key at all.
+      assert census.window == %{from: @cov_from, to: @cov_to}
+
+      # And the human sentence still ships beside the token — the prose is what
+      # says WHY the bound is one-sided, which a token cannot.
+      assert census.coverage_cohorts.basis =~ "bounded on the LEFT only"
+    end
+
+    # ONE `as_of` PER ENVELOPE. The operator route builds its body as
+    # `census(from, to) |> Map.put(:delivery, delivery(from, to))` — two calls
+    # that used to read two different clocks, measured 15.7s apart on the live
+    # control plane at `--days 23`. Same window in, one instant out.
+    test "coverage_cohorts.as_of and delivery.as_of are the SAME instant — the window's own pinned edge",
+         %{site: site} do
+      deployments!(site, [
+        %{status: "failed", inserted_at: DateTime.add(@cov_from, 1_000, :second)}
+      ])
+
+      census = DeployLedger.census(@cov_from, @cov_to)
+      delivery = DeployLedger.delivery(@cov_from, @cov_to)
+
+      assert census.coverage_cohorts.as_of == delivery.as_of
+      assert census.deferral_wait.as_of == delivery.as_of
+      assert delivery.censored.as_of == delivery.as_of
+      assert delivery.as_of == @cov_to
+
+      # ON THE WIRE, which is where an operator compares them. Equal instants
+      # are not enough: `DateTime.truncate/2` on the window edge would widen
+      # "…T00:00:00Z" to "…T00:00:00.000000Z", and a reader diffing two stamps
+      # would still see two different strings under one envelope.
+      body = Jason.encode!(Map.put(census, :delivery, delivery)) |> Jason.decode!()
+      assert body["coverage_cohorts"]["as_of"] == body["delivery"]["as_of"]
+      assert body["coverage_cohorts"]["as_of"] == body["window"]["to"]
+      assert body["deferral_wait"]["as_of"] == body["delivery"]["censored"]["as_of"]
     end
 
     # D478'S WORDING FENCE, ON THE WIRE. The key ships COVERAGE and the three

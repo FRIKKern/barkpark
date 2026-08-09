@@ -2328,6 +2328,21 @@ type DeployCoverageCohort struct {
 	OldestPendingSeconds      *float64                    `json:"oldest_pending_seconds"`
 }
 
+// DeployCoverageSite is ONE never-covered {site, environment} pair, BY NAME.
+//
+// The counts one struct up say how many rows are sitting dark and refuse to say
+// where — and the control plane already had `site_id` on every row it folded, so
+// the anonymity was an omission and never a limit. Name and Slug are resolved
+// from the site registry and may be empty when the site row has since been
+// deleted: an empty name is "no site row answered", never a site called "".
+type DeployCoverageSite struct {
+	SiteID       string `json:"site_id"`
+	Name         string `json:"name"`
+	Slug         string `json:"slug"`
+	Environment  string `json:"environment"`
+	NeverCovered int    `json:"never_covered"`
+}
+
 // DeployCoverageCohorts is `coverage_cohorts` on the census envelope: the
 // coverage partition over BOTH never-live cohorts. DeferralWait one struct up
 // answers "how long did the re-queue take" over DEFERRED rows only, and is blind
@@ -2337,12 +2352,27 @@ type DeployCoverageCohort struct {
 // MaturitySeconds is the fence under which a PENDING row is not counted as never
 // covered: a row written minutes ago has not been given time to be covered, and
 // counting it as damage would report the fleet's own arrival rate as failure.
+//
+// CoveringBound is the covering query's own bound as one token ("left_only"):
+// the basis paragraph says it in English, and a reader that wants to know
+// whether the number in front of it was computed against a right-bounded window
+// should not have to parse prose to find out. It is NOT on the window map —
+// that one is half-open [from, to) and bounded on both sides.
+//
+// NeverCoveredSites NAMES the tail the counts can only size, and it is BOUNDED:
+// NeverCoveredSitesTotal is the unbounded population and
+// NeverCoveredSitesTruncated says whether the list was cut. A list that cuts
+// silently is the same anonymity one level down.
 type DeployCoverageCohorts struct {
-	Clock           string                 `json:"clock"`
-	Basis           string                 `json:"basis"`
-	AsOf            string                 `json:"as_of"`
-	MaturitySeconds int                    `json:"maturity_seconds"`
-	Cohorts         []DeployCoverageCohort `json:"cohorts"`
+	Clock                      string                 `json:"clock"`
+	Basis                      string                 `json:"basis"`
+	AsOf                       string                 `json:"as_of"`
+	MaturitySeconds            int                    `json:"maturity_seconds"`
+	CoveringBound              string                 `json:"covering_bound"`
+	Cohorts                    []DeployCoverageCohort `json:"cohorts"`
+	NeverCoveredSites          []DeployCoverageSite   `json:"never_covered_sites"`
+	NeverCoveredSitesTotal     int                    `json:"never_covered_sites_total"`
+	NeverCoveredSitesTruncated bool                   `json:"never_covered_sites_truncated"`
 }
 
 // DeployCensusError is a census the control plane REFUSED to answer, with the
