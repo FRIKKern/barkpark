@@ -284,14 +284,18 @@ means that gate does not emit, because it is not path-gated at all.
 | `Console gate` | `.github/workflows/console-harness.yml` | yes |
 | `Elixir gate` | `.github/workflows/elixir.yml` | yes |
 | `Security gate` | `.github/workflows/security.yml` | no |
+| `Compose smoke` | `.github/workflows/compose-smoke.yml` | no |
 | `PR references an active task` | — | yes |
 
 So three of the four required contexts can go green having dispatched nothing.
 The fourth, `PR references an active task`, is **exempt by construction** in the
 path-gating sense: its workflow carries no `paths:` filter and no `changes`
-dispatcher, so it executes on every PR. `Security gate` emits the same notice but
-is not required — a red one cannot block a merge, so its green is the weakest of
-the five.
+dispatcher, so it executes on every PR. `Security gate` and `Compose smoke` emit
+the same notice but are not required — a red one of either cannot block a merge,
+so those two greens are the weakest on this roster. If `Compose smoke` is ever
+promoted to a required context, its `no` above must flip to `yes` in the same PR:
+clause 3 of §21 parses the required set from `.github/required-checks.json` and
+reds on any disagreement in either direction.
 
 **The fourth had its own vacuous green, by a different mechanism, and until
 2026-08-08 it disclosed nothing.** `pr-task-gate.yml` grandfathers a PR whose
