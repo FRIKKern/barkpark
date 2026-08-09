@@ -367,6 +367,25 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
       assert StudioLinkFakeHttpClient.requests() == []
       assert forced == {:error, :identity_refused}
     end
+
+    # REVIEW ADDITION (cch-w61 review): the seam choice — refuse on
+    # `relay_admin_post/3`, NOT on `relay_admin/4` — was argued structurally
+    # ("relay_admin/4 is untouched") but never measured. A future refactor that
+    # hoisted the clause one seam up would silently refuse every READ at a
+    # refuted box (webhook lists, dataset reads, token mints) and no test would
+    # notice. This pins the scope: a READ still reaches the wire.
+    test "SCOPE: a READ through relay_admin/4 at a REFUTED box still reaches the wire" do
+      bp = probed_barkpark("identity_refused")
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: ~s({"ok":true})}}
+      ])
+
+      assert {:ok, 200, _} = Registry.relay_admin(bp, :get, "/v1/admin/health", nil)
+
+      assert [%{url: url}] = StudioLinkFakeHttpClient.requests()
+      assert url =~ "/v1/admin/health"
+    end
   end
 
   defp unset_url(bp), do: bp |> Ecto.Changeset.change(url: nil, host: "") |> Repo.update!()
