@@ -338,6 +338,20 @@ jobs:
     # its own red. It runs after both deploy jobs have already published theirs.
     name: Report deploy failure to a human
     needs: [changes, control-plane, instance]
+    # THIS ONE STAYS BARE `failure()`, AND IT IS THE EXCEPTION ON PURPOSE
+    # (dr-w33-s4, decided at review). Four other alert guards in this repository
+    # widened to `failure() || cancelled()` this wave, because on a SCHEDULED
+    # workflow a cancelled run is silence wearing a non-red conclusion. Here it
+    # is not: the bullet forty lines above already measured it — 344 of 1,378
+    # runs cancelled, `concurrency` is `cancel-in-progress: false`, and the
+    # `changes` job anchors its diff base to the last SUCCESSFUL run, so the
+    # surviving run of a burst merge deploys the UNION of every push since.
+    # Cancellation here is DESIGNED coalescing, prod is not left stale by it, and
+    # filing on it would bury the `deploy-production` key — this epic's own
+    # loudest alarm — under exactly the noise that trains people to ignore it.
+    # A cancelled run that DID lose a delivery is caught on its own key by
+    # report-recorder-failure below, which names `needs.record-delivery.result ==
+    # 'cancelled'` explicitly.
     if: failure() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
