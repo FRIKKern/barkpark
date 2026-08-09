@@ -12,15 +12,18 @@
 # and puts a REAL fake `bp` on PATH that emits {"commit":"<sha>"} — the only way
 # to drive section 2's cat-file / rev-parse / merge-base / diff ladder.
 #
-# The full 8-cell verdict matrix (the flip-risk surface):
+# The full 10-cell verdict matrix (the flip-risk surface):
 #   1. at-tip                → GREEN  (bp commit == origin/main tip)
 #   2. behind-Go             → RED    (Go input changed on origin/main since bp)
 #   3. behind-docs-only      → GREEN  (only non-Go paths changed since bp)
 #   4. ahead-with-local-Go   → GREEN  (bp ahead; merge-base==origin/main tip)
-#   5. diverged              → RED    (Go changed past the common ancestor)
+#   5. diverged              → RED    (off origin/main's history — its OWN
+#                                      sentence; remedy is a rebase, not a rebuild)
 #   6. unknown-commit        → SKIP   (bp commit absent from the checkout)
 #   7. no-stamp              → RED    (bp built without -ldflags: no commit)
 #   8. offline / no ref      → SKIP   (origin/main ref unavailable — LOUD, not ok)
+#   9. behind vs diverged    → the two RED sentences must DIFFER (W34 S2)
+#  10. exit code             → still 0: doctor is advisory, never a gate
 #
 # Templated on scripts/install-cli.test.sh.
 set -uo pipefail
@@ -44,18 +47,30 @@ trap cleanup EXIT
 # first match; under `set -o pipefail` that SIGPIPEs the upstream printf and the
 # pipeline returns 141 (a size-dependent false negative). A here-string has no
 # upstream writer to kill, so the match verdict is the ONLY thing that matters.
-sec2_green() { grep -qE 'installed bp .*is current with origin/main' <<<"$1"; }
-sec2_red()   { grep -qF 'predates Go changes on origin/main' <<<"$1"; }
-has()        { grep -qF "$2" <<<"$1"; }
+sec2_green()    { grep -qE 'installed bp .*is current with origin/main' <<<"$1"; }
+sec2_red()      { grep -qF 'predates Go changes on origin/main' <<<"$1"; }
+# The DIVERGED rung is its own sentence, never the "predates" one: a binary off
+# origin/main's history does not predate main, and its remedy is a rebase — a
+# rebuild from the same checkout reinstalls the same off-history binary.
+sec2_diverged() { grep -qF 'is DIVERGED from origin/main' <<<"$1"; }
+has()           { grep -qF "$2" <<<"$1"; }
 
 # assert_green <name> <output>  — section 2 says current, and says nothing stale
 assert_green() {
   if sec2_green "$2" && ! sec2_red "$2"; then pass "$1"; else
     fail "$1"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
 }
-# assert_red <name> <output>  — section 2 flags stale, and does NOT green
+# assert_red <name> <output>  — section 2 flags stale (BEHIND), does NOT green,
+# and does NOT reach for the diverged sentence: a pure-behind binary really does
+# predate main, and saying "diverged" there would be the mirror of the bug.
 assert_red() {
-  if sec2_red "$2" && ! sec2_green "$2"; then pass "$1"; else
+  if sec2_red "$2" && ! sec2_green "$2" && ! sec2_diverged "$2"; then pass "$1"; else
+    fail "$1"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
+}
+# assert_diverged <name> <output>  — section 2 flags DIVERGED, does NOT green,
+# and does NOT print the (false) "predates" sentence.
+assert_diverged() {
+  if sec2_diverged "$2" && ! sec2_green "$2" && ! sec2_red "$2"; then pass "$1"; else
     fail "$1"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
 }
 # assert_has <name> <output> <substr>  — an exact skip/red string is present …
@@ -65,7 +80,7 @@ assert_has() {
 }
 # … and section 2 must be neither green nor a stale RED (a clean SKIP).
 assert_clean_skip() {
-  if ! sec2_green "$2" && ! sec2_red "$2"; then pass "$1"; else
+  if ! sec2_green "$2" && ! sec2_red "$2" && ! sec2_diverged "$2"; then pass "$1"; else
     fail "$1 (leaked a green/red verdict)"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
 }
 
@@ -131,7 +146,7 @@ run_doctor() { # <work> <bindir> — full doctor output, fake bp shadowing real 
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-echo "== doctor.sh section 2 — 8-cell verdict matrix =="
+echo "== doctor.sh section 2 — 10-cell verdict matrix =="
 
 # ── 1. at-tip → GREEN ────────────────────────────────────────────────────────
 R1="$TMP/c1"; mkdir -p "$R1"; W1="$(base_repo "$R1")"
@@ -164,9 +179,12 @@ D4="$($GIT -C "$W4" rev-parse HEAD)"
 make_bp "$R4/bin" "$D4"
 assert_green "4. ahead-with-local-Go: merge-base==tip → GREEN (not false-red)" "$(run_doctor "$W4" "$R4/bin")"
 
-# ── 5. diverged → RED ────────────────────────────────────────────────────────
+# ── 5. diverged → RED, in its OWN sentence ───────────────────────────────────
 # origin/main advanced with a Go change (B); bp built on a sibling commit E off
-# the common ancestor A. merge-base(E, B)==A, diff(A,B) has the .go change → RED.
+# the common ancestor A. Neither commit contains the other, so this binary does
+# not PREDATE main — it carries a commit main has never seen, and `make
+# cli-install` would rebuild from this same checkout and reinstall it. Before
+# W34 S2 this cell printed the identical "predates Go changes" string as cell 2.
 R5="$TMP/c5"; mkdir -p "$R5"; W5="$(base_repo "$R5")"
 advance_origin "$W5" main.go 'package main // v2 diverge' 'B: go change on main'
 $GIT -C "$W5" checkout --quiet -b diverge "$($GIT -C "$W5" rev-list --max-parents=0 HEAD | tail -1)"
@@ -174,7 +192,9 @@ printf 'docs on a divergent branch\n' > "$W5/README.md"
 $GIT -C "$W5" add -A; $GIT -C "$W5" commit --quiet -m 'E: divergent sibling'
 E5="$($GIT -C "$W5" rev-parse HEAD)"
 make_bp "$R5/bin" "$E5"
-assert_red "5. diverged: Go changed past the merge-base → RED" "$(run_doctor "$W5" "$R5/bin")"
+OUT5="$(run_doctor "$W5" "$R5/bin")"
+assert_diverged "5. diverged: off origin/main's history → RED, not 'predates'" "$OUT5"
+assert_has "5. diverged: the remedy is a rebase, not a rebuild" "$OUT5" "run: git pull --rebase"
 
 # ── 6. unknown-commit → SKIP ─────────────────────────────────────────────────
 R6="$TMP/c6"; mkdir -p "$R6"; W6="$(base_repo "$R6")"
@@ -205,6 +225,40 @@ OUT8="$(run_doctor "$W8" "$R8/bin")"
 assert_has        "8. offline: LOUD skip when origin/main is unavailable" "$OUT8" "bp staleness check skipped"
 assert_clean_skip "8. offline: no green/red verdict leaked" "$OUT8"
 
+# ── 9. behind vs diverged print DIFFERENT sentences ──────────────────────────
+# The point of the whole slice, asserted directly rather than inferred from two
+# helpers agreeing: run the SAME doctor over cell 2 (behind) and cell 5
+# (diverged) and require the section-2 problem lines to differ. A regression
+# that re-collapses the two rungs into one string fails HERE even if both cells
+# still "RED".
+OUT2="$(run_doctor "$W2" "$R2/bin")"
+LINE2="$(grep -F 'installed bp (' <<<"$OUT2" | head -1)"
+LINE5="$(grep -F 'installed bp (' <<<"$OUT5" | head -1)"
+# Strip the commit sha, which differs per fixture for reasons unrelated to the
+# rung: what must differ is the SENTENCE.
+S2="$(sed 's/(.*)//' <<<"$LINE2")"; S5="$(sed 's/(.*)//' <<<"$LINE5")"
+if [ -n "$S2" ] && [ -n "$S5" ] && [ "$S2" != "$S5" ]; then
+  pass "9. behind and diverged print DIFFERENT sentences"
+else
+  fail "9. behind and diverged print the SAME sentence (the W34 S2 defect)"
+  printf '    behind:   %s\n    diverged: %s\n' "$LINE2" "$LINE5"
+fi
+# And the remedies differ in kind: a rebuild for behind, a rebase for diverged.
+assert_has "9. behind still prescribes the rebuild" "$LINE2" "run: make cli-install"
+if grep -qF 'run: git pull --rebase' <<<"$LINE2"; then
+  fail "9. the behind remedy must not become a rebase"
+else
+  pass "9. behind is not given the rebase remedy"
+fi
+
+# ── exit code: doctor is ADVISORY and stays advisory ─────────────────────────
+# Every RED above went through `bad`, which counts a problem and never exits
+# non-zero. This slice makes the sentence TRUE; it does not make doctor a gate.
+run_doctor "$W5" "$R5/bin" >/dev/null 2>&1
+RC5=$?
+if [ "$RC5" -eq 0 ]; then pass "10. doctor still exits 0 on the diverged RED (advisory)"; else
+  fail "10. doctor exited $RC5 on the diverged RED — it must never block a chain"; fi
+
 # ── negative control: prove the harness can SEE a false-green ────────────────
 # If section 2 ever regresses to comparing against the ancestor-only diff and
 # calls the behind-Go binary current, sec2_green would fire on cell 2. We assert
@@ -217,4 +271,4 @@ if [ "$fails" -ne 0 ]; then
   echo "doctor tests: $fails failure(s)" >&2
   exit 1
 fi
-echo "doctor tests: PASS (8/8 verdict cells)"
+echo "doctor tests: PASS (10/10 verdict cells)"
