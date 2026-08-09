@@ -23,7 +23,15 @@
 #   (e) CROWN UNREADABLE: a read that did not happen is never green  → exit 2
 #   (f) SERVING-UNRECORDED: the box serves a sha with no cp row      → exit 1
 #   (g) that same shape, but the process is seconds old              → exit 2
-#       (a deploy in flight is a warning, never a fabricated verdict)
+#       (a deploy in flight is a warning, never a fabricated verdict —
+#        and that warning must NAME the grace that fired, because the
+#        three counters it used to print were all zero every time)
+#   (n) the graced sha is RE-ASKED on the next run and accused even
+#       after the box has moved on to a different sha                 → exit 1
+#   (n2) a cp row appearing is the only CLEAN retirement              → exit 0
+#   (n3) the grace is charged against FIRST-SEEN, so a restart buys
+#        no second grace                                              → exit 1
+#   (p) a serving_since in the FUTURE is a FAULT, not leniency        → exit 1
 #   (h) a docs-only run delivered nothing and MUST NOT be counted    → exit 0
 #       (this is the false-positive that would drown the real reds)
 #   (i) a CARRIED row naming a sha with no run of its own is correct → exit 0
@@ -142,11 +150,18 @@ health_json() { # <name> <serving_sha> <serving_since>
 # `gh` and `curl` are removed from PATH: a fixture run that reaches for either
 # is a bug this harness must catch, not tolerate.
 NOTOOLS="$TMP/notools"; mkdir -p "$NOTOOLS"
+# The re-ask list OUTLIVES a run by design, so every probe gets a FRESH one and
+# cannot inherit another arm's deferred accusation. An arm that wants two runs to
+# share a list — the whole point of the re-read — sets CR_STATE itself.
+CR_STATE=""
+CR_N=0
 run_cr() { # <expected-rc> <label> [args…]
   local want="$1" label="$2"; shift 2
-  local out rc
+  local out rc state
+  CR_N=$((CR_N + 1))
+  state="${CR_STATE:-$TMP/state-$CR_N.txt}"
   out="$(env PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" \
-    CROWN_API_TOKEN= CP_HOST= DEPLOY_SSH_KEY= \
+    CROWN_API_TOKEN= CP_HOST= DEPLOY_SSH_KEY= CROWN_STATE_FILE="$state" \
     bash "$CR" --now "$NOW" "$@" 2>&1)"
   rc=$?
   printf '%s\n' "$out" > "$TMP/last.out"
@@ -283,6 +298,76 @@ HEALTH_FRESH="$(health_json health-fresh "$SHA_D" "2026-08-09T11:55:00Z")"
 run_cr 2 "the serving process is 300s old — too young to accuse" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
 not_saw "SERVING-UNRECORDED" "an in-flight deploy is never reported as a missing record"
+# The silence used to announce itself with three counters that were ALL ZERO on
+# every one of the four live runs that graced 4c8314c94 — the reason the run was
+# not clean was nowhere in the sentence that said it was not clean.
+saw "COULD NOT FULLY READ: 1 unreadable-or-deferred condition(s) fired" "the exit-2 sentence COUNTS the conditions that actually fired"
+saw "SERVING GRACE:" "and it NAMES the grace, rather than printing counters the grace does not move"
+not_saw "0 sha(s) unreadable" "the all-zero counter sentence is gone"
+saw "DEFERRED to the next run" "the grace says out loud that it is a deferral, not a dismissal"
+
+section "(n) THE DEFERRED RE-READ: a graced sha is re-asked after the box moves on"
+# The live defect, in fixture form. 4c8314c94 was served 13:34–13:42Z with no row
+# that could ever exist (its deploy run was CANCELLED with zero jobs). Four runs
+# graced it; at 13:42:23Z the box moved to another sha and the accusation became
+# permanently unmakeable. Run N grants the grace; run N+1 must still accuse.
+CR_STATE="$TMP/state-reask.txt"; rm -f "$CR_STATE"
+run_cr 2 "run N: $SHA_D is served, 300s old, unrecorded — graced" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+if grep -q "^$SHA_D " "$CR_STATE" 2>/dev/null; then
+  ok "the graced sha and its first-seen instant were PERSISTED to the re-ask list"
+else
+  bad "the graced sha never reached the re-ask list at $CR_STATE — the next run has nothing to re-ask"
+  [ -f "$CR_STATE" ] && sed 's/^/       | /' "$CR_STATE" >&2
+fi
+run_cr 1 "run N+1: the box now serves $SHA_A, and the graced $SHA_D is STILL accused" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "GRACED-UNRECORDED: 1 sha(s)" "the deferred accusation fires on the next run"
+saw "$SHA_D" "it names the sha the earlier run graced"
+saw "graced-unrecorded=1" "the verdict line carries the new axis beside the others"
+saw "whether or not the box still serves them" "it says the accusation does not depend on the box still serving it"
+CR_STATE=""
+
+section "(n2) a row appearing is the ONLY clean retirement"
+CR_STATE="$TMP/state-retire.txt"; rm -f "$CR_STATE"
+run_cr 2 "run N: $SHA_D graced again, on its own list" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+CROWN_RECORDED_D="$(crown_json crown-recorded-d \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_D" cp true "$IN2" 2)")"
+run_cr 0 "run N+1: the crown now HAS a cp row for $SHA_D — the debt is settled" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_RECORDED_D" --health-fixture "$HEALTH_BASE"
+not_saw "GRACED-UNRECORDED" "a sha that got its row is not accused"
+saw "retired from the re-ask list" "the retirement is stated, not silent"
+if grep -q "^$SHA_D " "$CR_STATE" 2>/dev/null; then
+  bad "$SHA_D is still on the re-ask list after its row appeared — the list never drains"
+else
+  ok "the recorded sha was dropped from the re-ask list"
+fi
+CR_STATE=""
+
+section "(n3) the grace is charged against FIRST-SEEN, not against process age"
+# A box that restarts every few minutes reported a fresh young process every run,
+# and under the old rule that bought a fresh grace forever. The list remembers.
+CR_STATE="$TMP/state-nofresh.txt"
+printf '%s %s\n' "$SHA_D" "$(( $(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$NOW" +%s 2>/dev/null || date -u -d "$NOW" +%s) - 3600 ))" > "$CR_STATE"
+run_cr 1 "$SHA_D was first seen an hour ago and the process is 300s old — no second grace" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+saw "SERVING-UNRECORDED" "an hour-old debt is accused even though the process is young"
+CR_STATE=""
+
+section "(p) a serving_since in the FUTURE is a FAULT, never leniency"
+# Live run 31316144030 printed "only -3s old" and granted the grace off a clock
+# that disagreed with it. A guard that reads disagreement as kindness cannot lose.
+HEALTH_SKEW="$(health_json health-skew "$SHA_D" "2026-08-09T12:05:00Z")"
+run_cr 1 "the serving process claims to have started 300s from now" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_SKEW"
+saw "SERVING-CLOCK-SKEW" "clock skew is its own named fault"
+saw "300s in the FUTURE" "it says how far ahead the reported instant is"
+saw "SERVING-UNRECORDED" "and the missing row is accused rather than excused"
+not_saw "SERVING GRACE:" "no grace is granted off a clock that disagrees"
 
 section "(h) a docs-only run delivered NOTHING and must not be counted BEHIND"
 RUNS_DOCS="$(runs_json runs-docs "$SHA_A:$IN1" "$SHA_C:$IN2")"
@@ -350,7 +435,7 @@ section "(j) configuration faults are 3 — never a verdict, never a warning"
 run_cr 3 "an unknown flag" --runs-fixture "$RUNS_BASE" --nonsense
 run_cr 3 "--window-hours that is not a number" --runs-fixture "$RUNS_BASE" --window-hours soon
 run_cr 3 "--now that is not an instant" --runs-fixture "$RUNS_BASE" --now yesterday
-out="$(env PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_API_TOKEN= CP_HOST= DEPLOY_SSH_KEY= bash "$CR" --window-hours 24 2>&1)"
+out="$(env PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_API_TOKEN= CP_HOST= DEPLOY_SSH_KEY= CROWN_STATE_FILE="$TMP/state-config.txt" bash "$CR" --window-hours 24 2>&1)"
 rc=$?
 printf '%s\n' "$out" > "$TMP/last.out"
 if [ "$rc" = "3" ]; then ok "no fixture and no credential → exit 3"; else bad "no credential → exit $rc, wanted 3"; fi
@@ -398,6 +483,20 @@ if [ -f "$SPEC" ] && grep -q "crown-reconcile" "$SPEC"; then
   bad "crown-reconcile appears in .github/required-checks.json — it must NOT be a required context"
 else
   ok "crown-reconcile is not in the required-check spec"
+fi
+
+section "(q) the re-ask boundary is STATED in the script, not only implemented"
+# A deferral whose retirement rule lives only in code is a rule the next reader
+# has to reverse-engineer from a while-loop.
+for phrase in "CLEAN RETIREMENT" "DIRTY RETIREMENT" "RE-ASK LIST" "charged against FIRST-SEEN"; do
+  if grep -qF "$phrase" "$CR"; then ok "the header states: $phrase"; else bad "the header never states '$phrase' — the boundary is undocumented"; fi
+done
+# Every UNREADABLE=1 must go through reason(), or a silence can go unnamed again.
+if [ "$(grep -c '^  UNREADABLE=1$' "$CR")" = "1" ]; then
+  ok "UNREADABLE is set in exactly one place — inside reason(), so no silence can be anonymous"
+else
+  bad "UNREADABLE=1 appears outside reason() — that site's silence would print as unnamed"
+  grep -n 'UNREADABLE=1' "$CR" >&2
 fi
 
 section "(l) no jq call takes a payload as an argv word (charter D486)"
