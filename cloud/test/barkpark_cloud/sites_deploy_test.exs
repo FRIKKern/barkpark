@@ -1094,7 +1094,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       {bp, site} = setup_site()
 
       FakeBoxRelay.program(
-        start: {:ok, 500, %{"error" => %{"code" => "box_exploded", "message" => "boom"}}}
+        start: {:ok, 500, %{"error" => %{"code" => "runner_start_failed", "message" => "boom"}}}
       )
 
       {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
