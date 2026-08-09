@@ -1349,10 +1349,14 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
 
   # RULED: write routes that ship with no caller in this tree. One row, one
   # reason, and arm 2 deletes it the moment the route gains a caller.
-  @caller_less_allowlist [
-    {{"POST", "/v1/internal/platform-deliveries"},
-     "dr-w26-s4 — the crown's writer seam. Merged and correct for two waves, wired to NOTHING: no recorder in .github/workflows/deploy.yml, so platform_deliveries stays empty and every read off it is honestly zero. Delete this row the moment the recorder lands."}
-  ]
+  #
+  # EMPTY, and that is the point. dr-w26-s4's single row ruled
+  # `POST /v1/internal/platform-deliveries` — the crown's writer seam, merged and
+  # correct for two waves and wired to nothing. dr-w26-s5 landed the recorder in
+  # `.github/workflows/deploy.yml`, so arm 2 (the anti-rot arm) would RED on the
+  # stale row: the route now has a caller. The row is deleted here rather than
+  # kept, which is exactly the lifecycle the arm exists to force.
+  @caller_less_allowlist []
 
   setup_all do
     root = Seam.repo_root!()
@@ -1561,8 +1565,19 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
     assert [{"scripts/x.sh", _} | _] =
              Seam.loose_mentions([route], caller, &Seam.loose_spellings/1)
 
-    # and the real corpus is clean under it, which is what arm 4 asserts
-    assert ctx.caller_less != []
+    # and the real corpus is clean under it, which is what arm 4 asserts.
+    #
+    # This line used to read `assert ctx.caller_less != []`, pinning a NON-EMPTY
+    # caller-less population. dr-w26-s5 emptied that population by wiring the
+    # recorder, so the pin would have RED on the very PR that fixed the hole —
+    # the same self-defeating shape arm 4's own loose-spelling assertion avoids
+    # by scoping itself to the caller-less set. What this arm actually needs is
+    # the POSITIVE fact, which is still able to lose: the crown is CALLED, by one
+    # contiguous literal on one line of .github/workflows/deploy.yml. Delete the
+    # recorder's POST, or split its path across lines, and this reds.
+    refute {"POST", "/v1/internal/platform-deliveries"} in ctx.caller_less,
+           "the crown is caller-less again — deploy.yml's record-delivery job lost its POST, " <>
+             "or the route path stopped being one contiguous literal on one line"
   end
 
   test "THE INTERPOLATION TRAP: a path split across shell variables scores caller-less" do

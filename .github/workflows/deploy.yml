@@ -95,8 +95,29 @@ jobs:
     if: needs.changes.outputs.cp == 'true'
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      # What the box was serving BEFORE this deploy — read here because it is
+      # only readable here. `record-delivery` runs AFTER the swap, where the old
+      # sha is gone. Never sourced from the `changes` job's last-successful-run
+      # base sha (line ~62): that value LOOKS like the previous sha and diverges
+      # from it exactly on a rollback, the one case `previous_sha` exists for.
+      previous_sha: ${{ steps.prev.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+      - id: prev
+        name: Read the sha the control plane is serving BEFORE this deploy
+        # ANONYMOUS and read-only: /health is public and returns `git_sha`
+        # (BARKPARK_GIT_SHA, read at call time). No credential, no SSH, and it
+        # can never fail this deploy — an unreachable box leaves the output
+        # empty, which the recorder records as `transition: unknown` rather than
+        # inventing a range.
+        run: |
+          sha=""
+          if body="$(curl -s --max-time 15 https://barkpark.cloud/health)"; then
+            sha="$(printf '%s' "$body" | jq -r '.git_sha // empty')"
+          fi
+          echo "control plane was serving: ${sha:-<unknown>}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -146,8 +167,32 @@ jobs:
     if: needs.changes.outputs.instance == 'true'
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      # Same reason as the control plane's: readable only before the swap.
+      # `/opt/barkpark/.instance-deploy-last` is instance-deploy.sh's own record
+      # of the last HEALTHY deploy, so it is the box's truth rather than CI's.
+      previous_sha: ${{ steps.prev.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+      - id: prev
+        name: Read the sha the content instance is serving BEFORE this deploy
+        # Over the SSH this job already holds — no new secret, no new hop. An
+        # unreachable box or a missing state file leaves the output empty and
+        # NEVER fails the deploy: the `if` swallows ssh's rc deliberately, and
+        # the recorder then records `transition: unknown` with NULL counts.
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+        run: |
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20"
+          sha=""
+          if out="$($SSH "root@${GUERRILLA_HOST}" 'cat /opt/barkpark/.instance-deploy-last')"; then
+            sha="$(printf '%s' "$out" | tr -d '[:space:]')"
+          fi
+          echo "content instance was serving: ${sha:-<unknown>}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Deploy content instance over SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -270,4 +315,520 @@ jobs:
             This issue is idempotent per key (`deploy-production`): a continuing
             outage appends a comment rather than opening a new issue. CLOSE IT
             once a deploy succeeds again — the next failure opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  record-delivery:
+    # ── THE CROWN'S WRITER ───────────────────────────────────────────────────
+    #
+    # `platform_deliveries` has a schema, a writer route, a reader route and a
+    # serializer, and until this job NOTHING CALLED THE WRITER. Its one live row
+    # was hand-posted by a human 22m47s after its run had ended. This job records
+    # what THIS run delivered, from inside the run, one row per sha per target.
+    #
+    # ZERO NEW CREDENTIALS. `DEPLOY_SSH_KEY` + `CP_HOST` are the repository
+    # secrets the control-plane job already SSHes production with; the bearer is
+    # `WORKER_TOKEN`, read on the box out of the running control-plane container.
+    # The runner never sees it, and `gh secret list` is unchanged by this PR.
+    #
+    # THE CONTAINER IS DISCOVERED BY IMAGE TAG, NEVER BY NAME. Blue/green renamed
+    # it `cloud-control_plane_green-1`, so a name match is a time bomb;
+    # `docker ps -q --filter ancestor=cloud-control_plane:latest` is the
+    # cp-ops.yml:213-226 precedent. Both the container id AND the token are
+    # explicitly checked non-empty — an empty either way is a LOUD refusal, never
+    # a silent empty POST.
+    #
+    # IT EXITS 0 NO MATTER WHAT, AND SAYS SO OUT LOUD. Not politeness: in THIS
+    # workflow the run conclusion is load-bearing state. The `changes` job
+    # anchors its diff base to the last SUCCESSFUL run of this workflow, so a red
+    # recorder freezes that anchor and every later merge unions a wider path set
+    # — measured on a real 230-commit freeze, the union touched api/ internal/
+    # cloud/ connectors/ deploy/, i.e. BOTH production hosts redeployed on every
+    # merge, which is this epic's known outage mechanism. Being IN
+    # `report-deploy-failure`'s `needs` is the other wrong branch: that job's body
+    # hardcodes "the affected host was NOT updated", which a recorder blip would
+    # turn into a fabricated outage report on a deploy that worked. So: read
+    # every rc explicitly, exit 0, and put the scream in `report-recorder-failure`
+    # below. There is NO `|| true` and NO `|| echo 0` anywhere in this job — a
+    # laundered zero is exactly the blindness this epic exists to end.
+    name: Record what this run delivered
+    needs: [changes, control-plane, instance]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (needs.control-plane.result == 'success' || needs.instance.result == 'success')
+    runs-on: ubuntu-latest
+    # CONVENTION AND DRIFT-IMMUNITY, NOT A REQUIREMENT: all six GitHub
+    # environments hold zero secrets and DEPLOY_SSH_KEY / CP_HOST are REPOSITORY
+    # secrets, so this job would resolve them without it. Carried so it matches
+    # the two deploy jobs it reports on, and so a future environment-scoped
+    # secret does not silently strand the recorder.
+    timeout-minutes: 8
+    environment: production
+    outputs:
+      delivered: ${{ steps.post.outputs.delivered }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The range needs the PREVIOUS sha's commit object, which is arbitrarily
+          # far back on a rollback or after a long docs-only stretch.
+          fetch-depth: 0
+
+      - id: clocks
+        name: Measure this run's clocks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Never fails the run (see the job comment): every rc is read, the step
+          # ends `exit 0`, and any clock that could not be measured stays the
+          # STRING `null` so it lands in the payload as JSON null. A 0 here would
+          # read as "the queue was instant" / "the build took no time", which is a
+          # confident lie; NULL says "not measured" and is the table's own law.
+          set +e
+          R="$GITHUB_REPOSITORY"
+          QUEUED=null
+          SELF=null
+          BUILD=null
+          # The three jobs that do the delivering. This job and
+          # report-deploy-failure are deliberately NOT in the window: the first is
+          # still running (no completed_at) and the second only exists on a red.
+          LEGS='["changes","control-plane","instance"]'
+
+          run_json="$(gh api "/repos/$R/actions/runs/$GITHUB_RUN_ID")"
+          run_rc=$?
+          jobs_json="$(gh api "/repos/$R/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100")"
+          jobs_rc=$?
+          echo "gh api rc: run=$run_rc jobs=$jobs_rc"
+
+          if [ "$run_rc" -eq 0 ] && [ "$jobs_rc" -eq 0 ]; then
+            printf '%s' "$run_json" > /tmp/pd-run.json
+            printf '%s' "$jobs_json" > /tmp/pd-jobs.json
+            created="$(jq -r '.created_at // empty' /tmp/pd-run.json)"
+            started="$(jq -r --argjson legs "$LEGS" '[.jobs[] | select(.name as $n | $legs | index($n)) | .started_at] | map(select(. != null)) | sort | first // empty' /tmp/pd-jobs.json)"
+            finished="$(jq -r --argjson legs "$LEGS" '[.jobs[] | select(.name as $n | $legs | index($n)) | .completed_at] | map(select(. != null)) | sort | last // empty' /tmp/pd-jobs.json)"
+            echo "run created_at=${created:-<none>}  first leg started=${started:-<none>}  last leg completed=${finished:-<none>}"
+
+            wait_start=""
+            wait_end=""
+            if [ -n "$created" ] && [ -n "$started" ]; then
+              wait_start="$(date -u -d "$created" +%s)"
+              wait_end="$(date -u -d "$started" +%s)"
+              if [ -n "$wait_start" ] && [ -n "$wait_end" ] && [ "$wait_end" -ge "$wait_start" ]; then
+                QUEUED=$((wait_end - wait_start))
+              fi
+            fi
+
+            if [ -n "$started" ] && [ -n "$finished" ]; then
+              build_start="$(date -u -d "$started" +%s)"
+              build_end="$(date -u -d "$finished" +%s)"
+              if [ -n "$build_start" ] && [ -n "$build_end" ] && [ "$build_end" -ge "$build_start" ]; then
+                BUILD=$((build_end - build_start))
+              fi
+            fi
+
+            # queued_self_seconds — the part of the wait this repository caused
+            # ITSELF, by serializing behind its own earlier deploys
+            # (`concurrency: deploy-production`, cancel-in-progress:false). It is
+            # the union of prior deploy.yml job windows overlapped with our wait
+            # window, so overlapping siblings are counted once.
+            #
+            # queued_pickup_seconds and queued_stall_seconds stay NULL, both by
+            # ruling and by honesty. D430 defines pickup as the RESIDUAL of a
+            # partition whose third term (stall) needs a repo-wide cross-workflow
+            # query this job does not make — and a residual of an incomplete
+            # partition is not a measurement: on a real sample the gap between a
+            # job's created and started was 3s while the residual computed 4s.
+            # Writing either as 0 would invent a verdict nobody measured.
+            if [ "$QUEUED" != "null" ] && [ "$QUEUED" -gt 0 ]; then
+              cands="$(gh api "/repos/$R/actions/workflows/deploy.yml/runs?branch=main&per_page=100" --jq "[.workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.created_at < \"${started}\") | select(.updated_at >= \"${created}\") | .id] | .[0:10] | .[]")"
+              cand_rc=$?
+              if [ "$cand_rc" -ne 0 ]; then
+                echo "::warning::could not list prior deploy runs (rc=$cand_rc) — queued_self_seconds stays NULL"
+              else
+                : > /tmp/pd-self-jobs.ndjson
+                fetch_rc=0
+                for cand in $cands; do
+                  cand_jobs="$(gh api "/repos/$R/actions/runs/${cand}/jobs?per_page=100" --jq '.jobs[] | {started_at, completed_at}')"
+                  if [ $? -ne 0 ]; then
+                    fetch_rc=1
+                    break
+                  fi
+                  printf '%s\n' "$cand_jobs" >> /tmp/pd-self-jobs.ndjson
+                done
+                if [ "$fetch_rc" -ne 0 ]; then
+                  echo "::warning::a prior run's job list could not be read — queued_self_seconds stays NULL rather than partial"
+                else
+                  self="$(jq -s --argjson a "$wait_start" --argjson b "$wait_end" '[ .[] | select(.started_at != null and .completed_at != null) | {s: (.started_at | fromdateiso8601), e: (.completed_at | fromdateiso8601)} ] | map(select(.e > $a and .s < $b)) | map({s: ([.s, $a] | max), e: ([.e, $b] | min)}) | sort_by(.s) | reduce .[] as $i ([]; if (length > 0) and ($i.s <= .[-1].e) then (.[0:-1] + [{s: .[-1].s, e: ([.[-1].e, $i.e] | max)}]) else (. + [$i]) end) | map(.e - .s) | add // 0 | floor' /tmp/pd-self-jobs.ndjson)"
+                  self_rc=$?
+                  if [ "$self_rc" -eq 0 ] && [ -n "$self" ]; then
+                    SELF="$self"
+                  else
+                    echo "::warning::the self-overlap computation failed (rc=$self_rc) — queued_self_seconds stays NULL"
+                  fi
+                fi
+              fi
+            fi
+          else
+            echo "::warning::the Actions API did not answer — every clock on this row stays NULL (never 0)"
+          fi
+
+          echo "clocks: queued=${QUEUED} self=${SELF} build=${BUILD} (pickup and stall are NULL by ruling)"
+          {
+            echo "PD_QUEUED_SECONDS=$QUEUED"
+            echo "PD_QUEUED_SELF_SECONDS=$SELF"
+            echo "PD_BUILD_SECONDS=$BUILD"
+          } >> "$GITHUB_ENV"
+          exit 0
+
+      - id: post
+        name: Record the delivery from the control plane
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          CP_HOST: ${{ secrets.CP_HOST }}
+          CP_RESULT: ${{ needs.control-plane.result }}
+          INSTANCE_RESULT: ${{ needs.instance.result }}
+          CP_PREVIOUS_SHA: ${{ needs.control-plane.outputs.previous_sha }}
+          INSTANCE_PREVIOUS_SHA: ${{ needs.instance.outputs.previous_sha }}
+        run: |
+          # Same law as the clocks step: read every rc, exit 0, and set
+          # `delivered=false` so report-recorder-failure below can be the red.
+          set +e
+          export TZ=UTC
+          SHA="$GITHUB_SHA"
+          RUN_ID="$GITHUB_RUN_ID"
+          FIRST_SEEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          MAX_RANGE=500
+          QUEUED="${PD_QUEUED_SECONDS:-null}"
+          SELF="${PD_QUEUED_SELF_SECONDS:-null}"
+          BUILD="${PD_BUILD_SECONDS:-null}"
+          delivered=true
+
+          echo "shallow clone: $(git rev-parse --is-shallow-repository)"
+
+          # serving_since, cp leg only, WITH ITS BASIS SAID OUT LOUD: /health's
+          # `serving_since` is PROCESS-derived (VM start), not the instant the sha
+          # began being served — two BEAMs running the same code moved it forward
+          # 6.4s, and `serving_since_basis` on that same payload says so. It is
+          # recorded because a process-start upper bound is a real datum; it is
+          # NOT the flip instant and must never be read as one.
+          #
+          # The instance leg records NO serving_since. The durable source would be
+          # ServingMemory at /opt/barkpark/.bp-site-deploy-runs/serving-memory.json
+          # and THAT FILE DOES NOT EXIST on live guerrilla (the directory holds
+          # 4,457 other records), while the first call to the authed site-deploy
+          # route would WRITE first_seen_at = now — i.e. reading it would MINT the
+          # value it claims to observe. An omitted column reads nil; that is the
+          # honest answer until a durable source exists.
+          CP_SERVING_SINCE=""
+          if [ "$CP_RESULT" = "success" ]; then
+            health="$(curl -s --max-time 15 https://barkpark.cloud/health)"
+            health_rc=$?
+            if [ "$health_rc" -ne 0 ]; then
+              echo "::warning::/health did not answer (rc=$health_rc) — serving_since is OMITTED for the cp row"
+            else
+              health_sha="$(printf '%s' "$health" | jq -r '.git_sha // empty')"
+              if [ "$health_sha" = "$SHA" ]; then
+                CP_SERVING_SINCE="$(printf '%s' "$health" | jq -r '.serving_since // empty')"
+                echo "cp serving_since=${CP_SERVING_SINCE:-<absent>} (basis: process start, not the flip instant)"
+              else
+                echo "::warning::/health reports git_sha=${health_sha:-<absent>}, not ${SHA} — serving_since would describe a different commit, so it is OMITTED"
+              fi
+            fi
+          fi
+
+          # One target's rows. THE RANGE PRIMITIVE IS THREE-DOT --left-right,
+          # rc-checked and never piped: `git rev-list --count OLD..NEW` reads 0 on
+          # a real rollback, byte-identical to a no-op, and a pipeline reports the
+          # LAST command's status so `… | head` prints `fatal:` and still exits 0.
+          # Anything that goes wrong lands on transition=unknown with NULL counts.
+          rows_for() {
+            target="$1"
+            prev="$2"
+            serving="$3"
+            out="$4"
+            rangefile="/tmp/pd-range-${target}.txt"
+            transition=unknown
+            measured=0
+
+            git show -s --format='%H %cd' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$SHA" > "$rangefile"
+            if [ $? -ne 0 ]; then
+              echo "::warning::${target}: git could not describe ${SHA} — no row for this leg"
+              printf '[]' > "$out"
+              return 1
+            fi
+
+            if [ -z "$prev" ]; then
+              echo "::warning::${target}: no previous sha was captured before the deploy — transition=unknown, counts NULL"
+            else
+              git cat-file -e "${prev}^{commit}"
+              if [ $? -ne 0 ]; then
+                echo "::warning::${target}: previous sha ${prev} is not in this clone — transition=unknown, counts NULL"
+              else
+                counts="$(git rev-list --count --left-right "${prev}...${SHA}")"
+                if [ $? -ne 0 ]; then
+                  echo "::warning::${target}: rev-list --count --left-right ${prev}...${SHA} failed — transition=unknown, counts NULL"
+                else
+                  set -- $counts
+                  behind="$1"
+                  ahead="$2"
+                  measured=1
+                  if [ "$behind" -eq 0 ] && [ "$ahead" -eq 0 ]; then
+                    transition=noop
+                  elif [ "$behind" -eq 0 ]; then
+                    transition=forward
+                  elif [ "$ahead" -eq 0 ]; then
+                    transition=rollback
+                  else
+                    transition=diverged
+                  fi
+                  echo "${target}: ${prev}...${SHA} = ${behind} left / ${ahead} right -> ${transition}"
+                  # A run delivers every sha on the right side of the range, not
+                  # just its own head: ~36% of merged shas have no run of their
+                  # own and ride a later sha's. Those rows are what `carried`
+                  # exists to say, and they are the deliveries this epic exists to
+                  # make visible.
+                  if [ "$ahead" -gt 0 ]; then
+                    if [ "$ahead" -gt "$MAX_RANGE" ]; then
+                      echo "::warning::${target} delivered ${ahead} commits, above the ${MAX_RANGE}-row cap — the NEWEST ${MAX_RANGE} are recorded and the older ones are NOT"
+                    fi
+                    git log --max-count="$MAX_RANGE" --format='%H %cd' --date=format-local:%Y-%m-%dT%H:%M:%SZ "${prev}..${SHA}" > "$rangefile"
+                    if [ $? -ne 0 ]; then
+                      echo "::warning::${target}: the range enumeration failed after its count succeeded — recording the head sha alone, unmeasured"
+                      git show -s --format='%H %cd' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$SHA" > "$rangefile"
+                      transition=unknown
+                      measured=0
+                    fi
+                  fi
+                fi
+              fi
+            fi
+
+            # `carried` is EMITTED ONLY WHEN THE RANGE MEASURED, and then it is
+            # computed (`sha != this run's head`), never a literal. The column has
+            # no schema default, so an omitted key genuinely reads nil — "nobody
+            # measured this" — where a `false` would be a confident wrong answer
+            # about whether a sha rode someone else's run.
+            jq -n \
+              --rawfile lines "$rangefile" \
+              --arg head "$SHA" \
+              --arg run "$RUN_ID" \
+              --arg first_seen "$FIRST_SEEN" \
+              --arg target "$target" \
+              --arg prev "$prev" \
+              --arg transition "$transition" \
+              --arg serving "$serving" \
+              --argjson measured "$measured" \
+              --argjson queued "$QUEUED" \
+              --argjson self "$SELF" \
+              --argjson build "$BUILD" \
+              '$lines | split("\n") | map(select(length > 0)) | map(split(" ")) | map({sha: .[0], delivering_run_id: $run, first_seen_at: $first_seen, merged_at: .[1], target: $target, queued_seconds: $queued, queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null, build_seconds: $build, transition: $transition} + (if $measured == 1 then {carried: (.[0] != $head)} else {} end) + (if ($prev | length) > 0 then {previous_sha: $prev} else {} end) + (if ($serving | length) > 0 then {serving_since: $serving} else {} end))' > "$out"
+            if [ $? -ne 0 ]; then
+              echo "::warning::${target}: the row payload could not be built — no row for this leg"
+              printf '[]' > "$out"
+              return 1
+            fi
+            return 0
+          }
+
+          # ONE ROW SET PER TARGET, EACH GATED ON THE JOB THAT ACTUALLY RAN. A
+          # cloud-only merge SKIPS the instance job, and a skipped job delivered
+          # nothing: it must produce no instance row.
+          printf '[]' > /tmp/pd-rows-cp.json
+          printf '[]' > /tmp/pd-rows-instance.json
+          if [ "$CP_RESULT" = "success" ]; then
+            rows_for cp "$CP_PREVIOUS_SHA" "$CP_SERVING_SINCE" /tmp/pd-rows-cp.json
+          else
+            echo "control-plane result=${CP_RESULT} — no cp row"
+          fi
+          if [ "$INSTANCE_RESULT" = "success" ]; then
+            rows_for instance "$INSTANCE_PREVIOUS_SHA" "" /tmp/pd-rows-instance.json
+          else
+            echo "instance result=${INSTANCE_RESULT} — no instance row"
+          fi
+
+          jq -n --slurpfile cp /tmp/pd-rows-cp.json --slurpfile inst /tmp/pd-rows-instance.json '{deliveries: ($cp[0] + $inst[0])}' > /tmp/pd-payload.json
+          if [ $? -ne 0 ]; then
+            echo "::error::the delivery batch could not be assembled — run ${RUN_ID} recorded NOTHING"
+            echo "delivered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count="$(jq -r '.deliveries | length' /tmp/pd-payload.json)"
+          echo "rows to record: ${count}"
+          jq -c '.deliveries[0] // "no rows"' /tmp/pd-payload.json
+          if [ "${count:-0}" -eq 0 ]; then
+            # Nothing to record is not a failure to record. Say it, stay green.
+            echo "::warning::no leg reported success — there is nothing to record for run ${RUN_ID}"
+            echo "delivered=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20"
+
+          # The POST is issued FROM the control plane, over the SSH this workflow
+          # already holds, so the bearer never leaves the box and no new GitHub
+          # secret exists. It goes to the PUBLIC edge rather than a localhost
+          # port: both slots bind 127.0.0.1 and cp-deploy.sh's localhost probes
+          # deliberately target the IDLE one, so a port here would record into the
+          # slot that is not serving. The payload arrives on stdin; the remote
+          # script exits 0 and reports what happened in PD_* lines this step then
+          # branches on.
+          REMOTE='set -u
+          cat > /tmp/pd-payload.json
+          CID="$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)"
+          if [ -z "$CID" ]; then echo "PD_ERROR=no_control_plane_container"; rm -f /tmp/pd-payload.json; exit 0; fi
+          WT="$(docker exec "$CID" printenv WORKER_TOKEN)"
+          if [ -z "$WT" ]; then echo "PD_ERROR=empty_worker_token"; rm -f /tmp/pd-payload.json; exit 0; fi
+          CODE="$(curl -s -o /tmp/pd-response.json -w "%{http_code}" --max-time 30 -X POST -H "content-type: application/json" -H "authorization: Bearer $WT" --data-binary @/tmp/pd-payload.json https://barkpark.cloud/v1/internal/platform-deliveries)"
+          PD_CURL_RC=$?
+          echo "PD_CURL_RC=$PD_CURL_RC"
+          echo "PD_HTTP=$CODE"
+          echo "PD_BODY=$(tr -d "\n" < /tmp/pd-response.json)"
+          rm -f /tmp/pd-payload.json /tmp/pd-response.json
+          exit 0'
+
+          out="$($SSH "root@${CP_HOST}" "$REMOTE" < /tmp/pd-payload.json)"
+          ssh_rc=$?
+          printf '%s\n' "$out"
+
+          if [ "$ssh_rc" -ne 0 ]; then
+            echo "::error::the recorder could not reach the control plane over SSH (rc=${ssh_rc}) — run ${RUN_ID} delivered ${count} row(s) that were NOT recorded"
+            echo "delivered=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pd_error="$(printf '%s\n' "$out" | sed -n 's/^PD_ERROR=//p')"
+          curl_rc="$(printf '%s\n' "$out" | sed -n 's/^PD_CURL_RC=//p')"
+          http="$(printf '%s\n' "$out" | sed -n 's/^PD_HTTP=//p')"
+          body="$(printf '%s\n' "$out" | sed -n 's/^PD_BODY=//p')"
+
+          if [ -n "$pd_error" ]; then
+            echo "::error::the recorder found no usable seam on the control plane (${pd_error}) — run ${RUN_ID} delivered ${count} row(s) that were NOT recorded"
+            delivered=false
+          elif [ "${curl_rc:-1}" -ne 0 ]; then
+            echo "::error::curl exited ${curl_rc} posting the delivery batch — run ${RUN_ID} recorded NOTHING"
+            delivered=false
+          elif [ "$http" = "200" ]; then
+            received="$(printf '%s' "$body" | jq -r '.received // empty')"
+            recorded="$(printf '%s' "$body" | jq -r '.recorded // empty')"
+            echo "recorded ${recorded:-?} of ${received:-?} row(s) for run ${RUN_ID}"
+            if [ "${received:-0}" -ne "$count" ]; then
+              echo "::error::the crown counted ${received:-<none>} rows but ${count} were sent — the batch did not arrive intact"
+              delivered=false
+            elif [ "${recorded:-0}" -lt "${received:-0}" ]; then
+              # Idempotent on (sha, delivering_run_id, target): a retried job
+              # re-posts its batch and writes nothing. That is a success, and
+              # saying so beats a fake "recorded everything".
+              echo "::notice::$(( ${received:-0} - ${recorded:-0} )) row(s) were already recorded for this run — the write is idempotent on sha+run+target"
+            fi
+          elif [ "$http" = "503" ]; then
+            reason="$(printf '%s' "$body" | jq -r '.reason // empty')"
+            if [ "$reason" = "platform_deliveries_missing" ]; then
+              # THE TYPED REFUSAL, keyed on the reason and never on the status
+              # code alone: this control plane has not run the migration yet,
+              # which is REAL (the instance job fires on paths that do not
+              # require the cloud/** merge carrying it). Retryable, and LOGGED.
+              echo "::error::the control plane has no platform_deliveries table yet (reason=platform_deliveries_missing) — run ${RUN_ID} delivered ${count} row(s) and the crown recorded NONE of them"
+            else
+              echo "::error::the control plane answered 503 with reason=${reason:-<none>} — run ${RUN_ID} recorded NOTHING: ${body}"
+            fi
+            delivered=false
+          else
+            # The route is NOT spelled out here, deliberately: the caller-less
+            # census (cloud/test/barkpark_cloud/payload_key_set_census_test.exs)
+            # scores a route CALLED when its literal path appears on any line of
+            # this file, so a log line naming the path would keep the census
+            # green with the actual POST deleted — measured by mutation. The one
+            # contiguous literal in this job is the curl above, which is the
+            # caller.
+            echo "::error::the crown's writer route answered HTTP ${http:-<none>} — run ${RUN_ID} recorded NOTHING: ${body}"
+            delivered=false
+          fi
+
+          echo "delivered=${delivered}" >> "$GITHUB_OUTPUT"
+          # ALWAYS 0. The scream is report-recorder-failure's job, not the run
+          # conclusion's — see the job comment.
+          exit 0
+
+  report-recorder-failure:
+    # ── THE RED THE RECORDER IS NOT ALLOWED TO BE ────────────────────────────
+    #
+    # record-delivery exits 0 by design, so without this job a delivery that was
+    # never recorded would be a warning in a log nobody opens — the same silence
+    # this epic exists to end, one level up.
+    #
+    # It is a SEPARATE job for the same reason report-deploy-failure is: the
+    # `permissions:` block must stay JOB-LEVEL. The two deploy jobs hold
+    # DEPLOY_SSH_KEY and SSH into production as root; widening the WORKFLOW-level
+    # block (`contents: read` + `actions: read`) to carry `issues: write` would
+    # re-scope THEIR tokens too. That is a security regression, not a style note.
+    #
+    # `CI_FAILURE_KEY: deploy-recorder` is distinct from report-deploy-failure's
+    # `deploy-production`: one open issue per key, and these two are different
+    # incidents — "prod is stale" versus "prod is current and we cannot prove
+    # it". file-ci-failure-issue.sh exits 1 only when the alert was NOT
+    # delivered, so a filed alert leaves this run green and the `changes` job's
+    # diff anchor keeps advancing.
+    #
+    # THE REPORTER MUST ALSO SURVIVE THE RECORDER DYING (added in review, W27).
+    # `delivered == 'false'` is the recorder's OWN verdict, and a job that never
+    # reached its last step cannot render one: an `actions/checkout` failure, the
+    # `timeout-minutes: 8` expiring inside the clocks step's `gh api` loop, or a
+    # runner evicted mid-job all end with `outputs.delivered` EMPTY. Without
+    # `always()` the default `success()` gate would then skip this job, and the
+    # loudest possible recorder failure — the one where the recorder did not run
+    # at all — would be the only one that files nothing. So the trigger is the
+    # UNION of "the recorder said it lost" and "the recorder did not get to say",
+    # and `always()` is what lets a failed dependency be evaluated at all.
+    name: Report a delivery that was never recorded
+    needs: record-delivery
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      needs.record-delivery.result != 'skipped' &&
+      (needs.record-delivery.outputs.delivered == 'false' ||
+      needs.record-delivery.result == 'failure' ||
+      needs.record-delivery.result == 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: deploy-recorder
+          CI_FAILURE_DETAIL: |
+            **The deploy WORKED and the record of it did NOT land.** Production is
+            running the merged commit; what is missing is the durable row that
+            says so. Nothing about the hosts is stale — do not treat this as an
+            outage, and do not redeploy on account of it.
+
+            Read `record-delivery`'s last step in this run: it prints exactly one
+            `::error::` naming the reason, and every reason is one of
+
+            - `no_control_plane_container` — no container matched
+              `ancestor=cloud-control_plane:latest`; the image tag moved.
+            - `empty_worker_token` — the container has no `WORKER_TOKEN` in its
+              environment.
+            - an SSH rc — the runner could not reach `CP_HOST` at all.
+            - `platform_deliveries_missing` — this control plane has not run the
+              migration; it lands on an api-only merge and clears on the next
+              `cloud/**` deploy.
+            - any other HTTP status, quoted with the response body.
+
+            IF `record-delivery` PRINTED NO `::error::` AT ALL, it did not reach
+            its last step — it failed, was cancelled, or hit its 8-minute
+            timeout, and `outputs.delivered` is empty rather than `false`. This
+            job fires on that case too (its `if` is the union), so read the
+            recorder job's own conclusion and its LAST step instead. That variant
+            also reds the whole run, which freezes the `changes` job's
+            last-successful-run diff anchor — the next merge will union a wider
+            path set and redeploy more than it needed to.
+
+            The write is idempotent on (sha, delivering_run_id, target), so a
+            re-run of the deploy workflow for the same commit is safe and is the
+            normal repair. This issue is idempotent per key (`deploy-recorder`):
+            a continuing outage appends a comment rather than opening a new
+            issue. CLOSE IT once a delivery records again.
         run: bash scripts/file-ci-failure-issue.sh
