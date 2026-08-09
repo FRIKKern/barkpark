@@ -3131,6 +3131,102 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 64 REVIEW — grade A, four round-1 slices + the Law-0 repayment; all four pushed with PRs open
+
+**LANDED (four PRs, all pushed before this entry was written — the streak stays broken two waves running):**
+
+- `cch-w63-s5` **THE RESTING STATE STOPS PROMISING** → **#11435**,
+  `loop-epic/the-resting-state-stops-asserting-a-chec-0`. The nine measured causes of `"unknown"` get a
+  name. `updateBadge` takes role `warn` + "Could not check" on a NAMED cause and gains a `disabled` arm
+  ("Autoupdate off" — echoed from `operatorRowState` at `app.js:8970`, verified by the reviewer);
+  `lastCheckedText` takes a second argument, and **six** rungs that reached the wire read
+  `Tried <rel> — <sentence>` while `no_admin_token`, `decrypt_failed` and `not_live` — which return before
+  the single HTTP request site — carry **no clock at all**. The rail's KEY moves with the value ("Update
+  check"), because "Last checked: Tried 45m ago" contradicts itself in one line. `state:"unknown"` is KEPT
+  (D778) and the return shape gains no key, so the `isu-w5` whole-object `deepEqual`s stay green. The fleet
+  card stops being SILENT: `.fleet-update-chip--refused` in an explicit WARN role, because
+  `fleetRow(REFUSED)` was byte-identical to `fleetRow(NEVER_PROBED)` on main. Reviewer independently
+  re-derived the one HIGH-FLIP-RISK judgment — the `forbidden` noun swap — against
+  `registry/barkpark.ex:93` and `registry.ex:3839` (`forbidden` is a **403**: "the box knows the credential
+  and refuses the principal"), and confirms "the instance refused the check" is the true sentence and
+  `ERRORS.forbidden` (which is about the HUMAN's authority) the wrong one. All nine vocabulary rungs are
+  covered exactly, no more and no fewer. Baseline 1307 → 1310, read out of the tool's own failure text.
+
+- `cch-w64-s2` **THE RED AGGREGATE NAMES THE REFUSING JOB** → **#11436**,
+  `loop-epic/the-red-aggregate-names-the-job-that-ref-1`. An ACCUMULATOR, not a string edit: `reds=""`
+  beside `bad=0` in all four aggregators, appended at **all four** `bad=1` sites so the skip, EMPTY and
+  unrecognised reds name their job too — a job reaches the set through the same line that reds the gate, so
+  the two can never disagree. `console-harness.yml`'s `else` — the arm #11377 left naming nothing, which
+  fires on EVERY red where no upstream published a REFUSED verdict — now also prints the `${measured}` list
+  it was collecting and discarding. Second half (D776): `path-escape` gets a verdict channel, reachability
+  proved FIRST (emptied `CONSOLE_PATHS` → the BARE invocation exits 2 at `:319`), wrapper byte-identical in
+  shape to the shipped `cssom-parity` one. Reviewer re-proved the deciding guard by mutation: a hardcoded
+  `cloud-unit` takes case 7 from 173/0 to **168 passed / 5 failed**.
+
+- `cch-w63-s6` **PIN_TOTAL_SCENARIOS LEARNS TO LOSE** → **#11437**,
+  `loop-epic/pin-total-scenarios-learns-to-lose-the-g-2`. One file, +14/−3. The mismatch arm printed a note
+  and never pushed to `broken` — and the sweep is a bare `run:` step, so the exit code is the whole verdict.
+  It now names the DIRECTION and magnitude and reds both ways; the printed instruction ("update both pins"),
+  which if obeyed literally exits 1 on **actor-set**, is replaced by "re-derive by RUNNING". Reviewer
+  re-proved both directions on the pushed tree.
+
+- `cch-w64-s4` **THE SEAL PREDICATE CAN READ ITS OWN ROSTER** → **#11438**,
+  `loop-epic/the-epic-s-own-census-instrument-stops-r-3`. The strongest slice of the wave. The premise of
+  the old refusal — "this endpoint returns no total and no hasMore" — was **never a property of the
+  endpoint, only of the request**: `offset` and `count=true` are documented in `docs/api-v1.md` §4 and were
+  re-measured live first. A second measurement shaped the design: an `order` the endpoint does not honour is
+  **ignored silently**, so the walk pages by `_createdAt:asc` and VERIFIES the ordering off the rows. The
+  refusal is re-aimed, never softened. Reviewer re-proved the fail-before **LIVE against guerrilla**:
+  `origin/main` bytes exit 2 `code=ROSTER-TRUNCATED`; this branch exit 1
+  `reason=TERMINAL-CLAIM-REFUTED` having actually read 417 live rows.
+
+- `cch-w64-s5` **THE LAW-0 REPAYMENT** — bp ledger only, zero repo files, so no branch and no PR, correctly.
+  THIRTEEN closes read back, one CANCEL, two rows (`cch-w63-s4`, `cch-w38-s1`) left open because closing
+  either would be a lie. Reviewer verified independently: exactly **15** rows left LIVE in the wave window
+  and every one is on this slice's list — **no foreign row was touched**.
+
+**LAW 0, RE-READ BY THE REVIEWER AT 2026-08-09T20:2xZ (the board moved under the builder, as it said it
+would).** 854 published children · **LIVE 417** (open 412, in_progress 5, considering 1) · done 370 ·
+cancelled 66. CLOSES **13**, MOVES **14**, SELF-FILED **14** (13 by the builders + 1 by the reviewer). Floor
+scored against `LIVE_final − self_filed` = **403**. Growth remains 100% endogenous. **Pin the MOVES
+definition in the charter before wave 65** — this slice read it as "rows leaving LIVE" (13 done + 1 cancel)
+while wave 63's 12/3 pair implies "foreign closes only"; both give 14 here only because every row touched
+was foreign, so the number is safe and the DEFINITION is not.
+
+**WHAT THE REVIEWER CHANGED: nothing in the code.** Four slices, four gates re-run green on the pushed
+trees, zero fixes. Two ledger acts: `cch-w63-s6`'s builder claim had **lapsed** and its lifecycle had
+reverted to `open` while the work sat built and green with a now-line still reading "unpushed" — re-claimed,
+restored to `in_progress`, corrected. And the wave's biggest evidence hole was filed as
+`cch-w64-bl-the-refused-fleet-chip-has-no-preview-scenario`: the refused chip is unit-pinned but **no
+preview scenario paints it in the fleet LIST**, so its live wrap behaviour beside the provider chip is
+unwitnessed by any browser instrument. That row names its own cost — adding a scenario moves the corpus
+111 → 112 and now reds four pinned literals, one of which `cch-w63-s6` just brought to life.
+
+**FOR THE LEAD, BEFORE MERGING.** Every slice sits at N−1/N with only its merge-gated criterion open; those
+are yours. Note the claim epochs moved during review (pulses renew the lease) — read the current epoch, do
+not reuse the one in a builder's report. `cch-w63-s6` is now held by `epic-reviewer-wave-64` at epoch 7.
+**Merge #11435 FIRST**: it is the round-1 sole holder of `app.css`, `cssom-heads.baseline` and `smoke.mjs`
+(D774), and three round-2 slices are sequenced behind its MERGED bytes. #11436, #11437 and #11438 are file-
+disjoint from it and from each other and can merge in any order. An **independent second reviewer** is owed
+on two points: the `forbidden` noun swap in #11435 (this reviewer's re-derivation CONFIRMS it, which is one
+opinion, not two), and #11438's fail-closed `ROSTER-INCOMPLETE` arm, which can cost a false exit-2 if a
+child is unpublished or reparented mid-walk.
+
+**THE UNION WAS MEASURED, NOT ASSUMED.** File-disjointness is a claim about a plan; the reviewer octopus-
+merged all four branches onto `origin/main` (16 files, +1181/−75, **zero conflicts**) and ran the union:
+`__app.test.mjs` **1043/0**, `smoke.mjs` **all 111 scenarios rendered**, `__css_check.mjs` **0 error(s)**,
+`cssom-parity` **PARITY PASS · MISSES 0**, `member-authority-sweep` **ok corpus-size 111 (pinned 111) · 0
+guard failure(s)**, `gate-announces-skips.test.sh` **173/0**, `seal-predicate.test.mjs` **80/0**. The one
+cross-slice hazard worth naming — `cch-w63-s6` makes the corpus literal able to red, and `cch-w63-s5` is the
+slice most likely to have moved it — is measured CLEAR: s5 touches no fixture, so the corpus stays 111.
+
+**WHAT THIS WAVE DID NOT PROVE.** Nothing in #11436 was proved on live GitHub — every run is the extracted
+step body under `env -i`, so whether the appended `NOT IN THE ALLOW-SET:` clause survives GitHub's
+annotation rendering is inference from a working precedent until these four PRs' own contexts render.
+#11438's tests are hermetic and pin the WALK, not the endpoint. And no live browser screenshot of either
+#11435 surface exists — the only refused row on the real fleet belongs to team `yo`, which this wave's
+principal structurally cannot see.
+
 ### 2026-08-09 — wave 64 DECIDE (build in flight) — THE RESTING STATE STOPS PROMISING
 
 Wave 63's four PRs (#11376/#11377/#11378/#11379) are merged and verified on the tree; `#11337` is
