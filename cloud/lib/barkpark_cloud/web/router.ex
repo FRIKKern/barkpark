@@ -3283,86 +3283,113 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            force? = conn.body_params["force"] == true
+            cond do
+              # cch-w54-bl — a SUSPENDED box is not ASKED TO RUN ANYTHING with
+              # the platform's stored admin credential. Isolation (D653) is
+              # "the control plane withholds new credentials and maintenance
+              # attention; nothing stops, nothing is deleted" — and rewriting a
+              # suspended box's running code is the most maintenance-shaped act
+              # the control plane has. Same axis as the instance-API proxy's
+              # `:mutate` tier (D673): a relay that CHANGES the box is refused,
+              # a read is not.
+              #
+              # Placed as a sibling `cond` clause ABOVE the trigger call — not a
+              # leg inside it — exactly as `dispatch_instance_api/4` does, so
+              # the ciphertext is never decrypted and NOTHING reaches the wire
+              # on the refused path. Same 409 `suspended` slug as studio-link /
+              # app-token, which `app.js` (ERRORS.suspended) already renders, so
+              # no new console copy is minted.
+              bp.suspended ->
+                json(conn, 409, %{ok: false, error: %{code: "suspended"}})
 
-            case Registry.trigger_self_update(bp, force: force?) do
-              # PIN HONESTY (isu-w5.2): a pinned box is frozen; an unforced Update
-              # click is a 409 (not a silent no-op). `force: true` overrides. The
-              # body names the pin so the console can say WHICH release holds the
-              # box (S3 reads error.pinned_release for its conflict modal).
-              {:error, :pinned} ->
-                json(conn, 409, %{error: %{code: "pinned", pinned_release: bp.pinned_release}})
-
-              {:ok, 202, _body} ->
-                # OC24: the run started on the box — record the operator
-                # trigger (and whether the pin was force-overridden).
-                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.self_update_triggered", %{
-                  name: bp.name,
-                  force: force?
-                })
-
-                # Refresh the row's cached status once the run has had time to
-                # land (the run itself takes a minute or two — the sweep would
-                # otherwise leave the row stale for up to an hour).
-                _ =
-                  %{"barkpark_id" => bp.id}
-                  |> BarkparkCloud.Workers.UpdateStatusWorker.new(schedule_in: 60)
-                  |> Oban.insert()
-
-                push_event(team.id, "fleet")
-                json(conn, 202, %{ok: true, status: "updating"})
-
-              {:ok, 409, _body} ->
-                json(conn, 409, %{error: %{code: "already_running"}})
-
-              # A REAL instance 503 carries {"error":{"code":"feature_not_configured"}}
-              # (self_update_controller.ex). A bare/HTML 503 is the box's front
-              # proxy during a restart window — which the 202 path itself causes —
-              # and telling the operator to flip BARKPARK_SELF_UPDATE_APPLY=1 for
-              # that would be actively wrong. Match on the body, not the status.
-              {:ok, 503, %{"error" => %{"code" => "feature_not_configured"}}} ->
-                json(conn, 503, %{error: %{code: "not_enabled"}})
-
-              {:ok, 503, _proxy_or_restart_window} ->
-                json(conn, 502, %{error: %{code: "instance_unavailable"}})
-
-              {:ok, 404, _body} ->
-                json(conn, 404, %{error: %{code: "not_supported"}})
-
-              {:ok, 500, _body} ->
-                json(conn, 500, %{error: %{code: "runner_start_failed"}})
-
-              # Any other instance status is outside the endpoint's contract —
-              # report the instance misbehaving rather than inventing semantics.
-              {:ok, _status, _body} ->
-                json(conn, 502, %{error: %{code: "instance_error"}})
-
-              {:error, :not_live} ->
-                json(conn, 409, %{error: %{code: "not_live"}})
-
-              # Same mapping as the studio-link route: a missing token is a
-              # permanent, actionable condition (re-provision), a decrypt
-              # failure an integrity signal — neither is "unreachable".
-              {:error, :no_admin_token} ->
-                json(conn, 404, %{
-                  error: %{
-                    code: "no_admin_token",
-                    detail:
-                      "No admin token is stored for this instance yet. It is captured at " <>
-                        "provision time — a pre-existing instance may need a re-provision."
-                  }
-                })
-
-              {:error, :decrypt_failed} ->
-                json(conn, 500, %{error: %{code: "decrypt_failed"}})
-
-              {:error, _reason} ->
-                json(conn, 502, %{error: %{code: "instance_unreachable"}})
+              true ->
+                self_update_relay(conn, team, bp)
             end
 
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # The self-update relay itself — split out so the suspension refusal above can
+  # be a sibling clause of the whole working path rather than a leg inside it.
+  defp self_update_relay(conn, team, bp) do
+    force? = conn.body_params["force"] == true
+
+    case Registry.trigger_self_update(bp, force: force?) do
+      # PIN HONESTY (isu-w5.2): a pinned box is frozen; an unforced Update
+      # click is a 409 (not a silent no-op). `force: true` overrides. The
+      # body names the pin so the console can say WHICH release holds the
+      # box (S3 reads error.pinned_release for its conflict modal).
+      {:error, :pinned} ->
+        json(conn, 409, %{error: %{code: "pinned", pinned_release: bp.pinned_release}})
+
+      {:ok, 202, _body} ->
+        # OC24: the run started on the box — record the operator
+        # trigger (and whether the pin was force-overridden).
+        audit_lifecycle_trigger(conn, team, bp.id, "barkpark.self_update_triggered", %{
+          name: bp.name,
+          force: force?
+        })
+
+        # Refresh the row's cached status once the run has had time to
+        # land (the run itself takes a minute or two — the sweep would
+        # otherwise leave the row stale for up to an hour).
+        _ =
+          %{"barkpark_id" => bp.id}
+          |> BarkparkCloud.Workers.UpdateStatusWorker.new(schedule_in: 60)
+          |> Oban.insert()
+
+        push_event(team.id, "fleet")
+        json(conn, 202, %{ok: true, status: "updating"})
+
+      {:ok, 409, _body} ->
+        json(conn, 409, %{error: %{code: "already_running"}})
+
+      # A REAL instance 503 carries {"error":{"code":"feature_not_configured"}}
+      # (self_update_controller.ex). A bare/HTML 503 is the box's front
+      # proxy during a restart window — which the 202 path itself causes —
+      # and telling the operator to flip BARKPARK_SELF_UPDATE_APPLY=1 for
+      # that would be actively wrong. Match on the body, not the status.
+      {:ok, 503, %{"error" => %{"code" => "feature_not_configured"}}} ->
+        json(conn, 503, %{error: %{code: "not_enabled"}})
+
+      {:ok, 503, _proxy_or_restart_window} ->
+        json(conn, 502, %{error: %{code: "instance_unavailable"}})
+
+      {:ok, 404, _body} ->
+        json(conn, 404, %{error: %{code: "not_supported"}})
+
+      {:ok, 500, _body} ->
+        json(conn, 500, %{error: %{code: "runner_start_failed"}})
+
+      # Any other instance status is outside the endpoint's contract —
+      # report the instance misbehaving rather than inventing semantics.
+      {:ok, _status, _body} ->
+        json(conn, 502, %{error: %{code: "instance_error"}})
+
+      {:error, :not_live} ->
+        json(conn, 409, %{error: %{code: "not_live"}})
+
+      # Same mapping as the studio-link route: a missing token is a
+      # permanent, actionable condition (re-provision), a decrypt
+      # failure an integrity signal — neither is "unreachable".
+      {:error, :no_admin_token} ->
+        json(conn, 404, %{
+          error: %{
+            code: "no_admin_token",
+            detail:
+              "No admin token is stored for this instance yet. It is captured at " <>
+                "provision time — a pre-existing instance may need a re-provision."
+          }
+        })
+
+      {:error, :decrypt_failed} ->
+        json(conn, 500, %{error: %{code: "decrypt_failed"}})
+
+      {:error, _reason} ->
+        json(conn, 502, %{error: %{code: "instance_unreachable"}})
     end
   end
 
@@ -3420,95 +3447,114 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            case Registry.trigger_rollback(bp) do
-              {:ok, 202, body} ->
-                # Pin at the instance-REPORTED target — never a client value.
-                # A 202 without a parsable target_sha is outside the W6
-                # instance contract; the run has still started, so relay
-                # honestly with the pin untouched rather than unpinning or
-                # pretending the flip never began.
-                target_sha =
-                  case body["target_sha"] do
-                    sha when is_binary(sha) and sha != "" -> sha
-                    _ -> nil
-                  end
+            cond do
+              # cch-w54-bl — same refusal as self-update above, for the same
+              # reason: a rollback is the control plane ASKING A SUSPENDED BOX
+              # TO RUN SOMETHING with the stored admin credential, and it would
+              # additionally re-pin the row. Sibling `cond` clause above the
+              # relay so the ciphertext is never decrypted and nothing reaches
+              # the wire; the 409 `suspended` slug is the one `app.js` already
+              # maps.
+              bp.suspended ->
+                json(conn, 409, %{ok: false, error: %{code: "suspended"}})
 
-                pinned_release =
-                  with sha when is_binary(sha) <- target_sha,
-                       {:ok, %Barkpark{} = updated} <-
-                         Registry.set_autoupdate(bp, %{pinned_release: sha}) do
-                    updated.pinned_release
-                  else
-                    _ -> bp.pinned_release
-                  end
-
-                # OC24: the flip started on the box — record the operator
-                # trigger with the instance-REPORTED target and the pin that
-                # now holds it (both facts, never operator input).
-                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.rollback_triggered", %{
-                  name: bp.name,
-                  target_sha: target_sha,
-                  pinned_release: pinned_release
-                })
-
-                # Refresh the row's cached status once the flip has had time
-                # to land — the sweep would otherwise leave the row (and the
-                # console) stale for up to an hour.
-                _ =
-                  %{"barkpark_id" => bp.id}
-                  |> BarkparkCloud.Workers.UpdateStatusWorker.new(schedule_in: 60)
-                  |> Oban.insert()
-
-                push_event(team.id, "fleet")
-
-                json(conn, 202, %{
-                  status: "started",
-                  target_sha: target_sha,
-                  pinned_release: pinned_release
-                })
-
-              {:ok, 409, %{"error" => %{"code" => code}}}
-              when code in ["no_previous_slot", "already_running", "not_supported"] ->
-                json(conn, 409, %{error: %{code: code}})
-
-              # A REAL instance 503 carries {"error":{"code":"feature_not_
-              # configured"}}; a bare/HTML 503 is the box's front proxy during
-              # a restart window. Match on the body, not the status.
-              {:ok, 503, %{"error" => %{"code" => "feature_not_configured"}}} ->
-                json(conn, 503, %{error: %{code: "not_enabled"}})
-
-              {:ok, 503, _proxy_or_restart_window} ->
-                json(conn, 502, %{error: %{code: "instance_unavailable"}})
-
-              # Anything else — an unknown 409 code, a pre-rollback instance
-              # 404ing the admin endpoint, a 500 — is outside the W6 contract:
-              # report the instance misbehaving, never invent semantics.
-              {:ok, _status, _body} ->
-                json(conn, 502, %{error: %{code: "instance_error"}})
-
-              {:error, :not_live} ->
-                json(conn, 409, %{error: %{code: "not_live"}})
-
-              {:error, :no_admin_token} ->
-                json(conn, 404, %{
-                  error: %{
-                    code: "no_admin_token",
-                    detail:
-                      "No admin token is stored for this instance yet. It is captured at " <>
-                        "provision time — a pre-existing instance may need a re-provision."
-                  }
-                })
-
-              {:error, :decrypt_failed} ->
-                json(conn, 500, %{error: %{code: "decrypt_failed"}})
-
-              {:error, _reason} ->
-                json(conn, 502, %{error: %{code: "instance_unreachable"}})
+              true ->
+                rollback_relay(conn, team, bp)
             end
 
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # The rollback relay itself — split out so the suspension refusal above can be
+  # a sibling clause of the whole working path rather than a leg inside it.
+  defp rollback_relay(conn, team, bp) do
+    case Registry.trigger_rollback(bp) do
+      {:ok, 202, body} ->
+        # Pin at the instance-REPORTED target — never a client value.
+        # A 202 without a parsable target_sha is outside the W6
+        # instance contract; the run has still started, so relay
+        # honestly with the pin untouched rather than unpinning or
+        # pretending the flip never began.
+        target_sha =
+          case body["target_sha"] do
+            sha when is_binary(sha) and sha != "" -> sha
+            _ -> nil
+          end
+
+        pinned_release =
+          with sha when is_binary(sha) <- target_sha,
+               {:ok, %Barkpark{} = updated} <-
+                 Registry.set_autoupdate(bp, %{pinned_release: sha}) do
+            updated.pinned_release
+          else
+            _ -> bp.pinned_release
+          end
+
+        # OC24: the flip started on the box — record the operator
+        # trigger with the instance-REPORTED target and the pin that
+        # now holds it (both facts, never operator input).
+        audit_lifecycle_trigger(conn, team, bp.id, "barkpark.rollback_triggered", %{
+          name: bp.name,
+          target_sha: target_sha,
+          pinned_release: pinned_release
+        })
+
+        # Refresh the row's cached status once the flip has had time
+        # to land — the sweep would otherwise leave the row (and the
+        # console) stale for up to an hour.
+        _ =
+          %{"barkpark_id" => bp.id}
+          |> BarkparkCloud.Workers.UpdateStatusWorker.new(schedule_in: 60)
+          |> Oban.insert()
+
+        push_event(team.id, "fleet")
+
+        json(conn, 202, %{
+          status: "started",
+          target_sha: target_sha,
+          pinned_release: pinned_release
+        })
+
+      {:ok, 409, %{"error" => %{"code" => code}}}
+      when code in ["no_previous_slot", "already_running", "not_supported"] ->
+        json(conn, 409, %{error: %{code: code}})
+
+      # A REAL instance 503 carries {"error":{"code":"feature_not_
+      # configured"}}; a bare/HTML 503 is the box's front proxy during
+      # a restart window. Match on the body, not the status.
+      {:ok, 503, %{"error" => %{"code" => "feature_not_configured"}}} ->
+        json(conn, 503, %{error: %{code: "not_enabled"}})
+
+      {:ok, 503, _proxy_or_restart_window} ->
+        json(conn, 502, %{error: %{code: "instance_unavailable"}})
+
+      # Anything else — an unknown 409 code, a pre-rollback instance
+      # 404ing the admin endpoint, a 500 — is outside the W6 contract:
+      # report the instance misbehaving, never invent semantics.
+      {:ok, _status, _body} ->
+        json(conn, 502, %{error: %{code: "instance_error"}})
+
+      {:error, :not_live} ->
+        json(conn, 409, %{error: %{code: "not_live"}})
+
+      {:error, :no_admin_token} ->
+        json(conn, 404, %{
+          error: %{
+            code: "no_admin_token",
+            detail:
+              "No admin token is stored for this instance yet. It is captured at " <>
+                "provision time — a pre-existing instance may need a re-provision."
+          }
+        })
+
+      {:error, :decrypt_failed} ->
+        json(conn, 500, %{error: %{code: "decrypt_failed"}})
+
+      {:error, _reason} ->
+        json(conn, 502, %{error: %{code: "instance_unreachable"}})
     end
   end
 

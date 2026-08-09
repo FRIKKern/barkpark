@@ -15,6 +15,9 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
       nonexistent id (no existence leak)
     * unauthenticated → 401; not-live instance → 409 not_live; transport
       failure → 502 instance_unreachable
+    * cch-w54-bl: a BILLING-SUSPENDED box is refused 409 `suspended` BEFORE the
+      relay — zero upstream requests, the credential never on the wire — and
+      the pinned-release 409 still fires underneath it
   """
   use BarkparkCloud.DataCase, async: true
   use Oban.Testing, repo: BarkparkCloud.Repo
@@ -182,6 +185,59 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
       assert json_body(wrong_team) == json_body(nonexistent)
 
       # And the instance was never called for either.
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "SUSPENDED box → 409 suspended; ZERO upstream requests; the credential never reaches the wire" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(suspended: true, suspended_reason: "billing_lapsed")
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Program a 202 the box WOULD have answered: if the refusal ever moved
+      # below the relay, this test would go green on the status alone. The wire
+      # assertion below is what actually holds the line.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: ~s({"ok":true,"status":"started"})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", token)
+
+      # THE WIRE FIRST (cch-w54-bl): nothing was sent to the instance at all —
+      # the ciphertext was never decrypted, so the platform did not spend the
+      # stored admin credential on a suspended box.
+      assert StudioLinkFakeHttpClient.requests() == []
+
+      assert conn.status == 409
+      assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "suspended"}}
+      refute conn.resp_body =~ @instance_admin_token
+
+      # And no status-refresh run was scheduled for a run that never started.
+      refute_enqueued(worker: UpdateStatusWorker)
+    end
+
+    test "a PINNED box still 409s `pinned` with the release named (the suspension clause did not swallow it)" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(pinned_release: "v0.2.24")
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([])
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"]["code"] == "pinned"
+      assert json_body(conn)["error"]["pinned_release"] == "v0.2.24"
       assert StudioLinkFakeHttpClient.requests() == []
     end
 
