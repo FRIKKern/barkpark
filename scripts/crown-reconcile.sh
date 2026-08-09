@@ -169,14 +169,54 @@
 # So the list now states itself on EVERY run, in ONE line, over four states:
 #
 #   UNCONFIGURED   no path at all → already a reason(), so rc 2. Unchanged.
-#   ABSENT         a path, no file. A REASON: either the memory was wiped or
-#                  this is the first run ever, and a grace granted on a previous
-#                  run cannot be re-asked. NOT counted clean. PRESENT-EMPTY is
-#                  reachable (state_save writes its header unconditionally), so
-#                  ABSENT after the first run means DESTROYED.
+#   ABSENT         a path, no file. A REASON: the memory was DESTROYED between
+#                  runs, and a grace granted on a previous run cannot be
+#                  re-asked. NOT counted clean.
+#   ABSENT-FIRST-RUN
+#                  a path, no file, and the CALLER has PROVEN the persistent
+#                  store has never held a list (CROWN_STATE_FIRST_RUN=1). There
+#                  is no memory to have lost, so there is nothing to re-ask and
+#                  nothing to accuse. NOT a fault. See below — this claim is the
+#                  caller's, and only a caller that actually looked may make it.
 #   PRESENT-EMPTY  the file exists and holds nothing. NOT a fault — it is the
 #                  affirmative statement that nothing is owed.
 #   PRESENT        N entries loaded.
+#
+# A FIRST RUN IS NOT A DESTROYED MEMORY, AND ONLY THE CALLER CAN TELL THEM APART
+# (charter D545).
+#
+# This script sees exactly one thing: a local path with no file behind it. That
+# byte-identical absence is produced by THREE different worlds — the store has
+# never been written (a genuine first run), the store was written and then lost,
+# and the transport that would have fetched it failed. Calling all three
+# DESTROYED pages on the first run past every harness fix, by construction, over
+# a file that has never existed; calling all three FIRST RUN launders the two
+# that matter. Neither reading is available from here.
+#
+# The caller CAN tell them apart, because the caller holds the store. So the
+# statement is the caller's and it is explicit: CROWN_STATE_FIRST_RUN=1 means
+# "I reached the persistent store, and it holds no list yet". The workflow sets
+# it ONLY from a remote existence test that SUCCEEDED — a fetch that failed
+# leaves it unset, so transport silence still lands in ABSENT and still pages.
+#
+# A GRACE IS A DEFERRAL, AND A DEFERRAL IS NOT A SILENCE (charter D545).
+#
+# rc 2 used to mean four unrelated things at once: an empty population, a window
+# whose every run predates the recorder, a genuine unreadable condition — and the
+# SERVING GRACE, whose own printed sentence calls itself a DEFERRAL. Measured
+# over crown-reconcile.yml's entire history: rc=2 fired SIX times, FIVE of them
+# the benign in-flight grace (four of those the same sha in four consecutive
+# minutes) and ZERO of them a real crown mismatch. An alarm that is wrong five
+# times in six gets muted, and a muted alarm is a dead gate.
+#
+# So the grace no longer sets UNREADABLE. It goes through defer(), which counts
+# and names it exactly as reason() does but keeps it out of the silence, and it
+# exits 4 — NOT YET DUE — which the workflow renders as a ::warning and a green
+# step. NOTHING IS FORGIVEN BY THIS: the grace still writes the sha to the
+# re-ask list, and the next run that still finds no row fires GRACED-UNRECORDED
+# and exits 1. The accusation is deferred by one run, which is what "deferred"
+# has always meant here. An unreadable condition in the SAME run still wins: 2
+# is checked before 4, so a deferral can never launder a silence.
 #
 # and `state_save` closes symmetrically with `wrote M entry(ies)`. `wrote M>0`
 # followed by the next run's `loaded 0` is the eviction signature, readable with
@@ -218,9 +258,16 @@
 #                 refused.
 #                 An ABSENT re-ask list is one of these conditions: a memory
 #                 that was destroyed cannot re-ask, so it is a named silence.
+#                 A DECLARED first run (CROWN_STATE_FIRST_RUN=1) is not.
 #             3 = CONFIGURATION fault only (no jq/gh, no credential, bad flag,
 #                 or CROWN_API_TOKEN set but EMPTY — a reader asked for and not
 #                 supplied. UNSET is not a fault: it falls through to SSH.)
+#             4 = NOT YET DUE. Everything that could be read reconciled, nothing
+#                 is accused, and a DEFERRAL is open — today that is the serving
+#                 grace, whose accusation the next run collects. It is a
+#                 ::warning, not a page, and it is NOT a green either: the
+#                 sentence names every deferral that fired. rc 2 outranks it, so
+#                 a deferral never launders a silence.
 #
 # USAGE
 #   scripts/crown-reconcile.sh --repo FRIKKern/barkpark
@@ -266,6 +313,12 @@ STATE_FILE="${CROWN_STATE_FILE:-${TMPDIR:-/tmp}/crown-reconcile-graced.txt}"
 # below, and a path that lives in a temp directory says so rather than implying
 # a memory it does not have.
 STATE_STORAGE="${CROWN_STATE_STORAGE:-}"
+# The CALLER's statement that the persistent store has never held a list. Only a
+# caller that actually reached the store may say this — the workflow sets it from
+# a remote existence test that SUCCEEDED, and leaves it unset when the fetch
+# failed, so transport silence keeps landing in ABSENT. Any value other than the
+# literal 1 is read as "not claimed": a typo must not become a first run.
+STATE_FIRST_RUN="${CROWN_STATE_FIRST_RUN:-}"
 # The instant `record-delivery` first existed: PR #11167, merge commit 67f4a6ab2.
 # Re-derivable by hand, which is why the commit is named beside it:
 #   TZ=UTC git show -s --format='%H %cd %s' --date=iso-strict 67f4a6ab2
@@ -366,6 +419,22 @@ reason() { # <sentence>
   return 0
 }
 
+# ── the named deferrals ──────────────────────────────────────────────────────
+# A DEFERRAL is not a silence. It says "the comparison ran, it found nothing to
+# accuse YET, and the accusation is owed to a LATER run" — which is only honest
+# because the debt is written to the re-ask list before this process exits. It
+# is counted and named exactly like a reason(), and deliberately does NOT touch
+# UNREADABLE: folding it into the silence is what made the crown alarm wrong
+# five times in six and one code away from being muted.
+DEFERRED=0
+DEFERRALS_FILE=""
+defer() { # <sentence>
+  DEFERRED=$((DEFERRED + 1))
+  warn "  $*"
+  [ -n "$DEFERRALS_FILE" ] && printf '%s\n' "$*" >> "$DEFERRALS_FILE"
+  return 0
+}
+
 # ── the re-ask list ──────────────────────────────────────────────────────────
 # Line format: `<sha> <first-seen-epoch>`, one per line, `#` comments ignored.
 # Deliberately NOT json: this file is written and read by this script alone, and
@@ -396,14 +465,23 @@ state_load() { # -> $WORK/reask.txt, and ONE printed line, always
   if [ -z "$STATE_FILE" ]; then
     STATE_STATE="UNCONFIGURED"
     reason "no re-ask list path was configured — a grace granted now cannot be re-asked on the next run"
+  elif [ ! -f "$STATE_FILE" ] && [ "$STATE_FIRST_RUN" = "1" ]; then
+    # The caller reached the persistent store and found no list there. There is
+    # no memory to have lost, so there is no grace an earlier run could have
+    # granted, so there is nothing to re-ask — and pretending otherwise pages a
+    # human about a file that has never existed. NOT a fault, and it still says
+    # exactly what it is rather than passing for PRESENT-EMPTY, which would be a
+    # claim about a file that was read.
+    STATE_STATE="ABSENT-FIRST-RUN"
   elif [ ! -f "$STATE_FILE" ]; then
     # NOT silence, and NOT clean. state_save writes its header unconditionally,
     # so after any run that reached the save the file EXISTS even holding zero
-    # entries. Absent therefore means one of exactly two things — the first run
-    # ever, or a memory that was destroyed — and neither can re-ask a grace an
-    # earlier run granted.
+    # entries. Absent WITHOUT the caller's first-run statement therefore means
+    # the memory was destroyed between runs — or the transport that would have
+    # carried it failed, which is the same loss — and neither can re-ask a grace
+    # an earlier run granted.
     STATE_STATE="ABSENT"
-    reason "the re-ask list at $STATE_FILE does not exist — either this is the first run ever or the memory was destroyed between runs, and a grace granted on a previous run cannot be re-asked. NOT counted clean."
+    reason "the re-ask list at $STATE_FILE does not exist and the caller did NOT state that the persistent store is empty (CROWN_STATE_FIRST_RUN=1) — the memory was destroyed between runs or the fetch that would have carried it failed, and a grace granted on a previous run cannot be re-asked. NOT counted clean."
   else
     while read -r sha ts _; do
       case "$sha" in ''|'#'*) continue ;; esac
@@ -421,6 +499,9 @@ state_load() { # -> $WORK/reask.txt, and ONE printed line, always
     fi
   fi
   say "RE-ASK LIST: ${STATE_FILE:-<none>} [$(state_storage)] — ${STATE_STATE}; loaded ${STATE_LOADED} entry(ies), dropped ${STATE_DROPPED} malformed line(s)."
+  if [ "$STATE_STATE" = "ABSENT-FIRST-RUN" ]; then
+    say "  the caller states the persistent store has never held a list, so there is no earlier grace to re-ask — this is a FIRST RUN, not a destroyed memory. A run that could not REACH the store leaves this unstated and is reported as ABSENT."
+  fi
   return 0
 }
 
@@ -439,12 +520,19 @@ state_save() { # <file of "sha epoch" lines to keep>
     return 0
   fi
   mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null
+  # WRITE-THEN-MOVE, never a truncating redirect. `> "$STATE_FILE"` truncates
+  # BEFORE the first byte is written, so a process killed mid-write leaves a
+  # SHORT list — and a short list is indistinguishable from a list that legitimately
+  # drained, which is precisely the accusation-losing shape this file exists to
+  # prevent. The rename is atomic on the same filesystem, so a reader sees either
+  # the whole old list or the whole new one.
   if {
     printf '# crown-reconcile re-ask list — "<sha> <first-seen-epoch>". Written %s.\n' "$NOW_ISO"
     sort -u "$1"
-  } > "$STATE_FILE" 2>/dev/null; then
+  } > "$STATE_FILE.tmp.$$" 2>/dev/null && mv -f "$STATE_FILE.tmp.$$" "$STATE_FILE" 2>/dev/null; then
     say "RE-ASK LIST: wrote ${kept} entry(ies) to $STATE_FILE [$(state_storage)]."
   else
+    rm -f "$STATE_FILE.tmp.$$" 2>/dev/null
     reason "the re-ask list could not be written to $STATE_FILE — a grace granted now will not be re-asked"
     say "RE-ASK LIST: FAILED to write ${kept} entry(ies) to $STATE_FILE [$(state_storage)]."
   fi
@@ -653,6 +741,8 @@ say "crown-reconcile — repo=$REPO reader-transport=$READER window=${WINDOW_HOU
 
 REASONS_FILE="$WORK/reasons.txt"
 : > "$REASONS_FILE"
+DEFERRALS_FILE="$WORK/deferrals.txt"
+: > "$DEFERRALS_FILE"
 state_load
 
 fetch_runs
@@ -855,7 +945,11 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
           SERVING_RED=1
         elif [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt "$SERVING_GRACE_SECONDS" ] && [ "$graced_age" -lt "$SERVING_GRACE_SECONDS" ]; then
           GRACED_THIS_RUN="$SERVING_SHA"
-          reason "SERVING GRACE: the serving sha $SERVING_SHA has no cp row, but that process is only ${age}s old — a deploy may still be in flight, so the accusation is DEFERRED to the next run rather than dropped (first seen $(iso_of "$first_seen"))"
+          # defer(), NOT reason(). This is not a condition that could not be
+          # read — everything was read, and the answer is "not yet". The debt is
+          # written to the re-ask list six lines below and collected by the next
+          # run as GRACED-UNRECORDED, exit 1.
+          defer "SERVING GRACE: the serving sha $SERVING_SHA has no cp row, but that process is only ${age}s old — a deploy may still be in flight, so the accusation is DEFERRED to the next run rather than dropped (first seen $(iso_of "$first_seen"))"
         else
           SERVING_RED=1
         fi
@@ -969,10 +1063,13 @@ if [ "$RECONCILABLE" -eq 0 ]; then
   exit 2
 fi
 
+# SILENCE OUTRANKS DEFERRAL, always. A run that both granted a grace and failed
+# to read something is a run that failed to read something; checking rc 4 first
+# would let one benign deferral launder a real silence into a warning.
 if [ "$UNREADABLE" != "0" ]; then
   say ""
   REASON_COUNT="$(awk 'NF' "$REASONS_FILE" 2>/dev/null | wc -l | tr -d ' ')"
-  say "COULD NOT FULLY READ: ${REASON_COUNT} unreadable-or-deferred condition(s) fired. Everything that COULD be read reconciled, but this run is NOT clean. Each condition, by name:"
+  say "COULD NOT FULLY READ: ${REASON_COUNT} unreadable condition(s) fired. Everything that COULD be read reconciled, but this run is NOT clean. Each condition, by name:"
   if [ "${REASON_COUNT:-0}" -eq 0 ]; then
     # UNREADABLE was set without going through reason(). The counters this
     # sentence used to print could be all zeros while it exited 2; an unnamed
@@ -983,6 +1080,21 @@ if [ "$UNREADABLE" != "0" ]; then
          END { for (i = 1; i <= n; i++) printf "    - %s%s\n", order[i], (c[order[i]] > 1 ? " (x" c[order[i]] ")" : "") }' "$REASONS_FILE"
   fi
   exit 2
+fi
+
+if [ "$DEFERRED" != "0" ]; then
+  say ""
+  DEFER_COUNT="$(awk 'NF' "$DEFERRALS_FILE" 2>/dev/null | wc -l | tr -d ' ')"
+  say "NOT YET DUE: ${DEFER_COUNT} deferred condition(s) fired. Everything was READ, nothing is accused, and every accusation this run held back was written to the re-ask list — the next run that still finds no row fires GRACED-UNRECORDED and exits 1. This is a warning, not a page, and it is not a green either. Each deferral, by name:"
+  if [ "${DEFER_COUNT:-0}" -eq 0 ]; then
+    # DEFERRED was incremented without going through defer(). Same shape as the
+    # unnamed-silence bug above, and stated for the same reason.
+    say "    - (unnamed — DEFERRED was incremented without a deferral, which is a BUG in this script)"
+  else
+    awk 'NF { c[$0]++; if (!($0 in seen)) { seen[$0] = 1; order[++n] = $0 } }
+         END { for (i = 1; i <= n; i++) printf "    - %s%s\n", order[i], (c[order[i]] > 1 ? " (x" c[order[i]] ")" : "") }' "$DEFERRALS_FILE"
+  fi
+  exit 4
 fi
 
 say ""
