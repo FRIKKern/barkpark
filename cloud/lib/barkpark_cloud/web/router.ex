@@ -11457,8 +11457,12 @@ defmodule BarkparkCloud.Web.Router do
       #     (`DeployLedger.classify/1`), computed from `stage` + the RAW column,
       #     never from the humanized string above: `humanize/1` is a display fold
       #     that maps many distinct causes onto one sentence, so counting it
-      #     groups by prose and prose collapses causes. `nil` on any non-failed
-      #     row.
+      #     groups by prose and prose collapses causes. `nil` on rows that were
+      #     never refused — but NOT on every non-failed row (cch-w64-s6): a
+      #     DEFERRED row is classified too (`DeployLedger.classify/1` has an
+      #     explicit deferred arm), and prod serves e.g.
+      #     `BOX_AT_CAPACITY_DEFERRED` on a `status: "deferred"` row. The old
+      #     wording read as a guarantee the console could key on, and it is false.
       #   * `failure_reason_raw` — the capture WITHOUT the humanize rewrite, so a
       #     reader can see what the box actually said when the prose above is the
       #     generic arm. Raw of the REWRITE, never raw of the SECRETS:

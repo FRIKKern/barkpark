@@ -2111,13 +2111,13 @@ const EXPECTATIONS = {
       // cruel row — a 255-char single-token name on a 253-char host). Every
       // integer in this check is now ALSO pinned in FIXTURE_SHAPE_PINS, so the
       // next edit to sitesListRows is named before this check ever runs.
-      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 7,
+      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 8,
         "one v4 density row per fixture site");
       // cch-w16-s4 — THE CONTRADICTION, ASSERTED PER ROW, NOT PER PAGE. A page
       // total can be satisfied by the wrong four rows; this splits the list on
       // its own row head and reads each row's own two claims.
       const rows = body.split('<div class="site-row').slice(1);
-      assert.equal(rows.length, 7, "the split found every row");
+      assert.equal(rows.length, 8, "the split found every row");
       const undeployed = rows.filter((r) => r.includes(">Not deployed<"));
       assert.equal(undeployed.length, 2,
         "acme-labs (never deployed) and acme-previews (preview-only) both say so");
@@ -2126,7 +2126,7 @@ const EXPECTATIONS = {
           "a row that says Not deployed offers NO door: " + (r.match(/site-name">([^<]*)/) || [])[1]);
       }
       const deployed = rows.filter((r) => !r.includes(">Not deployed<"));
-      assert.equal(deployed.length, 5, "five rows have served a build");
+      assert.equal(deployed.length, 6, "six rows have served a build");
       for (const r of deployed) {
         // …AND THE OTHER DIRECTION: rebuilding and deploy-failed rows are still
         // SERVING their previous build, so stripping their door would be the
@@ -2135,8 +2135,8 @@ const EXPECTATIONS = {
         assert.ok(r.includes('class="site-open"'),
           "a site that has served a build KEEPS its door: " + (r.match(/site-name">([^<]*)/) || [])[1]);
       }
-      assert.equal(countMatches(body, 'title="Open the live site"'), 5,
-        "exactly five live-site doors on the page");
+      assert.equal(countMatches(body, 'title="Open the live site"'), 6,
+        "exactly six live-site doors on the page");
       // The leading status pill, states-complete across the four rows.
       assert.ok(body.includes("status-pill--ok"), "the live site reads an ok pill");
       assert.ok(body.includes("status-pill--warn"), "the rebuilding site reads a warn pill");
@@ -2147,6 +2147,19 @@ const EXPECTATIONS = {
       // harness for the first time — one spelling ("Cancelled", not "Canceled"),
       // on a neutral pill (a cancel is neither a success nor a failure).
       assert.ok(body.includes(">Cancelled<"), "a cancelled deploy says Cancelled — one spelling of the deploy noun");
+      // cch-w64-s6: the deferred head row, rendered by a harness for the first
+      // time. It reads AMBER and names who refused — not the neutral shrug the
+      // generic else painted, which made a refused build look as calm as a
+      // healthy one. Asserted on the ROW, because a page-level pill count is
+      // already satisfied by the rebuilding site.
+      const deferredRow = rows.filter((r) => r.includes(">acme-media<"))[0];
+      assert.ok(deferredRow, "the deferred site renders a row");
+      assert.ok(deferredRow.includes("status-pill--warn"),
+        "a build the box REFUSED is amber, never the neutral pill it used to wear");
+      assert.ok(deferredRow.includes(">Deferred by the box<"),
+        "and it names WHO refused, echoing the shipped CLI phrase");
+      assert.ok(!/will never build|minutes|shortly|soon/i.test(deferredRow),
+        "no loss claim and no time promise rides in with it");
       assert.ok(!body.includes(">Canceled<"), "never the American spelling for the DEPLOY noun");
       // Real fields: the site's OWN name, its host, framework, the instance link,
       // and a recency segment.
@@ -2175,9 +2188,9 @@ const EXPECTATIONS = {
       const body = (reg.get("instance-sites") || {}).innerHTML || "";
       assert.ok(body.length > 0, "#instance-sites rendered empty");
       const rows = body.split('<div class="site-row').slice(1);
-      assert.equal(rows.length, 7, "one instance row per fixture site");
-      assert.equal(countMatches(body, 'class="site-open"'), 5,
-        "five doors: the two that never served a build get none");
+      assert.equal(rows.length, 8, "one instance row per fixture site");
+      assert.equal(countMatches(body, 'class="site-open"'), 6,
+        "six doors: the two that never served a build get none");
       // Named, so a fixture reshuffle cannot silently move the gate.
       const rowOf = (name) => rows.filter((r) => r.includes(">" + name + "<"))[0];
       for (const name of ["acme-labs", "acme-previews"]) {
@@ -3580,7 +3593,8 @@ const FIXTURE_SHAPE_PINS = [
   {
     scenario: "sites",
     path: "sites.length",
-    expected: 7,
+    // cch-w64-s6: 7 → 8, the deferred head row (acme-media).
+    expected: 8,
     why: 'EXPECTATIONS["sites"].check pins the row count TWICE (countMatches over site-row--global, then the length of the split) and every per-row filter after it is arithmetic on this array — and `sites-on-instance` reads the SAME array through the other builder, so one appended row reds two scenarios that name neither the array nor each other',
   },
   {
@@ -3592,19 +3606,23 @@ const FIXTURE_SHAPE_PINS = [
   {
     scenario: "sites",
     path: "sites.#with(current_deployment_id)",
-    expected: 5,
+    // cch-w64-s6: 5 → 6. A deferral does not tear down what is already serving,
+    // so the deferred row keeps its pointer and its door.
+    expected: 6,
     why: 'the served population: siteHasEverDeployed reads current_deployment_id and NOTHING else, so this count IS the number of site-open doors and the number of title="Open the live site" anchors the check pins — including cch-w24-s7\'s cruel row, whose 253-char host is only worth rendering because it kept its door',
   },
   {
     scenario: "sites-on-instance",
     path: "sites.length",
-    expected: 7,
+    // cch-w64-s6: 7 → 8, the same shared array through the other row builder.
+    expected: 8,
     why: 'the instance Sites card renders the SAME sitesListRows through siteRow, and its check reds FIRST on rows.length — pinning it here means an edit to the shared array is named as a shape change once, rather than discovered separately by each builder',
   },
   {
     scenario: "sites-on-instance",
     path: "sites.#with(current_deployment_id)",
-    expected: 5,
+    // cch-w64-s6: 5 → 6, the deferred row's door through the compact builder.
+    expected: 6,
     why: 'the same served population through the compact builder: the check pins countMatches(body, class="site-open") to it, and siteRow has no status pill for a never-served site, so this count is the ONLY thing standing between a door-gating regression and a silent pass',
   },
   {

@@ -12086,6 +12086,41 @@ test("stw4 freshnessModel: nil-honest — no embed, no status → null (no badge
   assert.equal(hooks.freshnessBadge({}), "");
 });
 
+test("cch-w64-s6 freshnessModel/siteStatusPill: a DEFERRED head row reads amber and names who refused", () => {
+  // THE DEFECT: `deferred` is the seventh server status and had no arm, so it
+  // fell to the generic capitalise/else with dot "unknown" — which
+  // siteStatusPill maps to role NEUTRAL and `.fresh-badge--unknown` styles not
+  // at all. A build the BOX REFUSED rested on the list looking exactly as calm
+  // as a healthy one, on 3 of 12 production sites at census time.
+  const row = { last_deployment: { status: "deferred", trigger: "content-auto", updated_at: new Date().toISOString() } };
+  const m = hooks.freshnessModel(row);
+  assert.equal(m.label, "Deferred by the box", "echoes the shipped CLI phrase, not a second vocabulary");
+  assert.equal(m.dot, "rebuild", "an EXISTING amber rule on both surfaces — this arm costs app.css nothing");
+  assert.equal(m.rebuilding, false, "a refused build is SETTLED: nothing is in flight to pulse for");
+  assert.match(m.meta, /^auto · /, "and it still states trigger · when like every other settled row");
+
+  const pill = hooks.siteStatusPill(row);
+  assert.match(pill, /status-pill status-pill--warn/, "amber, NOT the neutral shrug it used to wear");
+  assert.doesNotMatch(pill, /status-pill--neutral/);
+  assert.match(pill, />Deferred by the box</);
+
+  const badge = hooks.freshnessBadge(row);
+  assert.match(badge, /fresh-badge fresh-badge--rebuild/);
+  assert.ok(!badge.includes("is-rebuilding"), "no pulse: a settled row must not claim work is in flight");
+  // THE RULED SENTENCE (charter D785/D786), every clause derivable from the wire:
+  // the box refused (defer/3 runs only on the box's 409), a rebuild WAS re-queued
+  // (the only `status: "deferred"` write sits in requeue_rebuild/2's {:ok, _job}
+  // arm; both sibling arms write `failed`), and nothing newer has run (the embed
+  // IS the site's newest row).
+  assert.ok(badge.includes("Deferred by the box — it refused this build, and a rebuild was re-queued. Nothing newer has run yet."),
+    "the hover title carries the whole honest sentence");
+  // BANNED, in both directions: no ETA (p50 to live 278s, p90 48 minutes) and no
+  // loss claim (99.83% of deferred rows are followed by a later live build).
+  assert.doesNotMatch(badge, /will never build|minutes|shortly|soon|any moment/i);
+  // Every other status is untouched by this arm.
+  assert.equal(hooks.freshnessModel({ last_deployment: { status: "cancelled" } }).dot, "unknown");
+});
+
 test("stw4 freshnessModel: amber-pulse ONLY for an in-flight content-auto rebuild", () => {
   for (const status of ["queued", "building", "pushing"]) {
     const m = hooks.freshnessModel({ last_deployment: { status, trigger: "content-auto" } });
@@ -14318,6 +14353,61 @@ test("cch-w28-bl: the fixture's refusal copy IS the server's @refusal_detail (dr
   // And the remedy is the whole point of carrying it.
   assert.match(REFUSAL_DETAIL, /bp cloud site deploy/);
   assert.match(REFUSAL_DETAIL, /--prebuilt/);
+});
+
+test("cch-w64-s6: a DEFERRED row is a refusal too — it speaks, once, and its pill is its own", () => {
+  // `deferred` is the OTHER refusal and the common one: the box answered 409 at
+  // capacity, Sites.Deploy defer/3 minted a terminal row carrying the box's own
+  // sentence, and `deployIsRefusal` (cancelled-only) threw it away — so the
+  // ladder rendered NOTHING for the state that is most of the refused rows.
+  const REASON =
+    "The build box refused this deploy: it is already at capacity (3 of 3 build slots busy). " +
+    "This build did not run. A rebuild has been re-queued and will pick up the content you just " +
+    "published, not a stale snapshot. Nothing has been lost — the release currently serving is " +
+    "untouched. If this keeps happening the box is undersized for the publish rate on this fleet, " +
+    "and the fix is a bigger box, not a retry.";
+  assert.ok(REASON.length > 255, "the fixture must exceed the varchar(255) clamp — that IS the defect");
+  // What the SERVER writes to `detail`: Sites.Deploy.short_detail/1 clamps
+  // anything over 255 to a 254-character prefix plus an ellipsis, while
+  // `failure_reason` is :text and keeps the whole story. The two channels are
+  // therefore NOT byte-identical, which the old equality de-dup assumed.
+  const clamped = REASON.slice(0, 254) + "…";
+  const deferred = {
+    id: "d-deferred", status: "deferred", trigger: "content-auto",
+    failure_reason: REASON, detail: clamped,
+    inserted_at: "2026-08-09T10:00:00Z", updated_at: "2026-08-09T10:00:02Z",
+  };
+
+  assert.equal(hooks.deployIsRefusal(deferred, "deferred"), true, "a deferred row that said why IS a refusal");
+  assert.equal(hooks.deployIsRefusal({ status: "deferred" }, "deferred"), false,
+    "…and a status word alone still invents no copy");
+
+  const html = hooks.deployRow(deferred, null);
+  assert.match(html, /dep-pill dep-deferred/, "its own pill class — no longer the .dep-queued-identical base");
+  assert.match(html, /class="deploy-fail deploy-fail--blocked"/, "a refusal is a decision, not a crash");
+  assert.match(html, /already at capacity/, "the box's own sentence reaches the person");
+  // SAID ONCE (charter D793). The old guard was `d.detail === deployRefusalCopy(d)`,
+  // an EQUALITY test that the clamp defeats: the ladder printed the sentence and
+  // then a truncated copy of itself. The prefix test collapses both readings.
+  assert.equal((html.match(/already at capacity/g) || []).length, 1, "the sentence prints exactly once");
+  assert.doesNotMatch(html, /deploy-detail/, "the clamped echo is not a second voice");
+  assert.equal(hooks.deployDetailHtml(deferred, "deferred"), "", "the detail channel stays quiet on an echo");
+  assert.equal(hooks.deployDetailEchoesCopy(clamped, REASON), true);
+  assert.equal(hooks.deployDetailEchoesCopy("Uploading bundle", REASON), false,
+    "a genuinely different second sentence still speaks");
+  // REVIEW (wave 65): the prefix test is narrowed to the CLAMP's own output. A
+  // detail that merely OPENS with the same words but was never clamped (no
+  // ellipsis) is a second voice, not an echo, and is not swallowed.
+  assert.equal(hooks.deployDetailEchoesCopy("The build box refused this deploy", REASON), false,
+    "an unclamped detail that shares an opening is not the clamp's echo");
+  assert.match(hooks.deployDetailHtml({ ...deferred, detail: "The build box refused this deploy" }, "deferred"),
+    /deploy-detail/, "…and it still reaches the reader");
+  // A deferred row whose detail says something ELSE keeps both voices.
+  const twoVoices = { ...deferred, detail: "waiting on the box — 3 of 3 slots busy" };
+  assert.match(hooks.deployDetailHtml(twoVoices, "deferred"), /3 of 3 slots busy/);
+  // The under-clamp case is unchanged: a short identical detail still de-dups.
+  const short = { ...deferred, failure_reason: "The box is busy.", detail: "The box is busy." };
+  assert.equal(hooks.deployDetailHtml(short, "deferred"), "", "byte-identical channels still print once");
 });
 
 test("cch-w28-bl: deployIsRefusal — cancelled WITH copy, never cancelled alone, never a live/failed row", () => {

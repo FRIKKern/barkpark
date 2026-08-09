@@ -565,4 +565,19 @@
 # FOR THE LEAD: this slice is the ROUND-1 SOLE HOLDER of app.css and this sidecar
 # (charter D774); three round-2 slices are sequenced behind it. D158 stands — re-run
 # the tool on the MERGED tree and write what it prints; never add deltas.
-1310
+# cch-w64-s6 MEASURED 2026-08-09 (the deferred pill stops reading calm): 1310 ->
+# 1311, +1 authored rule head, MISSES 0, flattened selectors 1256 -> 1257. WHY: ONE
+# rule, `.dep-deferred`. The deploy ladder emitted `dep-deferred` from the raw
+# server status with NO rule behind it, so it fell through to the `.dep-pill` base
+# — which app.css's own comment records as byte-identical to `.dep-queued` on
+# colour, background and border in both themes. A build the box REFUSED therefore
+# impersonated a build still waiting its turn. The rule keeps the warn hue but
+# gives up the filled chip (the `.dep-cancelled` precedent: a row no longer holding
+# a build slot), so it cannot be confused with `.dep-building` either.
+# MEASURED, NOT REASONED (D158): cssom-parity.mjs was RUN against the stale 1310 and
+# printed "!! BASELINE MISMATCH: 1311 authored rule heads, sidecar baseline is 1310
+# (+1)" with "MISSES 0" and "flattened selectors 1257 authored / 1257 CSSOM" on the
+# same run. Both numbers are copied from that printout, never from arithmetic.
+# ARM A OF THIS SLICE COST THIS FILE NOTHING, deliberately: the site-list pill
+# consumes `.fresh-badge--rebuild` and `.status-pill--warn`, which already exist.
+1311

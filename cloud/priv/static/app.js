@@ -11860,6 +11860,20 @@
   // for a never-deployed site (nil-honest — no badge invented). While a
   // CONTENT-AUTO rebuild is in flight (queued/building/pushing) the badge pulses
   // amber; every settled row states its status · trigger · when.
+  // cch-w64-s6 (charter D785/D786): what a DEFERRED head row is allowed to say,
+  // derived clause by clause from the four bytes the list embed carries and the
+  // one call site that writes the status. The box refused the build (Sites.Deploy
+  // defer/3 runs only on the box's 409) and a rebuild WAS re-queued — the status
+  // word is the enqueue receipt, because the only `status: "deferred"` write sits
+  // inside requeue_rebuild/2's `{:ok, _job}` arm while both sibling arms write
+  // `failed`. "Nothing newer has run yet" is structurally true on this surface:
+  // the embed is the site's NEWEST row. BANNED and absent, deliberately: any
+  // time promise or ETA (p50 to live is 278s, p90 is 48 minutes — a range no
+  // sentence can honestly compress), and any loss claim such as "will never
+  // build" (99.83% of deferred rows are followed by a later live build).
+  var DEFERRED_HINT = "Deferred by the box — it refused this build, and a rebuild was re-queued. " +
+    "Nothing newer has run yet.";
+
   function freshnessModel(s) {
     var d = s && s.last_deployment;
     if (!d || !d.status) return null;
@@ -11868,7 +11882,7 @@
     var rebuilding = inFlight && auto;
     var when = relTime(d.updated_at || d.inserted_at);
     var triggerWord = auto ? "auto" : "manual";
-    var label, dot;
+    var label, dot, hint = null;
     if (rebuilding) { label = "Rebuilding"; dot = "rebuild"; }
     else if (inFlight) { label = "Deploying"; dot = "deploy"; }
     else if (d.status === "live") { label = "Live"; dot = "up"; }
@@ -11879,9 +11893,24 @@
     // one DOM. (The Stripe SUBSCRIPTION status keeps its own American
     // "Canceled" in billingStatusLabel — a different noun, Stripe's vocabulary.)
     else if (d.status === "cancelled") { label = "Cancelled"; dot = "unknown"; }
+    // cch-w64-s6 (charter D773/D785): the SEVENTH server status. `deferred` fell
+    // to the generic else with dot "unknown", which siteStatusPill maps to role
+    // NEUTRAL and .fresh-badge--unknown styles not at all — a build the box
+    // REFUSED rested on the list looking exactly as calm as a healthy one.
+    // The label echoes the shipped CLI phrase ("DEFERRED by the box",
+    // internal/cli/cloud_site_cmd.go:1805/1807) rather than minting a second
+    // vocabulary for one fact. The dot is "rebuild" — an EXISTING amber rule on
+    // both surfaces (.fresh-badge--rebuild, and rebuild → warn → .status-pill--warn),
+    // so this arm costs the stylesheet nothing. `rebuilding` stays false: a
+    // refused build is settled, and the is-rebuilding pulse would claim work is
+    // in flight when none is.
+    else if (d.status === "deferred") { label = "Deferred by the box"; dot = "rebuild"; hint = DEFERRED_HINT; }
     else { label = d.status.charAt(0).toUpperCase() + d.status.slice(1); dot = "unknown"; }
     return {
       rebuilding: rebuilding,
+      // The one settled status whose LABEL alone is not the whole truth, so the
+      // badge's hover title states the rest instead of re-spelling status·when.
+      hint: hint,
       inFlight: inFlight,
       trigger: d.trigger || null,
       triggerWord: triggerWord,
@@ -11903,7 +11932,9 @@
     if (!m) return "";
     var title = m.rebuilding
       ? "Auto-deploy in progress — a content publish is rebuilding this site"
-      : (m.label + " · " + m.meta);
+      // cch-w64-s6: a settled row whose label needs a sentence carries one (the
+      // deferred arm); every other settled row still hovers status · trigger · when.
+      : (m.hint || (m.label + " · " + m.meta));
     // Inline-concat so the walker reads the literal head "fresh-badge fresh-badge--"
     // (ALLOW_PREFIXES) rather than ""; dot ∈ up|down|deploy|rebuild, all real rules.
     return '<span class="fresh-badge fresh-badge--' + m.dot + (m.rebuilding ? " is-rebuilding" : "") +
@@ -12498,8 +12529,42 @@
   // failure panel as if a decision had been explained — a stage caption
   // re-cast as a reason, which is the defect class this slice exists to close,
   // one row over. `failure_reason` is written on the refusal path ONLY.
+  //
+  // cch-w64-s6: `deferred` is the OTHER refusal, and it is the common one — the
+  // box answered 409 at capacity, Sites.Deploy defer/3 minted a terminal row
+  // carrying the box's own 200-character sentence in `failure_reason`, and this
+  // gate (cancelled-only) threw it away, so the ladder rendered nothing at all
+  // for the state that is 79.7% of refused rows. Same shape, same rule: a
+  // refusal is a row that was REFUSED and said why; a status word alone still
+  // invents no copy.
   function deployIsRefusal(d, st) {
-    return (st || "") === "cancelled" && !!(d && d.failure_reason);
+    var s = st || "";
+    return (s === "cancelled" || s === "deferred") && !!(d && d.failure_reason);
+  }
+
+  // cch-w64-s6 (charter D793): does the row's `detail` merely echo the sentence
+  // the failure panel already printed? It cannot be an EQUALITY test — the two
+  // channels are not the same column. `failure_reason` is `:text` and holds the
+  // whole story, while `detail` is varchar(255) and passes through
+  // `Sites.Deploy.short_detail/1`, which clamps anything over 255 characters to
+  // a 254-character PREFIX plus an ellipsis. `already_running` (224 chars) is
+  // under the clamp and compared equal; `box_at_capacity` (479) did not, so the
+  // ladder printed the server's sentence and then a truncated copy of itself.
+  // Compare on the prefix, ellipsis stripped, and both readings collapse to one.
+  // REVIEW (wave 65): the prefix test is NARROWED to the two shapes the server
+  // can actually produce, so it suppresses an echo without becoming a general
+  // "swallow any detail that happens to start the same way" rule. Either the two
+  // channels are byte-identical (under the clamp), or `detail` is the CLAMP's
+  // own output — a prefix that ENDS IN THE ELLIPSIS short_detail/1 appends. A
+  // detail with no ellipsis that merely opens with the same words is a second
+  // voice and still speaks.
+  function deployDetailEchoesCopy(detail, copy) {
+    if (!detail || !copy) return false;
+    var d = String(detail), c = String(copy);
+    if (d === c) return true;
+    var head = d.replace(/…+$/, "");
+    if (head === d) return false; // no ellipsis → not the clamp's output
+    return head.length > 0 && c.indexOf(head) === 0;
   }
 
   // The ONE sentence a refused row speaks. Both server channels carry the same
@@ -12595,7 +12660,8 @@
     // say the same bytes (refuse/1 writes the identical sentence to both
     // channels — rendering both would print the remedy twice).
     if (!deployIsActive(st)) {
-      if (!deployIsRefusal(d, st) || !d.detail || d.detail === deployRefusalCopy(d)) return "";
+      if (!deployIsRefusal(d, st) || !d.detail ||
+          deployDetailEchoesCopy(d.detail, deployRefusalCopy(d))) return "";
       return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
     }
     if (!d.detail) return "";
@@ -22731,6 +22797,7 @@
       // The refusal predicate + its single-voice copy accessor, so the terminal
       // "cancelled but it HAS something to say" rule is assertable directly.
       deployIsRefusal: deployIsRefusal, deployRefusalCopy: deployRefusalCopy,
+      deployDetailEchoesCopy: deployDetailEchoesCopy,
       // Rollback endgame: the post-promote reconcile (Current chip stays put
       // until the new build is live) + the loadInstanceSites stale-paint guard.
       promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
