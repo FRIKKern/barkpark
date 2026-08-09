@@ -230,14 +230,26 @@ is harmless:
   `Boundary gate`) have silently left the list on regeneration. Read an absence
   from that file as "the sample did not see it", never as "no such gate exists";
   the ceiling is now filed there under **S4 PATHS-FILTERED** with that mechanism
-  written into its reason. **That hand-added row will not survive the next
-  regeneration** (corrected on review): the generator's MERGE covers `_readme`
-  and the check LIST (a base-first union), but it emits `exclusions:` from the
-  array it just derived and never reads the committed one — and a paths-filtered
-  name cannot enter that array, because stage 2 iterates only names that rendered
-  on the sampled main heads. Re-add it by hand after any
-  `required-checks-generate.sh` run until the generator carries `.exclusions`
-  through base-first (filed).
+  written into its reason. **That hand-added row now survives a regeneration,
+  and until 2026-08-09 it did not.** What stood here — "re-add it by hand after
+  any `required-checks-generate.sh` run" — was a guard that could not lose,
+  because a human remembering is not a mechanism: the generator's MERGE covered
+  `_readme` and the check LIST (a base-first union) but emitted `exclusions:`
+  from the array it had just derived, never reading the committed one, and a
+  paths-filtered name cannot enter that array because stage 2 iterates only
+  names that rendered on the sampled main heads. Measured over the frozen
+  fixture pair, that took **25 exclusion rows in and wrote 18 out, exit 0, with
+  nothing on stderr**. `scripts/required-checks-generate.sh` now emits
+  `.exclusions` as the same base-first union (the *derived* reason winning where
+  both sides carry a row), **and** refuses by name when a run cannot re-derive a
+  committed exclusion — acknowledged one name at a time with
+  `--expect-unrendered '<name>'`, the same flag the check list already uses — so
+  the carry can never be silent. A committed exclusion the run instead SELECTS
+  as required is a contradiction rather than an absence — carrying it would emit
+  one context on both lists — so it refuses separately and takes
+  `--expect-promoted '<name>'`, which DROPS the committed row instead of
+  carrying it. Both arms are mutation-proven in §14b of
+  `scripts/required-checks.test.sh`.
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
