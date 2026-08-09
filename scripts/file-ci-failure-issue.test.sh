@@ -22,17 +22,21 @@ trap 'kill "${SRV_PID:-0}" 2>/dev/null; rm -rf "$work"' EXIT
 
 MODE_FILE="$work/mode"
 LOG_FILE="$work/requests.log"
+BODY_FILE="$work/bodies.jsonl"
 : >"$LOG_FILE"
+: >"$BODY_FILE"
 printf 'no-existing-issues' >"$MODE_FILE"
 
 # --- fake GitHub API -------------------------------------------------------
 # Reads $MODE_FILE per request, so a single long-lived server can play every
-# scenario. Appends "<METHOD> <PATH>" to $LOG_FILE for every request received.
+# scenario. Appends "<METHOD> <PATH>" to $LOG_FILE for every request received,
+# and one {"path":…,"body":…} line per request WITH a body to $BODY_FILE — the
+# request log alone cannot tell a routed issue from an unrouted one.
 cat >"$work/fake-github.py" <<'PY'
 import json, os, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-MODE_FILE, LOG_FILE = sys.argv[1], sys.argv[2]
+MODE_FILE, LOG_FILE, BODY_FILE = sys.argv[1], sys.argv[2], sys.argv[3]
 TITLE = "CI failure: proof-workflow"
 
 def mode():
@@ -74,16 +78,36 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         self._record()
         m = mode()
+        body = {}
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n:
+                raw = self.rfile.read(n)
+                body = json.loads(raw)
+                with open(BODY_FILE, "a") as f:
+                    f.write(json.dumps(
+                        {"path": self.path.split("?")[0], "body": body}) + "\n")
+        except Exception:
+            pass
+        assignees = body.get("assignees") or []
         if m == "create-422":
             return self._send(422, {"message": "Validation Failed"})
         if self.path.endswith("/comments"):
             return self._send(201, {"id": 999})
-        return self._send(201, {"number": 123})
+        # GitHub rejects the WHOLE create when an assignee cannot be assigned.
+        if m == "assignee-rejected" and assignees:
+            return self._send(422, {"message": "Validation Failed",
+                                    "errors": [{"field": "assignees"}]})
+        # …and in other shapes accepts the create and silently drops them.
+        if m == "assignee-dropped":
+            return self._send(201, {"number": 123, "assignees": []})
+        return self._send(201, {"number": 123,
+                                "assignees": [{"login": a} for a in assignees]})
 
 HTTPServer(("127.0.0.1", 0), H).serve_forever()
 PY
 
-python3 "$work/fake-github.py" "$MODE_FILE" "$LOG_FILE" &
+python3 "$work/fake-github.py" "$MODE_FILE" "$LOG_FILE" "$BODY_FILE" &
 SRV_PID=$!
 
 # Discover the assigned port from the socket the child is listening on.
@@ -110,6 +134,7 @@ out=""; err=""; got=0
 run() { # run <mode> [env overrides...]
   printf '%s' "$1" >"$MODE_FILE"; shift
   : >"$LOG_FILE"
+  : >"$BODY_FILE"
   out="$work/out"; err="$work/err"
   ( eval "GITHUB_API_URL=\"$API\" \
           GITHUB_SERVER_URL=https://github.test \
@@ -136,9 +161,25 @@ want_loud() { # want_loud <label> — degrade must be ::error::, never a quiet p
 want_not_loud() {
   if grep -q '^::error' "$err"; then bad "$1 — unexpected ::error::"; else ok "$1"; fi
 }
+want_warn() { # want_warn <label> — the SOFT degrade: routing lost, alarm kept
+  if grep -q '^::warning' "$err"; then ok "$1 (::warning:: emitted)"
+  else bad "$1 — no ::warning:: on stderr; stderr was: $(head -c 200 "$err")"; fi
+}
+want_not_warn() {
+  if grep -q '^::warning' "$err"; then bad "$1 — unexpected ::warning::"; else ok "$1"; fi
+}
 want_requests() { # want_requests <label> <expected count> <grep pattern>
   local n; n="$(grep -c -- "$3" "$LOG_FILE" 2>/dev/null || true)"
   if [ "$n" = "$2" ]; then ok "$1 ($3 x$n)"; else bad "$1 — want $2 '$3' got $n"; fi
+}
+# A create call's payload, as the fake API actually received it. `which` is
+# first|last, because a rejected assignment retries and the two payloads differ.
+want_create_field() { # want_create_field <label> <first|last> <jq filter> <expected>
+  local got
+  got="$(jq -r 'select(.path | endswith("/issues")) | .body' "$BODY_FILE" 2>/dev/null \
+        | jq -sr "$2 | $3" 2>/dev/null)"
+  if [ "$got" = "$4" ]; then ok "$1 ($2 create: $3 = $got)"
+  else bad "$1 — want $2 create '$3' = '$4' got '$got'"; fi
 }
 
 echo "--- happy path: a new failure files an issue"
@@ -146,6 +187,50 @@ run no-existing-issues
 want_exit      "new failure exits 0" 0
 want_not_loud  "new failure is not a degrade"
 want_requests  "new failure POSTs one issue" 1 "POST /repos/acme/widgets/issues"
+
+echo
+echo "--- ROUTING: the create carries a human, derived from GITHUB_REPOSITORY"
+# Filed is not routed. An UNSUBSCRIBED owner is notified only when assigned,
+# participating or @mentioned, so the create must carry the assignee itself —
+# asserted against the payload the API RECEIVED, not against the exit code.
+run no-existing-issues
+want_create_field "create assigns the repository owner" last '.assignees | join(",")' "acme"
+want_create_field "create @mentions them in the body"   last '.body | test("@acme")' "true"
+want_not_warn     "a routed create warns about nothing"
+
+echo
+echo "--- ROUTING: CI_FAILURE_ASSIGNEE overrides the derived owner"
+run no-existing-issues 'CI_FAILURE_ASSIGNEE=octocat'
+want_exit         "explicit assignee exits 0" 0
+want_create_field "create assigns the explicit login" last '.assignees | join(",")' "octocat"
+
+echo
+echo "--- ROUTING: an EMPTY CI_FAILURE_ASSIGNEE is a deliberate opt-out"
+run no-existing-issues 'CI_FAILURE_ASSIGNEE='
+want_exit         "opt-out exits 0" 0
+want_create_field "opt-out assigns nobody" last '.assignees | length' "0"
+want_not_warn     "an opt-out is not a degrade"
+
+echo
+echo "--- DEGRADE: a REJECTED assignment still files the alarm, warns, exits 0"
+# GitHub rejects the whole create for one bad login. The issue is the alarm:
+# losing it to a routing problem would be strictly worse than filing it
+# unrouted, so this is the one path that warns instead of dying.
+run assignee-rejected
+want_exit         "rejected assignment still exits 0" 0
+want_not_loud     "rejected assignment is NOT a hard failure"
+want_warn         "rejected assignment warns that it was filed but not routed"
+want_requests     "rejected assignment refiles the issue" 2 "POST /repos/acme/widgets/issues$"
+want_create_field "the rejected attempt carried the assignee" first '.assignees | join(",")' "acme"
+want_create_field "the refile carries none"                   last  '.assignees | length' "0"
+
+echo
+echo "--- DEGRADE: an assignment SILENTLY DROPPED by the API also warns"
+run assignee-dropped
+want_exit      "dropped assignment exits 0" 0
+want_not_loud  "dropped assignment is NOT a hard failure"
+want_warn      "dropped assignment warns that nobody is assigned"
+want_requests  "dropped assignment files exactly one issue" 1 "POST /repos/acme/widgets/issues$"
 
 echo
 echo "--- idempotency: the SAME ongoing failure must not mint a second issue"

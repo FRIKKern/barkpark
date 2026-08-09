@@ -60,8 +60,12 @@ jobs:
       # the PDS crown-proof transcript — and nothing reached a human, because a
       # cron job's red X is only visible to whoever thinks to open the Actions
       # tab. GITHUB_TOKEN is built in, so this needs no secret at all.
+      # AND `cancelled()`, because `failure()` is FALSE on a cancelled run and
+      # the last SIX scheduled runs of this workflow (2026-08-04 .. 08-09) were
+      # all cancelled. The audit silently did not run for six days while #5658
+      # sat open looking like the current state of the corpus.
       - name: Report failure to a human
-        if: failure()
+        if: failure() || cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_FAILURE_KEY: paper-readers

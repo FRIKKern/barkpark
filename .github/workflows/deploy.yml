@@ -338,7 +338,12 @@ jobs:
     # its own red. It runs after both deploy jobs have already published theirs.
     name: Report deploy failure to a human
     needs: [changes, control-plane, instance]
-    if: failure() && github.ref == 'refs/heads/main'
+    # `cancelled()` is part of the trigger because `failure()` evaluates FALSE
+    # on a cancelled run: a deploy that was cancelled mid-flight leaves prod in
+    # exactly the state a failed one does — stale, and nobody told. The sibling
+    # job report-recorder-failure already names `cancelled` explicitly; this is
+    # the same rule for the deploy itself.
+    if: (failure() || cancelled()) && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read

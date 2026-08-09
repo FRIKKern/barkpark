@@ -256,7 +256,10 @@ jobs:
       # caller in this repository (deploy.yml ×2, paper-readers, renew-mail-cert,
       # codebase-intel) sets GITHUB_TOKEN; this one is now the same shape.
       - name: File the failure to a human
-        if: failure() && github.event_name != 'pull_request'
+        # `failure()` is FALSE on a cancelled run, and this workflow has 13 of
+        # them; without `cancelled()` a reconciler that never ran reads exactly
+        # like a reconciler that reconciled.
+        if: (failure() || cancelled()) && github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ github.token }}
