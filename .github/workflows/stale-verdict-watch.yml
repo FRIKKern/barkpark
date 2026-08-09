@@ -1,0 +1,129 @@
+# stale-verdict-watch — the second scream. It reds for as long as a CONFLICTING
+# pull request keeps asserting a green required verdict it can no longer earn
+# (deploy-reliability D474).
+#
+# WHAT IS ACTUALLY BROKEN
+#
+# A conflicted PR re-dispatches NOTHING. Measured on #10944: every workflow run
+# on its head was created at the push instant 2026-08-08T14:31:22Z with
+# run_attempt=1, and 49 commits have landed on main since. #10129's twelve runs
+# are all from 2026-08-07T05:57:05Z with 100+ commits since — and the checks API
+# still answers SUCCESS for all four required contexts. Nothing in this repo
+# says so out loud, which is the whole defect: the verdict next to the merge
+# button describes a tree that no longer exists, and it will describe it forever
+# unless somebody pushes.
+#
+# WHY THIS IS A NEW FILE AND NOT AN EDIT TO main-gate-watch.yml
+#
+# Two reasons, and the second alone would be enough. (1) That file is CONTENDED:
+# cchi-w60-main-gate-watch-push-arm-cannot-win is in flight against its push arm
+# right now, and two branches editing one workflow is the co-scoped-fixes trap —
+# whichever merges second silently loses half a fix. (2) Its permissions are
+# `contents: read` + `checks: read` with NO `pull-requests: read`, and this
+# verdict is a pull-request read. Widening a contended file's token scope from a
+# second branch is the worst version of that collision. Ordering, stated so it
+# can be checked: this file can merge in any order relative to cchi-w60 because
+# the two share no line.
+#
+# WHY THERE IS NO continue-on-error ANYWHERE IN THIS FILE
+#
+# Job-level `continue-on-error: true` still renders a RED check run, but it
+# launders the WORKFLOW RUN to success — and the run conclusion is what
+# notifications, `gh run list` and the rollup read. A scream nobody is paged for
+# is not a scream. This run fails.
+#
+# WHY A SCHEDULE
+#
+# Staleness is not an event. No webhook fires when main moves past a conflicted
+# PR's last verdict; the PR simply sits there, greener by the hour and less
+# true. A LEVEL trigger is the only shape that can see it, so this asks every 30
+# minutes and keeps asking.
+#
+# THE RESIDUALS, IN NUMBERS
+#
+#   * a ~30-45 minute observation window (GitHub queues cron under load)
+#   * silence during an Actions outage, and GitHub's 60-day auto-disable of
+#     scheduled workflows in an inactive repo
+#   * `mergeable` is LAZILY COMPUTED. On 2026-08-09 the FIRST poll answered 39
+#     UNKNOWN of 40 open and the second, 12s later, answered 22 CONFLICTING / 18
+#     MERGEABLE. The script re-polls and prints any surviving UNKNOWN as a
+#     WARNING ROW — it is never dropped and never counted clean. A run that ends
+#     with rows still UNKNOWN reports a warning, not a green claim about them.
+#   * the staleness distance is measured over a bounded window of main commits
+#     (3 pages, 300); a distance that fills the window prints as `N+`.
+
+name: stale-verdict-watch
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub queues cron under load, so read this as "within
+    # ~30-45 minutes", never "at :00 and :30".
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    # Deliberately narrow: this trigger exists ONLY so the harness below is not
+    # orphaned. Being paths-filtered also keeps every name in this file out of
+    # the required set, belt and braces with the watch job's `if:`.
+    paths:
+      - "scripts/stale-verdict-watch.sh"
+      - "scripts/stale-verdict-watch.test.sh"
+      - ".github/workflows/stale-verdict-watch.yml"
+      - ".github/required-checks.json"
+      - "docs/ops/merge-gates.md"
+
+permissions:
+  contents: read
+  # The verdict reads open pull requests and their check rollup. GITHUB_TOKEN
+  # carries both with these two scopes — no PAT, no secret, no human gate.
+  pull-requests: read
+  checks: read
+
+concurrency:
+  group: stale-verdict-watch-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the watch dark.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  stale-verdict-watch:
+    name: Stale verdict watch
+    # Never on pull_request: a name that never renders on a PR head can never be
+    # sampled into the required-check spec.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The scream's own tripwire. If the harness stops being able to fail, the
+      # watch below is decoration — and this run says so first.
+      - name: Prove the verdict can be shown wrong (stale-verdict-watch.test.sh)
+        run: bash scripts/stale-verdict-watch.test.sh
+
+      - name: Is a conflicted PR still asserting a green it cannot earn?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/stale-verdict-watch.sh --repo "${{ github.repository }}" || rc=$?
+          case "$rc" in
+            0) exit 0 ;;
+            1) echo "::error::A CONFLICTING pull request is asserting a green required verdict main has moved past. It re-dispatches nothing, so this cannot clear itself: rebase or close the PRs named above. This run fails, and it will keep failing every 30 minutes."; exit 1 ;;
+            2) echo "::warning::rows were still mergeable=UNKNOWN after re-polling, or the pull-request list could not be read. That is a SILENCE, not a green — those rows are named in the log above and will be re-read on the next run."; exit 0 ;;
+            3) echo "::error::CONFIGURATION FAULT — this run's credential cannot read the pull-request list, or the required-check spec is unreadable. A watch that cannot read what it watches must not report success."; exit 1 ;;
+            *) echo "::error::stale-verdict-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
+  stale-verdict-harness:
+    name: Stale verdict harness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n scripts/stale-verdict-watch.sh
+      - name: Mutation proofs (stale-verdict-watch.test.sh)
+        run: bash scripts/stale-verdict-watch.test.sh
