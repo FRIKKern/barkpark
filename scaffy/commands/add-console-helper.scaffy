@@ -18,7 +18,8 @@ COMMAND "Add a Console Pure Helper" DESCRIPTION "Scaffold one node-pinned pure h
 #          order-free object keys + house trailing-comma style make the
 #          append separator-safe.
 #   op 3 → MARK:zone-console-tests    — the starter test group. The zone's
-#          law: node:test registration order is semantics-free.
+#          law: node:test registration order is NOT semantics-free, so the
+#          zone lives at the harness TAIL, below every top-level await.
 #
 # What varies across the live helpers is exactly the two declared variables:
 # the name and the one-line purpose. Everything else — the PURE discipline,
@@ -109,7 +110,12 @@ ASLONG FILE DONT CONTAIN "{{.helperName}}: {{.helperName}},"
 # OP 3 — the starter test group, planted in the console-tests zone
 # ─────────────────────────────────────────────────────────────────────────────
 # Anchor: the tests zone's mark line — same never-consumed idiom; groups
-# stack newest-first below it, order-free under node:test. Two starter pins:
+# stack newest-first below it. Order is NOT free under node:test, which is
+# exactly why that mark now lives at the harness TAIL (below the file's last
+# top-level await): a group planted above a top-level await is drained before
+# the later top-level consts initialise and TDZ-crashes. Anchoring on the mark
+# rather than on a fixed line means this op follows the zone wherever it sits.
+# Two starter pins:
 # the exported-typeof test (the harness's own first-test idiom) and the
 # identity pin — DELIBERATELY brittle, so growing the helper body reds it and
 # forces the test group to grow in the same change. Guard = the typeof

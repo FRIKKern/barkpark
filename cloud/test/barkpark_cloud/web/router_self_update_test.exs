@@ -241,6 +241,69 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
       assert StudioLinkFakeHttpClient.requests() == []
     end
 
+    test "a REFUTED box → 409 identity_refused; ZERO upstream requests; never 502 unreachable" do
+      {user, team} = user_with_team()
+
+      # The producer's own shape: `persist_update_unknown/2` writes the reason
+      # and "unknown" in the SAME changeset (cch-w58).
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(
+          update_state: "unknown",
+          update_unavailable_reason: "identity_refused"
+        )
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Program the 202 the box WOULD have answered: if the refusal ever slipped
+      # below the relay, this test would go green on the status alone.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: ~s({"ok":true,"status":"started"})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", token)
+
+      # THE WIRE FIRST (cch-w60-s4): the box already answered this credential
+      # 401, so the plane did not decrypt it or spend it again.
+      assert StudioLinkFakeHttpClient.requests() == []
+
+      # And the console is told what actually happened. A 502
+      # "instance_unreachable" here would be the epic's thesis defect: claiming
+      # we could not reach a box that answered us.
+      assert conn.status == 409
+      assert json_body(conn) == %{"error" => %{"code" => "identity_refused"}}
+      refute conn.resp_body =~ @instance_admin_token
+      refute_enqueued(worker: UpdateStatusWorker)
+    end
+
+    test "a PINNED and refuted box still reports the PIN on an unforced click (wire empty either way)" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(
+          update_state: "unknown",
+          update_unavailable_reason: "identity_refused",
+          pinned_release: "v0.2.24"
+        )
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: ~s({"ok":true,"status":"started"})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", token)
+
+      assert StudioLinkFakeHttpClient.requests() == []
+      assert conn.status == 409
+      assert json_body(conn)["error"]["code"] == "pinned"
+    end
+
     test "no token → 401" do
       {_user, team} = user_with_team()
       bp = live_barkpark(team)

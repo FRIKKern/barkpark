@@ -205,6 +205,34 @@ jobs:
       - name: Every repo-root read is dispatched on
         run: bash scripts/console-path-escape-check.sh
 
+      # ── TDZ ORDER + THE RUNTIME PIN (cch-w61) ──────────────────────────────
+      # Both guards live HERE, in the unfiltered job, and not in console-unit,
+      # for the same reason the ratchet above does: console-unit carries
+      # `if: needs.changes.outputs.console == 'true'`, so a PR that edits only
+      # this workflow's `node-version:` lines — the precise edit the pin exists
+      # to catch — would skip its own guard. An instrument that goes dark on the
+      # change it measures is not an instrument (charter D26).
+      #
+      # No `setup-node` step in this job, deliberately: both scripts are
+      # zero-dependency (node builtins / POSIX sh) and run on the runner's
+      # default Node, and a setup-node here would itself be a FOURTH
+      # `node-version:` entry — the pin below would red on its own workflow.
+      #
+      # The self-test runs FIRST and in the SAME STEP as the measurement. The
+      # TDZ guard is a heuristic lexer, not a parser: v1 of it mis-lexed regex
+      # literals and reported `crossings: 0, exit 0` on a file with five live
+      # crossings. A guard that fails silently toward green must be made to red
+      # on a known fixture before its green means anything.
+      - name: TDZ order — the guard must lose on its fixture, then the harness must be clean
+        run: |
+          node scripts/console-tdz-order-check.mjs --selftest
+          node scripts/console-tdz-order-check.mjs cloud/priv/static/__app.test.mjs
+
+      - name: Console runtime pin — the declaration and this workflow agree
+        run: |
+          sh scripts/console-runtime-pin-check.sh --selftest
+          sh scripts/console-runtime-pin-check.sh
+
   console-unit:
     name: Console client unit harness
     needs: changes

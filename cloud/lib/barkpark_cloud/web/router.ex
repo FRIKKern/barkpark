@@ -3401,6 +3401,16 @@ defmodule BarkparkCloud.Web.Router do
       {:error, :decrypt_failed} ->
         json(conn, 500, %{error: %{code: "decrypt_failed"}})
 
+      # cch-w60-s4: the box already answered our stored admin credential 401,
+      # so the plane refused to spend it again — nothing reached the wire. This
+      # arm MUST sit above the catch-all: without it we would relay "we could
+      # not reach your box" (502 instance_unreachable) about a box that answered
+      # us, which is this epic's own thesis defect committed by the fix. 409 is
+      # the shipped family for terminal refusals here (`pinned`, `not_live`) and
+      # the code is the Registry's whitelist word verbatim — no third vocabulary.
+      {:error, :identity_refused} ->
+        json(conn, 409, %{error: %{code: "identity_refused"}})
+
       {:error, _reason} ->
         json(conn, 502, %{error: %{code: "instance_unreachable"}})
     end
@@ -3565,6 +3575,12 @@ defmodule BarkparkCloud.Web.Router do
 
       {:error, :decrypt_failed} ->
         json(conn, 500, %{error: %{code: "decrypt_failed"}})
+
+      # cch-w60-s4: same refusal as the self-update relay — the box refuted our
+      # stored admin credential, so the plane did not spend it on a rollback
+      # either. Above the catch-all, or a refuted box reads as unreachable.
+      {:error, :identity_refused} ->
+        json(conn, 409, %{error: %{code: "identity_refused"}})
 
       {:error, _reason} ->
         json(conn, 502, %{error: %{code: "instance_unreachable"}})

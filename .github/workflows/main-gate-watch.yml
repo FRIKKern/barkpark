@@ -30,17 +30,27 @@
 # outage, and GitHub's 60-day auto-disable of scheduled workflows in an inactive
 # repo.
 #
-# ONE MORE RESIDUAL, AND IT IS NOT SMALL (wave 60, added with the push-trigger
-# deletion below). Deleting `push:` removes the arm that red on EVERY merge, but
-# it does not remove the cause: MISSING cannot tell "no row has been created on
-# this tip YET" from "this tip was never judged". The required rows appeared at
-# +7m15s, +9m52s and +25m27s after a merge, so a scheduled slot landing inside
-# that window still reds on a tip that is merely young. It self-heals on the next
-# slot, so this is noise rather than a stuck scream — but it is noise on the one
-# workflow whose whole job is to be believed. The fix is age-aware and NOT done
-# here: the commit's own timestamp is readable, and a tip younger than the
-# observed row-creation lag with zero rows is WAITING, not MISSING — while
-# a5260f609 (old, judged, no required row) stays MISSING. Owner:
+# THAT RESIDUAL WAS REAL, IT FIRED, AND IT IS NOW FIXED (wave 61)
+#
+# Wave 60 predicted the shape wrongly: it said a young tip would carry ZERO rows
+# and proposed an age threshold. What actually happened, on the */30 arm, is
+# PARTIAL rows. Scheduled run 31312071143 (2026-08-09T11:57:21Z) red on tip
+# 2e72d2948 with `MISSING Elixir gate` while `Cloud gate` and `Console gate` were
+# both green: the tip was 5m02s old and carried THIRTY-SIX check-run rows. The
+# `elixir` run on it (31311871968) was created 11:52:33Z, went terminal only at
+# 11:59:07Z, and had produced NO JOBS (`/jobs` -> total_count: 0), so no
+# `Elixir gate` row could exist yet.
+#
+# THE DISCRIMINATOR IS THE RUN STATUS, NOT THE AGE. scripts/main-gate-watch.sh
+# now reads a third authority, `actions/runs?head_sha=<tip>`: an absent required
+# row while ANY run on the tip is not `completed` is WAITING (exit 2); an absent
+# row with every run terminal stays MISSING (exit 1), so the never-judged sha
+# a5260f609 (all 9 runs completed) screams exactly as before. It is threshold-
+# free, so it cannot go stale. An age threshold was measured and REJECTED: over
+# 51 simulated */30 ticks, a 28m grace leaves 35 ticks judged but SEVEN of the 17
+# distinct tips a tick landed on judged NEVER, because a newer commit supersedes
+# them first — it trades a false red for a never-measured tip. Proofs live in
+# scripts/main-gate-watch.test.sh §3b/§3c/§3d. Owner:
 # cchi-w61-main-gate-watch-missing-conflates-young-tip.
 #
 # WHY ITS NAME CAN NEVER ENTER THE REQUIRED SET
@@ -66,12 +76,11 @@ on:
   # row, so an empty payload falls through to MISSING — exit 1 by construction.
   # Production record: 2 of 2 push runs FAILED on tip 026c5b1d78 (MISSING x3)
   # while main was in fact green; the byte-identical script on the SAME sha 36
-  # minutes later printed ok/ok/ok, rc=0. The three required rows were created at
-  # +7m15s (Console), +9m52s (Cloud) and +25m27s (Elixir), so no honest grace
-  # constant is smaller than the */30 cadence this file already runs on — the
-  # schedule arm IS the fix, and the header above already accepts a ~30-45 minute
-  # verdict lag. `scripts/main-gate-watch.test.sh` §11 reds if a push: trigger
-  # comes back, and §3b carries the empty-payload fixture that proves why.
+  # minutes later printed ok/ok/ok, rc=0. The schedule arm IS the trigger, and the
+  # header above already accepts a ~30-45 minute verdict lag.
+  # `scripts/main-gate-watch.test.sh` §11 reds if a push: trigger comes back, and
+  # §3b carries the empty-payload fixture — which since wave 61 reports WAITING
+  # while a run on the tip is in flight, and MISSING once every run is terminal.
   pull_request:
     # Deliberately narrow: this trigger exists ONLY so the harness below is not
     # orphaned. Being paths-filtered also keeps every name in this file out of
@@ -84,6 +93,12 @@ on:
 permissions:
   contents: read
   checks: read
+  # `actions: read` is what lets the watch read the WORKFLOW RUNS on the tip
+  # (repos/<repo>/actions/runs?head_sha=…) — the authority that separates "no
+  # check-run row has been created YET" from "this commit was never judged".
+  # Without it that read 403s and the watch reds as a CONFIGURATION FAULT rather
+  # than guessing, which is correct but useless: grant it.
+  actions: read
   # NOTE, and it is load-bearing: `administration` is NOT a scope the workflow
   # `permissions:` key accepts — naming it makes GitHub reject the whole file
   # and the workflow NEVER RUNS. So GITHUB_TOKEN cannot read branch protection
@@ -134,7 +149,7 @@ jobs:
             # WAITING is neither a pass nor a scream: a context is still in
             # flight. Reddening here would false-red every fresh push to main
             # for as long as CI takes, which is how a watch gets muted.
-            2) echo "::notice::WAITING — a watched context on main's tip is still running. The next scheduled run decides."; exit 0 ;;
+            2) echo "::notice::WAITING — a watched context on main's tip is still running, or its row has not been created yet while a workflow run on the tip is still in flight. The next scheduled run decides."; exit 0 ;;
             3) echo "::error::CONFIGURATION FAULT — this run could not read branch protection, or protection requires a context this watch has never classified. A watch with no live authority must not report success. See scripts/main-gate-watch.sh."; exit 1 ;;
             *) echo "::error::main-gate-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
