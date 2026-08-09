@@ -73,6 +73,62 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     # Oban uniqueness config is stamped onto the built job (guards double-send).
     unique = Ecto.Changeset.get_field(DailyDigestWorker.new(%{}), :unique)
     assert unique.period == 86_400
+
+    # dr-w29-s4: the states are named EXPLICITLY and `:completed` is NOT among
+    # them. Oban's default set includes it, which made the period a rolling
+    # window off yesterday's finished row instead of a same-day double-send
+    # guard. The behavioural proof is the next test; this is the shape pin, and
+    # it matches every other worker in `lib/barkpark_cloud/workers/`.
+    assert unique.states == [:available, :scheduled, :executing, :retryable, :suspended]
+    refute :completed in unique.states
+  end
+
+  ## 1b. The rolling-window defect — a COMPLETED digest must not eat today's tick
+  ##
+  ##     The pin above is a shape; this is the behaviour. Under the bare
+  ##     `unique: [period: 86_400]` Oban inherited `states: [scheduled,
+  ##     available, executing, retryable, completed]` and `timestamp:
+  ##     :inserted_at`, so YESTERDAY'S completed row suppressed today's enqueue
+  ##     whenever the cron tick landed microseconds earlier in the second than
+  ##     the previous one — no job row, no log, no telemetry, no delivery. Prod
+  ##     lost 3 of 7 days to it. Revert `@unique` to the bare option and this
+  ##     test REDS: `second.conflict?` is true and only one row exists.
+
+  test "a COMPLETED digest from yesterday does NOT suppress today's enqueue" do
+    {:ok, first} = Oban.insert(DailyDigestWorker.new(%{}))
+    refute first.conflict?
+
+    # Drive it to the state a finished cron tick leaves behind — the whole point
+    # is that a job Oban has already run is not a reason to refuse the next one.
+    first
+    |> Ecto.Changeset.change(
+      state: "completed",
+      completed_at: DateTime.utc_now()
+    )
+    |> Repo.update!()
+
+    # Today's tick: identical args, well inside the 86,400s period.
+    {:ok, second} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    refute second.conflict?
+    assert second.id != first.id
+
+    # Two DISTINCT rows, not one row handed back twice.
+    rows =
+      Repo.all(Oban.Job) |> Enum.filter(&(&1.worker == "BarkparkCloud.Workers.DailyDigestWorker"))
+
+    assert length(rows) == 2
+    assert Enum.map(rows, & &1.id) |> Enum.uniq() |> length() == 2
+  end
+
+  test "a digest still PENDING does suppress a second enqueue (the guard still guards)" do
+    {:ok, first} = Oban.insert(DailyDigestWorker.new(%{}))
+    {:ok, second} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    # `:available` IS in the state list, so the double-enqueue this option was
+    # written for is still refused — the fix widens nothing it should not.
+    assert second.conflict?
+    assert second.id == first.id
   end
 
   ## 2. Body rendering — honest fleet truth from fixture rows
