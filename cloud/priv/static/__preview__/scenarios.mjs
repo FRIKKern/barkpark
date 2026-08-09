@@ -516,6 +516,21 @@ const sitesListRows = [
     current_deployment_id: depOf(7),
     last_deployment: lastDeploy("cancelled", "manual", 1800),
   }),
+  // cch-w64-s6: the SEVENTH server status, and the one the corpus could not
+  // render at all — `lastDeploy()` had covered live/building/failed/cancelled/
+  // never, so the state a live head-of-stream census found on 3 of 12 production
+  // sites (oldest 93s old, all three carrying the box's 409 sentence) had never
+  // reached a pixel here. `deferred` means the BOX refused this build and the
+  // plane re-queued the rebuild; the previous build is still being served, so
+  // the production pointer holds and this row keeps its door — the same rule
+  // the failed and rebuilding rows above follow.
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000ca",
+    name: "acme-media", slug: "acme-media", domains: ["media.acme.com"],
+    framework: "astro", github_webhook_configured: true,
+    current_deployment_id: depOf(8),
+    last_deployment: lastDeploy("deferred", "content-auto", 240),
+  }),
   // cch-w15-bl-preview-only-site-fixture-missing, closed HERE: the corpus held
   // ZERO preview-only sites, so the population the Visit-link defect was widest
   // on — a site with branch previews and no production release — could not be

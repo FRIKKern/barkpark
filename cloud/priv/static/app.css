@@ -1950,6 +1950,31 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dep-failed  { color: var(--danger); background: hsl(var(--danger-hsl) / 0.10); border-color: hsl(var(--danger-hsl) / 0.30); }
 .dep-building, .dep-pushing { color: var(--warn-strong); background: hsl(var(--warn-hsl) / 0.12); border-color: hsl(var(--warn-hsl) / 0.35); }
 .dep-queued  { color: var(--muted-text); }
+/* cch-w64-s6: deferred is the SEVENTH status (registry/deployment.ex @statuses)
+   and, like cancelled before its rule existed, it had none — so it fell through
+   to the .dep-pill base, which the comment below records as byte-identical to
+   .dep-queued on colour AND background AND border in both themes. A build the
+   box REFUSED therefore impersonated a build still waiting its turn: the one
+   reading that costs a person the most, because it says "be patient" about a
+   round that did not run.
+   ONE ADDITIVE RULE under the GR11/D24 dep-pill freeze, on the wave-13 D157
+   shape (charter D787's carve-out is for THIS rule and nothing else): an ADD,
+   never a restyle — no other .dep-* rule and no .status-pill is touched.
+   THE VOICE: warn HUE, but NOT .dep-building's filled warn chip. Reusing that
+   would swap impersonating-queued for impersonating-building in the same pixel,
+   in the wave whose subject is states that impersonate each other. It follows
+   .dep-cancelled's precedent instead — a row no longer holding a build slot
+   gives up the filled chip — while keeping amber and a SOLID hairline, because
+   unlike a deliberate stop a deferral wants attention. Three-way distinct:
+   filled+muted (queued), filled+amber (building), open+amber (deferred),
+   open+dashed+dim (cancelled). Contrast is gated: --warn-strong on --surface is
+   declared in __css_check CONTRAST_PAIRS (the transparent ground is why this
+   rule owes a pair the tinted variant would not). */
+.dep-deferred {
+  color: var(--warn-strong);
+  background: transparent;
+  border-color: hsl(var(--warn-hsl) / 0.35);
+}
 /* cch-w13-s3: cancelled is a TERMINAL, deliberately-stopped deployment (the
    server's own sixth status — auto_deploy_worker.refuse/1 mints one on an
    ordinary content publish, Registry.cancel_preview/2 on a branch delete), and
