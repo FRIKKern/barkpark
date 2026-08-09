@@ -12551,10 +12551,20 @@
   // under the clamp and compared equal; `box_at_capacity` (479) did not, so the
   // ladder printed the server's sentence and then a truncated copy of itself.
   // Compare on the prefix, ellipsis stripped, and both readings collapse to one.
+  // REVIEW (wave 65): the prefix test is NARROWED to the two shapes the server
+  // can actually produce, so it suppresses an echo without becoming a general
+  // "swallow any detail that happens to start the same way" rule. Either the two
+  // channels are byte-identical (under the clamp), or `detail` is the CLAMP's
+  // own output — a prefix that ENDS IN THE ELLIPSIS short_detail/1 appends. A
+  // detail with no ellipsis that merely opens with the same words is a second
+  // voice and still speaks.
   function deployDetailEchoesCopy(detail, copy) {
     if (!detail || !copy) return false;
-    var head = String(detail).replace(/…+$/, "");
-    return head.length > 0 && String(copy).indexOf(head) === 0;
+    var d = String(detail), c = String(copy);
+    if (d === c) return true;
+    var head = d.replace(/…+$/, "");
+    if (head === d) return false; // no ellipsis → not the clamp's output
+    return head.length > 0 && c.indexOf(head) === 0;
   }
 
   // The ONE sentence a refused row speaks. Both server channels carry the same

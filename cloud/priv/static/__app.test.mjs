@@ -14395,6 +14395,13 @@ test("cch-w64-s6: a DEFERRED row is a refusal too — it speaks, once, and its p
   assert.equal(hooks.deployDetailEchoesCopy(clamped, REASON), true);
   assert.equal(hooks.deployDetailEchoesCopy("Uploading bundle", REASON), false,
     "a genuinely different second sentence still speaks");
+  // REVIEW (wave 65): the prefix test is narrowed to the CLAMP's own output. A
+  // detail that merely OPENS with the same words but was never clamped (no
+  // ellipsis) is a second voice, not an echo, and is not swallowed.
+  assert.equal(hooks.deployDetailEchoesCopy("The build box refused this deploy", REASON), false,
+    "an unclamped detail that shares an opening is not the clamp's echo");
+  assert.match(hooks.deployDetailHtml({ ...deferred, detail: "The build box refused this deploy" }, "deferred"),
+    /deploy-detail/, "…and it still reaches the reader");
   // A deferred row whose detail says something ELSE keeps both voices.
   const twoVoices = { ...deferred, detail: "waiting on the box — 3 of 3 slots busy" };
   assert.match(hooks.deployDetailHtml(twoVoices, "deferred"), /3 of 3 slots busy/);
