@@ -368,6 +368,12 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PaperRevisionHeaders)
   end
 
+  # Papers are shareable, not searchable, out of the box — see the plug's
+  # @moduledoc. Rides BEFORE :paper_revision_headers so the 304 carries it.
+  pipeline :reader_noindex do
+    plug(BarkparkWeb.Plugs.ReaderNoindex)
+  end
+
   # :scoped_browser + the :docs share gate (P4) — the scoped STUDIO pipeline.
   # An anonymous request for a `:docs`-shared scope is pre-resolved by
   # RequireShareScope (read-only; LiveScope attaches the server-side write
@@ -441,6 +447,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :papers)
     plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
     plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.ReaderNoindex)
     plug(BarkparkWeb.Plugs.PaperRevisionHeaders)
   end
 
@@ -1192,7 +1199,7 @@ defmodule BarkparkWeb.Router do
   # modules are fully qualified. Expands to nothing until a plugin contributes
   # a `:public_root` route.
   scope "/" do
-    pipe_through([:browser, :paper_reader_csp, :paper_revision_headers])
+    pipe_through([:browser, :paper_reader_csp, :reader_noindex, :paper_revision_headers])
 
     plugin_routes(scope: :public_root)
   end

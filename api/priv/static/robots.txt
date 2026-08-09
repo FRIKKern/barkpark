@@ -1,5 +1,9 @@
 # Barkpark - public content reader.
 # Policy, not protection (charter D6): enforcement is the limiter, not this file.
+# Papers are shareable, not searchable (am-hg-ai-crawler-stance, decided
+# 2026-08-09): de-indexing rides the x-robots-tag: noindex response header -
+# crawl stays ALLOWED below so crawlers can see that header. This file only
+# refuses bulk-training ingestion. Roster vendor-verified at edit time; rosters rot.
 
 User-agent: *
 Allow: /papers/
@@ -9,3 +13,19 @@ Disallow: /quiz/
 Disallow: /studio
 Disallow: /login
 Disallow: /s/
+
+# Bulk-training / mass-ingestion crawlers: everything off. User-initiated
+# fetchers (ChatGPT-User, Claude-User, Perplexity-User) and search-index bots
+# (OAI-SearchBot, Claude-SearchBot, PerplexityBot) are deliberately NOT here -
+# live fetches, citations, and link previews must keep working.
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: CCBot
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: Amazonbot
+User-agent: meta-externalagent
+User-agent: meta-webindexer
+User-agent: Bytespider
+User-agent: MistralAI-Training
+Disallow: /
