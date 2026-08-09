@@ -30,6 +30,19 @@
 # outage, and GitHub's 60-day auto-disable of scheduled workflows in an inactive
 # repo.
 #
+# ONE MORE RESIDUAL, AND IT IS NOT SMALL (wave 60, added with the push-trigger
+# deletion below). Deleting `push:` removes the arm that red on EVERY merge, but
+# it does not remove the cause: MISSING cannot tell "no row has been created on
+# this tip YET" from "this tip was never judged". The required rows appeared at
+# +7m15s, +9m52s and +25m27s after a merge, so a scheduled slot landing inside
+# that window still reds on a tip that is merely young. It self-heals on the next
+# slot, so this is noise rather than a stuck scream — but it is noise on the one
+# workflow whose whole job is to be believed. The fix is age-aware and NOT done
+# here: the commit's own timestamp is readable, and a tip younger than the
+# observed row-creation lag with zero rows is WAITING, not MISSING — while
+# a5260f609 (old, judged, no required row) stays MISSING. Owner:
+# cchi-w61-main-gate-watch-missing-conflates-young-tip.
+#
 # WHY ITS NAME CAN NEVER ENTER THE REQUIRED SET
 #
 # This job reads two GitHub endpoints. Requiring an API-reading check gates every
