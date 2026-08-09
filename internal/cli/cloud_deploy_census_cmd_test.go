@@ -1304,6 +1304,35 @@ const censusStraddleEnvelope = `{
   "min_sample": 200
 }`
 
+// censusMixedSampleEnvelope: two class shares refuse with the SAME reason and
+// were denominated over DIFFERENT samples. The control plane's straddle reason
+// carries no denominator, so a render that groups by reason alone would print
+// one row's n beside a count covering both — a denominator no row was taken
+// over. The two rows must be reported separately.
+const censusMixedSampleEnvelope = `{
+  "window": {"from": "2026-08-02T00:00:00Z", "to": "2026-08-09T00:00:00Z"},
+  "volume": 8678,
+  "failed": 3444,
+  "failure_rate": {"sample": 8678, "pct": null, "numerator": 3444, "min_sample": 200, "refused": true,
+    "reason": "the window STRADDLES the deferred settle status boundary at 2026-08-05T21:13:50Z (method: schema_commit, source: #9615) — a blend of two taxonomies, not a measurement"},
+  "classes": [
+    {"class": "DOC_ID_EMPTY", "label": "the cause went unrecorded", "count": 1149,
+     "share": {"sample": 3444, "pct": null, "numerator": 1149, "min_sample": 200, "refused": true,
+       "reason": "the window STRADDLES the deferred settle status boundary at 2026-08-05T21:13:50Z (method: schema_commit, source: #9615) — a blend of two taxonomies, not a measurement"}},
+    {"class": "BOX_500", "label": "the box errored on the deploy (HTTP 500)", "count": 399,
+     "share": {"sample": 1201, "pct": null, "numerator": 399, "min_sample": 200, "refused": true,
+       "reason": "the window STRADDLES the deferred settle status boundary at 2026-08-05T21:13:50Z (method: schema_commit, source: #9615) — a blend of two taxonomies, not a measurement"}}
+  ],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "boundaries": [
+    {"subject": "deferred settle status", "instant": "2026-08-05T21:13:50Z", "method": "schema_commit", "source": "#9615",
+     "voids": "before this instant no row could settle deferred"}
+  ],
+  "min_sample": 200
+}`
+
 // censusSampleRefusalEnvelope: the shares refuse for SAMPLE, on a window that
 // already sits wholly AFTER the boundary. Narrowing can only shrink the sample,
 // so there is no `--from` to suggest and the render must say that outright.
@@ -1445,6 +1474,41 @@ func TestCloudDeploymentsRefusedShareInventsNoWindow(t *testing.T) {
 // TestCloudDeploymentsAnsweredSharesCarryNoNote: shares that produced a
 // percentage get no refusal note at all — this block is a note about refusals,
 // not a caption on every table.
+// Two rows, one reason, two denominators. The refusal note groups by
+// (reason, SAMPLE) precisely so the printed n is a denominator the counted rows
+// were actually taken over; grouping by reason alone prints "2 of 2 rows …
+// n=3444" and silently attributes BOX_500's 1201 to the larger population.
+func TestCloudDeploymentsRefusalNoteSplitsOnTheDenominator(t *testing.T) {
+	newCensusServer(t, 200, censusMixedSampleEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+
+	var notes []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "NO SHARE for") {
+			notes = append(notes, line)
+		}
+	}
+	if len(notes) != 2 {
+		t.Fatalf("two rows refused over two different denominators, want two refusal notes, got %d:\n%s", len(notes), stdout)
+	}
+	for _, want := range []string{"1 of 2 rows above (share denominator n=3444)", "1 of 2 rows above (share denominator n=1201)"} {
+		found := false
+		for _, note := range notes {
+			if strings.Contains(note, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("no refusal note carries %q — a note may never quote a denominator its counted rows were not taken over:\n%s", want, strings.Join(notes, "\n"))
+		}
+	}
+}
+
 func TestCloudDeploymentsAnsweredSharesCarryNoNote(t *testing.T) {
 	newCensusServer(t, 200, censusTodayEnvelope)
 	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))

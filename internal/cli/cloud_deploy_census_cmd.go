@@ -713,9 +713,15 @@ func deployCensusShareNotes(rows []cloudclient.DeployCensusClass, boundaries []d
 		}
 		refused++
 		reason := deployCensusRefusal(r.Share, minSample)
+		// Grouped by (reason, SAMPLE), never by reason alone. The reason the
+		// control plane writes for a straddle does not carry the denominator,
+		// so two rows can share a reason and have been denominated over
+		// different populations — and printing the first row's n beside a
+		// count that includes the second would state a denominator no row was
+		// actually taken over. Splitting the group is the honest render.
 		found := false
 		for i := range groups {
-			if groups[i].reason == reason {
+			if groups[i].reason == reason && groups[i].sample == r.Share.Sample {
 				groups[i].rows++
 				found = true
 				break
