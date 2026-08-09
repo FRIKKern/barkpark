@@ -1,3 +1,17 @@
+# dr-w32 S5. The abandonment backfill is a MIGRATION, and migrations live outside
+# the compiled app's load path — so it is required HERE, before this file
+# compiles, rather than in a setup block: the tests call its own statement
+# builders, and a runtime-only load would leave those calls compiling against an
+# unknown module.
+unless Code.ensure_loaded?(BarkparkCloud.Repo.Migrations.BackfillAbandonmentDeferralStructure) do
+  Code.require_file(
+    Path.expand(
+      "../../priv/repo/migrations/20260809180000_backfill_abandonment_deferral_structure.exs",
+      __DIR__
+    )
+  )
+end
+
 defmodule BarkparkCloud.SitesDeployTest do
   @moduledoc """
   site-spawner D22/D30 — the STATIC deploy driver: mint a build, drive the box
@@ -2202,6 +2216,211 @@ defmodule BarkparkCloud.SitesDeployTest do
       {:ok, b1} = Deploy.enqueue(site, bp)
       assert {:duplicate, dup} = Deploy.enqueue(site, bp)
       assert dup.id == b1.id
+    end
+  end
+
+  # ── dr-w32 S5 ──────────────────────────────────────────────────────────────
+  #
+  # THE SEVEN HISTORICAL ABANDONMENTS, and the backfill that has to land before
+  # the predicate swap. `dr-w28-rv-abandonment-predicate-replaces-the-prose-regex`
+  # replaces the prose-anchored classifier with a `deferral_cause`-based one; the
+  # seven abandonments on cloud-db-1 all predate the W28 writer (first stamped
+  # triple 2026-08-07 10:12:35.033826, last abandonment 03:41:33.865677) and carry
+  # NULL in all three columns, so that swap without this backfill turns the whole
+  # historical cohort into a zero the cleanup manufactured itself.
+  #
+  # These tests run the migration's OWN statements — not a paraphrase — so a
+  # predicate change there is a predicate change here.
+  #
+  # IT CAN LOSE: drop the three `IS NULL` legs and the cause's LIKE pattern from
+  # `backfill_statements/0` and "an ordinary failure that never deferred is NOT
+  # touched" reds with a stamped 0-depth chain on a plain build failure, while the
+  # abandonment assertions stay green — the vacuous-green shape this test exists
+  # to refuse.
+  describe "the historical abandonment backfill (20260809180000)" do
+    @backfill BarkparkCloud.Repo.Migrations.BackfillAbandonmentDeferralStructure
+
+    # The two production episodes, at their real depths and timestamps: the
+    # 2026-08-05 busy abandonment at 6 rounds, and one of the six 2026-08-07
+    # capacity abandonments at 12.
+    @busy_at ~U[2026-08-05 22:57:53.830161Z]
+    @capacity_at ~U[2026-08-07 01:20:14.000000Z]
+
+    test "stamps depth, bound and cause off the row's own sentence — and an ordinary failure that never deferred is NOT touched" do
+      {bp, site} = setup_site()
+
+      capacity =
+        seed_failed(site, bp,
+          failure_reason:
+            Deploy.abandonment_reason(
+              "the instance was at its concurrent-build cap",
+              12,
+              "BOX_AT_CAPACITY_DEFERRED"
+            ),
+          inserted_at: @capacity_at
+        )
+
+      busy =
+        seed_failed(site, bp,
+          failure_reason:
+            Deploy.abandonment_reason(
+              "the instance was already deploying",
+              6,
+              "BOX_BUSY_DEFERRED"
+            ),
+          inserted_at: @busy_at
+        )
+
+      # A FAILURE THAT NEVER DEFERRED. It is `failed` like the two above and it
+      # sits in the same table — the only thing separating it from an abandonment
+      # is the chain sentence, which is exactly what the predicate keys on.
+      ordinary =
+        seed_failed(site, bp,
+          failure_reason: "the box refused the build (HTTP 500 runner_start_failed)",
+          inserted_at: @capacity_at
+        )
+
+      # BEFORE: the structured predicate the W28 swap will rely on returns NOTHING
+      # for this site, which is the production reading (0 of 32,953 rows).
+      assert structured_abandonments(site) == 0
+
+      assert run_backfill() == 2
+
+      capacity = Repo.get(Deployment, capacity.id)
+      assert capacity.deferral_depth == 12
+      assert capacity.deferral_bound == 12
+      assert capacity.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+
+      # The SHORTER leash is read off the busy row's own sentence, not off the
+      # capacity constant — one blanket bound would misstate this whole episode.
+      busy = Repo.get(Deployment, busy.id)
+      assert busy.deferral_depth == 6
+      assert busy.deferral_bound == 6
+      assert busy.deferral_cause == "BOX_BUSY_DEFERRED"
+
+      # THE NON-VACUOUS HALF: a migration that stamped every failed row would put
+      # ordinary build failures into the abandonment numerator forever.
+      ordinary = Repo.get(Deployment, ordinary.id)
+      assert ordinary.deferral_depth == nil
+      assert ordinary.deferral_bound == nil
+      assert ordinary.deferral_cause == nil
+
+      # AFTER: the predicate the swap keys on now finds both, so the swap can land
+      # without erasing history.
+      assert structured_abandonments(site) == 2
+    end
+
+    test "the bound is the DERIVED depth, never today's constant" do
+      {bp, site} = setup_site()
+
+      # A capacity abandonment written under a cap of 9 — a bound that is not the
+      # constant in force today. Reading `@max_consecutive_capacity_deferrals`
+      # here instead of the sentence would rewrite this row's history to 12.
+      row =
+        seed_failed(site, bp,
+          failure_reason:
+            Deploy.abandonment_reason("at the cap", 9, "BOX_AT_CAPACITY_DEFERRED"),
+          inserted_at: @capacity_at
+        )
+
+      assert run_backfill() == 1
+
+      row = Repo.get(Deployment, row.id)
+      assert row.deferral_depth == 9
+      assert row.deferral_bound == 9
+      refute row.deferral_bound == 12
+    end
+
+    test "is idempotent — a second run stamps zero rows and changes nothing" do
+      {bp, site} = setup_site()
+
+      row =
+        seed_failed(site, bp,
+          failure_reason:
+            Deploy.abandonment_reason("at the cap", 12, "BOX_AT_CAPACITY_DEFERRED"),
+          inserted_at: @capacity_at
+        )
+
+      assert run_backfill() == 1
+      after_first = Repo.get(Deployment, row.id)
+
+      assert run_backfill() == 0
+      after_second = Repo.get(Deployment, row.id)
+
+      assert {after_second.deferral_depth, after_second.deferral_bound,
+              after_second.deferral_cause} ==
+               {after_first.deferral_depth, after_first.deferral_bound,
+                after_first.deferral_cause}
+    end
+
+    test "the down clears exactly what the up set — a writer-era abandonment survives it" do
+      {bp, site} = setup_site()
+
+      reason = Deploy.abandonment_reason("at the cap", 12, "BOX_AT_CAPACITY_DEFERRED")
+
+      historical = seed_failed(site, bp, failure_reason: reason, inserted_at: @capacity_at)
+
+      # A row `Sites.Deploy.defer/3` stamped ITSELF, after the W28 writer landed.
+      # It matches the same prose and carries the same triple — the ONLY thing
+      # separating it from a backfilled row is that it is newer than the writer,
+      # which is why the down is fenced on `inserted_at`.
+      writer_era =
+        seed_failed(site, bp,
+          failure_reason: reason,
+          inserted_at: DateTime.add(@backfill.writer_landed_at(), 3600, :second),
+          deferral_depth: 12,
+          deferral_bound: 12,
+          deferral_cause: "BOX_AT_CAPACITY_DEFERRED"
+        )
+
+      assert run_backfill() == 1
+
+      cleared =
+        for {sql, params} <- @backfill.clear_statements(), reduce: 0 do
+          acc -> acc + Repo.query!(sql, params).num_rows
+        end
+
+      assert cleared == 1
+
+      historical = Repo.get(Deployment, historical.id)
+      assert historical.deferral_depth == nil
+      assert historical.deferral_bound == nil
+      assert historical.deferral_cause == nil
+
+      writer_era = Repo.get(Deployment, writer_era.id)
+      assert writer_era.deferral_depth == 12
+      assert writer_era.deferral_bound == 12
+      assert writer_era.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+    end
+
+    # A `failed` row carrying whatever the fixture says, minted through the real
+    # enqueue path so every NOT NULL column is what production would hold.
+    defp seed_failed(site, bp, attrs) do
+      {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+
+      d
+      |> Ecto.Changeset.change(Keyword.put(attrs, :status, "failed"))
+      |> Repo.update!()
+    end
+
+    defp run_backfill do
+      for {sql, params} <- @backfill.backfill_statements(), reduce: 0 do
+        acc -> acc + Repo.query!(sql, params).num_rows
+      end
+    end
+
+    # The query the W28 predicate swap will run: an abandonment is the only row
+    # that can satisfy `deferral_depth = deferral_bound`, because `defer/3`
+    # abandons AT the bound and a deferred row caps at bound-1.
+    defp structured_abandonments(site) do
+      Repo.aggregate(
+        from(d in Deployment,
+          where:
+            d.site_id == ^site.id and d.status == "failed" and
+              d.deferral_depth == d.deferral_bound
+        ),
+        :count
+      )
     end
   end
 end
