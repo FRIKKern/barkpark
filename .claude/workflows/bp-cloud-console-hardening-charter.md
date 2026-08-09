@@ -3042,6 +3042,70 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 62 REVIEW — grade A−, four round-1 slices built, four pushed with PRs open
+
+**Round 1 shipped four of four; every branch is the reviewer's `-r` and every one is pushed with a PR
+open** (the six-wave streak of stranded local branches is broken here, deliberately).
+
+- `cch-w61-s2` **THE CROWN** → **#11337** (`loop-epic/a-permanent-refusal-renders-terminally-a-0-r`).
+  Seven codes, not two: `rollbackRefusalTerminal` gains `identity_refused`, `suspended`,
+  `decrypt_failed`, `no_admin_token`, `not_found`; `instance_unavailable` stays TRANSIENT (front-proxy
+  restart window) and gains copy only — the free positive control. `updateConflict` gains seven named
+  kinds and **no new key** (`Object.keys === ["kind","pin"]`, asserted for all seven);
+  `runner_start_failed` stays retryable. No `updateRefusalTerminal` minted (D738) — the refusal is
+  written into the code. D739 folded in: the site `rollback_failed` arm splits off the 409 and renders
+  the plane's own measured `detail`. Copy echoed not minted (D734). The preview corpus was made ABLE TO
+  FAIL — a hosted refused fixture keyed on id AND host, a mock POST rollback route, and a mandatory
+  smoke expectation. `wireUpdatePanel` had **never wired a handler in any harness run** (compound
+  selector unparseable in the shim); the shipped `#instance-body` fallback moves it 0 → 1. The gr41
+  two-literal terminality census is deleted for a bidirectional one derived from the shipped function's
+  own source. Gate 1037/1037, 111 scenarios.
+- `cch-w58-followup-unavailable-reason-has-no-reader` → **#11338**. One emit in `barkpark_json/4`, the
+  Go tag on `cloudclient.Barkpark` (D744's route, reversing wave 61's allowlist choice), five `==` pins
+  re-derived by the 999-technique, and the stale `router.ex:1941` → `:2077` citation fixed in the same
+  diff. Both halves of the guard shown losing; reviewer re-ran the PHANTOM mutation independently.
+- `cch-w62-s3` → **#11339**. The runtime pin stops certifying a runtime it did not measure: header
+  regex widened for trailing comments, a DUPLICATE arm, and every value on the pinned and exempt jobs
+  checked instead of `head -1`. Self-test 6/6 → 10/10; reviewer verified the clean-tree roster is
+  byte-identical to `origin/main`'s script output by running both and diffing.
+- `cch-w60-s7` → **#11340**. D743 executed — the third deferral would have been an error. The
+  verify-route census learns `update_unavailable_reason` / `identity_refused` as a **review tripwire,
+  explicitly NOT D706's circularity refusal**, and gains an extraction arm over
+  `Registry.reveal_admin_token/1`. Reviewer re-ran the seam mutation: planting a refusal reds; restored
+  green.
+
+**Round 2 (`task-a0b92c5761233af4`, `cch-w60-s6`) was NOT built, by design** — both sequence after
+#11338 on router.ex file-truth.
+
+**Cross-slice proved by a run, not by reading:** #11338 adds the word `update_unavailable_reason` to
+`router.ex` in the same wave that #11340 forbids that word in its two extracted router blocks. The two
+branches were merged in a probe branch and both censuses run green together — **26 tests, 0 failures**.
+#11337's `bpBase` addition also silently closes #11338's own stated blind spot (the preview corpus was
+one key behind the serializer).
+
+**Reviewer fix, one:** `siteRollbackFailure`'s doc comment still claimed *"Static strings only (no
+server free-text embedded)"* after D739 made it relay the plane's `detail` — this epic's disease one
+layer up. Corrected on #11337.
+
+**What the next wave must take.** (1) **`update_unavailable_reason` now reaches the WIRE and still
+reaches no human** — measured on the merge-time tree: 0 references in `app.js`, 0 uses of
+`UpdateUnavailableReason` outside its declaration. Filed as
+`cch-w62-bl-update-unavailable-reason-reaches-the-wire-but-no-human`, and it is the single highest-value
+row on this board: the emit half is merged-pending, the render half is the wish. (2) Then round 2 in
+dependency order — `task-a0b92c5761233af4` (dispatcher fence + its 409 copy half, D741/D742) and
+`cch-w60-s6` (a refused write leaves a named audit row, D746), both after #11338 merges. (3) The
+tdz-order guard was never audited for the same first-match hole
+(`cchi-w62-bl-the-tdz-guard-was-never-audited-for-a-first-match-hole`); the site plane still relays
+prose where it measured a typed code
+(`cch-w62-bl-the-site-plane-relays-prose-where-it-measured-a-typed-code`).
+
+**Merge notes for the lead.** #11338's `@go_tag_floor` is contended by open #11007 and #10811 on the
+identical line — the stale-green merge window is live; re-derive on the merge-time tree. #11337 is
+flagged **HIGH-FLIP-RISK** (does naming `identity_refused` overclaim?); the reviewer re-derived it
+independently against `persist_update_unknown/2` + `relay_admin_post/3` and judges it honest, but a
+genuinely independent second reader is owed on that one sentence. Every slice leaves its merge-gated
+criterion open for the lead; three PR-body criteria were satisfied and stamped by the reviewer.
+
 ### 2026-08-09 — wave 61 REVIEW — grade A−, six slices built, six delivered
 
 **Round 1 shipped six of six.** One merged during the wave; five are pushed with PRs open.
