@@ -19180,7 +19180,7 @@ test("cch-w48-s1: the unanswered /new step asks ONCE, and its exit re-asks", asy
 // claim without even the affordance behind it.
 //
 // WHY THESE ARE NODE PINS AND NOT SMOKE SCENARIOS, stated rather than papered
-// over: the 402 fold is CORPUS-DARK. Not one of the 110 committed scenarios
+// over: the 402 fold is CORPUS-DARK. Not one of the 111 committed scenarios
 // reaches it — the status histogram over the whole corpus is {"200":104,"401":6},
 // there is no 402 anywhere, and POST /v1/launch has no route arm in
 // scenarios.mjs at all. So the smoke absent-arm guard (which covers the six
