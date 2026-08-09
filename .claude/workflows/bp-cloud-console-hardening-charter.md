@@ -2847,6 +2847,54 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 58 REVIEW — grade B+ — FIVE round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; two reviewer commits, one of them a REVERSAL of a slice's central judgement; two round-2 slices deferred by design
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| The identity verdict stops being discarded | `cch-w58-s1-the-identity-verdict-stops-being-discarded` | `loop-epic/a-401-from-the-box-stops-being-filed-as--0-r` | #11102 | `registry_update_status` + `registry_autoupdate` + `commit_distance` **55 / 0**; `mix format` clean |
+| A 409 is `already_running`, not a refusal | `cch-w58-s2-a-refusal-is-not-a-started-run` | `loop-epic/an-http-409-stops-being-recorded-as-a-su-1-r` | #11103 | `autoupdate_rollout_worker` + `registry_autoupdate` **37 / 0**; `mix format` clean |
+| `unreachable` stops meaning two things | `cch-w58-s3-unreachable-stops-meaning-two-things` | `loop-epic/the-usage-meter-stops-telling-a-paying-u-2` (builder's, unchanged) | #11104 | `usage_test` + `usage_route_test` **83 / 0**; `__app.test.mjs` **1020 / 0** |
+| The domain checklist checks the name the plane serves | `cch-w58-s4-domain-status-checks-the-name-the-plane-serves` | `loop-epic/the-domain-checklist-stops-blaming-dns-p-3` (builder's, unchanged) | #11105 | `domain_status_test` **52 / 0** |
+| The act paths stop spending the admin credential on a suspended box | `cch-w54-bl-other-admin-token-backed-paths-ignore-suspension` | `loop-epic/the-act-paths-stop-spending-the-admin-cr-4` (builder's, unchanged) | #11106 | `router_self_update` + `router_rollback` **22 / 0**; full `cloud` suite **3479 / 3**, all three pre-existing census rows on `internal/cloudclient/deliveries.go` |
+
+**What landed.** The hourly identity question stops being asked into a void (S1): the bare catch-all in
+`refresh_update_status/1` becomes six named outcomes and the verdict is PERSISTED in
+`barkparks.update_unavailable_reason`, cleared by `force_change/3` on a decodable 200 so a stale accusation cannot
+outlive a recovery. A paying customer stops being told "we could not reach your box" when the box answered and refused
+our credential (S3) — three catch-alls split on delivered-vs-not, three new atoms, and the browser sentence beside its
+siblings in the same PR, proved through the real route AND through `usage_samples` because the cached fleet strip reads
+the persisted map. The domain checklist stops blaming DNS propagation for a hostname nothing ever creates (S4, D690),
+and its 18-site tautologous harness — which fed the fake exactly the name the code asked for — is broken as part of the
+slice. And the seventh suspension hole is shut (cch-w54-bl): self-update and rollback refuse a suspended box as a
+sibling `cond` clause ABOVE the relay, asserted ON THE WIRE FIRST.
+
+**THE REVERSAL, AND WHY IT MATTERS MORE THAN THE SLICE.** S2 shipped reading an HTTP 409 from the trigger POST as the
+box REFUSING us: it paused the box and stepped past it to a second box in the same tick. The instance's own handler
+answers 409 for exactly ONE reason — `already_running`
+(`api/lib/barkpark_web/controllers/self_update_controller.ex` `trigger/2`) — and `trigger_self_update/2` relays the
+status intact. So a 409 is a run IN FLIGHT that this tick did not start, whose ordinary producer is a customer pressing
+Apply in the Console. As built, the slice would have (a) disabled autoupdate on a merely-busy box until an operator
+resumed it and (b) triggered a SECOND box mid-run, making the worker's own moduledoc promise — *"every instance is
+proven live on the new release before the next is touched"* — unsupportable. **This wave was one merge away from
+MINTING the class of claim the epic exists to remove.** The reviewer reversed it: mark in flight, let the settle grace
+bound it, do not pause, do not walk. What survives is the honest log (main said `triggered <slug> (HTTP 409)` for a run
+it never triggered) and two regression pins that SAY IN THE FILE that they pass on main too. The builder had named the
+instance-side meaning of 409 as their single biggest blind spot and could not reach it inside their FILES fence — the
+fence worked as a scope control and failed as an evidence boundary, which is the process lesson.
+
+**LEDGER.** All five tasks claimed, stamped as the builders worked, left `in_progress` with the merge-gated criteria
+open for the lead — clean. One fix: S2's criteria 0-3 were stamped met for behaviour the reversal removed, and the
+ledger **refuses a met:true → met:false patch**, so each carries a `[WITHDRAWN BY WAVE REVIEW]` evidence prefix instead.
+Read the evidence, not the flag. Reviewer commits: S1's `bad_shape` rung had no producer (a word naming a state the
+plane could not reach) — wired to the undecodable-200 arm and pinned in both directions.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** Round 2 is already filed and blocked only on these merges, in this order: merge
+round 1, then `cch-w58-s6-the-console-states-the-binding-it-already-receives` (needs S3 merged — both edit `app.js`),
+then `cchi-w58-credential-egress-register` (needs S1 + S3 + cch-w54-bl merged, so this wave's refusals are its built-in
+positive controls). Beyond that: `relay_admin/4` is still unguarded, so a future third caller inherits the suspension
+bug the router now refuses at two call sites — the honest fix is a clause head on the funnel; and nothing yet READS
+`update_unavailable_reason`, so S1's win is not visible to a human until a console rung shows it.
+
 ### 2026-08-09 — wave 57 REVIEW — grade A — EIGHT round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; six reviewer commits; zero round-2 deferrals; the wave audited what the console says when something ENDS, and closed three of its own builders' stated ceilings
 
 | Slice | Task | Final branch | PR | Gate re-run by the reviewer |
