@@ -17050,7 +17050,12 @@ test("cch-w34-s1: the absence-as-answer census runs clean against the shipped ap
   const censusPath = fileURLToPath(new URL("./__unknown_census.mjs", import.meta.url));
   const r = spawnSync(process.execPath, [censusPath], { encoding: "utf8" });
   assert.equal(r.status, 0, "the census must equal its pin:\n" + r.stdout + r.stderr);
-  assert.match(r.stdout, /OK: the absence-as-answer set equals its 5-site pin\./);
+  // cch-w66-s3: FOUR, not five. loadSite left the population under the REMOVE
+  // arm — its deployments read now has a real not-ok arm and the list says so —
+  // and its ALLOWLIST row was deleted rather than left to describe a tree that
+  // has moved. The other four sites of cch-w34-bl-five-remaining-absence-
+  // collapses are untouched and still pinned.
+  assert.match(r.stdout, /OK: the absence-as-answer set equals its 4-site pin\./);
   // The five positive controls are PRESENT and unflagged — that is the proof it
   // discriminates rather than counting `|| []` idioms.
   assert.match(r.stdout, /controls present : presenceChip lifecyclePill catalogViewState metricsAgeText freshnessModel/);
@@ -17059,6 +17064,7 @@ test("cch-w34-s1: the absence-as-answer census runs clean against the shipped ap
   // Neither fixed loader may still be in the population.
   assert.ok(r.stdout.indexOf("loadInstanceSites") === -1);
   assert.ok(r.stdout.indexOf("loadTokens") === -1);
+  assert.ok(r.stdout.indexOf("loadSite") === -1, "cch-w66-s3: nor the site card's deployments read");
 });
 
 // ── cch-w36-s3 · A ROLE WE DO NOT KNOW IS NOT A ROLE OF "MEMBER" ───────────
@@ -20205,4 +20211,117 @@ test("cch-w61-s2: siteRollbackFailure stops printing 'A deploy is already runnin
   // emitting the box's typed code alongside the detail — is filed, not faked.
   assert.equal(hooks.siteRollbackRefusalTerminal(422, refused), false,
     "a slug the console cannot classify keeps the retry — we do not guess a permanent no from prose");
+});
+
+// ── cch-w66-s3 · AN ABSENCE IS NOT A FAILURE (the site card) ───────────────
+// loadSite's guard was `sr.status === 404 || !sr.ok || !sr.data || !sr.data.site`,
+// and `!sr.ok` swallowed every non-2xx AND api()'s {ok:false, status:0}
+// transport envelope — so SIX distinct statuses painted the byte-identical
+// "Site not found / It may have been removed." A wifi blip, a slot-flip 502 and
+// a genuine deletion were one sentence, on this console's highest-reachability
+// screen.
+//
+// The fix is a BRANCH SPLIT, not a copy replacement: GET /v1/sites/:id 404s for
+// not-yours, already-gone and bad-id alike, so the HEDGED sentence is correct
+// THERE and must survive byte for byte. Route 404 into the fault card and the
+// console silences a genuine deletion — the exact inverse lie — so that arm is
+// pinned on its own, byte-equal, below.
+//
+// The ground was undebted when these were written: `grep -c 'Site not found'`
+// on origin/main's __app.test.mjs was 0, so none of this can be vacuous.
+
+// The 404 card, VERBATIM as it shipped before this slice — it was written
+// inline inside loadSite (grep -n 'function loadSite' app.js) and now lives in
+// siteLoadFailureHtml's first arm. Byte equality here IS the anti-regression
+// ratchet: it is what a careless predicate breaks.
+const W66_S3_NOT_FOUND_CARD =
+  '<div class="empty-state"><h2>Site not found</h2>' +
+  '<p>It may have been removed. <a href="#sites">Back to sites</a>.</p></div>';
+
+// A fetch that REJECTS — the only way to get api()'s real {ok:false, status:0,
+// transport} envelope, which is the shape a wifi blip actually produces.
+const deadNetworkFetch = () => Promise.reject(new TypeError("Failed to fetch"));
+
+test("cch-w66-s3: the site-load mapper is hookable (RED on origin/main, where it does not exist)", () => {
+  assert.equal(typeof hooks.siteLoadFailureHtml, "function", "siteLoadFailureHtml must be drivable");
+  assert.equal(typeof hooks.deployLoadFailureHtml, "function", "deployLoadFailureHtml must be drivable");
+});
+
+test("cch-w66-s3: SIX STATUSES, TWO OUTCOMES — only a 404 may speak of a removal", async () => {
+  // Every envelope below is built by the SHIPPED api(), not hand-written, so
+  // the mapper is judged on the values it actually receives in the browser.
+  const faults = [
+    ["status 0 (transport)", await driveApi(deadNetworkFetch, "GET", "/v1/sites/s1")],
+    ["403", await driveApi(fetchStub(403, { error: "forbidden" }), "GET", "/v1/sites/s1")],
+    ["500", await driveApi(fetchStub(500, { error: "server_error" }), "GET", "/v1/sites/s1")],
+    ["502 (proxy HTML)", await driveApi(proxyFaultFetch(502, "text/html", NGINX_502), "GET", "/v1/sites/s1")],
+    ["504", await driveApi(fetchStub(504, { error: "server_error" }), "GET", "/v1/sites/s1")],
+  ];
+  for (const [label, r] of faults) {
+    const html = hooks.siteLoadFailureHtml(r);
+    assert.ok(html.indexOf("Site not found") === -1,
+      label + ": a failed read must never assert the site is gone");
+    assert.ok(html.indexOf("may have been removed") === -1,
+      label + ": the hedged deletion sentence belongs to the 404 arm alone");
+    assert.match(html, /Couldn't load this site/, label + ": the failure is STATED");
+    assert.match(html, /id="site-load-retry"/, label + ": recovery is offered");
+  }
+  // …and each one says something DIFFERENT about what actually happened.
+  assert.match(hooks.siteLoadFailureHtml(faults[0][1]), /network|offline|connection/i,
+    "status 0 names the transport, not the server");
+  assert.match(hooks.siteLoadFailureHtml(faults[2][1]), /broke on our side/,
+    "a 5xx names US as the party at fault");
+  assert.match(hooks.siteLoadFailureHtml(faults[1][1]), /access to this site/,
+    "a 403 says WHICH read was refused, not a sentence about another screen");
+  // The 502's recovered proxy body reaches the surface, escaped, never as markup.
+  const gateway = hooks.siteLoadFailureHtml(faults[3][1]);
+  assert.match(gateway, /The server replied/);
+  assert.match(gateway, /502 Bad Gateway/);
+  assert.ok(gateway.indexOf("<html") === -1 && gateway.indexOf("<center") === -1,
+    "the upstream page is escaped into text, never mounted as markup");
+
+  // THE SIXTH STATUS, AND THE INVERSE LIE THIS SLICE MUST NOT COMMIT: a real
+  // 404 keeps the hedged copy, BYTE FOR BYTE. Flip the mapper's predicate so
+  // 404 falls through to the fault card and this equality reds — which is what
+  // stops a future refactor from silencing a genuine deletion.
+  const gone = await driveApi(fetchStub(404, { error: "not_found" }), "GET", "/v1/sites/s1");
+  assert.equal(gone.status, 404);
+  assert.equal(hooks.siteLoadFailureHtml(gone), W66_S3_NOT_FOUND_CARD,
+    "a 404 keeps the pre-slice card verbatim — a deletion must stay speakable");
+  // The same claim by its other route: a 200 whose body carries no site.
+  const empty = await driveApi(fetchStub(200, { site: null }), "GET", "/v1/sites/s1");
+  assert.equal(hooks.siteLoadFailureHtml(empty), W66_S3_NOT_FOUND_CARD,
+    "a 200 with no site in it is an absence, not a failure");
+  // Total over junk: an absent read is a FAULT, never a fabricated deletion.
+  assert.match(hooks.siteLoadFailureHtml(null), /Couldn't load this site/);
+});
+
+test("cch-w66-s3: THE DEPLOYMENTS ARM IS HONEST TOO — a failed read is not an empty history", async () => {
+  const r = await driveApi(fetchStub(500, { error: "server_error" }), "GET", "/v1/sites/s1/deployments");
+  // BEFORE: loadSite folded this to [] and deployListHtml painted the empty
+  // state — an invitation to Deploy over state the console could not read.
+  const failed = hooks.deployListHtml([], "dep-9", null, r);
+  assert.ok(failed.indexOf("No deployments yet") === -1,
+    "a failed deployments read must never be painted as a site that never built");
+  assert.ok(failed.indexOf("Trigger the first build with Deploy") === -1,
+    "and it must never invite a write over state it could not read");
+  assert.match(failed, /Couldn't load deployments/);
+  assert.match(failed, /broke on our side/);
+  assert.match(failed, /id="site-deploys-retry"/);
+
+  // The site read SUCCEEDING while the deployments leg 500s — the whole detail
+  // card renders, and only the list says so.
+  const site = { id: "s1", name: "acme", slug: "acme", current_deployment_id: "dep-9", domains: ["acme.com"] };
+  const full = hooks.siteDetailHtml(site, null, [], "acme.com", [], "grant", r);
+  assert.match(full, /Couldn't load deployments/, "the failure surfaces inside the rendered site card");
+  assert.ok(full.indexOf("No deployments yet") === -1);
+
+  // AND THE EMPTY STATE SURVIVES: a site that genuinely never built still reads
+  // as one. (The tempting one-liner — treat [] as a fault — would trade this
+  // lie for its mirror image.)
+  const genuinelyEmpty = hooks.deployListHtml([], "dep-9", null, null);
+  assert.match(genuinelyEmpty, /No deployments yet/);
+  assert.match(genuinelyEmpty, /Trigger the first build with Deploy/);
+  assert.match(hooks.deployListHtml([], "dep-9", null), /No deployments yet/,
+    "the pre-slice 3-arg call site (renderDeployList) is untouched");
 });

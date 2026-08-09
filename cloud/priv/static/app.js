@@ -495,6 +495,60 @@
       '<p><button class="btn btn-primary btn-sm" id="inst-load-retry" type="button">Retry</button></p></div>';
   }
 
+  // cch-w66-s3 — THE SITE CARD STOPS ASSERTING A DELETION IT NEVER OBSERVED.
+  // loadSite's guard folded `!sr.ok` into the not-found arm, so api()'s
+  // {ok:false, status:0} transport envelope (a wifi blip), a 403, a 500 and a
+  // slot-flip 502 ALL told the person their site "may have been removed" — an
+  // absence indistinguishable from a failure, on this screen's highest-
+  // reachability path.
+  //
+  // THIS IS A BRANCH SPLIT, NOT A COPY REPLACEMENT. GET /v1/sites/:id 404s for
+  // not-yours, already-gone and bad-id alike, so the HEDGED sentence is the
+  // right one THERE and survives byte for byte — as does the 200-with-no-site
+  // body, which is the same claim arriving by a different route. Route 404 into
+  // the fault card and the console SILENCES a genuine deletion: the exact
+  // inverse lie, which is why that arm carries its own pinned assertion.
+  //
+  // Everything else takes the fleetLoadErrorHtml shape (its working precedent,
+  // ZERO new CSS): readFailureCopy's honest classification — 5xx names us, a
+  // status 0 names the transport class, a 403 says WHICH read was refused —
+  // faultDetail's recovered proxy body, and a Retry that is wired in loadSite.
+  function siteLoadFailureHtml(r) {
+    r = r || {};
+    if (r.status === 404 || (r.ok && !(r.data && r.data.site))) {
+      return '<div class="empty-state"><h2>Site not found</h2>' +
+        '<p>It may have been removed. <a href="#sites">Back to sites</a>.</p></div>';
+    }
+    var detail = faultDetail(r.text);
+    return '<div class="empty-state"><h2>Couldn\'t load this site</h2>' +
+      // The 4xx fallback is DESIGNED for this read and deliberately is not the
+      // shared "Check your connection and retry." sentence: readFailureCopy
+      // routes status 0 to the transport class and 5xx to the server sentence,
+      // so the only statuses that ever reach this string are answers ABOUT the
+      // request, where blaming the network would be the lie next door.
+      "<p>" + esc(readFailureCopy(r, "You don't have access to this site.", "That site couldn't be loaded, and the answer didn't say why.")) + "</p>" +
+      (detail ? '<p class="muted">The server replied: ' + esc(detail) + "</p>" : "") +
+      '<p><button class="btn btn-primary btn-sm" id="site-load-retry" type="button">Retry</button> ' +
+      '<a href="#sites">Back to sites</a></p></div>';
+  }
+
+  // cch-w66-s3, the same slice's second arm: a failed DEPLOYMENTS read is not an
+  // empty history. loadSite still degrades res[1] to [] for the consumers that
+  // read the SITE for truth (the status chip, the rollback gate, the stage rail
+  // — see the current_deployment_id note above), but the LIST is the one place
+  // where [] is a SENTENCE: "No deployments yet. Trigger the first build with
+  // Deploy." on a site with a hundred builds, inviting a write over state the
+  // console could not read. No Retry here — the site-level Retry above reloads
+  // both legs, and this card is only ever painted beside a site that rendered.
+  function deployLoadFailureHtml(r) {
+    r = r || {};
+    var detail = faultDetail(r.text);
+    return '<div class="empty-state"><h2>Couldn\'t load deployments</h2>' +
+      "<p>" + esc(readFailureCopy(r, "You don't have access to this site's deployments.", "The deployment history couldn't be loaded, and the answer didn't say why.")) + "</p>" +
+      (detail ? '<p class="muted">The server replied: ' + esc(detail) + "</p>" : "") +
+      '<p><button class="btn btn-ghost btn-sm" id="site-deploys-retry" type="button">Retry</button></p></div>';
+  }
+
   // =========================================================== TOAST primitive
   // toast({ kind, title, body, action, duration }) — kind: success|error|info.
   // action: { label, onClick }. Auto-dismisses; X closes early.
@@ -12050,12 +12104,19 @@
       var sr = res[0];
       if (sr.status === 404 || !sr.ok || !sr.data || !sr.data.site) {
         setBreadcrumb(null);
-        box.innerHTML = '<div class="empty-state"><h2>Site not found</h2>' +
-          '<p>It may have been removed. <a href="#sites">Back to sites</a>.</p></div>';
+        // cch-w66-s3: the guard still names every case this screen cannot
+        // render; siteLoadFailureHtml decides WHICH of them it is — a deletion
+        // we can hedge about, or a failure we must state.
+        box.innerHTML = siteLoadFailureHtml(sr);
+        var slr = $("#site-load-retry");
+        if (slr) slr.addEventListener("click", function () { loadSite(id); });
         return;
       }
       var site = sr.data.site;
       var deployments = (res[1].ok && res[1].data && res[1].data.deployments) || [];
+      // cch-w66-s3: the read that FAILED, kept beside the value it degraded to,
+      // so the list can speak while every other consumer keeps its safe [].
+      var deployFault = res[1] && res[1].ok ? null : res[1] || {};
       var previews = (res[3] && res[3].ok && res[3].data && res[3].data.previews) || [];
       var bp = (res[2] || []).filter(function (x) { return String(x.id) === String(site.barkpark_id); })[0];
       var domain = (site.domains && site.domains[0]) || site.slug || site.name || "site";
@@ -12068,7 +12129,9 @@
       setScopeLabel(parseHash(), shellNavLayer(parseHash()));
       // cch-w48-s2 (D539): the ONE authority read this screen takes, taken HERE
       // and threaded in — #site-github is the only admin-gated control on it.
-      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority());
+      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority(), deployFault);
+      var dlr = $("#site-deploys-retry");
+      if (dlr) dlr.addEventListener("click", function () { loadSite(id, { quiet: true }); });
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       var srb = $("#site-rollback");
@@ -12221,7 +12284,7 @@
   // "unknown" (/v1/me in flight or failed), a stale answer, and an OMITTED
   // argument all take the closed arm. That last case matters — a call site
   // that never heard about this parameter must not silently re-open the door.
-  function siteDetailHtml(site, bp, deployments, domain, previews, authority) {
+  function siteDetailHtml(site, bp, deployments, domain, previews, authority, deployFault) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
     // ssw8 (D82): the content binding, derived once for the rail rows below.
@@ -12236,7 +12299,7 @@
     // (deployment_id:null "previous release" note). Stale/expired flashes resolve to
     // null so the panel reads normally.
     var flashView = siteRollbackFlashView(siteRollbackFlash[String(site.id)], site, Date.now());
-    var list = deployListHtml(deployments, site.current_deployment_id, flashView);
+    var list = deployListHtml(deployments, site.current_deployment_id, flashView, deployFault);
     var rollbackBanner = deployRollbackBannerHtml(flashView);
     // stw5 (D25): the one-honest-click SITE rollback — offered only when there's a
     // live release AND at least one prior deployment to fall back to. The SERVER owns
@@ -12785,7 +12848,11 @@
   // The production deployment list markup — shared by the initial site render
   // and the optimistic post-promote repaint so the empty state and the Current
   // chip logic can never drift between the two paint paths.
-  function deployListHtml(deployments, currentId, flash) {
+  function deployListHtml(deployments, currentId, flash, fault) {
+    // cch-w66-s3: a read that FAILED is not a history that is EMPTY. The
+    // optimistic repaint path (renderDeployList) passes no fault — it only ever
+    // paints a list it just received.
+    if (fault) return deployLoadFailureHtml(fault);
     if (!deployments || !deployments.length) {
       return '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
     }
@@ -23047,6 +23114,10 @@
       // bytes a reader: the excerpt derivation and the card that renders it.
       api: api,
       faultDetail: faultDetail, fleetLoadErrorHtml: fleetLoadErrorHtml,
+      // cch-w66-s3: the site card's two honest mappers — the branch that keeps
+      // the hedged deletion sentence for a 404, and the one that states a
+      // failure it actually observed for everything else.
+      siteLoadFailureHtml: siteLoadFailureHtml, deployLoadFailureHtml: deployLoadFailureHtml,
       // cch-w30-s5: the crash-vs-validation copy switch. Node drives it with the
       // router's real crash envelope so the RENDERED sentence is pinned, not
       // just the wire bytes.
