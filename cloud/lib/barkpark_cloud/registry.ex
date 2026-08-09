@@ -3825,8 +3825,11 @@ defmodule BarkparkCloud.Registry do
   NEVER raises, and ALWAYS best-effort-persists on failure: any failure mode —
   not live, no/tampered admin token, transport error, non-200 (a pre-feature
   instance 404s the endpoint), undecodable body — lands `update_state:
-  "unknown"` on the row (with a fresh `update_checked_at`) and returns
-  `{:error, reason}`. A 200 with a `"check"` map persists its state (whitelisted
+  "unknown"` on the row and returns `{:error, reason}`. `update_checked_at` is
+  refreshed only when a check was ACTUALLY made (cch-w65): the three rungs that
+  return before a request is built — not live, no admin token, tampered token —
+  leave the column exactly as they found it. A 200 with a `"check"` map
+  persists its state (whitelisted
   against `Barkpark.update_states/0`, anything else → `"unknown"`), the
   running/latest releases, and the check time, returning `{:ok, bp}`.
 
@@ -3946,19 +3949,41 @@ defmodule BarkparkCloud.Registry do
   # no-usable-verdict it was. The write itself is best-effort too (a
   # changeset/DB failure never masks the original reason), and every atom that
   # reaches here is in `Barkpark.update_unavailable_reasons/0`.
+  #
+  # THE CLOCK RECORDS A CHECK THAT WAS ACTUALLY MADE (cch-w65). Three of the
+  # nine rungs return BEFORE any request is built — `:no_admin_token`,
+  # `:decrypt_failed` and `:not_live` — so no bytes ever left this plane and
+  # there is no check whose time could be recorded. Stamping one there is the
+  # control plane inventing evidence about a box it never spoke to, and the
+  # console shipped a client-side apology (`UPDATE_REFUSAL_UNCLOCKED`) to teach
+  # the browser which three of nine server rungs to disbelieve.
+  @unclocked_reasons [:no_admin_token, :decrypt_failed, :not_live]
+
   defp persist_update_unknown(bp, reason) do
     _ =
       bp
-      |> Barkpark.update_status_changeset(%{
-        update_state: "unknown",
-        update_running_release: nil,
-        update_latest_release: nil,
-        update_checked_at: DateTime.utc_now(),
-        update_unavailable_reason: Atom.to_string(reason)
-      })
+      |> Barkpark.update_status_changeset(update_unknown_attrs(reason))
       |> Repo.update()
 
     {:error, reason}
+  end
+
+  defp update_unknown_attrs(reason) do
+    attrs = %{
+      update_state: "unknown",
+      update_running_release: nil,
+      update_latest_release: nil,
+      update_unavailable_reason: Atom.to_string(reason)
+    }
+
+    # OMITTED, never an explicit `nil` (charter D789). A box that answered
+    # honestly an hour ago and has since lost its `url` still HAS a true
+    # last-checked time; writing nil would erase it and trade one lie for
+    # another. A never-checked row simply stays NULL, which every reader
+    # already renders honestly (`digest_email.format_ts(nil) -> "never"`).
+    if reason in @unclocked_reasons,
+      do: attrs,
+      else: Map.put(attrs, :update_checked_at, DateTime.utc_now())
   end
 
   defp string_field(v) when is_binary(v) and v != "", do: v
