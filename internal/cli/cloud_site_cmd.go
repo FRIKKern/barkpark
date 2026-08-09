@@ -943,6 +943,13 @@ func siteAbandonmentText(d cloudclient.SiteDeployment) string {
 // blind to every row older than it rather than degraded by a fraction. Seven
 // live abandoned rows carry NULL columns today and the sentence is all they have.
 //
+// On `main` today the prose arm is the ONLY reachable one — nothing writes the
+// columns on an abandoned row until PR #11209 merges (see
+// `siteAbandonmentBound`). The column-first order is kept anyway because it is
+// the ruled one and because it needs no edit the day #11209 lands, whose
+// `deferral_depth: prior + 1` is by construction the number this regex reads
+// out of the same call's sentence.
+//
 // A PRESENT-BUT-UNUSABLE COLUMN IS "NO DEPTH", NEVER A PROSE RE-READ: the
 // control plane has answered, and falling through would let a stale sentence
 // contradict the column on the same row.
@@ -969,9 +976,21 @@ func siteAbandonmentDepth(d cloudclient.SiteDeployment) (int, bool) {
 // "12 unless capacity, then 6" in Go would hardcode the control plane's
 // per-cause budget in a second place — the precise mistake charter D195 names.
 //
-// So on a pre-column row depth and cause render and the bound does NOT. That
-// asymmetry is the coverage signal, honestly rendered: a zero here would read as
-// "abandoned against a budget of nothing".
+// So on a row without the column, depth and cause render and the bound does
+// NOT. That asymmetry is the coverage signal, honestly rendered: a zero here
+// would read as "abandoned against a budget of nothing".
+//
+// ON `main` TODAY THAT IS EVERY ABANDONED ROW, verified in the producer rather
+// than taken on trust: the abandonment arm is `fail(ctx,
+// abandonment_reason(reason, prior + 1, cause))` and `fail/2` writes only
+// `status` / `failure_reason` / `detail` — the column triple is written on the
+// DEFERRED arm alone. PR #11209 (`dr-w28-s6-abandonment-stamps-its-own-columns`,
+// open, unmerged) is what starts writing them, with `deferral_depth: prior + 1`
+// — the SAME number `abandonment_reason/3` interpolates, pinned there by
+// `assert abandoned.failure_reason =~ "refused #{abandoned.deferral_depth}
+// rebuilds in a row"`. So the two arms below cannot disagree, and this key is
+// simply unreachable until #11209 lands: MERGE THAT FIRST, or ship this knowing
+// `abandonment_bound` is dead until it does.
 func siteAbandonmentBound(d cloudclient.SiteDeployment) (int, bool) {
 	if d.DeferralBound == nil || *d.DeferralBound < 1 {
 		return 0, false
