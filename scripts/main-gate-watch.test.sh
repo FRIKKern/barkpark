@@ -503,6 +503,51 @@ grep -q "CONFIGURATION FAULT" "$OUT" && ok "the runs fault is labelled CONFIGURA
 rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/runs-forbidden.json")"
 if [ "$rc" = "3" ]; then ok "a recorded 403 body from the runs endpoint -> exit 3, not a verdict"; else bad "403 runs body -> expected exit 3, got $rc"; cat "$OUT" >&2; fi
 
+# ADDED IN REVIEW (cch-w61). This is the one predictable way the new read fails
+# after merge: GH_TOKEN is `secrets.BREAKGLASS_TOKEN || github.token`, and a
+# fine-grained PAT without Actions: read 403s HERE while branch protection and
+# check-runs keep reading fine. Exit 3 is honest; a fault that recurs every 30
+# minutes and does not say how to clear itself is how a watch gets muted. So the
+# FORBIDDEN arm must name the credential AND the permission, not just complain.
+#
+# Asserted ON THE SOURCE, and that limitation is the point rather than a dodge:
+# the hermetic harness cannot reach `gh`, so the recorded 403 BODY above lands in
+# the UNREADABLE arm (a file body is not JSON), never in FORBIDDEN. Scanning the
+# FORBIDDEN block itself is the strongest hermetic statement available — the same
+# discipline §3d already uses for the 401/403 classifier and §7 uses for
+# protection. A live 403 is still unproven here; it is proven only by the
+# workflow running.
+# Anchored on the RUNS case block by name — there is an earlier `FORBIDDEN)` arm
+# on the protection reader, and a bare /FORBIDDEN)/ match lands on that one.
+forbidden_block="$(awk '/case "\$tip_runs" in/{f=1} f{print} f && /^  esac$/{exit}' "$WATCH" \
+  | awk '/^    FORBIDDEN\)$/{f=1} f{print} f && /return 3 ;;/{exit}')"
+if grep -q "Actions: read" <<<"$forbidden_block"; then
+  ok "the FORBIDDEN arm names the PERMISSION that clears it (Actions: read)"
+else
+  bad "the FORBIDDEN arm does not name Actions: read — the operator is told there is a fault, not how to fix it"
+fi
+if grep -q "GH_TOKEN" <<<"$forbidden_block" && grep -q "BREAKGLASS_TOKEN" <<<"$forbidden_block"; then
+  ok "the FORBIDDEN arm names the CREDENTIAL that needs it, and the secret that overrides the default"
+else
+  bad "the FORBIDDEN arm does not name GH_TOKEN / BREAKGLASS_TOKEN"
+fi
+# The specimen must be a real extraction, not an empty string that greps false
+# in both directions and quietly turns two assertions into noise.
+if [ "$(printf '%s\n' "$forbidden_block" | wc -l)" -ge 5 ]; then
+  ok "the FORBIDDEN block was actually extracted ($(printf '%s\n' "$forbidden_block" | wc -l | tr -d ' ') lines) — the two assertions above scanned something"
+else
+  bad "the FORBIDDEN block extraction is empty or truncated; the assertions above prove nothing"
+fi
+# ...and it is not boilerplate pasted onto every fault: the UNREADABLE arm is a
+# different diagnosis (the endpoint answered garbage) and must NOT claim a
+# permission fix would help.
+rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/runs-garbage.json")"
+if ! grep -q "Actions: read" "$OUT"; then
+  ok "the UNREADABLE arm does NOT prescribe the permission remedy — a wrong remedy is worse than none"
+else
+  bad "the permission remedy leaked onto the UNREADABLE arm, which is not a credential fault"; cat "$OUT" >&2
+fi
+
 rc="$(run_watch 2e72d2948 "$FX/2e72d2948.json" "$FX/protection.json" "$WATCH" "$FX/does-not-exist.json")"
 if [ "$rc" = "3" ]; then ok "a runs file that does not exist -> exit 3"; else bad "missing runs file -> expected exit 3, got $rc"; cat "$OUT" >&2; fi
 

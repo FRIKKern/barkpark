@@ -363,6 +363,21 @@ EOF
       red "That read is what separates 'no check-run row has been created YET' from 'this commit was never"
       red "judged'. Without it every young tip reads as never-judged, which is the false red this watch was"
       red "repaired to stop emitting. This run FAILS rather than guessing."
+      red ""
+      # THE REMEDY, NAMED (added in review, cch-w61). Exit 3 is honest, but a
+      # fault that recurs every 30 minutes and does not say how to clear itself
+      # is how a watch gets muted by the people it is shouting at. This is the
+      # one predictable way the new read fails: the workflow runs `gh` under
+      # GH_TOKEN, which is `secrets.BREAKGLASS_TOKEN` when that secret exists and
+      # `github.token` otherwise. The workflow's own `permissions:` block already
+      # grants `actions: read`, so `github.token` is fine — but a fine-grained
+      # PAT in BREAKGLASS_TOKEN carries its own scope set and that grant does
+      # not reach it.
+      red "REMEDY: whatever credential \$GH_TOKEN carries needs Actions: read on this repository."
+      red "  This workflow's own permissions: block already grants actions: read, so the DEFAULT"
+      red "  github.token is sufficient. If secrets.BREAKGLASS_TOKEN is set, it OVERRIDES that token"
+      red "  and must carry the Actions: read permission itself — a fine-grained PAT without it 403s"
+      red "  here on every scheduled run while branch protection and check-runs still read fine."
       return 3 ;;
     UNREADABLE)
       red "CONFIGURATION FAULT — the workflow runs on $sha could not be read (repos/<repo>/actions/runs)."
