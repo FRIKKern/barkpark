@@ -1,0 +1,876 @@
+defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
+  @moduledoc """
+  SIDE B of the deletion law: the READERS an instrument key actually has, read
+  off the consumer trees' SOURCE.
+
+  ## The definition, ruled in charter D453
+
+  A READER IS A CODE PATH THAT NAMES THE KEY.
+
+  Not "the bytes reach a human". `census.Raw = body` (`internal/cloudclient/
+  client.go:2261`) piped to `fmt.Fprintln` (`internal/cli/cloud_deploy_census_cmd.go:222`)
+  really does put the control plane's exact bytes — `coalesced_attempts`
+  included — in a terminal under `-o json`. It is still TRANSPORT, not
+  readership, on three grounds: no Go field, render or test names the key, so
+  deleting it reds nothing reader-side; the DEFAULT `-o table` render omits it;
+  and a byte pipe prints absence and presence IDENTICALLY, i.e. that "reader"
+  structurally cannot lose (D397). A verbatim passthrough is a pipe, and a pipe
+  is not an audience.
+
+  ## The corpus — POSITIVELY declared, five trees, three casings
+
+  `@roots` is a positive declaration. A SUBTRACTIVE corpus ("everything except
+  …") is how D441's went vacuous, and D442's went dark for a different reason:
+  IT OMITTED `api/`. The instance half of every control-plane instrument lives
+  there — `internal/agent/report.go:639` holds the probe and
+  `api/lib/barkpark_web/router.ex:1633` MOUNTS the route it probes — so a corpus
+  without `api/` cannot see the reader half of a cross-tree instrument and
+  scores it dark by construction. `test "the api/ half of the corpus is
+  LOAD-BEARING"` measures exactly that: dropping `api/` loses real reader files
+  for a key that has them.
+
+  Three casings, always: `queued_stall_seconds`, `queuedStallSeconds`,
+  `QueuedStallSeconds`. The wire is snake, the JS/Go locals are camel, the Go
+  struct fields are Pascal — a snake-only sweep scores every Go struct field
+  ZERO and calls a decoded key dark.
+
+  ## What is NOT a reader — and the direction this errs in
+
+  A COMMENT is not a code path. `cloud_deploy_census_cmd.go:538` said
+  *"`coalesced_attempts` now lands on the row but is not in this envelope"* —
+  false on main (`deploy_ledger.ex:893` emits it inside `census/3`) — and D442
+  scored that one comment as this key's single "reader hit". A sentence about a
+  key cannot stop the key from being deleted, so it is not readership.
+
+  The stripper is line-anchored: a line whose FIRST non-space characters are
+  `//`, `#`, `*`, `/*` or `<!--` is dropped. It therefore still counts a
+  TRAILING comment on a code line, and still counts a block-comment body line
+  that starts with a word. That is deliberate and it is the SAFE direction: an
+  over-counted reader can only ever PROTECT an instrument from deletion. It
+  never authorises one. The unsafe direction — under-counting, i.e. deleting an
+  instrument something reads — is the one this bias cannot produce. The cost is
+  named honestly below: an over-count can also MASK the loss of a real reader on
+  a `:has_reader` row.
+
+  `.json` is not in `@extensions`. A JSON fixture naming a key is DATA, not a
+  code path, by the same rule that refuses the comment — and admitting it would
+  drag `api/priv/codex_app_server_schema/**` (a vendored protocol schema) into
+  the corpus as a phantom audience.
+
+  ## SUBSTRING, not identifier-boundary — and why, measured
+
+  A boundary-anchored match (`(?<![A-Za-z0-9_])name(?![A-Za-z0-9_])`) was the
+  first cut and it LOST THE CENSUS'S OWN CONTROL: `internal/agent/report.go:639`
+  reads `const requestStatsPath = "/v1/instance/request-stats"`, and the trailing
+  `Path` makes `requestStats` fail the right-hand boundary. A compound identifier
+  built out of the key's name is still a code path that names the key — that is
+  how Go names a route constant and how Pascal fields compose. So the match is a
+  plain SUBSTRING over the three casings. It over-counts (a longer identifier
+  that merely embeds the name scores as a reader), and that is the same safe
+  direction the comment stripper errs in: an over-count can only PROTECT an
+  instrument from deletion, never authorise one.
+  """
+
+  # The repo root, walked with `Path.dirname/1` rather than a parent-relative
+  # path literal. THIS IS NOT COSMETIC AND IT IS NOT FREE — read the DISPATCH
+  # BLINDNESS paragraph in the census's own moduledoc.
+  # `scripts/cloud-path-escape-check.sh` resolves every parent-relative string
+  # literal in `cloud/**` against `CLOUD_PATHS`; `internal`, `web`, `js` and
+  # `api` are not declared there, and the declaration lives in a file this slice
+  # does not own (dr-w26-s4). A parent-relative literal naming those trees fails
+  # that gate on arrival — measured, not assumed: writing one here reds it with
+  # `UNCOVERED repo-root read: internal`, which is exactly the honest complaint
+  # the moduledoc records and files rather than silences.
+  #
+  # Walking with `Path.dirname/1` does not BUY dispatch coverage — it only stops
+  # a gate from failing over a declaration this slice cannot make. The gap is
+  # real and is written down where a reader will find it.
+  @repo_root __DIR__ |> Path.dirname() |> Path.dirname() |> Path.dirname()
+
+  # THE READER CORPUS. Positively declared; five trees.
+  @roots ~w(internal cloud/priv/static web js api)
+
+  @extensions ~w(.go .ex .exs .heex .ts .tsx .js .mjs .cjs .jsx .html .css)
+
+  # Refused by name: build output and vendored dependencies are not code anyone
+  # in this repo can be said to have written a reader in.
+  @refused_dirs ~w(node_modules _build deps dist .next .git coverage cover)
+
+  @comment_starts ["//", "#", "*", "/*", "<!--"]
+
+  @type hit :: %{file: binary(), line: pos_integer(), text: binary()}
+
+  @doc "The repo root this scan is anchored to."
+  @spec repo_root() :: binary()
+  def repo_root, do: @repo_root
+
+  @doc "The declared corpus roots."
+  @spec roots() :: [binary()]
+  def roots, do: @roots
+
+  @doc "The declared source extensions."
+  @spec extensions() :: [binary()]
+  def extensions, do: @extensions
+
+  @doc """
+  The three casings of an instrument key: snake, camel, Pascal.
+
+      iex> variants("queued_stall_seconds")
+      ["queued_stall_seconds", "queuedStallSeconds", "QueuedStallSeconds"]
+  """
+  @spec variants(binary()) :: [binary()]
+  def variants(key) do
+    parts = String.split(key, "_")
+    pascal = parts |> Enum.map_join(&String.capitalize/1)
+    camel = hd(parts) <> (parts |> tl() |> Enum.map_join(&String.capitalize/1))
+
+    [key, camel, pascal] |> Enum.uniq()
+  end
+
+  @doc """
+  Every corpus file, as repo-relative paths.
+
+  A root that does not exist is a NAMED refusal, never an empty list: "no files
+  under `api/`" and "no reader under `api/`" are the same green, and only one of
+  them is true.
+  """
+  @spec files(keyword()) :: [binary()]
+  def files(opts \\ []) do
+    opts
+    |> Keyword.get(:roots, @roots)
+    |> Enum.flat_map(fn root ->
+      abs = Path.join(@repo_root, root)
+
+      unless File.dir?(abs) do
+        raise ArgumentError,
+              "ReaderScan: declared corpus root #{root} does not exist at #{abs}. " <>
+                "A missing tree scans zero files and reports every instrument reader-less. " <>
+                "Re-point @roots rather than deriving a deletion from an absent corpus."
+      end
+
+      abs
+      |> walk()
+      |> Enum.map(&Path.relative_to(&1, @repo_root))
+    end)
+    |> Enum.sort()
+  end
+
+  @doc """
+  `%{key => [hit]}` — every non-comment line in the corpus naming any casing of
+  any key. One pass over the corpus for all keys at once.
+  """
+  @spec hits([binary()], keyword()) :: %{binary() => [hit()]}
+  def hits(keys, opts \\ []) do
+    keys = Enum.uniq(keys)
+    table = Map.new(keys, &{&1, variants(&1)})
+    all = table |> Map.values() |> List.flatten() |> Enum.uniq()
+
+    empty = Map.new(keys, &{&1, []})
+
+    opts
+    |> files()
+    |> Enum.reduce(empty, fn file, acc ->
+      source = File.read!(Path.join(@repo_root, file))
+
+      # Binary prefilter: most files name none of the keys, and `contains?/2`
+      # over a literal list is far cheaper than a per-line regex.
+      if String.contains?(source, all) do
+        source
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.reduce(acc, fn {line, n}, acc -> record(line, n, file, table, acc) end)
+      else
+        acc
+      end
+    end)
+  end
+
+  @doc """
+  True when the line's first non-space characters open a comment.
+
+  Line-anchored on purpose — see the moduledoc's account of what this misses and
+  which direction the miss errs in.
+  """
+  @spec comment?(binary()) :: boolean()
+  def comment?(line) do
+    trimmed = String.trim_leading(line)
+    trimmed != "" and Enum.any?(@comment_starts, &String.starts_with?(trimmed, &1))
+  end
+
+  defp record(line, n, file, table, acc) do
+    if comment?(line) do
+      acc
+    else
+      Enum.reduce(table, acc, fn {key, vs}, acc ->
+        if String.contains?(line, vs) do
+          Map.update!(acc, key, &[%{file: file, line: n, text: String.trim(line)} | &1])
+        else
+          acc
+        end
+      end)
+    end
+  end
+
+  defp walk(dir) do
+    dir
+    |> File.ls!()
+    |> Enum.reject(&(&1 in @refused_dirs))
+    |> Enum.flat_map(fn entry ->
+      path = Path.join(dir, entry)
+
+      cond do
+        File.dir?(path) -> walk(path)
+        Path.extname(path) in @extensions -> [path]
+        true -> []
+      end
+    end)
+  end
+end
+
+defmodule BarkparkCloud.ReaderLessInstrumentCensus.Stay do
+  @moduledoc """
+  THE STAY PREDICATE — re-derived, never inherited (charter D452).
+
+  An instrument may be reader-less and still stay, but only for a stated reason,
+  and rider 1 ("an open PR names it") is DEAD AS WRITTEN. Re-derived on
+  2026-08-09 against the three PRs the epic's own table stayed instruments for:
+
+      #10811  OPEN  DIRTY  36 check-runs  25 SUCCESS + 11 SKIPPED  0 failures  newest 2026-08-08T11:42:08Z
+      #11007  OPEN  DIRTY  36 check-runs  29 SUCCESS +  7 SKIPPED  0 failures  newest 2026-08-08T16:39:37Z
+      #11008  OPEN  DIRTY  32 check-runs  25 SUCCESS +  7 SKIPPED  0 failures  newest 2026-08-08T16:40:46Z
+
+  All three are 100% success-or-skipped with ZERO failures, and NONE of them can
+  merge. GitHub attaches a PR's checks to its HEAD sha and never re-fires them
+  when the BASE advances: `origin/main` moved to `0239dd4ee` at
+  2026-08-08T23:48:12Z, hours after the newest of those runs. #10811's rollup
+  literally reads `Required-check spec gate SUCCESS` on a PR that is
+  CONFLICTING. A green check-run is therefore not evidence the PR is alive; it
+  is evidence about a tree that no longer exists.
+
+  RULED, and implemented here as `stayed?/1`:
+
+      state == "OPEN"
+        AND mergeStateStatus != "DIRTY"
+        AND deciding_check_at > base_moved_at
+
+  `clauses/1` returns the three legs separately, because a stay that fails must
+  say WHICH leg refused — "not stayed" alone would let a DIRTY PR and a stale
+  green be confused for one another, which is precisely the confusion that let
+  three dead PRs hold instruments alive for a wave.
+
+  NOT THE MERGE PREDICATE. #11009 is UNSTABLE and must still land. This function
+  answers one question only: may a reader-less instrument keep its life on the
+  strength of this PR.
+  """
+
+  @type facts :: %{
+          required(:state) => binary(),
+          required(:merge_state_status) => binary(),
+          required(:deciding_check_at) => DateTime.t(),
+          required(:base_moved_at) => DateTime.t()
+        }
+
+  @doc "The three legs, named, as `{leg, boolean}`."
+  @spec clauses(facts()) :: [{atom(), boolean()}]
+  def clauses(f) do
+    [
+      open: f.state == "OPEN",
+      not_conflicting: f.merge_state_status != "DIRTY",
+      check_newer_than_base: DateTime.compare(f.deciding_check_at, f.base_moved_at) == :gt
+    ]
+  end
+
+  @doc "True only when all three legs hold."
+  @spec stayed?(facts()) :: boolean()
+  def stayed?(f), do: f |> clauses() |> Enum.all?(fn {_leg, ok?} -> ok? end)
+
+  @doc "The legs that refused, by name."
+  @spec refusals(facts()) :: [atom()]
+  def refusals(f), do: for({leg, false} <- clauses(f), do: leg)
+end
+
+defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
+  @moduledoc """
+  THE READER-LESS INSTRUMENT CENSUS — the deletion law, as code that can lose
+  (deploy-reliability wave 26, charter D452 + D453 + D454 + D456 + D459).
+
+  ## The defect this exists to end
+
+  Twenty-five waves of this epic could ADD an instrument and could not SUBTRACT
+  one. The law was ratified as PROSE (D442) and no wave shipped it, so the
+  register of what nobody reads was a table in a markdown file that went stale
+  about three of its own rows before it was even merged. A pipeline that only
+  accretes has no way to be wrong about an instrument: every number it ever
+  built is still there, still green, still unread.
+
+  ## The shape — a declaration checked against a derivation
+
+  SIDE A: `@register`, committed. Every row names its `key`, `what` it reports,
+  the `surface` its bytes appear on, the `audience` that can read that surface,
+  a REQUIRED `reason`, a `disposition`, and — when reader-less — a `stay`.
+
+  SIDE B: `ReaderScan` derives the key's readers from five trees of source.
+
+  THE ASSERTIONS, and both directions can lose:
+
+    * a `:has_reader` row whose derived readers are EMPTY reds — a reader was
+      taken away and nothing else said so;
+    * a `:stay` or `:deleted` row whose derived readers are NON-EMPTY reds as
+      ROT — the row's excuse stopped being true, and the fix is to delete the
+      ROW (this is the good direction);
+    * a `:stay` row whose stay does not hold TODAY reds — rider-1 stays are
+      re-derived at build time, never read off a table;
+    * a `:deleted` row whose key still appears in `cloud/lib` reds — a deletion
+      that did not happen is not a deletion.
+
+  ## COUNTING WHICH HUMAN (D456)
+
+  Every row names `surface` AND `audience`, and `audience` is not decoration.
+  On 2026-08-08 the fleet took a 4h55m five-site outage and something DID
+  report it: `notification_deliveries` carries exactly 30 rows in the window —
+  18 `alert/email/deployment_failed` and 12 `alert/email/agent_unreachable`, all
+  `status=sent`, ALL TO ONE ADDRESS, `frikk@guerrilla.no`, the tenant's own
+  user. Not one platform recipient. `deployment_failed` would score as
+  "instrumented, has a reader" under any law that counts code paths alone, while
+  being — from the seat of the party who could act — exactly as blind as no
+  instrument at all. So a reader column that names only a surface is a lie of
+  omission, and this register refuses to have one.
+
+  ## THIS GUARD'S OWN BLINDNESS — read it before trusting a green (D459)
+
+  This census inherits the go-tag census's hole and does not close it.
+  `Go.all_tags/1` is a file-global union of NAMES, so it measures vocabulary,
+  not coverage: turning `SiteDeleteResult.Status` (`internal/cloudclient/client.go:1701`,
+  a name declared at 11 sites) into `json:"-"` — the reader STOPS DECODING a
+  live envelope key — leaves that census at 13 tests, 0 failures AND
+  `go test ./internal/cloudclient/...` green, mutation-proved on main. 82 of 228
+  names (36.0%) and 190 of 418 tag sites (45.5%) are silently deletable.
+  THE SAME HOLE IS HERE, in the same shape: this file asks whether the NAME
+  appears anywhere in the corpus, so a struct field that still carries the name
+  but has stopped decoding the key still scores as a reader. A green row here
+  means "some code path names this key", never "this key is decoded". The only
+  fix that can lose is `dr-w23-s6-register-per-struct-unread`, and it is NOT
+  this wave — so the blindness is written down instead of covered over.
+
+  Two further limits, stated rather than discovered later:
+
+    * DISPATCH. `.github/workflows/cloud.yml` dispatches this suite on
+      `cloud/**` and the paths declared in `scripts/cloud-path-escape-check.sh`.
+      `internal/`, `web/`, `js/` and `api/` are NOT declared there, so a commit
+      that adds a reader ONLY in those trees does not re-run this census; the
+      ROT is caught on the next cloud-touching commit, not on the commit that
+      caused it. That declaration lives in a file dr-w26-s4 owns, so it is filed
+      (`dr-w26-followup-reader-corpus-dispatch`), not smuggled into this slice.
+    * FAILING OPEN. An instrument nobody registered is invisible here, exactly
+      as `deploy_signal_audience_census_test.exs` admits of its own registry.
+      Nothing syntactic closes that hole. `queued_seconds` is the honest
+      example: it is emitted by `platform_delivery.ex:356`, has zero readers in
+      all five trees, and is NOT in the register below because its disposition
+      is a later slice's call, not this one's — filed as
+      `dr-w26-followup-queued-seconds-disposition`.
+  """
+
+  use ExUnit.Case, async: true
+
+  alias BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan
+  alias BarkparkCloud.ReaderLessInstrumentCensus.Stay
+
+  @cloud_lib Path.join([ReaderScan.repo_root(), "cloud", "lib"])
+
+  # ---------------------------------------------------------------------------
+  # SIDE A — THE INSTRUMENT REGISTER
+  #
+  # `reason` is REQUIRED on every row: a register whose rows do not say why they
+  # are there decays into a junk drawer, and a junk drawer cannot order a
+  # deletion. `surface` is where the bytes land; `audience` is WHICH HUMAN can
+  # be at that surface (D456).
+  # ---------------------------------------------------------------------------
+  @register [
+    %{
+      key: "publish_clock",
+      what:
+        "the publish→web clock: how long a human's publish waited before the bytes it produced were live",
+      surface:
+        "GET /v1/sites/:id/deployments — a sibling node on the JSON body (was router.ex:7110)",
+      audience:
+        "a SESSION-authenticated member of the site's own team, and nobody else: the route is session-only (D219), so no PAT, no CI credential and no platform seat could ever read it — and no client, page or script in five trees ever decoded the node",
+      reason:
+        "ruled the epic's vital in W11, written in W12, given a production caller in W14, and read by zero code paths in thirteen waves. Zero readers across all five corpus trees, no open PR names it, and its stay under any rider is empty. THE FIRST DELETION (dr-w26-s6).",
+      disposition: :deleted,
+      stay: nil
+    },
+    %{
+      key: "coalesced_attempts",
+      what:
+        "how many deploy attempts the ledger collapsed into one row — the denominator that decides whether a failure rate is measuring deploys or measuring coalescing",
+      surface:
+        "GET /v1/deploy-ledger/census — emitted inside DeployLedger.census/3 (deploy_ledger.ex:893)",
+      audience:
+        "NOBODY today. The default `-o table` render omits it, and no Go field, render or test names it; `-o json` prints the control plane's bytes verbatim, which is transport and not readership (D453).",
+      reason:
+        "D442 scored this key '1 reader hit'. That hit was the COMMENT at internal/cli/cloud_deploy_census_cmd.go:538 — 'coalesced_attempts now lands on the row but is not in this envelope' — which is FALSE on main, since deploy_ledger.ex:893 emits it inside census/3. The comment is deleted by this slice, not cited. The true reader count is 0.",
+      disposition: :stay,
+      # RIDER 2, and it is the whole reason this row is not the second deletion.
+      # #10811 names this key and is OPEN — and its stay FAILS the re-derived
+      # predicate (DIRTY, and its newest check predates the base movement), so
+      # rider 1 buys this row nothing. What protects it is DATA.
+      stay:
+        {:data,
+         "the COLUMN is data, not an instrument: deployments.coalesced_attempts (deployment.ex:206) is written by auto_deploy_worker.ex:412 across ~31,697 rows. What is deletable here is the EMISSION plus this row plus the false comment. '`coalesced_attempts` is deletable' must never become 'drop the column'."}
+    },
+    %{
+      key: "queued_self_seconds",
+      what:
+        "the queue leg a delivery spent waiting on ITSELF — the self-inflicted half of a deploy's queue wait",
+      surface:
+        "PlatformDelivery.to_json/1 (platform_delivery.ex:357), on the deliveries envelope",
+      audience:
+        "nobody today — the timeline that renders these legs is the slice in flight, and until it lands no terminal, page or email carries the number",
+      reason:
+        "zero rendered-bytes readers, hits in exactly three files (schema, migration, test), and never written on prod (0 of 1 rows non-null). Under a naive reading of D442 the cleanest delete target in the epic — and deleting it would delete the measurement the wave is building. D454: NOT exempted from the corpus, because exempting is how D441's corpus went vacuous. It is registered, it is scored, and its stay is named.",
+      disposition: :stay,
+      stay:
+        {:slice, ["dr-w26-s3", "dr-w26-s5"],
+         "dr-w26-s3 builds the reader (the deliveries timeline renders the legs) and dr-w26-s5 builds the writer, both in THIS wave. If either misses, this row's red is the correct outcome and the honest line in the wave report — not a reason to widen the stay."}
+    },
+    %{
+      key: "queued_pickup_seconds",
+      what: "the queue leg spent waiting for a runner to pick the delivery up",
+      surface:
+        "PlatformDelivery.to_json/1 (platform_delivery.ex:358), on the deliveries envelope",
+      audience:
+        "nobody today — same as its two siblings: the leg is emitted, and no surface renders it",
+      reason:
+        "same measured state as queued_self_seconds: zero rendered-bytes readers, three source hits, never written on prod. Registered rather than exempted (D454).",
+      disposition: :stay,
+      stay:
+        {:slice, ["dr-w26-s3", "dr-w26-s5"],
+         "dr-w26-s3 builds the reader and dr-w26-s5 builds the writer, both in THIS wave. A missed slice reds this row; that red is the honest report."}
+    },
+    %{
+      key: "queued_stall_seconds",
+      what:
+        "the queue leg that is neither self-inflicted nor pickup — the stall nobody owns, which is the one worth alerting on",
+      surface:
+        "PlatformDelivery.to_json/1 (platform_delivery.ex:359), on the deliveries envelope",
+      audience:
+        "nobody today — and this is the leg whose absence a platform operator would most need, which is exactly why it is not a delete target",
+      reason: "same measured state as its two siblings. Registered rather than exempted (D454).",
+      disposition: :stay,
+      stay:
+        {:slice, ["dr-w26-s3", "dr-w26-s5"],
+         "dr-w26-s3 builds the reader and dr-w26-s5 builds the writer, both in THIS wave. A missed slice reds this row; that red is the honest report."}
+    },
+    %{
+      key: "failure_class",
+      what: "the ledger's NAMED cause for a failed deployment (DeployLedger.classify/1)",
+      surface:
+        "GET /v1/sites/:id/deployments and its per-deployment sibling; rendered in the status header by `bp cloud site status`",
+      audience:
+        "the site's own team, in their terminal — internal/cloudclient/client.go:1207 decodes it into SiteDeployment.FailureClass and internal/cli/cloud_site_cmd.go:1983 renders it. A HUMAN-facing reader, held here as the register's positive control.",
+      reason:
+        "a register with no reachable instrument in it cannot demonstrate that the derivation works at all — a census where every row is reader-less passes identically when the scanner is broken. This row is the one that reds if ReaderScan stops finding anything.",
+      disposition: :has_reader,
+      stay: nil
+    },
+    %{
+      key: "request_stats",
+      what:
+        "the instance's own request rate and p95, probed each beat by the agent's ReqStatsProbe",
+      surface:
+        "GET /v1/instance/request-stats on the INSTANCE, mounted at api/lib/barkpark_web/router.ex:1633",
+      audience:
+        "the fleet agent (a machine) on the read side, and the instance operator through the vitals it feeds — held here for a second reason: it is the row that proves the corpus needs api/",
+      reason:
+        "its two halves live in DIFFERENT trees: internal/agent/report.go:639 names the route it probes, api/lib/barkpark_web/router.ex:1633 mounts it, and five more api/ files name the identifier. D442's corpus omitted api/ entirely, so a key whose readership lives there scored dark by construction. This row makes that concrete and testable.",
+      disposition: :has_reader,
+      stay: nil
+    }
+  ]
+
+  # THE ANTI-VACUITY FLOOR. A deleted register row would otherwise be a silent
+  # green — zero instruments examined is zero reader-less instruments found.
+  # Lowered only in the same commit as the instrument that went away.
+  @register_floor 7
+
+  # The corpus floor, per root. A `find` that silently returns nothing (a moved
+  # tree, a refused-dirs change that eats a whole root) reports every instrument
+  # reader-less, which is the deletion law's most dangerous failure mode.
+  @corpus_floor 400
+
+  # ---------------------------------------------------------------------------
+  # THE THREE STAYED PRs — re-derived 2026-08-09 with `gh pr view`, and the base
+  # movement re-derived with `git log -1 origin/main`. Facts, not verdicts: the
+  # verdict is computed by `Stay.stayed?/1` below.
+  # ---------------------------------------------------------------------------
+  @base_moved_at ~U[2026-08-08 23:48:12Z]
+  @base_head "0239dd4ee662dd30c4d8da0c6b9a149638224b1d"
+
+  @stayed_prs [
+    %{
+      pr: 10811,
+      names: "coalesced_attempts",
+      state: "OPEN",
+      merge_state_status: "DIRTY",
+      check_runs: 36,
+      failures: 0,
+      deciding_check_at: ~U[2026-08-08 11:42:08Z],
+      base_moved_at: @base_moved_at
+    },
+    %{
+      pr: 11007,
+      names: "the delivery timeline's queue legs",
+      state: "OPEN",
+      merge_state_status: "DIRTY",
+      check_runs: 36,
+      failures: 0,
+      deciding_check_at: ~U[2026-08-08 16:39:37Z],
+      base_moved_at: @base_moved_at
+    },
+    %{
+      pr: 11008,
+      names: "platform_deliveries rollback/no-op",
+      state: "OPEN",
+      merge_state_status: "DIRTY",
+      check_runs: 32,
+      failures: 0,
+      deciding_check_at: ~U[2026-08-08 16:40:46Z],
+      base_moved_at: @base_moved_at
+    }
+  ]
+
+  setup_all do
+    keys = Enum.map(@register, & &1.key)
+    {:ok, hits: ReaderScan.hits(keys), keys: keys}
+  end
+
+  # ---------------------------------------------------------------------------
+  # THE REGISTER ITSELF
+  # ---------------------------------------------------------------------------
+
+  test "every row carries a REQUIRED reason and names both its SURFACE and its AUDIENCE" do
+    assert length(@register) >= @register_floor,
+           "the register shrank to #{length(@register)} rows (floor #{@register_floor}). " <>
+             "Lower the floor in the same commit as the instrument that went away, or restore the row."
+
+    for row <- @register do
+      for field <- [:key, :what, :surface, :audience, :reason] do
+        value = Map.fetch!(row, field)
+
+        assert is_binary(value) and String.trim(value) != "",
+               "#{row.key}: #{field} is empty. Every row states why it is here, where its bytes " <>
+                 "land, and WHICH HUMAN can be at that surface — a row missing any of the three " <>
+                 "cannot order or refuse a deletion."
+      end
+
+      assert row.disposition in [:has_reader, :stay, :deleted],
+             "#{row.key}: unknown disposition #{inspect(row.disposition)}"
+
+      # The audience column is the D456 lesson: a surface with no named
+      # population is how `deployment_failed` scored as instrumented while
+      # every one of its 30 alerts went to one tenant address.
+      refute row.audience == row.surface,
+             "#{row.key}: audience must name a POPULATION, not repeat the surface."
+    end
+  end
+
+  test "the corpus is FIVE trees including api/, and it searches snake, camel and Pascal" do
+    assert ReaderScan.roots() == ~w(internal cloud/priv/static web js api)
+
+    assert "api" in ReaderScan.roots(),
+           "api/ is the tree D442's corpus omitted, and omitting it is why a cross-tree " <>
+             "instrument scores dark by construction."
+
+    assert ReaderScan.variants("queued_stall_seconds") ==
+             ["queued_stall_seconds", "queuedStallSeconds", "QueuedStallSeconds"]
+
+    files = ReaderScan.files()
+
+    assert length(files) >= @corpus_floor,
+           "the corpus collapsed to #{length(files)} files (floor #{@corpus_floor}). " <>
+             "A corpus that scans nothing reports every instrument reader-less."
+
+    for root <- ReaderScan.roots() do
+      assert Enum.any?(files, &String.starts_with?(&1, root <> "/")),
+             "corpus root #{root} contributed ZERO files — it moved, or @extensions no longer " <>
+               "covers anything in it."
+    end
+  end
+
+  test "the scanner CAN find a reader: the control at internal/agent/report.go", ctx do
+    control = ReaderScan.hits(["request_stats"])["request_stats"]
+
+    assert Enum.any?(control, &(&1.file == "internal/agent/report.go" and &1.line == 639)),
+           """
+           the control is missing. internal/agent/report.go:639 reads
+
+               const requestStatsPath = "/v1/instance/request-stats"
+
+           — a code path in `internal/` that NAMES the sibling route. It is the
+           control for every zero this census reports out of that same tree: if
+           this line cannot be found, a zero is a grep artefact, not an absence.
+
+           found instead: #{inspect(Enum.take(control, 5))}
+           """
+
+    # And the register's own positive control resolves.
+    assert ctx.hits["failure_class"] != [],
+           "failure_class has no derived reader — the derivation is broken, not the instrument."
+  end
+
+  test "the api/ half of the corpus is LOAD-BEARING" do
+    with_api = ReaderScan.hits(["request_stats"])["request_stats"]
+
+    without_api =
+      ReaderScan.hits(["request_stats"], roots: ReaderScan.roots() -- ["api"])["request_stats"]
+
+    api_files =
+      with_api |> Enum.filter(&String.starts_with?(&1.file, "api/")) |> Enum.map(& &1.file)
+
+    assert api_files != [],
+           "no api/ reader found for request_stats — either the route moved or api/ is not " <>
+             "actually being scanned, and D442's blind spot is back."
+
+    assert length(without_api) < length(with_api),
+           """
+           dropping api/ changed nothing, so the corpus's api/ half is decorative.
+           This test exists because D442's corpus OMITTED api/ and therefore
+           could not see the reader half of a cross-tree instrument.
+           """
+  end
+
+  # ---------------------------------------------------------------------------
+  # THE TWO DIRECTIONS
+  # ---------------------------------------------------------------------------
+
+  test "an instrument declared to HAVE a reader still has one", ctx do
+    assert violations(@register, ctx.hits, :lost_reader) == [],
+           """
+           a `:has_reader` row derives ZERO readers. Its reader was taken away and
+           nothing else said so.
+
+           #{fmt(violations(@register, ctx.hits, :lost_reader))}
+           """
+  end
+
+  test "a reader-less row that GAINED a reader reds as ROT — delete the row", ctx do
+    assert violations(@register, ctx.hits, :rot) == [],
+           """
+           a row declared reader-less (`:stay` or `:deleted`) now derives readers.
+           THIS IS THE GOOD DIRECTION: its closer landed, or the deletion was
+           reverted. Delete the register row, or re-declare it `:has_reader`.
+
+           #{fmt(violations(@register, ctx.hits, :rot))}
+           """
+  end
+
+  test "MUTATION: a fake reader-less instrument declared `:has_reader` REDS" do
+    fake = %{
+      key: "publish_clock_shadow_metric",
+      what: "a metric nothing emits and nothing reads",
+      surface: "nowhere",
+      audience: "nobody at all",
+      reason: "the mutation that proves this census can lose",
+      disposition: :has_reader,
+      stay: nil
+    }
+
+    register = @register ++ [fake]
+    hits = ReaderScan.hits(Enum.map(register, & &1.key))
+
+    assert hits["publish_clock_shadow_metric"] == []
+
+    assert [%{key: "publish_clock_shadow_metric", kind: :lost_reader}] =
+             violations(register, hits, :lost_reader)
+  end
+
+  test "MUTATION: a reader-less row given a REAL reader reds as ROT" do
+    # `failure_class` genuinely has readers (client.go:1207, cloud_site_cmd.go).
+    # Declaring it `:stay` is exactly the shape of a stale allowlist row.
+    rotten = %{
+      key: "failure_class",
+      what: "the ledger's named failure cause",
+      surface: "GET /v1/sites/:id/deployments",
+      audience: "the site's own team",
+      reason: "the mutation that proves a stale stay cannot hide behind a green",
+      disposition: :stay,
+      stay: {:data, "a stay that stopped being true"}
+    }
+
+    register = Enum.reject(@register, &(&1.key == "failure_class")) ++ [rotten]
+    hits = ReaderScan.hits(Enum.map(register, & &1.key))
+
+    assert [%{key: "failure_class", kind: :rot} = v] = violations(register, hits, :rot)
+    assert v.readers > 0
+  end
+
+  test "the comment stripper refuses a comment and keeps the code line" do
+    assert ReaderScan.comment?("// `coalesced_attempts` now lands on the row")
+    assert ReaderScan.comment?("  # a prose mention")
+    assert ReaderScan.comment?("   * a block-comment continuation")
+    refute ReaderScan.comment?("  CoalescedAttempts int `json:\"coalesced_attempts\"`")
+  end
+
+  # ---------------------------------------------------------------------------
+  # THE STAY
+  # ---------------------------------------------------------------------------
+
+  test "RE-DERIVED: all three stayed PRs FAIL the predicate, though their checks are 100% green" do
+    for pr <- @stayed_prs do
+      assert pr.failures == 0,
+             "#{pr.pr}: this test's premise is that the checks are GREEN — re-derive it."
+
+      refute Stay.stayed?(pr),
+             """
+             #{pr.pr} passes the re-derived stay, which contradicts the measurement
+             this predicate was written from. Re-derive with `gh pr view #{pr.pr}`.
+             """
+
+      assert :not_conflicting in Stay.refusals(pr),
+             "#{pr.pr}: expected mergeStateStatus DIRTY (re-derived 2026-08-09)."
+
+      assert :check_newer_than_base in Stay.refusals(pr),
+             """
+             #{pr.pr}: its deciding check (#{pr.deciding_check_at}) is expected to PREDATE
+             the base movement to #{String.slice(@base_head, 0, 9)} (#{@base_moved_at}).
+             GitHub attaches checks to the head sha and never re-fires them when the base
+             advances, which is why #{pr.check_runs} green check-runs prove nothing about
+             whether this PR can still land.
+             """
+    end
+
+    # The counterfactual: a PR that IS alive passes. Without this the predicate
+    # could be `false` and every assertion above would still hold.
+    alive = %{
+      state: "OPEN",
+      merge_state_status: "UNSTABLE",
+      deciding_check_at: DateTime.add(@base_moved_at, 3600, :second),
+      base_moved_at: @base_moved_at
+    }
+
+    assert Stay.stayed?(alive)
+  end
+
+  test "every `:stay` row's stay is valid TODAY, and no stay is a bare PR reference" do
+    for %{disposition: :stay} = row <- @register do
+      case row.stay do
+        {:data, why} ->
+          assert String.trim(why) != "", "#{row.key}: a :data stay must say what the data IS."
+
+        {:slice, slices, why} ->
+          assert slices != [] and Enum.all?(slices, &(&1 != "")),
+                 "#{row.key}: a :slice stay must NAME the slices that close it."
+
+          assert String.trim(why) != "", "#{row.key}: a :slice stay must say what they build."
+
+        {:pr, facts} ->
+          assert Stay.stayed?(facts),
+                 """
+                 #{row.key}: its PR stay does NOT hold today — refused by #{inspect(Stay.refusals(facts))}.
+                 Rider 1 is re-derived at build time, never inherited: re-derive it, or delete
+                 the instrument.
+                 """
+
+        other ->
+          flunk("#{row.key}: unknown stay #{inspect(other)}")
+      end
+    end
+  end
+
+  test "the three queued_* columns are IN the register, with the stay naming s3 and s5" do
+    for key <- ~w(queued_self_seconds queued_pickup_seconds queued_stall_seconds) do
+      row = Enum.find(@register, &(&1.key == key))
+
+      assert row, """
+      #{key} is not in the register. D454 rules that the three queued_* columns are
+      NOT exempted — exempting the reader-less rows a wave is actively building for
+      is exactly how D441's corpus went vacuous.
+      """
+
+      assert {:slice, slices, _why} = row.stay
+      assert "dr-w26-s3" in slices and "dr-w26-s5" in slices
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # THE DELETION
+  # ---------------------------------------------------------------------------
+
+  test "a `:deleted` row's key is ABSENT from cloud/lib — a deletion that did not happen is not one" do
+    for %{disposition: :deleted} = row <- @register do
+      variants = ReaderScan.variants(row.key)
+
+      residue =
+        @cloud_lib
+        |> ex_files()
+        |> Enum.flat_map(fn file ->
+          file
+          |> File.read!()
+          |> String.split("\n")
+          |> Enum.with_index(1)
+          |> Enum.filter(fn {line, _n} ->
+            not ReaderScan.comment?(line) and Enum.any?(variants, &String.contains?(line, &1))
+          end)
+          |> Enum.map(fn {line, n} ->
+            "#{Path.relative_to(file, ReaderScan.repo_root())}:#{n}: #{String.trim(line)}"
+          end)
+        end)
+
+      assert residue == [],
+             """
+             #{row.key} is declared DELETED but cloud/lib still emits it:
+
+             #{Enum.join(residue, "\n")}
+
+             Either finish the deletion or take the row back to `:stay` WITH a stay
+             that holds today.
+             """
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # helpers
+  # ---------------------------------------------------------------------------
+
+  # The two directions, as data so the mutation tests can drive them.
+  defp violations(register, hits, :lost_reader) do
+    for %{disposition: :has_reader} = row <- register,
+        Map.get(hits, row.key, []) == [],
+        do: %{key: row.key, kind: :lost_reader, readers: 0, sample: []}
+  end
+
+  defp violations(register, hits, :rot) do
+    for %{disposition: d} = row <- register,
+        d in [:stay, :deleted],
+        found = Map.get(hits, row.key, []),
+        found != [],
+        do: %{
+          key: row.key,
+          kind: :rot,
+          readers: length(found),
+          sample: found |> Enum.take(3) |> Enum.map(&"#{&1.file}:#{&1.line}")
+        }
+  end
+
+  defp fmt([]), do: "(none)"
+
+  defp fmt(violations) do
+    Enum.map_join(violations, "\n", fn v ->
+      "  #{v.key} (#{v.kind}, #{v.readers} reader(s)) #{Enum.join(v.sample, ", ")}"
+    end)
+  end
+
+  defp ex_files(dir) do
+    dir
+    |> File.ls!()
+    |> Enum.flat_map(fn entry ->
+      path = Path.join(dir, entry)
+
+      cond do
+        File.dir?(path) -> ex_files(path)
+        Path.extname(path) in [".ex", ".exs", ".heex"] -> [path]
+        true -> []
+      end
+    end)
+  end
+end

@@ -257,10 +257,13 @@ defmodule BarkparkCloud.DeployLedgerReachability.Census do
 
   # `fun(args)` — an UNQUALIFIED call. Counted only while walking the defining
   # file. Elsewhere it is a different module's function that happens to share a
-  # name, and this codebase forks names on purpose: `PublishClock` declares its
-  # own `census/3`, `min_sample/0` and `rate/2`. Counting bare `census(...)` in
-  # publish_clock.ex as a caller of the LEDGER's `census/3` is the exact
-  # false-GREEN this census exists to not produce — measured, then fixed.
+  # name, and this codebase forks names on purpose. The measured precedent was
+  # `PublishClock`, which declared its OWN `census/3`, `min_sample/0` and
+  # `rate/2`: counting bare `census(...)` in publish_clock.ex as a caller of the
+  # LEDGER's `census/3` was the exact false-GREEN this census exists to not
+  # produce — measured, then fixed. That module was DELETED as reader-less
+  # (dr-w26-s6), so the example is history; the rule it proved is not, and the
+  # next forked name will arrive without warning.
   defp record({name, meta, args} = node, names, locals?, acc)
        when is_atom(name) and is_list(args) do
     if locals? and name in names,
@@ -499,9 +502,11 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
     assert measured_in(callers, :reachable) == declared_in(:reachable)
 
     # Every external site must literally name the module. This is the guard
-    # against the collision that fooled the grep sweep: `PublishClock` has its
-    # own `census/3`, `min_sample/0` and `rate/2`, and `apns.ex`/`fcm.ex` have
-    # their own `classify/2`. If this census ever starts counting bare local
+    # against the collision that fooled the grep sweep: `PublishClock` HAD its
+    # own `census/3`, `min_sample/0` and `rate/2` (deleted as reader-less by
+    # dr-w26-s6), and `apns.ex`/`fcm.ex` still have their own `classify/2` —
+    # a LIVE example, so this guard is not defending against history alone.
+    # If this census ever starts counting bare local
     # calls in a foreign file again, this reds.
     for {{name, arity}, sites} <- callers, site <- sites.external do
       line = source_line(site.file, site.line)
