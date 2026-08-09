@@ -325,6 +325,57 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
       assert Enum.all?(layer, &String.starts_with?(&1, "barkpark.")),
              "audit_lifecycle_trigger/5 now mints non-barkpark verbs: #{inspect(sorted(layer))}"
     end
+
+    # cch-w63-s8 — THE HOLE THE THREE LAYER SIZES ABOVE CANNOT SEE.
+    #
+    # Each layer size counts DISTINCT VERBS RESOLVED. That reds when someone
+    # CONVERTS an existing literal call site to a non-literal — the count drops.
+    # It does NOT red when someone ADDS a call site whose verb is a module
+    # attribute, a variable or a function call: the resolved set is unchanged, the
+    # size still matches, and a verb nobody can see is now being written (or, far
+    # likelier, rejected by `validate_inclusion` at runtime while every arm here
+    # reports a clean tree — the 0-failures-over-a-broken-producer shape).
+    #
+    # So count ARITY, not verbs: every call site of a call-site-keyed helper must
+    # carry a quoted verb. Equality in both directions — a call site that stops
+    # carrying one reds, and a regex that stops matching reds too rather than
+    # comparing 0 to 0. The `defp` definition line is excluded by requiring the
+    # helper name NOT to be preceded by `defp `.
+    for {helper, arity_label} <- [
+          {"audit_lifecycle_trigger", "audit_lifecycle_trigger/5"},
+          {"audit_account_security", "audit_account_security/2"}
+        ] do
+      test "every #{arity_label} CALL SITE carries a quoted verb (arity, not verb count)" do
+        name = unquote(helper)
+        call = Regex.compile!("(?<!defp )" <> Regex.escape(name) <> "\\(")
+
+        with_literal =
+          Regex.compile!("(?<!defp )" <> Regex.escape(name) <> "\\([^\"]*\"[a-z0-9_.]+\"")
+
+        calls = for line <- code_lines(@router), Regex.match?(call, line), do: String.trim(line)
+
+        literal =
+          for line <- code_lines(@router), Regex.match?(with_literal, line), do: String.trim(line)
+
+        assert calls != [],
+               "#{unquote(arity_label)} has no call sites at all in router.ex — the helper was " <>
+                 "renamed or removed, and this arm is comparing 0 to 0. Re-point it."
+
+        assert length(calls) == length(literal),
+               """
+               #{unquote(arity_label)} has #{length(calls)} call sites but only #{length(literal)}
+               carry a QUOTED verb. These do not:
+
+                   #{Enum.map_join(calls -- literal, "\n    ", & &1)}
+
+               A call site whose verb is a module attribute, a variable or a function call is
+               invisible to EVERY arm of this census at once — the layer regex above needs the
+               quoted verb at the call site, so the resolved set (and its size) is unchanged and
+               nothing reds. Meanwhile `validate_inclusion` decides at runtime whether the row
+               exists. Pass the verb as a literal, or resolve the new form here explicitly.
+               """
+      end
+    end
   end
 
   describe "the comment stripper (without it, prose invents a producer)" do

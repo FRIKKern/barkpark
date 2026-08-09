@@ -8,10 +8,16 @@ defmodule BarkparkCloud.AccountsAuditTest do
   use BarkparkCloud.DataCase, async: true
 
   import Ecto.Query, only: [from: 2]
+  import Plug.Test
+  import Plug.Conn
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.{AuditEvent, TeamMembership}
+  alias BarkparkCloud.Registry
   alias BarkparkCloud.Repo
+  alias BarkparkCloud.Web.Router
+
+  @router_opts Router.init([])
 
   @password "correct-horse-battery"
 
@@ -297,6 +303,125 @@ defmodule BarkparkCloud.AccountsAuditTest do
       end
 
       assert %AuditEvent{} = Repo.get(AuditEvent, ev.id)
+    end
+  end
+
+  # cch-w63-s8 — THE REFUSED WRITE'S ROW, PROVEN BY PERSISTENCE, NEVER BY SOURCE.
+  #
+  # The audit vocabulary census next door is a SOURCE SCAN and says so in its own
+  # moduledoc: declaring `barkpark.credentials_refused` in `AuditEvent.actions/0`
+  # and writing that string once anywhere in `cloud/lib` satisfies BOTH its arms
+  # unconditionally, whether or not a row is ever persisted. And the failure it
+  # cannot see is not hypothetical: a producer that reaches a shared helper with
+  # the verb in a MODULE ATTRIBUTE is invisible to all four census arms at once —
+  # the literal regex wants a quoted `action: "…"`, the two call-site layers want
+  # a quoted verb at the call site, and the helper's own `action: action,` line is
+  # already excused in `@accounted_indirection` — while `validate_inclusion`
+  # rejects every write at runtime. Zero failures over a producer that has never
+  # written a row.
+  #
+  # So these tests never read source. They drive the REAL routes through
+  # `Router.call/2` against a box that answered our stored admin credential 401
+  # (`update_unavailable_reason == "identity_refused"`), and then ask the DATABASE
+  # what happened. Nothing reaches the wire on this path either: the refusal fires
+  # in `Registry.relay_admin_post/3` ABOVE `reveal_admin_token/1`, so no HTTP
+  # client is involved and no credential is decrypted.
+  describe "a refused instance write leaves a named audit row" do
+    defp owner_with_team do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "owner")
+      {:ok, token} = Accounts.create_user_session_token(user)
+      {Accounts.get_user(user.id), team, token}
+    end
+
+    # A LIVE box whose last probe was REFUTED BY THE BOX ITSELF — the one rung of
+    # `Barkpark.update_unavailable_reasons/0` that makes the plane stop spending
+    # the stored credential (`"forbidden"` is a different fact and does not).
+    defp refused_barkpark(team, overrides \\ %{}) do
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+
+      bp
+      |> Ecto.Changeset.change(
+        Map.merge(
+          %{
+            host: "203.0.113.#{rem(n, 250) + 1}",
+            url: "https://bp-#{n}.barkpark.cloud",
+            suspended: false,
+            update_state: "unknown",
+            update_unavailable_reason: "identity_refused"
+          },
+          overrides
+        )
+      )
+      |> Repo.update!()
+    end
+
+    defp post_as(path, token) do
+      conn(:post, path, "{}")
+      |> put_req_header("content-type", "application/json")
+      |> put_req_header("authorization", "Bearer #{token}")
+      |> Router.call(@router_opts)
+    end
+
+    defp refused_rows do
+      Repo.all(from(e in AuditEvent, where: e.action == "barkpark.credentials_refused"))
+    end
+
+    test "the self-update route's refusal persists exactly one row, reason in metadata" do
+      {user, team, token} = owner_with_team()
+      bp = refused_barkpark(team)
+
+      resp = post_as("/v1/barkparks/#{bp.id}/self-update", token)
+
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "identity_refused"
+
+      # THE DATABASE, not the source tree. One row, and only one.
+      assert [%AuditEvent{} = ev] = refused_rows()
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp.id
+      assert ev.actor_user_id == user.id
+      assert ev.team_id == team.id
+
+      # jsonb round-trips to STRING keys. This map is what `audit_json/1` ships as
+      # `metadata`, what `auditEntry` renames to `payload`, and what
+      # `tlvDetailHtml` prints verbatim as the expanded timeline detail — so the
+      # wire word the 409 carried is the word the operator reads an hour later.
+      assert ev.metadata == %{"reason" => "identity_refused", "attempted" => "self_update"}
+    end
+
+    test "the rollback route's refusal persists its own row, naming the write it refused" do
+      {_user, team, token} = owner_with_team()
+      bp = refused_barkpark(team)
+
+      resp = post_as("/v1/barkparks/#{bp.id}/rollback", token)
+
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "identity_refused"
+
+      assert [%AuditEvent{metadata: metadata}] = refused_rows()
+      assert metadata == %{"reason" => "identity_refused", "attempted" => "rollback"}
+    end
+
+    # ANTI-VACUITY. The row must be bound to THIS refusal, not to "any 409 on this
+    # route": a suspended box is refused by a sibling `cond` clause with the same
+    # status and a different fact (the plane withheld attention; the box was never
+    # asked and never spoke). If this test ever goes green with a row, the
+    # producer has drifted up into the shared refusal path and the verb has
+    # stopped meaning what its @actions comment says it means.
+    test "a SUSPENDED box's 409 is a different fact and writes NO credentials_refused row" do
+      {_user, team, token} = owner_with_team()
+
+      bp =
+        refused_barkpark(team, %{suspended: true, update_unavailable_reason: nil})
+
+      resp = post_as("/v1/barkparks/#{bp.id}/self-update", token)
+
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "suspended"
+      assert refused_rows() == []
     end
   end
 end

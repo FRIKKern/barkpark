@@ -46,6 +46,21 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # (an anchor that must resolve plus a blocker that must stay absent), in
   # test/barkpark_cloud/audit_vocabulary_census_test.exs's @producerless — which
   # reds if a THIRD zero-producer verb joins them.
+  #
+  # WIRE-VOCABULARY MAP (cch-w63-s8), so this epic does not ship the drift it
+  # exists to stop. `barkpark.credentials_refused` is the AUDIT name for the fact
+  # the WIRE calls `identity_refused`: the box answered our stored admin
+  # credential 401, so the control plane refused to spend it again and the write
+  # never left the plane (`Barkpark.update_unavailable_reason` rung
+  # "identity_refused"; the self-update and rollback routes relay 409
+  # `%{code: "identity_refused"}`). The two words are ONE fact in two
+  # vocabularies — the wire says WHY the request never went, the audit register
+  # says WHAT was refused, to WHOM, and by WHOSE hand. The sibling wire word
+  # `suspended` is a DIFFERENT fact (the plane withholds attention; the box was
+  # never asked and never spoke) and deliberately gets no verb here. Reconciling
+  # the two vocabularies is the open row
+  # `cch-w58-bl-two-unavailable-vocabularies-name-one-fact`; this comment is the
+  # MAP, not the merge.
   @actions ~w(
     member.invited member.role_changed member.removed
     invitation.revoked invitation.accepted
@@ -64,7 +79,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     barkpark.site_url_set barkpark.self_update_triggered barkpark.rollback_triggered
     barkpark.autoupdate_changed barkpark.domain_attached
     barkpark.vercel_deploy_triggered barkpark.resurrected
-    barkpark.push_relay_provisioned
+    barkpark.push_relay_provisioned barkpark.credentials_refused
     env_var.created env_var.deleted
     provider.connected provider.disconnected
     github.installation_connected github.installation_disconnected github.repo_pushed
