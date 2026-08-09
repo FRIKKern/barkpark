@@ -835,7 +835,25 @@ jobs:
               ;;
             2)
               verdict REFUSED
-              echo "::error title=CSSOM parity REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT fault, not a stylesheet defect. app.css was never parsed and NO parity claim is being made about it. Do not go looking for a CSS bug: fix the environment (Chrome binary, Node 22, the cssom-heads.baseline sidecar) named in the log above. The bring-up is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
+              # THE SAME CORRECTION AS THE AGGREGATE'S REFUSED ARM, APPLIED TO
+              # THE ONE PER-INSTRUMENT BANNER THAT STILL DISAGREED WITH IT.
+              # This sentence used to read "an ENVIRONMENT fault, not a
+              # stylesheet defect. app.css was never parsed … fix the
+              # environment". Counted in cssom-parity.mjs rather than
+              # remembered, exit 2 has SIX shapes: no global WebSocket (Node
+              # < 22), no stylesheet at $CSS, no Chrome/CHROME not executable,
+              # a MISSING cssom-heads.baseline sidecar, an UNPARSEABLE one, and
+              # a CDP/bring-up failure raised through die() after a bounded
+              # retry. Three of those six are committed files under
+              # cloud/priv/static/__preview__ — repo faults wearing an
+              # "environment" label — and the last one fires AFTER app.css has
+              # been read, so "never parsed" was false there too. The sibling
+              # tier-floor-render and overflow-guard banners already said
+              # "ENVIRONMENT or COVERAGE"; this one now agrees with them and
+              # with the aggregate. scripts/console-path-escape-check.test.sh
+              # drives this exact step body at rc=2 and both asserts the new
+              # cause set and DENIES the two removed claims.
+              echo "::error title=CSSOM parity REFUSED::The instrument refused to measure (exit 2). It made NO parity claim about cloud/priv/static/app.css in either direction — a refusal is the absence of a measurement, not a clean bill and not an accusation. WHY it refused is in this job's own log, above: cssom-parity.mjs prints the cause by name. exit 2 covers SIX causes and only one of them is the runner — no global WebSocket (Node 20 instead of 22); no stylesheet at \$CSS; no Chrome binary, or CHROME pointing at a non-executable; a MISSING cloud/priv/static/__preview__/cssom-heads.baseline sidecar; a sidecar carrying no parseable count; or a CDP bring-up that failed after a bounded retry in a fresh profile (every attempt's Chrome stderr is in the log). THREE of those six are committed files in this repo, so do NOT assume the environment before reading the line the instrument printed."
               exit 1
               ;;
             1)

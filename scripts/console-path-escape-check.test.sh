@@ -1405,7 +1405,11 @@ else
   no "HEADS_BASELINE=/nonexistent -> exit $rc, wanted 1: $out"
 fi
 if has "$out" "title=CSSOM parity REFUSED"; then
-  ok "…and annotates it REFUSED (an ENVIRONMENT fault)"
+  # Deliberately NOT "(an ENVIRONMENT fault)", which is what this label used to
+  # say: the cause driven here is a MISSING cssom-heads.baseline sidecar — a
+  # committed file in cloud/priv/static/__preview__, i.e. the exact repo-side
+  # cause the banner's old copy denied could exist.
+  ok "…and annotates it REFUSED (here: a missing committed sidecar, not the runner)"
 else
   no "…but did not emit the REFUSED annotation: $out"
 fi
@@ -1446,6 +1450,37 @@ css_rc "a real parity miss"       1 1 "title=CSSOM parity DEFECT"
 css_rc "an instrument refusal"    2 1 "title=CSSOM parity REFUSED"
 css_rc "parity holds"             0 0 "authored CSS and the browser agree"
 css_rc "an exit outside the set"  7 1 "title=CSSOM parity UNINTERPRETABLE"
+
+# ── THE REFUSAL BANNER'S COPY, PINNED IN BOTH DIRECTIONS ────────────────────
+# The aggregate's REFUSED arm stopped naming one cause (cases (l)-(r) above),
+# but this per-instrument banner — a DIFFERENT step body, so none of those
+# cases could see it — still said "an ENVIRONMENT fault … app.css was never
+# parsed … fix the environment". Counted in cssom-parity.mjs, exit 2 has six
+# shapes; three are committed files under cloud/priv/static/__preview__ and one
+# fires after app.css has already been read. So the banner sent a reader to the
+# runner for half of its own causes, while its two siblings (tier-floor-render,
+# overflow-guard) already said "ENVIRONMENT or COVERAGE".
+#
+# This runs the REAL step body at rc=2 — the same extraction css_rc uses, so a
+# copy edit that reinstates either removed claim reds here rather than shipping
+# unwitnessed. Mutation-proved: restoring the old sentence in
+# console-harness.yml turns the two `denies` rows red; deleting the cause-set
+# clause turns the two `says` rows red.
+# `|| true`: the step body EXITS 1 on a refusal (that is the point of it), and
+# this file runs under `set -e`.
+REFOUT="$(STUB_RC=2 PATH="$STUBBIN:$PATH" bash --noprofile --norc "$CSS" 2>&1 || true)"
+css_copy() {
+  if has "$REFOUT" "$1"; then ok "$2"; else no "$2 (the banner never says it)"; fi
+}
+css_copy_denies() {
+  if has "$REFOUT" "$1"; then no "$2 (the banner still says it)"; else ok "$2"; fi
+}
+css_copy        "SIX causes"                "the refusal banner names a cause SET, not one cause"
+css_copy        "cssom-heads.baseline"      "…and names the committed sidecar among them"
+css_copy        "do NOT assume the environment" "…and tells the reader not to assume the runner"
+css_copy_denies "an ENVIRONMENT fault, not a stylesheet defect" "…and no longer calls every refusal an environment fault"
+css_copy_denies "app.css was never parsed"  "…and no longer claims the stylesheet was never read"
+css_copy_denies "fix the environment"       "…and no longer sends the reader to the runner"
 # The stub must really be the thing that ran — otherwise every case above
 # measured the real instrument (or nothing) and proves nothing about the wrapper.
 out="$(STUB_RC=0 PATH="$STUBBIN:$PATH" bash --noprofile --norc "$CSS" 2>&1)"
