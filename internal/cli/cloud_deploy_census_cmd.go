@@ -1157,6 +1157,14 @@ func renderDeployCoverageCohorts(out *writer, c *cloudclient.DeployCoverageCohor
 	if basis := strings.TrimSpace(c.Basis); basis != "" {
 		out.outf("  basis: %s", sanitizeCell(basis))
 	}
+	// THE ONE INFERENCE THE SHARED VOCABULARY CANNOT STOP ON ITS OWN (review,
+	// wave 32). "A deferral was covered" reads as "the re-queue worked", which is
+	// true. "A FAILED row was covered" reads as "that failure turned out fine",
+	// which is NOT what was measured: the clock only ever says the SITE rebuilt
+	// afterwards. The basis line above states what COVERED means; this one states
+	// what it does not, because the failed cohort is new here and the wrong
+	// reading of it is the comforting one.
+	out.outf("  and NOT: a COVERED row in the failed cohort means the site is not stuck — never that the failure was repaired or its content shipped")
 	out.outf("  fence: a row is only counted NEVER COVERED once it is older than %s %s",
 		deployDeliveryDuration(float64(c.MaturitySeconds)), deployDeliveryAsOf(c.AsOf))
 

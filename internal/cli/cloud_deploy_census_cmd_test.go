@@ -1382,6 +1382,11 @@ func TestCloudDeploymentsCoverageRendersBothCohorts(t *testing.T) {
 			t.Fatalf("the struck word %q reached the coverage render:\n%s", forbidden, stdout)
 		}
 	}
+	// And the inference the fence alone cannot stop: on the FAILED cohort,
+	// COVERED must be denied the reading "that failure turned out fine".
+	if !strings.Contains(stdout, "never that the failure was repaired") {
+		t.Fatalf("the failed cohort's COVERED must state what it does NOT mean:\n%s", stdout)
+	}
 	t.Logf("`bp cloud deployments` coverage section:\n%s", stdout)
 }
 
