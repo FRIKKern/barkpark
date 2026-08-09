@@ -1,0 +1,129 @@
+# main-gate-watch — the second scream. It reds for as long as main's TIP does
+# not carry a green verdict on every post-merge-reproducible required context,
+# and it reds just as loudly when the tip carries NO verdict at all.
+#
+# WHY THIS EXISTS AT ALL
+#
+# main's required `Cloud gate` was `failure` across three consecutive commits
+# with clean PRs blocked behind it, and nothing in this repo said so: zero
+# `workflow_run` triggers across all 40 workflows, zero notification egress in
+# CI, zero check-run consumers in cloud/lib or internal/, and `gh run list`
+# laundering a job-level red into a run-level `success`. Of the 15 main commits
+# in the window before it, TWELVE concluded `cancelled` — 3 red / 12 UNMEASURED
+# / 0 green. This workflow is the level trigger that keeps asking.
+#
+# WHY THERE IS NO continue-on-error ANYWHERE IN THIS FILE
+#
+# Job-level `continue-on-error: true` still renders a RED check run, but it
+# launders the WORKFLOW RUN to success — and the run conclusion is what
+# notifications, `gh run list` and the rollup read. A scream nobody is paged for
+# is not a scream. This run fails. (Same argument, verbatim in spirit, as
+# breakglass-watch.yml, which this file is modelled on.)
+#
+# WHY A SCHEDULE AND NOT `workflow_run`
+#
+# `workflow_run` is an EDGE trigger tied to one upstream workflow: it fires when
+# THAT workflow finishes and is silent about a workflow that never ran — which
+# is precisely the `cancelled`/MISSING case that dominates the measurement. A
+# tip left without a verdict needs a LEVEL trigger. Residual, stated rather than
+# papered over: a ~30-minute observation window, silence during an Actions
+# outage, and GitHub's 60-day auto-disable of scheduled workflows in an inactive
+# repo.
+#
+# WHY ITS NAME CAN NEVER ENTER THE REQUIRED SET
+#
+# This job reads two GitHub endpoints. Requiring an API-reading check gates every
+# merge on GitHub's availability, which this repo refuses. Two independent
+# structural guards, belt and braces: the watch job carries
+# `if: github.event_name != 'pull_request'` so the name never renders on a PR
+# head the required-checks generator samples, and the pull_request trigger below
+# is paths-filtered besides (generator stage S4).
+
+name: main-gate-watch
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub queues cron under load, so treat this as "within
+    # ~30-45 minutes", never "at :00 and :30".
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    # Deliberately narrow: this trigger exists ONLY so the harness below is not
+    # orphaned. Being paths-filtered also keeps every name in this file out of
+    # the required set (generator stage S4).
+    paths:
+      - "scripts/main-gate-watch.sh"
+      - "scripts/main-gate-watch.test.sh"
+      - ".github/workflows/main-gate-watch.yml"
+
+permissions:
+  contents: read
+  checks: read
+  # NOTE, and it is load-bearing: `administration` is NOT a scope the workflow
+  # `permissions:` key accepts — naming it makes GitHub reject the whole file
+  # and the workflow NEVER RUNS. So GITHUB_TOKEN cannot read branch protection
+  # (that read needs repo-admin scope) and will 403. The watch derives its
+  # required set LIVE from protection on purpose — reading the committed spec
+  # would go stale against the live rule with nobody the wiser — so it runs with
+  # `secrets.BREAKGLASS_TOKEN` when present and falls back to `github.token`.
+  # If that secret is removed, rotated or revoked, the fallback keeps the job
+  # RUNNABLE and it then reds every 30 minutes on the protection read (exit 3).
+  # That red is the honest state of a watch that cannot read what it watches. It
+  # is not a false alarm to silence, and the fix is to restore the secret, never
+  # to soften the classification.
+
+concurrency:
+  group: main-gate-watch-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the watch dark —
+  # which is the exact failure mode (a collapsed run leaving no verdict) this
+  # workflow was built to report.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  main-gate-watch:
+    name: Main gate watch
+    # Never on pull_request: a name that never renders on a PR head can never be
+    # sampled into the required-check spec.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The scream's own tripwire, first. If the read stops being able to fail —
+      # on a RED tip AND on a tip with no verdict at all — the watch below is
+      # decoration, and this run says so before it says anything about main.
+      - name: Prove the watch can lose both ways (main-gate-watch.test.sh)
+        run: bash scripts/main-gate-watch.test.sh
+
+      - name: Does main's tip carry a verdict?
+        env:
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/main-gate-watch.sh --repo "${{ github.repository }}" --branch main || rc=$?
+          case "$rc" in
+            0) exit 0 ;;
+            1) echo "::error::MAIN'S TIP DOES NOT CARRY A GREEN VERDICT on every watched required context (RED, or MISSING — never judged). This run fails, and it will keep failing every 30 minutes until the tip is green."; exit 1 ;;
+            # WAITING is neither a pass nor a scream: a context is still in
+            # flight. Reddening here would false-red every fresh push to main
+            # for as long as CI takes, which is how a watch gets muted.
+            2) echo "::notice::WAITING — a watched context on main's tip is still running. The next scheduled run decides."; exit 0 ;;
+            3) echo "::error::CONFIGURATION FAULT — this run could not read branch protection, or protection requires a context this watch has never classified. A watch with no live authority must not report success. See scripts/main-gate-watch.sh."; exit 1 ;;
+            *) echo "::error::main-gate-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
+  main-gate-watch-harness:
+    name: Main gate watch harness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n scripts/main-gate-watch.sh
+      - name: Both-ways proofs (main-gate-watch.test.sh)
+        run: bash scripts/main-gate-watch.test.sh
