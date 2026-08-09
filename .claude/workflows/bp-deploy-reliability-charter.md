@@ -10174,3 +10174,333 @@ exits green through the workflow (`dr-transport-silence-still-exits-zero` — st
 wave just fixed one layer up, and worse, because there the payload was never read at all); the run-id alibi is
 self-reported and trades a false-positive-prone axis for a false-negative-prone one; and `seal-run.test.sh`
 runs in NO CI at all.
+
+## WAVE 30 — READ IT BACK, AND MAKE THE READING MEAN SOMETHING
+
+Ground re-derived against `origin/main` **839453b70** (it moved off the briefed 02475d0ec mid-run; every claim
+below names which sha produced it). Decisions append from **D510**; nothing above this line is rewritten.
+
+### D510 — THE PROVING WAVE WAS ACTUALLY EXECUTED, AND THE SIXTEEN RESOLVE 13 / 1 / 2.
+
+Wave 28's debrief asked for proof and wave 29 built; wave 29 asked again. Wave 30 ran the reads. **All sixteen
+unmet criteria are now disposed, and the "sixteen" is off by one in a way that matters: only FIFTEEN carry the
+`MERGE-GATED` prefix.** Wave 28 has SEVEN slices, not eight.
+
+| bucket | n | disposition |
+|---|---|---|
+| wave-29 merge stamps | 8 | **MET** — every merge commit is an ancestor of origin/main by `git merge-base --is-ancestor`, not by the lead's claim |
+| wave-28 instrument reads | 5 | **MET, all five, by actually running them** |
+| clock-gated | 1 | w28-s5 — earliest read **2026-08-10T06:00Z** |
+| unstartable | 1 | w28-s6 — gated on #11209, which is OPEN and RED |
+| retroactively unsatisfiable | 1 | w28-s4[9] — "at write time" has passed |
+
+The five real reads, with the line that closed each: **w28-s1[10]** — run 31311142804, both job logs printed
+`target=8e83b709a…` and the recorded rows carry that sha for both targets with `build_seconds` cp=140 vs
+instance=328. **w28-s2[9]** — scheduled run 31314281701 (12:50:18Z, after #11205 at 11:40:05Z):
+`VERDICT: NOT reconciled — behind=15/19 delivering runs, wrong=1/28 rows, serving-unrecorded=0.` **w28-s3[10]** —
+scheduled runs 31314564686 and 31316989714 produced real verdicts over the live population; **the lag is
+71/71/32/32 commits, not the briefed "71–83"**. **w28-s4[10]** — live census p50=**301.794s**, p95=**1303.948s**,
+sample=872 COVERED / 4 PENDING / 0 UNREADABLE, `max` REFUSED with its own reason. **w28-s7[9]** — a seal reading
+taken THROUGH the runner: `seal-run: VOUCHED — NO SEAL (predicate exit 1) … token head=<absent>
+b-unavailable=0/0`, true rc=1.
+
+**w28-s6[9] closes on its own escape hatch, honestly.** On live data **7 abandoned rows exist and all three
+columns are NULL on every one**, newest 2026-08-07 — so "the lead records that the row is unproven on live
+data" is the correct close, not a fake-proven. **w28-s4[9] is stamped HONESTLY MISSED**, never dropped: #11207
+merged at 11:34:49Z with the criterion unmet and the instant is gone.
+
+### D511 — THE CROWN'S rc=2 IS A DEFERRAL WITH NO RE-READ, AND IT SWALLOWED A REAL RED TODAY.
+
+The direction said run 31316266634 "exits rc=0". **REFUTED — it exited rc=2** via the serving-grace arm
+(`crown-reconcile.sh:565`, `SERVING_GRACE_SECONDS=1200`), and `crown-reconcile.yml:123` maps rc=2 to `exit 0`
+under text that itself reads *"That is a SILENCE, not a green."* The run is reported **success**.
+
+Also refuted: "every push run is condemned to rc=2." Three push runs the same minute — 31316057500, 31316075489,
+31316124609 — printed `RECONCILED: all 3 delivering run(s) …` and exited 0. The grace is cadence-dependent.
+
+**The defect neither premise named, and it is the sharpest thing this wave found.** PR #11255's merge commit
+`4c8314c94` had its deploy run 31316124617 **CANCELLED with ZERO jobs**, so no row could ever be written — yet
+barkpark.cloud SERVED it from ~13:34Z to 13:42Z. That is textbook SERVING-UNRECORDED, the exact sentence
+`crown-reconcile.sh:610` exists to print. Four consecutive runs SAW it (ages **-3s / 53s / 105s / 200s**) and
+each downgraded it to a warning. At 13:42:23Z the box moved to 02475d0ec, and the serving check only ever reads
+the CURRENT serving sha. **There is no queue, no re-ask list, no persisted "come back to this sha" — so the
+accusation is now permanently unmakeable.** The instrument detected the epic's founding failure mode on live
+production four times in four minutes and reported it zero times.
+
+Compounding it: the exit-2 message at `:633` prints exactly three counters (BEHIND_UNREADABLE, JOBS_UNREADABLE,
+UNCLASSIFIED) while `UNREADABLE=1` is set at **eight** distinct sites, five of which no counter tracks. All four
+graced runs printed `COULD NOT FULLY READ: 0 sha(s) unreadable, 0 run(s) with no job list, 0 row(s) with carried
+never measured` — **all zeros, while exiting 2**. And `age=$((NOW - since))` is unguarded: run 31316144030
+printed "only **-3s** old" and treated a clock skew as leniency. **RULED: the grace must ARM A RE-READ, the
+exit-2 message must NAME the cause that fired, and `age < 0` is a fault, not leniency.** This is unruled ground
+— D500–D509 say nothing about the serving grace.
+
+### D512 — THE 401 IS BY DESIGN AND ALREADY RULED. THE FIX IS A CREDENTIAL, NOT A DOOR.
+
+`router.ex:3917` is `require_user_or_pat([]) |> require_ability("read")`, and the router's own table line 107
+says *"PAT-reachable on purpose (D385/D412)"*. **D437 measured this before the reconciler ever ran.** WORKER_TOKEN
+is a faceless principal that authenticates nowhere, so it halts 401 BEFORE `require_ability` — which is why the
+code is 401 and never 403.
+
+**The PAT path now has its first end-to-end execution in the epic's life.** A real minted read-ability PAT
+(`dr-w30-verifier-probe`, minted and revoked in-run, 401 after revoke, no residue) drives `crown-reconcile.sh`'s
+`:311` branch to `reader=pat`, **exit 0, `RECONCILED: all 5 delivering run(s) … all 54 row(s) …`, with ZERO
+"answered HTTP" warnings**. So the arm works; it is unselectable in CI for one structural reason:
+`crown-reconcile.yml`'s reconcile step env is GH_TOKEN + CP_HOST + DEPLOY_SSH_KEY only, and **`gh secret list`
+returns exactly six secrets, none named CROWN_API_TOKEN**. The secret does not exist.
+
+**RULED, and it splits across the human/build line.** (a) HUMAN GATE — the lead mints a read-ability PAT and
+stores it as repository secret `CROWN_API_TOKEN`; no builder can do this. (b) BUILD — one env line, plus the
+reconciler stating `read_via:` as a first-class verdict field instead of burying five 401s in `note:`. Widening
+the route is **FILED, NOT BUILT**: it lives inside cloud-console-hardening's bare-`cloud/` fence (D94), and
+`dr-w24-bl-internal-write-route-is-publicly-reachable` already argues against concentrating that secret further.
+
+**Blast radius correction: "every non-SSH reader is DARK" is FALSE.** The console reads
+`/v1/notifications/deliveries` and `/v1/operator/deliveries` — a different table; `digest_email.ex`,
+`daily_digest_worker.ex` and `deploy_ledger.ex` carry ZERO references to the platform delivery record. The 401's
+blast radius is ONE consumer: crown-reconcile's CI read path.
+
+### D513 — rc=2 IS OVERLOADED THREE WAYS, AND THE WATCH HAS NEVER PRODUCED A MEANINGFUL GREEN.
+
+`stale-verdict-watch.sh` returns 2 from three conditions of two kinds: **(A)** the PR list was never read at all
+(`:158`, propagated `:315`) — zero coverage, and rate-limit/abuse are deliberately routed here; **(B)** main's
+commit history was never read (`:324`) — population known, staleness distance unknowable; **(C)** rows still
+UNKNOWN after re-polling (`:367`) — the genuine warning. Only C is what the message says. Both silences
+reproduce hermetically with nothing but `PATH=/usr/bin:/bin`.
+
+**RULED: add 6 = UNREACHABLE and 7 = DISTANCE UNREADABLE.** Two codes, not one — different remedies (token/poll
+budget vs the commits API), different residual knowledge, and a 7 could later be downgraded to a partial verdict
+while a 6 never can. Reusing 3 is REFUSED for the reason the file's own header already gives: for one release 3
+and 4 were the same code and "the size fault wore the credential fault's name." Arms **0, 1, 3, 4, 5 stay
+byte-identical**; arm 2's text loses its now-false "or the pull-request list could not be read" clause.
+Fail-open warning that must survive into the build: B's early return is load-bearing — falling through with an
+empty commits array makes `commits_since` return 0 for every green and `select(.since >= 1)` drops all of them,
+**manufacturing a clean verdict**.
+
+**And the worse finding.** Run **31316075524** (push, 13:32:37Z) concluded **SUCCESS** having classified **ZERO
+of 42 open rows** — every row `mergeable=UNKNOWN`, the rc=2 arm taken, green reported on a population of zero.
+The other greens are a DIFFERENT JOB: `stale-verdict-harness` runs on `pull_request` while the watch itself is
+skipped there. **So the watch has never once produced a green that means "no PR is asserting a stale verdict."**
+The arm-5 BLIND fix (#11256, 899aa34c0, merged 13:34:10Z) landed **93 seconds after** that blind green, so its
+own comment claiming 31311358759 is "the ONLY push run that ever concluded success" is already false on main.
+
+### D514 — THE WATCH'S GREEN IS UNREACHABLE INSIDE THIS EPIC'S FENCE, AND THE CHARTER'S OWN NUMBER WAS WRONG.
+
+Run live from origin/main: `35 open · 25 CONFLICTING · 10 MERGEABLE · 0 UNKNOWN` → **RED, 23 CONFLICTING**.
+Ownership derived from each PR's OWN body slug, not guessed: **14 ours** (#10129 #10173 #10400 #10407 #10496
+#10522 #10720 #10722 #10811 #10944 #11007 #11008 #11169 #11174), **6 cloud-console-hardening** (#10054 #10085
+#10086 #10256 #10404 #10523 — closing any is a fence violation), **3 neither** (#6028, #6057 a security waiver,
+#6086).
+
+Draining the four the direction names leaves **19** — which reproduces D502's number exactly. But D502's
+*"eleven belonging to other epics' charters"* is **WRONG: only 9 of the 19 are foreign, and only 4 of those are
+other-epic charter PRs. Ten of the 19 are this epic's own.** The drain we can scope is roughly twice what the
+charter believed. **Draining all 14 of ours still leaves 9. No act inside this fence reaches green** — a slice
+promising green would be dishonest, and D502 already conceded this.
+
+**A TRAP IN THAT DRAIN, and it is destructive if missed.** Four of our ten (#10173, #10407, #10496, #10522) are
+this epic's own stranded wave charters. `grep -cE '^#+ +(D25[0-9]|D3[0-2][0-9]) '` over origin/main's charter
+returns **0** — D256–D336 exist NOWHERE on main; charter:5609 already records the stranding. **Closing those
+four deletes unrecorded charter history. Salvage the decisions before closing.**
+
+### D515 — #11209 IS A ONE-WORD TEST EDIT, AND THE WORD IS `runner_start_failed`.
+
+The direction's "five required checks with an EMPTY conclusion" is **REFUTED** — that was a read 2m16s after a
+push while runs were in flight. As of this wave #11209 is OPEN, **MERGEABLE**, with exactly two hard FAILUREs
+(`Cloud control-plane (test)`, `Cloud gate`): `3544 tests, 3 failures`, all three the DeployLedgerTest label
+gauge, all from the code word **`box_exploded`** the PR's own fixture invents at `sites_deploy_test.exs:1097`.
+The gauge scrapes `sites_deploy_test.exs` AS ITS CORPUS, so an invented fixture word reads as production
+vocabulary.
+
+**Both candidate substitutions turn the suite green (3544/0, `mix format --check-formatted` rc=0), and both are
+already declared — so neither enters a fictional word.** But they are NOT equivalent, and that is the ruling:
+`transient_refusal?/1` (`deploy.ex:1611`) grades `internal_error` AUTHORLESS and RETRYABLE, so it takes the
+grace arm and the start is attempted **4 times**; `runner_start_failed` and `box_exploded` both terminate on the
+first answer (**1 call**, measured via an instrumented `FakeBoxRelay.calls/0`). The test is named *"an ORDINARY
+failure carries NO chain columns"*. **RULED: `runner_start_failed`** — it preserves the scenario the comment
+describes, the box genuinely authors it, and it is already in both `@deliberately_unnamed` (with a written
+reason) and `@code_claims`. **Adding `box_exploded` to `@code_claims` is FORBIDDEN**: `deploy_ledger_test.exs:862`
+requires a key for every scraped word, so that "fix" would seat a fabricated cause word in the epic's taxonomy
+permanently.
+
+### D516 — THE CAUSE RANKING IS PRODUCIBLE. IT IS THE DERIVED CLASSIFIER, WINDOWED PAST THE SETTLE BOUNDARY.
+
+The two "contradicting" surveys read two different instruments and **both were right; neither said which reader
+it used.** The stored column carries 1,388 rows, all `BOX_AT_CAPACITY_DEFERRED`. The derived classifier sees
+2,509 / 698 over the same fleet.
+
+**The fact that settles it, and it is new.** Split the deferred cohort at the writer's landing instant
+(2026-08-07 10:12:35.033826): **post-writer = 1,388 rows, column populated 1,388/1,388, ZERO disagreement with
+derived. Pre-writer = 1,120 AT_CAPACITY + 698 BUSY, all NULL because the column did not exist.** Every single
+`BOX_BUSY_DEFERRED` row predates the writer; **the busy arm has not fired once since.** D381 ("never written to
+the column") is confirmed and its cause is now known: **the column is not broken, the arm is empty.** This also
+**corrects D221**, whose "116 of 1,934 post-boundary rows (6.0%)" is stale — post-writer column coverage is
+**100%**.
+
+`DeployLedger.census/3` (`deploy_ledger.ex:882-907`) groups by `(site_id, stage, status, failure_reason)` and
+maps `classify(g)`. **It never selects `deferral_cause`.** The column has exactly ONE reader repo-wide
+(`router.ex:11489` → `cloud_site_cmd.go:2384`), a per-row detail field, never aggregated. **RULED: the DERIVED
+classifier is canonical for every ranking surface; the column is chain identity and depth arithmetic, never
+census.** No aggregate surface mixes them, so `dr-w13-bl-column-first-classify-bypass` is not at risk today —
+but every published number must name its reader or this contradiction re-manufactures itself.
+
+**THE FIRST D3-LEGAL RANKING, live, needing no build.** Window `[2026-08-05T21:13:50Z, 2026-08-09T14:30Z)` — it
+starts EXACTLY at the settle boundary, so nothing is refused. **volume 5,874 · failure_rate 17.79% (1045/5874) ·
+min_sample 200.**
+
+| failure class (denominator 1,045 settled failed) | n | share | D3-legal |
+|---|---|---|---|
+| BOX_500 | 301 | 28.80% | yes |
+| DOC_ID_EMPTY | 265 | 25.36% | yes |
+| BOX_DEPLOY_DISABLED_503 | 219 | 20.96% | yes |
+| BUILD_FAILED | 192 | 18.37% | **no — misses n≈200 by 8** |
+| BOX_UNREACHABLE · PROCESS_DIED · BOX_BUSY_409 · ABANDONED_AT_CAPACITY · ABANDONED_BOX_STUCK · BOX_RATE_LIMITED_429 · HEALTH_GATE_FAILED | 26 · 23 · 10 · 6 · 1 · 1 · 1 | — | no — counts only |
+
+| deferral cause (denominator 5,874 attempted) | n | share |
+|---|---|---|
+| BOX_AT_CAPACITY_DEFERRED | 2,509 | 42.71% |
+| BOX_BUSY_DEFERRED | 698 | 11.88% |
+
+**THREE DISCIPLINES BIND ANY REPUBLICATION.** (1) The window instant is load-bearing — one hour earlier and the
+same instrument refuses to divide at all; publishing a pct without its window is the sin this epic exists to
+refuse. (2) **The two tables NEVER merge** — failure classes divide by 1,045 settled failures, deferral arms by
+5,874 attempts; one ranked table would be a category error the census itself avoids by keeping separate keys.
+(3) The counts 2,509/698 are **window-invariant**; only the denominator moves. The reported "28.67%/8.01%" pins
+volume ≈ 8,752, a window that STRADDLES the boundary — and `bp-cloud-deployments` itself reported those shares
+REFUSED, so that pair was computed **outside** the instrument, by hand, over a denominator the instrument
+declined to divide by. **That, not the classifier, is the defect in that number.**
+
+**And the honest limit: `BOX_BUSY_DEFERRED` is a DEAD ARM in the present tense.** Its 698 rows are entirely
+historical. A wave-31 cure aimed at it would cure a cause that has not fired in two days. Why it stopped —
+capacity change, traffic change, or a removed producer path — is **UNRESOLVED and is the single most important
+open question behind this ranking.**
+
+### D517 — THE CHEAPEST CURE WAVE 31 WILL EVER GET IS A CONFIG CHANGE, NOT CODE.
+
+`BOX_DEPLOY_DISABLED_503` is **20.96% of the failure numerator and is a FEATURE FLAG, not a fault**: 215 of its
+rows literally read *"set BARKPARK_SITE_DEPLOY_APPLY=1"*. Curing it is a config act. `BOX_500` (301, the largest
+class) is **diagnostically opaque** — 207 of its rows carry only `internal_error — unknown error` — so it is the
+biggest cure opportunity and currently unreadable. `DOC_ID_EMPTY` (265) is a search-API restart cascade. That is
+wave 31's input, ranked, from an instrument that has been read back.
+
+### D518 — SEAL CLAUSE (b) IS **PASS**. THE ARTEFACT WAS SHALLOWNESS, NOT THE DIRECTORY.
+
+A `git worktree` of this repo can **NEVER** be full-history: the shallow graft lives in the shared object store,
+so `git worktree add … origin/main` yields `is-shallow-repository=true` and reproduces `b=HISTORY-UNAVAILABLE
+6/6` identically. `seal-run.sh` **REFUSED to read at all** (`[exit 3] … is a SHALLOW repository`) — the D488
+guard doing exactly its job. From a genuine full clone: **`a=FAIL b=PASS c=PASS orphans=161 … roster=242`**, no
+`b-unavailable` field at all, all six CCH defects resolving by ancestry — corroborated off-machine by GitHub's
+compare API (every clause-(b) sha `behind_by=0`). Through the runner at the live tip: **`VOUCHED — NO SEAL …
+token head=92ef3efd5 b-unavailable=0/0`**, the first vouched token this epic has ever held, and #11257's
+abbreviated-head fix confirmed on the LIVE path.
+
+**RULED: do not report a seal regression.** The actionable residue is **clause (a) at 161 orphans / roster 242**
+— more than DOUBLE charter:8290's `orphans=69 roster=147`, and the first 8 orphans are wave 29's own slices.
+Two corrections ride along: **w28-s7 criterion 9's wording ("a full-history WORKTREE") is unsatisfiable on this
+machine and must read "full-history CHECKOUT"**, and the seal roster (242) undercounts bp's 249 by exactly the
+seven `drafts.*` rows — the gauge cannot see draft twins.
+
+### D519 — THE ORPHAN-HARNESS CLASS IS 16 OF 32, NOT 1, AND ONE IS ALREADY RED ON MAIN.
+
+Of 32 shell harnesses on origin/main, exactly **16 are executed by a workflow and 16 are orphans** — a naive
+name-grep manufactures false orphans (`console-path-escape-check.test.sh` appears FOUR times in workflows, every
+one a COMMENT; `cloud-path-escape-check.test.sh` and `elixir-path-escape-check.test.sh` are reachable via a
+wired parent's `--selftest`). **Neither `seal-run.sh` NOR `seal-run.test.sh` appears in any of the 48 workflow
+files** — P4 confirmed and widened: the runner itself is uninvoked, not just its test. Orphaned assertions total
+**1,000+**, not 73.
+
+**15 of the 16 pass; ONE is already RED.** `registration-sample.test.sh` fails **40 pass / 3 fail** on
+origin/main and passes 43/0 on `0e94b99fe^`. The break landed with **0e94b99fe (#11082, merged 02:18:52Z)**,
+which added `internal/**` to `CLOUD_PATHS`; the harness's own control fixture writes `internal/tui/x.go` as a
+NEITHER-shape head, which now classifies CLOUD, so three `of which NEITHER` assertions each read one lower. **The
+SAMPLER is correct; the HARNESS's expectations are stale.** It has been red on main for ~14 hours and this wave
+is the first thing that noticed — precisely the failure this epic is about.
+
+**RULED: fix the three expectations FIRST or in the SAME PR, never after.** Wiring all 16 blindly reds
+`shell-harnesses.yml` on the merge commit. Two honest limits stated rather than buried: `shell-harnesses.yml` is
+**NOT** one of main's four required contexts (`Elixir gate`, `PR references an active task`, `Cloud gate`,
+`Console gate`, `enforce_admins=true`, `strict=false`) — wiring makes a harness **RUN, not BLOCK**; and
+`barkpark-boot-selftest.sh` needs one historical blob, so it requires `fetch-depth: 0` or it exits 2 forever, a
+gate that can only lose.
+
+### D520 — LEAD ACTS WRITTEN AS CHARTER PROSE HAVE A 0% EXECUTION RATE ACROSS TWO WAVES.
+
+Zero of the six GitHub-observable wave-29 lead acts were executed. Wave 28's overlapping list went unexecuted
+too, so wave 29 restated it verbatim and **the draft-twin cluster count GREW from three to four**. The only
+wave-28 lead acts that happened were plain merges of clean branches (#11170, #10947); everything requiring a
+judgement read — rebase-with-conflict, close-after-reading-the-test-body, a token-first DB transaction, a doc
+discard — did not happen in EITHER wave. **Acts requiring judgement: 0%. One-button merges: ~67%.**
+
+Corroborated on the ledger: D505/D507 landed in `97f2deb50` at 13:35:36Z and **every row those decisions ordered
+has a last-write timestamp PREDATING that commit.** All four gyldendal rows sit `open` at 0/N (and
+`drafts.dr-w26-hg-gyldendal-operator-packet-corrected` is STILL an unpublished draft — the 409 dedup wall
+`dr-w27-bl` predicted). D507's reclaim row was never refreshed (`updated_at` 45 seconds after its own insert).
+Seven `drafts.*` rows survive, three of which **carry LOWER progress than their published twins** (w24-s5 7/9 vs
+8/9; w27-s6 7/10 vs 9/10), so a roster read landing on a draft **under-reports shipped work**.
+
+**RULED, binding from this wave: every lead act is FILED AS A TASK or it does not happen.** Charter prose is
+invisible to every instrument this epic has built.
+
+Two read-path traps that generate level-skips and must be written down: the epic's children live at the
+**response root** (`d["children"]`, 249 rows), NOT under `d["doc"]["children"]` — the natural accessor prints 0
+against a 249-child epic; and `bp task get task-93206ca8fd299ae7` **silently returns the DRAFT**, distinguished
+only by the `status` field, which the child projection does not carry.
+
+### D521 — PUSHDELIVERYWORKER: LEAVE THE OPTION ALONE. COPYING #11255 HERE WOULD BE THE REGRESSION.
+
+Same config (`push_delivery_worker.ex:68`, bare `unique: [period: 600]`), **different bug — in fact no bug.**
+Mutating it to the explicit incomplete-states list leaves the entire push suite GREEN (102/0 before and after),
+and `grep -rln PushDeliveryWorker cloud/test/` proves the blast radius is complete, not sampled: **no test
+anywhere can distinguish the two configurations.** The existing replay test replays while the first job is still
+`:available`, a state both configurations dedupe; only `:completed` separates them and nothing reaches it.
+
+Writing the missing behavioural test settles it: on main's config it **PASSES**; under the mutation it **FAILS**
+`left: {:ok, 0}` / `right: {:ok, 1}`. **So main is correct and the "fix" is the regression** — an instance's
+at-least-once redelivery arriving after the first push landed would send the user a SECOND identical push. The
+worker is event-driven and its uniqueness key is the full args, whose `blocked_since` is the event's identity,
+so two byte-identical payloads inside 600s can only be a replay. One producer, one call site
+(`push.ex:220` ← `router.ex:7790`). **RULED: keep `:completed` in the window; add the behavioural PIN so the
+next reader cannot "tidy" it away.** The residue task's FILES list names
+`cloud/test/barkpark_cloud/workers/push_delivery_worker_test.exs`, **a path that does not exist** — the real
+files are under `cloud/test/barkpark_cloud/push/`.
+
+### D522 — CITATION CORRECTIONS AND NUMBERS DISCIPLINE, CARRIED FORWARD.
+
+`bp cloud deploy census` **does not exist** and fails in the worst way — it treats `census` as a HOST NAME and
+answers *"can't resolve a host"*, which reads as a credentials problem. Any criterion naming it is REFUTED, not
+attempted (D497 re-confirmed on the merged tree). The forbidding law on before/after comparisons is **D3**; D508
+invokes it. And **`bp cloud deployments` / `bp cloud deliveries` do not exist on the installed binary**
+(commit 0789ab90a, built 2026-08-07) — wave 29's human-facing readers do not reach the human running this epic.
+That is the same defect class as the three this wave fixed, applied to the epic's own tooling; the remedy is
+`make cli-install` after CLI merges, and nothing enforces or reports it.
+
+One operational note for every future reading: **origin/main moved 02475d0ec → 839453b70 → 92ef3efd5 during this
+wave.** Any artefact saying "origin/main <sha>" without an as-of timestamp is stale on arrival. And the primary
+checkout's charter copy was **UNTRACKED and 16,404 bytes short**, missing BOTH the wave-28 and wave-29 REVIEWED
+entries — editing it would have re-run wave 29's exact breakage. **Brief every wave from
+`git show origin/main:<charter>`, never the working-tree path.**
+
+### D523 — THE WAVE 30 PLAN.
+
+Six slices build this run; one is deferred to round 2 because it edits a file round 1 owns. The build half is
+CHOSEN BY EVIDENCE — every slice traces to a defect named with a run id or a file:line above.
+
+| # | slice | task | surface | model | round |
+|---|---|---|---|---|---|
+| s1 | the graced sha gets re-read, and the silence names its cause | `dr-w30-s1-graced-sha-gets-a-re-read` | `scripts/crown-reconcile.{sh,test.sh}` | fable | 1 |
+| s2 | rc=2 stops meaning three things | `dr-w30-s2-transport-silence-gets-its-own-code` | `scripts/stale-verdict-watch.{sh,test.sh}` + yml | opus | 1 |
+| s3 | #11209 stops inventing a code word | `dr-w30-s3-11209-stops-inventing-a-code-word` | `cloud/test/.../sites_deploy_test.exs` (PR branch) | opus | 1 |
+| s4 | the orphan harnesses run, and the red one goes green first | `dr-w30-s4-orphan-harnesses-reach-ci` | `shell-harnesses.yml`, `registration-sample.test.sh` | opus | 1 |
+| s5 | a refused share says which window would un-refuse it | `dr-w30-s5-refusal-names-the-window` | `internal/cli/cloud_deploy_census_cmd.go` | opus | 1 |
+| s6 | the push worker's dedupe claim gets its pin | `dr-w30-s6-push-dedupe-claim-gets-its-pin` | `cloud/.../push/`, `push_delivery_worker.ex` | opus | 1 |
+| s7 | the crown can select the PAT arm, and its silence stops exiting 0 | `dr-w30-s7-crown-reader-and-silence` | `crown-reconcile.yml` + `.sh` | opus | **2, after s1** |
+
+**HIGH-FLIP-RISK, named so the reviewer re-derives independently rather than re-reading the builder:** s1 (the
+re-read's persistence boundary — a graced sha must be re-asked even when the box no longer serves it, and a
+wrong boundary makes the guard unable to lose) and s7 (reachability — whether the PAT arm is selectable is a
+credential fact about CI, not a code fact, and a green here can be vacuous until the secret exists).
+
+**Fences honoured:** `@build_slot_capacity`, the episode detector, alert suppression, an 841st email producer, a
+`/v1/capabilities` key, the per-box ledger join, PLATFORM_ADMIN_EMAILS, `cp-deploy.sh` + `instance-deploy.sh`,
+and `app.js` + `router.ex`'s auth region + the credential-egress path in `registry.ex`/`usage.ex`
+(cloud-console-hardening, whose wave 61 ran in parallel with this one).
