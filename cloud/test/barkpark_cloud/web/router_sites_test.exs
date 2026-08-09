@@ -2176,6 +2176,75 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   end
 
   ## ---------------------------------------------------------------------------
+  ## cloud-console-hardening W63 (D741/D763) — THE TYPED REFUSAL, AT THE WIRE.
+  ##
+  ## Added by the WAVE REVIEW, not the slice. cch-w63-s3 fenced the site writes
+  ## at `BoxRelay` and taught both routes a 4-tuple clause that relays the code
+  ## `Sites.Deploy` measured — but every assertion it shipped stops at the
+  ## `Sites.Deploy` return value. Deleting either router clause therefore still
+  ## sent a 409 wearing the flat `rollback_failed` / `teardown_failed` slug and
+  ## NOTHING went red, which is a guard-shaped hole in a wave whose thesis is
+  ## that a guard must be able to lose. These two drive the real conn.
+  ##
+  ## The flat slug is what makes the console unable to classify a site failure
+  ## at all: router.ex stamped `rollback_failed` on EVERY error status, so a
+  ## reader keying on the code learns nothing. The status still comes from
+  ## `Sites.Deploy`; these tests assert the ROUTE relays both halves.
+  ## ---------------------------------------------------------------------------
+
+  describe "a box that refused our credential answers a TYPED code on the wire" do
+    defp refused_barkpark(team) do
+      team
+      |> live_barkpark()
+      |> Ecto.Changeset.change(update_unavailable_reason: "identity_refused")
+      |> BarkparkCloud.Repo.update!()
+    end
+
+    test "POST /v1/sites/:id/rollback → 409 identity_refused, NOT rollback_failed, and no box call" do
+      {user, team} = user_with_team()
+      bp = refused_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # ARMED: `record/1` only appends under a key `program/1` created, so an
+      # unprogrammed recorder answers `[]` for any traffic at all.
+      FakeBoxRelay.program([])
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] == "identity_refused"
+      refute body["error"] == "rollback_failed"
+      assert body["detail"] =~ "the instance rejected our access credential"
+      # A 502 would be a claim about the network. Nothing went on the wire.
+      assert FakeBoxRelay.calls() == []
+    end
+
+    test "DELETE /v1/sites/:id → 409 identity_refused, the row survives, and no box call" do
+      {user, team} = user_with_team()
+      bp = refused_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program([])
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] == "identity_refused"
+      refute body["error"] == "teardown_failed"
+      assert body["detail"] =~ "the instance rejected our access credential"
+      assert FakeBoxRelay.calls() == []
+      # Box-first: a refused teardown never deregisters a still-serving box.
+      refute Registry.get_site(site.id) == nil
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
   ## site-spawner W9 — THE PREBUILT LANE (charter D86/D87/D91/D97)
   ##
   ## The build leaves the serving box. A prebuilt deploy MINTS first and UPLOADS
