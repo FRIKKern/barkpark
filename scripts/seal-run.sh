@@ -259,7 +259,31 @@ TOK_BUNAVAIL="$(tok b-unavailable)"
 
 # ---------------------------------------------------------------------------
 # REFUSAL 5 — post-run leg, read off the token itself.
-if [ -n "$TOK_HEAD" ] && [ "$TOK_HEAD" != "NOT-READ" ] && [ "$TOK_HEAD" != "$ORIGIN_SHA" ]; then # MUT:G-TOKENHEAD
+#
+# THE TOKEN'S head= IS ABBREVIATED. The predicate builds it from `git rev-parse
+# --short HEAD`, so it is 7-plus characters, never the 40 this wrapper resolved
+# $ORIGIN_SHA to. A flat `!=` therefore fired refusal 5 on EVERY live read —
+# including over a tree parked exactly at the tip, where the reading it withheld
+# was `b-clean=6/6 b-unavailable=0/6`. It also took the exit code away from
+# refusal 6 (refusals are collected and REFUSAL_CODE keeps the FIRST), so a tree
+# that could not read clause-(b) history exited 5 and never 6.
+#
+# A bare 7-character floor is NOT the fix: a checkout configured `core.abbrev=4`
+# emits head=c2de and would still be refused for being correct. So ask THIS repo
+# what it abbreviates the tip to and accept that at whatever length it chose;
+# only a head the repo did not produce has to clear git's own 7-character floor,
+# which is what keeps a 1-character head and a same-length LIE refusable.
+MIN_ABBREV=7
+ORIGIN_SHORT="$(git -C "$REPO" rev-parse --short "$ORIGIN_SHA" 2>/dev/null || true)"
+
+head_is_tip() { # <token head=> -> 0 when it names $ORIGIN_SHA, 1 when it names some other tree
+  local h="$1"
+  [ "$h" = "$ORIGIN_SHA" ] && return 0
+  [ -n "$ORIGIN_SHORT" ] && [ "$h" = "$ORIGIN_SHORT" ] && return 0
+  [ "${#h}" -ge "$MIN_ABBREV" ] && [ "${ORIGIN_SHA:0:${#h}}" = "$h" ]
+}
+
+if [ -n "$TOK_HEAD" ] && [ "$TOK_HEAD" != "NOT-READ" ] && ! head_is_tip "$TOK_HEAD"; then # MUT:G-TOKENHEAD
   refuse 5 "the token says head=$TOK_HEAD, which is not $ORIGIN_REF's tip $ORIGIN_SHA — the reading describes some other tree." \
            "take the reading from a worktree parked at $ORIGIN_REF"
 fi
