@@ -5,6 +5,20 @@ on:
     paths:
       - "deploy/**"
       - ".github/workflows/deploy-harnesses.yml"
+      # Both site engines' self-tests assert on THIS file — the @stage_names
+      # whitelist that decides which BPSTAGE lines become a verdict (ROUTE must
+      # stay out of it, charter D327/D346). Without this entry a PR that adds
+      # ROUTE to @stage_names touches no deploy/** path, so the only shell
+      # assertion protecting that doctrine never fires on the exact change it
+      # exists to catch.
+      #
+      # BELT-AND-BRACES, NOT THE FIX: this workflow is not a required status
+      # check (the required set is "Elixir gate", "PR references an active
+      # task", "Cloud gate", "Console gate"), so it cannot block a merge no
+      # matter what it runs. The blocking guard is
+      # api/test/barkpark/sites/deploy_runner_stage_names_test.exs, which rides
+      # the required Elixir lane. This line just makes the shell half reachable.
+      - "api/lib/barkpark/sites/deploy_runner.ex"
 
 permissions:
   contents: read

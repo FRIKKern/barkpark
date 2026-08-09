@@ -889,6 +889,115 @@ func siteDeferralChain(d cloudclient.SiteDeployment) (depth, bound int, ok bool)
 	return depth, bound, true
 }
 
+// --- the ABANDONED chain: the same numbers, the OPPOSITE fact ------------------
+
+// siteDeployAbandoned is DeployLedger's abandonment cohort, read off the row's
+// NAMED class (ABANDONED_AT_CAPACITY / ABANDONED_BOX_STUCK /
+// ABANDONED_UNCLASSIFIED — deploy_ledger.ex abandoned_class/1).
+//
+// IT IS A CLASS PREDICATE, NEVER `deferral_depth >= 12` (deploy-reliability
+// charter D195). Thresholding the depth would be right for the wrong reason on
+// the capacity cause and simply WRONG on the busy/stuck one, whose bound is 6 —
+// and it would answer zero forever against the pre-column rows.
+//
+// The prefix, not an exact set, on purpose: the day the ledger names a fourth
+// abandonment cause, this reader keeps counting it instead of quietly dropping
+// the row out of the cohort — the same inversion dr-w28-s4 fixed inside
+// abandoned_class/1 itself.
+func siteDeployAbandoned(class string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(class)), "ABANDONED_")
+}
+
+// siteAbandonmentChainRe reads the depth out of the terminal round's own
+// sentence. The producer literal is Sites.Deploy.abandonment_reason/3
+// (cloud/lib/barkpark_cloud/sites/deploy.ex:1424), and the control plane's own
+// classifier anchors on the SAME clause (deploy_ledger.ex @abandoned) — three
+// readers, one sentence, so a reword reds on the producer side first.
+//
+// It is NOT `refusal N of M`: that clause is written only on the DEFERRED branch
+// (deploy.ex:1302). An abandoned row has never carried it, and a reader keyed on
+// it matches nothing at all.
+var siteAbandonmentChainRe = regexp.MustCompile(`— and it has now refused (\d+) rebuilds in a row for this site,`)
+
+// siteAbandonmentText is the row's words in decreasing order of truth. The RAW
+// capture is consulted too, because FailureReason can be the humanizer's generic
+// arm — and the clause the depth lives in is in what the box actually said.
+func siteAbandonmentText(d cloudclient.SiteDeployment) string {
+	for _, s := range []string{d.FailureReason, d.FailureReasonRaw} {
+		if t := strings.TrimSpace(s); t != "" && siteAbandonmentChainRe.MatchString(t) {
+			return t
+		}
+	}
+	for _, st := range d.Stages {
+		if det := strings.TrimSpace(st.Detail); det != "" && siteAbandonmentChainRe.MatchString(det) {
+			return det
+		}
+	}
+	return ""
+}
+
+// siteAbandonmentDepth is how many rounds in a row the box refused before the
+// publish was GIVEN UP ON — column-first, prose-fallback, exactly the order
+// charter D221 already ruled for the deferral chain, and for the same reason:
+// the columns were first written at a hard instant, so a column-only reader is
+// blind to every row older than it rather than degraded by a fraction. Seven
+// live abandoned rows carry NULL columns today and the sentence is all they have.
+//
+// On `main` today the prose arm is the ONLY reachable one — nothing writes the
+// columns on an abandoned row until PR #11209 merges (see
+// `siteAbandonmentBound`). The column-first order is kept anyway because it is
+// the ruled one and because it needs no edit the day #11209 lands, whose
+// `deferral_depth: prior + 1` is by construction the number this regex reads
+// out of the same call's sentence.
+//
+// A PRESENT-BUT-UNUSABLE COLUMN IS "NO DEPTH", NEVER A PROSE RE-READ: the
+// control plane has answered, and falling through would let a stale sentence
+// contradict the column on the same row.
+func siteAbandonmentDepth(d cloudclient.SiteDeployment) (int, bool) {
+	if d.DeferralDepth != nil {
+		if *d.DeferralDepth < 1 {
+			return 0, false
+		}
+		return *d.DeferralDepth, true
+	}
+	m := siteAbandonmentChainRe.FindStringSubmatch(siteAbandonmentText(d))
+	if m == nil {
+		return 0, false
+	}
+	depth, err := strconv.Atoi(m[1])
+	if err != nil || depth < 1 {
+		return 0, false
+	}
+	return depth, true
+}
+
+// siteAbandonmentBound is the budget that depth was measured against, and it is
+// COLUMN-ONLY on purpose. The bound is not in the sentence, and re-deriving
+// "12 unless capacity, then 6" in Go would hardcode the control plane's
+// per-cause budget in a second place — the precise mistake charter D195 names.
+//
+// So on a row without the column, depth and cause render and the bound does
+// NOT. That asymmetry is the coverage signal, honestly rendered: a zero here
+// would read as "abandoned against a budget of nothing".
+//
+// ON `main` TODAY THAT IS EVERY ABANDONED ROW, verified in the producer rather
+// than taken on trust: the abandonment arm is `fail(ctx,
+// abandonment_reason(reason, prior + 1, cause))` and `fail/2` writes only
+// `status` / `failure_reason` / `detail` — the column triple is written on the
+// DEFERRED arm alone. PR #11209 (`dr-w28-s6-abandonment-stamps-its-own-columns`,
+// open, unmerged) is what starts writing them, with `deferral_depth: prior + 1`
+// — the SAME number `abandonment_reason/3` interpolates, pinned there by
+// `assert abandoned.failure_reason =~ "refused #{abandoned.deferral_depth}
+// rebuilds in a row"`. So the two arms below cannot disagree, and this key is
+// simply unreachable until #11209 lands: MERGE THAT FIRST, or ship this knowing
+// `abandonment_bound` is dead until it does.
+func siteAbandonmentBound(d cloudclient.SiteDeployment) (int, bool) {
+	if d.DeferralBound == nil || *d.DeferralBound < 1 {
+		return 0, false
+	}
+	return *d.DeferralBound, true
+}
+
 // siteDeferralLine is the operator's one-line read of a deferral chain.
 //
 // THE HONEST BOUND, and the reason this line spells out what is being counted
@@ -2266,6 +2375,39 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 			m["deferral_depth"] = depth
 			m["deferral_bound"] = bound
 		}
+		// deploy-reliability W29: the chain's NAMED cause. It has been decoded
+		// since #10248 and emitted NOWHERE — "decode is not readership" on a
+		// column populated on 1,332 live rows, so a script could see how deep a
+		// chain ran and never WHY. Written only when the control plane sent it.
+		if d.DeferralCause != nil {
+			if c := strings.TrimSpace(*d.DeferralCause); c != "" {
+				m["deferral_cause"] = c
+			}
+		}
+	}
+	// deploy-reliability W29 (charter D504): an ABANDONED publish — a chain the
+	// control plane GAVE UP on — carries its own depth, bound and cause, under
+	// their own key names.
+	//
+	// NEW KEYS, NOT THE DEFERRAL ONES, and the gate is the class rather than a
+	// relaxed siteDeployDeferred. The two facts are semantically OPPOSITE: on a
+	// deferred row depth means "refused N times, RE-QUEUED"; here it means
+	// "refused N times, WE STOPPED". A dashboard summing one key across both
+	// would count a lost publish as a waiting one — the exact confusion
+	// TestSiteDeferralChainNotOnFailedRows exists to refuse, and it keeps
+	// refusing it.
+	//
+	// Each key is written only when it is KNOWN. The bound is column-only, so an
+	// old row renders depth and cause without it; that gap is the coverage
+	// signal, and a zero in its place would be a measurement nobody made.
+	if siteDeployAbandoned(d.FailureClass) {
+		if depth, ok := siteAbandonmentDepth(d); ok {
+			m["abandonment_depth"] = depth
+		}
+		if bound, ok := siteAbandonmentBound(d); ok {
+			m["abandonment_bound"] = bound
+		}
+		m["abandonment_cause"] = d.FailureClass
 	}
 	if d.Environment != "" {
 		m["environment"] = d.Environment

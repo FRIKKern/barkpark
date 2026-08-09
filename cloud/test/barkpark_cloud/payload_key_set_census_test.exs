@@ -843,8 +843,25 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `scope` rode free in W19 S1 and `sha`/`count`/`limit` rode free in W26 S3.
   # MERGE HAZARD, unchanged: these floors are `==`, so any other PR that also
   # moves them must be re-measured after this one lands, never summed with it.
-  @emitted_floor 141
-  @go_tag_floor 245
+  #
+  # W28 S4 (`deferral_wait` joins the census, and internal/cloudclient DECODES
+  # it): the emitted floor moves 141 -> 142 and the go-tag floor 245 -> 255,
+  # BOTH re-measured by the 999-technique on this branch — floors set to 999,
+  # the two refusals printed "142 emitted key(s) collected" and "255 json tag(s)
+  # found in internal/cloudclient". Neither is arithmetic. The emitted delta is
+  # ONE because `census/3` gained a single top-level key; the node's inner keys
+  # live in `deferral_wait/2`, which is not a censused serializer entry point.
+  # The go-tag delta is TEN because `DeployDeferralWait` and its three
+  # companions declare `deferral_wait`, `covered`, `pending`, `unreadable`,
+  # `outcome`, `outcomes`, `population`, `unresolved`, `unresolved_fraction` and
+  # `oldest_pending_seconds` as names new PACKAGE-WIDE; the sixteen other tags on
+  # those structs (`clock`, `basis`, `as_of`, `label`, `count`, `quantile`,
+  # `seconds`, `sample`, `headroom`, `min_sample`, `refused`, `reason`, `p50`,
+  # `p95`, `max`, `deferred`) ride free on the delivery census's union. The
+  # decoder is the POINT and not an afterthought: a wait number no reader decodes
+  # is a number nobody reads, which is the disease this epic exists to cure.
+  @emitted_floor 142
+  @go_tag_floor 255
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is

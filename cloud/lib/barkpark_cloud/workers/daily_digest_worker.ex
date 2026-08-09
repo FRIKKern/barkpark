@@ -23,14 +23,27 @@ defmodule BarkparkCloud.Workers.DailyDigestWorker do
   no Oban read route in the console at all) — so the accounting record, not the
   job state, is the thing that says the digest reached nobody.
 
-  `unique: [period: 86_400]` guards against a double-enqueue landing two digests
-  in the same day (the cron plugin fires once per tick, but a manual re-enqueue
-  or a redeploy blip must not double-send). `max_attempts: 1` — a missed daily
-  tick is harmless (the next day's digest is the same shape over fresher rows), so
-  Oban should not retry-storm a transient blip. Crash-safe: one bad build can
-  never wedge the queue.
+  `unique:` collapses a digest that is still PENDING — `[:available,
+  :scheduled, :executing, :retryable, :suspended]`, the same state set every
+  other worker in this directory names — so a manual re-enqueue or a redeploy
+  blip cannot land two digests at once. The state list is spelled out on purpose
+  (dr-w29-s4): Oban's default set INCLUDES `:completed`, and with
+  `timestamp: :inserted_at` that turns the period into a ROLLING 86,400s window
+  measured off YESTERDAY'S completed row rather than a calendar day. Cron tick
+  jitter is sub-second, so any tick landing microseconds earlier in the second
+  than the previous one was refused as a duplicate — no Oban row, no log, no
+  telemetry, no delivery record. Production lost 3 of 7 days that way (08-03,
+  08-06, 08-08 have no digest job at all). A COMPLETED digest from yesterday
+  must never suppress today's; only a digest still in flight may.
+
+  `max_attempts: 1` — a missed daily tick is harmless (the next day's digest is
+  the same shape over fresher rows), so Oban should not retry-storm a transient
+  blip. Crash-safe: one bad build can never wedge the queue.
   """
-  use Oban.Worker, queue: :maintenance, max_attempts: 1, unique: [period: 86_400]
+  use Oban.Worker,
+    queue: :maintenance,
+    max_attempts: 1,
+    unique: [period: 86_400, states: [:available, :scheduled, :executing, :retryable, :suspended]]
 
   require Logger
 

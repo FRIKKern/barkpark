@@ -3,27 +3,37 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
   Contract tests for `GET /v1/instance/site-deploy` (dr-w15-s1).
 
   The route exists so an instance can answer "can I deploy sites?" WITHOUT
-  spending a deploy. Three properties are worth a test each, and they are the
-  three ways this instrument could lie:
+  spending a deploy. Two properties are worth a test each, and they are the two
+  ways this instrument could lie:
 
     * it rides the EXISTING `[:api, :require_token]` seam — 401 without a token,
-      200 with one, six keys, no new auth surface;
+      200 with one, four keys, no new auth surface;
     * `configured` CANNOT contradict the refusal a real POST would produce —
-      proved by mutation, both directions, in the same test;
-    * NO field makes a `GenServer.call` — proved by wedging the Runner's
-      registered name behind a process that never receives, and showing the
-      route still answers, fast, with a queue length that ROSE.
+      proved by mutation, both directions, in the same test.
 
-  ## What dr-w22-s2 added, and what it had to admit about the old test
+  ## What dr-w26-s7 removed, and what that cost
 
-  The `build_slots` assertion below reads
-  `body["build_slots"] == DeployRunner.build_slot_capacity()` — and BOTH sides
-  are the same compile-time constant, so it is satisfied by identity. It passes
-  on a box whose door is saturated, on a box that has refused 1,810 deploys, and
-  on a box with no door at all. It could never have noticed that the payload
-  reported no measurement. It is kept (the capacity column is still part of the
-  contract) and the measurements are asserted separately, by MUTATION, in
-  `test/barkpark/sites/deploy_runner_door_census_test.exs`.
+  `build_slots` and `runner_queue_len` were deleted from the payload because
+  neither ever had a reader anywhere outside this file. Their assertions went
+  with them, and two of those were worth naming:
+
+    * `body["build_slots"] == DeployRunner.build_slot_capacity()` compared a
+      compile-time constant to itself and was satisfied by identity — it passed
+      on a saturated box, on a box that had refused 1,810 deploys, and on a box
+      with no door at all. Its useful half survives, RE-ANCHORED: the wire's
+      `door.capacity` is now checked against `DeployRunner.build_slot_capacity/0`
+      directly, which is a real cross-check between the census and the module
+      attribute the door admits on. The measurements themselves are asserted by
+      MUTATION in `test/barkpark/sites/deploy_runner_door_census_test.exs`.
+    * the wedged-Runner test (a working behavioural positive control: park a pid
+      in `receive`, pile six real callers into its mailbox, assert the field rose
+      0 -> >=6) was DELETED OUTRIGHT rather than trimmed. Trimming it to its
+      surviving property, `elapsed < 1_000`, would have left a green that passes
+      identically against a perfectly healthy runner — a control that cannot
+      fail is worse than no control, because it reads as coverage. So the
+      no-`GenServer.call` property is now UNPINNED and this moduledoc says so
+      instead of implying otherwise. Follow-up:
+      `dr-w27-s7-restore-a-wedge-control-that-does-not-need-runner-queue-len`.
   """
   # async: false — borrows the DeployRunner singleton's registered name and
   # mutates Application env.
@@ -109,32 +119,30 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
   end
 
   describe "the capability record" do
-    test "200 with the six-key contract {configured, runner_alive, runner_queue_len, build_slots, door, serving}",
+    test "200 with the four-key contract {configured, runner_alive, door, serving} — and NOT the two deleted keys",
          %{conn: conn, token: token} do
       body = conn |> authed(token) |> get(@route) |> json_response(200)
 
       assert Enum.sort(Map.keys(body)) ==
                [
-                 "build_slots",
                  "configured",
                  "door",
                  "runner_alive",
-                 "runner_queue_len",
                  "serving"
                ]
+
+      # Set EQUALITY above, not a subset — so this line is what would catch a
+      # reintroduction of either deleted key. Stated separately because the
+      # deletion is the point of dr-w26-s7 and a reader should not have to infer
+      # it from a sorted list.
+      refute Map.has_key?(body, "build_slots")
+      refute Map.has_key?(body, "runner_queue_len")
 
       assert is_boolean(body["configured"])
       # The Runner is in the supervision tree UNCONDITIONALLY, so on a healthy
       # box this is true even with the feature off — the two facts are separate
       # fields precisely so `false` here can only mean CRASHED.
       assert body["runner_alive"] == true
-      assert is_integer(body["runner_queue_len"])
-
-      # The CAPACITY column, unchanged in name and value — a released `bp` may
-      # read it. Note that both sides of this are the same constant; see the
-      # moduledoc.
-      assert body["build_slots"] == DeployRunner.build_slot_capacity()
-      assert body["build_slots"] >= 1
 
       # ── the door's census ──
       door = body["door"]
@@ -148,7 +156,14 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
                "refusals_total"
              ]
 
-      assert door["capacity"] == body["build_slots"]
+      # RE-ANCHORED (dr-w26-s7). This used to read `== body["build_slots"]`,
+      # which compared the wire to a wire field the wire itself produced from
+      # the same constant. Against `build_slot_capacity/0` it is a real
+      # cross-check: the ETS census the door admits on vs. the module attribute
+      # it admits BY. `build_slot_capacity/0` survives the deletion — the door
+      # needs it — and note `grep build_slots` does not match it.
+      assert door["capacity"] == DeployRunner.build_slot_capacity()
+      assert door["capacity"] >= 1
       assert is_integer(door["observed_in_flight"])
       assert is_list(door["in_flight_slugs"])
       assert is_integer(door["refusals_total"])
@@ -169,8 +184,17 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       assert is_nil(serving["serving_sha"]) == is_nil(serving["serving_since"])
     end
 
-    test "runner_alive is false and the queue is null — never a reassuring 0 — when the Runner is gone",
-         %{conn: conn, token: token} do
+    # THE VACUOUS SURVIVOR (dr-w26-s7). This test used to end with
+    # `assert is_nil(body["runner_queue_len"])` — the "never a reassuring 0"
+    # guard. It PASSED UNCHANGED after the key was deleted from the payload
+    # outright (measured: 1 test, 0 failures), because a nil-guard cannot
+    # distinguish "measured, and the answer is absent" from "the instrument is
+    # gone". It was DELETED rather than repaired: the only honest repair —
+    # `refute Map.has_key?(body, "runner_queue_len")` — is a key-set assertion
+    # about a field that no longer exists, and the four-key set equality above
+    # already carries it. What remains here is the half that still measures
+    # something: an unregistered Runner reports `runner_alive: false`.
+    test "runner_alive is false when the Runner is gone", %{conn: conn, token: token} do
       real = Process.whereis(DeployRunner)
       Process.unregister(DeployRunner)
 
@@ -181,8 +205,6 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       body = conn |> authed(token) |> get(@route) |> json_response(200)
 
       assert body["runner_alive"] == false
-      # An absent runner does not have an empty mailbox; it has no mailbox.
-      assert is_nil(body["runner_queue_len"])
     end
   end
 
@@ -222,7 +244,10 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       # THE NUMBER. A constant cannot do this.
       assert busy["door"]["observed_in_flight"] == 1
       assert busy["door"]["in_flight_slugs"] == ["census-wire"]
-      assert busy["door"]["capacity"] == busy["build_slots"]
+      # RE-ANCHORED with the same reasoning as the contract test above: the
+      # capacity the box reports WHILE BUSY is still the module attribute, so a
+      # door that quietly widened under load would be caught here.
+      assert busy["door"]["capacity"] == DeployRunner.build_slot_capacity()
 
       # A second site is refused at the door while the first builds — and the
       # box now counts what it used to only mention in a log line.
@@ -312,84 +337,31 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
     end
   end
 
-  # ── MUTATION PROOF: no field makes a GenServer.call ─────────────────────
+  # ── DELETED (dr-w26-s7): the wedged-Runner positive control ─────────────
   #
-  # The wedge is produced BY CONSTRUCTION, not by speed: a process that is
-  # parked in `receive` for a message that never comes takes over the Runner's
-  # registered name. Every caller that reaches for the Runner now piles into
-  # that mailbox and is never answered — a D113-shaped wedge, deterministic on
-  # any machine at any load. If ANY of the four fields called the Runner, this
-  # request could not return.
-  describe "a wedged Runner still gets answered" do
-    test "200 inside a bounded time, and runner_queue_len RISES with the callers piling up",
-         %{token: token} do
-      # Short status budget so the piling-up callers give up quickly; their
-      # `$gen_call` messages stay in the wedged door's mailbox regardless, which
-      # is exactly what the queue length is measuring.
-      put_runner_cfg(status_call_timeout_ms: 150)
-
-      real = Process.whereis(DeployRunner)
-      assert is_pid(real), "the DeployRunner singleton must be alive to be wedged"
-
-      # Parked forever on a message nobody sends: never processes its mailbox.
-      wedged = spawn(fn -> receive do: (:never -> :ok) end)
-      Process.unregister(DeployRunner)
-      Process.register(wedged, DeployRunner)
-
-      on_exit(fn ->
-        if Process.whereis(DeployRunner) == wedged, do: Process.unregister(DeployRunner)
-        Process.exit(wedged, :kill)
-
-        if Process.alive?(real) and is_nil(Process.whereis(DeployRunner)),
-          do: Process.register(real, DeployRunner)
-      end)
-
-      before = build_conn() |> authed(token) |> get(@route) |> json_response(200)
-      assert before["runner_alive"] == true
-      assert before["runner_queue_len"] == 0
-
-      # Six real callers do what the control plane does — poll status — and are
-      # never answered.
-      for i <- 1..6 do
-        Task.start(fn -> DeployRunner.status("wedge-probe-#{i}") end)
-      end
-
-      # Wait for the mailbox to actually hold them (bounded, not a sleep-and-hope).
-      assert {:message_queue_len, queued} = await_queue_len(wedged, 6, 2_000)
-      assert queued >= 6
-
-      started = System.monotonic_time(:millisecond)
-      body = build_conn() |> authed(token) |> get(@route) |> json_response(200)
-      elapsed = System.monotonic_time(:millisecond) - started
-
-      # THE PROPERTY: the instrument built to report a wedge is not taken down
-      # by one. A single GenServer.call anywhere in `show/2` would blow this.
-      assert elapsed < 1_000,
-             "the capability read must not wait on the Runner (took #{elapsed}ms)"
-
-      assert body["runner_alive"] == true
-      assert body["configured"] == DeployRunner.enabled?()
-      assert body["build_slots"] == DeployRunner.build_slot_capacity()
-
-      # And the HIGH-FLIP-RISK field earns its place: it ROSE, from 0, under a
-      # wedge, with no help from the process being measured.
-      assert body["runner_queue_len"] >= 6
-      assert body["runner_queue_len"] > before["runner_queue_len"]
-    end
-  end
-
-  defp await_queue_len(pid, at_least, budget_ms) do
-    deadline = System.monotonic_time(:millisecond) + budget_ms
-    do_await_queue_len(pid, at_least, deadline)
-  end
-
-  defp do_await_queue_len(pid, at_least, deadline) do
-    info = Process.info(pid, :message_queue_len)
-
-    cond do
-      match?({:message_queue_len, n} when n >= at_least, info) -> info
-      System.monotonic_time(:millisecond) >= deadline -> info
-      true -> Process.sleep(10) && do_await_queue_len(pid, at_least, deadline)
-    end
-  end
+  # There WAS a test here, and it worked: it wedged the Runner's registered name
+  # behind a process parked forever in `receive`, piled six real `DeployRunner.status/1`
+  # callers into that mailbox, and asserted the payload's `runner_queue_len`
+  # rose 0 -> >=6 while the route still answered in under a second. That is a
+  # genuine behavioural proof that no field makes a `GenServer.call`.
+  #
+  # It was deleted rather than trimmed, and the choice is argued rather than
+  # assumed. Its ONLY observable of wedge-ness was `runner_queue_len`, which
+  # this PR deletes for having no reader in its entire life. What would have
+  # survived a trim is `elapsed < 1_000` — and that assertion passes IDENTICALLY
+  # against a perfectly healthy runner, so a green would no longer tell you the
+  # wedge was ever constructed. A control that cannot fail is worse than an
+  # absent one, because the suite reads as covering something it does not.
+  #
+  # Deleting it also removes a real defect: the test aborted mid-wedge on
+  # failure and LEAKED the singleton's one build slot across tests and across
+  # files, which is why a failing run here could cascade into
+  # `deploy_runner_door_census_test.exs`.
+  #
+  # The no-`GenServer.call` property is now UNPINNED. That is stated here, in
+  # the router comment, and in this module's moduledoc rather than left for
+  # someone to discover. Restoring a control that observes the wedge WITHOUT
+  # the deleted field (measure the wedged pid's own mailbox directly with
+  # `Process.info/2`, then assert the route answers) is filed as
+  # `dr-w27-s7-restore-a-wedge-control-that-does-not-need-runner-queue-len`.
 end

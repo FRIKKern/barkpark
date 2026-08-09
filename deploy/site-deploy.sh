@@ -1542,7 +1542,19 @@ FAKENPM
     # it, so it can never reach stage_exit_code/1 and flip a green run to -1.
     # That is what keeps this a REPORT and not a verdict change.
     RUNNER_EX="$(cd "$(dirname "$SELF")/.." && pwd)/api/lib/barkpark/sites/deploy_runner.ex"
-    if [ -f "$RUNNER_EX" ]; then
+    if [ ! -f "$RUNNER_EX" ]; then
+      # Same reasoning as the e2e/flock skips: this block is the ONLY thing in
+      # either engine asserting that the CONSUMER of the wire (DeployRunner)
+      # still refuses to fold ROUTE into a verdict. Extract deploy/ alone — the
+      # `git archive origin/main deploy | tar -x` recipe does exactly this — and
+      # the rows vanish and the suite still prints PASS at a LOWER total, which
+      # is how a 322/322 run gets misread as "three rows were removed". Say so.
+      if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+        echo "[selftest] FAIL - the DeployRunner @stage_names proofs are REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but $RUNNER_EX is missing — this engine was extracted without api/, so the only assertion that ROUTE stays OUTSIDE the runner's whitelist did not run; a skipped doctrine proof must not report PASS"
+        exit 1
+      fi
+      echo "[selftest] SKIP DeployRunner @stage_names doctrine (ROUTE stays a report) — needs api/lib/barkpark/sites/deploy_runner.ex in the tree"
+    else
       check "DeployRunner's @stage_names still has no ROUTE arm (the report cannot flip a verdict)" \
         sh -c "! grep -q '^  @stage_names .*ROUTE' '$RUNNER_EX'"
       check "…and that whitelist is still the six this engine folds" \

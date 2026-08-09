@@ -2241,21 +2241,208 @@ func TestRunCloudSiteStatusDeferralPreD99(t *testing.T) {
 }
 
 // TestSiteDeferralChainNotOnFailedRows keeps the two vocabularies apart: the
-// numeric keys ride ONLY a deferred row. A failed row whose reason happens to
-// quote a chain (the terminal round does) is a drop, not a deferral, and giving
-// it deferral keys would let a dashboard count a lost publish as a re-queued one.
+// `deferral_*` keys ride ONLY a deferred row. A failed row is a drop, not a
+// re-queue, and giving it deferral keys would let a dashboard count a lost
+// publish as a waiting one.
+//
+// ITS ORIGINAL RATIONALE WAS FALSE, and dr-w29-s7 corrects it rather than
+// deleting the property. The comment used to claim "the terminal round does"
+// quote a chain — meaning `refusal N of M`. It does not: that clause is written
+// only on the DEFERRED branch (cloud/lib/barkpark_cloud/sites/deploy.ex:1302),
+// and 0 of 7 live abandoned rows match it. The first fixture below is therefore
+// a sentence NO producer emits; the second is the real one, from
+// `abandonment_reason/3` (deploy.ex:1424), and it is the case that actually had
+// to be defended. Both must stay free of `deferral_*` — the abandoned row gets
+// `abandonment_*` instead (TestSiteAbandonmentChainReachesTheJSONEnvelope).
 func TestSiteDeferralChainNotOnFailedRows(t *testing.T) {
-	failed := cloudclient.SiteDeployment{
-		ID:            "dep-x",
+	rows := map[string]cloudclient.SiteDeployment{
+		"a sentence no producer emits": {
+			ID:            "dep-x",
+			Status:        "failed",
+			FailureReason: "…and it has now refused 12 rebuilds in a row for this site (refusal 12 of 12)",
+		},
+		"the real abandonment sentence": {
+			ID:            "dep-y",
+			Status:        "failed",
+			FailureClass:  "ABANDONED_AT_CAPACITY",
+			FailureReason: siteAbandonmentSentence(12, "so the instance has been at its concurrent-build cap for that entire run; check for builds holding slots without finishing, or raise the cap"),
+			DeferralDepth: siteIntPtr(12),
+			DeferralBound: siteIntPtr(12),
+			DeferralCause: strPtr("BOX_AT_CAPACITY_DEFERRED"),
+		},
+	}
+	for name, failed := range rows {
+		m := siteDeploymentMap(failed)
+		for _, k := range []string{"deferral_depth", "deferral_bound", "deferral_cause"} {
+			if _, ok := m[k]; ok {
+				t.Fatalf("%s: a failed row must not carry %s: %+v", name, k, m)
+			}
+		}
+		if siteDeployDeferred(failed.Status) {
+			t.Fatalf("%s: siteDeployDeferred must not match a failed row", name)
+		}
+	}
+}
+
+// siteAbandonmentSentence rebuilds `Sites.Deploy.abandonment_reason/3`'s output
+// byte-for-byte (cloud/lib/barkpark_cloud/sites/deploy.ex:1424):
+//
+//	reason <> " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
+//
+// The fixture goes through this one helper so the Go reader is pinned to the
+// PRODUCER's template rather than to a paraphrase of it — the same discipline
+// deploy_ledger_test.exs applies from the Elixir side.
+func siteAbandonmentSentence(rounds int, verdict string) string {
+	return fmt.Sprintf(
+		"the instance refused the deploy (HTTP 409): box_at_capacity — and it has now refused %d rebuilds in a row for this site, %s",
+		rounds, verdict)
+}
+
+// TestSiteAbandonmentChainReachesTheJSONEnvelope is the dr-w29-s7 defect in one
+// fixture. Before it, an abandoned row lost ALL THREE chain numbers from
+// `bp cloud site status -o json` while `failure_class: ABANDONED_AT_CAPACITY`
+// survived — the machine surface was strictly WORSE than the human one, which
+// still printed "refused 12 rebuilds in a row" in prose.
+//
+// MUTATION PROOF: delete the `siteDeployAbandoned` block in siteDeploymentMap
+// and this test reds on the first key — the exact silence being fixed.
+func TestSiteAbandonmentChainReachesTheJSONEnvelope(t *testing.T) {
+	m := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID:            "dep-abandoned",
 		Status:        "failed",
-		FailureReason: "…and it has now refused 12 rebuilds in a row for this site (refusal 12 of 12)",
+		FailureClass:  "ABANDONED_BOX_STUCK",
+		FailureReason: siteAbandonmentSentence(6, "so the instance is not busy but stuck; check its deploy runner"),
+		DeferralDepth: siteIntPtr(6),
+		DeferralBound: siteIntPtr(6),
+	})
+	if got := m["abandonment_depth"]; got != 6 {
+		t.Fatalf("abandonment_depth = %v, want 6: %+v", got, m)
 	}
-	m := siteDeploymentMap(failed)
-	if _, ok := m["deferral_depth"]; ok {
-		t.Fatalf("a failed row must not carry deferral_depth: %+v", m)
+	if got := m["abandonment_bound"]; got != 6 {
+		t.Fatalf("abandonment_bound = %v, want 6: %+v", got, m)
 	}
-	if siteDeployDeferred(failed.Status) {
-		t.Fatalf("siteDeployDeferred must not match a failed row")
+	if got := m["abandonment_cause"]; got != "ABANDONED_BOX_STUCK" {
+		t.Fatalf("abandonment_cause = %v, want the ledger class: %+v", got, m)
+	}
+	// The keys are DISTINCT, never an alias: a reader summing `deferral_depth`
+	// must not silently start counting given-up publishes as waiting ones.
+	for _, k := range []string{"deferral_depth", "deferral_bound", "deferral_cause"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("an abandoned row must not borrow the deferral key %s: %+v", k, m)
+		}
+	}
+	// It renders, byte for byte, as JSON a script can threshold on.
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"abandonment_bound":6`, `"abandonment_depth":6`, `"abandonment_cause":"ABANDONED_BOX_STUCK"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("rendered JSON missing %s:\n%s", want, b)
+		}
+	}
+}
+
+// TestSiteAbandonmentDepthFallsBackToTheProducersSentence covers the seven live
+// rows that predate the columns (charter D504 rules NO BACKFILL, so they are the
+// only population that can prove this arm is reachable). Depth comes off the
+// producer's own clause and the cause off the class — and `abandonment_bound` is
+// ABSENT, never a zero: the bound is not in the sentence, and re-deriving 12/6
+// in Go would hardcode the other cause's budget (D195).
+func TestSiteAbandonmentDepthFallsBackToTheProducersSentence(t *testing.T) {
+	m := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID:           "dep-old",
+		Status:       "failed",
+		FailureClass: "ABANDONED_AT_CAPACITY",
+		FailureReason: siteAbandonmentSentence(12,
+			"so the instance has been at its concurrent-build cap for that entire run; check for builds holding slots without finishing, or raise the cap"),
+	})
+	if got := m["abandonment_depth"]; got != 12 {
+		t.Fatalf("the prose fallback must read the depth off the producer's clause, got %v: %+v", got, m)
+	}
+	if got := m["abandonment_cause"]; got != "ABANDONED_AT_CAPACITY" {
+		t.Fatalf("abandonment_cause = %v: %+v", got, m)
+	}
+	if v, ok := m["abandonment_bound"]; ok {
+		t.Fatalf("an unknown bound must be ABSENT, not %v: %+v", v, m)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"abandonment_bound"`) {
+		t.Fatalf("no bound key may be rendered at all:\n%s", b)
+	}
+	// The RAW capture carries the clause when FailureReason is the humanizer's
+	// generic arm — the fallback reads that too, or those rows stay silent.
+	raw := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID: "dep-raw", Status: "failed", FailureClass: "ABANDONED_UNCLASSIFIED",
+		FailureReason:    "the deploy did not complete",
+		FailureReasonRaw: siteAbandonmentSentence(9, "so the instance is refusing this site persistently for a cause the ledger cannot name; check its deploy runner"),
+	})
+	if got := raw["abandonment_depth"]; got != 9 {
+		t.Fatalf("the raw capture must be read too, got %v: %+v", got, raw)
+	}
+}
+
+// TestSiteAbandonmentKeysOnlyOnAbandonedRows pins the gate to the ledger CLASS.
+// An ordinary build failure — even a deep chain that was merely deferred — never
+// grows abandonment keys, and a class-less failed row emits nothing at all.
+func TestSiteAbandonmentKeysOnlyOnAbandonedRows(t *testing.T) {
+	rows := map[string]cloudclient.SiteDeployment{
+		"an ordinary build failure": {
+			ID: "dep-b", Status: "failed", FailureClass: "BUILD_EXIT_NONZERO",
+			FailureReason: "the build exited 1", DeferralDepth: siteIntPtr(3), DeferralBound: siteIntPtr(12),
+		},
+		"a failed row with no class at all": {
+			ID: "dep-c", Status: "failed",
+			FailureReason: siteAbandonmentSentence(12, "so the instance is not busy but stuck; check its deploy runner"),
+		},
+		"a live row": {ID: "dep-d", Status: "live"},
+	}
+	for name, d := range rows {
+		m := siteDeploymentMap(d)
+		for _, k := range []string{"abandonment_depth", "abandonment_bound", "abandonment_cause"} {
+			if _, ok := m[k]; ok {
+				t.Fatalf("%s must not carry %s: %+v", name, k, m)
+			}
+		}
+	}
+	if !siteDeployAbandoned("ABANDONED_UNCLASSIFIED") {
+		t.Fatal("the class predicate must match every ABANDONED_* member")
+	}
+	if siteDeployAbandoned("BOX_AT_CAPACITY_DEFERRED") || siteDeployAbandoned("") {
+		t.Fatal("the class predicate must not match a deferral class or an empty class")
+	}
+}
+
+// TestSiteDeferralCauseReachesTheJSONEnvelope closes the third silent drop:
+// `deferral_cause` has been decoded since #10248 and emitted nowhere, so a
+// script could read how deep a chain ran and never WHY. It rides a DEFERRED row
+// only, and only when the control plane actually sent it.
+func TestSiteDeferralCauseReachesTheJSONEnvelope(t *testing.T) {
+	m := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID: "dep-def", Status: "deferred",
+		FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued",
+		DeferralDepth: siteIntPtr(3), DeferralBound: siteIntPtr(12),
+		DeferralCause: strPtr("BOX_AT_CAPACITY_DEFERRED"),
+	})
+	if got := m["deferral_cause"]; got != "BOX_AT_CAPACITY_DEFERRED" {
+		t.Fatalf("deferral_cause = %v, want the ledger class: %+v", got, m)
+	}
+	if m["deferral_depth"] != 3 || m["deferral_bound"] != 12 {
+		t.Fatalf("the depth pair must be unchanged: %+v", m)
+	}
+	// A pre-#10248 box sends no cause, and silence stays silence.
+	old := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID: "dep-old-def", Status: "deferred",
+		FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued",
+	})
+	if _, ok := old["deferral_cause"]; ok {
+		t.Fatalf("a control plane that sent no cause must yield no key: %+v", old)
+	}
+	if old["deferral_depth"] != 3 {
+		t.Fatalf("the prose fallback for the depth pair must still work: %+v", old)
 	}
 }
 

@@ -12,15 +12,21 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
 
   The route rides `[:api, :require_token]` — the SAME Bearer seam as
   `/v1/instance/request-stats`, which the agent's health gate already probes.
-  Never unauthenticated: build capacity and runner health are
+  Never unauthenticated: door census and runner health are
   instance-operational data.
 
-  Wire contract — SIX keys: `200 {"configured": bool, "runner_alive": bool,
-  "runner_queue_len": int|null, "build_slots": int, "door": {…},
-  "serving": {…}}`. The first four are the original capability record and are
-  unchanged in name, type and value; `door` and `serving` were added beside them
-  (dr-w22-s2), never on top of them, because a released `bp` may already read
-  `build_slots`.
+  Wire contract — FOUR keys: `200 {"configured": bool, "runner_alive": bool,
+  "door": {…}, "serving": {…}}`.
+
+  It used to be six. `build_slots` and `runner_queue_len` were emitted here from
+  2026-08-07 (dr-w15-s1) until they were DELETED (dr-w26-s7) because neither ever
+  acquired a reader: zero occurrences across `internal/`, `cloud/`, `web/` and
+  `js/`, and this route has zero non-test callers repo-wide. `build_slots` cost
+  nothing to lose — it was `DeployRunner.build_slot_capacity/0`, a compile-time
+  constant, and `door.capacity` already carries the same number from the census
+  the door actually admits on. `runner_queue_len` cost the only mailbox
+  observable this route had; that is stated plainly under "Honest limit" below
+  rather than hidden.
 
   ## Why these four producers, and no others
 
@@ -41,13 +47,6 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
     * `runner_alive` — `Process.whereis/1`. The Runner is put in the tree
       UNCONDITIONALLY (`application.ex`), so `false` here means CRASHED, never
       "feature off". Those two are separate fields for that reason.
-    * `runner_queue_len` — `Process.info(pid, :message_queue_len)`, non-blocking
-      (same prior art as `ListenController`). `null` when there is no pid.
-    * `build_slots` — `DeployRunner.build_slot_capacity/0`, a module attribute.
-      A CONSTANT. It is the capacity column and nothing more: it cannot report
-      that the door is saturated, that it refused anybody, or that it does not
-      know. That is what `door` is for, and it is why `build_slots` was kept
-      rather than redefined.
     * `door` — `DeployRunner.door_census/0`, an ETS read (no `GenServer.call`,
       same rule as everything else here). Carries `observed_in_flight` —
       `length(building_slugs(state))`, the SAME census the door admits or
@@ -62,12 +61,16 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
 
   ## Honest limit (do not read more into this than it says)
 
-  `runner_queue_len` distinguishes a BACKED-UP runner — callers piling up behind
-  a door that is not answering — from an idle one. It does NOT see a runner
-  whose single in-flight `systemctl` is merely slow with an empty mailbox: such
-  a box presents `configured: true, runner_alive: true, runner_queue_len: 0` and
-  can still 503 the next trigger. This route reports CAPABILITY and runner
-  health, not a guarantee about the next deploy.
+  Nothing here sees a WEDGE. `runner_alive` is a `whereis`, and a process parked
+  forever in `receive` is as alive as a healthy one; the mailbox depth that told
+  those two apart was `runner_queue_len`, and it is gone — deleted, not
+  degraded, because for its whole life nothing read it. `door` narrows the gap
+  (`observed_in_flight` and `refusals_total` DO move) but it is an ETS snapshot
+  of admissions, not of the runner's responsiveness: a box parked mid-`systemctl`
+  with an empty mailbox presents `configured: true, runner_alive: true,
+  door.observed_in_flight: 1` and can still 503 the next trigger. This route
+  reports CAPABILITY and process presence, not a guarantee about the next
+  deploy, and not wedge-detection.
   """
   use BarkparkWeb, :controller
 
@@ -80,22 +83,8 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
     json(conn, %{
       configured: DeployRunner.enabled?(),
       runner_alive: is_pid(pid),
-      runner_queue_len: message_queue_len(pid),
-      build_slots: DeployRunner.build_slot_capacity(),
       door: DeployRunner.door_census(),
       serving: ServingMemory.read()
     })
   end
-
-  # `null`, never a reassuring 0, when there is no process to measure: an absent
-  # runner has no empty mailbox, it has no mailbox.
-  defp message_queue_len(pid) when is_pid(pid) do
-    case Process.info(pid, :message_queue_len) do
-      {:message_queue_len, n} -> n
-      # the pid died between whereis and info
-      nil -> nil
-    end
-  end
-
-  defp message_queue_len(_), do: nil
 end

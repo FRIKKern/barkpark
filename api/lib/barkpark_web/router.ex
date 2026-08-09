@@ -1641,12 +1641,15 @@ defmodule BarkparkWeb.Router do
 
     # Can this box deploy sites? Answered WITHOUT spending a deploy (dr-w15-s1).
     # Same Bearer seam, same never-unauthenticated rule as request-stats.
-    # {"configured": bool, "runner_alive": bool, "runner_queue_len": int|null,
-    #  "build_slots": int} — contract owned by
+    # {"configured": bool, "runner_alive": bool, "door": {…}, "serving": {…}}
+    # — was six keys until dr-w26-s7 deleted `build_slots` and
+    # `runner_queue_len`, neither of which ever had a reader. Contract owned by
     # `BarkparkWeb.InstanceSiteDeployController` (read its moduledoc for why
     # each field's producer is the one that cannot lie) and pinned by
     # `InstanceSiteDeployControllerTest`. No field makes a GenServer.call, so a
-    # WEDGED runner — the case this exists for — still gets an answer.
+    # WEDGED runner still gets an answer — true of the code, but NO LONGER
+    # PINNED BY A TEST: the wedge control observed the wedge only through
+    # `runner_queue_len` and went with it (dr-w26-s7).
     get("/instance/site-deploy", InstanceSiteDeployController, :show)
 
     # Prometheus scrape of the telemetry aggregates (p95 Ecto query, per-route

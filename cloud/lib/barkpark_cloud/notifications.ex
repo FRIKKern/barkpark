@@ -33,6 +33,7 @@ defmodule BarkparkCloud.Notifications do
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.Team
   alias BarkparkCloud.Mailer
+  alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.Site
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Repo
@@ -406,11 +407,21 @@ defmodule BarkparkCloud.Notifications do
   barkpark-cloud | grep fleet_digest` answers "did anyone get today's digest?"
   without a metrics pipeline.
 
-  Scope, stated so it is not overclaimed: this fixes the ADDRESS, not the
-  PAYLOAD. `DigestEmail.summary/1` carries release-freshness only (total /
-  current / behind / paused / latest) and zero deploy-health data — re-addressing
-  it delivers a report that still says nothing about deploy failures. The payload
-  half is `dr-w10-bl-digest-email-calls-a-sick-fleet-healthy`.
+  Scope, as of dr-w28-s5: dr-w19-s5 fixed the ADDRESS and this rail now also
+  carries the PAYLOAD. `DigestEmail.summary/2` takes a `:deploy` reading from
+  `DigestEmail.deploy_health/1`, so the delivered body names deploy doors, their
+  deferral mass and their post-door failure rate — or the word UNMEASURED.
+  Before that, a digest that arrived said nothing whatsoever about deploy
+  failures (`dr-w10-bl-digest-email-calls-a-sick-fleet-healthy`).
+
+  AND THE PAYLOAD OBEYS THE SAME TENANCY RULING AS THE ADDRESS. The reading is
+  taken PER TEAM, over that team's OWN site ids — not once, fleet-wide, and
+  threaded into everyone's email. Deploy volume is platform information: the
+  first send that ever reached a human reached three teams and TWO of them own
+  zero sites, so a fleet-wide total would have told them how much the platform
+  deploys and how often it fails — an instance-count-shaped disclosure through
+  the back door, in the same email whose per-instance list is partitioned
+  precisely to prevent one. Half a rule is not a rule.
   """
   @spec deliver_fleet_digest([term()]) ::
           {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
@@ -434,7 +445,18 @@ defmodule BarkparkCloud.Notifications do
           is_binary(team_id),
           recipients = team_member_emails(team_id),
           recipients != [],
-          summary = DigestEmail.summary(rows),
+          # THE PAYLOAD READING, TAKEN HERE AND SCOPED TO THIS TEAM'S OWN SITES
+          # (dr-w28-s5). Inside the comprehension and not above it: one reading
+          # per recipient TEAM is the whole point — a reading hoisted out of the
+          # loop is a fleet reading by construction, whatever it is named.
+          #
+          # Cost is not the reason to hoist it: a scoped census scan measured
+          # 3.4ms against 26.9ms fleet-wide, so this is a handful of cheaper
+          # queries twice a day rather than two expensive ones. `deploy_health/1`
+          # never raises — an unreadable ledger renders as UNMEASURED inside the
+          # email instead of failing the send.
+          deploy = DigestEmail.deploy_health(site_ids: team_site_ids(team_id)),
+          summary = DigestEmail.summary(rows, deploy: deploy),
           recipient <- Enum.uniq(recipients),
           do: {team_id, summary, recipient}
 
@@ -493,6 +515,28 @@ defmodule BarkparkCloud.Notifications do
 
         {:ok, %{sent: sent, recipients: recipients}}
     end
+  end
+
+  # THE SITE IDS ONE TEAM OWNS — the narrowing the digest's deploy reading is
+  # taken through (dr-w28-s5). `Registry.list_sites_for_team/1` accepts a bare
+  # team_id binary; `Web.Router`'s team-scoped census route reads the same list
+  # for the same reason.
+  #
+  # A LOOKUP FAILURE RETURNS `{:error, …}` AND NEVER `nil`, because `nil` is
+  # `census/3`'s word for UNSCOPED: swallowing a DB failure into `nil` would
+  # silently promote this team's reading to a fleet-wide one, which is precisely
+  # the disclosure the scoping exists to close. `{:error, …}` renders as
+  # UNMEASURED with the failure's own words, and the digest still goes out — the
+  # ledger read is a side path on a best-effort operator email and must never be
+  # able to break the send it describes.
+  defp team_site_ids(team_id) do
+    team_id
+    |> Registry.list_sites_for_team()
+    |> Enum.map(& &1.id)
+  rescue
+    e -> {:error, Exception.message(e)}
+  catch
+    :exit, reason -> {:error, inspect(reason)}
   end
 
   # THE ACCOUNTING RECORD for one digest run — transposed from the webhook

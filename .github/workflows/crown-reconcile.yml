@@ -1,0 +1,178 @@
+# crown-reconcile — the crown stops self-certifying.
+#
+# WHAT IS ACTUALLY BROKEN
+#
+# `platform_deliveries` is the platform's own record of what was deployed, and
+# every verdict about it is produced INSIDE the delivering run. `record-delivery`
+# sets `delivered=true` from the rc of its OWN POST; `report-recorder-failure`
+# fires only when THAT run's POST failed. Neither can see a run whose `if:` gated
+# the recorder off, and neither can see a run that never reached the job. Both
+# leave a delivered sha with no row and no signal anywhere.
+#
+# Measured 2026-08-09: barkpark.cloud reported it was SERVING
+# a95bc7ca9747cb3d90a361c4d54eb2c068a24e32 while `GET /v1/deliveries?sha=a95bc…`
+# answered `count: 0`. Production was running a commit the platform's own record
+# had never heard of, and nothing in this repository said so.
+#
+# WHY THIS IS NOT A REQUIRED CONTEXT, AND MUST NEVER BECOME ONE
+#
+# main's required set is exactly ["Elixir gate", "PR references an active task",
+# "Cloud gate", "Console gate"], and all four are PR-head gates over an ephemeral
+# CI database. None of them can see a production row or a production Actions
+# history, so this verdict is not expressible as a merge gate — it is a LEVEL
+# check over the live population. The product job is fenced with
+# `if: github.event_name != 'pull_request'` so its name never renders on a PR
+# head and can never be sampled into the required-check spec, and the
+# `pull_request` trigger is paths-filtered to this slice's own three files so the
+# harness below is not orphaned.
+#
+# WHY THERE IS NO continue-on-error ANYWHERE IN THIS FILE
+#
+# Job-level `continue-on-error: true` still renders a RED check run but launders
+# the WORKFLOW RUN to success — and the run conclusion is what notifications,
+# `gh run list` and the rollup read. A scream nobody is paged for is not a
+# scream. This run fails, and it files an issue.
+#
+# WHY A SCHEDULE
+#
+# A missing row is not an event. Nothing fires a webhook when a recorder is gated
+# off; the row simply never appears. Only a level trigger can see that, so this
+# asks every six hours and keeps asking.
+#
+# CREDENTIALS: NONE ARE ADDED. `DEPLOY_SSH_KEY` + `CP_HOST` are the repository
+# secrets deploy.yml's own recorder already uses to reach the control plane, and
+# the bearer is read on the box out of the running container. `gh secret list` is
+# unchanged by this workflow.
+#
+# THE RESIDUALS, IN NUMBERS
+#
+#   * a ~6-hour observation window (GitHub queues cron under load, so read this
+#     as "within ~6-7 hours", never "on the hour")
+#   * silence during an Actions outage, and GitHub's 60-day auto-disable of
+#     scheduled workflows in an inactive repo
+#   * the run population is ONE page of 100 successful runs; when that page
+#     fills, the population prints as `N+` rather than being rounded down
+#   * the reverse direction reads one bounded page of the newest rows, so a
+#     ghost row older than that page is not seen this run
+
+name: crown-reconcile
+
+on:
+  schedule:
+    # Every six hours. GitHub queues cron under load — read this as "within
+    # ~6-7 hours", never "at :05".
+    - cron: "5 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    # Deliberately narrow: this trigger exists ONLY so the harness below is not
+    # orphaned. Being paths-filtered also keeps every name in this file out of
+    # the required set, belt and braces with the reconcile job's `if:`.
+    paths:
+      - "scripts/crown-reconcile.sh"
+      - "scripts/crown-reconcile.test.sh"
+      - ".github/workflows/crown-reconcile.yml"
+
+permissions:
+  contents: read
+  # The verdict lists deploy.yml runs and their jobs; GITHUB_TOKEN carries both
+  # with `actions: read`. `issues: write` is what the scream needs to file.
+  actions: read
+  issues: write
+
+concurrency:
+  group: crown-reconcile-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the reconciler dark.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  crown-reconcile:
+    name: Crown reconcile
+    # Never on pull_request: a name that never renders on a PR head can never be
+    # sampled into the required-check spec.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The scream's own tripwire. If the comparison stops being able to fail,
+      # the verdict below is decoration — and this run says so first.
+      - name: Prove the verdict can lose (crown-reconcile.test.sh)
+        run: bash scripts/crown-reconcile.test.sh
+
+      - id: reconcile
+        name: Does the crown match what was actually deployed?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CP_HOST: ${{ secrets.CP_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/crown-reconcile.sh --repo "${{ github.repository }}" --window-hours 24 || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # Four verdicts, four messages. A compute fault must NEVER be reported
+          # as a credential fault, and a read that did not happen must never be
+          # reported as a clean reconciliation.
+          case "$rc" in
+            0) echo "::notice::the crown reconciles with what deploy.yml actually delivered over the last 24h"; exit 0 ;;
+            1) echo "::error::THE CROWN DOES NOT MATCH WHAT WAS DEPLOYED. A delivering run has no row, a row has no run, or production is serving a sha the record has never heard of — the counts and the population are in the log above. This cannot clear itself: the missing rows must be recorded, or the recorder's gate fixed."; exit 1 ;;
+            2) echo "::warning::the reconciler COULD NOT READ part of what it compares, or the population was empty. That is a SILENCE, not a green — the unreadable shas are named in the log above and will be re-read on the next run."; exit 0 ;;
+            3) echo "::error::CONFIGURATION FAULT — this run's credential cannot reach the control plane, or a flag is wrong. A reconciler that cannot read what it reconciles must not report success. This is NOT a statement about the crown's contents."; exit 1 ;;
+            *) echo "::error::crown-reconcile.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
+      # The scream. file-ci-failure-issue.sh exits 1 when the alert was NOT
+      # delivered, so a failure to page is itself a failure.
+      #
+      # THE VARIABLE NAME IS LOAD-BEARING. file-ci-failure-issue.sh reads
+      # GITHUB_TOKEN, not GH_TOKEN. This step shipped with only GH_TOKEN set, so
+      # the FIRST production run — 2026-08-09, run 31311406793 — died with
+      # "GITHUB_TOKEN is empty … the failure that triggered this alert is
+      # UNREPORTED". The reconciler screamed and nothing heard it. Every other
+      # caller in this repository (deploy.yml ×2, paper-readers, renew-mail-cert,
+      # codebase-intel) sets GITHUB_TOKEN; this one is now the same shape.
+      - name: File the failure to a human
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          CI_FAILURE_KEY: crown-reconcile
+          CI_FAILURE_DETAIL: |
+            **The platform's delivery record does not match what was deployed.**
+
+            `scripts/crown-reconcile.sh` compares every SUCCESSFUL, DELIVERING
+            `deploy.yml` run over the last 24h against `GET /v1/deliveries?sha=`,
+            in both directions, and also against the sha barkpark.cloud reports
+            it is SERVING. It exited non-zero. Read the run log for the counts —
+            every rate there is printed beside its population.
+
+            Which exit code fired decides what to look at:
+
+            - `1` — BEHIND (a run delivered a sha with no row), WRONG (a row
+              names a sha no run delivered), or SERVING-UNRECORDED (production
+              runs a commit the record has never heard of). The usual cause is
+              deploy.yml's `record-delivery` job being gated off by its `if:`,
+              or the run never reaching it.
+            - `3` — a CONFIGURATION fault: the runner could not reach the control
+              plane at all. That says nothing about the crown's contents.
+
+            This issue is idempotent per key (`crown-reconcile`): a continuing
+            mismatch appends a comment rather than opening a new issue. CLOSE IT
+            once a run reconciles — the next mismatch opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  crown-reconcile-harness:
+    name: Crown reconcile harness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n scripts/crown-reconcile.sh
+      - name: Mutation proofs (crown-reconcile.test.sh)
+        run: bash scripts/crown-reconcile.test.sh
