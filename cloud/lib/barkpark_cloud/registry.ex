@@ -3812,7 +3812,8 @@ defmodule BarkparkCloud.Registry do
     * `no_self_update_route` (404) — a PRE-FEATURE box: no such route, nothing
       refused. Deliberately NOT folded into `identity_refused` (charter D684).
     * `unreachable` — no response at all (transport failure).
-    * `instance_error` — any other status, or a 200 we could not read.
+    * `bad_shape` — a 200 whose body we could not read as a check envelope.
+    * `instance_error` — any other status.
 
   A clean 200 CLEARS the column, so a stale refusal can never outlive a
   recovery. Nothing REFUSES on this column yet — it is evidence, not a guard.
@@ -3830,6 +3831,7 @@ defmodule BarkparkCloud.Registry do
              | :forbidden
              | :no_self_update_route
              | :unreachable
+             | :bad_shape
              | :instance_error}
   def refresh_update_status(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
@@ -3850,8 +3852,12 @@ defmodule BarkparkCloud.Registry do
         case studio_link_http_client().request(request) do
           {:ok, %{status: 200, body: body}} ->
             case Jason.decode(body) do
+              # A 200 we cannot read is not the same world as a box that
+              # errored: the box answered and believes it succeeded, and the
+              # shape is what failed. Same word `Usage` already uses for it,
+              # and it is the only writer of this rung (cch-w58 review).
               {:ok, %{"check" => %{} = check}} -> persist_update_check(bp, check)
-              _ -> persist_update_unknown(bp, :instance_error)
+              _ -> persist_update_unknown(bp, :bad_shape)
             end
 
           # The box's OWN admin route answered, and its answer DISCRIMINATES —

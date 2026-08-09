@@ -216,10 +216,30 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       # update_unavailable_reasons/0, validate_inclusion rejects it and the
       # best-effort write silently drops the verdict — leaving the row's OLD
       # reason on file, which is worse than none. This pins the vocabulary.
-      for reason <- ~w(identity_refused forbidden no_self_update_route unreachable instance_error
-                       no_admin_token decrypt_failed not_live) do
+      for reason <- ~w(identity_refused forbidden no_self_update_route unreachable bad_shape
+                       instance_error no_admin_token decrypt_failed not_live) do
         assert reason in Barkpark.update_unavailable_reasons()
       end
+    end
+
+    test "the vocabulary has no word nothing can write — every rung has a producer" do
+      # The mirror of the test above. A whitelist entry with no writer reads as
+      # a state the plane can reach and cannot, which is the same class of lie
+      # this slice exists to remove (cch-w58 review).
+      producers =
+        ~w(identity_refused forbidden no_self_update_route unreachable bad_shape
+           instance_error no_admin_token decrypt_failed not_live)
+
+      assert Enum.sort(Barkpark.update_unavailable_reasons()) == Enum.sort(producers)
+    end
+
+    test "a 200 we cannot read is a DIFFERENT verdict from a box that errored" do
+      unreadable = persisted_reason({:ok, %{status: 200, body: ~s({"nope":true})}})
+      errored = persisted_reason({:ok, %{status: 500, body: "boom"}})
+
+      refute is_nil(unreadable)
+      refute is_nil(errored)
+      refute unreadable == errored
     end
   end
 end

@@ -87,6 +87,9 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # deliberately its own rung — folding a 404 into "refused" is the exact
   # conflation that made `verify_reachable` useless (charter D684). NULL (absent
   # from this list) is the un-enumerated state: no refusal on file.
+  #
+  # EVERY rung here has a writer in `Registry.refresh_update_status/1` — a word
+  # in this vocabulary that nothing can persist would be a small lie of its own.
   @update_unavailable_reasons ~w(identity_refused forbidden no_self_update_route unreachable bad_shape instance_error no_admin_token decrypt_failed not_live)
 
   # The rollout channels (isu-w5.2): "staging" boxes are the canary the rollout
