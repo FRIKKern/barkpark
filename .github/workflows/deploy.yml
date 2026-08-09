@@ -172,6 +172,18 @@ jobs:
       # `/opt/barkpark/.instance-deploy-last` is instance-deploy.sh's own record
       # of the last HEALTHY deploy, so it is the box's truth rather than CI's.
       previous_sha: ${{ steps.prev.outputs.sha }}
+      # What the box is serving AFTER the swap, read from the SAME file — the
+      # recorder anchors its `sha` on this and NEVER on `github.sha`. The two
+      # differ routinely: instance-deploy.sh pulls origin/main's TIP, so a run
+      # triggered by an older head delivers whatever main had reached by the time
+      # the box pulled (measured on run 31306459823: head b977b16ad, served
+      # a95bc7ca9 — every recorded sha named a commit the box was not serving).
+      served_sha: ${{ steps.served.outputs.sha }}
+      # The MTIME of that same file, ISO-8601 UTC. instance-deploy.sh writes the
+      # file only AFTER its health check and slot flip, so its mtime is the
+      # instant this sha began being served — a real flip instant, unlike the
+      # control plane's process-derived /health `serving_since`.
+      serving_since: ${{ steps.served.outputs.serving_since }}
     steps:
       - uses: actions/checkout@v4
       - id: prev
@@ -223,6 +235,56 @@ jobs:
           code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
+      - id: served
+        name: Read the sha the content instance is serving AFTER this deploy
+        # THE BOX ANSWERS FOR WHAT THE BOX SERVES (charter D481/D485). Over the
+        # SSH this job already holds — no new secret, no new hop, and read from
+        # `/opt/barkpark/.instance-deploy-last`, the same file the `prev` step
+        # read before the swap.
+        #
+        # `stat -c %Y` + `date -u -d @EPOCH` and NOT `stat -c %y`: the epoch form
+        # is byte-identical on GNU coreutils and busybox, and the ISO conversion
+        # then happens on the runner, whose `date` is known-GNU. Verified against
+        # live guerrilla, read-only: the file reads
+        # a95bc7ca9747cb3d90a361c4d54eb2c068a24e32, `stat -c %Y` reads 1786268911
+        # and `date -u -d @1786268911` reads 2026-08-09T09:48:31Z, which matches
+        # `stat -c %y`'s 2026-08-09 09:48:31.442360825 +0000.
+        #
+        # It can NEVER fail this deploy: the deploy already succeeded above, and
+        # an unreadable state file is the RECORDER's verdict to render (empty
+        # outputs -> `delivered=false` -> report-recorder-failure), never a
+        # fabricated "prod is stale" report from report-deploy-failure.
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+        run: |
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ConnectTimeout=20"
+          sha=""
+          serving_since=""
+          # Both fields come out KEYED, never as bare positional lines: `cat`
+          # of a file with (or without) a trailing newline shifts an unkeyed
+          # second line, which would silently swap the sha and the mtime.
+          probe='S=/opt/barkpark/.instance-deploy-last
+          printf "PD_SHA=%s\n" "$(tr -d "[:space:]" < "$S")"
+          printf "PD_MTIME=%s\n" "$(stat -c %Y "$S")"'
+          if out="$($SSH "root@${GUERRILLA_HOST}" "$probe")"; then
+            sha="$(printf '%s\n' "$out" | sed -n 's/^PD_SHA=//p' | tr -d '[:space:]')"
+            mtime="$(printf '%s\n' "$out" | sed -n 's/^PD_MTIME=//p' | tr -d '[:space:]')"
+            if [ -n "$mtime" ]; then
+              if iso="$(date -u -d "@${mtime}" +%Y-%m-%dT%H:%M:%SZ)"; then
+                serving_since="$iso"
+              else
+                echo "::warning::the state file's mtime (${mtime}) is not a usable epoch — serving_since stays empty"
+              fi
+            fi
+          else
+            echo "::warning::could not read /opt/barkpark/.instance-deploy-last after the swap — the recorder will refuse rather than guess"
+          fi
+          echo "content instance is now serving: ${sha:-<unknown>} since ${serving_since:-<unknown>}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "serving_since=$serving_since" >> "$GITHUB_OUTPUT"
 
   report-deploy-failure:
     # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
@@ -386,11 +448,17 @@ jobs:
           R="$GITHUB_REPOSITORY"
           QUEUED=null
           SELF=null
-          BUILD=null
-          # The three jobs that do the delivering. This job and
-          # report-deploy-failure are deliberately NOT in the window: the first is
-          # still running (no completed_at) and the second only exists on a red.
-          LEGS='["changes","control-plane","instance"]'
+          BUILD_CP=null
+          BUILD_INSTANCE=null
+          # The two jobs that do the DELIVERING, and only those (charter D483).
+          # This job and report-deploy-failure were never in the window (the
+          # first is still running — no completed_at — and the second only exists
+          # on a red), and `changes` is now out too: it is the path filter, not a
+          # delivery, and on run 31306459823 its 14s window pulled the shared
+          # `queued_seconds` DOWN and pushed the shared build window UP on every
+          # row of both targets. `queued_seconds` keeps its shipped definition —
+          # min(leg start) - run created — computed over THESE legs.
+          LEGS='["control-plane","instance"]'
 
           run_json="$(gh api "/repos/$R/actions/runs/$GITHUB_RUN_ID")"
           run_rc=$?
@@ -403,8 +471,7 @@ jobs:
             printf '%s' "$jobs_json" > /tmp/pd-jobs.json
             created="$(jq -r '.created_at // empty' /tmp/pd-run.json)"
             started="$(jq -r --argjson legs "$LEGS" '[.jobs[] | select(.name as $n | $legs | index($n)) | .started_at] | map(select(. != null)) | sort | first // empty' /tmp/pd-jobs.json)"
-            finished="$(jq -r --argjson legs "$LEGS" '[.jobs[] | select(.name as $n | $legs | index($n)) | .completed_at] | map(select(. != null)) | sort | last // empty' /tmp/pd-jobs.json)"
-            echo "run created_at=${created:-<none>}  first leg started=${started:-<none>}  last leg completed=${finished:-<none>}"
+            echo "run created_at=${created:-<none>}  first leg started=${started:-<none>}"
 
             wait_start=""
             wait_end=""
@@ -416,13 +483,28 @@ jobs:
               fi
             fi
 
-            if [ -n "$started" ] && [ -n "$finished" ]; then
-              build_start="$(date -u -d "$started" +%s)"
-              build_end="$(date -u -d "$finished" +%s)"
-              if [ -n "$build_start" ] && [ -n "$build_end" ] && [ "$build_end" -ge "$build_start" ]; then
-                BUILD=$((build_end - build_start))
-              fi
-            fi
+            # build_seconds is PER TARGET, from THAT target's own job window
+            # (charter D483, ratifying D465's "the deploy job's own wall clock,
+            # measured entirely inside the job"). There is deliberately no
+            # run-level build variable left to stamp on both rows: on run
+            # 31306459823 one shared window put 380s on every row of a leg that
+            # took 110s — a 3.45x overstatement that no reader could detect,
+            # because the two targets agreed. Two targets that agree now can only
+            # do so by having actually taken the same time.
+            leg_seconds() {
+              jq -r --arg n "$1" '[.jobs[]
+                | select(.name == $n)
+                | select(.started_at != null and .completed_at != null)
+                | ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))
+                | select(. >= 0)] | first // empty' /tmp/pd-jobs.json
+            }
+            cp_secs="$(leg_seconds control-plane)"
+            cp_rc=$?
+            if [ "$cp_rc" -eq 0 ] && [ -n "$cp_secs" ]; then BUILD_CP="$cp_secs"; fi
+            inst_secs="$(leg_seconds instance)"
+            inst_rc=$?
+            if [ "$inst_rc" -eq 0 ] && [ -n "$inst_secs" ]; then BUILD_INSTANCE="$inst_secs"; fi
+            echo "leg windows: control-plane=${BUILD_CP} instance=${BUILD_INSTANCE} (a skipped leg has no window and stays NULL)"
 
             # queued_self_seconds — the part of the wait this repository caused
             # ITSELF, by serializing behind its own earlier deploys
@@ -470,11 +552,12 @@ jobs:
             echo "::warning::the Actions API did not answer — every clock on this row stays NULL (never 0)"
           fi
 
-          echo "clocks: queued=${QUEUED} self=${SELF} build=${BUILD} (pickup and stall are NULL by ruling)"
+          echo "clocks: queued=${QUEUED} self=${SELF} build(cp)=${BUILD_CP} build(instance)=${BUILD_INSTANCE} (pickup and stall are NULL by ruling)"
           {
             echo "PD_QUEUED_SECONDS=$QUEUED"
             echo "PD_QUEUED_SELF_SECONDS=$SELF"
-            echo "PD_BUILD_SECONDS=$BUILD"
+            echo "PD_BUILD_SECONDS_CP=$BUILD_CP"
+            echo "PD_BUILD_SECONDS_INSTANCE=$BUILD_INSTANCE"
           } >> "$GITHUB_ENV"
           exit 0
 
@@ -487,50 +570,126 @@ jobs:
           INSTANCE_RESULT: ${{ needs.instance.result }}
           CP_PREVIOUS_SHA: ${{ needs.control-plane.outputs.previous_sha }}
           INSTANCE_PREVIOUS_SHA: ${{ needs.instance.outputs.previous_sha }}
+          INSTANCE_SERVED_SHA: ${{ needs.instance.outputs.served_sha }}
+          INSTANCE_SERVING_SINCE: ${{ needs.instance.outputs.serving_since }}
         run: |
           # Same law as the clocks step: read every rc, exit 0, and set
           # `delivered=false` so report-recorder-failure below can be the red.
           set +e
           export TZ=UTC
-          SHA="$GITHUB_SHA"
+          # WHAT TRIGGERED THIS RUN, WHICH IS NOT WHAT THE BOXES SERVE (D481).
+          # Recorded in the log and the job summary, and NEVER as a row's `sha`:
+          # both deploy scripts pull origin/main's TIP, so by the time a box
+          # deploys, main has typically moved past the head that triggered the
+          # run. On run 31306459823 that gap put sha=b977b16ad + transition=
+          # rollback on a control plane whose own log said `target=a95bc7ca9 /
+          # Already up to date` — a fabricated backwards move on a box that had
+          # not moved at all, while a95bc7ca9, the sha BOTH boxes were actually
+          # serving, had zero rows in the table.
+          DELIVERING_REF_SHA="$GITHUB_SHA"
           RUN_ID="$GITHUB_RUN_ID"
           FIRST_SEEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           MAX_RANGE=500
           QUEUED="${PD_QUEUED_SECONDS:-null}"
           SELF="${PD_QUEUED_SELF_SECONDS:-null}"
-          BUILD="${PD_BUILD_SECONDS:-null}"
+          BUILD_CP="${PD_BUILD_SECONDS_CP:-null}"
+          BUILD_INSTANCE="${PD_BUILD_SECONDS_INSTANCE:-null}"
+          # The committer of every commit GitHub's own merge machinery writes.
+          # It is what makes the blessed `%cd` producer safe: a merge/squash
+          # commit's COMMITTER date IS the instant the PR merged (28/28 sampled
+          # shas within 1s), but a commit pushed straight to main carries the
+          # author's local commit time, which is not a merge instant at all —
+          # and `%cd` cannot say "there was no merge". That case is the NULL arm
+          # below; 200/200 commits on main today are GitHub-committed.
+          GITHUB_MERGE_COMMITTER="noreply@github.com"
           delivered=true
 
+          echo "delivering_ref_sha (github.sha, the TRIGGER — never a row's sha): ${DELIVERING_REF_SHA}"
           echo "shallow clone: $(git rev-parse --is-shallow-repository)"
 
-          # serving_since, cp leg only, WITH ITS BASIS SAID OUT LOUD: /health's
-          # `serving_since` is PROCESS-derived (VM start), not the instant the sha
-          # began being served — two BEAMs running the same code moved it forward
-          # 6.4s, and `serving_since_basis` on that same payload says so. It is
-          # recorded because a process-start upper bound is a real datum; it is
-          # NOT the flip instant and must never be read as one.
+          # THE BOX-REPORTED SHA, NORMALISED AND PROVEN PRESENT. Anything that
+          # cannot be resolved to a commit in this clone is a REFUSAL, never a
+          # row: a row anchored on a sha we cannot describe is exactly the
+          # identity-false record this wave exists to end.
+          resolve_served() {
+            target="$1"
+            raw="$(printf '%s' "$2" | tr -d '[:space:]')"
+            if [ -z "$raw" ]; then
+              echo "::error::${target}: the box did not report what it is serving — no row can be anchored, so ${target} records NOTHING" >&2
+              return 1
+            fi
+            case "$raw" in
+              *[!0-9a-f]*)
+                echo "::error::${target}: the box reported '${raw}', which is not a hex sha — ${target} records NOTHING" >&2
+                return 1
+                ;;
+            esac
+            full="$(git rev-parse --verify --quiet "${raw}^{commit}")"
+            if [ $? -ne 0 ] || [ -z "$full" ]; then
+              echo "::error::${target}: the box reports it is serving ${raw}, which is not a commit in this clone — ${target} records NOTHING" >&2
+              return 1
+            fi
+            printf '%s' "$full"
+            return 0
+          }
+
+          # THE CONTROL PLANE'S OWN ANSWER, from the /health read this step
+          # already performed. `git_sha` is `BARKPARK_GIT_SHA`, which
+          # cp-deploy.sh:58 exports from the very `git rev-parse HEAD` it just
+          # checked out — the box's own statement of what it serves, and
+          # therefore the cp row's `sha`.
           #
-          # The instance leg records NO serving_since. The durable source would be
-          # ServingMemory at /opt/barkpark/.bp-site-deploy-runs/serving-memory.json
-          # and THAT FILE DOES NOT EXIST on live guerrilla (the directory holds
-          # 4,457 other records), while the first call to the authed site-deploy
-          # route would WRITE first_seen_at = now — i.e. reading it would MINT the
-          # value it claims to observe. An omitted column reads nil; that is the
-          # honest answer until a durable source exists.
+          # THE MISMATCH IS NOW A VERDICT, NOT A NULLED COLUMN (D482). This block
+          # used to compare /health's git_sha against $GITHUB_SHA and, on the
+          # disagreement, drop `serving_since` and SHIP the row anyway with
+          # delivered=true — holding the refutation of its own row in a shell
+          # variable and spending it on one column. An unreadable /health now
+          # means the cp leg records nothing and `delivered=false`, which is what
+          # makes report-recorder-failure fire.
+          #
+          # `serving_since` keeps its basis said out loud: /health's value is
+          # PROCESS-derived (VM start), not the instant the sha began being
+          # served — two BEAMs running the same code moved it forward 6.4s, and
+          # `serving_since_basis` on that same payload says so. A process-start
+          # upper bound is a real datum; it is NOT the flip instant.
+          CP_SERVED_SHA=""
           CP_SERVING_SINCE=""
           if [ "$CP_RESULT" = "success" ]; then
             health="$(curl -s --max-time 15 https://barkpark.cloud/health)"
             health_rc=$?
             if [ "$health_rc" -ne 0 ]; then
-              echo "::warning::/health did not answer (rc=$health_rc) — serving_since is OMITTED for the cp row"
+              echo "::error::/health did not answer (rc=$health_rc) — the control plane cannot say what it is serving, so the cp leg of run ${RUN_ID} records NOTHING"
+              delivered=false
             else
               health_sha="$(printf '%s' "$health" | jq -r '.git_sha // empty')"
-              if [ "$health_sha" = "$SHA" ]; then
-                CP_SERVING_SINCE="$(printf '%s' "$health" | jq -r '.serving_since // empty')"
-                echo "cp serving_since=${CP_SERVING_SINCE:-<absent>} (basis: process start, not the flip instant)"
+              CP_SERVED_SHA="$(resolve_served cp "$health_sha")"
+              if [ $? -ne 0 ] || [ -z "$CP_SERVED_SHA" ]; then
+                CP_SERVED_SHA=""
+                delivered=false
               else
-                echo "::warning::/health reports git_sha=${health_sha:-<absent>}, not ${SHA} — serving_since would describe a different commit, so it is OMITTED"
+                CP_SERVING_SINCE="$(printf '%s' "$health" | jq -r '.serving_since // empty')"
+                echo "cp: /health says it is serving ${CP_SERVED_SHA} (trigger was ${DELIVERING_REF_SHA}), serving_since=${CP_SERVING_SINCE:-<absent>} (basis: process start, not the flip instant)"
               fi
+            fi
+          fi
+
+          # THE CONTENT INSTANCE'S OWN ANSWER, read by the instance job from
+          # `/opt/barkpark/.instance-deploy-last` after its swap (D485). The
+          # MTIME of that file is `serving_since` for this leg and it IS the flip
+          # instant: instance-deploy.sh writes the file only after the health
+          # check and the slot flip, and a redeploy of an already-live sha exits
+          # early without touching it. NOT ServingMemory, which D465 rejected by
+          # name — reading it would MINT the first_seen_at it claims to observe.
+          INSTANCE_SERVED=""
+          INSTANCE_SINCE=""
+          if [ "$INSTANCE_RESULT" = "success" ]; then
+            INSTANCE_SERVED="$(resolve_served instance "$INSTANCE_SERVED_SHA")"
+            if [ $? -ne 0 ] || [ -z "$INSTANCE_SERVED" ]; then
+              INSTANCE_SERVED=""
+              delivered=false
+            else
+              INSTANCE_SINCE="$(printf '%s' "$INSTANCE_SERVING_SINCE" | tr -d '[:space:]')"
+              echo "instance: the box says it is serving ${INSTANCE_SERVED} (trigger was ${DELIVERING_REF_SHA}), serving_since=${INSTANCE_SINCE:-<absent>} (basis: mtime of .instance-deploy-last, the flip instant)"
             fi
           fi
 
@@ -543,14 +702,19 @@ jobs:
             target="$1"
             prev="$2"
             serving="$3"
-            out="$4"
+            build="$4"
+            out="$5"
+            served="$6"
             rangefile="/tmp/pd-range-${target}.txt"
             transition=unknown
             measured=0
 
-            git show -s --format='%H %cd' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$SHA" > "$rangefile"
+            # `%ce` rides along so the merged_at producer can have a NULL arm —
+            # see GITHUB_MERGE_COMMITTER above. Neither a sha, an ISO timestamp
+            # nor an email can contain a space, so the split stays safe.
+            git show -s --format='%H %cd %ce' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$served" > "$rangefile"
             if [ $? -ne 0 ]; then
-              echo "::warning::${target}: git could not describe ${SHA} — no row for this leg"
+              echo "::warning::${target}: git could not describe ${served} — no row for this leg"
               printf '[]' > "$out"
               return 1
             fi
@@ -562,9 +726,9 @@ jobs:
               if [ $? -ne 0 ]; then
                 echo "::warning::${target}: previous sha ${prev} is not in this clone — transition=unknown, counts NULL"
               else
-                counts="$(git rev-list --count --left-right "${prev}...${SHA}")"
+                counts="$(git rev-list --count --left-right "${prev}...${served}")"
                 if [ $? -ne 0 ]; then
-                  echo "::warning::${target}: rev-list --count --left-right ${prev}...${SHA} failed — transition=unknown, counts NULL"
+                  echo "::warning::${target}: rev-list --count --left-right ${prev}...${served} failed — transition=unknown, counts NULL"
                 else
                   set -- $counts
                   behind="$1"
@@ -579,20 +743,24 @@ jobs:
                   else
                     transition=diverged
                   fi
-                  echo "${target}: ${prev}...${SHA} = ${behind} left / ${ahead} right -> ${transition}"
-                  # A run delivers every sha on the right side of the range, not
-                  # just its own head: ~36% of merged shas have no run of their
-                  # own and ride a later sha's. Those rows are what `carried`
-                  # exists to say, and they are the deliveries this epic exists to
-                  # make visible.
+                  echo "${target}: ${prev}...${served} = ${behind} left / ${ahead} right -> ${transition}"
+                  # A deploy delivers every sha on the right side of the range,
+                  # not just the one the run was triggered for: ~36% of merged
+                  # shas have no run of their own and ride a later sha's. Those
+                  # rows are what `carried` exists to say, and they are the
+                  # deliveries this epic exists to make visible. The range now
+                  # ends at the SERVED sha, so every emitted row names a commit
+                  # this box demonstrably has — where a range ending at
+                  # $GITHUB_SHA could (and on 31306459823 did) emit rows for
+                  # commits no box was serving, and omit the one it was.
                   if [ "$ahead" -gt 0 ]; then
                     if [ "$ahead" -gt "$MAX_RANGE" ]; then
                       echo "::warning::${target} delivered ${ahead} commits, above the ${MAX_RANGE}-row cap — the NEWEST ${MAX_RANGE} are recorded and the older ones are NOT"
                     fi
-                    git log --max-count="$MAX_RANGE" --format='%H %cd' --date=format-local:%Y-%m-%dT%H:%M:%SZ "${prev}..${SHA}" > "$rangefile"
+                    git log --max-count="$MAX_RANGE" --format='%H %cd %ce' --date=format-local:%Y-%m-%dT%H:%M:%SZ "${prev}..${served}" > "$rangefile"
                     if [ $? -ne 0 ]; then
-                      echo "::warning::${target}: the range enumeration failed after its count succeeded — recording the head sha alone, unmeasured"
-                      git show -s --format='%H %cd' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$SHA" > "$rangefile"
+                      echo "::warning::${target}: the range enumeration failed after its count succeeded — recording the served sha alone, unmeasured"
+                      git show -s --format='%H %cd %ce' --date=format-local:%Y-%m-%dT%H:%M:%SZ "$served" > "$rangefile"
                       transition=unknown
                       measured=0
                     fi
@@ -602,24 +770,34 @@ jobs:
             fi
 
             # `carried` is EMITTED ONLY WHEN THE RANGE MEASURED, and then it is
-            # computed (`sha != this run's head`), never a literal. The column has
-            # no schema default, so an omitted key genuinely reads nil — "nobody
-            # measured this" — where a `false` would be a confident wrong answer
-            # about whether a sha rode someone else's run.
+            # computed (`sha != the sha this box serves`), never a literal. The
+            # column has no schema default, so an omitted key genuinely reads nil
+            # — "nobody measured this" — where a `false` would be a confident
+            # wrong answer about whether a sha rode someone else's run. It is
+            # compared against the SERVED sha, which is what makes it true: a run
+            # whose trigger the box never served would otherwise mark its own
+            # served commit `carried: true`.
+            #
+            # `merged_at` keeps the blessed `%cd` producer and gains its NULL
+            # arm: a commit GitHub did not commit did not arrive by a merge, and
+            # `null` is the only honest answer for it. `.[2]` is absent (null)
+            # when git printed no committer email at all, which lands on the same
+            # arm rather than on a fabricated timestamp.
             jq -n \
               --rawfile lines "$rangefile" \
-              --arg head "$SHA" \
+              --arg head "$served" \
               --arg run "$RUN_ID" \
               --arg first_seen "$FIRST_SEEN" \
               --arg target "$target" \
               --arg prev "$prev" \
               --arg transition "$transition" \
               --arg serving "$serving" \
+              --arg merge_committer "$GITHUB_MERGE_COMMITTER" \
               --argjson measured "$measured" \
               --argjson queued "$QUEUED" \
               --argjson self "$SELF" \
-              --argjson build "$BUILD" \
-              '$lines | split("\n") | map(select(length > 0)) | map(split(" ")) | map({sha: .[0], delivering_run_id: $run, first_seen_at: $first_seen, merged_at: .[1], target: $target, queued_seconds: $queued, queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null, build_seconds: $build, transition: $transition} + (if $measured == 1 then {carried: (.[0] != $head)} else {} end) + (if ($prev | length) > 0 then {previous_sha: $prev} else {} end) + (if ($serving | length) > 0 then {serving_since: $serving} else {} end))' > "$out"
+              --argjson build "$build" \
+              '$lines | split("\n") | map(select(length > 0)) | map(split(" ")) | map({sha: .[0], delivering_run_id: $run, first_seen_at: $first_seen, merged_at: (if .[2] == $merge_committer then .[1] else null end), target: $target, queued_seconds: $queued, queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null, build_seconds: $build, transition: $transition} + (if $measured == 1 then {carried: (.[0] != $head)} else {} end) + (if ($prev | length) > 0 then {previous_sha: $prev} else {} end) + (if ($serving | length) > 0 then {serving_since: $serving} else {} end))' > "$out"
             if [ $? -ne 0 ]; then
               echo "::warning::${target}: the row payload could not be built — no row for this leg"
               printf '[]' > "$out"
@@ -633,15 +811,48 @@ jobs:
           # nothing: it must produce no instance row.
           printf '[]' > /tmp/pd-rows-cp.json
           printf '[]' > /tmp/pd-rows-instance.json
-          if [ "$CP_RESULT" = "success" ]; then
-            rows_for cp "$CP_PREVIOUS_SHA" "$CP_SERVING_SINCE" /tmp/pd-rows-cp.json
+          if [ "$CP_RESULT" = "success" ] && [ -n "$CP_SERVED_SHA" ]; then
+            rows_for cp "$CP_PREVIOUS_SHA" "$CP_SERVING_SINCE" "$BUILD_CP" /tmp/pd-rows-cp.json "$CP_SERVED_SHA"
+            if [ $? -ne 0 ]; then delivered=false; fi
+          elif [ "$CP_RESULT" = "success" ]; then
+            echo "control-plane deployed but could not be anchored — no cp row (delivered=false above)"
           else
             echo "control-plane result=${CP_RESULT} — no cp row"
           fi
-          if [ "$INSTANCE_RESULT" = "success" ]; then
-            rows_for instance "$INSTANCE_PREVIOUS_SHA" "" /tmp/pd-rows-instance.json
+          if [ "$INSTANCE_RESULT" = "success" ] && [ -n "$INSTANCE_SERVED" ]; then
+            rows_for instance "$INSTANCE_PREVIOUS_SHA" "$INSTANCE_SINCE" "$BUILD_INSTANCE" /tmp/pd-rows-instance.json "$INSTANCE_SERVED"
+            if [ $? -ne 0 ]; then delivered=false; fi
+          elif [ "$INSTANCE_RESULT" = "success" ]; then
+            echo "instance deployed but could not be anchored — no instance row (delivered=false above)"
           else
             echo "instance result=${INSTANCE_RESULT} — no instance row"
+          fi
+
+          # THE ROW MUST STILL AGREE WITH THE BOX IT CLAIMS TO DESCRIBE. The
+          # anchor above is the box's own answer, so this can only fire if the
+          # range or the enumeration substituted a different head — and that is
+          # precisely the class of bug that shipped 8 identity-false rows with
+          # `delivered=true`. It is a REFUSAL, not a warning: a row nobody can
+          # tie back to a box is the silence this epic exists to end.
+          agrees_with_box() {
+            target="$1"
+            served="$2"
+            file="$3"
+            n="$(jq -r --arg s "$served" '[.[] | select(.sha == $s and (.carried != true))] | length' "$file")"
+            if [ $? -ne 0 ] || [ "${n:-0}" -ne 1 ]; then
+              echo "::error::${target}: the payload carries ${n:-<unreadable>} row(s) naming the sha the box reports it serves (${served}), expected exactly 1 — run ${RUN_ID} will not record a delivery it cannot tie to the box"
+              printf '[]' > "$file"
+              return 1
+            fi
+            return 0
+          }
+          if [ -n "$CP_SERVED_SHA" ]; then
+            agrees_with_box cp "$CP_SERVED_SHA" /tmp/pd-rows-cp.json
+            if [ $? -ne 0 ]; then delivered=false; fi
+          fi
+          if [ -n "$INSTANCE_SERVED" ]; then
+            agrees_with_box instance "$INSTANCE_SERVED" /tmp/pd-rows-instance.json
+            if [ $? -ne 0 ]; then delivered=false; fi
           fi
 
           jq -n --slurpfile cp /tmp/pd-rows-cp.json --slurpfile inst /tmp/pd-rows-instance.json '{deliveries: ($cp[0] + $inst[0])}' > /tmp/pd-payload.json
@@ -653,10 +864,33 @@ jobs:
           count="$(jq -r '.deliveries | length' /tmp/pd-payload.json)"
           echo "rows to record: ${count}"
           jq -c '.deliveries[0] // "no rows"' /tmp/pd-payload.json
+
+          # WHAT THIS RUN IS ABOUT TO CLAIM, ON THE RUN'S OWN PAGE — the trigger
+          # sha and the served shas side by side, because their gap is the whole
+          # defect this job was rewritten for and a reader should not need the
+          # database to see it.
+          {
+            echo "### Delivery record for run ${RUN_ID}"
+            echo
+            echo "| | value |"
+            echo "|---|---|"
+            echo "| delivering_ref_sha (trigger, never a row's \`sha\`) | \`${DELIVERING_REF_SHA}\` |"
+            echo "| cp serves | \`${CP_SERVED_SHA:-<not recorded>}\` |"
+            echo "| instance serves | \`${INSTANCE_SERVED:-<not recorded>}\` |"
+            echo "| build_seconds | cp ${BUILD_CP}, instance ${BUILD_INSTANCE} |"
+            echo "| rows | ${count} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           if [ "${count:-0}" -eq 0 ]; then
-            # Nothing to record is not a failure to record. Say it, stay green.
-            echo "::warning::no leg reported success — there is nothing to record for run ${RUN_ID}"
-            echo "delivered=true" >> "$GITHUB_OUTPUT"
+            if [ "$delivered" = "true" ]; then
+              # Nothing to record is not a failure to record. Say it, stay green.
+              echo "::warning::no leg reported success — there is nothing to record for run ${RUN_ID}"
+            else
+              # A leg DID deploy and produced no row: that is a loss, and the
+              # zero-row exit must not launder it back into a green.
+              echo "::error::a leg deployed but no row could be anchored to it — run ${RUN_ID} recorded NOTHING"
+            fi
+            echo "delivered=${delivered}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
