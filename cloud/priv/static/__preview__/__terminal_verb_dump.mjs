@@ -48,7 +48,7 @@
 //     "painted_verbs": ["..."],                      // sorted, deduped
 //     "sequences": [["decommission"], ["archive", ...]], // distinct paint orders
 //     "painted_equals_declared_always": true|false,  // see below
-//     "combos": 360
+//     "combos": 432
 //   }
 //
 // `painted_equals_declared_always` is true when EVERY combo whose model reports
