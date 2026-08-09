@@ -11222,3 +11222,476 @@ with the shipped code (nobody has), prove the crown's first-run round trip on it
 production abandonment predicate and release or hold the W28 swap, and clear the 24 landed-but-unproven rows.
 If that wave finds no new failing population — and on this evidence it will not — the epic seals and the digest
 becomes its standing instrument.
+
+---
+
+## WAVE 33 — 2026-08-09 — THE WIND-DOWN, VERIFIED · Paper `deploy-reliability-wave-33-2026-08-09`
+
+Wave 32 named this wave in writing: *"a WIND-DOWN wave, not a feature wave … every item is a READ against the
+live system rather than new code."* It was run that way. Thirteen verifiers executed the reads before a line of
+this section was written, and the reads did not confirm the wind-down — they SPLIT it. The fleet's numbers are
+boring. The instrument that reports them is not yet well-defined, and nobody could have known that from a paper.
+
+### DECISIONS
+
+- **D554 — THE EXIT VERDICT IS SPLIT, AND BOTH HALVES ARE STATED: WIND DOWN THE FLEET FRONT; NOT YET ON THE
+  INSTRUMENT.** THE FLEET HALF IS SETTLED AND ITS NUMBERS ARE BORING. The shipped `coverage_cohorts`, run
+  against the live control plane through three independent routes (in-container `rpc`, real HTTP `GET
+  /v1/deploy-ledger/census` with a non-operator credential, and a hand-written SQL re-derivation on
+  `cloud-db-1`), reproduces D537's split EXACTLY: failed 18,654 population / 18,649 covered / **5 never_covered
+  = 3 production + 2 preview**; deferred 3,4xx population, **0 never_covered**. Every one of the five is
+  explained and none is a customer sitting dark — see D557. THE INSTRUMENT HALF IS NOT SETTLED: the same
+  history reads `never_covered` **0, 3 or 5** depending on where an operator puts two dates (D556), the
+  envelope discloses none of the three mechanisms that move it, the law that decides the biggest of them is
+  pinned by ZERO tests out of 3,592 (D555), and the operator's one command structurally cannot reach the window
+  that shows the number (D562). **An epic does not close on a number that moves. The wind-down ships when the
+  four reader-side slices of the wave-33 plan land — not before, and not later than that.**
+
+- **D555 — THE TAUTOLOGY ATTACK ON THE COVERAGE GAUGE IS REFUTED BY RUN, AND THE HALF THAT SURVIVED IS WORSE
+  THAN THE HALF THAT DIED.** The direction's own sharpest attack was that `live_marks/1` is unbounded on the
+  right, so on a fleet that rebuilds every few minutes every row acquires a successor and `never_covered → 0`
+  by construction. **REFUTED, on the real corpus:** the closed retrospective window `2026-07-01 → 2026-08-01`
+  reads `never_covered=3`, not 0, and `pending` is **5 at every window width tried** (to = 08-01, 08-02, 08-03,
+  08-09) while the population grew 12,025 → 18,640. Unboundedness makes `never_covered` a stable ALL-TIME-never
+  statement; it cannot manufacture a false green for a genuinely stuck site, because acquiring a successor is
+  exactly what those five rows never did. **WHAT SURVIVED IS THE MUTATION.** Adding `where: d.inserted_at <=
+  ^as_of` to `live_marks` (promoted to /2, `as_of` threaded from both call sites at `deploy_ledger.ex:1349` and
+  `:1521`) leaves the ENTIRE cloud suite green — **3,592 tests, 0 failures, mutated and unmutated** — while on
+  the real corpus **3,918 of 12,025 failed rows in the July window (32.6%) are counted COVERED SOLELY by a live
+  mark minted after the window's `to`**, so that mutation swings the epic's headline from 3 to ~3,921. Nine
+  lines of load-bearing prose at `deploy_ledger.ex:1319-1328` defend the omission; `deploy_ledger_test.exs:2668`
+  states the law as a fixture PRECONDITION and never asserts it; all 13 `never_covered` assertions mint their
+  covering marks INSIDE the window. **The law's entire exercise surface is empty.** This is the epic's own
+  "make the check able to fail" rule violated inside the instrument the wind-down rests on. Wave-33 slice s1
+  closes it with one ~15-line fixture.
+
+- **D556 — THREE INDEPENDENT WINDOW MECHANISMS MOVE THE SAME NUMBER, THE ENVELOPE DISCLOSES NONE OF THEM, AND
+  THE EXIT LINE IS THEREFORE PINNED OPEN-RIGHT.** Measured, all three: **(1) POPULATION EXCLUSION** — the five
+  rows are 26.4 days old, so `census(from,to)`'s `inserted_at >= ^from` drops them out of a narrower window
+  rather than classifying them; `bp cloud deployments --days 1` and `--days 7` both print `0 NEVER COVERED` and
+  exit 0. **(2) THE MATURITY FENCE, MEASURED FROM THE PINNED `as_of`** — a ONE-DAY shift of `to` moves the
+  number 3 → 5, because at `to = 2026-08-01` the two preview rows are `too_young` and at `to = 2026-08-02` they
+  are `never_covered`; `pending` stays 5 throughout, so this is a bucket rename, not a population change.
+  **(3) THE UNBOUNDED COVERING QUERY** (D555) — which makes a retrospective read NOT retrospective:
+  `census(July)` answers "is this site stuck NOW", never "was it stuck on 2026-08-01", and 3,918 rows is the
+  size of that lie. Predicate-tested against the LIVE emitted strings: `basis_discloses_right_edge=false`,
+  `clock_discloses_right_edge=false`; the envelope ships `as_of` and `maturity_seconds` — the two ingredients of
+  the leak — and states neither relationship. **RULING: every published coverage reading pins an OPEN-RIGHT
+  window (`to = now`). That is the only reading where all three mechanisms agree, and the answer there is 5.**
+  A closed retrospective coverage reading may be taken but must never be published as a historical verdict.
+
+- **D557 — NAME THE SITES, DO NOT EXCLUDE THEM; AND THE PREVIEW ARM IS `never_covered` BY CONSTRUCTION.**
+  The tempting fix — exclude lifecycle-dead sites and take the last non-zero to zero — is REFUTED three ways.
+  **(a) There is no lifecycle.** `sites` has 35 columns and ZERO of `lifecycle`/`archived`/`decommissioned`/
+  `deleted_at`/`retired`; deletion is a HARD delete (`deployments.site_id … on_delete: :delete_all`,
+  `deploy_ledger.ex:95`), so a row's PERSISTENCE is positive evidence the site was never retired. Any exclusion
+  must be a proxy. **(b) The only available proxy is coextensive with the worst customer case.** `perfect-demo-2`
+  sat at `current_deployment_id IS NULL` with zero live rows for **15 days 21:48:36** and then went live;
+  fleet-wide, 8 of 12 sites opened with a failed deploy and 6 recovered. Excluding on "no live row ever" would
+  have blinded the gauge to that site for sixteen days and silently un-blinded it when it got better — the
+  gauge's suicide, not its cure. **(c) It would not reach zero anyway: 5 − 3 = 2.** The two preview rows belong
+  to `jarl-website`, a LIVE site with 23 live production builds and a non-NULL `current_deployment_id`; no
+  site-level predicate can touch them. **RULING: NAME.** The three production rows are `perfect-demo` ×2
+  (2026-07-14, *"the instance refused the deploy (HTTP 404)"*) and `nodeproof-20260718-73191` ×1 (2026-07-18,
+  *"deploy process died abnormally"*) — both sites `current_deployment_id` NULL, `updated_at == inserted_at`,
+  ZERO live rows ever: one-shot proof sites, not customers. **AND THE PREVIEW ARM IS UNMEASURABLE BY
+  CONSTRUCTION:** the entire `deployments` table holds exactly 2 preview rows, both failed, and **no row of any
+  site has ever carried `environment='preview'` AND `status='live'`**, so — coverage requiring a later live row
+  on the same `{site_id, environment}` (`@coverage_clock`) — no preview row can EVER be covered, at any window,
+  forever. 40% of the epic's last non-zero is a definitional artefact sitting in the same list as a real signal.
+  The exit line prints the environment split with that stated, or it does not print the split.
+  If an exclusion is ever wanted it must be a per-row TOMBSTONE an operator sets deliberately (like the seven
+  D19 tombstones `completeness/3` already accounts for), NEVER a predicate derived from `current_deployment_id`
+  — a derived predicate is a green-by-construction machine.
+
+- **D558 — THE COVERAGE PERCENTAGE IS A STUCK-SITE DETECTOR AND NEVER A PUBLISH-DELIVERY RATE, AND IT CANNOT
+  DISTINGUISH ABANDONMENT FROM STUCKNESS. ACCEPTED, NOT FIXED.** `coverage_cohorts/2` (`:1504-1541`) issues ONE
+  query over `scoped` selecting five DEPLOYMENT columns — `site_id, environment, inserted_at, content_rev,
+  status` — with no join to `sites` and no site attribute of any kind; the module's only site-level predicate is
+  `scope_to_sites/2` (`:1616-1619`), an `in ^site_ids` list the CALLER computes. There is no channel through
+  which a lifecycle fact could reach the gauge even if one existed. It measures exactly one relation: *did this
+  site mint a later live build*. Abandonment and stuckness are the same observation to it. This sentence is
+  what `@coverage_basis` already says inside the artefact and what no published sentence has yet said to a
+  human; it belongs verbatim in the exit verdict's residual-risk list, beside D478's wording fence.
+
+- **D559 — THE W28 ABANDONMENT PREDICATE SWAP IS HELD, NOT RELEASED — THE WAVE'S OWN INHERITED PREMISE IS
+  REFUTED — AND "ABANDONMENTS = 7" IS A FROZEN BACKFILL, NOT A LIVE GAUGE.** Strategize recorded the swap as
+  RELEASED because `select count(*) … where deferral_depth = deferral_bound` returns 7. What is released is the
+  BACKFILL (migration `20260809180000`), which is the prerequisite D544's ordering ruling demanded. **The READER
+  swap is not:** `git grep deferral_depth origin/main -- cloud/lib` returns only the writer
+  (`sites/deploy.ex:1295`), the schema, an API passthrough (`web/router.ex:11526`) and three PROSE mentions —
+  **no query predicate anywhere.** The shipped classifier is still the regex `@abandoned` at
+  `deploy_ledger.ex:774`, and main says so in its own words at `:325-327`: *"No count in this envelope reads
+  them yet, so nothing refuses on it; a later wave that aggregates chain depth must."* **THE 7 ARE 100%
+  HISTORICAL AND 100% BACKFILL-WRITTEN:** newest matching row **2026-08-07 03:41:33**, the live writer's first
+  stamp **2026-08-07 10:12:35** — every matching row predates the writer by ≥6h31m, and zero abandonments have
+  occurred in the ~2d10h since. The writer is nonetheless demonstrably ALIVE (1,590 rows stamped since it
+  landed, all `deferred`, depths 1..9 against bound 12) and TRIPWIRED (deleting the three-key `extra` map from
+  `defer/3`'s terminal arm reds exactly the two abandonment tests at both bounds, 83 tests → 2 failures).
+  **RULING: the exit verdict may quote 7 only with its three labels — historical (last 2026-08-07 03:41 UTC),
+  backfill-written, and measured today by the PROSE classifier because the structured predicate has no reader.**
+  A bare "7" is the permanent-zero-by-cleanup D544's ordering ruling exists to prevent, inverted into a
+  permanent SEVEN. **RELEASE CONDITION, stated once:** the two bases agree at exactly 7 right now
+  (prose scan 7, structured 7, `prose_but_unstamped` 0, `status <> 'failed'` 0) — that reconciliation is the
+  safe moment to land the swap, and the swap must ship with its OWN negative control, because the writer's
+  tripwire does not cover a reader that does not exist.
+
+- **D560 — D525's "D38's LAPSE HAS STILL NEVER FIRED" IS A CATEGORY ERROR, D134 CITES D38 FOR THE OPPOSITE OF
+  WHAT D38 SAYS, AND THIS CHARTER CARRIES TWO DIFFERENT D38s.** Three corrections, all reproduced by
+  `git show origin/main:`. **(1)** D38 (`:673-689`) is the 900s engine-gate lapse → `exit 15` → `exit_label`
+  names the wrong lock → no `classify/2` arm matches → UNCLASSIFIED terminal. `deferral_bound` appears nowhere
+  in it. D38's own text records the honest bound: *"the lapse has NOT been observed in production — no `exit 15`
+  gate timeout is findable on the box"*, and that still holds: **0 rows** on the live table match `exit 15` in
+  `failure_reason` or `detail`, all-time. **(2)** D525 (`:10608`) writes *"Max chain depth 9 against
+  `deferral_bound` 12, so D38's lapse-to-terminal has still never fired."* That compares a population capped
+  below the bound BY CONSTRUCTION — `defer/3` fires the terminal arm at `prior >= bound − 1` and writes the
+  bound-th round `failed`, so a `deferred` row can never carry depth == bound — and it measures a different
+  mechanism in a different file. It is unfalsifiable, and it is struck. **(3)** D134 (`:2708`) asserts D38 *"had
+  already recorded the terminal arm as fired in production"*; D38 says the opposite. Struck. **(4)** `:3800`
+  cites a bare "(D38)" that resolves to the SITE-SPAWNER charter's D38 (`:4714` labels the same fact correctly
+  as *"site-spawner D38, Case 14"*). **STANDING RULE: a cross-charter D-number is cited with its charter's name
+  or it is not cited.** Two D38s in one file is the phantom-D class wearing a real number. What HAS fired is the
+  deferral-chain abandonment: 7 firings, all `production`, 1 × `BOX_BUSY_DEFERRED` 6/6 on 2026-08-05 22:57:53
+  and 6 × `BOX_AT_CAPACITY_DEFERRED` 12/12 on 2026-08-07 — two lines in the residual list, never one.
+
+- **D561 — "THE EXIT IS A COMMAND" IS A NEW DECISION AND IS FILED AS ONE. IT IS NOT D551's RULING, AND D551 IS
+  NOT AMENDED.** D551 names the maintenance MECHANISM explicitly: *"THE MAINTENANCE CADENCE IS ALREADY BUILT AND
+  ALREADY DAILY … The epic's last act is to change that sentence's UNIT from the attempt to the coverage
+  partition — not to invent a scheduler"*, with D552's pinned SQL as the named fallback. Nothing in D551
+  authorises a CLI reading as the exit artefact. This wave adds one anyway, and states why on its own
+  authority rather than borrowing D551's: **the epic's exit condition is that a HUMAN can read the number, and
+  the digest cannot show it** (D564) — its widest window is 7d and the rows are 26 days old, so the carrier
+  D551 named is arithmetically incapable of carrying the epic's only non-zero. The command and the digest are
+  therefore BOTH required, and neither supersedes the other. **D525's both-bases ruling binds the exit reading's
+  own percentage**: a coverage percentage is a rate, so it prints beside the full partition, never alone —
+  which the direction's four-number design would have violated.
+
+- **D562 — THE OPERATOR'S ONE COMMAND CANNOT REACH THE WINDOW THAT SHOWS THE NUMBER, AND THE LIMITER IS THE
+  CLIENT, NOT THE PLANE.** Built from origin/main and run against the live control plane: `--days 20` prints
+  `2 NEVER COVERED` and exits 0 — so the command is NOT structurally blind, which corrects the digest's
+  framing — but the 3 PRODUCTION rows are 26.4 days old and first appear at a **27-day** window, and
+  **`--days 22` returns HTTP 500 while `--days 23/24/25/26/27/30` all die on `context deadline exceeded
+  (Client.Timeout exceeded while awaiting headers)`, exit 1.** The cause is `cloudclient.DefaultTimeout = 30 *
+  time.Second` (`client.go:44`) with `FleetDeployCensus` (`:2396`) installing NO per-call override — unlike its
+  own neighbours `DomainStatusTimeout` (`:814`) and `VerifyTimeout` (`:964`), both 90s, both installed by the
+  same three-line pattern in the same file. The plane is not the blocker: the same 27-day window answers **HTTP
+  200 in 57.9s** under `curl`, carrying `production: 3` + `preview: 2`. **There is no window width at which the
+  shipped command can print the epic's only non-zero.** Slice s2 gives the census its own headroom; a residual
+  the wave states rather than hides is that the 22-day HTTP 500 is server-side and a client fix is necessary,
+  not provably sufficient. **THREE OPERATOR-FACING FACTS, corrected against the inherited brief:** non-TTY
+  stdout emits the raw JSON envelope, not the table (CONFIRMED — `-o table` must be typed); usage errors exit
+  **2**, not 0 (**REFUTED** — the "exit 0" reading came from `cmd | tail; echo $?`, the pipe-eats-rc trap this
+  repo has now hit three times); and a window-truncated `0 NEVER COVERED` exits **0 with a clean bill**, because
+  it is not a refusal at all — the exit code cannot distinguish "healthy" from "you asked a window too narrow to
+  contain the problem."
+
+- **D563 — THE ALARM FILES A GITHUB ISSUE; IT DOES NOT PAGE. AND `if: failure()` IS BLIND TO CANCELLED, WHICH
+  HAS BEEN EATING THE ALARMS FOR SIX DAYS.** The carrier mechanism WORKS and discriminates: run live against a
+  local fake API with an open `CI failure: crown-reconcile` issue present, `CI_FAILURE_KEY=never-covered` filed
+  a NEW issue (exit 0) while `CI_FAILURE_KEY=crown-reconcile` commented on the existing one (exit 0), and the
+  `GH_TOKEN`-instead-of-`GITHUB_TOKEN` trap reproduces exactly (loud `::error`, exit 1, zero API calls). **But
+  it reaches nobody.** `gh repo view FRIKKern/barkpark --json viewerSubscription` returns **UNSUBSCRIBED**, and
+  the reading discriminates — `FRIKKern/galleryspace` returns SUBSCRIBED from the identical call. The filed
+  issues carry **no assignees and no @mentions** (`{"assignees":[],"mentions":false}` on #11217), so an
+  UNSUBSCRIBED owner is notified only when participating. The historical record says FILED, not READ: only three
+  `ci-failure` issues have ever existed, and **#5658 "CI failure: paper-readers" has been OPEN since 2026-07-22
+  with 8 comments, every one authored by `github-actions` and none by a human.** **AND THE NEWEST FINDING IS THE
+  WORST:** every alert step is guarded `if: failure()`, which GitHub evaluates FALSE on cancellation — and
+  paper-readers' last SIX scheduled runs (08-04 … 08-09) are all `cancelled`, so the gate has been silently not
+  running for six days while its stale issue accreted nothing. Cancellation is the dominant non-success
+  conclusion across the board (stale-verdict-watch 17, crown-reconcile 13, breakglass-watch 11). **RULING: the
+  wind-down says "a workflow FILES a GitHub issue", never "pages", until an assignee or an @mention ships; slice
+  s4 ships the assignee and widens the guard to `failure() || cancelled()`; and the owner subscribing to their
+  own repository is filed as a HUMAN GATE.** Corrections to the inherited framing: `breakglass-watch` is NOT
+  chronically red (89 success / 0 failure of the last 100), and `absent-context-census` has failed **11 of 11
+  runs it has ever had** with no carrier at all — that is a decoration, not a watch.
+
+- **D564 — THE DIGEST CAN PRINT A NON-ZERO; IT CANNOT PRINT *THIS* NON-ZERO; AND WIDENING IT WOULD SURRENDER THE
+  FAILURE RATE. RENDER THE SPLIT, DO NOT WIDEN THE WINDOW.** The renderer is not the censor: rendering the
+  SHIPPED digest live for the only site-owning team prints `0 still not after 24.0h` in both windows, while
+  feeding the SAME renderer a `last 30d` window built from the same live census prints **`18,649 of 18,654
+  failed rows … 5 still not after 24.0h`**. `@deploy_windows [{"last 24h", 86_400}, {"last 7d", 604_800}]`
+  (`digest_email.ex:115`) is the whole window set and the five rows are 26 days old. **Widening is not free:**
+  at 30d the failure RATE goes UNMEASURED because the window straddles the deferred-settle boundary at
+  **2026-08-05T21:13:50Z** (the schema commit, `#9615` — note this is NOT the 22:57:53 instant, which is the
+  last-ever `already_running` written `failed`; two different instants, and only the first is what the refusal
+  quotes), and that straddle does not age out until ~2026-09-04. So the digest trades the rate for the coverage
+  non-zero, and cannot have both today. **RULING: do not widen. Render `never_covered_by_environment`, which is
+  computed at `deploy_ledger.ex:1573/:1578` and never rendered — `digest_email.ex` contains the string
+  "environment" ZERO times — and state the window's own reach limit in the clause.** This is a
+  stamped-evidence-overstates case in the epic's own carrier: `digest_email_test.exs:667` builds a fixture that
+  explicitly passes `by_environment: [%{environment: "production", never_covered: 2}]` and then asserts a
+  sentence that omits it entirely — the test constructs the split, watches it be dropped, and passes.
+  **TWO REACH FACTS THE WIND-DOWN MUST NOT OVERSTATE:** the coverage clause landed on main at
+  **2026-08-09 19:50 UTC** and the only four `fleet_digest` deliveries that have ever existed are stamped
+  **06:00:00.69–06:00:01.11 the same morning**, 13h50m EARLIER — so **no human has ever received a coverage
+  sentence**, and the 06:00Z send evidences only that the CARRIER reaches a human. And the audience is derived
+  from INSTANCE ownership (`notifications.ex:445`), not SITE ownership: three teams own instances, exactly ONE
+  team owns any site, so 4 sends reach 3 addresses and 1 human, and only one of those sends can contain
+  coverage at all. A team that owned sites but no instance would be measured by nobody and mailed by nobody.
+
+- **D565 — A DR "SEAL" WOULD CERTIFY THE CONSOLE EPIC'S DEFECT LADDER. THE EXIT ARTEFACT IS THE VOUCHED TOKEN
+  WITH ITS LETTERS INTACT, NEVER THE WORD "SEAL".** Run from a full-history worktree parked at origin/main so
+  the wrapper VOUCHED (no refusal fired, `b-unavailable=0/0`), the shipped predicate answers:
+  `SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=156 considering=0 roster=293`. **`b` is PASS, not FAIL** —
+  correcting the inherited premise: `bLetter` fails only on `defectFails`, and four of the six registered
+  defects sit at rung 2 (MEASURED-ELSEWHERE), which does not fail. That makes it WORSE, not better: clause (b)
+  is a live readout of the CONSOLE epic's ladder (all six ids are `CCH-D*`), and bucket (c)'s three gates are
+  hardcoded console ids fetched independently of `--epic` — the predicate says so itself at `:1275`. **DR can
+  neither fail nor earn b by doing DR work, and a printed DR SEAL would assert another epic's ladder under a
+  deploy-reliability label.** Clause (a) is separately hollow for DR: `PERMANENT_HUMAN_GATES` cannot contain a DR
+  row, and `forwarded` is `fetchRoster(SUCCESSOR)` while `residue ⊆ fetchRoster(EPIC)` — `parent_id` is a SINGLE
+  reference (`api/lib/barkpark/tasks/schema.ex:527-534`), so no row can be in both; measured live, epic roster
+  293 ∩ successor roster 3 = **0**, and `orphans = residue = 156` exactly. Clause (a) live IS the single
+  proposition *"the epic has zero live children"*, reachable by re-parenting rows ANYWHERE. **RULING: this
+  epic's exit artefact is the VOUCHED token quoted verbatim with its letters — `NO-SEAL a=FAIL b=PASS c=PASS
+  orphans=N` reads honestly; a SEAL would not — and the wind-down does not aim at printing one.**
+
+- **D566 — THE ZERO-CRITERIA DISEASE HAS NOW REGRESSED THREE TIMES IN TWENTY-FOUR HOURS. A BACKFILL THAT DOES
+  NOT BECOME A GATE IS WORTHLESS, AND THE FOURTH BACKFILL IS REFUSED.** `dr-w19-bl-zero-criteria-rows-need-a-
+  refusal` names the exact seven rows measured on 2026-08-08; all six live ones have been backfilled and now
+  carry 2–4 criteria each. **And there is ZERO overlap with the six measured today** — six brand-new
+  zero-criteria rows, four of them filed within nine hours, including a p0. That row's own prose already
+  predicted it: *"the census COUNTS the disease; nothing REFUSES the write."* **RULING: the structural cure is a
+  WRITE-SIDE REFUSAL (`bp task create` on a child of this epic refuses a body with no acceptance criteria); it
+  is filed with this measurement attached and is NOT built here, because it is a tasks-plugin governance change
+  that outlives this epic and this is a wind-down wave.** What ships is the bounded reclaim (slice s5).
+  **The inherited "79 open rows with zero criteria" is REFUTED and the correction cuts both ways:** the true
+  zero-criteria count is **SIX** of 163 (the 79 almost certainly came from reading `doc.acceptance_criteria`,
+  which is ALWAYS null on this server — the criteria live at `doc.content.acceptance_criteria`), but a second
+  read of the same population counts **106 of 163 rows that have never had a single criterion STAMPED**
+  (100 at 0/N plus the 6). The reclaim's size is the second number, not the first.
+
+- **D567 — THE COUNT IS `GENUINE-OPEN 155`, `done 126` IS ARITHMETICALLY WRONG, AND `in_progress` IS A CLAIM
+  LEASE THAT MEASURES WORKER HEARTBEATS.** Read four times across 20:20:03–20:25:08Z and once more at 20:45Z:
+  300 children, and the split MOVED between those reads with no work done — `in_progress` 3 → 0 purely by lease
+  expiry (all three claims had `expired_at` 19:49:0xZ, already 35 minutes stale at the first read; lifecycle
+  flips on a sweep, not on read). **`dr-w32-s7` sits at 7/7 criteria and reads `open`**, as does
+  `dr-w28-s4-followup-payload-key-census-deferral-wait` at 3/3. **RULING: this epic publishes GENUINE-OPEN =
+  (open ∪ in_progress) − (rows at 100% criteria) − (rows with no criteria) = 163 − 2 − 6 = 155**, because that
+  definition cannot move when a sweeper runs; a count that subtracts `in_progress` measures heartbeats.
+  **`done 126` is struck.** It exists in exactly two places, both authored by the reclaim builder from ONE
+  19:15:19Z gate run, and charter `:11171` copies that string forward; it fails the builder's own books —
+  `done 73` before the act + 52 closes = **125**, which is what the server returns, while the cancelled arm
+  reconciles exactly (8+4=12). **AND ANY PUBLISHED COUNT LIVES IN A COMMITTED FILE:** `wave_status` is a single
+  mutable string and w32-s7's criterion-6 "publication" survived about one hour before this wave overwrote it.
+  Related corrections: **#11428 is CLOSED and unmerged, but its ledger content IS on origin/main via #11432
+  (`7e5e621aff`), byte-identical** — the digest's "stranded on a dead branch" is refuted; and of the 24
+  landed-but-open rows, **8 rest on the PR body ALONE** (#10350, #10565, #9727, #10942, #10949, #11207, #10017,
+  #11080 — zero standalone `Task:` lines in main's own commit messages), so D546's "second independent source"
+  corroborates only two thirds of the set. **#11319 never names its slug anywhere at all** — no slug-keyed scan
+  of any strictness can find it, which is a hard floor on any automated reclaim, not a tunable one, and makes
+  155 an UPPER bound on genuine remaining work rather than a count.
+
+- **D568 — SIX BROKEN CRITERION COMMANDS, NOT THREE, AND THE PUREST SPECIMEN DEFEATS ITSELF WITH ITS OWN PROSE.**
+  The three the survey named all reproduce: `dr-w26-s3`'s `grep -c 'Carried \*bool'` returns 0 only because the
+  field is column-padded (`Carried             *bool` at `deliveries.go:121` — `grep -cE 'Carried +\*bool'`
+  returns 1); `dr-w26-s7`'s scoped grep returns four files whose api/lib matches are ALL prose comments
+  documenting the very deletion the criterion checks for, beside a real `refute Map.has_key?` guard;
+  `dr-w26-s6`'s unscoped grep is unsatisfiable by construction (this charter alone holds 17 matching lines).
+  **Three more nobody had named:** `dr-w24-s7#3` and `dr-w25-s8#7` both demand `grep -n '|| true'
+  .github/workflows/deploy.yml` return nothing — it returns three lines, and **the third, `deploy.yml:413`, is a
+  COMMENT that reads "There is NO `|| true` … anywhere in this job"**; and `dr-w25-s8#8` demands the job contain
+  no single-quoted `grep -qE`, of which three are present and legitimate. `dr-w25-s8-crown-gets-its-writer` alone
+  carries FOUR defective criteria and is p0. **RULING: a criterion is a QUESTION and must be runnable; these six
+  are re-worded to padding-insensitive, path-scoped, prose-excluding forms in slice s5, and the class is
+  classified rather than swept.** Counter-finding that keeps the reclaim honest: SIX unmet criteria have
+  commands that PASS on origin/main today (`stale-verdict-watch.test.sh` → 87 passed / 0 failed; the
+  path-escape check; the Go build/vet/test gate; two absence greps) — the rows are unmet on paper only.
+
+- **D569 — DELIVERY: D540's WINDOW ORDERING HAS INVERTED, THE STILL-WAITING COHORT IS A ROTATING FIVE-MINUTE
+  TAIL, AND THE CENSORING REFUSAL IS ARITHMETICALLY UNREACHABLE ON THE WINDOW SHAPE AN EXIT LINE WOULD USE.**
+  Retaken on a quiet host (`load average: 0.38`), p95 by width: 6h **1,405s** · 24h **1,072s** · 72h **967s** ·
+  7d **205,582s** · 14d **540,655s** — **72h now reads BELOW 24h, inverting D540's recorded ordering (948.8s /
+  1,256.8s), and the 72h→14d spread is 559x with a single 213x step at 72h→7d.** Retakes 90s apart agree to <1s
+  on p50 and to the digit on p95, because the quantiles come from persisted timestamps; the real load caveat is
+  narrower than "quiet host" — the 6h and 24h windows OVERLAP this wave's own traffic, 72h and wider do not.
+  **There are no permanently-censored rows:** censored is 9 at 6h and 9 at 14d, every one `deferred`/`PLAN` with
+  `became_live_at` NULL and minted in the last ~5 minutes, on three NAMED sites (`live-auto`,
+  `search-capstone`, `search-ember`); the oldest censored wait over 14 days is 308.7s. **`max` refuses at every
+  width by construction** (q=1.0 leaves 0.0 headroom, so one censored row is one too many) and must never be
+  published. **And the censoring refusal cannot speak on a trailing window:** p95 needs `n >= 200` AND
+  `c/n > 0.05`, i.e. `200 <= n < 20c`, which at today's `c = 9` is an EMPTY interval — a 180m→360m sweep crosses
+  `cf = 0.05` downward while `n` is still 166. On CLOSED windows it fires loudly on real rows (nine disjoint day
+  buckets refuse at 17.6–80.3% censored), so the machinery is proven able to lose; it is simply silent on the
+  shape an exit line uses. Two more: the sites node carries `site_id` and nothing else at EVERY layer
+  (`site_delivery/3` → `DeployDeliverySite` at `client.go:2179-2188` → `sanitizeCell(s.SiteID)` at
+  `cloud_deploy_census_cmd.go:936`), so the operator reads a UUID — the same disclosure disease as D557, one
+  function over; and the taxonomy boundary's healing tail runs **12–30 hours PAST the relabel** (p95 refuses at
+  b+0h and b+6h, first prints 7,820s at b+12h, settles to 336s by b+36h), so "a straddling window measures the
+  relabel" UNDERSTATES it — a window pinned exactly at the boundary still swallows a full day of residual.
+
+- **D570 — THE CROWN'S ROUND TRIP IS PROVEN FUNCTIONAL, THE ARMED NEGATIVE CONTROL RETIRED RATHER THAN FIRING,
+  AND THE ALARM'S ONLY LIVE FIRING WAS A FALSE POSITIVE FROM THREE SECONDS OF CLOCK JITTER.** Job two of the
+  lead's list is discharged, and by a stronger route than a hand run: four consecutive production runs walked
+  **ABSENT-FIRST-RUN → PRESENT-EMPTY → PRESENT**, and run `31333052697` LOADED the entry the prior run wrote and
+  used it — *"the graced sha cc10b0c0… was recorded after all — retired from the re-ask list"* — which is the
+  deferred accusation being collected across a run boundary, the mechanism D545 said was structurally unable to
+  fire. Run `31333565555` then retired the armed sha and printed RECONCILED, leaving `graced.txt` at 92 bytes,
+  header only. **`dr-w32-s4-followup-prove-the-first-run-path-live` is discharged on run ids, not on a grep** —
+  and it is closed citing them because it has no criteria to close on (D566's disease, in this epic's own
+  ledger). **THREE RESIDUALS, none of which the wind-down may round up.** (1) **GRACED-UNRECORDED has never
+  fired live, ever.** (2) **The page arm fired ONCE post-fix and it was WRONG:** run `31332764821` failed with
+  `SERVING-CLOCK-SKEW: … 3s in the FUTURE … so the missing row below is ACCUSED rather than excused`, exit 1,
+  comment on #11217 — and the accused sha got its row minutes later. `crown-reconcile.sh:939` sets `SERVING_RED=1`
+  on ANY negative age, zero epsilon, and the control plane's own clock is NTP-healthy, so this is inter-host
+  jitter and it WILL recur. Precision on live data is **0/1**. (3) **The schedule arm has NEVER run the
+  reconcile:** `crown-reconcile.yml` has run on `schedule` exactly twice ever and both failed at the harness
+  step with the product step SKIPPED — every successful reconcile in the workflow's history was piggybacked on a
+  `push` to main. The workflow's own header argues *"Only a level trigger can see that"*, and that level trigger
+  is 0/2. **This is load-bearing for a wind-down: the workflow currently looks healthy because the epic is being
+  actively pushed.** Wind down the pushes and the only surviving trigger is the one that has never worked. Also
+  unchanged: the reader answers 100% through the postgres fallback (`route=0` in every run read) because
+  `/v1/deliveries` 401s the WORKER principal, and #11217 is OPEN with 20 comments after five subsequent
+  RECONCILED runs, contrary to the workflow's own instruction to close it.
+
+- **D571 — TWO OPEN PRs RED MAIN ON MERGE, WITH MEASURED NUMBERS, AND NEITHER MERGES AS-IS.** Both were merged
+  locally onto origin/main in a throwaway clone and the real gate was RUN. **#10811** does not merge — three
+  conflicts, one INSIDE the floor-pin block (its context is `@emitted_floor 123` / `@go_tag_floor 225→227`
+  against main's 144/264, i.e. arithmetic against a tree 39 tags in the past, so charter `:6804`'s "s6 inherits
+  227" is STALE and struck) — and resolved to main's pin the census gate reds **`266 json tag(s) found …, floor
+  is EXACTLY 264`** (delta +2: `coalesced_attempts`, `since`) **plus a second undisclosed UNREAD arm** (`no
+  longer unread … coalesced_attempts`), 23 tests / 2 failures. Its merge order is a TWO-part co-edit, not a
+  one-line bump. **#10129** conflicts in six paths and renames `barkpark_json/4` → `/5`, which the census pins
+  in three places plus ~20 string-keyed allowlist rows: merged, the anti-vacuity floor reds **`84 emitted key(s)
+  collected, floor is EXACTLY 144`** — a silent **60-key loss**, 7 failures — confirming D242's prediction with
+  a live run and dating its numbers (D242 quotes 47/103). Re-pinned to arity 5 the true post-merge figures are
+  **145 emitted / `p.top` 47 / `@go_tag_floor` 269** (+5 tags: `absorption`, `box_caused`, `deploy_rate`,
+  `rate`, `sites_deploying` — matching, name for name, the independent run-proof already in
+  `dr-w26-bl-10129-and-10086-red-mains-census-on-merge`). **#10811's regression is tracked by NO task** and is
+  filed by this wave. Both floors are `==` and both PRs touch `client.go`, so the two merges are NOT
+  independent: whichever lands second must be re-measured from scratch, never summed.
+
+- **D572 — THE DEPLOYED CONTROL PLANE CANNOT IDENTIFY ITS OWN COMMIT, AND "THE SHIPPED CODE" IS ANCHORED ON A
+  TREE HASH INSTEAD.** `cloud-control_plane_green-1` carries an EMPTY `org.opencontainers.image.revision` label
+  and `Application.spec(:barkpark_cloud, :vsn)` is a hardcoded `~c"0.1.0"`. The server checkout reads HEAD
+  `5a11c43dbb`, two commits behind origin/main — but `git rev-parse HEAD:cloud` on the box and
+  `git rev-parse origin/main:cloud` are the SAME tree, `f7b6a002969436496ebdd057a2ad567df5107bcb`, and
+  `git log 5a11c43db..origin/main -- cloud/` is empty. **Green runs origin/main's cloud tree byte-for-byte, and
+  this wave's "shipped code" claims stand on that hash, not on a label** (the missing provenance is already
+  filed as `dr-w25-bl-cp-keeps-no-deploy-provenance`). Two operational corrections for anyone re-deriving:
+  **the live slot is GREEN, not blue** — a recipe hardcoding `cloud-control_plane_blue-1` fails with `container
+  … is not running`, an error an inattentive reader mistakes for a code fault — and `/app/bin/barkpark_cloud
+  eval` cannot run the census (the Repo is not started); only `rpc` works.
+
+### WAVE 33 PLAN — FIVE SLICES IN ROUND 1, ONE DEFERRED TO ROUND 2
+
+Every slice is reader-side and licensed by a demonstrated ABSENCE, not by a plan. Two candidates from the
+direction evaporated at Strategize (the ten-minute `bp cloud site deploy` lie, cured by #11423; the abandonment
+predicate hold) and a third evaporated at Verify (`dr-w32-s4-followup`, discharged on live run ids). What
+remains is the smallest set that makes the epic's own number well-defined, attributable, reachable and
+readable — after which the numbers ARE boring and the epic closes on them.
+
+| # | Slice | Task | Surface | Round | Model |
+|---|---|---|---|---|---|
+| s1 | The coverage window contract gets a test that can fail, and a wire that says what it does | `dr-w33-s1-coverage-window-contract` | `cloud/lib/barkpark_cloud/deploy_ledger.ex` (attrs) + `cloud/test/…/deploy_ledger_test.exs` | 1 | opus |
+| s2 | The census reader stops being the limiter | `dr-w33-s2-census-reader-stops-being-the-limiter` | `internal/cloudclient/client.go` + `client_test.go` | 1 | opus |
+| s3 | The morning digest names the environment behind its non-zero, and its own reach limit | `dr-w33-s3-digest-names-the-environment` | `cloud/lib/…/notifications/digest_email.ex` + its test | 1 | opus |
+| s4 | The alarm reaches a human, and a cancelled run is not silence | `dr-w33-s4-alarm-reaches-a-human` | `scripts/file-ci-failure-issue.sh` + 5 workflow guards | 1 | opus |
+| s5 | The ledger's questions become runnable and its count reproducible | `dr-w33-s5-ledger-questions-become-runnable` | bp writes + `tooling/grip/ledger/w33-…md` | 1 | opus |
+| s6 | The last non-zero names its site | `dr-w32-followup-coverage-names-no-site` | `deploy_ledger.ex` + `client.go` + census cmd + floors | **2** | opus |
+
+**s6 IS ROUND 2 BY CONSTRUCTION, not by caution.** It edits `coverage_cohorts/2` in the same file s1 edits and
+`DeployCoverageCohort` in the same file s2 edits, and — the substantive reason — naming the sites behind a
+number whose window contract is not yet pinned would ship an attributable wrong answer. It dispatches after s1
+and s2 MERGE. `dr-w31-fu-agency-reaches-the-cli` also remains dispatchable now that #11423 has merged.
+
+**HIGH-FLIP-RISK, named here and in the brief.** **s1**: whether the right-edge law is a defect to fix or a
+deliberate design to DISCLOSE. This wave rules DISCLOSE — the prose at `:1319-1328` is correct that bounding the
+covering query would manufacture PENDING at the window's own edge, and the measured 3,918-row swing is the cost
+of the alternative, not evidence for it — so the slice adds a test and a sentence and must NOT add the bound.
+A second independent re-derivation is owed before merge, and the lead dispatches it by hand. **s4**: whether
+assigning an issue to a repository owner constitutes "paging" — it does not, and the brief forbids the word.
+
+**WHAT THE WIND-DOWN WILL SAY WHEN THESE LAND**, so the next wave writes it rather than re-deriving it: the
+maintenance cadence is `DailyDigestWorker` at `0 6 * * *` plus `bp cloud deployments` pinned open-right; the
+gauge that alarms is `never_covered_by_environment` being non-zero, NEVER a percentage; and the residual risks,
+by name, are (1) abandonment can lose a publish, 2 of 7, `search` @ `947c0dbd0de8` and `search-ember` @
+`91284be29666`, both saved only by a later whole-site rebuild (D544's "saved", never D478's "lost");
+(2) D38's `exit 15` lapse is undischarged and unfired, 0 rows all-time, and D525's chain-depth argument for it
+is struck (D560); (3) the coverage percentage is a stuck-site detector, not a delivery rate, and cannot
+distinguish abandonment from stuckness (D558); (4) the preview arm is `never_covered` by construction (D557);
+(5) the 2026-08-05T21:13:50Z taxonomy boundary makes any straddling window measure the relabel, and its healing
+tail runs 12–30h past it (D569); (6) the crown's scheduled trigger has never once run the reconcile (D570);
+(7) prebuilt deploys and lost fenced CASes are invisible to the abandonment gauge, and it is production-only by
+construction (D559).
+
+### Wave 2026-08-09 (wave 33) — REVIEWED · Paper `deploy-reliability-wave-33-2026-08-09` · grade **A**
+
+**Five of six slices built, reviewed, gate-green on the reviewed state, pushed and PR'd. Nothing merged — the
+lead merges.** The sixth (`dr-w32-followup-coverage-names-no-site`) is round 2 BY DESIGN, behind s1 and s2.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The coverage window contract gets a test that can fail | `dr-w33-s1-coverage-window-contract` | `…contract-gets-a-test-0-r` | [#11478](https://github.com/FRIKKern/barkpark/pull/11478) | 99 tests, 0 failures · format clean |
+| The census reader stops being the limiter | `dr-w33-s2-census-reader-stops-being-the-limiter` | `…being-the-limite-1-r` | [#11479](https://github.com/FRIKKern/barkpark/pull/11479) | go build/vet/test ok · gofmt clean |
+| The digest names the environment and its reach limit | `dr-w33-s3-digest-names-the-environment` | `…names-the-environment-2-r` | [#11480](https://github.com/FRIKKern/barkpark/pull/11480) | 47 tests, 0 failures · format clean |
+| The alarm reaches a human; cancelled stops being silence | `dr-w33-s4-alarm-reaches-a-human` | `…a-human-and-a-cancelle-3-r` | [#11481](https://github.com/FRIKKern/barkpark/pull/11481) | 41 passed, 0 failed (was 23 cases) |
+| The ledger's questions become runnable | `dr-w33-s5-ledger-questions-become-runnable` | `…become-runnable-a-4-r` | [#11482](https://github.com/FRIKKern/barkpark/pull/11482) | six re-worded commands re-run · LEDGER-ROW-PRESENT |
+
+**What landed.** The wind-down was VERIFIED rather than declared, and verifying it split the verdict — which is
+the wave's whole finding and the reason the epic did not seal today. The FLEET half is settled through three
+independent routes and every one of its five never-covered rows is explained; two of the five are preview rows
+that are uncoverable BY CONSTRUCTION (D557). The INSTRUMENT half was not. The same history read 0, 3 or 5
+depending on where an operator put two dates, and the envelope disclosed none of the three mechanisms behind
+that. This wave closed each one at its own seam. The right-edge law that swings the headline ~1,300× now has a
+test that can lose and a wire that says what it does (D555/D556). The exit command can now reach the 27-day
+window that holds the number — the limiter was a 30s client default sitting beside two 90s precedents in its
+own file, while the plane answers that window in 57.9s (D562). The morning digest renders the environment split
+its own fixture had been constructing and watching be dropped since it was written, and states its reach limit
+once (D564). And the alarm learned that a cancelled scheduled run is silence: paper-readers' gate had not run
+for six days while its stale issue sat there looking current (D563).
+
+**What the reviewer changed.** Five slices, all fixed in place, none redesigned. (1) **s4's deploy.yml widening
+was reverted** — the file already measured the argument against it forty lines above the guard the wave
+changed: 344 of 1,378 runs cancelled, `cancel-in-progress: false`, and a diff base anchored to the last
+SUCCESSFUL run, so a burst-merge cancellation is DESIGNED coalescing and prod is not left stale. Widening it
+would have buried `deploy-production`, this epic's loudest alarm key, under exactly the noise the file says
+trains people to ignore the real ones — and the PR left the old bullet standing, so `deploy.yml` shipped two
+comments contradicting each other. The other four guards stand. (2) **s3's reach sentence moved off
+`coverage_clause/1` onto `deploy_block/1`**: `@deploy_windows` has two doors, so it printed verbatim under both
+in every real send, and it was fail-open — had every window fallen to coverage-UNMEASURED the disclosure would
+have vanished exactly when the numbers deserve it most. Mutation-proved once-per-email. (3) **s2's value test
+pinned equality with two sibling constants** and never asserted the property that matters; it now pins the
+measured 57.9s floor (mutation-proved at 45s) with a 5m ceiling, and the builder's named blind spot was cleared
+— `cloudCtx` is `context.Background` at both call sites, so no outer deadline pre-empts the cap. (4) s1's
+non-vacuity mirror counted the never-covered row without saying where it came from; it now pins
+`never_covered_by_environment`, the quantity s3 renders. (5) s5 — see below.
+
+**Ledger fix, and it is the wave's second-best finding.** Charter D567 publishes `GENUINE-OPEN 155` and s5's
+committed count file published `164` — a live contradiction between `main` and the ledger, the exact class of
+thing this wave exists to clear. They reconcile with ZERO residue once the population is cleaned. Seven of the
+thirteen criteria-less rows were ONE row: a Decide-phase filing that retried **seven times at ~45s intervals**
+(20:51:23 → 20:56:26Z), leaving six `drafts.*` shadows counted as GENUINE-OPEN plus one published, criteria-less
+orphan — while the same finding was re-filed correctly ten minutes later as
+`dr-w33-bl-crown-skew-arm-has-no-epsilon`. Six discarded, one cancelled as a duplicate. `nocrit` then falls
+13 → 6, which is D567's six exactly, and the entire remaining gap is +8 rows this wave FILED and +2 rows s5
+CLOSED: **155 was true at 20:45Z, 165 is true at 21:47:56Z, and nothing else moved.** Recorded as §8 of
+`tooling/grip/ledger/w33-ledger-reclaim-2026-08-09.md`, with the count re-derived independently from a third
+worktree using the file's own command verbatim. This is the second live sighting of the draft-shadow mechanism,
+from a different write path and on a bigger burst — `dr-w33-fu-patch-spawns-a-counted-draft-shadow` is the right
+structural cure, not another manual sweep.
+
+**Ledger audit: clean.** All five slice tasks claimed, stamped criterion-by-criterion AS the work happened with
+quotable evidence, and left `in_progress` with the PR-body and merge-gated criteria honestly `--miss`-noted for
+the lead. No row outside this wave was touched by a builder. Three criteria carry appended REVIEW NOTES where a
+reviewer fix changed what the stored evidence describes (s3#1, s4#3, s5#5), each written with the criterion text
+and met flags read back and preserved.
+
+**What the lead must know before merging.** `dr-w33-s4` (#11481) now widens FOUR guards, not five — if the
+merge diff shows `deploy.yml` widened, the wrong branch was taken. **s1 is HIGH-FLIP-RISK (disclose-vs-fix) and
+has had exactly ONE independent re-derivation, the reviewer's; a genuinely independent second reviewer is still
+owed by hand.** Round 2 (`dr-w32-followup-coverage-names-no-site`) dispatches only after #11478 AND #11479 are
+on `origin/main` — it edits `coverage_cohorts/2` in s1's file and the cohort struct in s2's, and it is
+HIGH-FLIP-RISK on tenancy. #10811 and #10129 both red `main` on merge with measured numbers (D571) and neither
+merges as-is. Every merge-gated criterion (index 7 on s1–s4, index 7 on s5) is the lead's to close.
+
+**What the next wave should take.** The epic is ONE live proof from its exit. Nobody has yet run the patched
+`bp cloud deployments --days 27` against the live plane, so "the operator can reach the number" is inferred, not
+witnessed — and `--days 22` still returns HTTP **500** server-side, which a client-side timeout cannot fix.
+Nobody has yet received a digest carrying a coverage sentence: the clause landed 13h50m after the only four
+`fleet_digest` sends that have ever existed, so the first email that can carry it is the next 06:00Z tick. Merge
+round 1, dispatch round 2, then run ONE maintenance-cadence wave whose entire job is those two live reads plus
+the `--days 22` 500 and the comment-path routing hole (`dr-w33-followup-comment-path-routing`). If those come
+back boring, the exit artefact is written and the epic seals on VOUCHED (D565) — never on the word SEAL, whose
+clause (b) is a live readout of another epic's ladder.
