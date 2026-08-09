@@ -14,11 +14,23 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
   MUTATION test at the bottom is the anti-vacuous-green guard: it flips one
   fixture's `commit_ancestry` and proves the counts move, so a future refactor
   that stops reading the measured column cannot keep these tests green.
-  """
-  use ExUnit.Case, async: true
 
+  dr-w28-s5 adds section 8, the deploy-health block. `use BarkparkCloud.DataCase`
+  (rather than the bare `ExUnit.Case` this file had) because the TENANCY test
+  there MANUFACTURES TWO TEAMS with different sites and reads the real ledger:
+  every other test in this file renders from hand-built fixture maps and would
+  pass identically whether the reading is team-scoped or fleet-wide, so a
+  fixture cannot decide the one question section 8 exists to answer. The pure
+  tests are unaffected — they simply never touch the sandbox.
+  """
+  use BarkparkCloud.DataCase, async: true
+
+  alias BarkparkCloud.Accounts
+  alias BarkparkCloud.DeployLedger
   alias BarkparkCloud.Notifications.DigestEmail
+  alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.Barkpark
+  alias BarkparkCloud.Registry.Deployment
 
   @checked ~U[2026-08-07 14:02:00.000000Z]
   @measured ~U[2026-08-08 03:11:00.000000Z]
@@ -320,5 +332,404 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
     assert body =~ "| pinned=v0.2.20, paused, autoupdate off | checked"
     assert body =~ "2509 commits behind main"
+  end
+
+  ## 8. dr-w28-s5 — THE DIGEST NAMES DEPLOY HEALTH, FOR THE TEAM'S OWN SITES
+  ##
+  ## The digest reached a human for the first time ever at 2026-08-09T06:00:00Z
+  ## (four notification_deliveries rows, event=fleet_digest, status=sent) and
+  ## the payload was deploy-blind: it told four people nothing about their
+  ## deploy failures. These tests read the BYTES of the block that fixes that,
+  ## and they exist mostly to pin what it is NOT allowed to say.
+  ##
+  ## `summary/2` takes the reading as an argument, so the render shapes below
+  ## are exercised without a database. THE TENANCY TEST IS THE EXCEPTION AND
+  ## THAT IS THE POINT: it manufactures two teams with different sites and real
+  ## ledger rows, because a fixture-fed reading is green by construction whether
+  ## the scope is the team or the whole platform.
+
+  @read_at ~U[2026-08-09 06:00:00Z]
+
+  # The instant both tenancy tests pin their windows at, so the rows they insert
+  # and the census they compare against share one clock.
+  @ledger_now ~U[2026-08-09 12:00:00Z]
+
+  defp window(label, door, deferred, failed, rate) do
+    %{
+      label: label,
+      from: DateTime.add(@read_at, -86_400, :second),
+      to: @read_at,
+      door: door,
+      deferred: deferred,
+      failed: failed,
+      rate: rate
+    }
+  end
+
+  defp measured_rate(numerator, denominator) do
+    %{
+      sample: denominator,
+      pct: Float.round(numerator * 100 / denominator, 2),
+      numerator: numerator,
+      min_sample: 200,
+      refused: false,
+      reason: nil,
+      basis: "attempted rows in the window"
+    }
+  end
+
+  defp refused_rate(denominator, reason) do
+    %{
+      sample: denominator,
+      pct: nil,
+      numerator: 0,
+      min_sample: 200,
+      refused: true,
+      reason: reason,
+      basis: "attempted rows in the window"
+    }
+  end
+
+  defp health(windows) do
+    %{
+      windows: windows,
+      measured_at: @read_at,
+      unmeasured: false,
+      no_sites: false,
+      reason: nil
+    }
+  end
+
+  test "the digest body names the deploy doors — and every rate carries its deferred population" do
+    deploy =
+      health([
+        window("last 24h", 852, 564, 53, measured_rate(53, 852)),
+        %{
+          window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156))
+          | from: DateTime.add(@read_at, -604_800, :second)
+        }
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "Deploy health for this team's sites (control-plane deploy ledger, read 2026-08-09 06:00 UTC):"
+
+    # THE BINDING SHAPE: door, deferrals and the post-door rate on ONE line.
+    assert body =~
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 852 attempted, of which 564 deferred by a busy box — 6.22% failed post-door (53 of 852 attempted)."
+
+    assert body =~
+             "  last 7d (2026-08-02 06:00 UTC to 2026-08-09 06:00 UTC): 9,156 attempted, of which 3,043 deferred by a busy box — 67.5% failed post-door (6,180 of 9,156 attempted)."
+  end
+
+  test "a rate can never be rendered without its door and its deferrals beside it" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    [line] = for l <- String.split(body, "\n"), l =~ "failed post-door", do: l
+
+    # Every number the percentage depends on is on the SAME line as the
+    # percentage. A future refactor that splits them apart reds here.
+    assert line =~ "852 attempted"
+    assert line =~ "564 deferred"
+    assert line =~ "6.22%"
+  end
+
+  test "a window with no rows renders UNMEASURED — never 0%, never healthy" do
+    deploy =
+      health([window("last 24h", 0, 0, 0, refused_rate(0, "sample 0 below min_sample 200"))])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): UNMEASURED — no deploy rows at all in this window for this team's sites. A window with nothing in it is not a clean bill of health."
+
+    # The reassuring readings a zero window must never be able to produce.
+    refute body =~ "0% failed"
+    refute body =~ "0.0% failed"
+    refute body =~ "failed post-door"
+  end
+
+  test "an empty window and a team with NO SITES are different sentences" do
+    empty_window =
+      DigestEmail.body(
+        DigestEmail.summary([fresh_box()],
+          deploy:
+            health([
+              window("last 24h", 0, 0, 0, refused_rate(0, "sample 0 below min_sample 200"))
+            ])
+        )
+      )
+
+    no_sites = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: no_sites_reading()))
+
+    # THE FALSE ALARM THIS ARM EXISTS TO STOP. A team that owns no sites is not
+    # a team whose deploys stopped, and it must not be told every morning that a
+    # window had nothing in it.
+    assert no_sites =~
+             "Deploy health: this team owns no sites, so it ran no deploys — nothing was measured here and nothing is being withheld."
+
+    refute no_sites =~ "no deploy rows at all in this window"
+    refute no_sites =~ "not a clean bill of health"
+    refute no_sites =~ "UNMEASURED"
+    assert empty_window =~ "no deploy rows at all in this window"
+    refute empty_window == no_sites
+  end
+
+  test "a refused rate keeps its counts and withholds only the ratio" do
+    deploy =
+      health([window("last 24h", 74, 12, 3, refused_rate(74, "sample 74 below min_sample 200"))])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 74 attempted, of which 12 deferred by a busy box — failure rate UNMEASURED (sample 74 below min_sample 200); 3 of 74 attempted are settled failures"
+
+    refute body =~ "% failed post-door"
+  end
+
+  test "a send that supplied no reading says so — the omission cannot render as a clean team" do
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()]))
+
+    assert body =~ "Deploy health: UNMEASURED — this send supplied no deploy-ledger reading."
+    refute body =~ "failed post-door"
+  end
+
+  test "no team scope is UNMEASURED and is NEVER read as the whole fleet" do
+    # `nil` is `census/3`'s word for UNSCOPED, and a fleet-wide reading inside a
+    # per-team email is the disclosure the scoping exists to close. Both the
+    # absent option and an explicit `nil` fail CLOSED.
+    for reading <- [
+          DigestEmail.deploy_health(now: @read_at),
+          DigestEmail.deploy_health(now: @read_at, site_ids: nil)
+        ] do
+      assert %{unmeasured: true, no_sites: false, windows: []} = reading
+
+      body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: reading))
+
+      assert body =~
+               "Deploy health: UNMEASURED — this send supplied no team scope, so no reading was taken."
+
+      refute body =~ "failed post-door"
+      refute body =~ "attempted, of which"
+    end
+  end
+
+  test "a site lookup that failed renders UNMEASURED with the failure's own words" do
+    reading =
+      DigestEmail.deploy_health(now: @read_at, site_ids: {:error, "connection not available"})
+
+    assert %{unmeasured: true, windows: []} = reading
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: reading))
+
+    assert body =~
+             "Deploy health: UNMEASURED — this team's sites could not be listed: connection not available."
+  end
+
+  test "an unreadable ledger renders UNMEASURED and the digest still goes out" do
+    # A junk site id is a real production failure mode, not a hypothetical:
+    # `site_ids` is interpolated into a `binary_id` column, so a non-UUID raises
+    # `Ecto.Query.CastError` — a 500 if it escaped. It must not escape.
+    reading = DigestEmail.deploy_health(now: @read_at, site_ids: ["not-a-uuid"])
+
+    assert %{unmeasured: true, windows: [], reason: reason} = reading
+    assert reason =~ "the deploy ledger could not be read"
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: reading))
+    assert body =~ "Deploy health: UNMEASURED — the deploy ledger could not be read"
+    refute body =~ "failed post-door"
+  end
+
+  test "the digest never prints a lifetime deploy rate" do
+    deploy =
+      health([
+        window("last 24h", 852, 564, 53, measured_rate(53, 852)),
+        window("last 7d", 9_156, 3_043, 6_180, measured_rate(6_180, 9_156))
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The all-time numerator's honest freeze point is 2026-08-08T14:55:28.776961
+    # at 18,640 — a number that is stale the moment it is written down. Only
+    # windows this send pinned itself may be reported.
+    refute body =~ "lifetime"
+    refute body =~ "all-time"
+    refute body =~ "18,640"
+    refute body =~ "18640"
+
+    # ...and every window it DOES report names both of its own bounds.
+    assert body =~ "2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC"
+  end
+
+  test "the deploy block reaches the actual email struct, not just body/1" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+
+    email =
+      DigestEmail.build(
+        DigestEmail.summary([stale_box()], deploy: deploy),
+        "ops@example.com"
+      )
+
+    assert email.text_body =~ "852 attempted, of which 564 deferred by a busy box"
+  end
+
+  test "an empty instance list still reports deploy health — sites deploy with no instance registered" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    body = DigestEmail.body(DigestEmail.summary([], deploy: deploy))
+
+    assert body =~ "No instances are registered yet"
+    assert body =~ "852 attempted, of which 564 deferred"
+  end
+
+  test "MUTATION: the rendered percentage is DERIVED from the reading, not baked" do
+    six = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    sixty = health([window("last 24h", 852, 564, 575, measured_rate(575, 852))])
+
+    six_body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: six))
+    sixty_body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: sixty))
+
+    assert six_body =~ "6.22% failed post-door (53 of 852 attempted)"
+    assert sixty_body =~ "67.49% failed post-door (575 of 852 attempted)"
+
+    # If the block ever stops reading the reading, these two bodies become
+    # identical and this reds.
+    refute six_body == sixty_body
+  end
+
+  ## ── THE TENANCY PROOF ─────────────────────────────────────────────────────
+  ##
+  ## TWO REAL TEAMS, TWO REAL SITES, REAL LEDGER ROWS. Everything above renders
+  ## from a fixture map and passes identically whether `deliver_fleet_digest/1`
+  ## takes one fleet-wide reading or one per team — which is exactly why a
+  ## fixture cannot settle this. These read the database through
+  ## `Registry.list_sites_for_team/1`, the same list the digest narrows by.
+
+  test "each team's digest carries ITS OWN deploy numbers, and never the platform's" do
+    {_ua, team_a} = user_team()
+    {_ub, team_b} = user_team()
+
+    site_a = site_fixture(team_a)
+    site_b = site_fixture(team_b)
+
+    # 7 attempted rows for A (5 settled failures), 2 for B (1 failure). Both
+    # doors sit below `min_sample` 200, so both rates are REFUSED and the counts
+    # survive — the honest shape a small team actually receives.
+    deployments!(site_a, 5, "failed")
+    deployments!(site_a, 2, "live")
+    deployments!(site_b, 1, "failed")
+    deployments!(site_b, 1, "live")
+
+    body_a = team_body(team_a)
+    body_b = team_body(team_b)
+
+    assert body_a =~ "7 attempted, of which 0 deferred by a busy box"
+    assert body_a =~ "5 of 7 attempted are settled failures"
+
+    assert body_b =~ "2 attempted, of which 0 deferred by a busy box"
+    assert body_b =~ "1 of 2 attempted are settled failures"
+
+    # NEITHER TEAM IS SHOWN THE OTHER'S ROWS...
+    refute body_a =~ "2 attempted, of which"
+    refute body_b =~ "7 attempted, of which"
+
+    # ...NOR THE PLATFORM TOTAL THAT CONTAINS BOTH. This is the disclosure the
+    # per-team scoping closes: the fleet-wide census over the same window is 9
+    # attempted, and 9 is a number about the platform that neither of these two
+    # teams may read off its own email.
+    fleet = DeployLedger.census(DateTime.add(@ledger_now, -86_400, :second), @ledger_now)
+    assert fleet.volume == 9
+    refute body_a =~ "9 attempted"
+    refute body_b =~ "9 attempted"
+
+    # And the two bodies genuinely differ — a scoping that silently collapsed
+    # would make these identical.
+    refute body_a == body_b
+  end
+
+  test "a team that owns no sites is told so, and is not told the platform is unhealthy" do
+    {_ua, team_a} = user_team()
+    {_ub, empty_team} = user_team()
+
+    # A busy platform around it: team A deploys, and every one of those deploys
+    # fails. A fleet-wide reading would deliver that alarm to a team that owns
+    # nothing, every morning.
+    deployments!(site_fixture(team_a), 6, "failed")
+
+    assert Registry.list_sites_for_team(empty_team) == []
+
+    body = team_body(empty_team)
+
+    assert body =~
+             "Deploy health: this team owns no sites, so it ran no deploys — nothing was measured here and nothing is being withheld."
+
+    refute body =~ "no deploy rows at all in this window"
+    refute body =~ "not a clean bill of health"
+    refute body =~ "attempted, of which"
+    refute body =~ "6 attempted"
+
+    # The busy neighbour IS visible to the team that owns it — the empty arm is
+    # a scoping result, not a silenced reading.
+    assert team_body(team_a) =~ "6 attempted, of which 0 deferred by a busy box"
+  end
+
+  # Exactly what `Notifications.deliver_fleet_digest/1` does for one team: list
+  # that team's sites, narrow the ledger read to them, render.
+  defp team_body(team) do
+    site_ids = team |> Registry.list_sites_for_team() |> Enum.map(& &1.id)
+
+    DigestEmail.body(
+      DigestEmail.summary([fresh_box()],
+        deploy: DigestEmail.deploy_health(now: @ledger_now, site_ids: site_ids)
+      )
+    )
+  end
+
+  defp no_sites_reading, do: DigestEmail.deploy_health(now: @read_at, site_ids: [])
+
+  defp user_fixture do
+    n = System.unique_integer([:positive])
+
+    {:ok, user} =
+      Accounts.register_user(%{
+        email: "digest-#{n}@example.com",
+        password: "correct-horse-battery"
+      })
+
+    user
+  end
+
+  defp user_team do
+    user = user_fixture()
+    n = System.unique_integer([:positive])
+    {:ok, team} = Accounts.create_team(%{name: "T #{n}", slug: "t-#{n}"})
+    {:ok, _} = Accounts.add_member(team, user, "owner")
+    {user, team}
+  end
+
+  defp site_fixture(team) do
+    n = System.unique_integer([:positive])
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+    {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+    site
+  end
+
+  # Deployments are inserted as STRUCTS on purpose (the same reason
+  # `DeployLedgerTest` does): `Deployment.changeset/2` forbids casting `status`,
+  # and the census needs rows pinned to an exact `inserted_at` inside the window.
+  defp deployments!(site, count, status) do
+    at = %{DateTime.add(@ledger_now, -3600, :second) | microsecond: {0, 6}}
+
+    for _ <- 1..count do
+      Repo.insert!(%Deployment{
+        site_id: site.id,
+        status: status,
+        environment: "production",
+        failure_reason: if(status == "failed", do: "the build did not finish in time"),
+        inserted_at: at,
+        updated_at: at
+      })
+    end
   end
 end
