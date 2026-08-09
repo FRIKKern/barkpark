@@ -2082,6 +2082,13 @@ type DeployCensus struct {
 	// control plane does not measure delivery yet" must not decode to "delivery
 	// took zero seconds".
 	Delivery *DeployDelivery `json:"delivery"`
+	// DeferralWait is the dr-w28-s4 addition: how long the re-queue a deferral
+	// promises actually TOOK. A POINTER for the same reason Delivery is — a
+	// control plane predating that slice sends no `deferral_wait` key at all,
+	// and "this control plane does not measure the re-queue" must never decode
+	// into "the re-queue took zero seconds", which is the most flattering
+	// possible reading of an absence.
+	DeferralWait *DeployDeferralWait `json:"deferral_wait"`
 	// Scope is the dr-w18-s1 addition: the population these numbers were taken
 	// over, NAMED. A POINTER because the operator route (and any control plane
 	// predating the team route) sends no `scope` key at all, and an absent key
@@ -2180,6 +2187,74 @@ type DeployDelivery struct {
 	Unmetered   int                    `json:"unmetered"`
 	MinSample   int                    `json:"min_sample"`
 	Sites       []DeployDeliverySite   `json:"sites"`
+}
+
+// DeployDeferralWaitPopulation is the deferral-wait sample WITH everything that
+// is NOT in it. Covered + Pending + Unreadable == Deferred; a reader that prints
+// a p50 without printing Pending is quoting a survivor-biased number, because
+// the rows still waiting are precisely the slow ones the estimator cannot see.
+type DeployDeferralWaitPopulation struct {
+	Deferred   int `json:"deferred"`
+	Covered    int `json:"covered"`
+	Pending    int `json:"pending"`
+	Unreadable int `json:"unreadable"`
+}
+
+// DeployDeferralWaitOutcome is one cohort of the deferral population, carrying
+// the control plane's own wording for it. The vocabulary is exactly COVERED /
+// PENDING / UNREADABLE, and a reader must render Label rather than inventing a
+// gloss: COVERED means "the site has since rebuilt", NEVER "your edit shipped".
+type DeployDeferralWaitOutcome struct {
+	Outcome string `json:"outcome"`
+	Label   string `json:"label"`
+	Count   int    `json:"count"`
+}
+
+// DeployDeferralWaitQuantile is ONE percentile of the deferral wait, and it can
+// REFUSE two ways: below min_sample, and when the unresolved fraction exceeds
+// the 1-q headroom the quantile needs. Seconds is a POINTER because a refusal
+// sends null and a float64 would decode that as 0.0 — a fleet whose re-queues
+// look instant because nobody could measure them.
+type DeployDeferralWaitQuantile struct {
+	Quantile           float64  `json:"quantile"`
+	Label              string   `json:"label"`
+	Seconds            *float64 `json:"seconds"`
+	Sample             int      `json:"sample"`
+	Unresolved         int      `json:"unresolved"`
+	UnresolvedFraction float64  `json:"unresolved_fraction"`
+	Headroom           float64  `json:"headroom"`
+	MinSample          int      `json:"min_sample"`
+	Refused            bool     `json:"refused"`
+	Reason             string   `json:"reason"`
+	Basis              string   `json:"basis"`
+}
+
+// DeployDeferralWait is `deferral_wait` on the census envelope: the number
+// behind the sentence "a deferral is re-queued, not lost" (DeployLedger's
+// deferral_wait). Until it existed, `deferred` was a COUNT with no clock, so a
+// fleet that improved its failure rate by relabelling every 409 `deferred` read
+// as a fleet getting better even when the rebuild arrived six hours later.
+//
+// Clock is the payload's own statement of what is being measured — a TIME-keyed
+// join (deferred row → the first later-MINTED live build on the same site and
+// environment), deliberately NOT keyed on content_rev, which is not a revision,
+// is not injective across sites, and recurs.
+//
+// OldestPendingSeconds is a LOWER BOUND on a wait still running, and it is a
+// pointer: no pending rows means there is no bound to state, which is not zero.
+type DeployDeferralWait struct {
+	Clock                string                       `json:"clock"`
+	Basis                string                       `json:"basis"`
+	AsOf                 string                       `json:"as_of"`
+	Population           DeployDeferralWaitPopulation `json:"population"`
+	Outcomes             []DeployDeferralWaitOutcome  `json:"outcomes"`
+	Sample               int                          `json:"sample"`
+	Unresolved           int                          `json:"unresolved"`
+	OldestPendingSeconds *float64                     `json:"oldest_pending_seconds"`
+	P50                  DeployDeferralWaitQuantile   `json:"p50"`
+	P95                  DeployDeferralWaitQuantile   `json:"p95"`
+	Max                  DeployDeferralWaitQuantile   `json:"max"`
+	MinSample            int                          `json:"min_sample"`
 }
 
 // DeployCensusError is a census the control plane REFUSED to answer, with the
