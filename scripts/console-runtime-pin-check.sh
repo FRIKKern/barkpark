@@ -63,13 +63,17 @@ fail() { echo "::error::console-runtime-pin-check: $*" >&2; }
 # job header above it. COMMENT LINES ARE SKIPPED — console-harness.yml:600
 # carries the string `node-version: 20` inside a prose comment, and a naive grep
 # attributes it to whichever job it lands near.
+# A job header may carry a TRAILING COMMENT (`  intruder-job:  # added in a
+# hurry`). The old anchored `:[[:space:]]*$` missed those headers entirely, so
+# the setup-node underneath was attributed to the PREVIOUS matched header — an
+# intruder placed above `cssom-parity` was silently absorbed into the pinned set.
 pairs() {
   awk '
-    /^[[:space:]]*#/                       { next }
-    /^  [A-Za-z0-9_-]+:[[:space:]]*$/      { j=$0; sub(/^  /,"",j); sub(/:.*$/,"",j); next }
-    /node-version-file:/                   { print j "\tFILE"; next }
-    /node-version:/                        { v=$0; sub(/^.*node-version:[[:space:]]*/,"",v);
-                                             gsub(/[^0-9A-Za-z._-]/,"",v); print j "\t" v }
+    /^[[:space:]]*#/                              { next }
+    /^  [A-Za-z0-9_-]+:[[:space:]]*(#.*)?$/       { j=$0; sub(/^  /,"",j); sub(/:.*$/,"",j); next }
+    /node-version-file:/                          { print j "\tFILE"; next }
+    /node-version:/                               { v=$0; sub(/^.*node-version:[[:space:]]*/,"",v);
+                                                    gsub(/[^0-9A-Za-z._-]/,"",v); print j "\t" v }
   ' "$1"
 }
 
@@ -123,25 +127,46 @@ measure() {
     rc=1
   fi
 
-  pinned_val="$(echo "$rows" | awk -F'\t' -v j="$PINNED_JOB" '$1 == j { print $2 }' | head -1)"
-  if [ "$pinned_val" = "FILE" ]; then
-    fail "REFUSED — '$PINNED_JOB' uses node-version-file:. That makes this guard's parity leg compare the declaration with itself: true by construction, unable to lose. Keep the literal."
+  # DUPLICATE — a job may state its runtime ONCE. The set-equality leg above
+  # reasons over `sort -u` job NAMES, so a second `node-version` row on an
+  # already-known job used to be printed to the roster and then dropped from
+  # every verdict. This guard reads a job's runtime from its declaration; with
+  # two declarations and no tiebreak it cannot know which runtime actually runs,
+  # so it refuses to certify either. (It does NOT claim "the last one wins" —
+  # that was not measured here, and the refusal does not need it.)
+  for j in $(echo "$rows" | cut -f1 | sort | uniq -d); do
+    vals="$(echo "$rows" | awk -F'\t' -v j="$j" '$1 == j { print $2 }' | tr '\n' ' ' | sed 's/ *$//')"
+    fail "DUPLICATE — job '$j' declares node-version more than once (values: $vals). This guard names a job's runtime from its declaration; with two declarations and no tiebreak it cannot know which runtime this job actually runs on, so it refuses to certify either one. Leave exactly one."
     rc=1
-  elif [ -z "$pinned_val" ]; then
+  done
+
+  # Every value the pinned job declares, not just the first — a `node-version-file:`
+  # added BELOW the literal used to slip past the headline refusal.
+  pinned_vals="$(echo "$rows" | awk -F'\t' -v j="$PINNED_JOB" '$1 == j { print $2 }')"
+  if [ -z "$pinned_vals" ]; then
     fail "'$PINNED_JOB' declares no node-version — the harness would run on the runner default and no file would say so."
     rc=1
-  elif [ "$pinned_val" != "$decl" ]; then
-    fail "PARITY — $DECL_REL says $decl but '$PINNED_JOB' runs node-version: $pinned_val. The harness is tested under a runtime nothing declares."
-    rc=1
+  else
+    for v in $pinned_vals; do
+      if [ "$v" = "FILE" ]; then
+        fail "REFUSED — '$PINNED_JOB' uses node-version-file:. That makes this guard's parity leg compare the declaration with itself: true by construction, unable to lose. Keep the literal."
+        rc=1
+      elif [ "$v" != "$decl" ]; then
+        fail "PARITY — $DECL_REL says $decl but '$PINNED_JOB' runs node-version: $v. The harness is tested under a runtime nothing declares."
+        rc=1
+      fi
+    done
   fi
 
   for j in $EXEMPT_JOBS; do
-    v="$(echo "$rows" | awk -F'\t' -v j="$j" '$1 == j { print $2 }' | head -1)"
-    [ -n "$v" ] || continue   # absence already reported by set-equality
-    if [ "$v" != "$EXEMPT_VERSION" ]; then
-      fail "EXEMPTION DRIFT — browser job '$j' is on node-version: $v, not $EXEMPT_VERSION. These three are exempt BECAUSE they need 22 for a stable global WebSocket (D17); on anything else the exemption has lost its reason."
-      rc=1
-    fi
+    vals="$(echo "$rows" | awk -F'\t' -v j="$j" '$1 == j { print $2 }')"
+    [ -n "$vals" ] || continue   # absence already reported by set-equality
+    for v in $vals; do
+      if [ "$v" != "$EXEMPT_VERSION" ]; then
+        fail "EXEMPTION DRIFT — browser job '$j' is on node-version: $v, not $EXEMPT_VERSION. These three are exempt BECAUSE they need 22 for a stable global WebSocket (D17); on anything else the exemption has lost its reason."
+        rc=1
+      fi
+    done
   done
 
   [ "$rc" -eq 0 ] && echo "OK: the console runtime declaration, console-unit's literal and the three-job exemption set all agree."
@@ -149,8 +174,10 @@ measure() {
 }
 
 # ── SELF-TEST ───────────────────────────────────────────────────────────────
-# Five mutations on a throwaway copy of the tree. Each must red, and the
-# unmutated copy must green — a pin that cannot lose is not a pin.
+# Ten mutations on a throwaway copy of the tree. Each must red, and the
+# unmutated copy must green — a pin that cannot lose is not a pin. The last four
+# are wave 62's: they all ran GREEN before this change, because the guard
+# reasoned over a SET of job names and then read ONE value per job.
 selftest() {
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -193,11 +220,58 @@ selftest() {
   rc="$(probe)"
   [ "$rc" -eq 1 ] && grep -q "INTRUDER — job 'intruder-job'" "$tmp/out" && say "a FOURTH setup-node job -> INTRUDER red, named" 0 || { say "a FOURTH setup-node job -> INTRUDER red, named (got $rc)" 1; sed 's/^/      /' "$tmp/out"; }
 
+  # ── wave 62: the four holes a set-of-jobs reading left open ────────────────
+  # Each of these ran rc=0 on origin/main: the roster PRINTED the contradiction
+  # and the script certified agreement anyway.
+
+  fresh
+  awk '{ print }
+       /^          node-version: 20$/ && !d {
+         print "      - uses: actions/setup-node@v4";
+         print "        with:";
+         print "          node-version: 22";
+         d=1 }' "$ROOT/$WF_REL" > "$tmp/tree/$WF_REL"
+  rc="$(probe)"
+  [ "$rc" -eq 1 ] && grep -q "DUPLICATE — job 'console-unit'" "$tmp/out" && say "a SECOND setup-node inside console-unit (on 22) -> DUPLICATE red, named" 0 || { say "a SECOND setup-node inside console-unit (on 22) -> DUPLICATE red, named (got $rc)" 1; sed 's/^/      /' "$tmp/out"; }
+
+  fresh
+  awk '/^  cssom-parity:/ { inj=1 }
+       { print }
+       inj && /^          node-version: 22$/ && !d {
+         print "      - uses: actions/setup-node@v4";
+         print "        with:";
+         print "          node-version: 20";
+         d=1 }' "$ROOT/$WF_REL" > "$tmp/tree/$WF_REL"
+  rc="$(probe)"
+  [ "$rc" -eq 1 ] && grep -q "DUPLICATE — job 'cssom-parity'" "$tmp/out" && grep -q "EXEMPTION DRIFT" "$tmp/out" && say "a SECOND setup-node inside an EXEMPT job (on 20) -> DUPLICATE + EXEMPTION DRIFT red" 0 || { say "a SECOND setup-node inside an EXEMPT job (on 20) -> DUPLICATE + EXEMPTION DRIFT red (got $rc)" 1; sed 's/^/      /' "$tmp/out"; }
+
+  fresh
+  awk '{ print }
+       /^          node-version: 20$/ && !d {
+         print "          node-version-file: cloud/priv/static/__node-version";
+         d=1 }' "$ROOT/$WF_REL" > "$tmp/tree/$WF_REL"
+  rc="$(probe)"
+  [ "$rc" -eq 1 ] && grep -q "REFUSED — 'console-unit' uses node-version-file" "$tmp/out" && say "node-version-file: added BELOW the literal -> still REFUSED" 0 || { say "node-version-file: added BELOW the literal -> still REFUSED (got $rc)" 1; sed 's/^/      /' "$tmp/out"; }
+
+  fresh
+  awk '/^  cssom-parity:/ && !d {
+         print "  intruder-job:  # added by a hurried PR";
+         print "    runs-on: ubuntu-latest";
+         print "    steps:";
+         print "      - uses: actions/setup-node@v4";
+         print "        with:";
+         print "          node-version: 18";
+         print "";
+         d=1 }
+       { print }' "$ROOT/$WF_REL" > "$tmp/tree/$WF_REL"
+  rc="$(probe)"
+  [ "$rc" -eq 1 ] && grep -q "INTRUDER — job 'intruder-job'" "$tmp/out" && say "an intruder job whose header carries a trailing comment, ABOVE cssom-parity -> INTRUDER red, named" 0 || { say "an intruder job whose header carries a trailing comment, ABOVE cssom-parity -> INTRUDER red, named (got $rc)" 1; sed 's/^/      /' "$tmp/out"; }
+
   if [ "$bad" -ne 0 ]; then
     fail "SELF-TEST FAILED ($bad assertion(s)) — this pin can no longer lose."
     return 1
   fi
-  echo "  self-test: 6/6 — the pin can still lose."
+  echo "  self-test: 10/10 — the pin can still lose."
   return 0
 }
 
