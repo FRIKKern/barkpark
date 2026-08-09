@@ -12782,9 +12782,12 @@
 
   // Typed rollback refusals → one honest sentence each (D25). The server owns whether
   // a site CAN roll back; this maps its named refusals so a click never dead-ends in
-  // a raw code. Static strings only (no server free-text embedded) except the generic
-  // fallback, which routes through friendly(). Reads both {error:"code"} and
-  // {error:{code}} envelope shapes.
+  // a raw code. Static strings EXCEPT two arms that deliberately relay the plane's
+  // own words: the generic fallback (via friendly()) and, since cch-w61-s2/D739,
+  // the `rollback_failed` arm, which renders the `detail` Sites.Deploy MEASURED
+  // rather than overwriting it with a sentence about a different failure. Both
+  // land in setText/textContent, never innerHTML, so relayed prose cannot become
+  // markup. Reads both {error:"code"} and {error:{code}} envelope shapes.
   function siteRollbackFailure(status, data) {
     var err = (data && data.error) || {};
     var code = typeof err === "string" ? err : err.code;
