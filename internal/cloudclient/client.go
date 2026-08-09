@@ -1665,15 +1665,30 @@ type SiteDeploymentPage struct {
 }
 
 // SiteDeploymentTerminal reports whether a deploy status is final. The status enum
-// has SIX values — queued, building, pushing, live, failed, cancelled — and exactly
-// three of them are the end of the road: live (success), failed (the build died),
-// and cancelled (someone stopped it). The CLI's stream loop polls until this is
-// true, so a terminal status missing from this set is not a cosmetic bug: the loop
-// would poll its full budget (300 × 2s ≈ 10 min) and then report the deploy as
-// still in progress. Both `cancelled` and `canceled` spellings count.
+// has SEVEN values — queued, building, pushing, live, failed, cancelled, deferred —
+// and exactly four of them are the end of the road: live (success), failed (the
+// build died), cancelled (someone stopped it), and deferred (the box refused the
+// round at its build cap). The CLI's stream loop polls until this is true, so a
+// terminal status missing from this set is not a cosmetic bug: the loop would poll
+// its full budget (300 × 2s ≈ 10 min) and then report the deploy as still in
+// progress. Both `cancelled` and `canceled` spellings count.
+//
+// DEFERRED IS TERMINAL, and the server is the authority on that: the transition
+// table in cloud/lib/barkpark_cloud/registry/deployment.ex maps "deferred" => [],
+// so a deferred row can never become anything else. It was absent from this set
+// until deploy-reliability wave 32, and since deferral is 73.7% of settled deploy
+// attempts (charter D209) the omission meant the MAJORITY outcome of
+// `bp cloud site deploy` spun the full ten minutes and then printed
+// "deploy in progress" over a settled refusal.
+//
+// TERMINAL IS NOT THE SAME QUESTION AS "HAS THE CONTENT REACHED THE WEB". A
+// deferred ROW is settled while the PUBLISH is not — the control plane re-queues a
+// rebuild carrying the same content — so the CLI's waiting predicate
+// (cli.siteDeployWaiting) deliberately keeps counting deferred as a wait and does
+// not read this function alone. Do not "simplify" the two back together.
 func SiteDeploymentTerminal(status string) bool {
 	s := strings.ToLower(strings.TrimSpace(status))
-	return s == "live" || s == "failed" || s == "cancelled" || s == "canceled"
+	return s == "live" || s == "failed" || s == "cancelled" || s == "canceled" || s == "deferred"
 }
 
 // SiteRollbackResult is a completed spawned-site rollback. Raw is the envelope
@@ -2094,6 +2109,13 @@ type DeployCensus struct {
 	// into "the re-queue took zero seconds", which is the most flattering
 	// possible reading of an absence.
 	DeferralWait *DeployDeferralWait `json:"deferral_wait"`
+	// CoverageCohorts is the dr-w32-s3 addition: the SAME later-live clock as
+	// DeferralWait, applied to BOTH the deferred and the failed-terminating
+	// cohorts, so the rows that never reached live are visible whichever status
+	// they terminated in. A POINTER for the same reason its two neighbours are:
+	// a control plane that does not send the key has not measured coverage, and
+	// that must never decode into "nothing is uncovered".
+	CoverageCohorts *DeployCoverageCohorts `json:"coverage_cohorts"`
 	// Scope is the dr-w18-s1 addition: the population these numbers were taken
 	// over, NAMED. A POINTER because the operator route (and any control plane
 	// predating the team route) sends no `scope` key at all, and an absent key
@@ -2260,6 +2282,54 @@ type DeployDeferralWait struct {
 	P95                  DeployDeferralWaitQuantile   `json:"p95"`
 	Max                  DeployDeferralWaitQuantile   `json:"max"`
 	MinSample            int                          `json:"min_sample"`
+}
+
+// DeployCoverageEnvironment splits ONE cohort's never-covered count by
+// environment. A preview build with no successor is not a production site
+// sitting dark, and pooling the two hides the rows that matter inside a bigger,
+// softer number.
+type DeployCoverageEnvironment struct {
+	Environment  string `json:"environment"`
+	NeverCovered int    `json:"never_covered"`
+}
+
+// DeployCoverageCohort is ONE never-live cohort — `deferred` or `failed` —
+// partitioned by the coverage clock. Population == Covered + Pending +
+// Unreadable, and Pending splits again into NeverCovered (older than the
+// maturity fence) and TooYoung.
+//
+// COVERED IS THE CONTROL PLANE'S WORD AND IT MEANS "the site has since rebuilt".
+// It is not a claim that any particular edit shipped, and a renderer that
+// upgrades it into one is the mis-report this whole section exists to prevent.
+type DeployCoverageCohort struct {
+	Cohort                    string                      `json:"cohort"`
+	Status                    string                      `json:"status"`
+	Population                int                         `json:"population"`
+	Covered                   int                         `json:"covered"`
+	Pending                   int                         `json:"pending"`
+	Unreadable                int                         `json:"unreadable"`
+	Matured                   int                         `json:"matured"`
+	NeverCovered              int                         `json:"never_covered"`
+	TooYoung                  int                         `json:"too_young"`
+	NeverCoveredByEnvironment []DeployCoverageEnvironment `json:"never_covered_by_environment"`
+	OldestPendingSeconds      *float64                    `json:"oldest_pending_seconds"`
+}
+
+// DeployCoverageCohorts is `coverage_cohorts` on the census envelope: the
+// coverage partition over BOTH never-live cohorts. DeferralWait one struct up
+// answers "how long did the re-queue take" over DEFERRED rows only, and is blind
+// by construction to the chains that terminate `failed` — a third of the
+// never-live tail on the corpus that motivated this key.
+//
+// MaturitySeconds is the fence under which a PENDING row is not counted as never
+// covered: a row written minutes ago has not been given time to be covered, and
+// counting it as damage would report the fleet's own arrival rate as failure.
+type DeployCoverageCohorts struct {
+	Clock           string                 `json:"clock"`
+	Basis           string                 `json:"basis"`
+	AsOf            string                 `json:"as_of"`
+	MaturitySeconds int                    `json:"maturity_seconds"`
+	Cohorts         []DeployCoverageCohort `json:"cohorts"`
 }
 
 // DeployCensusError is a census the control plane REFUSED to answer, with the

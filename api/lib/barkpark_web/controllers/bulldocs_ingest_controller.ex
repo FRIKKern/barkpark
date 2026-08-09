@@ -206,8 +206,39 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, changeset} ->
+      # The wall's FIFTH shape (deploy-reliability D541). Hand-routing only the
+      # four above meant this tuple fell into the changeset catch-all below, and
+      # a bare variable matches a tuple: invalid_paper_error/2 handed the WALL
+      # TUPLE to Ecto.Changeset.traverse_errors/2 (one clause, `%Changeset{}`) →
+      # FunctionClauseError → 500 "unknown error", while the wall had already
+      # computed the named failures. 33 of 299 distinct trailing-24h 500s on
+      # guerrilla's live slot were this, including the epic cycle's own
+      # wave-Paper publish. The 422 envelope already exists (errors.ex).
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      # The wall's SIXTH shape, and the only TRANSIENT one: the duplicate scan
+      # could not RUN (pool saturation / blown query budget). Its own arm, NOT
+      # render_error/2 — the shared envelope stamps the plugin-veto hint
+      # ("A plugin's lifecycle hook vetoed this write"), which describes an
+      # outage as a policy refusal and sends the caller to fix a document that
+      # is fine (charter D542). The wire code/status stay `halted` 409 (what
+      # errors.ex already emits and docs/api-v1.md §9 documents); the honest
+      # 503 `dedup_unavailable` is the separately-filed contract change
+      # (dr-w32-bl-dedup-unavailable-is-an-outage-called-a-veto) so a wall fix
+      # and a vocabulary change do not ride one PR.
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         invalid_paper_error(conn, changeset)
+
+      # Any OTHER non-changeset reason goes through the shared envelope rather
+      # than the changeset renderer. The 500 this head cured WAS a non-changeset
+      # reason reaching a changeset-only renderer; a bare tail would rebuild it
+      # for the next shape the wall learns.
+      {:error, _reason} = err ->
+        render_error(conn, err)
     end
   end
 
@@ -275,8 +306,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, changeset} ->
+      # Wall shapes five and six — see the blocks head above (D541/D542). This
+      # leg is walled identically, so it 500'd identically.
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         invalid_paper_error(conn, changeset)
+
+      {:error, _reason} = err ->
+        render_error(conn, err)
     end
   end
 
@@ -334,8 +376,21 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, changeset} ->
+      # Shape-parity with the paper legs (D541/D542) — dead code for "session"
+      # today (`@walled_types` is `~w(paper task)`), live the day a walled
+      # blocks-type joins the whitelist, which is exactly when a bare catch-all
+      # would 500 again.
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         invalid_paper_error(conn, changeset)
+
+      {:error, _reason} = err ->
+        render_error(conn, err)
     end
   end
 
@@ -896,7 +951,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # see the render_error/2 comment above); `details` is ADDITIVE — the per-field
   # validation errors, so a caller can see exactly what failed instead of
   # guessing from the flat message.
-  defp invalid_paper_error(conn, changeset) do
+  # The %Ecto.Changeset{} pattern is LOAD-BEARING, not decoration: this head is
+  # changeset-only (traverse_errors/2 has exactly one clause and matches
+  # `%Changeset{}`), and the untyped head it replaces silently accepted the wall
+  # tuples the case clauses above forgot, turning a computed 422 into a 500
+  # "unknown error" (deploy-reliability D541). A future unrouted shape now fails
+  # at the case, visibly, instead of inside Ecto.
+  defp invalid_paper_error(conn, %Ecto.Changeset{} = changeset) do
     conn
     |> put_status(:unprocessable_entity)
     |> json(%{
@@ -906,6 +967,37 @@ defmodule BarkparkWeb.BulldocsIngestController do
         details: changeset_field_errors(changeset)
       }
     })
+  end
+
+  # The dedup wall could not RUN. Nothing was written and nothing was refused on
+  # the merits — so the caller's correct move is to RESEND THE SAME REQUEST, not
+  # to edit the paper. It is BUILT by the shared envelope (so code, message,
+  # status and — the part a hand-rolled body silently dropped — `request_id` stay
+  # byte-identical to what every other v1 error carries, and an operator can
+  # actually quote the failing request) and then has exactly ONE field replaced:
+  # the code-keyed `halted` hint, which reads "A plugin's lifecycle hook vetoed
+  # this write" and is the one sentence that would send an author editing a
+  # document that is fine (charter D542). The wire code/status stay `halted` 409
+  # (docs/api-v1.md §9) — the honest 503 `dedup_unavailable` code is a
+  # vocabulary change filed on its own task, because registering a new code
+  # forces an errors.ex + byte-capped docs edit.
+  @dedup_unavailable_hint "Transient: the duplicate-scan could not complete, so this paper was neither written nor refused on its merits. Resend the identical request. If it keeps failing the database is degraded — this is an outage to report, not a document to fix."
+
+  defp dedup_unavailable_error(conn, reason) do
+    env = Errors.to_envelope({:error, {:dedup_unavailable, reason}}, conn)
+
+    body =
+      env
+      |> Map.delete(:status)
+      |> Map.put(:hint, @dedup_unavailable_hint)
+
+    conn
+    # `retry-after` makes the transience machine-readable. 5s is a floor, not a
+    # measurement — nothing yet measures how long a saturated pool takes to
+    # recover, and a caller that retries later is never worse off.
+    |> put_resp_header("retry-after", "5")
+    |> put_status(env.status)
+    |> json(%{error: body})
   end
 
   defp changeset_field_errors(changeset) do

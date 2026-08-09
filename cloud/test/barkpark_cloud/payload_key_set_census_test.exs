@@ -860,8 +860,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `p95`, `max`, `deferred`) ride free on the delivery census's union. The
   # decoder is the POINT and not an afterthought: a wait number no reader decodes
   # is a number nobody reads, which is the disease this epic exists to cure.
-  @emitted_floor 143
-  @go_tag_floor 256
+  @emitted_floor 144
+  @go_tag_floor 264
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
@@ -1027,7 +1027,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     src = Go.source(@cloudclient)
     census_tags = Go.struct_tags(src, "DeployCensus")
 
-    for key <- ~w(live live_rate in_flight cancelled residual) do
+    for key <- ~w(live live_rate in_flight cancelled residual coverage_cohorts) do
       assert key in census_tags,
              "`#{key}` is emitted by census/3 but is NOT a json tag on DeployCensus itself. " <>
                "The UNREAD arm cannot catch this: it compares against the FILE-GLOBAL tag " <>

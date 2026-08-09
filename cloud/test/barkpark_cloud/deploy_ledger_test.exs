@@ -2706,6 +2706,206 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
   end
 
+  ## ── 4b-bis. THE COVERAGE PARTITION, OVER BOTH NEVER-LIVE COHORTS ──────────
+
+  describe "census/3 — coverage_cohorts sees the FAILED tail the deferral clock cannot" do
+    setup do
+      {_user, team} = user_team()
+      %{site: site_fixture(team), team: team}
+    end
+
+    @cov_from ~U[2026-08-01 00:00:00Z]
+    @cov_to ~U[2026-08-08 00:00:00Z]
+
+    # THE MEASURED PARTITION, REPRODUCED IN SHAPE (dr-w32-s3).
+    #
+    # The corpus this key was built from reads, all-time and on rows older than
+    # 24h: DEFERRED 0 never-covered of 2,816, FAILED 5 never-covered of 18,640,
+    # and TWO of those five are the only two `environment: "preview"` rows in the
+    # table — so PRODUCTION never-covered, all-time, is THREE. Those totals are a
+    # production measurement (cloud-db-1) and cannot be re-derived inside a test
+    # database; what a test can pin, and what this one does pin, is the
+    # ARITHMETIC and the ENVIRONMENT SPLIT that turn five into three. The
+    # cohort sizes below are scaled; the never-covered numbers are the measured
+    # ones, verbatim.
+    defp measured_partition!(site) do
+      # Every DEFERRED row covered — 0 never-covered, the measured deferred side.
+      deferred =
+        Enum.flat_map(1..24, fn i ->
+          at = DateTime.add(@cov_from, 1_000 * i, :second)
+
+          [
+            %{status: "deferred", content_rev: "rev-d", inserted_at: at},
+            %{
+              status: "live",
+              content_rev: "rev-live",
+              inserted_at: DateTime.add(at, 120, :second),
+              became_live_at: DateTime.add(at, 120, :second)
+            }
+          ]
+        end)
+
+      # FAILED rows that a later live build DID cover — the ordinary shape, and
+      # the reason the failed cohort is not simply "damage".
+      covered_failures =
+        Enum.flat_map(1..40, fn i ->
+          at = DateTime.add(@cov_from, 100_000 + 1_000 * i, :second)
+
+          [
+            %{status: "failed", inserted_at: at},
+            %{
+              status: "live",
+              inserted_at: DateTime.add(at, 300, :second),
+              became_live_at: DateTime.add(at, 300, :second)
+            }
+          ]
+        end)
+
+      # THE FIVE. Three production, two preview — and the preview pair is
+      # covered by NOTHING because the live builds above are all `production`,
+      # which is the whole point of keying the clock on {site, environment}.
+      never_covered =
+        for {env, n} <- [{"production", 3}, {"preview", 2}],
+            i <- 1..n,
+            do: %{
+              status: "failed",
+              environment: env,
+              inserted_at: DateTime.add(@cov_from, 300_000 + i, :second)
+            }
+
+      deployments!(site, deferred ++ covered_failures ++ never_covered)
+    end
+
+    test "the failed cohort is reported BESIDE the deferred one, never pooled with it",
+         %{site: site} do
+      measured_partition!(site)
+
+      census = DeployLedger.census(@cov_from, @cov_to)
+      [deferred, failed] = census.coverage_cohorts.cohorts
+
+      assert deferred.cohort == "deferred"
+      assert failed.cohort == "failed"
+
+      # THE DEFERRED SIDE, as measured: nothing never-covered.
+      assert deferred.population == 24
+      assert deferred.covered == 24
+      assert deferred.never_covered == 0
+
+      # THE FAILED SIDE: five never-covered, which is the number the deferral
+      # clock structurally cannot see.
+      assert failed.population == 45
+      assert failed.covered == 40
+      assert failed.never_covered == 5
+
+      # …and the split that turns five into three.
+      assert failed.never_covered_by_environment == [
+               %{environment: "production", never_covered: 3},
+               %{environment: "preview", never_covered: 2}
+             ]
+
+      # THE BLINDNESS THIS KEY EXISTS FOR, asserted rather than asserted-about:
+      # the deferral wait, over the SAME window and the SAME rows, reports a
+      # population of 24 and cannot name one of the five.
+      assert census.deferral_wait.population == %{
+               deferred: 24,
+               covered: 24,
+               pending: 0,
+               unreadable: 0
+             }
+    end
+
+    # THE MATURITY FENCE, PROVEN IN BOTH DIRECTIONS. A test that only asserted
+    # "too young rows are not never-covered" would pass on an implementation
+    # that never counts anything: the same row, aged past the fence, must flip.
+    test "a PENDING row younger than the fence is too_young, and the same row older is never_covered",
+         %{site: site} do
+      young = DateTime.add(@cov_to, -3_600, :second)
+      old = DateTime.add(@cov_to, -172_800, :second)
+
+      deployments!(site, [
+        %{status: "failed", inserted_at: young},
+        %{status: "failed", inserted_at: old}
+      ])
+
+      [_deferred, failed] = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts.cohorts
+
+      assert failed.population == 2
+      assert failed.pending == 2
+      assert failed.too_young == 1
+      assert failed.never_covered == 1
+      assert failed.matured == 1
+      assert failed.oldest_pending_seconds == 172_800.0
+
+      # The fence is the census's own number, published beside the counts — a
+      # reader can never be handed "1 never covered" without being told what
+      # bar it cleared.
+      assert DeployLedger.census(@cov_from, @cov_to).coverage_cohorts.maturity_seconds == 86_400
+    end
+
+    # UNREADABLE ROWS SIT BESIDE BOTH SIDES, never inside either. A row whose
+    # box could not be read at write time is not a covered site and it is not a
+    # stuck one — folding it into either is the reassuring lie or the
+    # manufactured alarm, depending on which way you fold.
+    test "an UNREADABLE row is counted beside covered and never_covered, not inside them",
+         %{site: site} do
+      deployments!(site, [
+        %{
+          status: "failed",
+          content_rev: "",
+          inserted_at: DateTime.add(@cov_from, 1_000, :second)
+        }
+      ])
+
+      [_deferred, failed] = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts.cohorts
+
+      assert failed.population == 1
+      assert failed.unreadable == 1
+      assert failed.covered == 0
+      assert failed.never_covered == 0
+      assert failed.pending == 0
+      assert failed.covered + failed.pending + failed.unreadable == failed.population
+    end
+
+    # A cohort with no rows says NOTHING, and says it in counts. Zero of zero is
+    # not full coverage.
+    test "an empty cohort reports zeroes and no environment rows", %{site: site} do
+      deployments!(site, [
+        %{status: "deferred", inserted_at: DateTime.add(@cov_from, 1_000, :second)}
+      ])
+
+      [deferred, failed] = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts.cohorts
+
+      assert deferred.population == 1
+      assert failed.population == 0
+      assert failed.covered == 0
+      assert failed.never_covered == 0
+      assert failed.never_covered_by_environment == []
+      assert failed.oldest_pending_seconds == nil
+    end
+
+    # D478'S WORDING FENCE, ON THE WIRE. The key ships COVERAGE and the three
+    # sanctioned outcome words; it must never ship a claim that an operator's
+    # own edit reached the web. `delivered`, `superseded` and `publish reach`
+    # are struck BY NAME, and this asserts against the SERIALIZED node rather
+    # than against the source, because the source may discuss the refusal (it
+    # does) while the payload may not make it.
+    test "the emitted node carries COVERAGE and none of the struck words", %{site: site} do
+      measured_partition!(site)
+
+      node = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts
+      wire = Jason.encode!(node) |> String.downcase()
+
+      refute wire =~ "delivered"
+      refute wire =~ "superseded"
+      refute wire =~ "publish reach"
+
+      # And what it DOES say: the site rebuilt, which is a fact about the site.
+      assert wire =~ "coverage"
+      assert node.basis =~ "THE SITE has since rebuilt"
+      assert node.clock =~ "the SAME clock as `deferral_wait`"
+    end
+  end
+
   ## ── 4c. THE D8 INVERSION: a new cause must not shrink the abandoned count ──
 
   describe "abandonment with an unnamed cause — the count can no longer go DOWN" do

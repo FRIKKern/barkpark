@@ -138,7 +138,17 @@ jobs:
       # A fetch that FAILS deliberately leaves no local file: the script then
       # says ABSENT and exits 2, which after the fix is a non-zero silence. A
       # failed fetch must never look like "the first run ever".
-      - name: Re-ask list — fetch from the control plane
+      #
+      # AND THE FIRST RUN EVER IS A REAL, DIFFERENT WORLD (charter D545).
+      # /var/lib/crown-reconcile/graced.txt has never been written on CP_HOST,
+      # so "the file is not there" is the state this workflow is actually IN —
+      # and the reconciler, which sees only a local absence, cannot tell it from
+      # a memory that was destroyed. This step CAN: it is the thing holding the
+      # store. So the remote command STATES which world it found, on its first
+      # line, and only a remote command that SUCCEEDED may say `FIRST-RUN`. A
+      # transport that fails says nothing, leaves no file, and still pages.
+      - id: reask
+        name: Re-ask list — fetch from the control plane
         env:
           CP_HOST: ${{ secrets.CP_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -148,12 +158,21 @@ jobs:
           install -m 600 /dev/null "$RUNNER_TEMP/crown/key"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/crown/key"
           SSH="ssh -i $RUNNER_TEMP/crown/key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RUNNER_TEMP/crown/known -o ConnectTimeout=20"
-          if $SSH "root@${CP_HOST}" 'mkdir -p /var/lib/crown-reconcile && cat /var/lib/crown-reconcile/graced.txt 2>/dev/null || true' \
-              > "$RUNNER_TEMP/crown/graced.txt"; then
-            echo "::notice::re-ask list fetched from ${CP_HOST}:/var/lib/crown-reconcile/graced.txt ($(wc -l < "$RUNNER_TEMP/crown/graced.txt" | tr -d ' ') line(s))"
+          echo "first_run=" >> "$GITHUB_OUTPUT"
+          if $SSH "root@${CP_HOST}" 'mkdir -p /var/lib/crown-reconcile && if [ -e /var/lib/crown-reconcile/graced.txt ]; then echo CR_LIST=PRESENT; cat /var/lib/crown-reconcile/graced.txt; else echo CR_LIST=FIRST-RUN; fi' \
+              > "$RUNNER_TEMP/crown/fetched.txt"; then
+            marker="$(head -1 "$RUNNER_TEMP/crown/fetched.txt")"
+            tail -n +2 "$RUNNER_TEMP/crown/fetched.txt" > "$RUNNER_TEMP/crown/graced.txt"
+            if [ "$marker" = "CR_LIST=FIRST-RUN" ]; then
+              rm -f "$RUNNER_TEMP/crown/graced.txt"
+              echo "first_run=1" >> "$GITHUB_OUTPUT"
+              echo "::notice::the control plane answered, and ${CP_HOST}:/var/lib/crown-reconcile/graced.txt does not exist yet — this is the FIRST RUN, not a destroyed memory. The reconciler is told so explicitly (CROWN_STATE_FIRST_RUN=1) and will not page over a list that has never been written."
+            else
+              echo "::notice::re-ask list fetched from ${CP_HOST}:/var/lib/crown-reconcile/graced.txt ($(wc -l < "$RUNNER_TEMP/crown/graced.txt" | tr -d ' ') line(s))"
+            fi
           else
-            rm -f "$RUNNER_TEMP/crown/graced.txt"
-            echo "::warning::the re-ask list could NOT be fetched from the control plane. No local file is left behind on purpose — the reconciler will report the list as ABSENT rather than mistake a failed fetch for an empty memory."
+            rm -f "$RUNNER_TEMP/crown/graced.txt" "$RUNNER_TEMP/crown/fetched.txt"
+            echo "::warning::the re-ask list could NOT be fetched from the control plane. No local file is left behind and no first-run claim is made on purpose — the reconciler will report the list as ABSENT rather than mistake a failed fetch for an empty memory OR for a first run."
           fi
 
       - id: reconcile
@@ -172,6 +191,11 @@ jobs:
           CROWN_API_TOKEN: ${{ secrets.CROWN_API_TOKEN }}
           CROWN_STATE_FILE: ${{ runner.temp }}/crown/graced.txt
           CROWN_STATE_STORAGE: "CP_HOST:/var/lib/crown-reconcile/graced.txt, fetched and written back over the deploy SSH key"
+          # EMPTY unless the fetch step above REACHED the control plane and found
+          # no list there. A failed fetch leaves this empty, so transport silence
+          # is still ABSENT and still pages — the tolerance is for a store that
+          # was read, never for one that could not be.
+          CROWN_STATE_FIRST_RUN: ${{ steps.reask.outputs.first_run }}
         run: |
           set -uo pipefail
           if [ -z "${CROWN_API_TOKEN:-}" ]; then
@@ -187,8 +211,9 @@ jobs:
           case "$rc" in
             0) echo "::notice::the crown reconciles with what deploy.yml actually delivered over the last 24h"; exit 0 ;;
             1) echo "::error::THE CROWN DOES NOT MATCH WHAT WAS DEPLOYED. A delivering run has no row, a row has no run, or production is serving a sha the record has never heard of — the counts and the population are in the log above. This cannot clear itself: the missing rows must be recorded, or the recorder's gate fixed."; exit 1 ;;
-            2) echo "::error::SILENCE — the reconciler COULD NOT READ part of what it compares, the population was empty, or its re-ask list was ABSENT. Its own text has always said this is NOT a green, and it exited 0 anyway: run 31321844876 (2026-08-09T15:42Z) granted a SERVING GRACE to 1d57725553b39db5feb38bf7d2517f429db1879b, exited rc=2, and published a run conclusion of SUCCESS. The named conditions are in the log above."; exit 1 ;;
+            2) echo "::error::SILENCE — the reconciler COULD NOT READ part of what it compares, the population was empty, or its re-ask list was ABSENT with no first-run statement (a destroyed memory, or a fetch that failed). Its own text has always said this is NOT a green, and it exited 0 until #11365. The named conditions are in the log above. A benign in-flight grace no longer lands here: that is rc 4."; exit 1 ;;
             3) echo "::error::CONFIGURATION FAULT — this run's credential cannot reach the control plane, or a flag is wrong. A reconciler that cannot read what it reconciles must not report success. This is NOT a statement about the crown's contents."; exit 1 ;;
+            4) echo "::warning::NOT YET DUE — everything was read and nothing is accused, but a SERVING GRACE is open: the box is serving a sha whose recorder POST has not landed yet. The accusation is not dropped, it is DEFERRED — the sha is on the re-ask list, and the next run that still finds no row exits 1 as GRACED-UNRECORDED. Measured before this arm existed, rc=2 fired SIX times in this workflow's whole history and FIVE were exactly this benign grace, so paging here is what mutes the alarm for the one case that is not."; exit 0 ;;
             *) echo "::error::crown-reconcile.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
 
@@ -206,7 +231,13 @@ jobs:
             exit 0
           fi
           SSH="ssh -i $RUNNER_TEMP/crown/key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RUNNER_TEMP/crown/known -o ConnectTimeout=20"
-          if $SSH "root@${CP_HOST}" 'mkdir -p /var/lib/crown-reconcile && cat > /var/lib/crown-reconcile/graced.txt' \
+          # WRITE-THEN-MOVE. `cat > graced.txt` truncates the remote file BEFORE
+          # the first byte arrives, so an SSH stream that dies mid-write leaves a
+          # SHORT list — and a short list is indistinguishable from one that
+          # legitimately drained, which silently forgives every accusation past
+          # the cut. The rename is atomic within /var/lib/crown-reconcile, so the
+          # next run reads either the whole old list or the whole new one.
+          if $SSH "root@${CP_HOST}" 'mkdir -p /var/lib/crown-reconcile && cat > /var/lib/crown-reconcile/graced.txt.tmp && mv -f /var/lib/crown-reconcile/graced.txt.tmp /var/lib/crown-reconcile/graced.txt' \
               < "$RUNNER_TEMP/crown/graced.txt"; then
             echo "::notice::re-ask list written back to ${CP_HOST}:/var/lib/crown-reconcile/graced.txt ($(wc -l < "$RUNNER_TEMP/crown/graced.txt" | tr -d ' ') line(s))"
           else
@@ -248,8 +279,12 @@ jobs:
               or the run never reaching it.
             - `2` — a SILENCE: part of what this compares could not be read, the
               population was empty, or the re-ask list was ABSENT (its memory
-              did not survive the run boundary). Nothing here is a statement
-              that the crown is correct. This arm used to `exit 0`.
+              did not survive the run boundary, or the fetch failed). Nothing
+              here is a statement that the crown is correct. This arm used to
+              `exit 0`. A benign in-flight SERVING GRACE is NOT this: that is
+              rc 4, which warns and exits 0 and therefore never reaches this
+              issue at all — its accusation is collected by the next run as
+              GRACED-UNRECORDED (`1`).
             - `3` — a CONFIGURATION fault: the runner could not reach the control
               plane at all, or `CROWN_API_TOKEN` was set to an empty string.
               That says nothing about the crown's contents.
