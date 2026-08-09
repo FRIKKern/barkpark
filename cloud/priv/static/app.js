@@ -8286,6 +8286,23 @@
     if (code === "already_running") return { kind: "already_running", pin: null };
     if (code === "not_enabled") return { kind: "not_enabled", pin: null };
     if (code === "not_live") return { kind: "not_live", pin: null };
+    // cch-w61-s2: seven more NAMED kinds so the self-update seam stops folding a
+    // permanent refusal into the `other` arm's "Please try again in a moment."
+    // THE RETURN SHAPE IS UNCHANGED — new kind VALUES only, never a new KEY: the
+    // harness round-trips this object through plain() and deepEquals the whole
+    // thing, so one extra field reds the isu-w5 classifier test (and, on the
+    // `other` arm, the cch-w38-s1 key-set assertion too).
+    if (code === "not_supported") return { kind: "not_supported", pin: null };
+    if (code === "identity_refused") return { kind: "identity_refused", pin: null };
+    if (code === "suspended") return { kind: "suspended", pin: null };
+    if (code === "decrypt_failed") return { kind: "decrypt_failed", pin: null };
+    if (code === "no_admin_token") return { kind: "no_admin_token", pin: null };
+    if (code === "not_found") return { kind: "not_found", pin: null };
+    // RETRYABLE, and named so it stops sharing a sentence with the permanent
+    // five: the box ACCEPTED the request and its update runner failed to start.
+    // Calling a box-side transient "terminal" is the mirror-image of the lie
+    // this slice deletes, so this arm keeps the try-again sentence.
+    if (code === "runner_start_failed") return { kind: "runner_start_failed", pin: null };
     return { kind: "other", pin: pin, code: code || null };
   }
 
@@ -8321,6 +8338,55 @@
     if (c.kind === "already_running") return { title: "An update is already running", body: "Give it a moment to finish.", forceLabel: null };
     if (c.kind === "not_enabled") return { title: "Self-update is not enabled on this instance", body: "Set BARKPARK_SELF_UPDATE_APPLY=1 on the box to allow one-click updates.", forceLabel: null };
     if (c.kind === "not_live") return { title: "This instance isn't live yet", body: "Wait until it finishes provisioning.", forceLabel: null };
+    // cch-w61-s2 — THE UPDATE SEAM SHIPS COPY, NOT AFFORDANCE (D738). This seam
+    // renders through toast(): there is no Try again button to withdraw and no
+    // terminality concept to consult, so NO `updateRefusalTerminal` predicate is
+    // minted — a guard no shipped path reads is a guard that structurally cannot
+    // lose, which is the exact defect class this wave exists to delete. What was
+    // wrong here was the SENTENCE: a permanent 401 read "Please try again in a
+    // moment." Same echoes as the rollback seam (D734), same refusal to promise a
+    // faster re-check than the hourly probe.
+    if (c.kind === "identity_refused") {
+      return {
+        title: "The instance refused our credential",
+        body: "The update was never sent — " + usageUnavailableText("unauthorized") +
+          ". Barkpark Cloud stops asking a box that refused it; the hourly update " +
+          "check is what notices the credential working again.",
+        forceLabel: null,
+      };
+    }
+    if (c.kind === "suspended") return { title: "The update wasn't sent", body: ERRORS.suspended, forceLabel: null };
+    if (c.kind === "decrypt_failed") {
+      return {
+        title: "We can't read this instance's stored credential",
+        body: "The stored admin credential didn't decrypt on our side, so the update was never sent.",
+        forceLabel: null,
+      };
+    }
+    if (c.kind === "no_admin_token") return { title: "The update needs a stored credential", body: ERRORS.no_admin_token, forceLabel: null };
+    if (c.kind === "not_found") {
+      return {
+        title: "This instance no longer exists",
+        body: "The control plane has no record of it — it may already have been decommissioned.",
+        forceLabel: null,
+      };
+    }
+    if (c.kind === "not_supported") {
+      return {
+        title: "Self-update isn't available here",
+        body: "This box doesn't carry the self-update route, so there's nothing for the update button to call.",
+        forceLabel: null,
+      };
+    }
+    // The one RETRYABLE arm of the batch — the box took the request and its
+    // runner didn't come up. Try again is the recovery that can actually work.
+    if (c.kind === "runner_start_failed") {
+      return {
+        title: "The update didn't start",
+        body: "The instance accepted the request but its update runner failed to start. Try again in a moment.",
+        forceLabel: null,
+      };
+    }
     return { title: "Couldn't start the update", body: "Please try again in a moment.", forceLabel: null };
   }
 
@@ -8351,15 +8417,31 @@
 
   // Which rollback refusals are TERMINAL — a retry cannot help until the box or
   // its config changes, so the modal's single recovery is Close. Transient ones
-  // (already_running, instance_unreachable, instance_error, unknown) offer Try
-  // again — for the unknown default, retrying is the honest safe bet. Pure.
+  // (already_running, instance_unreachable, instance_error, instance_unavailable,
+  // unknown) offer Try again — for the unknown default, retrying is the honest
+  // safe bet. Pure.
   // cch-w38-s1: a REFUSAL A RETRY CAN NEVER FIX IS TERMINAL. `forbidden` and
   // `no_team` are decided by the caller's role, which no amount of Try again
   // changes — offering one re-POSTs into a permanent 403 forever.
+  // cch-w61-s2: the CREDENTIAL and EXISTENCE vocabulary joins them, because the
+  // control plane now refuses to relay to a box that refuted us (relay_admin_post
+  // 409s a `identity_refused` instance outright), so every click after the first
+  // meets the identical 409 — a retry loop with no exit.
+  //   identity_refused — the box answered our stored admin credential with a 401.
+  //     That is the whole claim: not "your box is broken", not "you did something".
+  //   suspended       — Barkpark Cloud will not act until the suspension clears.
+  //   decrypt_failed  — the stored credential did not decrypt on our side.
+  //   no_admin_token  — there is no stored credential to relay with.
+  //   not_found       — the control plane has no such instance.
+  // `instance_unavailable` stays TRANSIENT ON PURPOSE — the route names it a
+  // front-proxy restart window, and a retry a moment later is the recovery that
+  // genuinely works. It gains COPY here, never terminality.
   function rollbackRefusalTerminal(code) {
     return code === "no_previous_slot" || code === "not_supported" ||
       code === "not_enabled" || code === "feature_not_configured" || code === "not_live" ||
-      code === "forbidden" || code === "no_team";
+      code === "forbidden" || code === "no_team" ||
+      code === "identity_refused" || code === "suspended" ||
+      code === "decrypt_failed" || code === "no_admin_token" || code === "not_found";
   }
 
   // cch-w46-s2: which DECOMMISSION refusals are TERMINAL — the same question
@@ -8382,6 +8464,13 @@
   // textContent, never innerHTML, so nothing here can become markup either way.
   // `body` was already the raw envelope, accepted for signature parity. NO force
   // affordance: unlike a pin conflict, a rollback refusal is always terminal.
+  // cch-w61-s2 ECHOES, IT DOES NOT MINT (D734): the credential arms reference the
+  // SHIPPED sentences — ERRORS.suspended and ERRORS.no_admin_token verbatim, and
+  // usageUnavailableText("unauthorized") for the 401 fact — rather than coining a
+  // fifth phrasing for a fact the console already words. ERRORS is read DIRECTLY,
+  // never through friendly(): friendly() indexes ERRORS with `data.error`, which
+  // on this seam's NESTED {error:{code}} envelope is an object, so the lookup
+  // misses and the humanizer would throw on `key.replace`.
   function rollbackConflictCopy(code, body) {
     body = body || {};
     switch (code) {
@@ -8411,6 +8500,42 @@
         return { title: "Couldn't reach the instance", body: "The box didn't answer. Give it a moment and try again." };
       case "instance_error":
         return { title: "The instance rejected the rollback", body: "The box couldn't complete the rollback — check its logs, then try again." };
+      // cch-w61-s2 — THE CREDENTIAL AND EXISTENCE REFUSALS. Each states what
+      // happened and stops: no remedy the control plane cannot perform on the
+      // customer's behalf, and NO "check now" — the relay trigger is 409'd for a
+      // refused box, so the hourly update probe is the only thing that can notice
+      // the credential working again. Promising a faster re-check would be a
+      // second lie stacked on the first.
+      case "identity_refused":
+        return {
+          title: "The instance refused our credential",
+          body: "The rollback was never sent — " + usageUnavailableText("unauthorized") +
+            ". Barkpark Cloud stops asking a box that refused it; the hourly update " +
+            "check is what notices the credential working again.",
+        };
+      case "suspended":
+        return { title: "The rollback wasn't sent", body: ERRORS.suspended };
+      case "decrypt_failed":
+        return {
+          title: "We can't read this instance's stored credential",
+          body: "The stored admin credential didn't decrypt on our side, so the rollback was never sent.",
+        };
+      case "no_admin_token":
+        return { title: "The rollback needs a stored credential", body: ERRORS.no_admin_token };
+      case "not_found":
+        return {
+          title: "This instance no longer exists",
+          body: "The control plane has no record of it — it may already have been decommissioned.",
+        };
+      // TRANSIENT, and the only one of this batch that is: the front proxy in
+      // front of the box is restarting. This arm gains COPY so the window stops
+      // reading as the generic "Couldn't start the rollback"; rollbackRefusalTerminal
+      // deliberately still answers false, so Try again stays offered.
+      case "instance_unavailable":
+        return {
+          title: "The instance isn't answering right now",
+          body: "Its front proxy is restarting, so the rollback wasn't accepted. Give it a moment, then try again.",
+        };
       default:
         return { title: "Couldn't start the rollback", body: "Please try again in a moment." };
     }
@@ -8496,6 +8621,16 @@
   // with the ONE field it toggles; a pin prompts for a tag first.
   function wireUpdatePanel(bp) {
     var panel = $("#instance-tabpanel .update-panel");
+    // cch-w61-s2: the COMPOUND DESCENDANT selector above is unresolvable in the
+    // preview smoke shim (its query() parses a bare #id, a single .class or one
+    // attribute selector — nothing richer), so this function returned at its
+    // first line in every harness and had NEVER wired a single handler. Fall back
+    // to the mount the panel is rendered into — the already-shipped idiom this
+    // file uses for mountUsageTab's root and two other mounts. In the browser the
+    // compound selector still wins, so this changes nothing there.
+    if (!panel && typeof document !== "undefined" && document.getElementById) {
+      panel = document.getElementById("instance-body");
+    }
     if (!panel) return;
     panel.querySelectorAll("[data-au]").forEach(function (btn) {
       btn.addEventListener("click", function () {
@@ -12666,10 +12801,26 @@
         body: "This site has only ever had one release — there's no previous release to return to yet.",
       };
     }
-    if (status === 409 || code === "rollback_failed") {
+    if (status === 409) {
       return {
         title: "A deploy is already running",
         body: "Let the in-flight deploy finish, then roll back.",
+      };
+    }
+    // cch-w61-s2 (D739) — THE SPLIT. `rollback_failed` used to share the 409 arm,
+    // so a site whose box refused with `no_previous` was told "A deploy is already
+    // running" — the opposite of what happened. The plane MEASURES the cause
+    // (Sites.Deploy.rollback → rollback_copy) and writes that sentence into
+    // `detail`; the router ships it as {ok:false, error:"rollback_failed", detail}
+    // on 422/502, and this arm discarded it. Render the plane's own sentence.
+    // `ctl.fail` → setText writes textContent, never innerHTML, so relaying
+    // server prose introduces no markup risk.
+    if (code === "rollback_failed") {
+      var detail = (data && typeof data.detail === "string" && data.detail) ||
+        (err && typeof err.detail === "string" && err.detail) || "";
+      return {
+        title: "Couldn't roll back",
+        body: detail || "The deploy plane refused the rollback and didn't say why.",
       };
     }
     return { title: "Couldn't roll back", body: friendly(data, "Please try again in a moment.") };
@@ -22378,6 +22529,11 @@
       // opts.title → esc()'d by confirmModalHtml.
       rollbackConfirmOpts: rollbackConfirmOpts, rollbackConflictCopy: rollbackConflictCopy,
       rollbackRefusalTerminal: rollbackRefusalTerminal,
+      // cch-w61-s2: the two IMPURE arms are hookable now, so the harness can prove
+      // the WIRE — that a terminal refusal issues exactly one POST and its recovery
+      // issues no second one. A pure-predicate assertion cannot see that at all
+      // (cch-w46-s2 fixed the identical blind spot for runDecommission).
+      rollbackInstance: rollbackInstance, updateInstance: updateInstance,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf, suspendedReasonText: suspendedReasonText,
@@ -22577,6 +22733,9 @@
       // node harness drives directly (the DOM mount/wiring is browser-verified).
       usageMeters: USAGE_METERS.map(function (m) { return { key: m.key, label: m.label, fmt: m.fmt }; }),
       c10FmtBytes: c10FmtBytes, usageMeterDisplay: usageMeterDisplay,
+      // cch-w61-s2: exported so the refusal copy that COMPOSES it can be pinned
+      // against the shipped clause byte-for-byte, rather than re-typing it.
+      usageUnavailableText: usageUnavailableText,
       usageMeterHtml: usageMeterHtml, usageMetersHtml: usageMetersHtml,
       // Wave 4 (OC19): the 14-day sparkline read path. usageHistorySeries
       // normalises the /usage/history envelope; usageHistoryValues extracts one

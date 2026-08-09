@@ -42,6 +42,8 @@ export const IDS = {
   provisioningInstance: "5b2c1e00-0000-4000-8000-0000000000a3",
   failedInstance: "5b2c1e00-0000-4000-8000-0000000000a4",
   suspendedInstance: "5b2c1e00-0000-4000-8000-0000000000a5",
+  // cch-w61-s2: the box that answered our stored admin credential with a 401.
+  refusedInstance: "5b2c1e00-0000-4000-8000-0000000000a6",
   // The single-instance provisioning / failed scenarios reuse their own ids.
   soloProvisioning: "5b2c1e00-0000-4000-8000-0000000000b1",
   soloFailed: "5b2c1e00-0000-4000-8000-0000000000b2",
@@ -89,6 +91,13 @@ function bpBase(over) {
       update_running_release: null,
       update_latest_release: null,
       update_checked_at: null,
+      // cch-w61-s2: `barkpark_json` serializes the update probe's typed refusal
+      // reason on EVERY row (Registry.persist_update_unknown/2 writes it; the
+      // whitelist is Barkpark.update_unavailable_reasons/0). It is null on a box
+      // that answered. A fixture that OMITS the key is a fixture in which the
+      // refused state cannot exist at all — the whole corpus rendered the Updates
+      // panel in exactly ONE state before this row was added.
+      update_unavailable_reason: null,
       // cch-w47-s2 (D529/D515): `barkpark_json` serializes the autoupdate policy
       // block on EVERY row, so a fixture that OMITS these keys makes
       // `hasAutoupdatePolicy` false for the whole corpus — the policy chip and
@@ -252,6 +261,35 @@ const suspendedInstance = bpBase({
   // the raw column. A fixture vouching for copy the plane cannot emit certifies
   // nothing.
   suspended_reason: "billing_past_due",
+  provision_status: "succeeded",
+});
+
+// cch-w61-s2 — THE BOX THAT REFUSED OUR CREDENTIAL. A HOSTED row (the Updates
+// panel only renders when a box has a host, which is why the corpus's two
+// hostless deep-links rendered no panel at all), carrying the state the hourly
+// update probe writes when the box answers our stored admin credential with a
+// 401: update_state "unknown" + update_unavailable_reason "identity_refused",
+// stamped 45 minutes ago.
+//
+// KEYED ON id AND host, NEVER ON NAME OR SLUG. The live subject shares its name
+// with two other rows on the fleet; a reader that picks by name picks an
+// arbitrary one of the three, and the assertion silently becomes a statement
+// about the wrong box. `167.233.194.23` is a bare-IP host on purpose — that is
+// what the subject actually serves on, and it also proves publicUrl() renders a
+// schemeless host without inventing a domain.
+const credentialRefusedInstance = bpBase({
+  id: IDS.refusedInstance,
+  name: "Gyldendal",
+  slug: "gyldendal",
+  url: "https://167.233.194.23",
+  host: "167.233.194.23",
+  health_status: "unknown",
+  agent_status: "offline",
+  version: "0.9.1",
+  last_seen_at: tMinus(45 * 60),
+  update_state: "unknown",
+  update_unavailable_reason: "identity_refused",
+  update_checked_at: tMinus(45 * 60),
   provision_status: "succeeded",
 });
 
@@ -4244,6 +4282,24 @@ export const SCENARIOS = {
       orderTask: offloadOrderTask("blocked", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
     },
   },
+  // ── cch-w61-s2: the credential-refused box, and a rollback that CAN refuse ──
+  "instance-update-credential-refused": {
+    label: "Updates panel — a box that answered our stored credential with a 401 (Unknown, 45m), and a Roll back that refuses terminally",
+    authed: true,
+    deepLink: "#instance/" + IDS.refusedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [credentialRefusedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      // The 409 the control plane emits for a box it will not relay to. Before
+      // this route existed the POST fell through to a blanket 200 and the modal
+      // reported success — the fixture could not refuse, so the split could not
+      // be exercised at all.
+      instanceRollback: { status: 409, body: { ok: false, error: { code: "identity_refused" } } },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -4535,6 +4591,18 @@ export function route(name, method, path, state) {
   const bpOne = p.match(/^\/v1\/barkparks\/([^/]+)$/);
   if (bpOne && method === "DELETE") {
     return destroyFrom(listOf(d, state, "barkparks"), state, (b) => b.id === bpOne[1]);
+  }
+  // cch-w61-s2: POST /v1/barkparks/:id/rollback — the instance slot flip. It was
+  // UNMODELLED: it fell through to the terminal `/v1/` 200 {} at the bottom of
+  // route(), so every preview click on "Roll back…" "succeeded" against a
+  // fixture that could never refuse, and the console's whole terminal-vs-retry
+  // split was unreachable from this harness. A scenario overrides via
+  // d.instanceRollback to drive one named refusal; the default stays the 202 the
+  // control plane answers on the happy path.
+  const bpRollback = p.match(/^\/v1\/barkparks\/([^/]+)\/rollback$/);
+  if (bpRollback && method === "POST") {
+    return d.instanceRollback ||
+      { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
   }
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this

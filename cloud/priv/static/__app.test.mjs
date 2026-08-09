@@ -10670,8 +10670,12 @@ test("isu-w5: updateConflict classifies pinned / already_running / not_enabled /
   assert.deepEqual(plain(hooks.updateConflict({ error: { code: "not_enabled" } })), { kind: "not_enabled", pin: null });
   assert.deepEqual(plain(hooks.updateConflict({ error: { code: "not_live" } })), { kind: "not_live", pin: null });
   assert.deepEqual(plain(hooks.updateConflict({ error: { code: "instance_error" } })), { kind: "other", pin: null, code: "instance_error" });
-  // a flat string error (some routes emit {error: "not_found"})
-  assert.equal(hooks.updateConflict({ error: "not_found" }).kind, "other");
+  // a flat string error (some routes emit {error: "<code>"}). cch-w61-s2 moved
+  // the example from "not_found" to "server_error": this assertion's subject is
+  // the FLAT-SHAPE READ, not the word, and not_found is now a NAMED kind (pinned
+  // in the cch-w61-s2 block below, over the flat envelope too). The unclassified
+  // arm still has to answer "other", so the assertion keeps its whole job.
+  assert.equal(hooks.updateConflict({ error: "server_error" }).kind, "other");
   assert.equal(hooks.updateConflict(null).kind, "other");
 });
 
@@ -10931,15 +10935,13 @@ test("gr41: a hostile instance name never injects markup through the shared moda
   assert.match(html, /&lt;img/);           // rendered as escaped text
 });
 
-test("gr41: rollbackRefusalTerminal splits Close from Try again over the D23 vocabulary", () => {
-  for (const code of ["no_previous_slot", "not_supported", "not_enabled",
-    "feature_not_configured", "not_live"]) {
-    assert.equal(hooks.rollbackRefusalTerminal(code), true, code + " is terminal");
-  }
-  for (const code of ["already_running", "instance_unreachable", "instance_error", "wat", undefined]) {
-    assert.equal(hooks.rollbackRefusalTerminal(code), false, String(code) + " is transient (retryable)");
-  }
-});
+// cch-w61-s2 REPLACED the gr41 terminality census that used to live here. It was
+// two hand-written literal lists with no bidirectional check, and it had ALREADY
+// failed silently once at this exact site: `forbidden` and `no_team` were made
+// terminal by cch-w38-s1 and appeared in NEITHER list, so adding a word to the
+// predicate reds nothing. Its replacement — "cch-w61-s2: THE TERMINALITY CENSUS
+// IS BIDIRECTIONAL" at the bottom of this file — derives the terminal population
+// from the SHIPPED FUNCTION'S OWN SOURCE and fails in both directions.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // cch-w46-s2 — DECOMMISSION'S 403 STOPS OFFERING "Try again" INTO A PERMANENT
@@ -19584,4 +19586,342 @@ test("cch-w58-s6: the Updates panel states the verification clock as its OWN row
   const older = hooks.updatePanelHtml(fleetBp({ update_checked_at: null }), "grant");
   assert.match(older, /Never checked/);
   assert.equal(older.indexOf("Verification"), -1);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w61-s2 — A PERMANENT REFUSAL RENDERS TERMINALLY, AND THE SITE SENTENCE
+// STOPS LYING. (charter D734/D737/D738/D739)
+//
+// MEASURED BEFORE THIS BLOCK EXISTED, driving rollbackInstance against the 409
+// the control plane now emits for a box that answered our stored admin
+// credential with a 401: 1 POST, recovery label "Try again", click it → 2 POSTs,
+// recursively — into a refusal the plane itself 409s outright, so no click after
+// the first can ever reach the box. Four more words behaved identically:
+// suspended, decrypt_failed, no_admin_token, not_found.
+//
+// WHAT `identity_refused` CLAIMS, EXACTLY: the box answered our stored admin
+// credential with a 401. Not "your box is broken", not "you did something".
+// The copy says that and stops.
+//
+// WHY THE UPDATE SEAM GETS COPY AND NO PREDICATE (D738): it renders through
+// toast(). There is no Try again button to withdraw and no terminality concept
+// to consult, so minting an `updateRefusalTerminal` no shipped path reads would
+// be a guard that structurally CANNOT LOSE — the defect class this wave deletes.
+//
+// TWO INDEPENDENT LIES, TWO INDEPENDENT PROOFS. Reverting only the COPY arms
+// (terminality intact) reds "the refusal copy ECHOES…"; reverting only the
+// terminality arms (copy intact) reds "…issues exactly ONE POST" (twice, once
+// per word) and the bidirectional census. Neither mutation hides behind the
+// other.
+
+// The rollback route's FULL refusal vocabulary → its verdict. This is the map the
+// census below drives in BOTH directions; the terminal half is checked for SET
+// EQUALITY against the words the shipped predicate actually names, so a word
+// added to the code and not to this map reds, and a word added here and not to
+// the code reds too.
+const W61S2_TERMINALITY = {
+  // permanent — a retry cannot move any of these
+  no_previous_slot: true,
+  not_supported: true,
+  not_enabled: true,
+  feature_not_configured: true,
+  not_live: true,
+  forbidden: true,
+  no_team: true,
+  identity_refused: true,
+  suspended: true,
+  decrypt_failed: true,
+  no_admin_token: true,
+  not_found: true,
+  // transient — a later click is the recovery that genuinely works
+  already_running: false,
+  instance_unreachable: false,
+  instance_error: false,
+  instance_unavailable: false,
+};
+
+function w61s2Ctl() {
+  const rec = { fails: [], succeeded: 0, busied: 0 };
+  return {
+    rec,
+    busy() { rec.busied++; },
+    succeed() { rec.succeeded++; },
+    fail(msg, label, handler) { rec.fails.push({ msg, label, handler }); },
+  };
+}
+
+// Swap fetch + document into the realm, run rollbackInstance to completion,
+// restore — then let the caller CLICK the recovery it wired, inside the same
+// stubbed realm, so any follow-on POST lands on the SAME counter. This is the
+// only observation that cannot be faked by a predicate assertion: the wire.
+async function driveRollback(status, payload) {
+  const fetch = fetchStub(status, payload);
+  const doc = {
+    querySelector: () => null, querySelectorAll: () => [],
+    getElementById: () => null, createElement: () => ({ ...inertEl }),
+  };
+  const ctl = w61s2Ctl();
+  const inRealm = async (fn) => {
+    const saved = { fetch: sandbox.fetch, document: sandbox.document };
+    sandbox.fetch = fetch;
+    sandbox.document = doc;
+    try {
+      fn();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+  };
+  await inRealm(() => hooks.rollbackInstance({ id: "bp-1", name: "web" }, ctl));
+  const last = () => ctl.rec.fails[ctl.rec.fails.length - 1];
+  return {
+    ctl, fetch, last,
+    posts: () => fetch.calls.filter((c) => c.opts && c.opts.method === "POST").length,
+    clickRecovery: () => inRealm(() => last().handler(ctl)),
+  };
+}
+
+test("cch-w61-s2: the two impure arms and the echoed clause are hookable at all", () => {
+  // TRANSPORT proof, not predicate proof: without these three the harness can
+  // only assert a pure function and never touches the POST that is the defect.
+  // Stated honestly in the PR body: adding them reds nothing on its own — the
+  // export test is a presence loop and no roster is frozen anywhere.
+  assert.equal(typeof hooks.rollbackInstance, "function",
+    "the arm that wires the recovery must be drivable (0 references on origin/main)");
+  assert.equal(typeof hooks.updateInstance, "function",
+    "…and so must the self-update arm whose sentence this slice fixes");
+  assert.equal(typeof hooks.usageUnavailableText, "function",
+    "…and the shipped clause the identity copy COMPOSES, so the echo is pinned, not retyped");
+});
+
+test("cch-w61-s2: rollbackRefusalTerminal is TRUE for the five permanent refusals and FALSE for the front-proxy window", () => {
+  for (const code of ["identity_refused", "suspended", "decrypt_failed", "no_admin_token", "not_found"]) {
+    const v = hooks.rollbackRefusalTerminal(code);
+    assert.equal(v, true, code + " is permanent — the plane refuses the relay, so no click can reach the box");
+    assert.equal(typeof v, "boolean", "D439: predicates stay boolean, never truthy");
+  }
+  // THE POSITIVE CONTROL, and it comes for free: instance_unavailable is the
+  // front-proxy restart window the route names. It must stay RETRYABLE.
+  assert.equal(hooks.rollbackRefusalTerminal("instance_unavailable"), false,
+    "a restart window is exactly the refusal a later click repairs");
+  // The arms cch-w38-s1 and isu-w6 shipped are untouched.
+  assert.equal(hooks.rollbackRefusalTerminal("forbidden"), true);
+  assert.equal(hooks.rollbackRefusalTerminal("already_running"), false);
+  assert.equal(hooks.rollbackRefusalTerminal("__uncensused__"), false,
+    "an UNKNOWN word fails safe TOWARD retry — we never invent a permanent no");
+});
+
+test("cch-w61-s2: the refusal copy ECHOES shipped sentences, names only what happened, and promises no faster re-check", () => {
+  // ECHO, DO NOT MINT (D734). friendly({error:"suspended"}) IS ERRORS.suspended
+  // (the flat key friendly() indexes with), so this compares the rendered body to
+  // the shipped sentence byte for byte without exporting the table.
+  const suspendedSentence = hooks.friendly({ error: "suspended" }, "");
+  const noTokenSentence = hooks.friendly({ error: "no_admin_token" }, "");
+  const unauthorizedClause = hooks.usageUnavailableText("unauthorized");
+  assert.equal(unauthorizedClause, "the instance rejected our access credential",
+    "the shipped clause this copy composes around — if it moves, this echo must move with it");
+
+  const rb = (code) => hooks.rollbackConflictCopy(code, { error: { code } });
+  const up = (code) => hooks.updateConflictCopy(hooks.updateConflict({ error: { code } }), { error: { code } });
+
+  // suspended + no_admin_token: the shipped sentence VERBATIM, on both seams.
+  assert.equal(rb("suspended").body, suspendedSentence, "rollback echoes ERRORS.suspended, unaltered");
+  assert.equal(up("suspended").body, suspendedSentence, "…and so does the update seam");
+  assert.equal(rb("no_admin_token").body, noTokenSentence);
+  assert.equal(up("no_admin_token").body, noTokenSentence);
+
+  // identity_refused COMPOSES the shipped unauthorized clause rather than
+  // coining a fifth phrasing for one fact.
+  assert.ok(rb("identity_refused").body.includes(unauthorizedClause),
+    "the identity refusal reuses the sentence the usage rail already ships for the same 401");
+  assert.ok(up("identity_refused").body.includes(unauthorizedClause));
+  // …and it claims EXACTLY that, never a verdict on the customer's box.
+  assert.doesNotMatch(rb("identity_refused").body, /broken|misconfigured|your fault/i);
+
+  // NO permanent arm falls through to the transient sentence, on either seam.
+  for (const code of ["identity_refused", "suspended", "decrypt_failed", "no_admin_token", "not_found"]) {
+    assert.notEqual(rb(code).title, "Couldn't start the rollback", code + " must not hit the rollback default arm");
+    assert.notEqual(up(code).title, "Couldn't start the update", code + " must not hit the update default arm");
+    for (const s of [rb(code).body, up(code).body]) {
+      assert.equal(s.indexOf("Please try again in a moment."), -1,
+        code + " is permanent — the transient sentence is a lie about it");
+      // NO FASTER RE-CHECK IS PROMISED: the relay trigger is 409'd for a refused
+      // box, so the hourly cron is the SOLE recovery detector. Offering a
+      // "check now" the plane will refuse stacks a second lie on the first.
+      assert.doesNotMatch(s, /check now|re-?check now|refresh now/i,
+        code + " must not offer a probe the control plane will refuse");
+    }
+  }
+  // The identity arm names the ONE recovery detector that exists, honestly.
+  assert.match(rb("identity_refused").body, /hourly update check/);
+
+  // instance_unavailable gains COPY ONLY — a named sentence, still retryable.
+  assert.equal(rb("instance_unavailable").title, "The instance isn't answering right now");
+  assert.match(rb("instance_unavailable").body, /front proxy is restarting/);
+  // runner_start_failed is the update seam's one RETRYABLE new arm: the box
+  // ACCEPTED the request. Calling a box-side transient terminal is the
+  // mirror-image lie, so its sentence keeps the retry.
+  assert.equal(up("runner_start_failed").title, "The update didn't start");
+  assert.match(up("runner_start_failed").body, /Try again in a moment\./);
+  assert.equal(up("not_supported").title, "Self-update isn't available here");
+
+  // NO force affordance is minted anywhere in this batch.
+  for (const code of ["identity_refused", "suspended", "decrypt_failed", "no_admin_token",
+    "not_found", "not_supported", "runner_start_failed"]) {
+    assert.equal(up(code).forceLabel, null, code + " must not offer a force override");
+  }
+});
+
+test("cch-w61-s2: updateConflict gains seven NAMED kinds and NOT ONE NEW KEY", () => {
+  for (const code of ["identity_refused", "suspended", "decrypt_failed", "no_admin_token",
+    "not_found", "not_supported", "runner_start_failed"]) {
+    const c = hooks.updateConflict({ error: { code } });
+    assert.equal(c.kind, code, code + " is classified by name, not folded into `other`");
+    // THE FROZEN SHAPE: kind VALUES are free, a new KEY is not — the harness
+    // deepEquals this whole object, and the `other` arm's key set is pinned by
+    // cch-w38-s1 as well.
+    assert.deepEqual(Object.keys(plain(c)).sort(), ["kind", "pin"],
+      code + " must not grow the return shape");
+  }
+  // The FLAT envelope classifies identically — reading only the nested shape is
+  // how a copy-paste calls every refusal unclassified.
+  assert.equal(hooks.updateConflict({ error: "not_found" }).kind, "not_found");
+  assert.equal(hooks.updateConflict({ error: "identity_refused" }).kind, "identity_refused");
+  // A pin still wins, and an unclassified code still answers `other` with code.
+  assert.equal(hooks.updateConflict({ error: { code: "pinned", pinned_release: "v0.4.1" } }).kind, "pinned");
+  assert.deepEqual(plain(hooks.updateConflict({ error: { code: "server_error" } })),
+    { kind: "other", pin: null, code: "server_error" });
+});
+
+test("cch-w61-s2: a 409 identity_refused renders TERMINALLY and issues exactly ONE POST", async () => {
+  const d = await driveRollback(409, { ok: false, error: { code: "identity_refused" } });
+  assert.equal(d.posts(), 1, "the click that opened this failure issued exactly one POST");
+  const f = d.last();
+  assert.ok(f, "the arm must FAIL the modal, not swallow the refusal");
+  assert.equal(f.label, "Close",
+    "MEASURED BEFORE THE FIX: 'Try again' — a live button re-POSTing into a refusal the plane 409s");
+  await d.clickRecovery();
+  assert.equal(d.posts(), 1, "the terminal recovery issues NO second POST — the loop is gone");
+  assert.equal(d.ctl.rec.busied, 0, "…and never re-arms the modal's busy state");
+  assert.equal(d.ctl.rec.fails.length, 1, "…nor renders a second failure");
+});
+
+test("cch-w61-s2: a 409 suspended renders TERMINALLY and issues exactly ONE POST", async () => {
+  const d = await driveRollback(409, { ok: false, error: { code: "suspended" } });
+  assert.equal(d.posts(), 1);
+  assert.equal(d.last().label, "Close",
+    "MEASURED BEFORE THE FIX: 'Try again', with the body \"Couldn't start the rollback - Please try again in a moment.\"");
+  await d.clickRecovery();
+  assert.equal(d.posts(), 1, "a suspension is not repaired by re-POSTing");
+});
+
+test("cch-w61-s2: forbidden is the NEGATIVE CONTROL — the SAME harness already answers Close, one POST", async () => {
+  // This one PASSED before this slice (cch-w38-s1 shipped it). It is here so the
+  // harness is shown able to distinguish, not merely able to agree.
+  const d = await driveRollback(403, { ok: false, error: { code: "forbidden" } });
+  assert.equal(d.last().label, "Close");
+  assert.equal(d.posts(), 1);
+  await d.clickRecovery();
+  assert.equal(d.posts(), 1);
+});
+
+test("cch-w61-s2: THE TRANSIENT PATH IS UNTOUCHED — already_running and instance_unavailable still retry, and still re-POST", async () => {
+  for (const code of ["already_running", "instance_unavailable"]) {
+    const d = await driveRollback(409, { ok: false, error: { code } });
+    assert.equal(d.last().label, "Try again", code + " keeps the recovery that can work");
+    assert.equal(d.posts(), 1);
+    await d.clickRecovery();
+    assert.equal(d.posts(), 2, code + " genuinely re-issues the POST — this is the positive control");
+    assert.equal(d.ctl.rec.busied, 1, "…after re-arming the modal's busy state, as it always did");
+  }
+  // An UNKNOWN failure keeps the retry too — a 500 is not evidence of a permanent no.
+  const boom = await driveRollback(500, { ok: false, error: { code: "wat" } });
+  assert.equal(boom.last().label, "Try again");
+  await boom.clickRecovery();
+  assert.equal(boom.posts(), 2);
+});
+
+// NOT DRIVEN HERE, and the omission is deliberate rather than an oversight: the
+// 202 SUCCESS arm ends in `loadInstance(bp.id)`, whose fetch chain outlives the
+// realm swap and lands on the restored inert document — node:test reports that
+// as asynchronous activity after the test ended, which is a real leak, not a
+// pass. The success arm is unmodified by this slice; the refusal arms are what
+// changed, and every one of them is driven above.
+
+test("cch-w61-s2: THE TERMINALITY CENSUS IS BIDIRECTIONAL over the route's own vocabulary", () => {
+  // Direction 1 — every censused word must get the verdict the map records.
+  for (const [code, want] of Object.entries(W61S2_TERMINALITY)) {
+    assert.equal(hooks.rollbackRefusalTerminal(code), want,
+      code + " is censused as " + (want ? "terminal" : "retryable") + " and the predicate must agree");
+  }
+
+  // Direction 2 — and the map must know every word the SHIPPED PREDICATE names.
+  // The population is DERIVED from the function's own source, not re-typed: that
+  // is the whole delta from the gr41 census this replaces, where `forbidden` and
+  // `no_team` sat terminal in code and absent from both literal lists, so adding
+  // a word to the predicate reddened nothing.
+  const src = String(hooks.rollbackRefusalTerminal);
+  const inCode = [...src.matchAll(/code === "([a-z_]+)"/g)].map((m) => m[1]).sort();
+  const inMap = Object.keys(W61S2_TERMINALITY).filter((k) => W61S2_TERMINALITY[k]).sort();
+  assert.ok(inCode.length > 0, "the predicate's source must be readable — a zero-word scan is a vacuous census");
+  assert.deepEqual(inCode, inMap,
+    "a word terminal in code but absent from the census reds here, and so does a word " +
+    "censused terminal that the code does not name");
+
+  // Direction 3 — an UNCENSUSED word fails safe TOWARD retry. A console that
+  // invents a permanent no for a word it has never seen is the same lie pointed
+  // the other way.
+  assert.equal(Object.prototype.hasOwnProperty.call(W61S2_TERMINALITY, "__uncensused__"), false);
+  assert.equal(hooks.rollbackRefusalTerminal("__uncensused__"), false);
+  assert.equal(hooks.rollbackRefusalTerminal(undefined), false);
+  assert.equal(hooks.rollbackRefusalTerminal(null), false);
+
+  // Every censused word carries a NAMED copy arm — the vocabulary the predicate
+  // splits and the vocabulary the copy words are the same vocabulary.
+  for (const code of Object.keys(W61S2_TERMINALITY)) {
+    assert.notEqual(hooks.rollbackConflictCopy(code, {}).title, "Couldn't start the rollback",
+      code + " is censused but falls to the unnamed default sentence");
+  }
+});
+
+test("cch-w61-s2: siteRollbackFailure stops printing 'A deploy is already running' over the plane's MEASURED cause", () => {
+  // THE LIE, in the plane's own bytes. Sites.Deploy.rollback maps the box's typed
+  // `no_previous` exit to a sentence, the router ships it as
+  // {ok:false, error:"rollback_failed", detail}, on 422 — and the console's
+  // `status === 409 || code === "rollback_failed"` short-circuit DISCARDED the
+  // detail and printed the in-flight sentence instead.
+  const NO_PREVIOUS_DETAIL =
+    "there is no previous build to roll back to — this site has only ever had one release";
+  const refused = { ok: false, error: "rollback_failed", detail: NO_PREVIOUS_DETAIL };
+
+  const after = hooks.siteRollbackFailure(422, refused);
+  assert.equal(after.body, NO_PREVIOUS_DETAIL, "the plane's own measured sentence renders, unedited");
+  assert.equal(after.title, "Couldn't roll back");
+  assert.equal(after.body.indexOf("A deploy is already running"), -1,
+    "BEFORE: title 'A deploy is already running', body 'Let the in-flight deploy finish, then roll back.'");
+  assert.notEqual(after.title, "A deploy is already running");
+
+  // The 409 arm KEEPS the in-flight sentence — that status really is a deploy in
+  // flight (Deploy.rollback's {:ok, 409, _} branch), so nothing there was a lie.
+  const inflight = hooks.siteRollbackFailure(409, {
+    ok: false, error: "rollback_failed",
+    detail: "a deploy is running on the box — try again once it finishes",
+  });
+  assert.equal(inflight.title, "A deploy is already running");
+  assert.equal(inflight.body, "Let the in-flight deploy finish, then roll back.");
+
+  // A detail-less rollback_failed carries an EXPLICIT fallback, never "".
+  const bare = hooks.siteRollbackFailure(502, { ok: false, error: "rollback_failed" });
+  assert.equal(bare.body, "The deploy plane refused the rollback and didn't say why.");
+
+  // The two typed 422 arms and the generic fallthrough are untouched.
+  assert.match(hooks.siteRollbackFailure(422, { error: "no_previous" }).title, /Nothing to roll back to/);
+  assert.match(hooks.siteRollbackFailure(422, { error: "not_rollbackable" }).title, /can't be rolled back in place/);
+  assert.match(hooks.siteRollbackFailure(500, {}).title, /Couldn't roll back/);
+
+  // THE STATED HALF-LIMIT (PR body, criterion 14c): terminality is UNCHANGED.
+  // The plane flattens three distinct box codes into one slug plus prose, so the
+  // console cannot tell a permanent no-previous-build refusal from a transient
+  // one without a typed code. Try again stays offered; the plane-side half —
+  // emitting the box's typed code alongside the detail — is filed, not faked.
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, refused), false,
+    "a slug the console cannot classify keeps the retry — we do not guess a permanent no from prose");
 });
