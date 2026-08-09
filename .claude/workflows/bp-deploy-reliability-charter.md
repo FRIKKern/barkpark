@@ -8356,3 +8356,63 @@ unowned, frozen-green against a tree with no census, and will RED main's census 
 **Seal state after this wave: honest NO-SEAL, `a=FAIL orphans=69 roster=147 head=0239dd4ee`,** with D444's
 caveat AND the depth caveat (69 direct plus 332 one level below) attached. Sealing while the crown has never
 held an automated row would be the epic's most expensive false green.
+
+### Wave 2026-08-09 (wave 26) — REVIEWED · Paper `deploy-reliability-wave-26-2026-08-09` · grade **A**
+
+**Six round-1 slices built, reviewed, gate-green on the reviewer's own tree, PUSHED and PR'd.** Rounds 2
+(`dr-w26-s5` the crown's writer, `dr-w26-s7` the two api-side deletions) were deferred BY DESIGN behind their
+dependencies' merges, not skipped.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| #11009 lands with the roster fix | `dr-w26-s1-land-11009-with-the-roster-fix` | `…roster-fi-0` (unchanged) | [#11075](https://github.com/FRIKKern/barkpark/pull/11075) | required-checks 166/0 hermetic · budgets + anchors PASS · both deploy-gate selftests SELFTEST OK |
+| #11008 union + the key-set lie | `dr-w26-s2-land-11008-union-and-the-key-set-lie` | `…union-resolved-a-1` (unchanged) | [#11078](https://github.com/FRIKKern/barkpark/pull/11078) | 45/0 + 13/0 |
+| The deliveries reader stops lying about `carried` | `dr-w26-s3-deliveries-reader-stops-lying-about-carried` | `…rendering-an-u-2` (unchanged) | [#11080](https://github.com/FRIKKern/barkpark/pull/11080) | gofmt/build/vet clean · `go test ./internal/cli/...` ok · census 13/0 · mutation re-run by the reviewer reds exactly one named test |
+| The census scores a caller-less producer | `dr-w26-s4-census-scores-a-caller-less-producer` | `…worker-se-3` (unchanged) | [#11082](https://github.com/FRIKKern/barkpark/pull/11082) | census 21/0 · `cloud-path-escape-check.sh` OK |
+| The deletion law + the first subtraction | `dr-w26-s6-reader-less-instrument-guard-and-the-first-deletion` | `…a-reader--4-r` (reviewer commit) | [#11083](https://github.com/FRIKKern/barkpark/pull/11083) | 36/0 on the three named files · **FULL cloud suite 3422/0** · go build + vet clean |
+| Name-claim legs cannot shrink silently | `dr-w26-s8-name-claim-legs-cannot-shrink-silently` | `…be-deleted-renam-5` (unchanged) | [#11084](https://github.com/FRIKKern/barkpark/pull/11084) | format clean · 34/0 |
+
+**What landed.** The wave's mandate was three-legged and all three legs moved. LEG 1 — three frozen PRs
+stop being frozen: #11009's two deploy gates (the paths↔filters gate scoped to the `changes` job, the smoke
+gate's step boundary widened to every 6-space `- ` item) get their FIRST CI caller in `doc-gates.yml`, and the
+roster follows 19 → 21 at all four sites, insert-and-renumber, so merging cannot red main's own honesty gate;
+#11008's `@columns` conflict is resolved by union and the 12-key `to_json/1` assertion the rebase silently
+turned into a lie is fixed (proved by re-running the before-state, not asserted); #11007's reader is
+SUPERSEDED rather than rebased, because `carried` decoded into a Go `bool` renders "this sha's OWN run" over a
+`null` — a confident attribution with no hedge a human could notice. LEG 2 — the crown's writer seam is now
+SCORED: 23 `/v1/internal/**` write routes against a positively declared 634-file corpus, exactly one
+caller-less (`POST /v1/internal/platform-deliveries`), with the corpus declaring itself into `CLOUD_PATHS` so a
+`deploy.yml`-only PR stops dispatching nothing. LEG 3 — D442 stops being prose: a reader-less-instrument
+census with a build-time-re-derived stay, surface AND audience per row, its own blindness in the moduledoc —
+and the epic's **first deletion**, `publish_clock`, net −802 lines.
+
+**Reviewer's independent re-derivations** (both HIGH-FLIP-RISK judgments, re-derived rather than re-read):
+the s4 caller-corpus ruling was re-scored with a separate walk — 634 files, one caller-less route, identical
+verdict; the s6 zero-reader claim for `publish_clock` was re-grepped full-tree on `origin/main` (every hit
+outside the module, its test and `router.ex` is charter prose). The s3 mutation was re-run: narrowing
+`Carried *bool` back to `bool` reds exactly `TestCloudDeliveriesCarriedUnrecordedIsItsOwnState`. The s6
+deletion was additionally covered by a FULL cloud-suite run, 3422/0 — the load-bearing evidence that no test
+anywhere asserted the removed response node.
+
+**What stalled — and one hole the wave OPENED.** `dr-w26-s2` takes `to_json/1` to 15 keys while `dr-w26-s3`'s
+Go decoder pins 13. Whichever order they merge, `bp cloud deliveries` then silently drops `previous_sha` and
+`transition` — the epic's own failure mode, reproduced inside the epic, and nothing reds because the fixture
+is a fixture and `to_json/1` has no emitted-key census. Filed as
+`dr-w26-bl-deliveries-reader-two-keys-behind-11008` (priority 1) and it is the next wave's first slice. Also
+still open: `PlatformDelivery.to_json/1` has no Elixir-side emitted-key census at all
+(`dr-w26-bl-platform-delivery-tojson-has-no-emitted-key-census`); the reader corpus reads four trees CI does
+not dispatch on (`dr-w26-followup-reader-corpus-dispatch`); `queued_seconds` is a fourth reader-less leg with
+no disposition (`dr-w26-followup-queued-seconds-disposition`); and the name-claim `select` that FEEDS the legs
+is uncensused (`dr-w26-s8-followup-census-the-leg-input-select`).
+
+**Next wave.** Merge round 1 in order — #11075 (close #11009 as superseded, or force-push its head; NOT both)
+→ #11078 (**carries a migration, lead-ordered**) → #11080 (close #11007; merging it re-introduces
+`Carried bool`) → #11082 → #11083 → #11084. Then round 2 the moment its deps are in: `dr-w26-s5` after s1+s4
+(and its PR DELETES s4's allowlist row, because the ROT arm reds by design), `dr-w26-s7` after s6. Then close
+the reader/serializer gap this wave opened. **A genuinely independent second reviewer is owed on s4's caller
+corpus and s6's deletion before merge** — the workflow spawns one reviewer, so that dispatch is a manual lead
+step.
+
+**Seal state unchanged and honest:** `NO-SEAL a=FAIL orphans=69 roster=147`, D444's caveat and the depth
+caveat attached. The crown has still never held a row an automated writer put there — `dr-w26-s5` is the
+slice that changes that, and it is round 2.
