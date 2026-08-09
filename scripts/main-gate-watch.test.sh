@@ -220,6 +220,64 @@ else
 fi
 grep -q "a5260f609" "$OUT" && ok "a5260f609 output names the sha" || bad "a5260f609 output does not name the sha"
 
+# ── 3b. THE EMPTY PAYLOAD — a tip nothing has registered on YET (cch-w60) ────
+# The fixture this file never had. The deleted `push:` trigger evaluated main's
+# tip ~19 seconds after a merge, when GitHub had created NO check-run rows on it
+# at all — the payload really is `{"check_runs": []}`. The three required rows
+# were created at +7m15s (Console), +9m52s (Cloud) and +25m27s (Elixir); 2 of 2
+# production push runs failed on tip 026c5b1d78 while main was in fact green.
+#
+# WHAT THIS SECTION REPORTS, STATED PLAINLY SO NOBODY MISREADS IT: on an empty
+# payload the script prints MISSING x3 and exits 1 — byte-identical to the
+# a5260f609 case above, which is a tip that WAS judged and simply never produced
+# a required row. The script's vocabulary does NOT distinguish "absent because
+# no row has been created yet" from "absent because the commit was never
+# judged". This section PINS that as the current behaviour; it does not endorse
+# it as correct. A MISSING row is therefore not evidence that a commit was
+# judged, and the fix for the trigger that made it fire on every merge is the
+# deletion asserted in §11 below, not a grace constant.
+section "3b. an EMPTY check-runs payload (a tip no workflow has registered on yet)"
+
+cat > "$FX/empty-payload.json" <<'JSON'
+{"check_runs": []}
+JSON
+
+if grep -q '"check_runs": \[\]' "$FX/empty-payload.json"; then
+  ok "empty-payload fixture is a literal {\"check_runs\": []} — the shape a fresh merge tip really has"
+else
+  bad "empty-payload fixture is not a literal empty check_runs array"
+fi
+
+rc="$(run_watch 026c5b1d7 "$FX/empty-payload.json")"
+if [ "$rc" = "1" ]; then
+  ok "empty payload -> MISSING/scream (exit 1) — this is the CURRENT behaviour, pinned, not endorsed"
+else
+  bad "empty payload -> expected exit 1 (the documented current behaviour), got $rc"; cat "$OUT" >&2
+fi
+if [ "$rc" != "2" ]; then
+  ok "empty payload is NOT WAITING — exit 2 is keyed on the .status of an EXISTING row, so no row means no wait"
+else
+  bad "empty payload reported WAITING; §3b's prose and the workflow comment in main-gate-watch.yml are now stale"
+fi
+n="$(grep -c "MISSING  " "$OUT")"
+if [ "$n" = "3" ]; then
+  ok "empty payload reports MISSING on all THREE watched contexts"
+else
+  bad "empty payload expected 3 MISSING rows, got $n"; cat "$OUT" >&2
+fi
+if ! grep -qE "^  ok       " "$OUT"; then
+  ok "empty payload produces no green row at all"
+else
+  bad "empty payload produced a green row — a payload with zero rows cannot green anything"
+fi
+# The conflation, asserted rather than described: the empty-payload verdict is
+# indistinguishable from the genuinely-never-judged verdict.
+if grep -q "MAIN'S TIP DOES NOT CARRY A GREEN VERDICT" "$OUT"; then
+  ok "empty payload is INDISTINGUISHABLE from the never-judged sha a5260f609 — same MISSING vocabulary, same exit 1"
+else
+  bad "empty payload no longer reaches the MISSING verdict; §3b's prose is stale"
+fi
+
 # ═══ 4. WAITING is neither a pass nor a scream ═══════════════════════════════
 section "4. WAITING (keyed on .status, conclusion null)"
 
@@ -348,7 +406,26 @@ section "11. workflow structure (the four breakglass-watch properties)"
 [ -f "$WF" ] && ok "workflow exists: .github/workflows/main-gate-watch.yml" || bad "workflow missing"
 grep -q "cron:" "$WF"                       && ok "schedule trigger"        || bad "no schedule trigger"
 grep -q "workflow_dispatch:" "$WF"          && ok "workflow_dispatch"       || bad "no workflow_dispatch"
-grep -qE "branches: \[main\]" "$WF"         && ok "push: main"              || bad "no push:main trigger"
+
+# THERE MUST BE NO push: TRIGGER (cch-w60, D721). It fired ~19s after a merge,
+# reached the empty-payload case pinned in §3b, and red by construction: 2 of 2
+# production push runs failed on tip 026c5b1d78 while main was in fact green.
+# Comments are stripped first — this workflow's prose argues about push at
+# length and a naive grep would red on its own explanation.
+if sed 's/#.*//' "$WF" | grep -qE '^[[:space:]]*push:'; then
+  bad "the workflow carries a push: trigger — it reds by construction on every merge (see 3b)"
+else
+  ok "no push: trigger at all — the merge-time false red cannot recur"
+fi
+# ...and prove that check can LOSE rather than trusting a grep that may simply
+# never match anything.
+sed 's/^  workflow_dispatch:/  push:\n    branches: [main]\n  workflow_dispatch:/' "$WF" > "$TMP/wf-push-readded.yml"
+if sed 's/#.*//' "$TMP/wf-push-readded.yml" | grep -qE '^[[:space:]]*push:'; then
+  ok "the no-push check catches a re-added push: trigger (it can lose)"
+else
+  bad "the no-push check did not catch a re-added push: trigger — it is vacuous"
+fi
+
 grep -q "if: github.event_name != 'pull_request'" "$WF" \
   && ok "watch job carries if: github.event_name != 'pull_request'" \
   || bad "watch job is missing the pull_request guard"
