@@ -582,9 +582,20 @@ async function main() {
       "Coverage here is corpus-bound (LIMIT L1), so growth must be NAMED: if a new member scenario landed, add its " +
       "controls' rows to HOOKS and raise the pin in the SAME commit. If one disappeared, say which and why.");
   }
-  if (SCENARIO_NAMES.length !== PIN_TOTAL_SCENARIOS) {
-    out("  note the committed corpus is now " + SCENARIO_NAMES.length + " scenarios (pinned " + PIN_TOTAL_SCENARIOS +
-      ") — re-derive the member slice and update both pins\n");
+  // The total pin is a GUARD, not a note: a printed line the workflow cannot see
+  // is not a guard at all (the sweep runs as a bare `run:` step, so the exit code
+  // is the entire verdict). It reds in BOTH directions and NAMES which one.
+  const corpusDrift = SCENARIO_NAMES.length - PIN_TOTAL_SCENARIOS;
+  const corpusDirection = corpusDrift > 0 ? "grew" : "shrank";
+  out("  " + (corpusDrift === 0 ? "ok  " : "FAIL") + " corpus-size     — " + SCENARIO_NAMES.length +
+    " scenario(s) committed (pinned " + PIN_TOTAL_SCENARIOS + ")" +
+    (corpusDrift === 0 ? "" : " — the corpus " + corpusDirection + " by " + Math.abs(corpusDrift)) + "\n");
+  if (corpusDrift !== 0) {
+    broken.push("the committed corpus " + corpusDirection + " to " + SCENARIO_NAMES.length + " scenario(s), pinned at " +
+      PIN_TOTAL_SCENARIOS + ". Re-derive by RUNNING this sweep and set PIN_TOTAL_SCENARIOS to the number it PRINTS — " +
+      "never pin ± 1, because one commit can move the corpus by more than one. PIN_MEMBER_SCENARIOS moves ONLY if " +
+      "the member slice itself moved (the actor-set line above says how many scenarios answer role=\"member\"); do not " +
+      "bump it to match the total, or this sweep reds on actor-set instead.");
   }
 
   // 2 — survey each member screen, and its privileged twin as the positive control.
