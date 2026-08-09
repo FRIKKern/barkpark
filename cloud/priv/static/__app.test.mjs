@@ -7419,6 +7419,17 @@ test("w29: usageMeterDisplay — every typed reason gets its own sentence; a tim
   assert.equal(say("unreachable"), "the instance was unreachable");
   assert.equal(say("bad_shape"), "the instance answered in an unexpected shape");
   assert.equal(say("too_many_datasets"), "too many datasets to tally");
+  // w58-s3: a box that ANSWERED and said no must never wear the "unreachable"
+  // sentence — that sends a paying customer to their network for a credential
+  // problem. Three delivered facts, three sentences, all distinct from it.
+  assert.equal(say("unauthorized"), "the instance rejected our access credential");
+  assert.equal(say("instance_error"), "the instance answered with an error");
+  assert.equal(say("refused"), "the instance refused the read");
+  for (const delivered of ["unauthorized", "instance_error", "refused"]) {
+    assert.notEqual(say(delivered), say("unreachable"), delivered + " must not read as unreachable");
+    assert.notEqual(say(delivered), say("unknown"), delivered + " must reach the browser as a real sentence");
+  }
+  assert.equal(new Set(["unauthorized", "instance_error", "refused"].map(say)).size, 3);
   assert.notEqual(say("exception"), say("deadline_exceeded"));
   // An unknown reason still says the honest half — never the deliberate copy.
   assert.equal(say("unknown"), "the read failed");
