@@ -21,6 +21,9 @@ defmodule BarkparkCloud.Web.RouterRollbackTest do
       fail-closed: wrong-team admin gets the SAME 404 as a nonexistent id;
       unauthenticated → 401; not-live → 409 not_live; transport failure →
       502 instance_unreachable
+    * cch-w54-bl: a BILLING-SUSPENDED box is refused 409 `suspended` BEFORE the
+      relay — zero upstream requests, the credential never on the wire, the pin
+      untouched
   """
   use BarkparkCloud.DataCase, async: true
   use Oban.Testing, repo: BarkparkCloud.Repo
@@ -304,6 +307,42 @@ defmodule BarkparkCloud.Web.RouterRollbackTest do
       assert conn.status == 404
       assert json_body(conn)["error"]["code"] == "no_admin_token"
       assert json_body(conn)["error"]["detail"] =~ "re-provision"
+    end
+  end
+
+  describe "POST /v1/barkparks/:id/rollback — billing suspension" do
+    test "SUSPENDED box → 409 suspended; ZERO upstream requests; credential never on the wire; pin untouched" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(
+          suspended: true,
+          suspended_reason: "billing_lapsed",
+          pinned_release: "v0.2.24"
+        )
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Program the 202 the box WOULD have answered: a refusal that moved below
+      # the relay would still 409 on some other arm, so the WIRE is the proof.
+      StudioLinkFakeHttpClient.program([instance_202()])
+
+      conn = rollback(bp.id, token)
+
+      # THE WIRE FIRST (cch-w54-bl): nothing reached the instance — the stored
+      # admin credential was never decrypted for a suspended box.
+      assert StudioLinkFakeHttpClient.requests() == []
+
+      assert conn.status == 409
+      assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "suspended"}}
+      refute conn.resp_body =~ @instance_admin_token
+
+      # A refusal re-pins nothing and schedules nothing.
+      assert Registry.get_barkpark(bp.id).pinned_release == "v0.2.24"
+      refute_enqueued(worker: UpdateStatusWorker)
     end
   end
 
