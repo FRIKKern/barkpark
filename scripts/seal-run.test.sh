@@ -49,6 +49,13 @@ command -v git  >/dev/null 2>&1 || { echo "git is required" >&2; exit 2; }
 # b-unavailable=. The body deliberately contains the string `NO-SEAL a=FAIL`, so
 # "the withheld reading was not printed" is an assertion about bytes on the
 # terminal rather than a claim about control flow.
+#
+# `head=` IS `rev-parse --short`, NOT `rev-parse`. The real predicate abbreviates
+# (seal-predicate.mjs, `['rev-parse', '--short', 'HEAD']`), and this stand-in used
+# to emit the FULL sha — which is the only reason the runner's flat `!=` against
+# the 40-char origin sha was green here while refusing exit 5 over every real
+# checkout, including one parked exactly at the tip. A stand-in that contradicts
+# the emitter it stands in for is a fixture that can only certify itself.
 FAKE="$TMP/fake-predicate.mjs"
 cat >"$FAKE" <<'EOF'
 import { execFileSync } from 'node:child_process';
@@ -56,7 +63,7 @@ const argv = process.argv.slice(2);
 const arg = (n) => { const i = argv.indexOf(n); return i === -1 ? null : argv[i + 1]; };
 const repo = arg('--repo') || process.cwd();
 let head = 'NOT-READ';
-try { head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); } catch {}
+try { head = execFileSync('git', ['-C', repo, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim(); } catch {}
 if (process.env.FAKE_HEAD) head = process.env.FAKE_HEAD;
 const bu = process.env.FAKE_BUNAVAIL ? ` b-unavailable=${process.env.FAKE_BUNAVAIL}` : '';
 console.log('=== SEAL PREDICATE — fixture stand-in ===');
@@ -92,6 +99,14 @@ gitq "$STALE" commit -qm "a commit origin/main does not have"
 DRIFT="$TMP/drift"; cp -R "$CLEAN" "$DRIFT"
 printf '\n// a pre-wave-9 line origin/main does not carry\n' >>"$DRIFT/cloud/priv/static/__preview__/seal-predicate.mjs"
 
+# The same clean checkout, configured to abbreviate to FOUR characters. `git
+# rev-parse --short` honours core.abbrev, so this fixture's head= is `c2de`-shaped
+# — and a runner that fixed the 40-vs-abbreviated bug with a bare 7-character
+# floor would refuse this correct tree instead. The floor is not the fix; asking
+# the repo what IT abbreviates to is.
+ABBREV4="$TMP/abbrev4"; cp -R "$CLEAN" "$ABBREV4"
+gitq "$ABBREV4" config core.abbrev 4
+
 # A genuinely shallow repository, produced offline from a file:// URL.
 SHALLOW="$TMP/shallow"
 git clone -q --depth 1 --no-local "file://$CLEAN" "$SHALLOW" 2>/dev/null
@@ -122,7 +137,11 @@ expect_has  "the predicate was actually executed" "SEAL PREDICATE — fixture st
 expect_has  "the verdict is the predicate's, marked vouched" "seal-run: VOUCHED — SEAL"
 expect_has  "the token's fields are echoed back" "token head="
 CLEAN_HEAD="$(gitq "$CLEAN" rev-parse HEAD)"
-expect_has  "the head= it vouches for is the fixture's tip" "token head=$CLEAN_HEAD"
+CLEAN_SHORT="$(gitq "$CLEAN" rev-parse --short HEAD)"
+expect_has  "the head= it vouches for is the fixture's tip, abbreviated as the predicate abbreviates it" "token head=$CLEAN_SHORT"
+[ "${#CLEAN_SHORT}" -lt 40 ] \
+  && ok "the fixture's head= really is ABBREVIATED (${#CLEAN_SHORT} chars) — the shape the runner must accept" \
+  || bad "the fixture emits a 40-char head=, so it no longer models the real predicate's --short contract"
 
 OUT="$(FAKE_EXIT=1 FAKE_VERDICT=NO-SEAL bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
 expect_code "clean checkout, predicate exit 1" 1 "$CODE"
@@ -173,6 +192,40 @@ expect_has  "the refusal quotes the token field" "the token says head=deadbeefde
 expect_lacks "the reading is withheld, not printed with a warning above it" "NO-SEAL a=FAIL b=FAIL"
 
 # ---------------------------------------------------------------------------
+# A TRUTHFUL ABBREVIATION IS NOT A WRONG TREE. The token's head= is abbreviated,
+# the wrapper's $ORIGIN_SHA is 40 characters, and the two are never string-equal:
+# comparing them flatly refused every correct checkout in the field while every
+# probe here stayed green, because the stand-in used to emit the full sha. These
+# six cases pin both halves — what must now be ACCEPTED, and what must still be
+# REFUSED, so the repair cannot slide into "any head= will do".
+section "refusal 5 — a truthful abbreviation is the tip; a lie is still a lie"
+
+run_seal "$CLEAN"
+expect_code "the predicate's own --short head= vouches" 0 "$CODE"
+
+OUT="$(FAKE_HEAD="${CLEAN_HEAD:0:9}" bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
+expect_code "an explicit 9-character truthful abbreviation vouches" 0 "$CODE"
+
+run_seal "$ABBREV4"
+ABBREV4_SHORT="$(gitq "$ABBREV4" rev-parse --short HEAD)"
+[ "${#ABBREV4_SHORT}" -eq 4 ] \
+  && ok "the core.abbrev=4 fixture really abbreviates to 4 ($ABBREV4_SHORT) — otherwise the probe below is vacuous" \
+  || bad "the core.abbrev=4 fixture emits ${#ABBREV4_SHORT} chars — a 7-char floor would not be tested"
+expect_code "a core.abbrev=4 checkout vouches (a 7-character floor alone would refuse it)" 0 "$CODE"
+expect_has  "…and the 4-character head= is the one it vouched for" "token head=$ABBREV4_SHORT"
+
+OUT="$(FAKE_HEAD="${CLEAN_HEAD:0:1}" bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
+expect_code "a 1-character head= is still refused — one hex digit names 1/16th of git" 5 "$CODE"
+
+LIE9="$(printf '%s' "${CLEAN_HEAD:0:9}" | tr '0-9a-f' 'b-f0-9a')"
+[ "$LIE9" != "${CLEAN_HEAD:0:9}" ] \
+  && ok "the truthful-length lie really differs from the tip ($LIE9 vs ${CLEAN_HEAD:0:9})" \
+  || bad "the truthful-length lie collided with the tip — the probe below is vacuous"
+OUT="$(FAKE_HEAD="$LIE9" bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
+expect_code "a 9-character LIE is refused — length is not the test, prefix is" 5 "$CODE"
+expect_has  "the refusal quotes the lying field" "the token says head=$LIE9"
+
+# ---------------------------------------------------------------------------
 section "refusal 6 — a non-empty b-unavailable="
 
 OUT="$(FAKE_BUNAVAIL=6/6 bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
@@ -180,6 +233,12 @@ expect_code "b-unavailable=6/6" 6 "$CODE"
 expect_has  "it quotes the field" "b-unavailable=6/6"
 expect_has  "it says this is not a finding" "not a finding about the epic"
 expect_lacks "the reading is withheld" "NO-SEAL a=FAIL b=FAIL"
+# REFUSAL 6 IS NOT SHADOWED. Refusals are collected and REFUSAL_CODE keeps the
+# FIRST, so while refusal 5 fired on every abbreviated head= this exact tree
+# exited 5 — refusal 6's sentence printed, its EXIT CODE never did, and a caller
+# branching on 6 had never once seen it. The code above is the assertion; the
+# line below is why it is the assertion.
+expect_lacks "…and no head= refusal is riding along to steal the exit code" "which is not origin/main's tip"
 
 OUT="$(FAKE_BUNAVAIL=0/6 bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
 expect_code "b-unavailable=0/6 is a successful read, not a refusal" 0 "$CODE"
@@ -330,6 +389,49 @@ else
   grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" | grep -q 'b-unreadable=' \
     && bad "the disarm matched a field name the predicate does not emit — these greps are not load-bearing" \
     || ok "disarm: a field name the predicate does NOT emit fails the same grep"
+fi
+
+# ---------------------------------------------------------------------------
+# ONE REAL END-TO-END EXECUTION — the greps above are about SOURCE TEXT, and the
+# defect this section was written to catch was about SHAPE. `head=` never went
+# missing; it went ABBREVIATED, and every grep here matched happily while the
+# runner refused exit 5 over every live tree it was ever pointed at. So the real
+# predicate is executed THROUGH the runner, once, over a purpose-built fixture
+# checkout that carries it at its committed path — no network (the ladder path
+# reads committed files and git only), no ledger, ~0.4s.
+#
+# The fixture has no history, so the register's fixes are unreachable and the
+# predicate honestly reports `b-unavailable=M/M`: exit 6. THAT is the assertion —
+# a runner that mis-compares head= exits 5 here instead, which is exactly what it
+# did before this slice, and it is the only probe in this file that would have
+# noticed.
+section "the real predicate, executed through the runner, over a real checkout"
+
+E2E="$TMP/e2e-real"
+if [ ! -f "$PRED_REAL" ] || [ ! -f "$ROOT/.github/workflows/cloud.yml" ]; then
+  bad "the e2e fixture cannot be built (needs the real predicate and .github/workflows/cloud.yml under $ROOT)"
+else
+  mkdir -p "$E2E/cloud/priv/static/__preview__" "$E2E/.github/workflows"
+  cp "$PRED_REAL" "$E2E/cloud/priv/static/__preview__/seal-predicate.mjs"
+  cp "$ROOT/.github/workflows/cloud.yml" "$E2E/.github/workflows/cloud.yml"
+  [ -f "$ROOT/.github/required-checks.json" ] && cp "$ROOT/.github/required-checks.json" "$E2E/.github/required-checks.json"
+  git init -q "$E2E"
+  gitq "$E2E" symbolic-ref HEAD refs/heads/main
+  gitq "$E2E" add -A
+  gitq "$E2E" commit -qm "e2e fixture carrying the real predicate"
+  gitq "$E2E" update-ref refs/remotes/origin/main HEAD
+
+  E2E_SHORT="$(gitq "$E2E" rev-parse --short HEAD)"
+  OUT="$(bash "$SEAL" --repo "$E2E" --epic deploy-reliability-epic --show-withheld -- --ladder-only 2>&1)"; CODE=$?
+
+  expect_has "the REAL predicate ran through the runner and emitted its own token" "VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY"
+  expect_has "the runner parsed the real token's head= and quotes it back" "head=$E2E_SHORT"
+  [ "${#E2E_SHORT}" -lt 40 ] \
+    && ok "the real emitter's head= is ABBREVIATED (${#E2E_SHORT} chars) — the contract the stand-in now mirrors" \
+    || bad "the real emitter's head= is 40 chars — the stand-in's --short contract has drifted from it"
+  expect_code "a truthful abbreviated head= is NOT refused; the historyless fixture refuses 6, not 5" 6 "$CODE"
+  expect_has "…and the refusal it does carry is the honest one" "the predicate could not read the history"
+  expect_lacks "…with no head= refusal shadowing it" "which is not origin/main's tip"
 fi
 
 # ---------------------------------------------------------------------------
