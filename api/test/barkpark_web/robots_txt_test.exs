@@ -74,8 +74,27 @@ defmodule BarkparkWeb.RobotsTxtTest do
     directives = for "Disallow: " <> _ = line <- String.split(body, "\n"), do: line
     refute Enum.any?(directives, &String.contains?(&1, ["*", "$"]))
 
-    # No AI-crawler stanza this wave (human gate am-hg-ai-crawler-stance): the
-    # file addresses exactly one user-agent group.
-    assert body |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "User-agent:")) == 1
+    # The AI-crawler stance IS decided (am-hg-ai-crawler-stance, 2026-08-09):
+    # exactly one bulk-training group refusing everything, every token
+    # vendor-verified at edit time. User-initiated fetchers and search-index
+    # bots must NEVER appear here — de-indexing is the ReaderNoindex header's
+    # job, and blocking them would break live fetches and link previews.
+    training_tokens =
+      ~w(GPTBot ClaudeBot CCBot Google-Extended Applebot-Extended Amazonbot
+         meta-externalagent meta-webindexer Bytespider MistralAI-Training)
+
+    for token <- training_tokens do
+      assert body =~ "User-agent: #{token}\n",
+             "expected the vendor-verified training token `#{token}`, got:\n#{body}"
+    end
+
+    assert body =~ "Disallow: /\n",
+           "the training group must refuse everything (bare `Disallow: /`)"
+
+    for never_block <- ~w(ChatGPT-User Claude-User OAI-SearchBot Claude-SearchBot
+                          PerplexityBot facebookexternalhit Googlebot) do
+      refute body =~ "User-agent: #{never_block}",
+             "#{never_block} is user-initiated/search/preview traffic — blocking it hurts functionality"
+    end
   end
 end
