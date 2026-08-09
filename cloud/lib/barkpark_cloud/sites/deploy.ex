@@ -1144,6 +1144,26 @@ defmodule BarkparkCloud.Sites.Deploy do
         {:ok, :live}
 
       {:error, reason} ->
+        # THE WORST LOSS ON THIS PATH (deploy-reliability W27). SWITCH has already
+        # happened ON THE BOX — the release IS serving — and this is the write
+        # that tells the control plane so. A refused fence leaves the row
+        # non-live with the site pointer unflipped, and because the row is still
+        # `building` with a lease nobody renews, the StaleDeploymentReaper's
+        # over-budget pass then settles that SERVING build `failed`, blaming
+        # "exceeded max deploy claim attempts (stale builder lease)". Reachable
+        # in prod: `deployment_stale_after_seconds` defaults to 15 minutes and
+        # `record_stage/2` only heartbeats on a stage TRANSITION, so a long BUILD
+        # lets the reaper move the row under a driver that is still running.
+        #
+        # The return shape is unchanged — this arm already answered
+        # `{:error, reason}` and its caller discards it. The repair is speech.
+        Logger.error(
+          "site deploy settle-live for deployment #{ctx.id} (site #{ctx.site.slug}) " <>
+            "could not be recorded (fenced write #{inspect(reason)}): the box is serving this build, " <>
+            "but the row never went live and the site's live pointer was not flipped — " <>
+            "the stale-deployment reaper will terminally report this serving build as failed, blaming the builder lease"
+        )
+
         {:error, reason}
     end
   end
@@ -1297,7 +1317,7 @@ defmodule BarkparkCloud.Sites.Deploy do
         # busy box on the same 60s clock that round 1 did.
         case requeue_rebuild(site.id, deferral_backoff_seconds(prior + 1)) do
           {:ok, _job} ->
-            _ =
+            deferral_write =
               Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
                 status: "deferred",
                 failure_reason: detail,
@@ -1325,9 +1345,32 @@ defmodule BarkparkCloud.Sites.Deploy do
                 deferral_cause: cause
               })
 
-            Logger.info(
-              "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
-            )
+            # A COUNTING DEFECT, not merely a narration one (deploy-reliability
+            # W27). The rebuild above really was enqueued, so the publish is not
+            # lost — but if this write loses its fence, the row never becomes
+            # `deferred` and `deferral_depth` / `deferral_bound` / `deferral_cause`
+            # are never written, so the deferral is invisible to every deferral
+            # census, to `consecutive_deferrals/2`'s chain scan, and to the
+            # post-door rate this epic publishes. A defect that removes rows from
+            # a numerator cannot be seen by reading the numerator.
+            #
+            # The narration rides the SAME branch: the pre-existing info line
+            # states "deferred … N in a row", which is a count read off the very
+            # write that just lost — true only when the CAS held.
+            case deferral_write do
+              {:ok, _updated} ->
+                Logger.info(
+                  "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
+                )
+
+              {:error, cas_error} ->
+                Logger.error(
+                  "site deploy deferral for deployment #{ctx.id} (site #{site.id}) " <>
+                    "could not be recorded (fenced write #{inspect(cas_error)}): the rebuild WAS re-queued, " <>
+                    "but the row never became deferred and deferral_depth / deferral_bound / deferral_cause " <>
+                    "were never written — this deferral is invisible to every deferral census and to the post-door rate"
+                )
+            end
 
             BarkparkCloud.Events.broadcast(site.team_id, "deployments")
             {:ok, :deferred}
@@ -1459,12 +1502,36 @@ defmodule BarkparkCloud.Sites.Deploy do
   end
 
   defp fail(ctx, reason) do
-    _ =
-      Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-        status: "failed",
-        failure_reason: reason,
-        detail: short_detail(reason)
-      })
+    # THE FAILURE'S ONLY CARRIER (deploy-reliability W27). This CAS is the whole
+    # report: `Deploy.TaskStarter.start/1` returns the SPAWN result and throws
+    # this function's return value away, so in production nothing downstream ever
+    # sees `{:ok, :failed}`. When the fence refuses (our lease was swept and
+    # re-claimed), the row is NOT `failed`, `failure_reason` stays nil — and no
+    # alert fires either, because `maybe_dispatch_deployment_failed/2` lives
+    # INSIDE the won-CAS branch of `transition_deployment_fenced/4`. A failed
+    # build then has no carrier at all.
+    #
+    # The RETURN SHAPE IS DELIBERATELY UNCHANGED: `{:error, _}` from here would
+    # route through `AutoDeployWorker.start_and_report/2`'s "could not start the
+    # driver — retrying" arm — a NEW mis-report on a build that DID start, plus
+    # an Oban retry of it. So the repair is speech: the line NAMES the deployment
+    # and states both halves of what did not happen.
+    case Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
+           status: "failed",
+           failure_reason: reason,
+           detail: short_detail(reason)
+         }) do
+      {:ok, _updated} ->
+        :ok
+
+      {:error, cas_error} ->
+        Logger.error(
+          "site deploy failure for deployment #{ctx.id} (site #{ctx.site.slug}) " <>
+            "could not be recorded (fenced write #{inspect(cas_error)}): the row was NOT marked failed, " <>
+            "failure_reason was not written, and no failure alert was dispatched " <>
+            "(the alert only fires on a won CAS) — the reason that was lost is: #{reason}"
+        )
+    end
 
     # `failed` is terminal too — the row is never re-driven (the reaper only
     # requeues rows that are still `queued`), so its bytes are equally dead
@@ -1712,6 +1779,26 @@ defmodule BarkparkCloud.Sites.Deploy do
       if now_live && now_live.id != was do
         Registry.set_site_current_deployment(site, now_live.id)
       end
+
+    # THE WRITE THAT WAS NEVER ATTEMPTED (deploy-reliability W27). When the box
+    # names a build the control plane has no Deployment row for, `now_live` is
+    # nil, the pointer write above is SKIPPED — and this function still answers
+    # `{:ok, …}`, which the route turns into a 200. The CLI gates success on the
+    # HTTP status alone, so the user is told the rollback landed while
+    # `sites.current_deployment_id` still names the build they rolled AWAY from,
+    # upstream of the very transition fields the crown reads.
+    #
+    # This is the arm where the discarded result is the LEAST of it:
+    # `sites.current_deployment_id` carries no FK, so that `Repo.update` is
+    # near-unfailable. What is lost is the write that never ran.
+    if is_nil(now_live) do
+      Logger.error(
+        "site rollback for site #{site.slug} (#{site.id}) could not repoint the live deployment: " <>
+          "the box reports build #{inspect(target)} as now live, but the control plane has no Deployment row for it, " <>
+          "so the site-pointer write was SKIPPED while the rollback still answered success — " <>
+          "sites.current_deployment_id still names #{inspect(was)}"
+      )
+    end
 
     BarkparkCloud.Events.broadcast(site.team_id, "deployments")
 
