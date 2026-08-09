@@ -1091,6 +1091,14 @@ select.form-input {
 .fleet-update-chip--busy .fleet-update-dot { background: var(--info); }
 [data-theme="dark"] .fleet-update-chip--ready { background: hsl(var(--ok-hsl) / 0.2); }
 [data-theme="dark"] .fleet-update-chip--busy { background: hsl(var(--info-hsl) / 0.2); }
+/* cch-w63-s5: refused = WARN, and the role is deliberate. This chip says "we
+   could not check this box" — a failure to measure, not a danger and emphatically
+   not the ready GREEN, which on this row means "a newer release is waiting for
+   you". It is the same amber usageMeterDisplay's "Could not measure" already
+   carries for the same class of fact one card away. */
+.fleet-update-chip--refused { background: var(--warn-soft); border-color: hsl(var(--warn-hsl) / 0.28); color: var(--warn-strong); }
+.fleet-update-chip--refused .fleet-update-dot { background: var(--warn); }
+[data-theme="dark"] .fleet-update-chip--refused { background: hsl(var(--warn-hsl) / 0.2); }
 
 /* stw4-freshness (charter D24): the site-row deploy-freshness badge. Amber pulse
    while a content-auto rebuild is in flight; a settled status·trigger·when pill
