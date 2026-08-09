@@ -604,7 +604,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     {"site_deployment_json/3", :unread, "console",
      "BROWSER-ONLY. gh-5's live build console; the CLI streams its own lines from the deploy stream rather than re-rendering this list."},
     {"barkpark_json/4", :phantom, "team",
-     "EMITTED, outside Side A's scope by design. /v1/barkparks Map.put's `team` onto the row in its all_teams? arm (router.ex:1941), i.e. in the ROUTE, not in the base serializer this census walks. The same one-level bound that stops the walk over-collecting a helper's private shapes also makes this key invisible — and `Barkpark.Team` is decoded and read (client_test.go:208), so the read lands."}
+     "EMITTED, outside Side A's scope by design. /v1/barkparks Map.put's `team` onto the row in its all_teams? arm (router.ex:2077), i.e. in the ROUTE, not in the base serializer this census walks. The same one-level bound that stops the walk over-collecting a helper's private shapes also makes this key invisible — and `Barkpark.Team` is decoded and read (client_test.go:208), so the read lands."}
   ]
 
   # KNOWN OPEN: a real hole. Every reason names the tracker. Do NOT move a row up
@@ -860,15 +860,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `p95`, `max`, `deferred`) ride free on the delivery census's union. The
   # decoder is the POINT and not an afterthought: a wait number no reader decodes
   # is a number nobody reads, which is the disease this epic exists to cure.
-  @emitted_floor 142
-  @go_tag_floor 255
+  @emitted_floor 143
+  @go_tag_floor 256
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
   # still worth exactly the same 14 vitals — the three new keys are in the base
   # literal, so they are visible to both walkers).
-  @barkpark_family_keys 59
-  @barkpark_family_keys_blind 45
+  @barkpark_family_keys 60
+  @barkpark_family_keys_blind 46
 
   # ---------------------------------------------------------------------------
 
@@ -912,7 +912,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
     # The base literal is 38 keys — what a regex would report. The pipeline adds
     # the four job-status keys, the two list keys, and `pressure`.
-    assert MapSet.size(p.top) == 45
+    assert MapSet.size(p.top) == 46
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure) do
