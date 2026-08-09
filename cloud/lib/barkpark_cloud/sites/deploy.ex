@@ -1270,7 +1270,32 @@ defmodule BarkparkCloud.Sites.Deploy do
         fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
 
       prior >= max_consecutive_deferrals(cause) - 1 ->
-        fail(ctx, abandonment_reason(reason, prior + 1, cause))
+        # THE ABANDONMENT STAMPS ITS OWN COLUMNS (deploy-reliability W28, S6).
+        # The terminal round of a chain is the one row an operator most needs to
+        # find — it is the publish the fleet GAVE UP ON — and it was the only
+        # deferral-chain row that carried NULL `deferral_depth` /
+        # `deferral_bound` / `deferral_cause`, because `fail/2` wrote status,
+        # failure_reason and detail and nothing else. Every abandonment on the
+        # live control plane was therefore findable ONLY by
+        # `failure_reason LIKE '%rebuilds in a row for this site%'` — a prose
+        # scan over the very sentence a reword would silently break — while the
+        # eleven DEFERRED rows beneath it were queryable as data.
+        #
+        # Nothing is computed here: `prior + 1`, the cause's bound and the cause
+        # are the three values this call site is ALREADY holding to write the
+        # sentence, so the columns and the prose come from one expression each
+        # and cannot drift apart.
+        #
+        # THE DEPTH IS `prior + 1`, NOT `prior`, and not the deferred rows' max.
+        # This branch fires at `prior >= bound - 1`, so the bound-th round is
+        # written `failed` and never `deferred`: the highest depth a DEFERRED
+        # row can carry is 11 (capacity) / 5 (busy), and the abandonment that
+        # follows it is 12 / 6 — the same number the sentence interpolates.
+        fail(ctx, abandonment_reason(reason, prior + 1, cause), %{
+          deferral_depth: prior + 1,
+          deferral_bound: max_consecutive_deferrals(cause),
+          deferral_cause: cause
+        })
 
       true ->
         # THE DEPTH TRAVELS (deploy-reliability charter D99, PR #9905). `prior`
@@ -1501,7 +1526,13 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  defp fail(ctx, reason) do
+  # `extra` is the OPTIONAL structured half of a failure — columns the caller is
+  # already holding, written in the SAME transition as the sentence so the two
+  # can never disagree (W28, S6: the abandonment branch stamps its chain's depth,
+  # bound and cause). It defaults to empty because the other nine `fail/…` call
+  # sites have no chain to report, and a failure with no structure must keep
+  # writing NULL rather than a zero that would read as "a chain of depth 0".
+  defp fail(ctx, reason, extra \\ %{}) do
     # THE FAILURE'S ONLY CARRIER (deploy-reliability W27). This CAS is the whole
     # report: `Deploy.TaskStarter.start/1` returns the SPAWN result and throws
     # this function's return value away, so in production nothing downstream ever
@@ -1516,11 +1547,19 @@ defmodule BarkparkCloud.Sites.Deploy do
     # driver — retrying" arm — a NEW mis-report on a build that DID start, plus
     # an Oban retry of it. So the repair is speech: the line NAMES the deployment
     # and states both halves of what did not happen.
-    case Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-           status: "failed",
-           failure_reason: reason,
-           detail: short_detail(reason)
-         }) do
+    # THE SENTENCE WINS THE MERGE. `extra` is written UNDER the three fields
+    # this function exists to write, never over them: `fail/…` is the failure's
+    # only carrier, so a caller that passed a stray `:status` or
+    # `:failure_reason` key — by typo, or by reusing a map built for something
+    # else — must not be able to turn an abandonment into a different row than
+    # the one it just announced. Structure is additive here, by construction.
+    attrs =
+      Map.merge(
+        extra,
+        %{status: "failed", failure_reason: reason, detail: short_detail(reason)}
+      )
+
+    case Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, attrs) do
       {:ok, _updated} ->
         :ok
 
