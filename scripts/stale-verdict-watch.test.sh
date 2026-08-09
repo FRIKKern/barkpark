@@ -15,7 +15,10 @@
 #       (main is strict:false; being behind is policy, not a defect)
 #   (c) a DUPLICATE-ENTRY PR proves the counting: occurrences-of-SUCCESS
 #       reaches the full set and launders a FAILURE out; all-of-present does not
-#   (d) an UNKNOWN row is WARNED, never dropped                  → exit 2
+#   (d) an UNKNOWN row beside a classified one is WARNED, never
+#       dropped, and the sentence carries its coverage            → exit 2
+#  (d2) a run in which NOTHING could be classified is BLIND, and
+#       the clean sentence never appears on it                    → exit 5
 #
 # THE REQUIRED SET IS DERIVED, NEVER TYPED. Context names come out of
 # .github/required-checks.json at build time, so a renamed context rebuilds
@@ -175,16 +178,29 @@ grep -q "all-of-present (this verdict): 1 " <<<"$out" \
   && ok "mutation: without the duplicate, both countings agree at 1 — the gap is the duplicate, not a constant" \
   || bad "mutation: the two countings did not converge when the duplicate was removed"
 
-# ═══ (d) UNKNOWN is a warning row, never an omission ═════════════════════════
-section "(d) mergeable=UNKNOWN → warned, never dropped, exit 2"
+# ═══ (d) PARTIAL coverage: UNKNOWN is a warning row, never an omission ═══════
+section "(d) PARTIAL — an UNKNOWN row beside a classified one → warned, never dropped, exit 2"
 
-fixture "$TMP/d.json" "$(pr_row 9004 UNKNOWN UNKNOWN "$(full_set "$OLD")")"
+# This fixture used to be a SINGLE all-UNKNOWN row, which is not the warning
+# case at all — it is the BLIND case, and it was asserting exit 2 (a code the
+# workflow maps to success). It is split in two: PARTIAL here, where something
+# WAS classified and the run can legitimately speak about what it read, and
+# TOTAL in (d2), where nothing was.
+fixture "$TMP/d.json" \
+  "$(pr_row 9004 UNKNOWN UNKNOWN "$(full_set "$OLD")")" \
+  "$(pr_row 9010 MERGEABLE CLEAN "$(full_set "$FRESH")")"
 out="$(run_watch "$TMP/d.json")"; rc=$?
-[ "$rc" = "2" ] && ok "exit 2 — not green, not red: unclassified" || bad "expected exit 2, got $rc"
+[ "$rc" = "2" ] && ok "exit 2 — not green, not red: partially classified" || bad "expected exit 2, got $rc"
 grep -q "WARNING ROWS" <<<"$out" && ok "a WARNING ROWS block is printed" || bad "no WARNING ROWS block"
 grep -q "? #9004" <<<"$out" && ok "#9004 is named — the naive CONFLICTING filter would have dropped it silently" \
   || bad "#9004 was dropped from the report"
 grep -q "1 UNKNOWN after re-polling" <<<"$out" && ok "the population counts it as UNKNOWN" || bad "the population hid the UNKNOWN row"
+grep -q "^INCONCLUSIVE — classified 1 of 2 open" <<<"$out" \
+  && ok "the sentence carries its coverage (classified 1 of 2 open), so the conclusion cannot be read without it" \
+  || bad "the partial run's sentence does not carry its coverage: $(grep -E '^(ok|RED|BLIND|INCONCLUSIVE)' <<<"$out")"
+grep -q "^ok — no CONFLICTING" <<<"$out" \
+  && bad "the clean sentence was printed by a run that left a row unread" \
+  || ok "…and the clean sentence is absent while any row went unread"
 
 # THE MUTATION: a red alongside an unknown must still read RED — the warning
 # lane must not be able to downgrade a real finding.
@@ -194,6 +210,65 @@ fixture "$TMP/d-mixed.json" \
 out="$(run_watch "$TMP/d-mixed.json")"; rc=$?
 [ "$rc" = "1" ] && ok "mutation: red wins over unknown (exit 1)" || bad "mutation: expected exit 1, got $rc"
 grep -q "? #9004" <<<"$out" && ok "mutation: the unknown row is STILL printed next to the red" || bad "mutation: the unknown row vanished once a red existed"
+
+# ═══ (d2) a run that classified NOTHING is BLIND, never green ════════════════
+section "(d2) TOTAL — every row UNKNOWN → BLIND, exit 5, and no clean sentence"
+
+# THE DEFECT THIS OWNS. Of the 19 runs this workflow has ever had, exactly one
+# push run concluded success: 31311358759, which classified 0 of 39 rows, printed
+# `ok — no CONFLICTING pull request is asserting…` and exited 0 via the rc=2 arm
+# — 68 seconds before a 23-row RED run on the same tree. The population line and
+# all 39 row names DID print; what lied was the SENTENCE and the CONCLUSION,
+# which are the only two things a human skimming a green check reads.
+fixture "$TMP/d-blind.json" \
+  "$(pr_row 9004 UNKNOWN UNKNOWN "$(full_set "$OLD")")" \
+  "$(pr_row 9011 UNKNOWN UNKNOWN "$(full_set "$OLD")")"
+out="$(run_watch "$TMP/d-blind.json")"; rc=$?
+[ "$rc" = "5" ] && ok "exit 5 — 0 of 2 rows classified is BLIND, a code of its own" \
+  || bad "expected exit 5 for an all-UNKNOWN population, got $rc — a run that classified nothing still exits through an arm the workflow maps to success"
+grep -q "^BLIND — classified 0 of 2 open" <<<"$out" \
+  && ok 'the sentence says BLIND and carries "classified 0 of 2 open"' \
+  || bad "no BLIND sentence with its coverage: $(grep -E '^(ok|RED|BLIND|INCONCLUSIVE)' <<<"$out")"
+grep -q "^ok — no CONFLICTING" <<<"$out" \
+  && bad "the clean sentence was printed by a run that classified NOTHING — that is run 31311358759's exact false green, reproduced" \
+  || ok "the clean sentence never appears on a blind run"
+grep -q "2 open · 0 CONFLICTING · 0 MERGEABLE · 2 UNKNOWN" <<<"$out" \
+  && ok "the population line still prints in full (it always did — the fix is the sentence and the conclusion, not the denominator)" \
+  || bad "the population line changed shape: $(grep 'open ·' <<<"$out")"
+grep -q "? #9004" <<<"$out" && grep -q "? #9011" <<<"$out" \
+  && ok "both unread rows are still named individually" || bad "a blind run dropped its rows from the report"
+
+# THE MUTATION: classify ONE of the two rows and nothing else. The blind verdict
+# must collapse to the partial one — proving 5 tracks coverage, not row count.
+fixture "$TMP/d-blind-one.json" \
+  "$(pr_row 9004 UNKNOWN UNKNOWN "$(full_set "$OLD")")" \
+  "$(pr_row 9011 MERGEABLE CLEAN "$(full_set "$OLD")")"
+out="$(run_watch "$TMP/d-blind-one.json")"; rc=$?
+[ "$rc" = "2" ] && ok "mutation: one classified row demotes BLIND to the exit-2 warning" \
+  || bad "mutation: expected exit 2 once a row was classified, got $rc — 5 is not tracking coverage"
+
+# The workflow must ANSWER a 5, and it must fail the run. Without this arm the
+# `*)` fallthrough would call it "not a verdict it defines".
+grep -qE '^\s+5\) echo "::error::BLIND RUN' "$WF" \
+  && ok "the workflow has its own 5) arm and sentence for BLIND" \
+  || bad "the workflow has no 5) arm — a blind run would fall through to the undefined-verdict branch"
+grep -qE '^\s+5\) echo .*exit 1 ;;' "$WF" \
+  && ok "…and arm 5 exits 1, so a blind run can no longer conclude success" \
+  || bad "arm 5 does not exit 1 — the blind run still reports green"
+grep -q "^#             5 = BLIND" "$WATCH" \
+  && ok "the script's own EXIT CODES header documents 5 where the arms are defined" \
+  || bad "EXIT CODES header does not document 5"
+
+# Arm 5's copy is NOT arm 1's. An exit-1 stale green cannot clear itself and
+# says so; a blind read is transient and the next run re-reads it. Copying arm
+# 1's sentence here would teach the reader to ignore a self-clearing alarm.
+arm5="$(grep -E '^\s+5\) echo' "$WF")"
+grep -q "keep failing every 30 minutes" <<<"$arm5" \
+  && bad "arm 5 repeats arm 1's 'it will keep failing every 30 minutes' — a blind read self-clears on the next poll" \
+  || ok "arm 5 does not repeat arm 1's 'keep failing every 30 minutes'"
+grep -qi "clears this by itself" <<<"$arm5" && grep -qi "PERSISTS" <<<"$arm5" \
+  && ok "…it says the next run re-reads and clears this by itself, and that a PERSISTENT 5 means the read is broken" \
+  || bad "arm 5 does not distinguish a transient blind read from a persistently broken one: $arm5"
 
 # ═══ (e) the population is re-derived, never baked ═══════════════════════════
 section "(e) the population is derived from the payload at run time"
@@ -236,12 +311,20 @@ grep -q "contents: read" "$WF" && ok "permissions carry contents: read" || bad "
 
 # The contended file. cchi-w60-main-gate-watch-push-arm-cannot-win has a live
 # builder inside main-gate-watch.yml; this slice must not have touched it.
-if command -v git >/dev/null 2>&1 && [ -f "$CONTENDED" ]; then
+# `command -v git` and the file existing are NOT enough: inside a `git archive`
+# extraction both hold and there is still no repository, so `git diff` exits 128
+# and the else-branch accused this slice of touching a file it cannot even see
+# the history of (measured: 52 passed / 1 failed from an archive, 53 / 0 from a
+# checkout). The absence of a worktree is now STATED rather than assumed.
+if command -v git >/dev/null 2>&1 && [ -f "$CONTENDED" ] \
+   && git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   if git -C "$REPO_ROOT" diff --quiet HEAD -- ".github/workflows/main-gate-watch.yml" 2>/dev/null; then
     ok "the contended .github/workflows/main-gate-watch.yml is untouched by this slice"
   else
     bad "this slice modified the CONTENDED main-gate-watch.yml — that is the co-scoped-fixes trap"
   fi
+else
+  ok "contended-file probe SKIPPED: $REPO_ROOT carries no git worktree (an archive extraction has no history to diff against) — this is a skip, not a pass of the check"
 fi
 
 # ═══ (h) the doc records the present-but-stale-pass case ═════════════════════

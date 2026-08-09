@@ -49,6 +49,9 @@
 #     MERGEABLE. The script re-polls and prints any surviving UNKNOWN as a
 #     WARNING ROW — it is never dropped and never counted clean. A run that ends
 #     with rows still UNKNOWN reports a warning, not a green claim about them.
+#     A run that classified NOT ONE row is a stronger case still: it exits 5 and
+#     FAILS (arm 5 below), because the warning arm concludes success and for one
+#     release a run that classified 0 of 39 rows concluded success through it.
 #   * the staleness distance is measured over a bounded window of main commits
 #     (3 pages, 300); a distance that fills the window prints as `N+`.
 
@@ -119,6 +122,12 @@ jobs:
             # sentence printed here was simply false. Whatever fails next, it
             # will not be described as something the token did.
             4) echo "::error::COMPUTE FAULT — the pull-request list WAS read and the verdict could not be computed from it (malformed payload, or jq could not run). This is not a credential fault: the read succeeded. See the byte count in the log above."; exit 1 ;;
+            # 5 is the arm that had to exist. The ONLY push run of this
+            # workflow that ever concluded success — 31311358759 — classified
+            # 0 of 39 rows and printed the clean sentence, 68 seconds before a
+            # 23-row RED run on the same tree. Every green a human has ever
+            # been shown here was produced by a run that could not look.
+            5) echo "::error::BLIND RUN — the pull-request list WAS read and NOT ONE row could be classified: every open row's mergeability was still UNKNOWN after re-polling, so this verdict covers zero pull requests. It is not a green, and this run fails rather than reporting one. GitHub computes mergeability lazily and invalidates it behind a merge, so this is usually TRANSIENT: the next scheduled run re-reads the population and clears this by itself, with nobody touching anything. A 5 that PERSISTS across runs means the read itself is broken — look at the poll budget and the token, not at the pull requests."; exit 1 ;;
             *) echo "::error::stale-verdict-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
 
