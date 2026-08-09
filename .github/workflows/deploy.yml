@@ -768,9 +768,25 @@ jobs:
     # it". file-ci-failure-issue.sh exits 1 only when the alert was NOT
     # delivered, so a filed alert leaves this run green and the `changes` job's
     # diff anchor keeps advancing.
+    #
+    # THE REPORTER MUST ALSO SURVIVE THE RECORDER DYING (added in review, W27).
+    # `delivered == 'false'` is the recorder's OWN verdict, and a job that never
+    # reached its last step cannot render one: an `actions/checkout` failure, the
+    # `timeout-minutes: 8` expiring inside the clocks step's `gh api` loop, or a
+    # runner evicted mid-job all end with `outputs.delivered` EMPTY. Without
+    # `always()` the default `success()` gate would then skip this job, and the
+    # loudest possible recorder failure — the one where the recorder did not run
+    # at all — would be the only one that files nothing. So the trigger is the
+    # UNION of "the recorder said it lost" and "the recorder did not get to say",
+    # and `always()` is what lets a failed dependency be evaluated at all.
     name: Report a delivery that was never recorded
     needs: record-delivery
-    if: needs.record-delivery.outputs.delivered == 'false' && github.ref == 'refs/heads/main'
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      needs.record-delivery.result != 'skipped' &&
+      (needs.record-delivery.outputs.delivered == 'false' ||
+      needs.record-delivery.result == 'failure' ||
+      needs.record-delivery.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -800,6 +816,15 @@ jobs:
               migration; it lands on an api-only merge and clears on the next
               `cloud/**` deploy.
             - any other HTTP status, quoted with the response body.
+
+            IF `record-delivery` PRINTED NO `::error::` AT ALL, it did not reach
+            its last step — it failed, was cancelled, or hit its 8-minute
+            timeout, and `outputs.delivered` is empty rather than `false`. This
+            job fires on that case too (its `if` is the union), so read the
+            recorder job's own conclusion and its LAST step instead. That variant
+            also reds the whole run, which freezes the `changes` job's
+            last-successful-run diff anchor — the next merge will union a wider
+            path set and redeploy more than it needed to.
 
             The write is idempotent on (sha, delivering_run_id, target), so a
             re-run of the deploy workflow for the same commit is safe and is the
