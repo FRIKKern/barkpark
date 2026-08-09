@@ -10504,3 +10504,75 @@ credential fact about CI, not a code fact, and a green here can be vacuous until
 `/v1/capabilities` key, the per-box ledger join, PLATFORM_ADMIN_EMAILS, `cp-deploy.sh` + `instance-deploy.sh`,
 and `app.js` + `router.ex`'s auth region + the credential-egress path in `registry.ex`/`usage.ex`
 (cloud-console-hardening, whose wave 61 ran in parallel with this one).
+
+
+### Wave 2026-08-09 (wave 30) — REVIEWED · Paper `deploy-reliability-wave-30-2026-08-09` · grade **A**
+
+**Six of seven slices built, reviewed, gate-green on their FINAL state, pushed and PR'd. Nothing merged — the
+lead merges.** s7 was deferred to round 2 BY DESIGN (it edits `crown-reconcile.yml`, which round 1's s1 owns
+the sibling of). This was the wave the direction asked for: it PROVED what waves 28 and 29 merged, and every
+one of the six slices traces to a defect the proving exposed with a run id or a file:line.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The graced sha gets re-read, and the silence names its cause | `dr-w30-s1-graced-sha-gets-a-re-read` | `…re-read-and-the-crow-0` (unchanged) | [#11318](https://github.com/FRIKKern/barkpark/pull/11318) | 91 passed, 0 failed (main 63) |
+| rc=2 stops meaning three different things | `dr-w30-s2-transport-silence-gets-its-own-code` | `…three-different-thing-1` (unchanged) | [#11319](https://github.com/FRIKKern/barkpark/pull/11319) | 87 passed, 0 failed (main 66) |
+| #11209 stops inventing a code word | `dr-w30-s3-11209-stops-inventing-a-code-word` | pushed onto #11209's head `…depth-bo-5-r` | [#11209](https://github.com/FRIKKern/barkpark/pull/11209) (updated in place) | 150 tests 0 failures · full cloud 3555/0 · format rc=0 |
+| The orphan harnesses reach CI, red one first | `dr-w30-s4-orphan-harnesses-reach-ci` | `…run-in-ci-and-the-o-3-r` | [#11320](https://github.com/FRIKKern/barkpark/pull/11320) | registration-sample 46/0 (main 40/3) · seal-run 73/0 |
+| A refused census share names the window | `dr-w30-s5-refusal-names-the-window` | `…says-which-window-4-r` | [#11321](https://github.com/FRIKKern/barkpark/pull/11321) | go build/vet/test rc=0 · gofmt clean |
+| The push worker's dedupe claim gets its pin | `dr-w30-s6-push-dedupe-claim-gets-its-pin` | `…dedupe-claim-gets-the--5` (unchanged) | [#11322](https://github.com/FRIKKern/barkpark/pull/11322) | push 103/0 · full cloud 3553/0 · format rc=0 |
+
+**WHAT LANDED.** The wave's centre of gravity is s1, and it is the most consequential instrument fix the epic
+has made. `crown-reconcile.sh` granted a serving grace and persisted NOTHING while only ever reading the sha
+the box serves right now, so any sha replaced inside 1200s was structurally unaccusable — which is how
+`4c8314c94` was graced four times in four minutes and then vanished. A granted grace now writes
+`<sha> <first-seen-epoch>` to a RE-ASK LIST that outlives the run, and every later run re-asks the CROWN, not
+the box. `UNREADABLE=1` collapsed from nine scattered sites to one (`reason()`), so the exit-2 sentence
+enumerates the conditions that actually fired instead of printing three counters that read all zeros on every
+graced run. `age < 0` stopped meaning "be lenient". s2 split the watch's overloaded rc=2 into 6 UNREACHABLE and
+7 DISTANCE UNREADABLE, each exiting 1 with its own remedy, with arms 0/1/3/4/5 byte-identical. s4 found
+`registration-sample.test.sh` had been RED on main for ~14 hours (from #11082 widening `CLOUD_PATHS`), fixed it
+by DERIVING the expectations from the ratchets rather than re-pinning numbers, and only then wired 13
+uninvoked harnesses into `shell-harnesses.yml` with 33 explicit per-file paths mirrored on `pull_request` and
+`push:[main]`. s5 turned a refused census share from a dead-end em-dash into the `--from` that would answer it
+— read from the plane's own refusal envelope, never hardcoded — and the suggested window un-refuses all
+fourteen classes live. s3 is one word (`box_exploded` → `runner_start_failed`) that unblocks #11209 without
+seating a fabricated cause word in the taxonomy. s6 pinned a claim, not a bug: D521 ruled main's config CORRECT
+and this wave wrote the only test that reaches `:completed`, so the next reader cannot tidy it away.
+
+**REVIEWER FIXES, in place.** Two, both small and both pinned. On s4: `timeout-minutes: 15` on all thirteen
+`shell-harnesses.yml` jobs — GitHub's default is 360 minutes, so a hang in a harness that finishes in seconds
+would have held a runner for six hours, the same class of silence this lane exists to end. On s5:
+`deployCensusShareNotes` grouped refused rows by REASON alone, and the plane's straddle reason carries no
+denominator, so two rows sharing a reason but denominated over different samples printed one row's `n` beside a
+count covering both; grouped by `(reason, sample)` now, pinned by a new mixed-sample fixture that reds when the
+key is reverted.
+
+**THE HIGH-FLIP-RISK JUDGMENT, RE-DERIVED INDEPENDENTLY.** s1's persistence boundary was re-proved by hand
+rather than by re-reading the builder or the harness: two real invocations sharing one `--state-file`. Run 1
+(box serving `aaaaaaaaa`, 60s old, no row) printed `SERVING GRACE … the accusation is DEFERRED to the next run`
+and wrote the sha with its first-seen epoch; run 2 an hour later, with the box serving a DIFFERENT sha, printed
+`GRACED-UNRECORDED: 1 sha(s) … it fires whether or not the box still serves them` and exited **1**. The
+judgment is CORRECT as built. A genuinely independent second reviewer is still owed on this slice before merge.
+
+**WHAT STALLED, AND THE ONE THING THAT MUST NOT BE MISREAD.** s1's headline capability is CORRECT and PROVEN
+and **INERT IN CI**: the default state path is `${TMPDIR:-/tmp}/…`, which persists on a laptop and not on a
+fresh GitHub runner, so between runs the re-read is a no-op until the workflow points `CROWN_STATE_FILE` at
+storage that survives. That file belongs to s7, so the consequence was filed
+(`dr-w30-s1-followup-carry-the-reask-list`, published) rather than reached for. Criterion 1 means "the
+instrument re-asks, given a list that survives", NOT "the live crown now re-asks". Two CI-observable criteria
+could not be answered at review time and are the lead's first read: #11320's own `shell-harnesses` run (the
+FIRST ubuntu-latest execution of 13 harnesses only ever measured on macOS) and #11209's `Cloud control-plane
+(test)` / `Cloud gate` on the freshly pushed head.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** Dispatch order is not optional: merge round 1 (#11318, #11319, #11320,
+#11321, #11322, and #11209 which s3 unblocks), THEN dispatch s7
+(`dr-w30-s7-crown-reader-and-silence`, round 2) once #11318 is on main — it rebases on s1's
+`crown-reconcile.sh` and owns `crown-reconcile.yml`. s7 must do THREE things, and the third is new this wave:
+add the `CROWN_API_TOKEN` env line (inert until the lead mints the secret — a human gate no builder can
+discharge), stop `crown-reconcile.yml:123` laundering rc=2 into `exit 0`, and point `CROWN_STATE_FILE` at
+persistent storage so s1's re-ask list survives between runs. Beyond s7, the ranking D516 produced is the
+epic's first D3-legal input to a CURE wave: `BOX_DEPLOY_DISABLED_503` (20.96%) is a FEATURE FLAG and the
+cheapest cure this epic will ever get; `BOX_500` (301, the largest class) is diagnostically opaque with 207
+rows reading only "internal_error — unknown error" and is the biggest opportunity; and the open question behind
+the whole ranking is why `BOX_BUSY_DEFERRED` (698 rows, all historical) stopped firing two days ago.
