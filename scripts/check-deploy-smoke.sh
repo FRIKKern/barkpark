@@ -34,14 +34,99 @@
 #      credential and no authentication is introduced by the gate itself.
 #
 # `--selftest` PROVES the tripwire on temp copies (plants nothing in the tree):
-# the real file passes, a copy with 404 re-added FAILS, and a copy with the
-# login probe deleted FAILS. A guard that cannot lose is a sentence with an exit
-# code. Modelled on scripts/check-deployyml-filters.sh, the house pattern.
+# the real file passes, a copy with 404 re-added FAILS, a copy with the login
+# probe deleted FAILS, and a copy that is not parseable YAML at all FAILS. A
+# guard that cannot lose is a sentence with an exit code. Modelled on
+# scripts/check-deployyml-filters.sh, the house pattern.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY_YML_DEFAULT=".github/workflows/deploy.yml"
+
+# ── yaml validity (runs BEFORE any text scan) ────────────────────────────────
+
+# THE HOLE THIS ARM CLOSES
+#
+# extract_cp_smoke below is an awk TEXT scan, and a text scan cannot see that its
+# input stopped being a workflow. Measured: append a heredoc body indented at two
+# spaces inside a `run: |` block — less than the block scalar's content indent, so
+# the scalar terminates and the following lines are parsed as YAML keys.
+# `yaml.safe_load` raises "could not find expected ':'", and BOTH deploy gates
+# still printed `OK[...]` at rc=0, real run and --selftest alike. GitHub answers
+# such a file with a `startup_failure` run carrying total_jobs=0: the smoke never
+# runs, report-deploy-failure never runs, no issue is filed, and the `changes`
+# job's `gh run list --status=success` anchor freezes.
+#
+# Note this is the SAME two-space line that breaks extract_cp_smoke's job
+# boundary (cause #1 in the diagnostic below) — but that path only reds when the
+# broken indent lands inside the control-plane job. Parsing first catches it
+# wherever it lands, and names it as what it is.
+#
+# Fails CLOSED, and never confuses "I could not look" with "it is fine": a
+# missing python3/PyYAML is HARNESS-UNAVAILABLE at a NON-ZERO exit, never a
+# silent pass.
+assert_parseable_yaml() {
+  local yml="$1" label="$2"
+  local detail rc=0
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "HARNESS-UNAVAILABLE[$label]: python3 not on PATH — could not verify that the file parses as YAML." >&2
+    echo "This is NOT a verdict on the workflow, and NOT a pass: a gate that cannot read its input" >&2
+    echo "must not certify it. Install python3 + PyYAML (pip install pyyaml) and re-run." >&2
+    return 2
+  fi
+
+  # The probe is materialised into a variable first: a heredoc cannot be fed to a
+  # command substitution that closes on the same line (`$(python3 - <<'PY')`),
+  # which bash rejects outright with a syntax error.
+  local probe
+  probe="$(cat <<'PY'
+import sys
+
+try:
+    import yaml
+except ImportError:
+    print("PyYAML not importable")
+    sys.exit(2)
+
+try:
+    with open(sys.argv[1], "rb") as fh:
+        yaml.safe_load(fh)
+except Exception as exc:
+    print(" ".join(str(exc).split()))
+    sys.exit(1)
+PY
+)"
+
+  # `|| rc=$?` is load-bearing: under `set -e` a bare assignment from a failing
+  # command substitution aborts here and DISCARDS the captured diagnostic, which
+  # is how a harness problem becomes an empty log indistinguishable from a find.
+  detail="$(printf '%s\n' "$probe" | python3 - "$yml" 2>&1)" || rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+
+  if [ "$rc" -eq 2 ]; then
+    echo "HARNESS-UNAVAILABLE[$label]: $detail — could not verify that the file parses as YAML." >&2
+    echo "This is NOT a verdict on the workflow, and NOT a pass: a gate that cannot read its input" >&2
+    echo "must not certify it. Install PyYAML (pip install pyyaml) and re-run." >&2
+    return 2
+  fi
+
+  echo "FAIL[$label]: not a parseable YAML workflow — the control-plane smoke invariants were NOT checked" >&2
+  echo "  $detail" >&2
+  echo "Cause: almost always a heredoc body indented LESS than its enclosing 'run: |' block scalar's" >&2
+  echo "content indent. That terminates the scalar, and every following line is parsed as YAML keys." >&2
+  echo "Cure: re-indent the heredoc payload INSIDE the run block, at or past the block's content indent" >&2
+  echo "(the terminator line included), then re-run this gate." >&2
+  echo "Why this arm fails closed: GitHub answers an unparseable workflow with a startup_failure run" >&2
+  echo "carrying total_jobs=0 — the smoke step never executes, report-deploy-failure never runs, no" >&2
+  echo "issue is filed, and the 'changes' job's 'gh run list --status=success' anchor freezes. awk and" >&2
+  echo "grep cannot see any of that, which is why this arm runs before them." >&2
+  return 1
+}
 
 # ── extraction ───────────────────────────────────────────────────────────────
 
@@ -74,6 +159,12 @@ extract_cp_smoke() {
 check_file() {
   local yml="$1" label="$2"
   local failures=0
+
+  # Parse first. Everything below is a text scan and is meaningless — worse,
+  # falsely reassuring — on a file GitHub itself cannot load.
+  local yaml_rc=0
+  assert_parseable_yaml "$yml" "$label" || yaml_rc=$?
+  [ "$yaml_rc" -eq 0 ] || return "$yaml_rc"
 
   local step
   step="$(extract_cp_smoke "$yml" || true)"
@@ -152,14 +243,14 @@ selftest() {
   local real="$REPO_ROOT/$DEPLOY_YML_DEFAULT"
   local rc=0
 
-  echo "selftest 1/4: the real workflow passes"
+  echo "selftest 1/5: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/4: re-adding 404 to the accept-list must FAIL (the original bug)"
+  echo "selftest 2/5: re-adding 404 to the accept-list must FAIL (the original bug)"
   sed "s/\^(200|301|302)\\\$/^(200|301|302|404)\$/" "$real" > "$tmp/mutated404.yml"
   if cmp -s "$real" "$tmp/mutated404.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the accept-list no longer looks as expected" >&2
@@ -172,7 +263,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/4: deleting the DB (login) probe must FAIL"
+  echo "selftest 3/5: deleting the DB (login) probe must FAIL"
   awk '
     /dbcode="\$\(curl/ { drop = 1 }
     !drop { print }
@@ -189,7 +280,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/4: an UNNAMED trailing step must not be absorbed into the smoke"
+  echo "selftest 4/5: an UNNAMED trailing step must not be absorbed into the smoke"
   # The disarm shape, verbatim: the probe is deleted from the smoke and its
   # strings reappear in a later, unnamed `- run:` step of the same job — where
   # they assert nothing. Before the step boundary became `- ` this read
@@ -214,6 +305,38 @@ selftest() {
     rc=1
   else
     echo "  ok: only the Smoke test step's own body answers for the invariants"
+  fi
+
+  echo
+  echo "selftest 5/5: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  # The measured shape, verbatim: a heredoc body written at two spaces inside a
+  # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
+  # the scalar ends there and the line is parsed as a YAML key with no ':'.
+  cp "$real" "$tmp/badyaml.yml"
+  cat >> "$tmp/badyaml.yml" <<'YML'
+
+  selftest-unparseable:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          cat > /tmp/payload <<'EOF'
+  a heredoc body at two spaces terminates the block scalar
+EOF
+YML
+  if assert_parseable_yaml "$real" "yaml-pass" >/dev/null 2>&1; then
+    echo "  ok: the arm passes today's real deploy.yml"
+  else
+    echo "SELFTEST FAIL: the YAML arm did not pass the real deploy.yml (a real parse error, or no python3/PyYAML)" >&2
+    rc=1
+  fi
+  if assert_parseable_yaml "$tmp/badyaml.yml" "yaml-fail" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: an unparseable workflow read GREEN — the YAML arm cannot fail" >&2
+    rc=1
+  elif check_file "$tmp/badyaml.yml" "yaml-fail" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: the arm red but check_file still certified the file — the arm is not wired in" >&2
+    rc=1
+  else
+    echo "  ok: a 2-space heredoc body inside 'run: |' reds the arm AND the whole gate"
   fi
 
   rm -rf "$tmp"
