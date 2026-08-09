@@ -81,13 +81,6 @@ vm.runInContext(
   sandbox,
 );
 
-// scaffy:zone console-tests (ensure-console-hook-zones) -- stable head anchor
-// for NEW test groups: add your `// ── name ──` header + test() blocks
-// DIRECTLY BELOW this comment. Registration order is semantics-free:
-// node:test runs callbacks after the whole module evaluates, so a group here
-// (above the older groups) sees the same populated `hooks` as a tail append.
-// Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
-
 // ── cch-w36-s1 · THE LAUNCH PAYWALL'S AUTHORITY SEAM ───────────────────────
 // The server refuses two DIFFERENT things on this one screen: launching needs
 // team-ADMIN (go_live's inline gate), paying needs OWNER
@@ -19387,4 +19380,208 @@ test("cch-w51-s2 arm C: no non-test BackupProbe assigner exists under internal/ 
     [],
     "a BackupProbe is now wired — backup_ok/backup_detail carry a real verdict, so the console's no-backup-probe-wired empty state is stale and must change in THIS PR",
   );
+});
+
+// scaffy:zone console-tests (ensure-console-hook-zones) -- stable TAIL anchor
+// for NEW test groups: add your `// ── name ──` header + test() blocks
+// DIRECTLY BELOW this comment. Registration order is NOT semantics-free: a
+// test() registered ABOVE a top-level `await` is drained while that await
+// settles — BEFORE the later top-level `const`s initialise — so its callback
+// throws ReferenceError (TDZ) on any fixture declared further down. Keep this
+// anchor BELOW the file's LAST top-level `await` (measured cch-w61-s1: node 20
+// and node 22 both crash a group planted above it).
+// Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
+
+// ── cch-w58-s6 · THE FLEET ROW STATES THE VERIFICATION ANSWER ──────────────
+// The control plane has been serializing last_verified_at and verify_reachable
+// on EVERY fleet row (barkpark_json in the cloud router, whose comment names
+// the fleet row as the intended consumer and states the three-state rule), and
+// the console discarded both: `grep -c verify_reachable app.js` was 0. The
+// fleet list — the surface that offers Open Studio — had no verify narrative at
+// all, while the instance DETAIL page had seven helpers driven off a different
+// source entirely (the per-instance agent_events stream).
+//
+// WHY THIS GROUP CARRIES ITS OWN POSITIVE CONTROL. The shipped
+// `gr-p3: fleetMetaHtml is the backend-true mono line, blank-tolerant` test is
+// necessary but NOT sufficient: its green is SITE-LOCAL to fleetMetaHtml. A
+// dishonest unconditional "never verified" chip placed in fleetRow's BODY,
+// reusing an existing css class, passes every console instrument — the harness,
+// __css_check, __binding_census, __unknown_census, __reason_arm_census — because
+// nothing pins the fleet row's absence of invented verify vocabulary. So the
+// pins below are re-run against a MUTATED build of app.js and must red there.
+
+const CCH_W58_S6_APP_SRC = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+// A second, throwaway vm context over a (possibly mutated) app.js — same inert
+// browser surface as the module-level sandbox, so the eval stays side-effect
+// free (document.readyState "loading" keeps init() unbound).
+function cchW58S6HooksFrom(src) {
+  const h = {};
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: {
+      readyState: "loading",
+      addEventListener: noop, removeEventListener: noop,
+      querySelector: () => null, querySelectorAll: () => [],
+      getElementById: () => null,
+      createElement: () => ({ ...inertEl }),
+      documentElement: { ...inertEl, getAttribute: () => null },
+      body: { ...inertEl, appendChild: noop },
+    },
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: storage, sessionStorage: storage, navigator: {},
+    URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+    console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(src, box);
+  return h;
+}
+
+// THE PINS, as one reusable body: a row that carries NEITHER column invents no
+// verification vocabulary anywhere on the fleet surface. Run against the real
+// build (must pass) and against each mutation (must throw).
+function cchW58S6PinPresenceConditional(h) {
+  assert.equal(h.fleetVerifyText({}), "");
+  assert.equal(h.fleetMetaHtml({}), "");
+  const meta = h.fleetMetaHtml(fleetBp()); // region · size · version · channel · autoupdate
+  assert.equal(meta.indexOf("verified"), -1, "no verify segment on a row carrying neither column");
+  assert.equal(meta.indexOf("unreachable"), -1);
+  assert.equal(h.fleetMetaHtml({ region: "nbg1" }).indexOf("·"), -1); // no dangling separator
+  // THE SITE-LOCAL GAP THIS CLOSES: the whole row, not just the mono line.
+  const row = h.fleetRow(fleetBp());
+  assert.equal(row.indexOf("never verified"), -1, "the fleet ROW invents no verify state either");
+  assert.equal(row.indexOf("unreachable"), -1);
+  assert.equal(h.fleetRow(NEVER_REPORTED).indexOf("never verified"), -1);
+}
+
+test("cch-w58-s6: fleetVerifyText is exported and is a NEW name (the seven agent_events helpers are untouched)", () => {
+  assert.equal(typeof hooks.fleetVerifyText, "function");
+  // The pre-existing verify vocabulary is driven off the per-instance
+  // agent_events stream, not off these two row columns — no collision, no reuse.
+  for (const other of ["verifySummaryText", "latestVerifyOf", "lastCheckedText"]) {
+    assert.notEqual(hooks.fleetVerifyText, hooks[other], other + " is a different clock");
+  }
+});
+
+test("cch-w58-s6: fleetVerifyText — three NULL-DISTINCT states, and false is a verdict not an absence", () => {
+  // present-and-null → the state has a name
+  assert.equal(hooks.fleetVerifyText({ last_verified_at: null, verify_reachable: null }), "never verified");
+  const fresh = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  assert.equal(hooks.fleetVerifyText({ last_verified_at: fresh, verify_reachable: true }), "verified 5m ago");
+  assert.equal(
+    hooks.fleetVerifyText({ last_verified_at: fresh, verify_reachable: false }),
+    "unreachable at last verify · 5m ago",
+  );
+  // a false verdict with no usable stamp is STILL a verdict — never folded
+  // back into "never verified" (that would report a failed probe as no probe).
+  assert.equal(hooks.fleetVerifyText({ last_verified_at: null, verify_reachable: false }), "unreachable at last verify");
+  assert.equal(hooks.fleetVerifyText({ last_verified_at: "not-a-date", verify_reachable: false }), "unreachable at last verify");
+  // an unparsable stamp with no verdict degrades to the honest floor
+  assert.equal(hooks.fleetVerifyText({ last_verified_at: "not-a-date" }), "never verified");
+  // truthiness is NOT the discriminator: verify_reachable true with no stamp
+  // still has nothing to date, so it reads "never verified", not "verified —".
+  assert.equal(hooks.fleetVerifyText({ verify_reachable: true }), "never verified");
+});
+
+test("cch-w58-s6: PRESENCE, not truthiness — a row carrying neither column is SILENT (an older control plane, not a state)", () => {
+  // hasOwnProperty is the discriminator. What it actually separates: the cloud
+  // router's barkpark_json ALWAYS emits both keys (value nil on an unverified
+  // box, measured 200 on a member session and on a read-scoped PAT), so this
+  // branch separates an OLDER CONTROL PLANE from a current one — it does NOT
+  // separate "never verified" from "the server sent nothing". It is a
+  // forward/backward-compatibility guard and is UNREACHABLE against any current
+  // server; the assertion exists so a refactor to truthiness reds here.
+  assert.equal(hooks.fleetVerifyText({}), "");
+  assert.equal(hooks.fleetVerifyText({ name: "old-cp-row" }), "");
+  assert.equal(hooks.fleetVerifyText(null), "");
+  assert.equal(hooks.fleetVerifyText({ last_verified_at: undefined }), "never verified"); // own property, present
+  cchW58S6PinPresenceConditional(hooks);
+});
+
+test("cch-w58-s6: THE POSITIVE CONTROL — the pins RED on an unconditional variant at the site this slice chose", () => {
+  // M1 — delete the presence guard inside fleetVerifyText (the "just render it
+  // always" refactor). The mono line then grows an invented segment.
+  const m1src = CCH_W58_S6_APP_SRC.replace(
+    /\n *if \(!has\.call\(bp, "last_verified_at"\) && !has\.call\(bp, "verify_reachable"\)\) return "";/,
+    "",
+  );
+  assert.notEqual(m1src, CCH_W58_S6_APP_SRC, "M1 must actually mutate the source");
+  const m1 = cchW58S6HooksFrom(m1src);
+  assert.equal(m1.fleetVerifyText({}), "never verified"); // the mutation is live
+  assert.throws(() => cchW58S6PinPresenceConditional(m1), /AssertionError/);
+
+  // M2 — the EXACT shape measured to pass every console instrument: an
+  // unconditional chip in fleetRow's BODY reusing an existing css class, with
+  // fleetVerifyText left honest. gr-p3 stays green under this; these pins do not.
+  const m2src = CCH_W58_S6_APP_SRC.replace(
+    "fleetMetaHtml(bp) +",
+    "fleetMetaHtml(bp) + '<div class=\"fleet-meta\">never verified</div>' +",
+  );
+  assert.notEqual(m2src, CCH_W58_S6_APP_SRC, "M2 must actually mutate the source");
+  const m2 = cchW58S6HooksFrom(m2src);
+  assert.equal(m2.fleetVerifyText({}), ""); // helper still honest — the lie is at the site
+  assert.equal(m2.fleetMetaHtml({}), "");   // ...so gr-p3's own assertions still hold
+  assert.throws(() => cchW58S6PinPresenceConditional(m2), /AssertionError/);
+});
+
+test("cch-w58-s6: fleetMetaHtml appends the verification segment LAST, escaped, after autoupdate", () => {
+  const fresh = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const full = hooks.fleetMetaHtml(fleetBp({ last_verified_at: fresh, verify_reachable: true }));
+  assert.match(full, /fsn1 · cx22 · v0\.9\.2 · prod · autoupdate on · verified 5m ago<\/div>$/);
+  const down = hooks.fleetMetaHtml(fleetBp({ last_verified_at: fresh, verify_reachable: false }));
+  assert.match(down, /· unreachable at last verify · 5m ago<\/div>$/);
+  // a row with ONLY the verify columns still renders a clean line (no leading ·)
+  assert.equal(hooks.fleetMetaHtml({ last_verified_at: null, verify_reachable: null }),
+    '<div class="fleet-meta">never verified</div>');
+});
+
+test("cch-w58-s6: the fleet ROW carries the answer, and Open Studio is untouched by it", () => {
+  const fresh = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const unreachable = hooks.fleetRow(fleetBp({ last_verified_at: fresh, verify_reachable: false }));
+  assert.match(unreachable, /unreachable at last verify · 5m ago/);
+  // D696/D707: this slice does NOT withdraw the Studio offer. A live row that
+  // the plane has never reached still gets the button — the row now SAYS so.
+  assert.match(unreachable, /fleet-open-studio/);
+  const never = hooks.fleetRow(fleetBp({ last_verified_at: null, verify_reachable: null }));
+  assert.match(never, /never verified/);
+  assert.match(never, /fleet-open-studio/);
+  // no new pill kind, no new status role: the lifecycle pill is byte-unchanged.
+  assert.match(never, /<div class="fleet-status"><span class="status-pill status-pill--ok/);
+});
+
+test("cch-w58-s6: THE SIBLING SEPARATOR — fleetInfraLine cannot reach the new segment", () => {
+  // fleetInfraLine is a SEPARATE function (the Overview card's denser region ·
+  // size slot); it never calls fleetVerifyText — re-derive with
+  // `grep -n "fleetVerifyText" app.js`, which lands only in fleetVerifyText's
+  // own definition, fleetMetaHtml, updatePanelHtml and the __bpTestHook export.
+  const fresh = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const withCols = { region: "fsn1", last_verified_at: fresh, verify_reachable: false };
+  assert.equal(hooks.fleetInfraLine(withCols), '<div class="fleet-infra">fsn1</div>');
+  assert.equal(hooks.fleetInfraLine(withCols).indexOf("·"), -1);   // the sibling separator law
+  assert.equal(hooks.fleetInfraLine(withCols).indexOf("verif"), -1);
+  assert.equal(hooks.fleetInfraLine({ last_verified_at: null, verify_reachable: null }), "");
+});
+
+test("cch-w58-s6: the Updates panel states the verification clock as its OWN row, never as 'Last checked'", () => {
+  const fresh = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const bp = fleetBp({ update_checked_at: fresh, last_verified_at: null, verify_reachable: null });
+  const html = hooks.updatePanelHtml(bp, "grant");
+  // The two clocks are DISTINCT rows: update_checked_at is the autoupdate poll.
+  assert.match(html, /Last checked/);
+  assert.match(html, /Checked 5m ago/);
+  assert.match(html, /Verification/);
+  assert.match(html, /Never verified/); // capitalised for the rail, same three states
+  // The real neighbouring strings (autoupdatePolicyLabel returns objects; the
+  // literal "Autoupdate: On" appears nowhere in this panel).
+  assert.match(html, /Auto · prod/);
+  // A control plane that sends neither column gets NO row — not an invented one.
+  const older = hooks.updatePanelHtml(fleetBp({ update_checked_at: null }), "grant");
+  assert.match(older, /Never checked/);
+  assert.equal(older.indexOf("Verification"), -1);
 });

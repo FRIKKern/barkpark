@@ -5876,6 +5876,44 @@
     if (bp.autoupdate_enabled === false) return "autoupdate off";
     return "autoupdate on";
   }
+  // The verification segment of the mono line — the two columns the control
+  // plane has been serializing on EVERY fleet row (see barkpark_json in the
+  // cloud router) and the console discarded: last_verified_at and
+  // verify_reachable. Three NULL-DISTINCT states, because `verify_reachable
+  // === false` is a real verdict and is NOT the same answer as "we have never
+  // reached this box":
+  //   "never verified"  · "verified 5m ago"  · "unreachable at last verify · 5m ago"
+  //
+  // PRESENCE, NOT TRUTHINESS. A row carrying NEITHER own property renders
+  // NOTHING (the fleetAutoupdateText precedent — a mono line never grows an
+  // invented segment, and never a dangling "·"). Be honest about what that
+  // branch buys: the cloud router's barkpark_json ALWAYS emits both keys, with
+  // value null on a box nothing has verified yet. So hasOwnProperty separates
+  // an OLDER control plane (a deploy that predates these columns) from a
+  // current one — it does NOT separate "never verified" from "the server sent
+  // nothing". Against any current server the silent branch is unreachable; it
+  // is a forward/backward-compatibility guard, not a state a user will see.
+  //
+  // Display only: no affordance, no pill kind, no gating. Distinct from
+  // lastCheckedText, whose one call site is fed update_checked_at — the
+  // AUTOUPDATE clock, a different column (grep lastCheckedText to re-derive).
+  function fleetVerifyText(bp) {
+    bp = bp || {};
+    var has = Object.prototype.hasOwnProperty;
+    if (!has.call(bp, "last_verified_at") && !has.call(bp, "verify_reachable")) return "";
+    var rel = "";
+    if (bp.last_verified_at) {
+      var r = relTime(bp.last_verified_at);
+      if (r !== "—") rel = r;
+    }
+    // A false verdict means a probe DID run and failed — never fold it into
+    // "never verified", even when the stamp is missing or unparsable.
+    if (bp.verify_reachable === false) {
+      return rel ? "unreachable at last verify · " + rel : "unreachable at last verify";
+    }
+    if (!rel) return "never verified";
+    return "verified " + rel;
+  }
   function fleetMetaHtml(bp) {
     bp = bp || {};
     var parts = [];
@@ -5885,6 +5923,8 @@
     if (bp.channel) parts.push(esc(String(bp.channel)));
     var au = fleetAutoupdateText(bp);
     if (au) parts.push(esc(au));
+    var vt = fleetVerifyText(bp);
+    if (vt) parts.push(esc(vt));
     return parts.length ? '<div class="fleet-meta">' + parts.join(" · ") + "</div>" : "";
   }
 
@@ -8401,11 +8441,20 @@
         '<span class="status-pill-label">' + esc(b.label) + "</span>" +
       "</span>";
 
+    // The verification clock, from the two columns the fleet list now also
+    // states. It is a DIFFERENT clock from "Last checked" one line above
+    // (update_checked_at = the autoupdate poll), so it gets its own row rather
+    // than overloading that one — and it is presence-conditional, so an older
+    // control plane that sends neither column shows no row at all instead of an
+    // invented "never verified".
+    var verifyLine = fleetVerifyText(bp);
+
     var rows =
       railRow("Running", running) +
       railRow("Latest", latest) +
       railRow("Channel", channel) +
       railRowPlain("Last checked", lastCheckedText(bp.update_checked_at)) +
+      (verifyLine ? railRowPlain("Verification", cap(verifyLine)) : "") +
       (policy ? railRowHtml("Autoupdate", badge(policy.text, policy.dot)) : "");
 
     var buttons = "";
@@ -22773,6 +22822,7 @@
       // pure/node-pinned. The DOM mounts (loadFleet/wireFleetRows/loadArchives)
       // stay browser-verified. archivesModel now carries the notConfigured state.
       fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
+      fleetVerifyText: fleetVerifyText,
       fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
       withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,
       // cch-w20-s3: the TEXT form of the address (scheme shaved) beside the

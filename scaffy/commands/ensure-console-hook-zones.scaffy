@@ -1,4 +1,4 @@
-COMMAND "Ensure console hook zones" DESCRIPTION "Idempotently plant the three named scaffy:zone marker comments across the Cloud console SPA pair -- cloud/priv/static/app.js (#7 discover hotspot: 81 commits / 60 MOSTLY_ADD in 12 months) and its co-accreting node harness cloud/priv/static/__app.test.mjs (#14: 56 commits, 55 of the 82 app.js commits touch it) -- the cloud subsystem's ONLY mechanically append-shaped seams. The console vein is vertical (a cloud feature = router route + Registry fn + SPA edits: 54/70 registry commits co-touch the router, 46/82 app.js commits co-touch app.css), but router/registry/css adds are all contextual-bespoke; what EVERY SPA feature repeats mechanically is this trio: a pure helper in the IIFE, its entry in the __bpTestHook export map, and its test group in the harness. One zone per seam: new-helper declarations (position-free -- the hook call runs at eval tail), new hook-map entries (order-free object keys, house trailing-comma style), new test groups (registration order is semantics-free under node:test). Each zone comment states IN WORDS the contract that makes an append below it safe by construction -- the ensure-router-zones idiom, JS spelling. No variables: fixed artifacts, planted once, guarded by their own declaration text." LAST_UPDATED "17-07-2026-21-00-00" DOMAIN "barkpark" TAGS "cloud-console", "scaffold" CONCEPT "console-hook-zones" VARIANT "js" DIRECTION "add" VARIABLES
+COMMAND "Ensure console hook zones" DESCRIPTION "Idempotently plant the three named scaffy:zone marker comments across the Cloud console SPA pair -- cloud/priv/static/app.js (#7 discover hotspot: 81 commits / 60 MOSTLY_ADD in 12 months) and its co-accreting node harness cloud/priv/static/__app.test.mjs (#14: 56 commits, 55 of the 82 app.js commits touch it) -- the cloud subsystem's ONLY mechanically append-shaped seams. The console vein is vertical (a cloud feature = router route + Registry fn + SPA edits: 54/70 registry commits co-touch the router, 46/82 app.js commits co-touch app.css), but router/registry/css adds are all contextual-bespoke; what EVERY SPA feature repeats mechanically is this trio: a pure helper in the IIFE, its entry in the __bpTestHook export map, and its test group in the harness. One zone per seam: new-helper declarations (position-free -- the hook call runs at eval tail), new hook-map entries (order-free object keys, house trailing-comma style), new test groups (registration order is NOT semantics-free under node:test -- a test() registered above a top-level await is drained before the later top-level consts initialise and TDZ-crashes, so the tests zone is planted at the file TAIL, below every top-level await). Each zone comment states IN WORDS the contract that makes an append below it safe by construction -- the ensure-router-zones idiom, JS spelling. No variables: fixed artifacts, planted once, guarded by their own declaration text." LAST_UPDATED "17-07-2026-21-00-00" DOMAIN "barkpark" TAGS "cloud-console", "scaffold" CONCEPT "console-hook-zones" VARIANT "js" DIRECTION "add" VARIABLES
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHY THIS COMMAND EXISTS — the measured anatomy of the cloud console pair
@@ -142,33 +142,37 @@ MARK "zone-console-hook-map"
 ASLONG FILE DONT CONTAIN "scaffy:zone console-hook-map"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OP 3 — plant the tests zone directly after the vm eval (__app.test.mjs)
+# OP 3 — plant the tests zone at the harness TAIL (__app.test.mjs)
 # ─────────────────────────────────────────────────────────────────────────────
-# Anchor: the vm.runInContext(...) call that evaluates the shipped app.js —
-# the harness's load-bearing plumbing, byte-unique, consumed by nothing; it
-# cannot vanish without rewriting the harness. INSERT AFTER lands the zone
-# between the eval and the first test group. Registration order is
-# semantics-free under node:test: callbacks run after the whole module
-# evaluates, so a group landing here (above the older groups) sees the same
-# populated `hooks` object as any tail append — and unlike the tail, this
-# head is STABLE (the newest group no longer defines the append point).
+# Anchor: the file's LAST top-level statement terminator. INSERT AFTER LAST
+# lands the zone at end-of-file, which is the only position that is safe by
+# construction — and the position is NOT free. Registration order is NOT
+# semantics-free under node:test: a test() registered ABOVE a top-level
+# `await` is drained while that await settles, BEFORE the later top-level
+# `const`s initialise, so its callback throws ReferenceError (TDZ) on any
+# fixture declared further down. Measured cch-w61-s1: this zone used to sit
+# after the vm eval at the file HEAD, above the harness's first top-level
+# `await import(...)`, and a group planted there red 5/1028 on node 20 —
+# node 22 crashed the same probe too, so this is a drain race, not a runtime
+# semantic difference. Below the last top-level await there is no remaining
+# drain point, so a tail group always sees a fully-initialised module.
 IN "cloud/priv/static/__app.test.mjs"
-### Plant the console-tests zone after the sandbox evaluation of app.js
-INSERT AFTER FIRST
-::: vm eval of the shipped app.js :::
-vm.runInContext(
-  fs.readFileSync(new URL("./app.js", import.meta.url), "utf8"),
-  sandbox,
-);
-::: vm eval of the shipped app.js :::
+### Plant the console-tests zone at the tail of the harness, below every top-level await
+INSERT AFTER LAST
+::: last top-level statement of the harness :::
+});
+::: last top-level statement of the harness :::
 WITH
 ::: console-tests zone :::
 
-// scaffy:zone console-tests (ensure-console-hook-zones) -- stable head anchor
+// scaffy:zone console-tests (ensure-console-hook-zones) -- stable TAIL anchor
 // for NEW test groups: add your `// ── name ──` header + test() blocks
-// DIRECTLY BELOW this comment. Registration order is semantics-free:
-// node:test runs callbacks after the whole module evaluates, so a group here
-// (above the older groups) sees the same populated `hooks` as a tail append.
+// DIRECTLY BELOW this comment. Registration order is NOT semantics-free: a
+// test() registered ABOVE a top-level `await` is drained while that await
+// settles — BEFORE the later top-level `const`s initialise — so its callback
+// throws ReferenceError (TDZ) on any fixture declared further down. Keep this
+// anchor BELOW the file's LAST top-level `await` (measured cch-w61-s1: node 20
+// and node 22 both crash a group planted above it).
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 ::: console-tests zone :::
 MARK "zone-console-tests"
