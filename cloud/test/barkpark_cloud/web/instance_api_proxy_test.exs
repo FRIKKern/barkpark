@@ -25,6 +25,7 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.StudioLinkFakeHttpClient, as: Fake
   alias BarkparkCloud.Web.Router
@@ -532,7 +533,12 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
         ),
         call(:delete, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9", token: token),
         call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/rotate", token: token),
-        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send", token: token)
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send", token: token),
+        call(
+          :post,
+          "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/deliveries/evt_1/replay",
+          token: token
+        )
       ]
 
       for conn <- calls do
@@ -542,6 +548,41 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
 
       assert Fake.requests() == []
       assert Accounts.list_audit_events(team) == []
+    end
+
+    # The sweep above enumerates its verbs BY HAND, which is only as complete as
+    # the day it was typed. This arm derives the population from the catalog, so a
+    # capability ADDED at `:mutate` reds here instead of silently gaining a route
+    # around the refusal. It is the ADD direction the hand list cannot have.
+    test "the hand-swept :mutate verbs ARE the catalog's :mutate population" do
+      mutating =
+        InstanceApiCatalog.catalog()
+        |> Enum.filter(&(&1.tier == :mutate))
+        |> Enum.map(& &1.capability)
+        |> MapSet.new()
+
+      swept =
+        MapSet.new([
+          :"webhook.create",
+          :"webhook.update",
+          :"webhook.delete",
+          :"webhook.rotate",
+          :"webhook.test_send",
+          :"webhook.replay"
+        ])
+
+      assert MapSet.equal?(mutating, swept),
+             "the proxy's :mutate population drifted from the suspended-box sweep above.\n" <>
+               "  in the catalog but NOT swept (ADD): " <>
+               "#{inspect(MapSet.difference(mutating, swept) |> MapSet.to_list())}\n" <>
+               "  swept but no longer :mutate (STALE): " <>
+               "#{inspect(MapSet.difference(swept, mutating) |> MapSet.to_list())}\n" <>
+               "A new :mutate capability needs a driven 409-with-zero-upstream-requests row in this " <>
+               "describe; a capability that stopped mutating needs this pin lowered deliberately."
+
+      refute MapSet.size(mutating) == 0,
+             "the catalog reports NO :mutate capability at all — an unreadable population must never " <>
+               "read as 'nothing to refuse'"
     end
   end
 
