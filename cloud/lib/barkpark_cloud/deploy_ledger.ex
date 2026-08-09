@@ -176,6 +176,7 @@ defmodule BarkparkCloud.DeployLedger do
     "BOX_BUSY_409",
     "ABANDONED_AT_CAPACITY",
     "ABANDONED_BOX_STUCK",
+    "ABANDONED_UNCLASSIFIED",
     "DOC_ID_EMPTY",
     "BOX_500",
     "FORBIDDEN_403",
@@ -230,6 +231,11 @@ defmodule BarkparkCloud.DeployLedger do
     "ABANDONED_AT_CAPACITY" =>
       "the box stayed at its concurrent-build cap and the publish was given up on",
     "ABANDONED_BOX_STUCK" => "the box kept refusing this site and the publish was given up on",
+    # NAMES NO CAUSE, deliberately — it is fed every cause the ledger has not
+    # learned yet, and a label that guessed one would put a specific accusation
+    # on rows that are mostly not it (the label gauge's assertion B).
+    "ABANDONED_UNCLASSIFIED" =>
+      "the publish was given up on for a cause the ledger has not named",
     "DOC_ID_EMPTY" => "HEALTH gate: the bp-doc-id marker was empty",
     "BOX_500" => "the box errored on the deploy (HTTP 500)",
     "FORBIDDEN_403" => "the build could not read its content (403)",
@@ -328,6 +334,57 @@ defmodule BarkparkCloud.DeployLedger do
   # percentage travels without saying what it is a percentage OF.
   @basis_attempted "attempted rows in the window: failed + deferred + live + in_flight + cancelled + residual (never-attempted tombstones excluded, D19)"
   @basis_failed "settled failed rows in the window — the failure numerator"
+
+  ## ── The deferral WAIT (dr-w28-s4) ─────────────────────────────────────────
+  #
+  # A deferral is reported as "re-queued, not lost". Until now that sentence had
+  # NO NUMBER BEHIND IT: the census counted deferrals and said nothing about how
+  # long the re-queue took, so a fleet whose failure rate improves by relabelling
+  # every 409 `deferred` reads as a fleet getting better even if the rebuild
+  # arrives six hours later. D161 already rules time-to-web the vital; this is
+  # that clock, restricted to the cohort the relabelling created.
+  #
+  # THE JOIN IS TIME-KEYED, AND THAT IS A DECISION, NOT A SHORTCUT (D478).
+  # The obvious implementation — join a deferred row to a later live row on the
+  # same `content_rev` — is DECLINED BY NAME in D170(a), and D162 rules that
+  # `content_rev` is not a revision at all: it is
+  # `sha256([doc_type, published_count, published_events])` over a DATASET-WIDE
+  # activity window, so it moves without a publish, it is not injective across
+  # sites (one rev lands on every site bound to the same instance/dataset
+  # triple), and (site, rev) pairs RECUR after a different rev intervened.
+  # Measured this wave: rev-keying claims 52.1% of deferred (site, rev) pairs
+  # never reached live, while time-keying finds all but a handful of the same
+  # rows followed by a later-minted live build on the same site. The bias of the
+  # rev key runs toward MANUFACTURING A LOSS THAT IS NOT THERE — a vacuous RED,
+  # which is the same lie as a vacuous green with the sign flipped.
+  @deferral_wait_clock "deferred row `inserted_at` → the FIRST later `inserted_at` of a live row on the same site and environment. Keyed on when the covering build was MINTED, never on `content_rev` (D170(a)/D162: it is not a revision, it is not injective, and it recurs) and never on `became_live_at` (a live row with a NULL mark would drop coverage the site really got)"
+
+  @deferral_wait_basis "deferred rows in this window whose site has since rebuilt (COVERED). PENDING and UNREADABLE rows are counted beside the sample, never inside it"
+
+  # THE OUTCOME VOCABULARY, THREE TERMS, AND NO FOURTH.
+  #
+  # `delivered` is refused: it claims the operator's OWN edit reached the web,
+  # which a non-injective, activity-derived hash cannot support. `superseded` is
+  # refused for the mirror reason: it names an inference — that a later build
+  # carried this row's content — that no column on the row can prove.
+  #
+  # COVERED is worded "the site has since rebuilt" and NEVER "your edit shipped".
+  # Cumulativity has one unmeasured hole — an unpublish makes `published_count`
+  # FALL — so the honest claim is about the SITE's current truth (a later build
+  # for it was minted and went live), not about this row's payload.
+  @deferral_outcomes [
+    {"COVERED", "the site has since rebuilt — a later live build was minted for it"},
+    {"PENDING", "no later live build has been minted for this site yet"},
+    {"UNREADABLE",
+     "the box's content marker could not be read when this row was written, so this deferral cannot be classified at all"}
+  ]
+
+  # The `content_rev` an unreadable box degrades to (`Sites.Deploy`'s
+  # `@unknown_content_rev`): the empty string, its honest fail-open. Read as a
+  # PER-ROW READABILITY FLAG — never as a join key, which is the thing D478
+  # forbids. `nil` is the same fact for rows written before the column was
+  # populated at all.
+  @unreadable_content_rev ""
 
   @doc "The named failure classes, most-frequent-first on the corpus that motivated them."
   @spec classes() :: [class()]
@@ -566,8 +623,25 @@ defmodule BarkparkCloud.DeployLedger do
       code when code in [:none, {:code, "already_running"}] ->
         "ABANDONED_BOX_STUCK"
 
+      # THE D8 INVERSION, FIXED (dr-w28-s4). This arm answered `"UNCLASSIFIED"`,
+      # which honoured D8 in shape and INVERTED it in effect: the row had
+      # already matched `@abandoned` — the producer's own chain-terminal
+      # sentence, which is proof it IS an abandonment — and then left the
+      # abandoned cohort entirely. So the day the box learns a new code word,
+      # the ABANDONED COUNT GOES DOWN while UNCLASSIFIED goes up, and an
+      # operator reading "abandonments fell" would be reading a taxonomy gap as
+      # an improvement. That is the vacuous green this epic exists to refuse,
+      # wearing D8's own clothes.
+      #
+      # The honest answer keeps BOTH facts: it is an abandonment (the count
+      # cannot fall), and its cause is one the ledger has not named (the unnamed
+      # cohort still rises, on its own line, where someone must look at it).
+      # `ABANDONED_UNCLASSIFIED` is a `@classes` member for the same reason the
+      # other two abandonment classes are: a given-up publish IS a failure and
+      # belongs in the failure numerator — unlike `DEFERRED_UNCLASSIFIED`, whose
+      # rows are healthy re-queues and must stay out of it.
       _unnamed ->
-        "UNCLASSIFIED"
+        "ABANDONED_UNCLASSIFIED"
     end
   end
 
@@ -891,6 +965,10 @@ defmodule BarkparkCloud.DeployLedger do
       # The counter that measures the attempts which minted NO row, with a
       # coverage floor that REFUSES rather than summing stored zeros.
       coalesced_attempts: coalesced_attempts(scoped, from),
+      # HOW LONG THE RE-QUEUE ACTUALLY TOOK. `deferred` above is a COUNT of rows
+      # the ledger calls "re-queued, not lost"; this is the number that says
+      # whether the re-queue arrived in four minutes or in fourteen hours.
+      deferral_wait: deferral_wait(scoped, to),
       # THE SECOND INDEPENDENT COUNT, in the code and not in a test.
       completeness: completeness(scoped, volume, not_attempted_rows),
       boundaries: @boundaries,
@@ -979,6 +1057,181 @@ defmodule BarkparkCloud.DeployLedger do
         basis: @coalesced_basis,
         reason: nil
       }
+    end
+  end
+
+  # THE DEFERRAL WAIT, over the SAME `scoped` source the rest of the census
+  # reads — same window, same `:site_ids` narrowing, so a team's deferral
+  # population and its census population can never be two different sets of rows.
+  #
+  # TWO QUERIES, and the second one is deliberately NOT window-bounded on the
+  # right. The population is the deferred rows IN the window; the build that
+  # covers one of them may well have been minted after `to`, and refusing to see
+  # it would manufacture PENDING at the window's own edge — an artefact of where
+  # the reader put the boundary, reported as a stalled fleet. The covering query
+  # is bounded on the LEFT (nothing earlier than the earliest deferral can cover
+  # anything) and by the site ids the deferred rows themselves carry, which are
+  # already inside whatever scope the caller was given — so this cannot widen a
+  # team's read to another team's rows.
+  #
+  # `as_of` is the window's `to`, PINNED, never `utc_now()`: a floating clock
+  # would make the same pinned window answer differently on every read, which is
+  # the exact defect this epic found live.
+  defp deferral_wait(scoped, as_of) do
+    deferrals =
+      Repo.all(
+        from(d in scoped,
+          where: d.status == "deferred",
+          select: %{
+            site_id: d.site_id,
+            environment: d.environment,
+            inserted_at: d.inserted_at,
+            content_rev: d.content_rev
+          }
+        )
+      )
+
+    # ONE covering query for the whole population, folded once — never one probe
+    # per deferred row.
+    marks = live_marks(deferrals)
+
+    observations = Enum.map(deferrals, &deferral_outcome(&1, marks, as_of))
+    by_outcome = Enum.group_by(observations, & &1.outcome)
+    covered = Map.get(by_outcome, "COVERED", [])
+    pending = Map.get(by_outcome, "PENDING", [])
+    unreadable = Map.get(by_outcome, "UNREADABLE", [])
+
+    # The mass that is NOT in the sample. A quantile needs `1 - q` of the
+    # distribution above it; if more than that is unresolved — still waiting, or
+    # unclassifiable — the quantile cannot be named, exactly as `delivery/3`'s
+    # censoring guard reasons. Reported as a fraction so the refusal shows its
+    # own arithmetic.
+    unresolved = length(pending) + length(unreadable)
+    seconds = covered |> Enum.map(& &1.seconds) |> Enum.sort()
+
+    %{
+      clock: @deferral_wait_clock,
+      basis: @deferral_wait_basis,
+      as_of: as_of,
+      population: %{
+        deferred: length(deferrals),
+        covered: length(covered),
+        pending: length(pending),
+        unreadable: length(unreadable)
+      },
+      outcomes:
+        Enum.map(@deferral_outcomes, fn {outcome, label} ->
+          %{
+            outcome: outcome,
+            label: label,
+            count: by_outcome |> Map.get(outcome, []) |> length()
+          }
+        end),
+      sample: length(covered),
+      unresolved: unresolved,
+      # A PENDING row is not a mystery — it is a row that has been waiting this
+      # long ALREADY, and that lower bound is the operator's whole question.
+      oldest_pending_seconds: pending |> Enum.map(& &1.seconds) |> Enum.max(fn -> nil end),
+      p50: deferral_wait_quantile(seconds, 0.5, "p50", unresolved, length(deferrals)),
+      p95: deferral_wait_quantile(seconds, 0.95, "p95", unresolved, length(deferrals)),
+      max: deferral_wait_quantile(seconds, 1.0, "max", unresolved, length(deferrals)),
+      min_sample: @min_sample
+    }
+  end
+
+  # The covering marks, keyed on `{site_id, environment}`. Environment rides in
+  # the key because a PREVIEW build going live is not the production site
+  # rebuilding, and claiming it were would be a vacuous green in the flagship
+  # instrument. The key can only move a row COVERED → PENDING, never the
+  # reverse, so it cannot manufacture coverage.
+  defp live_marks([]), do: %{}
+
+  defp live_marks(deferrals) do
+    keys = deferrals |> Enum.map(&{&1.site_id, &1.environment}) |> Enum.uniq()
+    site_ids = keys |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+    earliest = deferrals |> Enum.map(& &1.inserted_at) |> Enum.min(DateTime)
+
+    Repo.all(
+      from(d in Deployment,
+        where: d.site_id in ^site_ids,
+        where: d.status == "live",
+        where: d.inserted_at > ^earliest,
+        select: %{
+          site_id: d.site_id,
+          environment: d.environment,
+          inserted_at: d.inserted_at
+        }
+      )
+    )
+    |> Enum.group_by(&{&1.site_id, &1.environment}, & &1.inserted_at)
+    |> Map.new(fn {key, stamps} -> {key, Enum.sort(stamps, DateTime)} end)
+  end
+
+  # UNREADABLE takes precedence, and it is a READABILITY test on ONE ROW — not a
+  # join. The empty string is the producer's own fail-open for a box it could not
+  # read at all (`Sites.Deploy.@unknown_content_rev`), so the control plane was
+  # blind at the instant this deferral was written and says so.
+  #
+  # `nil` IS NOT THIS FACT and must not be folded into it. A NULL marker is a
+  # column that was never written — the ordinary shape for older rows and for
+  # code-driven builds (jarl-website: 55 rows, ZERO non-null `content_rev`) — and
+  # calling those "unreadable" would sweep whole customer sites out of the wait
+  # sample and into a cohort named after a failure that never happened. They are
+  # classified by the clock like every other row, which is exactly why the clock
+  # is time-keyed and not content-keyed.
+  defp deferral_outcome(%{content_rev: @unreadable_content_rev} = row, _marks, as_of),
+    do: %{outcome: "UNREADABLE", seconds: waited(row.inserted_at, as_of)}
+
+  defp deferral_outcome(row, marks, as_of) do
+    marks
+    |> Map.get({row.site_id, row.environment}, [])
+    |> Enum.find(&(DateTime.compare(&1, row.inserted_at) == :gt))
+    |> case do
+      %DateTime{} = live -> %{outcome: "COVERED", seconds: waited(row.inserted_at, live)}
+      nil -> %{outcome: "PENDING", seconds: waited(row.inserted_at, as_of)}
+    end
+  end
+
+  # `rate/2`'s refusal law, applied to a quantile: below `@min_sample` there is
+  # no number at all, and the COUNTS beside it survive untouched — they are real
+  # rows either way. The second predicate is `delivery/3`'s identifiability
+  # guard, which is not a duplicate of the first: a 3,000-row sample passes
+  # `min_sample` and still cannot name a p95 if more than 5% of the population
+  # is unresolved.
+  defp deferral_wait_quantile(seconds, q, label, unresolved, population) do
+    n = length(seconds)
+    fraction = if population == 0, do: 0.0, else: unresolved / population
+    headroom = 1.0 - q
+
+    node = %{
+      quantile: q,
+      label: label,
+      sample: n,
+      unresolved: unresolved,
+      unresolved_fraction: Float.round(fraction, 4),
+      headroom: Float.round(headroom, 4),
+      min_sample: @min_sample,
+      basis: @deferral_wait_basis
+    }
+
+    cond do
+      n < @min_sample ->
+        refused(node, "sample #{n} below min_sample #{@min_sample}")
+
+      fraction > headroom ->
+        refused(
+          node,
+          "#{label} is UNIDENTIFIABLE: #{pct(fraction)}% of the deferred population is " <>
+            "unresolved (still waiting, or unreadable), exceeding the #{pct(headroom)}% " <>
+            "headroom #{label} needs"
+        )
+
+      true ->
+        Map.merge(node, %{
+          seconds: Enum.at(seconds, quantile_index(n, q)),
+          refused: false,
+          reason: nil
+        })
     end
   end
 

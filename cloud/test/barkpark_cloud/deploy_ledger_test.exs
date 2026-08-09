@@ -360,8 +360,11 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert DeployLedger.classify("PLAN", @a_bare) == "ABANDONED_BOX_STUCK"
 
       # …and D8 holds on this arm too: a terminal 409 whose code the ledger has
-      # never named rises in the tail rather than joining the nearer bucket.
-      assert DeployLedger.classify("PLAN", @a_unknown_code) == "UNCLASSIFIED"
+      # never named rises in the tail rather than joining the nearer bucket —
+      # but it rises INSIDE the abandoned cohort (dr-w28-s4). It answered
+      # "UNCLASSIFIED" until then, which made the ABANDONED COUNT FALL the day
+      # the box learned a new code word. See "the D8 INVERSION" below.
+      assert DeployLedger.classify("PLAN", @a_unknown_code) == "ABANDONED_UNCLASSIFIED"
     end
 
     test "an ordinary 409 is untouched by the split — only a chain-terminal one promotes" do
@@ -1933,6 +1936,297 @@ defmodule BarkparkCloud.DeployLedgerTest do
       refute wide.truncated
       assert wide.total_sites == 51
       assert length(wide.sites) == 51
+    end
+  end
+
+  ## ── 4b. The deferral WAIT, and the D8 inversion ──────────────────────────
+  #
+  # "Re-queued, not lost" is a claim about TIME, and until dr-w28-s4 the census
+  # carried no time dimension for it at all: a fleet that relabels every 409
+  # `deferred` reads as a fleet that got better even if the rebuild lands
+  # fourteen hours later. These tests are that number, plus the two ways it
+  # could lie — a rev-keyed join that manufactures a loss, and a quantile
+  # printed over a population too small or too unresolved to name one.
+
+  describe "census/3 — the deferral WAIT is TIME-keyed, with its population beside it" do
+    setup do
+      {_user, team} = user_team()
+      %{site: site_fixture(team), team: team}
+    end
+
+    @dwait_from ~U[2026-08-01 00:00:00Z]
+    @dwait_to ~U[2026-08-08 00:00:00Z]
+
+    # One deferral every 1,000s, each covered by its OWN live build minted
+    # `wait` seconds later — so every gap is unambiguous and the sorted sample
+    # is exactly the wait list. 240 rows clears `min_sample` 200, which is the
+    # only way a quantile is allowed to be a number at all.
+    defp covered_deferrals!(site, waits, opts \\ []) do
+      rev = Keyword.get(opts, :content_rev, "rev-deferred")
+      live_rev = Keyword.get(opts, :live_content_rev, "rev-live")
+
+      rows =
+        waits
+        |> Enum.with_index(1)
+        |> Enum.flat_map(fn {wait, i} ->
+          at = DateTime.add(@dwait_from, 1_000 * i, :second)
+
+          [
+            %{status: "deferred", content_rev: rev, inserted_at: at},
+            %{
+              status: "live",
+              content_rev: live_rev,
+              inserted_at: DateTime.add(at, wait, :second),
+              became_live_at: DateTime.add(at, wait, :second)
+            }
+          ]
+        end)
+
+      deployments!(site, rows)
+    end
+
+    test "p50/p95/max are seconds, and the POPULATION rides in the same node", %{site: site} do
+      waits = List.duplicate(60, 120) ++ List.duplicate(300, 108) ++ List.duplicate(900, 12)
+      covered_deferrals!(site, waits)
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      # THE POPULATION, whole and accounted: nothing was silently dropped out of
+      # the denominator to make the percentiles prettier.
+      assert wait.population == %{deferred: 240, covered: 240, pending: 0, unreadable: 0}
+      assert wait.population.covered + wait.population.pending + wait.population.unreadable ==
+               wait.population.deferred
+
+      # THE NUMBERS. ceil(n*q), 1-based: p50 → the 120th, p95 → the 228th,
+      # max → the 240th of the sorted waits.
+      assert %{seconds: 60.0, refused: false, sample: 240} = wait.p50
+      assert %{seconds: 300.0, refused: false, sample: 240} = wait.p95
+      assert %{seconds: 900.0, refused: false, sample: 240} = wait.max
+
+      # D3: no percentile travels without what it is a percentile OF.
+      for node <- [wait.p50, wait.p95, wait.max] do
+        assert node.sample == 240
+        assert node.min_sample == 200
+        assert node.basis =~ "site has since rebuilt"
+      end
+
+      # …and the clock says WHICH two instants it subtracted.
+      assert wait.clock =~ "inserted_at"
+      assert wait.as_of == @dwait_to
+    end
+
+    # THE FORBIDDEN IMPLEMENTATION, refused as behaviour (D478 / D170(a)).
+    # `content_rev` is `sha256([doc_type, published_count, published_events])`
+    # over a dataset-wide window: it is not a revision, it is not injective
+    # across sites, and it recurs. A census that joined on it would call this
+    # deferral LOST — the fixture gives it a rev that appears on no live row
+    # anywhere — while the clock says the site rebuilt 300s later.
+    test "the outcome is decided by the CLOCK, never by a content_rev join", %{site: site} do
+      deployments!(site, [
+        %{
+          status: "deferred",
+          content_rev: "rev-that-never-reaches-a-live-row",
+          inserted_at: DateTime.add(@dwait_from, 100, :second)
+        },
+        %{
+          status: "live",
+          content_rev: "an-entirely-different-rev",
+          inserted_at: DateTime.add(@dwait_from, 400, :second),
+          became_live_at: DateTime.add(@dwait_from, 400, :second)
+        }
+      ])
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      assert wait.population.covered == 1
+      assert wait.population.pending == 0
+      # A rev-keyed census reads the SAME two rows as a loss. That is the
+      # 52.1%-never-reached-live number this slice exists to refuse.
+      assert wait.max.sample == 1
+    end
+
+    test "the vocabulary is COVERED / PENDING / UNREADABLE, and COVERED claims only the SITE",
+         %{site: site} do
+      deployments!(site, [
+        # COVERED — a later live build was minted for this site.
+        %{
+          status: "deferred",
+          content_rev: "rev-a",
+          inserted_at: DateTime.add(@dwait_from, 100, :second)
+        },
+        %{
+          status: "live",
+          content_rev: "rev-a",
+          inserted_at: DateTime.add(@dwait_from, 220, :second),
+          became_live_at: DateTime.add(@dwait_from, 220, :second)
+        },
+        # PENDING — nothing has been minted after it.
+        %{
+          status: "deferred",
+          content_rev: "rev-b",
+          inserted_at: DateTime.add(@dwait_from, 300, :second)
+        },
+        # UNREADABLE — the producer's own fail-open for a box it could not read.
+        %{status: "deferred", content_rev: "", inserted_at: DateTime.add(@dwait_from, 400, :second)}
+      ])
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      assert Enum.map(wait.outcomes, & &1.outcome) == ~w(COVERED PENDING UNREADABLE)
+      assert Map.new(wait.outcomes, &{&1.outcome, &1.count}) == %{
+               "COVERED" => 1,
+               "PENDING" => 1,
+               "UNREADABLE" => 1
+             }
+
+      # THE WORDING IS THE FINDING. Cumulativity has one unmeasured hole — an
+      # unpublish makes `published_count` fall — so COVERED may claim the SITE
+      # rebuilt and may never claim the operator's own edit shipped.
+      covered = Enum.find(wait.outcomes, &(&1.outcome == "COVERED"))
+      assert covered.label =~ "the site has since rebuilt"
+
+      # And the two words that must not ship, anywhere in this node: `delivered`
+      # claims a precision a non-injective hash cannot support, `superseded`
+      # names an inference no column on the row can prove.
+      rendered = inspect(wait)
+      refute rendered =~ "delivered"
+      refute rendered =~ "superseded"
+      refute rendered =~ "your edit"
+
+      # A PENDING row is not a mystery — it is a row that has waited THIS long
+      # already, floored on the window's own pinned `as_of`.
+      assert wait.oldest_pending_seconds > 0
+    end
+
+    test "below min_sample the QUANTILES refuse and the COUNTS survive", %{site: site} do
+      covered_deferrals!(site, List.duplicate(120, 3))
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      # The refusal, exactly as `rate/2` writes it at the same threshold.
+      for node <- [wait.p50, wait.p95, wait.max] do
+        assert node.refused
+        assert is_nil(node.seconds)
+        assert node.reason == "sample 3 below min_sample 200"
+        assert node.sample == 3
+      end
+
+      # …and the counts are REAL ROWS, so they stay. A refusal that also blanked
+      # the population would read as "no deferrals", which is the opposite fact.
+      assert wait.population == %{deferred: 3, covered: 3, pending: 0, unreadable: 0}
+      assert wait.sample == 3
+    end
+
+    # THE SECOND REFUSAL, and it is not a duplicate of the first: this sample
+    # clears `min_sample` and still cannot name a p95, because a quantile needs
+    # `1 - q` of the mass above it and 20% of the population has not finished.
+    test "a p95 REFUSES when more of the population is unresolved than its headroom", %{
+      site: site
+    } do
+      covered_deferrals!(site, List.duplicate(60, 240))
+
+      # 60 deferrals with nothing after them — 60 of 300 = 20.0% unresolved.
+      deployments!(
+        site,
+        for i <- 1..60 do
+          %{
+            status: "deferred",
+            content_rev: "rev-pending",
+            inserted_at: DateTime.add(@dwait_from, 500_000 + i, :second)
+          }
+        end
+      )
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      assert wait.population.deferred == 300
+      assert wait.population.pending == 60
+      assert wait.unresolved == 60
+
+      assert wait.p95.refused
+      assert is_nil(wait.p95.seconds)
+      assert wait.p95.unresolved_fraction == 0.2
+      assert wait.p95.reason =~ "UNIDENTIFIABLE"
+      assert wait.p95.reason =~ "20.0%"
+
+      # …and the guard is a FACT, not a blanket: p50 has 50% of headroom and is
+      # still nameable over the same population.
+      refute wait.p50.refused
+      assert wait.p50.seconds == 60.0
+    end
+  end
+
+  ## ── 4c. THE D8 INVERSION: a new cause must not shrink the abandoned count ──
+
+  describe "abandonment with an unnamed cause — the count can no longer go DOWN" do
+    setup do
+      {_user, team} = user_team()
+      %{site: site_fixture(team)}
+    end
+
+    @d8_from ~U[2026-08-01 00:00:00Z]
+    @d8_to ~U[2026-08-02 00:00:00Z]
+
+    # The pre-dr-w28-s4 fallthrough, reconstructed AS DATA — the same arm that
+    # shipped, so the mutation below is the real one and not a strawman.
+    defp pre_w28_class("ABANDONED_UNCLASSIFIED"), do: "UNCLASSIFIED"
+    defp pre_w28_class(class), do: class
+
+    test "the abandoned count HOLDS when the box learns a new code word — and used to FALL", %{
+      site: site
+    } do
+      for {reason, i} <- Enum.with_index([@a_capacity, @a_busy, @a_unknown_code]) do
+        deployment!(site, %{
+          stage: "PLAN",
+          failure_reason: reason,
+          inserted_at: DateTime.add(@d8_from, i + 1, :second)
+        })
+      end
+
+      counts =
+        DeployLedger.census(@d8_from, @d8_to).classes
+        |> Map.new(&{&1.class, &1.count})
+
+      abandoned = fn map ->
+        map
+        |> Enum.filter(fn {class, _} -> String.starts_with?(class, "ABANDONED_") end)
+        |> Enum.reduce(0, fn {_, n}, acc -> n + acc end)
+      end
+
+      # AFTER: all three abandonments are counted as abandonments, and the one
+      # with an unnamed cause says so on its own line.
+      assert abandoned.(counts) == 3
+      assert counts["ABANDONED_UNCLASSIFIED"] == 1
+      refute Map.has_key?(counts, "UNCLASSIFIED")
+
+      # BEFORE, on the identical rows: the new code word walked out of the
+      # abandoned cohort and the count FELL to 2 while UNCLASSIFIED rose to 1 —
+      # D8 honoured in shape, inverted in effect. An operator reading
+      # "abandonments fell" would have been reading a taxonomy gap as a fix.
+      before = Map.new(counts, fn {class, n} -> {pre_w28_class(class), n} end)
+      assert abandoned.(before) == 2
+      assert before["UNCLASSIFIED"] == 1
+
+      # The row is still in the failure numerator either way — the fix moves a
+      # LABEL, never a row, so no rate changes underneath it.
+      assert DeployLedger.census(@d8_from, @d8_to).failed == 3
+    end
+
+    test "the unnamed abandonment is a first-class class, and its label accuses nobody" do
+      assert "ABANDONED_UNCLASSIFIED" in DeployLedger.classes()
+      refute DeployLedger.deferred?("ABANDONED_UNCLASSIFIED")
+      refute DeployLedger.not_attempted?("ABANDONED_UNCLASSIFIED")
+
+      label = DeployLedger.label("ABANDONED_UNCLASSIFIED")
+      assert label =~ "given up on"
+      assert label =~ "has not named"
+
+      # It is fed EVERY cause the ledger has not learned yet, so it may not
+      # claim one — the label gauge's assertion B, restated where it is easy to
+      # see. `slot_reservation_denied` is the live example.
+      for word <- ~w(slot_reservation capacity cap slots running busy deploying) do
+        refute label =~ word
+      end
     end
   end
 
