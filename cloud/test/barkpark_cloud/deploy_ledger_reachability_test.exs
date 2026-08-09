@@ -370,6 +370,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "the deferral predicate, used inside census/3's fold. THE `?`-TRAP ROW: the grep sweep scored this at zero and would have deleted a live function."},
     {:not_attempted?, 1, :internal_only,
      "the never-attempted predicate that keeps rows out of the rate DENOMINATOR. Same `?`-trap as deferred?/1, same false zero."},
+    {:agency, 1, :internal_only,
+     "WHO a failure class accuses (D148/D242). `class_rows/3` reads it while building the census class table, so the accusation rides the same row as the count and reaches an operator through `Web.Router.deploy_census_json/2`'s existing whole-map serialisation — no new route, and no edit to router.ex, which is a sibling fence. Over-public rather than `defp` because the assertion suite calls it directly on named classes."},
     {:encode_cursor, 1, :internal_only,
      "keyset cursor writer, used by list_page/2 when it hands back a next page."},
     {:decode_cursor, 1, :internal_only,
@@ -381,12 +383,18 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
     {:deferred_classes, 0, :unreachable,
      "the deferral vocabulary. THREE test references, ZERO lib callers; `deferred?/1` answers the membership question internally, so this accessor exists for no reader. Same follow-up as classes/0."},
     {:min_sample, 0, :unreachable,
-     "the refusal floor. TWO test references and ZERO lib callers; `census/3` reads the `@min_sample` ATTRIBUTE directly, and `router.ex:3534` names the function only in a COMMENT — which is precisely why the grep sweep scored it reachable and this census does not."}
+     "the refusal floor. TWO test references and ZERO lib callers; `census/3` reads the `@min_sample` ATTRIBUTE directly, and `router.ex:3534` names the function only in a COMMENT — which is precisely why the grep sweep scored it reachable and this census does not."},
 
-    # `not_attempted_classes/0` was the sixth unreachable row: zero lib callers
-    # AND zero test references, the one genuinely dead public. Deleted in this
-    # slice rather than allowlisted (deploy_ledger.ex). Set equality below is
-    # what keeps it deleted — re-adding it without a caller reds this file.
+    # ALLOWLISTED WITH A REASON, both of them, and the reason is the same one:
+    # they exist so an ASSERTION can be keyed off the enums instead of a
+    # hand-list. dr-w16-s3 deleted `not_attempted_classes/0` as the one
+    # genuinely dead public and set equality kept it deleted — this is the
+    # commit that re-adds it, and it is re-added WITH a stated reader rather
+    # than smuggled back in.
+    {:not_attempted_classes, 0, :unreachable,
+     "the never-attempted vocabulary. ZERO lib callers; `not_attempted?/1` answers MEMBERSHIP inside census/3 and cannot ENUMERATE. Its reader is the agency-map exhaustiveness assertion (D242), which must cover `classes/0 ++ not_attempted_classes/0` — every value classify/2 can return — off the ENUMS, because a hand-listed set is a second place to forget and reproduces D224 with a green. Deleted by dr-w16-s3 when nothing at all read it; re-added by dr-w31-s3 with that reader named. CLOSER: the class vocabulary reaches an operator only when a route or the CLI renders a legend — the same follow-up as classes/0 and deferred_classes/0."},
+    {:agency_map, 0, :unreachable,
+     "the full class -> agency map. ZERO lib callers by design: `agency/1` is the READ path (census/3 uses it, see its :internal_only row) and answers per class, but it cannot list the map's KEYS, so the second direction of the exhaustiveness assertion — 'a key that is not a class' — is unprovable without this accessor. That direction is the one that catches an agency for a class somebody renamed, which is the failure that let an 18-class taxonomy and a 17-key map merge past each other. Allowlisted rather than deleted because deleting it deletes that direction. CLOSER: it stops being unreachable the day a lib caller needs the whole map (a legend, or an agency roll-up), not before."}
   ]
 
   # ---------------------------------------------------------------------------
@@ -396,8 +404,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   # under it, and a legitimate change RAISES them in the same commit — where the
   # set-equality assertions red on that same change anyway, so a floor can never
   # be the only thing a change has to satisfy.
-  @publics_floor 16
-  @call_sites_floor 14
+  @publics_floor 19
+  @call_sites_floor 21
 
   # ---------------------------------------------------------------------------
 
