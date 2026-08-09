@@ -77,7 +77,8 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   # `scripts/cloud-path-escape-check.sh` resolves every parent-relative string
   # literal in `cloud/**` against `CLOUD_PATHS`; `internal`, `web`, `js` and
   # `api` are not declared there, and the declaration lives in a file this slice
-  # does not own (dr-w26-s4). A parent-relative literal naming those trees fails
+  # does not own (dr-w26-s4-census-scores-a-caller-less-producer). A
+  # parent-relative literal naming those trees fails
   # that gate on arrival — measured, not assumed: writing one here reds it with
   # `UNCOVERED repo-root read: internal`, which is exactly the honest complaint
   # the moduledoc records and files rather than silences.
@@ -258,9 +259,12 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.Stay do
   green be confused for one another, which is precisely the confusion that let
   three dead PRs hold instruments alive for a wave.
 
-  NOT THE MERGE PREDICATE. #11009 is UNSTABLE and must still land. This function
-  answers one question only: may a reader-less instrument keep its life on the
-  strength of this PR.
+  NOT THE MERGE PREDICATE, and this moduledoc no longer tries to be one. The
+  sentence that stood here adjudicated a PR in prose — and went stale, because
+  prose has no way to be re-checked. Where a PR's disposition matters it is
+  carried as a ROW (`@landed_prs` in the test module below), never as a verdict
+  written into a paragraph. This function answers one question only: may a
+  reader-less instrument keep its life on the strength of this PR.
   """
 
   @type facts :: %{
@@ -359,15 +363,36 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       `internal/`, `web/`, `js/` and `api/` are NOT declared there, so a commit
       that adds a reader ONLY in those trees does not re-run this census; the
       ROT is caught on the next cloud-touching commit, not on the commit that
-      caused it. That declaration lives in a file dr-w26-s4 owns, so it is filed
-      (`dr-w26-followup-reader-corpus-dispatch`), not smuggled into this slice.
+      caused it. That declaration lives in a file
+      dr-w26-s4-census-scores-a-caller-less-producer owns, so the gap is filed
+      as its own backlog row ("the reader-less census reads four trees CI does
+      not dispatch on"), not smuggled into this slice. That row's slug predates
+      this file's id law and is therefore named by TITLE here — see
+      `test "every task id in this file is a FULL slug"`.
     * FAILING OPEN. An instrument nobody registered is invisible here, exactly
       as `deploy_signal_audience_census_test.exs` admits of its own registry.
-      Nothing syntactic closes that hole. `queued_seconds` is the honest
-      example: it is emitted by `platform_delivery.ex:356`, has zero readers in
-      all five trees, and is NOT in the register below because its disposition
-      is a later slice's call, not this one's — filed as
-      `dr-w26-followup-queued-seconds-disposition`.
+      Nothing syntactic closes that hole, and the register's own `queued_seconds`
+      row is the standing warning: it sat OUTSIDE this register for a wave while
+      a paragraph here said it had "zero readers in all five trees" — a
+      checkable claim nothing re-checked, and false since the reader landed
+      (`internal/cloudclient/deliveries.go:88` decodes it,
+      `internal/cli/cloud_deliveries_cmd.go:397-400` renders it into an operator
+      sentence). It is IN the register now, and a derivation says so.
+
+  ## PROSE MAY CITE, THE ROW ADJUDICATES (wave 27)
+
+  Six citations in this file named a task id that could not resolve, and four
+  sentences went further and adjudicated a task or a PR in prose: two declared a
+  task unfiled, one declared a merge still owed, one declared an instrument
+  reader-less. Every one of them was a checkable claim with nothing checking it,
+  and three of the four were false by the time they merged.
+  Two OFFLINE guards close the class, no network and no fixture:
+
+    * `test "every task id in this file is a FULL slug"` — a tail-less id is
+      unresolvable by construction, so the shape is the guard;
+    * `test "no id or PR number is followed by a verdict"` — prose may CITE a
+      task or a PR; only a machine-readable row (`@register`, `@stayed_prs`,
+      `@landed_prs`) may adjudicate one.
   """
 
   use ExUnit.Case, async: true
@@ -395,7 +420,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       audience:
         "a SESSION-authenticated member of the site's own team, and nobody else: the route is session-only (D219), so no PAT, no CI credential and no platform seat could ever read it — and no client, page or script in five trees ever decoded the node",
       reason:
-        "ruled the epic's vital in W11, written in W12, given a production caller in W14, and read by zero code paths in thirteen waves. Zero readers across all five corpus trees, no open PR names it, and its stay under any rider is empty. THE FIRST DELETION (dr-w26-s6).",
+        "ruled the epic's vital in W11, written in W12, given a production caller in W14, and read by zero code paths in thirteen waves. Zero readers across all five corpus trees, no open PR names it, and its stay under any rider is empty. THE FIRST DELETION (dr-w26-s6-reader-less-instrument-guard-and-the-first-deletion).",
       disposition: :deleted,
       stay: nil
     },
@@ -411,9 +436,11 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
         "D442 scored this key '1 reader hit'. That hit was the COMMENT at internal/cli/cloud_deploy_census_cmd.go:538 — 'coalesced_attempts now lands on the row but is not in this envelope' — which is FALSE on main, since deploy_ledger.ex:893 emits it inside census/3. The comment is deleted by this slice, not cited. The true reader count is 0.",
       disposition: :stay,
       # RIDER 2, and it is the whole reason this row is not the second deletion.
-      # #10811 names this key and is OPEN — and its stay FAILS the re-derived
-      # predicate (DIRTY, and its newest check predates the base movement), so
-      # rider 1 buys this row nothing. What protects it is DATA.
+      # #10811 names this key, and its state is carried as a ROW in
+      # `@stayed_prs`, never as a verdict in this comment. Read from that row,
+      # its stay FAILS the re-derived predicate (DIRTY, and its newest check
+      # predates the base movement), so rider 1 buys this row nothing. What
+      # protects it is DATA.
       stay:
         {:data,
          "the COLUMN is data, not an instrument: deployments.coalesced_attempts (deployment.ex:206) is written by auto_deploy_worker.ex:412 across ~31,697 rows. What is deletable here is the EMISSION plus this row plus the false comment. '`coalesced_attempts` is deletable' must never become 'drop the column'."}
@@ -425,13 +452,17 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:357), on the deliveries envelope",
       audience:
-        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:89 decodes the leg and internal/cli/cloud_deliveries_cmd.go:450 renders it. HALF a reader, and the register says which half — see `reason`.",
+        "the terminal, as of the deliveries-reader slice: internal/cloudclient/deliveries.go:89 decodes the leg and internal/cli/cloud_deliveries_cmd.go:450 renders it. HALF a reader, and the register says which half — see `reason`.",
       reason:
-        "RE-DECLARED 2026-08-09 (was `:stay`). The READER landed — internal/cloudclient/deliveries.go:89-91 decodes all three legs as *int and cloud_deliveries_cmd.go:450 renders them — so this row derives 5 readers and correctly redded as :rot under `:stay`. THE WRITER NEVER DID: cloud/lib/barkpark_cloud/platform_delivery.ex carries cast (:144), schema field (:173), validate (:249) and to_json emit (:452) and NO producer anywhere in cloud/lib computes a value (`grep -rn queued_self_seconds cloud/lib | grep -v platform_delivery.ex` is EMPTY), so the column is emitted ALWAYS-NULL and the terminal renders a hole. This census measures READERSHIP only, which is why `:has_reader` is true here while the number is still meaningless — the honest fact a plain green would hide. dr-w26-s5, the slice the old stay named as the writer's closer, DOES NOT EXIST (`bp task get dr-w26-s5` -> not_found), so nothing is queued to fill it. Deleting the row instead would have taken the guard with it (@register_floor 7 trips and the :780 pin fails); re-declaring keeps it and ADDS the :lost_reader direction.",
+        "RE-DECLARED 2026-08-09 (was `:stay`). The READER landed — internal/cloudclient/deliveries.go:89-91 decodes all three legs as *int and cloud_deliveries_cmd.go:450 renders them — so this row derives 5 readers and correctly redded as :rot under `:stay`. THE WRITER NEVER DID: cloud/lib/barkpark_cloud/platform_delivery.ex carries cast (:144), schema field (:173), validate (:249) and to_json emit (:452) and NO producer anywhere in cloud/lib computes a value (`grep -rn queued_self_seconds cloud/lib | grep -v platform_delivery.ex` is EMPTY), so the column is emitted ALWAYS-NULL and the terminal renders a hole. This census measures READERSHIP only, which is why `:has_reader` is true here while the number is still meaningless — the honest fact a plain green would hide. CORRECTED 2026-08-09 (wave 27): the writer's closer was cited by a TRUNCATED id, which resolves to nothing and so read as an unfiled slice; the slug is dr-w26-s5-crown-gets-its-writer and it resolves. Deleting the row instead would have taken the guard with it (@register_floor trips and the slug pin fails); re-declaring keeps it and ADDS the :lost_reader direction.",
       disposition: :has_reader,
       stay:
-        {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "KEPT AS THE RECORD, not as a live stay (this row is now `:has_reader`, so the stay-validity test no longer reads it, but the :780 pin does). dr-w26-s3 built the reader and LANDED. dr-w26-s5 was named as the writer and was never filed as a task at all — `bp task get dr-w26-s5` returns not_found and FTS finds only s6, the w26 charter and the w26 paper. A stay naming a closer that does not exist is exactly the failure this register exists to catch, and the register could not catch it: nothing here derives task existence."}
+        {:slice,
+         [
+           "dr-w26-s3-deliveries-reader-stops-lying-about-carried",
+           "dr-w26-s5-crown-gets-its-writer"
+         ],
+         "KEPT AS THE RECORD, not as a live stay (this row is now `:has_reader`, so the stay-validity test no longer reads it, but the slug pin does). The first slice built the reader and landed; the second is the writer's closer. Both slugs are FULL — the truncated forms this row used to carry could not be resolved by anyone reading it, which is the whole reason the id-shape guard below exists."}
     },
     %{
       key: "queued_pickup_seconds",
@@ -439,13 +470,17 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:358), on the deliveries envelope",
       audience:
-        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:90 decodes the leg, cloud_deliveries_cmd.go:450 renders it — same half-a-reader state as its sibling",
+        "the terminal, as of the deliveries-reader slice: internal/cloudclient/deliveries.go:90 decodes the leg, cloud_deliveries_cmd.go:450 renders it — same half-a-reader state as its sibling",
       reason:
-        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as queued_self_seconds: the READER landed (internal/cloudclient/deliveries.go:90) and the WRITER never did — platform_delivery.ex casts, stores, validates and emits the column and no producer in cloud/lib computes it, so it is emitted always-null. `:has_reader` is a readership claim, not a claim that the number means anything. dr-w26-s5, the writer's named closer, is not a filed task.",
+        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as queued_self_seconds: the READER landed (internal/cloudclient/deliveries.go:90) and the WRITER never did — platform_delivery.ex casts, stores, validates and emits the column and no producer in cloud/lib computes it, so it is emitted always-null. `:has_reader` is a readership claim, not a claim that the number means anything. The writer's named closer is dr-w26-s5-crown-gets-its-writer.",
       disposition: :has_reader,
       stay:
-        {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3 built the reader and landed; dr-w26-s5 was never filed — `bp task get dr-w26-s5` returns not_found."}
+        {:slice,
+         [
+           "dr-w26-s3-deliveries-reader-stops-lying-about-carried",
+           "dr-w26-s5-crown-gets-its-writer"
+         ],
+         "KEPT AS THE RECORD (the slug pin still reads it). The first slice built the reader and landed; the second is the writer's closer."}
     },
     %{
       key: "queued_stall_seconds",
@@ -454,13 +489,30 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:359), on the deliveries envelope",
       audience:
-        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:91 decodes the leg, cloud_deliveries_cmd.go:450 renders it — and this is the leg whose absence a platform operator would most need, which is why an always-null render is worse here than anywhere else",
+        "the terminal, as of the deliveries-reader slice: internal/cloudclient/deliveries.go:91 decodes the leg, cloud_deliveries_cmd.go:450 renders it — and this is the leg whose absence a platform operator would most need, which is why an always-null render is worse here than anywhere else",
       reason:
-        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as its two siblings: reader landed (internal/cloudclient/deliveries.go:91), writer never did (no producer in cloud/lib writes the column; platform_delivery.ex only casts/stores/validates/emits it), so the operator is shown a blank where the unowned stall should be. dr-w26-s5, named as the writer's closer, is not a filed task.",
+        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as its two siblings: reader landed (internal/cloudclient/deliveries.go:91), writer never did (no producer in cloud/lib writes the column; platform_delivery.ex only casts/stores/validates/emits it), so the operator is shown a blank where the unowned stall should be. The writer's named closer is dr-w26-s5-crown-gets-its-writer.",
       disposition: :has_reader,
       stay:
-        {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3 built the reader and landed; dr-w26-s5 was never filed — `bp task get dr-w26-s5` returns not_found."}
+        {:slice,
+         [
+           "dr-w26-s3-deliveries-reader-stops-lying-about-carried",
+           "dr-w26-s5-crown-gets-its-writer"
+         ],
+         "KEPT AS THE RECORD (the slug pin still reads it). The first slice built the reader and landed; the second is the writer's closer."}
+    },
+    %{
+      key: "queued_seconds",
+      what:
+        "the WHOLE queue wait a delivery took — the leg the three queued_* splits decompose, and the only one of the four a terminal renders on its own line",
+      surface:
+        "PlatformDelivery.to_json/1 (platform_delivery.ex:451), on the deliveries envelope",
+      audience:
+        "the platform operator, in their terminal: internal/cloudclient/deliveries.go:88 decodes it as *int and internal/cli/cloud_deliveries_cmd.go:397-400 renders it into a sentence ('… between the run being created and a runner picking the job up'), with a NIL branch at :397 — so absence and presence do NOT print identically, which is what makes this a reader and not a pipe",
+      reason:
+        "ADDED 2026-08-09 (wave 27). This key was the register's honest FAILING-OPEN example and the paragraph describing it stated a checkable fact nothing re-checked — 'zero readers in all five trees' — which the derivation now refutes. Its measured state is identical to the three queued_* legs re-declared the same day: READER LANDED, WRITER NEVER DID. platform_delivery.ex carries cast (:139), schema field (:168), validate (:247) and the to_json emit (:451), and `grep -rn queued_seconds cloud/lib | grep -v platform_delivery.ex` is EMPTY, so the column is emitted ALWAYS-NULL and the operator's sentence is a hole. `:has_reader` is a readership claim, never a claim the number means anything; the writer gap is filed as its own row (cch-w59-bl-queued-seconds-columns-have-readers-but-no-writer).",
+      disposition: :has_reader,
+      stay: nil
     },
     %{
       key: "failure_class",
@@ -537,6 +589,28 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       failures: 0,
       deciding_check_at: ~U[2026-08-08 16:40:46Z],
       base_moved_at: @base_moved_at
+    }
+  ]
+
+  # ---------------------------------------------------------------------------
+  # WHERE THE WORK ACTUALLY LANDED — a ROW, because the sentence this replaces
+  # ("must still land", in the Stay moduledoc) was a verdict in prose and it went
+  # stale: that PR closed WITHOUT merging and its work arrived under a different
+  # number. Re-derived 2026-08-09 with `gh pr view <n> --json state,mergedAt`.
+  #
+  # HONEST LIMIT: this row is DATA, and the test below can only check it against
+  # ITSELF (a closed-unmerged PR must name a successor, and the successor must
+  # carry a merge timestamp). Nothing offline can re-derive it from GitHub — the
+  # guard that this file CAN enforce is that no paragraph adjudicates a PR.
+  # ---------------------------------------------------------------------------
+  @landed_prs [
+    %{
+      pr: 11009,
+      names: "the two deploy.yml gates that stopped being disarmable",
+      state: "CLOSED",
+      merged_at: nil,
+      landed_as: 11075,
+      landed_merged_at: ~U[2026-08-09 02:18:14Z]
     }
   ]
 
@@ -665,6 +739,22 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
            """
   end
 
+  # THE EIGHTH STANDING CLAUSE — why both mutation arms assert a DELTA.
+  #
+  # `violations/3` comprehends the WHOLE register filtered only by kind; it is
+  # NOT scoped to the row an arm injects. An arm that pattern-matched a
+  # SINGLE-element list therefore could not survive its own success: the moment
+  # a SECOND, real finding of the same kind existed, the arm redded as
+  # `match (=) failed` and printed a pattern-match dump BESIDE the census's own
+  # correct red — naming the wrong line, and blaming the guard for the finding
+  # it was built to report. Measured on main before this change: flipping
+  # `request_stats` to `:stay` gave 13 tests / 2 failures, one of them at :704
+  # with a two-element right side; flipping `publish_clock` to `:has_reader`
+  # did the same at :684.
+  #
+  # So each arm asserts what its plant ACTUALLY changes: the key is ABSENT from
+  # the baseline violations and PRESENT after, found BY NAME. A real second
+  # finding then reds exactly one test — the census's — with a diagnosis.
   test "MUTATION: a fake reader-less instrument declared `:has_reader` REDS" do
     fake = %{
       key: "publish_clock_shadow_metric",
@@ -681,8 +771,22 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
     assert hits["publish_clock_shadow_metric"] == []
 
-    assert [%{key: "publish_clock_shadow_metric", kind: :lost_reader}] =
-             violations(register, hits, :lost_reader)
+    before = violations(@register, hits, :lost_reader)
+    plus_fake = violations(register, hits, :lost_reader)
+
+    refute Enum.any?(before, &(&1.key == "publish_clock_shadow_metric")),
+           "the plant is already in the committed register — this arm proves nothing."
+
+    assert Enum.any?(
+             plus_fake,
+             &(&1.key == "publish_clock_shadow_metric" and &1.kind == :lost_reader)
+           ),
+           """
+           the plant did not red. A `:has_reader` row with ZERO derived readers must
+           appear in the :lost_reader violations, so this census can lose.
+
+           found: #{fmt(plus_fake)}
+           """
   end
 
   test "MUTATION: a reader-less row given a REAL reader reds as ROT" do
@@ -701,7 +805,22 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
     register = Enum.reject(@register, &(&1.key == "failure_class")) ++ [rotten]
     hits = ReaderScan.hits(Enum.map(register, & &1.key))
 
-    assert [%{key: "failure_class", kind: :rot} = v] = violations(register, hits, :rot)
+    before = violations(@register, hits, :rot)
+    plus_rotten = violations(register, hits, :rot)
+
+    refute Enum.any?(before, &(&1.key == "failure_class")),
+           "failure_class already reds as :rot in the committed register — this arm proves nothing."
+
+    v = Enum.find(plus_rotten, &(&1.key == "failure_class" and &1.kind == :rot))
+
+    assert v,
+           """
+           re-declaring a row with REAL readers as `:stay` did not red as ROT — a stale
+           stay can hide behind a green.
+
+           found: #{fmt(plus_rotten)}
+           """
+
     assert v.readers > 0
   end
 
@@ -778,7 +897,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
     end
   end
 
-  test "the three queued_* columns are IN the register, with the stay naming s3 and s5" do
+  test "the three queued_* columns are IN the register, and their stay names FULL slugs" do
     for key <- ~w(queued_self_seconds queued_pickup_seconds queued_stall_seconds) do
       row = Enum.find(@register, &(&1.key == key))
 
@@ -789,8 +908,33 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       """
 
       assert {:slice, slices, _why} = row.stay
-      assert "dr-w26-s3" in slices and "dr-w26-s5" in slices
+
+      assert "dr-w26-s3-deliveries-reader-stops-lying-about-carried" in slices and
+               "dr-w26-s5-crown-gets-its-writer" in slices,
+             """
+             #{key}: the stay must name the two slices by their FULL slug. It used to pin
+             the TRUNCATED forms, which resolve to nothing — and this pin is why the
+             correction has to land in ONE commit with the register itself.
+
+             found: #{inspect(slices)}
+             """
     end
+  end
+
+  test "the queue TOTAL is in the register beside the three legs it decomposes", ctx do
+    row = Enum.find(@register, &(&1.key == "queued_seconds"))
+
+    assert row, """
+    queued_seconds is not in the register. It was this file's own FAILING-OPEN example
+    for a wave — an instrument nobody registered is invisible here — and the paragraph
+    that described it also stated, wrongly, that it had no readers anywhere.
+    """
+
+    assert row.disposition == :has_reader
+
+    assert ctx.hits["queued_seconds"] != [],
+           "queued_seconds derives ZERO readers, which is what the old prose claimed. " <>
+             "Either the reader went away or the scan is broken — both are findings."
   end
 
   # ---------------------------------------------------------------------------
@@ -830,8 +974,131 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   end
 
   # ---------------------------------------------------------------------------
+  # PROSE MAY CITE, THE ROW ADJUDICATES — two guards over this file's own source
+  #
+  # Both are OFFLINE and SYNTACTIC: no network, no fixture, no DB. That is the
+  # point, not a compromise. A network re-check would have asked the server about
+  # the TRUNCATED id this file used to carry, been told nothing was there, and
+  # AGREED with the false sentence. The shape of the citation is the only thing
+  # that can catch a citation whose shape is the defect.
+  # ---------------------------------------------------------------------------
+
+  @this_file __ENV__.file
+
+  # A full slug: epic, wave, slot (slice / backlog / human gate / round), tail.
+  # The tail is what makes an id resolvable; without it the id is a prefix.
+  @id_shape ~r/^(dr|cch)-w[0-9]+-(s[0-9]+[a-z]?|bl|hg|r[0-9]+)-[a-z][a-z0-9-]*$/
+
+  # Any id-looking citation, however truncated — this is what the guard FINDS,
+  # `@id_shape` is what it REQUIRES.
+  @id_citation ~r/(?:dr|cch)-w[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*/
+
+  # A citation is an id or a PR number. A VERDICT is a phrase that decides
+  # something about it. Data rows say `state: "CLOSED"`; only prose says
+  # "is CLOSED" — which is why the ban is on PHRASES and the register, the
+  # stayed-PR table and the landed-PR table need no exemption.
+  @citation ~r/(?:dr|cch)-w[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*|\#[0-9]{4,6}/
+  @verdicts [
+    "does not exist",
+    "not_found",
+    "never filed",
+    "is open",
+    "is closed",
+    "is merged",
+    "must still land",
+    "is not a filed task"
+  ]
+  @verdict_window 80
+
+  test "every task id in this file is a FULL slug" do
+    offenders =
+      @this_file
+      |> File.read!()
+      |> then(&Regex.scan(@id_citation, &1))
+      |> List.flatten()
+      |> Enum.uniq()
+      |> Enum.reject(&Regex.match?(@id_shape, &1))
+
+    assert offenders == [],
+           """
+           these citations are not full task slugs, so nothing can resolve them:
+
+           #{Enum.map_join(offenders, "\n", &"  #{&1}")}
+
+           An id cut off at its slot (epic, wave, slot, and no tail) is a PREFIX, not
+           an identifier: it answers nothing when looked up, and this file spent a
+           wave calling a real slice unfiled on exactly that evidence. Write the whole
+           slug, or name the row by its TITLE and cite no id at all.
+           """
+  end
+
+  test "no id or PR number is followed by a verdict — prose cites, the row adjudicates" do
+    source = File.read!(@this_file)
+
+    offenders =
+      @citation
+      |> Regex.scan(source, return: :index)
+      |> List.flatten()
+      |> Enum.flat_map(fn {start, len} ->
+        cite = binary_part(source, start, len)
+        window = window_after(source, start + len, @verdict_window)
+        lowered = String.downcase(window)
+
+        case Enum.find(@verdicts, &String.contains?(lowered, &1)) do
+          nil -> []
+          verdict -> [{cite, verdict, String.trim(window)}]
+        end
+      end)
+
+    assert offenders == [],
+           """
+           a citation ADJUDICATES in prose. Every one of these was a checkable claim
+           with nothing checking it, and this file shipped three that were false:
+
+           #{Enum.map_join(offenders, "\n", fn {cite, verdict, window} -> "  #{cite} → \"#{verdict}\" in: #{window}" end)}
+
+           Prose may CITE a task or a PR. Only a machine-readable row — @register,
+           @stayed_prs, @landed_prs — may say what state it is in, because only a row
+           can be re-derived and can red when it goes stale.
+           """
+  end
+
+  test "a PR's disposition is a ROW, and a closed-unmerged PR names where the work landed" do
+    assert Enum.count(@landed_prs) >= 1,
+           "the landed-PR table emptied — a table with no rows adjudicates nothing."
+
+    for pr <- @landed_prs do
+      assert pr.state in ["OPEN", "CLOSED", "MERGED"]
+
+      if pr.state == "CLOSED" and is_nil(pr.merged_at) do
+        assert is_integer(pr.landed_as) and pr.landed_as != pr.pr,
+               "#{pr.pr}: closed without merging and names no successor — then the work " <>
+                 "it carried is unaccounted for, which is the state a paragraph used to hide."
+
+        assert %DateTime{} = pr.landed_merged_at,
+               "#{pr.pr}: its successor must carry the merge timestamp that makes 'landed' checkable."
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # helpers
   # ---------------------------------------------------------------------------
+
+  # A byte window, trimmed back to a valid UTF-8 boundary — this file is full of
+  # em dashes, and a byte slice through one is not a string.
+  defp window_after(source, start, len) do
+    available = max(byte_size(source) - start, 0)
+    source |> binary_part(start, min(len, available)) |> trim_to_valid()
+  end
+
+  defp trim_to_valid(bin) do
+    if String.valid?(bin) or byte_size(bin) == 0 do
+      bin
+    else
+      bin |> binary_part(0, byte_size(bin) - 1) |> trim_to_valid()
+    end
+  end
 
   # The two directions, as data so the mutation tests can drive them.
   defp violations(register, hits, :lost_reader) do
