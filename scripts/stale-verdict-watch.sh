@@ -65,6 +65,16 @@
 #                 could not run). Never blamed on the credential — 3 and 4 are
 #                 separate codes because for one full release they were not,
 #                 and the size fault wore the credential fault's name.
+#             5 = BLIND: the population is non-empty and NOT ONE row could be
+#                 classified (every row answered UNKNOWN after re-polling).
+#                 2 says "some rows went unread"; 5 says "this run classified
+#                 NOTHING", which is a different claim and used to be
+#                 indistinguishable from perfect coverage — run 31311358759
+#                 classified 0 of 39 rows, printed the clean sentence and
+#                 concluded SUCCESS 68 seconds before a 23-row RED run on the
+#                 same tree. Zero coverage and full coverage shared one branch.
+#                 The predicate is `open > 0 AND classified == 0`: an EMPTY
+#                 population is still a legitimate 0, never a 5.
 #
 # USAGE
 #   scripts/stale-verdict-watch.sh
@@ -205,6 +215,14 @@ def commits_since($t):
     conflicting: [ $rows[] | select(.mergeable == "CONFLICTING") ],
     mergeable_n: [ $rows[] | select(.mergeable == "MERGEABLE") ] | length,
     unknown: [ $rows[] | select(.mergeable != "CONFLICTING" and .mergeable != "MERGEABLE") ] }
+# COVERAGE, carried in the verdict so no sentence has to infer it. A row is
+# classified when its mergeability was actually read; everything else went
+# unread. `blind` is the run that read a population and classified none of it —
+# and it is deliberately `open > 0 AND classified == 0`, never a bare
+# `classified == 0`, which would also fire on an empty population and turn this
+# verdict into an unconditional red.
+| .classified          = ((.conflicting | length) + .mergeable_n)
+| .blind               = (.open > 0 and .classified == 0)
 | .full_green_all      = [ .conflicting[] | select(.full_green) | .number ]
 | .full_green_occurr   = [ .conflicting[] | select(.occurrence_full_green) | .number ]
 | .laundered           = (.full_green_occurr - .full_green_all)
@@ -235,9 +253,18 @@ render() { # reads the verdict JSON on stdin
           " — the rest of the required set never rendered at all"
      else "PARTIAL CLASS: none" end),
     "",
-    (if (.reported | length) == 0
-     then "ok — no CONFLICTING pull request is asserting a green required verdict that main has moved past."
-     else "RED — \(.reported | length) CONFLICTING pull request(s) assert a green required verdict main has moved past. A conflicted PR re-dispatches NOTHING: this cannot clear itself." end),
+    # THREE WAYS TO SAY "NOT RED", AND THEY ARE NOT THE SAME CLAIM. The clean
+    # sentence used to be printed on the sole condition that .reported was
+    # empty — which it also is when NOTHING WAS CLASSIFIED. Every arm below now
+    # carries `classified N of M`, so the coverage behind the conclusion is in
+    # the sentence a human actually reads.
+    (if (.reported | length) > 0
+     then "RED — \(.reported | length) CONFLICTING pull request(s) assert a green required verdict main has moved past. A conflicted PR re-dispatches NOTHING: this cannot clear itself."
+     elif .blind
+     then "BLIND — classified 0 of \(.open) open pull request(s): the mergeability of every row was still UNKNOWN after re-polling, so this run classified NOTHING. This is NOT a green — a run that could not look cannot report the population clean."
+     elif (.unknown | length) > 0
+     then "INCONCLUSIVE — classified \(.classified) of \(.open) open pull request(s); \(.unknown | length) row(s) went unread. No CONFLICTING row in the part this run COULD read is asserting a stale green — that says nothing about the rows below."
+     else "ok — no CONFLICTING pull request is asserting a green required verdict that main has moved past (classified \(.classified) of \(.open) open)." end),
     (.reported | sort_by(.number)[] |
       "",
       "  #\(.number)  \(.mergeStateStatus)  head \(.headRefOid[0:9])  verdict as of \(.updatedAt)",
@@ -326,10 +353,17 @@ main() {
 
   printf '%s' "$verdict" | render
 
-  local reported unknown
+  local reported unknown open classified
   reported="$(jq '.reported | length' <<<"$verdict")"
   unknown="$(jq '.unknown | length' <<<"$verdict")"
+  open="$(jq '.open' <<<"$verdict")"
+  classified="$(jq '.classified' <<<"$verdict")"
   if [ "$reported" -gt 0 ]; then return 1; fi
+  # BEFORE the unknown check: a run that classified nothing is a stronger
+  # statement than "some rows went unread", and 2 is mapped to success by the
+  # workflow. An empty population is not blind — it is a read that found no
+  # pull requests, which is a legitimate 0.
+  if [ "${open:-0}" -gt 0 ] && [ "${classified:-0}" -eq 0 ]; then return 5; fi
   if [ "$unknown" -gt 0 ]; then return 2; fi
   return 0
 }
