@@ -238,6 +238,33 @@ jobs:
     needs: changes
     if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
+    # ── THE VERDICT CHANNEL, EXTENDED TO THE BROWSERLESS JOB (D209 shape) ────
+    # Same contract as cssom-parity's channel below — read only to choose the
+    # sentence a human reads, never consulted by anything that computes
+    # pass/fail — and wired here because the aggregate was naming ONE of TWO
+    # refusals. On run 31322709682 this job exited 2 with the same refusal
+    # tier-floor-render did and reached the merge button as a bare
+    # `FAIL console-unit: failure` with no verdict at all, because it had
+    # `outputs:` None and its `decide` line took no verdict argument.
+    #
+    # SIX of this job's steps can exit 2 (nine exit(2) sites: breakpoint-sweep
+    # 4, member-authority-sweep 1, and one each in the four censuses). Each of
+    # those steps classifies its own exit code and publishes the verdict BEFORE
+    # exiting — the shape proven to survive `exit 1` on run 31136979488. A step
+    # that PASSES publishes nothing, so the chain below reduces to the one
+    # failing step's verdict, and to the empty string when the job dies in one
+    # of the un-wrapped steps (`node --check`, the two `node --test` runs, the
+    # smoke harness, the css/token gate, the seal-predicate network probe) —
+    # none of which has an exit-2 vocabulary. Empty is read by the aggregator as
+    # "no verdict published", exactly as before this channel existed.
+    outputs:
+      verdict: >-
+        ${{ steps.sweep.outputs.verdict
+        || steps.member-authority.outputs.verdict
+        || steps.binding-census.outputs.verdict
+        || steps.reason-arm-census.outputs.verdict
+        || steps.me-envelope-census.outputs.verdict
+        || steps.agent-event-census.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -285,7 +312,31 @@ jobs:
       # Same shape as the standalone censuses below: node builtins only, no
       # Chrome, no network.
       - name: Member-actor rendered-state authority sweep
-        run: node cloud/priv/static/__preview__/member-authority-sweep.mjs
+        id: member-authority
+        run: |
+          # THE VERDICT WRAPPER (see this job's `outputs:` note). It preserves the
+          # instrument's exit VOCABULARY — 2 = refused to measure, 1 = a defect
+          # it really measured — instead of collapsing both into "the job
+          # failed", which is what sent a reader of run 31322709682 hunting for
+          # an environment fault that was not there.
+          #
+          # `set -uo pipefail` WITHOUT `-e`, for the reason cssom-parity gives:
+          # `-e` would kill the shell at the `node` line before the case could
+          # read `rc`. `${GITHUB_OUTPUT:-}` is guarded so publishing a verdict
+          # can never break the classification it describes. Both exits stay
+          # non-zero — a refusal is not a pass.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/member-authority-sweep.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — member-authority-sweep.mjs::member-authority-sweep.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
 
       # The seal predicate's OWN TESTS — never a live seal run. `seal-predicate.mjs`
       # decides clause (b) with `git merge-base --is-ancestor`, and under
@@ -408,7 +459,21 @@ jobs:
       # scripts/required-checks-verify.sh reds when a workflow's prose
       # contradicts that file. Nothing is registered here.
       - name: Responsive sweep — breakpoint/screen coverage refusal
-        run: node cloud/priv/static/__preview__/breakpoint-sweep.mjs
+        id: sweep
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/breakpoint-sweep.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — breakpoint-sweep.mjs::breakpoint-sweep.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
 
       - name: Responsive sweep unit tests
         run: node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs
@@ -464,7 +529,21 @@ jobs:
       # that predicates one affordance and ships another unpredicated keeps the
       # population identical and a `count <= N` gate green.
       - name: Elevated-write binding census (ADD + REMOVE)
-        run: node cloud/priv/static/__binding_census.mjs
+        id: binding-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__binding_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __binding_census.mjs::__binding_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
 
       # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
       #
@@ -502,7 +581,21 @@ jobs:
       # console dispatch set (scripts/console-path-escape-check.sh), so a router
       # edit that grows a new cause reaches this step.
       - name: Refusal reason-arm census (router causes ⊆ console arms)
-        run: node cloud/priv/static/__reason_arm_census.mjs
+        id: reason-arm-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__reason_arm_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __reason_arm_census.mjs::__reason_arm_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
 
       # ── THE /v1/me ENVELOPE CENSUS (charter D478/D480/D481, wave 43) ────────
       #
@@ -551,7 +644,21 @@ jobs:
       # in .github/required-checks.json: this job is already in console-gate's
       # `needs:`, so a failure here fails the one required context.
       - name: /v1/me envelope census (route keys ≡ preview corpus keys)
-        run: node cloud/priv/static/__me_envelope_census.mjs
+        id: me-envelope-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__me_envelope_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __me_envelope_census.mjs::__me_envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
 
       # ── agent-event vocabulary census — A TITLE IS A PROMISE ────────────────
       # Fourth sibling of the three censuses above, and the same law: the
@@ -612,7 +719,21 @@ jobs:
       # already in console-gate's `needs:`, so a failure here fails the one
       # required context.
       - name: Agent-event vocabulary census (titles ≡ producers ≡ fixtures)
-        run: node cloud/priv/static/__agent_event_vocabulary_census.mjs
+        id: agent-event-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__agent_event_vocabulary_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __agent_event_vocabulary_census.mjs::__agent_event_vocabulary_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
@@ -954,6 +1075,7 @@ jobs:
           # absence of a value here can ever green this context. A job that was
           # skipped or never ran interpolates to the empty string, which the
           # decide() below reports as "no verdict published" — never as OK.
+          V_UNIT: ${{ needs.console-unit.outputs.verdict }}
           V_CSSOM: ${{ needs.cssom-parity.outputs.verdict }}
           V_TIER: ${{ needs.tier-floor-render.outputs.verdict }}
           V_OVERFLOW: ${{ needs.overflow-guard.outputs.verdict }}
@@ -990,7 +1112,8 @@ jobs:
           #   literal string NEVER for jobs that must always run. A skip is
           #   accepted only against a gate-value of exactly 'false'.
           #   verdict is OPTIONAL and ADVISORY: jobs that publish one (the three
-          #   browser instruments) get their failure NAMED; jobs that do not
+          #   browser instruments, and console-unit for its six exit-2-capable
+          #   steps) get their failure NAMED; jobs that do not
           #   pass nothing and are judged exactly as before. It is read on the
           #   failure path ONLY, and cannot reach `bad` from there either.
           decide() {
@@ -1026,11 +1149,34 @@ jobs:
                     echo "          therefore red. Read the job log."
                     ;;
                   REFUSED)
-                    echo "          verdict=REFUSED — this instrument REFUSED TO MEASURE (exit 2). The browser"
-                    echo "          never came up, so NOT ONE rule or element was measured and NOTHING here"
-                    echo "          accuses cloud/priv/static. The bring-up was already retried a bounded"
-                    echo "          number of times in a fresh profile; each attempt's Chrome stderr is in"
-                    echo "          that job's log. Fix the ENVIRONMENT, not the CSS."
+                    # WHY THIS NAMES A CAUSE *SET* AND NOT A CAUSE (charter D237,
+                    # and D760 for the incident): this arm used to say "the
+                    # browser never came up, so NOT ONE rule or element was
+                    # measured". That was true of the last refusal its author
+                    # saw and false of the next one: on run 31322709682
+                    # tier-floor-render parsed 25 preludes, 6 breakpoints and 13
+                    # registered views and then refused over a COVERAGE fault in
+                    # cloud/priv/static/__preview__ — the console defect this
+                    # very sentence denied, while sending the reader to the
+                    # runner, the one place the fix was not. exit 2 is ONE code
+                    # over MANY causes (cssom-parity.mjs alone has eight message
+                    # shapes over ten, and only one of them is bring-up), and
+                    # this aggregate measured NONE of them. So it names the kind
+                    # of failure — which is all `result` + verdict can support —
+                    # and hands the cause back to the instrument that measured it.
+                    echo "          verdict=REFUSED — this instrument REFUSED TO MEASURE (exit 2). It made NO"
+                    echo "          claim, in either direction, about cloud/priv/static: a refusal is the"
+                    echo "          absence of a measurement, NOT a clean bill and NOT an accusation."
+                    echo "          WHY it refused is NOT knowable from here. exit 2 is ONE code over MANY"
+                    echo "          causes — headless Chrome that never came up after a bounded retry in a"
+                    echo "          fresh profile; a missing or unreadable input (e.g. the"
+                    echo "          cssom-heads.baseline sidecar, a renamed export, an unparseable route);"
+                    echo "          a COVERAGE fault in cloud/priv/static/__preview__ (a breakpoint, screen"
+                    echo "          or vocabulary no sweep accounts for); an unrecognised argument or defect"
+                    echo "          name; a census under its own floor."
+                    echo "          READ THAT JOB'S OWN SUMMARY LINE — the instrument printed the cause by"
+                    echo "          name. Do NOT assume the environment: several of those causes are fixed"
+                    echo "          in cloud/priv/static and nowhere else."
                     echo "          This context is still RED: a refusal is not a pass."
                     refusals="${refusals} ${job}"
                     ;;
@@ -1083,7 +1229,6 @@ jobs:
           # which is deliberately unfiltered.
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
-          decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"
           # `:-` on the VERDICT arguments ONLY, never on an `R_*`: an unbound
           # R_* must keep dying under `set -u` (that LOUD death is how D209's
           # missing-`env:` wiring mistake is caught). A verdict is advisory, and
@@ -1091,6 +1236,7 @@ jobs:
           # very step body supplying only the R_*/O_* environment GitHub had
           # before this channel existed — so an unset verdict must mean "none
           # published", not a crash.
+          decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"   "${V_UNIT:-}"
           decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"   "${V_CSSOM:-}"
           decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"   "${V_TIER:-}"
           decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}" "${V_OVERFLOW:-}"
@@ -1102,7 +1248,14 @@ jobs:
             # `bad` has already decided; there is deliberately no arm here in
             # which a REFUSED verdict can reach `exit 0`.
             if [ -n "${refusals}" ]; then
-              echo "::error title=Console gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AENVIRONMENT REFUSAL (exit 2), NOT a console defect:${refusals}%0AThose instruments could not bring headless Chrome up, after a bounded retry in a fresh profile, so they parsed no stylesheet and measured no element — nothing in this run accuses cloud/priv/static. Each failed attempt's Chrome stderr is printed in that job's log; fix the environment, not the CSS.%0AMeasured defects (exit 1) in this run:${measured:- none}%0AThis context is RED on purpose: a refusal is not a pass, and re-running is the only thing that can turn it green."
+              # SAME RULE AS THE REFUSED ARM ABOVE, AND FOR THE SAME MEASURED
+              # REASON (D760): this sentence used to promise the reader an
+              # ENVIRONMENT fault and a Chrome that never started. It is a
+              # promise this step cannot keep — it reads one word, `REFUSED`,
+              # and never opens the refusing job's log. Naming the cause SET is
+              # the strongest honest claim available here; the cause itself
+              # belongs to the instrument that measured it.
+              echo "::error title=Console gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2):${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about cloud/priv/static in either direction. It does NOT follow that the environment is at fault. exit 2 is ONE code over MANY causes — headless Chrome that never came up after a bounded retry in a fresh profile; a missing or unreadable input (e.g. the cssom-heads.baseline sidecar); a COVERAGE fault in cloud/priv/static/__preview__ (a breakpoint, screen or vocabulary no sweep accounts for); an unrecognised argument or defect name; a census under its own floor. This aggregate measured none of them and will not guess.%0AREAD THE REFUSING JOB'S OWN SUMMARY LINE — it printed the cause by name, and that cause may well live in the console's own bytes rather than on the runner.%0AMeasured defects (exit 1) in this run:${measured:- none}%0AThis context is RED on purpose: a refusal is not a pass, and only a fix or a re-run can turn it green."
             else
               echo "::error::Console gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
             fi

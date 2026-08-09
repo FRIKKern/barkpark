@@ -1041,21 +1041,40 @@ gate() {
   # step body that never decided anything exits 1 too: an unbound variable under
   # `set -u`, a syntax error, a `decide` renamed out from under its call sites.
   # So also require the aggregator to have reached its own conclusion.
+  #
+  # THE RED PATH HAS TWO CONCLUSION LINES, NOT ONE, and until this slice only
+  # the plain one was ever reached: no case here supplied a verdict, so the
+  # refusals branch — and with it the whole REFUSED arm of `decide` — had never
+  # executed under test. Either line proves the body decided; neither is
+  # optional, so a run that printed NEITHER still reports a crash.
   local verdict
   if [ "$want" -eq 0 ]; then
     verdict="Console gate: every upstream job either succeeded"
+    if grep -qF -- "$verdict" "$GATE_OUT"; then
+      ok "  …and reached its own verdict line"
+    else
+      no "  …but printed NO verdict line — the step body crashed rather than decided"
+      sed 's/^/        /' "$GATE_OUT" >&2
+    fi
   else
-    verdict="::error::Console gate: at least one upstream job is not in the allow-set"
-  fi
-  if grep -qF -- "$verdict" "$GATE_OUT"; then
-    ok "  …and reached its own verdict line"
-  else
-    no "  …but printed NO verdict line — the step body crashed rather than decided"
-    sed 's/^/        /' "$GATE_OUT" >&2
+    if grep -qF -- "::error::Console gate: at least one upstream job is not in the allow-set" "$GATE_OUT" \
+      || grep -qF -- "title=Console gate RED — an instrument REFUSED TO MEASURE" "$GATE_OUT"; then
+      ok "  …and reached its own verdict line"
+    else
+      no "  …but printed NO verdict line — the step body crashed rather than decided"
+      sed 's/^/        /' "$GATE_OUT" >&2
+    fi
   fi
 }
 gate_says() {
   if grep -q -- "$1" "$GATE_OUT"; then ok "$2"; else no "$2 (not in the step output)"; fi
+}
+# The negative half, and the one that pins a SENTENCE rather than a branch. A
+# copy edit is unwitnessable without it: the wording this gate must NOT use is
+# not absent by accident, it was removed on purpose (D760), and only an
+# assertion that reds when it comes back keeps it removed.
+gate_denies() {
+  if grep -q -- "$1" "$GATE_OUT"; then no "$2 (the step output still says it)"; else ok "$2"; fi
 }
 
 # (a) the happy path: a console PR, everything ran and passed
@@ -1126,6 +1145,87 @@ gate_says "overflow-guard: failure" "…and names overflow-guard (its decide lin
 #      walks needs -> env var -> decide's 2nd argument and is mutation-proven in
 #      four directions. This case is its behavioural companion, not a second
 #      copy of it.)
+
+# ── THE VERDICT CHANNEL, DRIVEN — cases (l)-(r) ───────────────────────────
+# MEASURED BEFORE THIS BLOCK EXISTED: `grep -c 'V_CSSOM\|V_TIER\|V_OVERFLOW'`
+# over this file returned 0. Not one case above supplies a verdict, so the
+# REFUSED arm of `decide`, the `refusals`/`measured` tallies and the refusal
+# banner had NEVER been executed by any test — gutting the entire `REFUSED)`
+# arm AND replacing the banner's title with `MUTATED — THE MOON IS MADE OF
+# CHEESE` still yielded `205 passed, 0 failed`. The copy in that arm was
+# therefore unwitnessable, which is how it came to assert, for two waves, a
+# Chrome bring-up failure for refusals that had parsed the stylesheet fine.
+# These cases make the arm able to lose, in both directions: what it must say,
+# and what it must never say again.
+
+# (l) A REFUSAL IS NAMED AS A REFUSAL — and names a cause SET, never one cause.
+gate "cssom-parity REFUSED (a verdict is published)" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_CSSOM=REFUSED
+gate_says "REFUSED TO MEASURE" "…and says the instrument refused, not that CSS is broken"
+gate_says "ONE code over MANY causes" "…and says exit 2 is one code over many causes"
+gate_says "COVERAGE fault in cloud/priv/static/__preview__" "…and lists the console-side cause the old copy DENIED"
+gate_says "READ THAT JOB'S OWN SUMMARY LINE" "…and sends the reader to the instrument that measured it (per-job arm)"
+gate_says "READ THE REFUSING JOB'S OWN SUMMARY LINE" "…and again in the aggregate banner"
+# The negative half. Every needle below is verbatim from the copy this slice
+# removed; each one asserted a single cause the refusing job's own log refutes.
+gate_denies "The browser never came up" "…and no longer asserts the browser never came up"
+gate_denies "could not bring headless Chrome up" "…and no longer asserts a Chrome bring-up failure"
+gate_denies "NOT ONE rule or element was measured" "…and no longer claims nothing was parsed"
+gate_denies "Fix the ENVIRONMENT, not the CSS" "…and no longer sends the reader to the runner"
+gate_denies "ENVIRONMENT REFUSAL" "…and no longer labels every refusal an environment refusal"
+
+# (m) THE SECOND REFUSAL THE GATE USED TO MISS. console-unit exited 2 on run
+#     31322709682 with the same refusal tier-floor-render published, and
+#     rendered as a bare `FAIL console-unit: failure` — it had `outputs:` None
+#     and its `decide` line took no verdict argument. Delete `V_UNIT` from the
+#     workflow's `env:`, or the 4th argument from its `decide` line, and this
+#     case is what notices.
+gate "console-unit REFUSED (the refusal the gate could not see)" 1 \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_UNIT=REFUSED
+gate_says "console-unit: failure" "…and names console-unit"
+gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal rather than a bare failure"
+gate_says "(exit 2): console-unit" "…and carries it into the refusals tally by name"
+
+# (n) …and BOTH refusals in one run are both named, in decide order.
+gate "console-unit and cssom-parity both REFUSED" 1 \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_UNIT=REFUSED V_CSSOM=REFUSED
+gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refusals, not one"
+
+# (o) AN UNPUBLISHED VERDICT MUST STAY UNPUBLISHED. A job that fails without
+#     publishing anything is judged exactly as it was before this channel
+#     existed — the gate may not invent a refusal it was never told about, and
+#     the un-wrapped steps in console-unit (node --check, the two --test runs,
+#     smoke, the css gate) are precisely that case.
+gate "cssom-parity failed, no verdict published" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true
+gate_says "cssom-parity: failure" "…and still names the failing job"
+gate_denies "REFUSED TO MEASURE" "…and does NOT manufacture a refusal out of an absent verdict"
+gate_says "not in the allow-set" "…and reaches the plain red conclusion"
+
+# (p) a MEASURED defect is the opposite claim, and must not borrow the
+#     refusal's words.
+gate "tier-floor-render MEASURED_DEFECT" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_TIER=MEASURED_DEFECT
+gate_says "This one IS about the console's own bytes" "…and says the defect is real and console-side"
+gate_denies "REFUSED TO MEASURE" "…and does not call a measured defect a refusal"
+
+# (q) a verdict outside the published vocabulary is "cannot tell", not a pass.
+gate "overflow-guard publishes an unknown verdict" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_ESCAPE=success \
+  O_CONSOLE=true V_OVERFLOW=BANANA
+gate_says "outside the published vocabulary" "…and refuses to interpret it"
+
+# (r) verdict=OK on a FAILED job — the instrument said clean and the job died
+#     anyway. Still red, and still says why it cannot tell.
+gate "cssom-parity publishes OK but the job failed" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_CSSOM=OK
+gate_says "the instrument said clean and the job" "…and names the contradiction"
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0
