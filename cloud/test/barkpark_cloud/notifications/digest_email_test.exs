@@ -390,6 +390,54 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     }
   end
 
+  # The wait node as `DeployLedger.census/3` actually returns it — a `max`
+  # quantile beside the population it was measured over.
+  defp measured_wait(seconds, covered, deferred, pending) do
+    %{
+      population: %{
+        deferred: deferred,
+        covered: covered,
+        pending: pending,
+        unreadable: deferred - covered - pending
+      },
+      sample: covered,
+      unresolved: pending,
+      max: %{
+        label: "max",
+        quantile: 1.0,
+        seconds: seconds,
+        sample: covered,
+        min_sample: 200,
+        refused: false,
+        reason: nil
+      }
+    }
+  end
+
+  defp refused_wait(covered, deferred, pending, reason) do
+    %{
+      population: %{
+        deferred: deferred,
+        covered: covered,
+        pending: pending,
+        unreadable: deferred - covered - pending
+      },
+      sample: covered,
+      unresolved: pending,
+      max: %{
+        label: "max",
+        quantile: 1.0,
+        seconds: nil,
+        sample: covered,
+        min_sample: 200,
+        refused: true,
+        reason: reason
+      }
+    }
+  end
+
+  defp with_wait(window, wait), do: Map.put(window, :wait, wait)
+
   defp health(windows) do
     %{
       windows: windows,
@@ -487,6 +535,100 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
              "  last 24h (2026-08-08 06:00 UTC to 2026-08-09 06:00 UTC): 74 attempted, of which 12 deferred by a busy box — failure rate UNMEASURED (sample 74 below min_sample 200); 3 of 74 attempted are settled failures"
 
     refute body =~ "% failed post-door"
+  end
+
+  ## ── THE DEFERRAL WAIT ─────────────────────────────────────────────────────
+  ##
+  ## The count answers "how often did a box say not now". Only the wait answers
+  ## "and how long did that cost the site" — and the live release rendered the
+  ## count alone while `census.deferral_wait` sat unread in the same reading.
+
+  test "the deferral wait rides on the same line as the deferrals it is a wait for" do
+    deploy =
+      health([
+        with_wait(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          measured_wait(2_500.0, 492, 502, 8)
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "760 attempted, of which 502 deferred by a busy box — 2.37% failed post-door (18 of 760 attempted). " <>
+               "The slowest of those deferrals waited 41.7m for a box; 492 of 502 deferred rows have since rebuilt, 8 are still waiting."
+
+    # The wait and the population it was measured over are on ONE line, for the
+    # same reason the rate and its door are: a fast max over a sliver of the
+    # population is not a fast platform.
+    [line] = for l <- String.split(body, "\n"), l =~ "slowest of those deferrals", do: l
+    assert line =~ "502 deferred by a busy box"
+    assert line =~ "492 of 502"
+  end
+
+  test "a wait the census REFUSED prints its refusal and its population — never a number" do
+    deploy =
+      health([
+        with_wait(
+          window("last 24h", 74, 12, 3, refused_rate(74, "sample 74 below min_sample 200")),
+          refused_wait(9, 12, 3, "sample 9 below min_sample 200")
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "Deferral wait UNMEASURED (sample 9 below min_sample 200); 9 of 12 deferred rows have since rebuilt, 3 are still waiting."
+
+    # A refusal that rendered as a duration, or as nothing at all, is the two
+    # failures this clause exists to make impossible.
+    refute body =~ "slowest of those deferrals"
+    refute body =~ "busy box — 2"
+  end
+
+  test "the zero-headroom refusal reaches the reader in the census's own words" do
+    reason =
+      "max is UNIDENTIFIABLE: 0.41% of the deferred population is unresolved " <>
+        "(still waiting, or unreadable), exceeding the 0.0% headroom max needs"
+
+    deploy =
+      health([
+        with_wait(
+          window("last 24h", 760, 241, 18, measured_rate(18, 760)),
+          refused_wait(240, 241, 1, reason)
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "Deferral wait UNMEASURED (#{reason}); 240 of 241 deferred rows have since rebuilt, 1 are still waiting."
+
+    refute body =~ "slowest of those deferrals"
+  end
+
+  test "a reading that carries no wait node renders UNMEASURED — never a fast one" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "Deferral wait UNMEASURED (the ledger returned no usable wait)."
+    refute body =~ "slowest of those deferrals"
+  end
+
+  test "a window with no rows at all carries no wait clause — there is nothing to have waited" do
+    deploy =
+      health([
+        with_wait(
+          window("last 24h", 0, 0, 0, refused_rate(0, "sample 0 below min_sample 200")),
+          refused_wait(0, 0, 0, "sample 0 below min_sample 200")
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "UNMEASURED — no deploy rows at all in this window"
+    refute body =~ "Deferral wait"
+    refute body =~ "deferred rows have since rebuilt"
   end
 
   test "a send that supplied no reading says so — the omission cannot render as a clean team" do
@@ -672,6 +814,40 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     # The busy neighbour IS visible to the team that owns it — the empty arm is
     # a scoping result, not a silenced reading.
     assert team_body(team_a) =~ "6 attempted, of which 0 deferred by a busy box"
+  end
+
+  test "the wait reaches the digest THROUGH the census, not through a fixture", %{} do
+    {_u, team} = user_team()
+    site = site_fixture(team)
+
+    deployments!(site, 3, "deferred")
+    deployments!(site, 2, "live")
+
+    body = team_body(team)
+
+    # Three real deferred rows, none of them covered by a later live build (the
+    # live rows share their instant, and coverage is strictly later). The census
+    # refuses the quantile at a sample of 0 and the counts survive — which is
+    # exactly what a real small team receives.
+    assert body =~ "5 attempted, of which 3 deferred by a busy box"
+
+    assert body =~
+             "Deferral wait UNMEASURED (sample 0 below min_sample 200); 0 of 3 deferred rows have since rebuilt, 3 are still waiting."
+
+    # If `window_health/3` ever drops the key again, this reds — the fixture
+    # tests above would not.
+    refute body =~ "the ledger returned no usable wait"
+  end
+
+  test "a team that owns no sites is never told a deferral wait either" do
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: no_sites_reading()))
+
+    assert body =~
+             "Deploy health: this team owns no sites, so it ran no deploys — nothing was measured here and nothing is being withheld."
+
+    refute body =~ "Deferral wait"
+    refute body =~ "deferred rows have since rebuilt"
+    refute body =~ "slowest of those deferrals"
   end
 
   # Exactly what `Notifications.deliver_fleet_digest/1` does for one team: list

@@ -2160,6 +2160,52 @@ defmodule BarkparkCloud.DeployLedgerTest do
       refute wait.p50.refused
       assert wait.p50.seconds == 60.0
     end
+
+    # THE ZERO-HEADROOM LAW, which nothing pinned until now: `max` is the q=1.0
+    # quantile, so its headroom is `1.0 - 1.0 = 0.0` and ONE unresolved row is
+    # already more of the population than it can carry. Deleting the law
+    # entirely — `deferral_wait_quantile(seconds, 1.0, "max", unresolved, ...)`
+    # → `..., 0, ...` — passed the whole file before this test existed.
+    #
+    # `live_marks/1` is bounded BELOW and not above, so a merely-past window has
+    # `pending: 0` and `max` prints. The fixture therefore mints a genuinely
+    # PENDING row: 240 covered deferrals that clear `min_sample` on their own,
+    # plus one deferral that nothing was minted after.
+    test "max REFUSES on a single unresolved row — a q=1.0 quantile has no headroom at all",
+         %{site: site} do
+      covered_deferrals!(site, List.duplicate(60, 240))
+
+      deployments!(site, [
+        %{
+          status: "deferred",
+          content_rev: "rev-still-waiting",
+          inserted_at: DateTime.add(@dwait_from, 500_000, :second)
+        }
+      ])
+
+      wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
+
+      # The sample is big enough that `min_sample` is NOT what refuses here —
+      # otherwise this test would pass with the law deleted.
+      assert wait.population == %{deferred: 241, covered: 240, pending: 1, unreadable: 0}
+      assert wait.max.sample == 240
+      assert wait.max.sample >= DeployLedger.min_sample()
+
+      assert wait.max.refused
+      assert is_nil(wait.max.seconds)
+      assert wait.max.reason =~ "UNIDENTIFIABLE"
+      assert wait.max.headroom == 0.0
+      assert wait.max.unresolved == 1
+
+      # …and it is the ZERO-HEADROOM law that refused, not the sample floor.
+      refute wait.max.reason =~ "below min_sample"
+
+      # The guard is a FACT about q=1.0 and not a blanket over the node: p95 has
+      # 5% of headroom, 0.41% is unresolved, and it still names a number over
+      # the same population.
+      refute wait.p95.refused
+      assert wait.p95.seconds == 60.0
+    end
   end
 
   ## ── 4c. THE D8 INVERSION: a new cause must not shrink the abandoned count ──
