@@ -2928,6 +2928,71 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 59 REVIEW — grade A- — THREE round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; main's red required gate is genuinely unjammed (full cloud suite 3485 / 0 on the merged tree); one reviewer commit fixing a stale-false-red in the new watch; two round-2/3 slices deferred by design
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| main's Cloud gate goes green by TIGHTENING both censuses | `cch-w59-s1-the-gate-goes-green-by-tightening-not-loosening` | `loop-epic/main-s-cloud-gate-goes-green-by-tighteni-0` (builder's, unchanged) | #11120 | both census files **35 / 0**; `mix format --check-formatted` clean |
+| A plain member stops making the plane hand a decrypted admin bearer to a SUSPENDED box | `cch-w58-bl-wire-site-url-writes-a-suspended-box` | `loop-epic/a-plain-team-member-makes-the-plane-hand-1` (builder's, unchanged) | #11121 | the seven-file gate **135 / 0**; `mix format` clean on all four touched files |
+| main's tip carries a verdict or something screams | `cch-w59-s3-mains-tip-carries-a-verdict-or-screams` | `loop-epic/main-s-tip-carries-a-verdict-or-somethin-2-r` | #11122 | `sh scripts/main-gate-watch.test.sh` **49 / 0** (was 47; review added two fixtures); live read EXIT=1 on tip `0e9246447` |
+
+**What landed.** The wish for this wave was places where the Console, the control plane or their GATES tell a user or a
+merge something they cannot support — and all three slices are literally that, one per audience. **The MERGE** (S1):
+main's required Cloud gate was red on three failures in two census files, blocking five clean security PRs, and both
+reds are repaired by TIGHTENING. Three `queued_*` rows are RE-DECLARED `:stay` → `:has_reader` rather than deleted
+(deletion is refuted by run: `@register_floor` trips AND the `:780` pin fails), which ADDS the `:lost_reader` direction
+a `:stay` never guarded — proved by renaming the three Go identifiers across `internal/` and watching all three red at
+`readers: 0`. The loose-spelling arm, which had fired on a NON-caller (`PlatformDeliveries` is the Go client method for
+the unrelated `GET /v1/deliveries`), learns the route's namespace as a conjunct on BOTH the loose and the snake arm.
+**THE USER** (cch-w58-bl): a PLAIN TEAM MEMBER could `POST /v1/barkparks/:id/site-url` against a SUSPENDED box and get
+a 200 — the plane decrypted the stored admin bearer and put it on the wire TWICE to rewrite the instance's revalidation
+webhook. A leading `%Barkpark{suspended: true}` clause refuses BEFORE the decrypt, with the load-bearing assertion being
+`StudioLinkFakeHttpClient.requests() == []`, not the status code. **THE FLEET** (S3): a scheduled, level-triggered watch
+on main's TIP that reds on RED and reds just as loudly on a tip carrying NO verdict at all — a PRESENCE assertion, since
+a "find a failing row" watch reports GREEN on the twelve `cancelled` shas.
+
+**The measured wave-level proof.** The reviewer built a throwaway integration branch merging all three slices and ran
+the **full cloud suite: 3485 tests, 0 failures**. The three pre-existing failures on `main` are gone and nothing else
+moved. That is the number that says the gate is actually unjammed rather than locally quiet.
+
+**The one reviewer commit, and it was a real bug.** `gh api --paginate` on an OBJECT endpoint emits one JSON document
+PER PAGE, so `main-gate-watch.sh`'s "latest run wins" dedup grouped per page: an older re-run row on page 1 could decide
+a context whose latest row was on page 2 — a permanent stale FALSE RED, which is precisely how a watch gets muted.
+Proved by running the pre-fix script against a two-document fixture (reports RED) and the fixed one (reports PASS);
+fixed with `jq -s` + `per_page=100` and two multi-document fixtures pinned in test section 9.
+
+**HIGH-FLIP-RISK, independently re-derived.** *May a suspended box still be WRITTEN?* The builder built the refusal as
+briefed and asked for a ruling. The reviewer re-derived it from shipped doctrine the builder did not cite:
+`router.ex:10731-10733` already refuses `bp.suspended and entry.tier == :mutate` with the same 409 `suspended` slug
+across the whole instance API, so this slice makes two stragglers consistent with a rule the plane already enforces.
+The counter-argument (site-url is member-tier, so it reads as a routine onboarding finish, and a billing-lapsed
+customer is exactly the person about to pay) is real but weaker than the precedent — and the console already ships a
+named human sentence for the code (`ERRORS.suspended`, surfaced through `friendly(r.data, …)`), so the user is told why.
+**A genuinely independent second reviewer is still owed before merge**; if the product answer flips, revert the
+`wire_site_url` clause ONLY — the push-relay half is admin-tier and purely infrastructural.
+
+**What stalled: nothing.** Both remaining slices are DEFERRED BY DESIGN under the sequenced-rounds law —
+`cch-w58-s6-the-console-states-the-binding-it-already-receives` (round 2, after #11104) and
+`cch-w58-followup-unavailable-reason-has-no-reader` (round 3, after #11102 AND after s6; both edit `app.js`).
+
+**Ledger.** All three tasks were claimed, stamped as the work happened, and left `in_progress` with only merge-gated
+criteria open — no fabrication found, no correction needed. The reviewer met and stamped the two PR-body criteria
+(S1 #7, S3 #7) when opening the PRs. Two residuals filed as published children rather than carried in prose:
+`cch-w59-bl-main-gate-watch-has-no-notification-egress` (narrowed on filing — the egress half is ALREADY owned by the
+open `cch-w42-s4`, so what is left is that exit 3 CONFIGURATION FAULT is indistinguishable from a red main at the run
+level, plus an undocumented branch-protection tax) and
+`cch-w59-bl-a-refused-suspended-write-leaves-no-trace` (`Accounts.audit/3` rolls back on any error tuple, so a refused
+attempt against a suspended box leaves the same trace as nobody doing anything).
+
+**What the next wave must know.** (1) MERGE ORDER IS THE WHOLE HANDOFF: #11120 first and alone — it is what turns main's
+required Cloud gate green, and every other PR in flight is being judged against a red base. Then #11121 and #11122 in
+any order. Only after #11104 merges may `cch-w58-s6` be dispatched, and only after both #11102 and s6 may
+`cch-w58-followup-unavailable-reason-has-no-reader`. (2) The watch this wave shipped will start reporting the moment it
+merges, and the FIRST thing it will do is red — that is correct and it is the point; do not soften it, land #11120.
+(3) The honest remainder of this epic's thesis is no longer "does the plane know?" but "does anyone HEAR?" — three
+waves have now built guards that can lose and each one ends with the same residual: the verdict reaches an Actions tab
+and stops. `cch-w42-s4` is the open owner of that and it is the highest-leverage unbuilt thing under this charter.
+
 ### 2026-08-09 — wave 58 REVIEW — grade B+ — FIVE round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; two reviewer commits, one of them a REVERSAL of a slice's central judgement; two round-2 slices deferred by design
 
 | Slice | Task | Final branch | PR | Gate re-run by the reviewer |
