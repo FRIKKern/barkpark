@@ -63,12 +63,33 @@ defmodule BarkparkCloud.DomainStatusTest do
     bp
   end
 
+  # A live box. Its stored `url` is the CLEAN form go-live actually reserves
+  # (`<slug>.barkpark.cloud`) — DELIBERATELY a DIFFERENT STRING from
+  # `Barkpark.provisioning_fqdn/1`'s suffixed `<slug>-<team_short_id>` form.
+  #
+  # This is the point of the fixture: the old harness stored the unrelated
+  # constant "https://x.barkpark.cloud" and then programmed every DNS/TLS/HTTP
+  # fake with `provisioning_fqdn(bp)` — feeding the fake exactly the name the
+  # code under test asked for, so it was structurally incapable of redding on
+  # WHICH name the console checks. Fakes are now programmed by `platform_fqdn/1`
+  # (the stored url's host), so probing the wrong name is a test failure.
   defp live_barkpark(team, attrs \\ %{}) do
-    team
-    |> barkpark_fixture()
-    |> Ecto.Changeset.change(Enum.into(attrs, %{host: @host, url: "https://x.barkpark.cloud"}))
+    bp = barkpark_fixture(team)
+
+    bp
+    |> Ecto.Changeset.change(Enum.into(attrs, %{host: @host, url: Barkpark.clean_url(bp.slug)}))
     |> Repo.update!()
   end
+
+  # The hostname the console must check: the host of the STORED url. Kept
+  # deliberately dumb (strip the scheme, nothing else) so it does not
+  # re-implement — and therefore cannot rubber-stamp — the production
+  # derivation. A row with no url falls back to the suffixed FQDN, which is the
+  # only name a pre-reservation row has.
+  defp platform_fqdn(%Barkpark{url: url}) when is_binary(url) and url != "",
+    do: String.replace_prefix(url, "https://", "")
+
+  defp platform_fqdn(bp), do: Barkpark.provisioning_fqdn(bp)
 
   # ── seam fakes (injected per call via opts) ──
 
@@ -186,7 +207,7 @@ defmodule BarkparkCloud.DomainStatusTest do
   # cannot see the new rung state at all.
   defp fixture_cases do
     bp = fixture_barkpark()
-    dns = dns_map(%{Barkpark.provisioning_fqdn(bp) => [{91, 99, 1, 2}]})
+    dns = dns_map(%{platform_fqdn(bp) => [{91, 99, 1, 2}]})
 
     %{
       "all_serving" =>
@@ -235,7 +256,7 @@ defmodule BarkparkCloud.DomainStatusTest do
 
   # The all-green estate for a platform-only box at @host.
   defp green_seams(bp) do
-    fqdn = Barkpark.provisioning_fqdn(bp)
+    fqdn = platform_fqdn(bp)
 
     [
       dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}),
@@ -250,6 +271,104 @@ defmodule BarkparkCloud.DomainStatusTest do
 
   # ── executor: happy path + envelope shape ──
 
+  # ── the estate's platform entry: WHICH hostname is the domain of record ──
+
+  # Live measurement that motivated this (N=6, the whole team-visible fleet):
+  # three instances returned ok:false with the platform domain stuck at
+  # `dns_found: pending` under "DNS records take up to a minute to propagate —
+  # give it a moment and re-check", for the SUFFIXED name — four of the six
+  # suffixed names do not resolve at all, because go-live reserved the clean
+  # form. The one row whose stored url happened to BE the provisioning_url
+  # returned ok:true on all four stages: the check passed exactly when the two
+  # names coincided. These tests pin the name apart from that coincidence.
+  describe "DomainStatus.check/2 — the platform domain is the STORED url's host" do
+    test "the console checks the url's hostname, NOT the suffixed provisioning_fqdn" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      stored = platform_fqdn(bp)
+      suffixed = Barkpark.provisioning_fqdn(bp)
+
+      # The premise of the whole test: these are two DIFFERENT names, and only
+      # the stored one exists in DNS.
+      assert stored != suffixed
+      assert stored == bp.slug <> ".barkpark.cloud"
+      assert suffixed =~ bp.slug <> "-"
+
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{stored => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = platform(result)
+      assert dom.host == stored
+      assert dom.overall == "ok"
+      assert result.ok == true
+    end
+
+    test "a fleet where ONLY the suffixed name resolves is not silently green" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      # The live defect, reproduced: the suffixed name is the one that answers
+      # (or, in the field, the one nothing ever creates). Checking it would make
+      # the console say "ok"; checking the name the plane serves says pending
+      # and never claims the instance is reachable.
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{Barkpark.provisioning_fqdn(bp) => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = platform(result)
+      assert dom.host == platform_fqdn(bp)
+      assert stage(dom, "dns_found").status == "pending"
+      assert dom.overall == "pending"
+      assert result.ok == false
+    end
+
+    test "POSITIVE CONTROL: a row whose url IS the provisioning_url still goes all-green" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+      bp = bp |> Ecto.Changeset.change(%{url: Barkpark.provisioning_url(bp)}) |> Repo.update!()
+
+      fqdn = Barkpark.provisioning_fqdn(bp)
+      assert platform_fqdn(bp) == fqdn
+
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = platform(result)
+      assert dom.host == fqdn
+      assert Enum.map(dom.stages, & &1.status) == ~w(ok ok ok ok)
+      assert result.ok == true
+    end
+
+    test "a row with no url yet falls back to the suffixed FQDN (the only name it has)" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team) |> Ecto.Changeset.change(%{url: nil}) |> Repo.update!()
+
+      fqdn = Barkpark.provisioning_fqdn(bp)
+
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      assert platform(result).host == fqdn
+      assert result.ok == true
+    end
+  end
+
   describe "DomainStatus.check/2 — all green" do
     test "platform-only box: every stage ok, overall ok, exact envelope shape" do
       {_u, team} = user_with_team()
@@ -263,7 +382,7 @@ defmodule BarkparkCloud.DomainStatusTest do
 
       assert [dom] = result.domains
       assert dom.kind == "platform"
-      assert dom.host == Barkpark.provisioning_fqdn(bp)
+      assert dom.host == platform_fqdn(bp)
       assert dom.overall == "ok"
 
       assert Enum.map(dom.stages, & &1.stage) == ~w(dns_found points_here tls serving)
@@ -285,7 +404,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "attached custom_host adds a second domain (platform + custom)" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team, %{custom_host: "shop.barkpark.cloud"})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       seams = [
         dns:
@@ -343,7 +462,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "points_here FAILS when the domain resolves somewhere else; tls/serving skip" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       # Resolves — but to a different box than @host.
       result =
@@ -372,7 +491,7 @@ defmodule BarkparkCloud.DomainStatusTest do
       {_u, team} = user_with_team()
       # A still-provisioning box: DNS record exists, but no reported host.
       bp = live_barkpark(team, %{host: nil})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result = DomainStatus.check(bp, dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}))
       dom = platform(result)
@@ -385,7 +504,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a hostname host is resolved and matched (not just IP literals)" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team, %{host: "box.example.net"})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       # Both the domain and the host resolve to the same address.
       result =
@@ -409,7 +528,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a timing-out TLS dial is a bounded pending, not a hang" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result =
         DomainStatus.check(bp,
@@ -430,7 +549,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a raising seam is caught (never escapes) — treated as unreachable" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result =
         DomainStatus.check(bp,
@@ -610,7 +729,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a failed rung still outranks unknown (the ordering is not just unknown-wins)" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       # The domain resolves elsewhere (points_here FAILS) while the box host's
       # own lookup faults — a real misconfiguration outranks an unmeasured rung.
@@ -665,7 +784,7 @@ defmodule BarkparkCloud.DomainStatusTest do
       {_u, team} = user_with_team()
       # The box's host is a NAME, so expected_addrs/2 resolves it too (:358).
       bp = live_barkpark(team, %{host: "box.example.net"})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       # The domain answers; the BOX host's lookup faults.
       result =
@@ -695,7 +814,7 @@ defmodule BarkparkCloud.DomainStatusTest do
 
       # The control, one field apart: the instance genuinely has no host yet.
       no_host = live_barkpark(team, %{host: nil, url: "https://no-host.barkpark.cloud"})
-      no_host_fqdn = Barkpark.provisioning_fqdn(no_host)
+      no_host_fqdn = platform_fqdn(no_host)
 
       unreported =
         no_host
@@ -710,7 +829,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a fault on ONE family while the other answers is still a MEASUREMENT (ok, not unknown)" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result =
         DomainStatus.check(bp,
@@ -740,7 +859,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     setup do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
       base = [dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}), http: http_const({:ok, 200})]
       {:ok, bp: bp, base: base}
     end
@@ -835,7 +954,7 @@ defmodule BarkparkCloud.DomainStatusTest do
       {_u, team} = user_with_team()
       # Stored with leading zeros / uppercase — NOT :inet.ntoa's canonical form.
       bp = live_barkpark(team, %{host: "2001:0DB8:0000:0000:0000:0000:0000:0001"})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result =
         DomainStatus.check(bp,
@@ -1203,7 +1322,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "returns the full green envelope for the owner" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       __MODULE__.RouteFake.program(
         dns: %{fqdn => [{203, 0, 113, 10}]},
