@@ -691,8 +691,9 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 // renderSiteDeployVerdict is the human verdict on a deployment the stream stopped
 // on — the extracted, network-free render the success-claim registry probes. Its
 // ONLY input is the deployment record the control plane returned, and the exit
-// code it returns is siteDeployExit's contract (a deploy that never went live
-// never exits 0).
+// code it returns is siteDeployExit's contract (a deploy that was DROPPED never
+// exits 0; a deferred one — re-queued, nothing lost — deliberately does, see the
+// D543 note on siteDeployExit).
 //
 // THE LIMIT IT SPEAKS. "live" is the control plane's record of its own SWITCH,
 // and the CLI never fetches the URL — so the receipt names the deployment it read
@@ -715,6 +716,30 @@ func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployme
 			out.userErr("site deploy cancelled at %s — %s (nothing was switched, visitors still see the previous build)", sanitizeCell(stage), sanitizeCell(reason))
 		}
 		return exitGeneric
+	case siteDeployDeferred(d.Status):
+		// The MAJORITY outcome (73.7% of settled attempts, charter D209) and, until
+		// wave 32, the one this verdict lied about: it fell through to the default
+		// arm and printed "deploy in progress" over a row the control plane had
+		// already settled. Nothing is in progress; the box refused this round and
+		// re-queued a rebuild carrying the same content. Say all three things —
+		// what happened, how deep the refusal chain is (siteDeferralLine, which
+		// spells out that the depth counts consecutive same-cause refusals rather
+		// than counting down to a drop), and that the operator must NOT re-publish
+		// by hand to make it happen.
+		//
+		// THE STAGE IS QUOTED, NEVER GUESSED. An earlier cut defaulted an empty
+		// stage to "PLAN", which is the stage a deferral plausibly stops at — and
+		// a plausible guess printed as a reading is exactly the lie this epic
+		// exists to remove. A control plane that sends no stage gets a sentence
+		// that says so.
+		if st := strings.TrimSpace(d.Stage); st != "" {
+			out.outf("↺ site deploy deferred at %s — the box refused this round; nothing was built and nothing was switched, so visitors still see the previous build", sanitizeCell(st))
+		} else {
+			out.outf("↺ site deploy deferred before it named a stage — the box refused this round; nothing was built and nothing was switched, so visitors still see the previous build")
+		}
+		out.outf("  %s", siteDeferralLine(d))
+		out.outf("  a rebuild carrying this same content is already queued — do NOT re-publish to force it; watch it land with `bp cloud site status %s`", ref)
+		return siteDeployExit(d)
 	case strings.EqualFold(d.Status, "live"):
 		prov := siteTriggerNarration(d.Trigger)
 		if u := strings.TrimSpace(d.URL); u != "" {
@@ -732,8 +757,21 @@ func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployme
 }
 
 // siteDeployExit is the exit code for a terminal deployment in machine-output
-// mode: failed or cancelled → generic, otherwise 0. A deploy that never went live
+// mode: failed or cancelled → generic, otherwise 0. A deploy that was DROPPED
 // must never exit 0 — a script that greps for success would ship a lie.
+//
+// DEFERRED KEEPS EXIT 0, DELIBERATELY (deploy-reliability charter D543 — decided,
+// not an oversight, and pinned by TestRunCloudSiteDeployDeferredKeepsExitZero).
+// A deferral is not a drop: wave 32 measured content coverage at 100.00% on
+// settled deferrals, because the control plane re-queues a rebuild carrying the
+// same content and it lands. Deferral is also 73.7% of settled attempts, so
+// flipping it non-zero would break every `deploy && notify` chain and every
+// `set -e` script for an outcome that loses nothing — cry-wolf on the operator
+// surface, which is the exact failure this epic exists to prevent. What was
+// dishonest here was the SENTENCE and the ten minutes of polling, both fixed in
+// the deferred arm of renderSiteDeployVerdict; the code was always right.
+// An opt-in `--wait-for-live` for callers that genuinely need liveness is filed
+// separately (dr-w32-bl-deploy-wait-for-live-flag) and is NOT this function's job.
 func siteDeployExit(d cloudclient.SiteDeployment) int {
 	if strings.EqualFold(d.Status, "failed") || siteDeployCancelled(d.Status) {
 		return exitGeneric
@@ -1884,12 +1922,22 @@ func siteTimeToWeb(d cloudclient.SiteDeployment) (time.Duration, bool) {
 // A deferred row is still not a FAILURE, and nothing here changes that vocabulary:
 // the failure arms in spawnSiteStatusMap key off siteDeployFailed and never off
 // this predicate.
+//
+// THE `|| siteDeployDeferred(s)` ARM IS LEVEL WITH THAT PARAGRAPH, NOT REDUNDANT
+// WITH IT. Wave 32 made `deferred` TERMINAL in cloudclient.SiteDeploymentTerminal
+// (it is settled server-side, so the deploy stream must stop polling it), which
+// would otherwise have silently reverted dr-w12 S7 by dropping deferred out of
+// this predicate — four tests named that revert, TestSiteWaitingSinceMeasures-
+// ADeferralChainFromItsStart loudest. The two questions are genuinely different
+// and now read differently: SiteDeploymentTerminal asks "can this ROW still
+// change?" (no), this asks "has the CONTENT reached the web?" (also no, and a
+// re-queued rebuild is still trying). Deleting this arm re-breaks the clock.
 func siteDeployWaiting(status string) bool {
 	s := strings.TrimSpace(status)
 	if s == "" {
 		return false
 	}
-	return !cloudclient.SiteDeploymentTerminal(s)
+	return !cloudclient.SiteDeploymentTerminal(s) || siteDeployDeferred(s)
 }
 
 // siteWaitingSince is the RIGHT-CENSORED bound for a revision that has not reached

@@ -78,13 +78,17 @@ func TestSiteDeploymentTerminal(t *testing.T) {
 		"canceled", // the other spelling of the same end-state
 		"  LIVE  ", // whitespace + case are the server's business, not ours
 		"Cancelled",
+		// deferred settles as [] in the control plane's transition table, and it is
+		// 73.7% of settled attempts — this list named it in NEITHER direction until
+		// wave 32, which is why the majority outcome spun for ten minutes.
+		"deferred", "Deferred", "  deferred  ",
 	}
 	for _, s := range terminal {
 		if !SiteDeploymentTerminal(s) {
-			t.Fatalf("SiteDeploymentTerminal(%q) = false, want true — the deploy stream would poll ~10 min and then report it as in progress", s)
+			t.Fatalf("SiteDeploymentTerminal(%q) = false, want true — the deploy stream would poll its full 300×2s budget (~10 min) against a row that can never change and then print \"deploy in progress\" over a settled deploy", s)
 		}
 	}
-	// Every non-terminal status of the six-value enum, plus the empty string, must
+	// Every non-terminal status of the seven-value enum, plus the empty string, must
 	// keep the loop polling.
 	for _, s := range []string{"queued", "building", "pushing", "", "unknown"} {
 		if SiteDeploymentTerminal(s) {
