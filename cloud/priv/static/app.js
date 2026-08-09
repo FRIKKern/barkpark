@@ -12942,14 +12942,14 @@
     // (D734, D757). No remedy is offered that the control plane cannot perform,
     // and no "check now": the hourly update probe is what notices the credential
     // working again.
-    if (code === "identity_refused") {
-      return {
-        title: "The instance refused our credential",
-        body: "The rollback was never sent — " + usageUnavailableText("unauthorized") +
-          ". Barkpark Cloud stops asking a box that refused it; the hourly update " +
-          "check is what notices the credential working again.",
-      };
-    }
+    //
+    // REVIEW (wave 65): CALLED, not copied. The builder shipped the instance
+    // seam's sentence as a second SOURCE SITE held in step only by the new
+    // test's byte-equality assertion — delete that assertion and the two drift.
+    // One fact now has one producer: `rollbackConflictCopy` is a pure mapper
+    // declared earlier in this same scope, and its "identity_refused" arm
+    // returns exactly this {title, body}.
+    if (code === "identity_refused") return rollbackConflictCopy("identity_refused");
     if (status === 409) {
       return {
         title: "A deploy is already running",
