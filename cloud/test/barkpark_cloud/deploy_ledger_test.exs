@@ -2842,6 +2842,66 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert DeployLedger.census(@cov_from, @cov_to).coverage_cohorts.maturity_seconds == 86_400
     end
 
+    # THE RIGHT-EDGE LAW, WHICH NOTHING IN THIS FILE EXERCISED UNTIL NOW.
+    #
+    # `live_marks/1` is bounded BELOW (`inserted_at > ^earliest`) and
+    # deliberately NOT bounded on the right, and `deploy_ledger.ex` spends nine
+    # lines saying why: the build that covers a row inside the window is very
+    # often minted after `to`, and refusing to see it would manufacture PENDING
+    # at the window's own edge — the reader's choice of boundary, reported as a
+    # stalled fleet.
+    #
+    # Before this test the law had an EMPTY exercise surface. Adding
+    # `where: d.inserted_at <= ^as_of` to `live_marks` left all 3,592 cloud
+    # tests green, while on the real corpus 32.6% of the July failed rows
+    # (3,918 of 12,025) are COVERED solely by a mark minted after the window —
+    # so the mutation swings the epic's headline number from 3 to ~3,921. Every
+    # other never_covered fixture in this file mints its covering mark INSIDE
+    # the window, and the maturity-fence test above uses only NEGATIVE offsets
+    # from @cov_to. This pair is the POSITIVE offset.
+    test "a row is COVERED by a live build minted AFTER the window's `to` — the covering query is not right-bounded",
+         %{site: site} do
+      failed_at = DateTime.add(@cov_from, 1_000, :second)
+      # POSITIVE offset from @cov_to: outside the window, and the ONLY thing in
+      # the table that can cover the failed row.
+      live_at = DateTime.add(@cov_to, 3_600, :second)
+
+      deployments!(site, [
+        %{status: "failed", inserted_at: failed_at},
+        %{status: "live", inserted_at: live_at, became_live_at: live_at}
+      ])
+
+      [_deferred, failed] = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts.cohorts
+
+      # The live row is OUTSIDE the window, so it is never part of the
+      # population — it is only ever a covering mark.
+      assert failed.population == 1
+      assert failed.covered == 1
+      assert failed.pending == 0
+      assert failed.never_covered == 0
+      assert failed.too_young == 0
+      assert failed.never_covered_by_environment == []
+    end
+
+    # THE MIRROR, so the assertion above cannot pass vacuously. Identical
+    # fixture with the post-window live build REMOVED: the row is old enough to
+    # clear the maturity fence, so it lands in never_covered — which is where
+    # the bounded implementation would put it WITH the live build present.
+    test "the same row with the post-window live build removed is never_covered — the law above is not vacuous",
+         %{site: site} do
+      failed_at = DateTime.add(@cov_from, 1_000, :second)
+
+      deployments!(site, [%{status: "failed", inserted_at: failed_at}])
+
+      [_deferred, failed] = DeployLedger.census(@cov_from, @cov_to).coverage_cohorts.cohorts
+
+      assert failed.population == 1
+      assert failed.covered == 0
+      assert failed.pending == 1
+      assert failed.never_covered == 1
+      assert failed.too_young == 0
+    end
+
     # UNREADABLE ROWS SIT BESIDE BOTH SIDES, never inside either. A row whose
     # box could not be read at write time is not a covered site and it is not a
     # stuck one — folding it into either is the reassuring lie or the
