@@ -385,6 +385,8 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		}
 		out.outf("")
 	}
+	renderDeployDeferralWait(out, census.DeferralWait)
+
 	if len(census.NotAttempted) > 0 {
 		out.outf("never attempted (outside every denominator)")
 		for _, c := range census.NotAttempted {
@@ -760,6 +762,137 @@ func deployDeliveryDuration(seconds float64) string {
 	return d.String()
 }
 
+// renderDeployDeferralWait prints the DEFERRAL WAIT census: the clock behind the
+// sentence "a deferral is re-queued, not lost". Until this section existed the
+// `deferrals` block above was a COUNT WITH NO CLOCK — a fleet that improved its
+// failure rate by relabelling every 409 `deferred` read as a fleet getting
+// better even when the rebuild landed six hours later.
+//
+// It refuses the same three ways renderDeployDelivery does, and none of them is
+// a zero:
+//
+//   - no `deferral_wait` node at all (every control plane older than #11207) —
+//     the section says NOT MEASURED, because a missing wait reads as no wait;
+//   - a quantile REFUSED (below min_sample, or the unresolved mass exceeds the
+//     1-q headroom it needs) — it prints NO NUMBER and the control plane's own
+//     reason, VERBATIM, never a percentile;
+//   - the unresolved mass itself, printed in max's place as a censored LOWER
+//     BOUND — and when that mass is entirely UNREADABLE there is no bound to
+//     state, so the UNREADABLE count prints with the control plane's own label
+//     rather than as an empty cell.
+//
+// UnresolvedFraction and Headroom print BESIDE the reason on every line, never
+// inside it. The server's `cond` tests `n < min_sample` FIRST, so a small window
+// reports only "sample 23 below min_sample 200" while the very same node carries
+// unresolved_fraction 0.2581 against p95's 0.05 headroom — 5.2x over, and
+// invisible to a renderer that prints Reason alone.
+func renderDeployDeferralWait(out *writer, w *cloudclient.DeployDeferralWait) {
+	if w == nil {
+		out.outf("deferral wait — how long a deferred deploy waited to be re-queued")
+		out.outf("  NOT MEASURED — this control plane sends no deferral-wait census. Nothing was read: the deferrals above are a COUNT WITH NO CLOCK, and this is NOT a fleet that re-queues instantly.")
+		out.outf("")
+		return
+	}
+
+	out.outf("deferral wait — how long a deferred deploy waited to be re-queued")
+	if clock := strings.TrimSpace(w.Clock); clock != "" {
+		out.outf("  clock: %s", sanitizeCell(clock))
+	}
+	if basis := strings.TrimSpace(w.Basis); basis != "" {
+		out.outf("  basis: %s", sanitizeCell(basis))
+	}
+	for _, q := range []cloudclient.DeployDeferralWaitQuantile{w.P50, w.P95, w.Max} {
+		label := strings.TrimSpace(q.Label)
+		if label == "" {
+			label = fmt.Sprintf("q%.2f", q.Quantile)
+		}
+		line := "  " + fmt.Sprintf("%-4s", sanitizeCell(label)) + " " + deployDeferralWaitValue(w, q)
+		if q.Quantile >= 1.0 {
+			line += " · " + deployDeferralWaitBound(w)
+		}
+		out.outf("%s", line)
+	}
+	if len(w.Outcomes) > 0 {
+		out.outf("  outcomes (the control plane's own words — COVERED means the site has since rebuilt, never that your edit shipped)")
+		for _, o := range w.Outcomes {
+			out.outf("    %-12s %6d  %s", sanitizeCell(o.Outcome), o.Count, sanitizeCell(o.Label))
+		}
+	}
+	out.outf("")
+}
+
+// deployDeferralWaitValue renders ONE deferral-wait quantile INSEPARABLY: the
+// value (or the refusal, with the control plane's reason verbatim) always
+// followed by the identifiability facts and by the population it was taken over.
+// There is no branch of this function that prints a bare number, and none that
+// prints an empty cell: a zero counter still prints its denominator and its
+// as-of.
+func deployDeferralWaitValue(w *cloudclient.DeployDeferralWait, q cloudclient.DeployDeferralWaitQuantile) string {
+	p := w.Population
+	population := fmt.Sprintf("(n=%d · covered %d / pending %d / unreadable %d of %d deferred · %s)",
+		q.Sample, p.Covered, p.Pending, p.Unreadable, p.Deferred, deployDeferralWaitAsOf(w.AsOf))
+	identifiability := fmt.Sprintf("unresolved %d = %.2f%% vs headroom %.2f%%",
+		q.Unresolved, q.UnresolvedFraction*100, q.Headroom*100)
+
+	if q.Refused || q.Seconds == nil {
+		reason := strings.TrimSpace(q.Reason)
+		if reason == "" {
+			reason = fmt.Sprintf("the control plane sent no value for a sample of %d", q.Sample)
+		}
+		return "NO NUMBER — " + sanitizeCell(reason) + " · " + identifiability + " " + population
+	}
+	return deployDeliveryDuration(*q.Seconds) + " · " + identifiability + " " + population
+}
+
+// deployDeferralWaitBound renders, in max's place, what is known about the waits
+// that are STILL RUNNING. A pending row is a wait whose end has not happened
+// yet, so its elapsed time is a LOWER BOUND, never a measurement.
+//
+// THE HOLE THIS CLOSES: when the unresolved mass is entirely UNREADABLE —
+// pending 0, unreadable > 0 — max refuses AND OldestPendingSeconds is nil, so a
+// naive "if refused, print the bound" renderer emits an EMPTY CELL: a new silent
+// mis-report inside the section built to end them. That branch prints the
+// UNREADABLE count with the control plane's own label for it.
+func deployDeferralWaitBound(w *cloudclient.DeployDeferralWait) string {
+	p := w.Population
+	asOf := deployDeliveryAsOf(w.AsOf)
+
+	if w.OldestPendingSeconds != nil {
+		return fmt.Sprintf("STILL WAITING >= %s · %d row(s) not covered %s",
+			deployDeliveryDuration(*w.OldestPendingSeconds), p.Pending, asOf)
+	}
+	if p.Pending > 0 {
+		return fmt.Sprintf("STILL WAITING >= an unstated bound · %d row(s) not covered %s", p.Pending, asOf)
+	}
+	if p.Unreadable > 0 {
+		return fmt.Sprintf("NO BOUND — nothing is pending, yet %d row(s) are UNREADABLE (%s) %s",
+			p.Unreadable, deployDeferralWaitOutcomeLabel(w, "unreadable"), asOf)
+	}
+	return fmt.Sprintf("nothing was unresolved %s — %d of %d deferred row(s) unreadable, a reading taken at that instant, not a standing fact",
+		asOf, p.Unreadable, p.Deferred)
+}
+
+// deployDeferralWaitAsOf is deployDeliveryAsOf's wording without the enclosing
+// parentheses, for the cells that already sit inside a parenthetical. An instant
+// the control plane did not name is still stated, never blanked.
+func deployDeferralWaitAsOf(raw string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(deployDeliveryAsOf(raw), "("), ")")
+}
+
+// deployDeferralWaitOutcomeLabel returns the control plane's own wording for one
+// outcome, VERBATIM. A reader that invents a gloss here is the mis-report:
+// COVERED means "the site has since rebuilt", never "your edit shipped".
+func deployDeferralWaitOutcomeLabel(w *cloudclient.DeployDeferralWait, outcome string) string {
+	for _, o := range w.Outcomes {
+		if strings.EqualFold(strings.TrimSpace(o.Outcome), outcome) {
+			if label := strings.TrimSpace(o.Label); label != "" {
+				return sanitizeCell(label)
+			}
+		}
+	}
+	return "the control plane named no label for " + sanitizeCell(outcome)
+}
+
 // printCloudDeploymentsHelp writes `bp cloud deployments` usage.
 func printCloudDeploymentsHelp(out *writer) {
 	const help = `bp cloud deployments — the FLEET deploy rate, with the denominator it was taken over.
@@ -778,9 +911,12 @@ WHAT IT PRINTS
   the live rate is a CEILING.
 
   Then the failure classes, the deferrals (counted in the volume, never in the
-  failure numerator), the DELIVERY census (how long content waited to reach the
-  web, each percentile beside the sample and window width that produced it) and
-  the sites, worst-volume first.
+  failure numerator), the DEFERRAL WAIT census (how long a deferred deploy
+  waited to be re-queued — the clock the deferral COUNT never had, each
+  percentile beside covered / pending / unreadable out of the deferred total),
+  the DELIVERY census (how long content waited to reach the web, each percentile
+  beside the sample and window width that produced it) and the sites,
+  worst-volume first.
 
   The parenthetical names every state an attempt ended in, so success is never
   the unnamed remainder: it also carries "N in flight", "N cancelled" and
@@ -789,7 +925,10 @@ WHAT IT PRINTS
   A percentile that cannot be identified prints NO NUMBER and the reason — on a
   fleet where 40% of rows are still waiting, no p95 exists to report. The
   still-waiting cohort prints as "STILL WAITING >= <bound> (as of <instant>)",
-  never as a bare count.
+  never as a bare count. On the deferral wait, the unresolved fraction and the
+  headroom print BESIDE the reason, so a min_sample refusal cannot mask an
+  identifiability problem — and when the unresolved mass is entirely UNREADABLE
+  there is no bound to state, so the UNREADABLE count prints in its place.
 
 FLAGS
   --days N            window width ending now (default 7)
