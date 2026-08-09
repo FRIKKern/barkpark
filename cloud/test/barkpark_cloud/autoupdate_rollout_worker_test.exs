@@ -130,6 +130,35 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorkerTest do
     refute fresh.autoupdate_triggered_at, "not marked in-flight (it never started)"
   end
 
+  # ── cch-w58-s2: a refusal is not a started run ────────────────────────────
+  test "a 409 (the box REFUSING the trigger) is not recorded as a started run" do
+    bp = live_behind()
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 409, body: ~s({"error":{}})}}])
+
+    tick()
+
+    fresh = reload(bp)
+    refute fresh.autoupdate_triggered_at, "a 409 refusal must NOT read as in-flight"
+    assert fresh.autoupdate_paused, "contained (paused) — a refusing box leaves the queue"
+  end
+
+  test "a permanently-409 address does not block a second eligible box in the same tick" do
+    # Oldest-stale first: the 409 box is the head candidate.
+    refusing = live_behind(%{update_checked_at: ~U[2026-07-01 00:00:00.000000Z]})
+    other = live_behind()
+
+    StudioLinkFakeHttpClient.program([
+      {:ok, %{status: 409, body: ~s({"error":{}})}},
+      {:ok, %{status: 202, body: ~s({"ok":true})}}
+    ])
+
+    tick()
+
+    refute reload(refusing).autoupdate_triggered_at, "the refusal never stamped an in-flight run"
+    assert reload(other).autoupdate_triggered_at, "the fleet advanced past the lying address"
+    assert length(StudioLinkFakeHttpClient.requests()) == 2, "both boxes were tried this tick"
+  end
+
   # ── isu-w5.2: fleet kill switch ───────────────────────────────────────────
   test "halt blocks advance but settle bookkeeping still runs" do
     in_flight = live_behind(%{autoupdate_triggered_at: DateTime.utc_now()})
