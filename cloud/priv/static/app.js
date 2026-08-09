@@ -6472,18 +6472,37 @@
     "</section>";
   }
 
-  // ── GR17 past-due surfaces (dates data-driven via the shared dunningDates) ───
-  // The overview banner (ratified strings, verbatim). Two sentences; NO "come
-  // right back" tail (that is the billing-page variant). Mutually exclusive with
-  // the runway (a past-due team is never on trial). Reuses dunningDates/fmtDay —
-  // never a forked date calc.
+  // ── GR17 past-due surfaces · cch-w54-s5: DATELESS, AND ISOLATION NOT STOP ───
+  // The overview banner. It used to name TWO calendar days, both synthetic and
+  // both promising an actor that does not exist:
+  //
+  //   * "Your payment failed on {day}" was back-computed as current_period_end
+  //     minus a client-side 3-day constant — and mark_past_due/2 re-anchors
+  //     current_period_end to now+3d on EVERY webhook delivery
+  //     (billing.ex:827, put_new_lazy(:current_period_end, &default_grace_anchor/0)),
+  //     so that "failed on" day is approximately TODAY, forever.
+  //   * "keep running until {day}, then they're suspended" named a suspension
+  //     with NO EXECUTOR. maybe_enforce/1 (billing.ex:883) is the only
+  //     grace-elapse suspender; its sole caller is mark_past_due/2, which has
+  //     just pushed the period end three days out, so the `:gt -> :ok` arm
+  //     always fires and Registry.suspend_team_barkparks(tid, "billing_past_due")
+  //     is unreachable on every production path. No worker, route, task or CLI
+  //     reaches it either.
+  //
+  // What grace elapse ACTUALLY does is flip Billing.entitled?/1, whose only lib
+  // call site outside billing.ex is router.ex:8744 (entitled_or_trial_started?/1,
+  // the go-live gate at :8832/:9019). The measured consequence is ISOLATION
+  // (charter D653/D670): the team cannot LAUNCH a new instance. Nothing stops,
+  // nothing is deleted, the deploy pipeline is untouched, and Hetzner and Stripe
+  // keep billing. The copy says exactly that and names no day.
+  //
+  // Mutually exclusive with the runway (a past-due team is never on trial).
+  // NO "come right back" tail — that is the billing-page variant.
   function overviewDunningBannerHtml(sub) {
-    var d = dunningDates(sub);
-    var failed = d ? "Your payment failed on " + esc(fmtDay(d.failedMs)) + "." : "Your payment failed.";
-    var keep = d
-      ? "Your instances keep running until " + esc(fmtDay(d.suspendMs)) +
-        ", then they're suspended — not deleted."
-      : "Your instances keep running through a short grace period, then they're suspended — not deleted.";
+    var failed = "Your payment failed.";
+    var keep = "Nothing stops and nothing is deleted — your instances keep running, and so does the bill. " +
+      "What lapses is entitlement: once the grace window is behind you, this team can't launch a new " +
+      "instance until payment succeeds. Isolation, not shutdown.";
     return '<div class="notice notice-warn dunning-banner overview-dunning" role="alert">' +
       '<div class="dunning-head"><span class="dunning-plan">' + esc(planName(sub.plan)) + "</span>" +
         '<b class="dunning-title">Payment failed</b></div>' +
@@ -14780,9 +14799,10 @@
     return "Active";
   }
 
-  // The renewal / cancel / end date line the server now feeds us
+  // The renewal / cancel / end line the server now feeds us
   // (current_period_end, cancel_at_period_end, canceled_at). "" when there's no
-  // dated milestone to show.
+  // milestone to show. Every arm but past_due carries a date the server can
+  // stand behind; the past_due arm is deliberately dateless (see below).
   function billingPeriodLine(sub) {
     if (sub.status === "canceled") {
       return sub.canceled_at ? "Ended " + fmtWhen(sub.canceled_at) : "";
@@ -14790,8 +14810,16 @@
     if (sub.cancel_at_period_end && sub.current_period_end) {
       return "Access until " + fmtWhen(sub.current_period_end);
     }
-    if (sub.status === "past_due" && sub.current_period_end) {
-      return "Grace period ends " + fmtWhen(sub.current_period_end);
+    // cch-w54-s5: NOT "Grace period ends {current_period_end}". That instant is
+    // re-anchored to now+3d by mark_past_due/2 on every webhook delivery, so the
+    // day slid forward each time it was quoted, and nothing is scheduled to run
+    // when it arrives. The dateless line states the consequence that IS real —
+    // entitled?/1 flips, and router.ex:8744's go-live gate refuses the next
+    // launch. Retracted HERE, inside the function, so the one edit moves BOTH
+    // twins: currentPlanCardHtml (the owner) and readOnlyPlanCardHtml (the
+    // non-owner, who sees this line with no banner beside it to explain it).
+    if (sub.status === "past_due") {
+      return "Grace period running — new instance launches stop when it ends";
     }
     if (sub.current_period_end) {
       return "Renews " + fmtWhen(sub.current_period_end);
@@ -14830,16 +14858,19 @@
     return isNaN(d.getTime()) ? "—" : d.toLocaleDateString(undefined, { month: "long", day: "numeric" });
   }
 
-  // GR17: the past-due banner — plan chip + "Past due", the honest suspended-not-
-  // deleted sentence with real dates, and the portal CTA. The old retry-count
-  // promise is DROPPED (nothing in the codebase retries twice), as is the
-  // support-mail denial copy.
+  // The billing-page past-due banner — plan chip + "Past due", the honest
+  // isolation sentence, and the portal CTA. The old retry-count promise stays
+  // DROPPED (nothing in the codebase retries twice), as does the support-mail
+  // denial copy. cch-w54-s5: the two calendar days go too, for the reasons
+  // written out over overviewDunningBannerHtml — both were synthetic and the
+  // suspension they pointed at has no executor on any production path. The
+  // billing-page variant keeps its own tail, which IS backed: invoice.paid →
+  // recover_subscription/1 → Registry.resume_team_barkparks/1.
   function dunningBannerHtml(sub) {
-    var d = dunningDates(sub);
-    var body = d
-      ? "Your card was declined on " + esc(fmtDay(d.failedMs)) + ". Your instances keep running until " +
-        esc(fmtDay(d.suspendMs)) + ", then they're suspended — not deleted — and come right back the moment payment succeeds."
-      : "Your card was declined. Your instances keep running for a short grace period, then they're suspended — not deleted — and come right back the moment payment succeeds.";
+    var body = "Your card was declined. Nothing stops and nothing is deleted — your instances keep running, " +
+      "and so does the bill. What lapses is entitlement: once the grace window is behind you, this team " +
+      "can't launch a new instance until payment succeeds. Isolation, not shutdown — and it lifts the " +
+      "moment payment succeeds.";
     return '<div class="notice notice-warn dunning-banner" role="alert">' +
         '<div class="dunning-head"><span class="dunning-plan">' + esc(planName(sub.plan)) + "</span>" +
           '<b class="dunning-title">Past due</b></div>' +
@@ -14901,8 +14932,11 @@
   // card" sentences in this file are TRUE (start_trial touches Stripe not at
   // all) and stay. The plan grid opens right below so "below" stays true. Trial
   // expiry is a REAL teardown (TrialExpiryWorker), so this copy never borrows
-  // the dunning "suspended — not deleted" promise; the 3-day/1-day reminders it
-  // names are the worker's real warn schedule.
+  // the dunning banners' reassurance; the 3-day/1-day reminders it names are the
+  // worker's real warn schedule. (This comment used to quote the dunning
+  // "suspended — not deleted" sentence, which cch-w54-s5 retired for promising an
+  // actor no production path reaches — a pointer left naming a retracted promise
+  // is the same defect one layer down, so it is retracted here in the same PR.)
   function trialCardHtml(sub) {
     var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
     var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");

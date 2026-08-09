@@ -3827,10 +3827,32 @@ test("billingStatusBadge: compact status pill", () => {
 
 test("billingPeriodLine: surfaces renewal / grace / cancel / end dates", () => {
   assert.match(hooks.billingPeriodLine({ status: "active", current_period_end: future }), /^Renews /);
-  assert.match(hooks.billingPeriodLine({ status: "past_due", current_period_end: future }), /^Grace period ends /);
   assert.match(hooks.billingPeriodLine({ status: "active", cancel_at_period_end: true, current_period_end: future }), /^Access until /);
   assert.match(hooks.billingPeriodLine({ status: "canceled", canceled_at: past }), /^Ended /);
   assert.equal(hooks.billingPeriodLine({ status: "active" }), ""); // no dated milestone
+});
+
+// ── cch-w54-s5 · THE PAST-DUE ARM IS DATELESS, AND IT IS DATELESS *HERE* ─────
+//
+// It used to read "Grace period ends {current_period_end}". mark_past_due/2
+// re-anchors current_period_end to now+3d on every webhook delivery
+// (billing.ex:827), so the quoted day slid forward each time a redelivery
+// arrived, and nothing is scheduled to run when it lands — maybe_enforce/1's
+// suspend arm is unreachable in production. The retraction lives INSIDE
+// billingPeriodLine, which is what makes this test cover both twins: the owner
+// card and the read-only member card call the same function.
+const PERIOD_DATE_SHAPED =
+  /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{1,2}\/\d{1,2}|\d{4}-\d{2}-\d{2}/;
+
+test("cch-w54-s5: billingPeriodLine's past-due arm names no day, and says what actually lapses", () => {
+  const line = hooks.billingPeriodLine({ status: "past_due", current_period_end: future });
+  assert.equal(line, "Grace period running — new instance launches stop when it ends");
+  assert.doesNotMatch(line, PERIOD_DATE_SHAPED, "the past-due arm must not quote a sliding calendar day");
+  assert.doesNotMatch(line, /Grace period ends/, "the retracted deadline promise must not come back");
+  // A past-due sub with no dated milestone still gets the honest line — the
+  // grace state is real whether or not the server sent an anchor.
+  assert.equal(hooks.billingPeriodLine({ status: "past_due" }),
+    "Grace period running — new instance launches stop when it ends");
 });
 
 // ── theme toggle label-in-name (WCAG 2.5.3): accessible name ⊇ visible word ──
@@ -12467,19 +12489,45 @@ test("dunningDates: failed_date is EXACTLY suspend_date minus the 3-day grace", 
   assert.equal(hooks.dunningDates(null), null);
 });
 
-test("dunningBannerHtml: GR17 strings verbatim, portal CTA, dead promises stay dead", () => {
-  const html = hooks.dunningBannerHtml({ plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z" });
-  assert.match(html, /Your card was declined on .+\. Your instances keep running until .+, then they're suspended — not deleted — and come right back the moment payment succeeds\./);
+// ── cch-w54-s5 · THE DUNNING BANNERS NAME NO DAY AND PROMISE NO SUSPENSION ───
+//
+// Both banners used to carry two synthetic dates and a suspension with no
+// executor (see the block over overviewDunningBannerHtml in app.js). The pins
+// below are written to LOSE: a date-shaped token or the word "suspend" in
+// either banner reds them BY NAME. The negative is scoped to these two helpers
+// on purpose — suspendedCardBannerHtml legitimately says "Suspended", is out of
+// this row's fence (charter D644), and an unscoped regex would red it.
+const DUNNING_DATE_SHAPED =
+  /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{1,2}\/\d{1,2}|\d{4}-\d{2}-\d{2}|\b\d{1,2}(st|nd|rd|th)\b/;
+
+test("dunningBannerHtml: honest isolation copy, portal CTA, dead promises stay dead", () => {
+  const dated = { plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z" };
+  const html = hooks.dunningBannerHtml(dated);
+  // The whole body, verbatim — no `.+` slot a date could slip back through.
+  assert.ok(html.includes(
+    "Your card was declined. Nothing stops and nothing is deleted — your instances keep running, " +
+    "and so does the bill. What lapses is entitlement: once the grace window is behind you, this team " +
+    "can't launch a new instance until payment succeeds. Isolation, not shutdown — and it lifts the " +
+    "moment payment succeeds."), "the isolation body renders verbatim");
+  assert.doesNotMatch(html, DUNNING_DATE_SHAPED,
+    "dunningBannerHtml must not name a calendar day — current_period_end slides on every webhook");
+  assert.doesNotMatch(html, /suspend/i,
+    "dunningBannerHtml must not promise a suspension: maybe_enforce/1's suspend arm is unreachable in production");
+  assert.doesNotMatch(html, /keep running until/, "the retracted deadline promise must not come back");
   assert.ok(html.includes(">Past due<"), "the banner title");
   assert.ok(html.includes(">Supporter<"), "the plan-name chip");
   assert.ok(html.includes(">Update payment method<"), "the GR17 CTA verbatim");
   assert.ok(html.includes('id="dunning-portal"'), "the CTA is the portal wire point");
   assert.ok(!html.includes("retry twice more"), "the retry-count fiction is gone");
   assert.ok(!/contact support/i.test(html), "the support-mail denial copy is gone");
-  // Date-less sub still renders the honest sentence, without invented dates.
+  // The banner no longer reads current_period_end at all, so a date-less sub
+  // renders the SAME sentence — there is nothing left to degrade.
   const bare = hooks.dunningBannerHtml({ plan: "supporter", status: "past_due", current_period_end: null });
-  assert.ok(bare.includes("suspended — not deleted"), "the promise survives date-less");
+  assert.equal(bare, html, "the copy no longer depends on a date at all");
   assert.ok(!bare.includes("declined on"), "no invented failed date");
+  // The reassurance that IS backed survives: invoice.paid →
+  // recover_subscription/1 → Registry.resume_team_barkparks/1.
+  assert.ok(html.includes("the moment payment succeeds"), "the backed restore promise survives");
 });
 
 test("trialCardHtml carries the RATIFIED CTA verbatim and never the teardown-dishonest promise", () => {
@@ -12866,16 +12914,28 @@ test("runwayProgressText / runwayCardHtml: 'N of 3 done' + role-gated dismiss", 
   assert.doesNotMatch(member, /runway-dismiss/); // plain member: no silent-403 button
 });
 
-test("overviewDunningBannerHtml (GR17): 'Your payment failed on {date}' + suspended-not-deleted, data-driven", () => {
-  // Midday UTC so fmtDay's local-date render never straddles a TZ boundary.
+test("overviewDunningBannerHtml: 'Your payment failed.' + isolation, naming no day and no suspension", () => {
   const sub = { plan: "supporter", status: "past_due", current_period_end: "2026-08-04T12:00:00.000Z" };
   const html = hooks.overviewDunningBannerHtml(sub);
-  assert.match(html, /Your payment failed on .+\. Your instances keep running until .+, then they're suspended — not deleted\./);
+  assert.ok(html.includes(
+    "Your payment failed. Nothing stops and nothing is deleted — your instances keep running, and so " +
+    "does the bill. What lapses is entitlement: once the grace window is behind you, this team can't " +
+    "launch a new instance until payment succeeds. Isolation, not shutdown."),
+    "the isolation body renders verbatim");
+  assert.doesNotMatch(html, DUNNING_DATE_SHAPED,
+    "overviewDunningBannerHtml must not name a calendar day — the 'failed on' day was back-computed from a sliding anchor");
+  assert.doesNotMatch(html, /suspend/i,
+    "overviewDunningBannerHtml must not promise a suspension nothing performs");
+  assert.doesNotMatch(html, /failed on/, "the back-computed failure date is retracted, clause and all");
   assert.match(html, /Update payment method/);
   assert.doesNotMatch(html, /come right back/); // that tail is the billing-page variant only
-  assert.doesNotMatch(html, /card was declined/); // the ratified overview lead is 'Your payment failed on'
-  // No dated milestone → the banner drops the dates, never invents them.
-  assert.match(hooks.overviewDunningBannerHtml({ plan: "supporter", status: "past_due" }), /Your payment failed\. /);
+  assert.doesNotMatch(html, /card was declined/); // the overview lead stays 'Your payment failed.'
+  // The consequence stated is the one entitled?/1 actually gates: its only lib
+  // call site outside billing.ex is router.ex:8744's entitled_or_trial_started?/1,
+  // the go-live gate — so what a lapsed grace costs is a NEW LAUNCH, nothing else.
+  assert.match(html, /can't launch a new instance/, "the stated consequence is the go-live gate's");
+  // Date-less sub renders the same sentence — the banner reads no date at all.
+  assert.equal(hooks.overviewDunningBannerHtml({ plan: "supporter", status: "past_due" }), html);
 });
 
 test("suspendedCardBannerHtml (GR17): 'Suspended {date} — payment failed' on the BILLING axis, verbatim", () => {
@@ -14243,6 +14303,36 @@ test("readOnlyPlanCardHtml: the non-owner view is a button-free summary reusing 
   // subscribe nor save the box was the only one not told it goes away.
   assert.ok(trial.includes("When the trial ends, the instance is torn down."),
     "the plain member is told the teardown half too");
+});
+
+// ── cch-w54-s5 · THE NON-OWNER PAST-DUE PATH, PINNED FOR THE FIRST TIME ─────
+//
+// readOnlyPlanCardHtml was exercised only with active / cancelling / trial
+// fixtures — zero past_due, and no preview scenario renders a member on a
+// past-due team. So the member card was the twin nobody was watching: it prints
+// billingPeriodLine with NO banner beside it, which meant a plain member saw a
+// bare "Grace period ends {a sliding date}" and nothing at all to explain it.
+// This is the GR36 owner/member asymmetry class one column over from the trial
+// axis cch-w55-s3 fixed. The pin exists so a future fix scoped to the owner
+// card cannot ship the lie to everyone else.
+test("cch-w54-s5: the non-owner card's past-due line is dateless and self-explaining", () => {
+  const member = hooks.readOnlyPlanCardHtml({
+    plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z",
+  });
+  assert.ok(member.includes("Grace period running — new instance launches stop when it ends"),
+    "the member reads the same honest line the owner does — one edit inside billingPeriodLine moves both");
+  assert.doesNotMatch(member, /Grace period ends/, "never the retracted deadline");
+  assert.ok(!/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{1,2}\/\d{1,2}/.test(member),
+    "and no calendar day anywhere on the member's past-due card");
+  assert.ok(!/<button/i.test(member), "still button-free — the member gains a sentence, not an affordance");
+  // The owner twin renders the identical line through currentPlanCardHtml, which
+  // is what proves the retraction landed inside billingPeriodLine, not at a call site.
+  const owner = hooks.currentPlanCardHtml({
+    plan: "supporter", status: "past_due", current_period_end: "2026-08-01T12:00:00.000Z",
+  });
+  assert.ok(owner.includes("Grace period running — new instance launches stop when it ends"),
+    "the owner twin carries the same line");
+  assert.doesNotMatch(owner, /Grace period ends/);
 });
 
 // cch-w55-s3 — THE PAIR PIN. Neither tagline was positively asserted anywhere,
