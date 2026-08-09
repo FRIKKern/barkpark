@@ -69,6 +69,71 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   that merely embeds the name scores as a reader), and that is the same safe
   direction the comment stripper errs in: an over-count can only PROTECT an
   instrument from deletion, never authorise one.
+
+  FILED, NOT FIXED — the `tls_mode` bias, named with its sites. `tls_mode` IS a
+  schema field (it is in the 223 the reflection below returns), so it is
+  admission-relevant, and the substring rule scores it FOUR readers:
+  `internal/runtime/runtime.go:147` (`func tlsModeForServing(mode string) string`),
+  `internal/runtime/runtime.go:279` (`TLSMode: tlsModeForServing(...)`),
+  `internal/runtime/runtime_test.go:774` and `:775`. Every one of the four is the
+  compound `tlsModeForServing`; ZERO would survive an identifier-boundary anchor.
+  So `tls_mode`'s entire "audience" is one differently-named function. This slice
+  RECORDS that and changes NOTHING about matching semantics — flipping the rule
+  here would re-rule readership for every key at once, inside a change whose only
+  claim is that it is faster.
+
+  ## COMPILED PATTERNS — why, measured
+
+  `hits/2` compiles one `:binary.compile_pattern/1` per key plus one for the
+  union, instead of re-deriving the variant list on every line/key pair. Measured
+  on this tree (3313 corpus files, macOS 10-core host, LOAD AVERAGE QUOTED
+  because it is most of the variance — this host carried 56 sessions while these
+  numbers were taken):
+
+      keys  implementation  result
+      7     uncompiled      1.87s                                  (load avg 8.8)
+      7     compiled        0.69s                                  (load avg 30.0)
+      223   uncompiled      DID NOT FINISH IN 240s, 207.67s CPU    (load avg 8.8)
+      223   compiled        FINISHED, 15.42s CPU                   (load avg 30.0)
+
+  Read that table with its right-hand column: the compiled 7-key run was 2.7x
+  faster than the uncompiled one WHILE THE HOST WAS UNDER 3.4x THE LOAD. The
+  uncompiled row got the quiet host and still lost.
+
+  WHAT THIS COSTS THE FILE, said rather than discovered: keeping the oracle means
+  the census pays for a second, uncompiled full-corpus pass in the equivalence
+  test. The file went 13 tests / 4.8s (load avg 8.8) to 14 tests / 6.4s (load avg
+  20.4) — a ~1.3x multiple here, and 11.9s at load avg 31, so the honest band is
+  1.3-2.5x and the variance is the host, not the code.
+  `.github/workflows/cloud.yml` sets no `timeout-minutes`, so the GitHub default
+  of 360 minutes applies and this is free in CI.
+
+  So the rewrite is a floor of ~15x, and at 223 keys it is the difference
+  between an instrument and one that cannot be run at all. THE 223 IS NOT
+  HYPOTHETICAL: it is `length(distinct schema fields across the 29 loaded
+  `BarkparkCloud.*` Ecto schemas)`, i.e. the key set a derived-admission arm
+  would scan.
+
+  Do NOT quote "9.4s" for the compiled 223-key scan; it is not reproducible, and
+  the corpus-growth story attached to it is wrong — the corpus grew from 3310 to
+  3313 files, THREE files, not ~75. The spread between one measurement and the
+  next is HOST LOAD, which is why every figure above carries its load average.
+
+  ## Two corrections a derived arm must inherit
+
+  1. THE REFLECTION MODULE IS `BarkparkCloud.Registry.Barkpark` — no dot after
+     `Barkpark`. `Barkpark.Cloud.Registry.Barkpark` does not exist and raises
+     `UndefinedFunctionError`, so a derived arm written against it fails at the
+     first call rather than reporting a wrong number.
+  2. THREE OF THE SEVEN REGISTER KEYS ARE NOT SCHEMA FIELDS — `publish_clock`,
+     `failure_class` and `request_stats` are absent from the 223; only
+     `coalesced_attempts`, `queued_self_seconds`, `queued_pickup_seconds` and
+     `queued_stall_seconds` are present. A schema-derived admission arm can
+     therefore sit BESIDE the hand-typed `@register` and can NEVER subsume it:
+     derivation alone would drop three instruments this census is watching.
+
+  The derived arm itself is DEFERRED out of this slice — see the task, and PR
+  #11169, which owns this file's tail.
   """
 
   # The repo root, walked with `Path.dirname/1` rather than a parent-relative
@@ -158,9 +223,56 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   @doc """
   `%{key => [hit]}` — every non-comment line in the corpus naming any casing of
   any key. One pass over the corpus for all keys at once.
+
+  The patterns are COMPILED ONCE, per key and for the union — see the
+  moduledoc's "COMPILED PATTERNS" section for the measurement that forced it.
+  `hits_uncompiled/2` is the byte-for-byte oracle this must agree with, and
+  `test "COMPILED == UNCOMPILED, on file:line"` is where that agreement is
+  asserted rather than assumed.
   """
   @spec hits([binary()], keyword()) :: %{binary() => [hit()]}
   def hits(keys, opts \\ []) do
+    keys = Enum.uniq(keys)
+    table = Enum.map(keys, &{&1, :binary.compile_pattern(variants(&1))})
+    all = keys |> Enum.flat_map(&variants/1) |> Enum.uniq() |> :binary.compile_pattern()
+
+    empty = Map.new(keys, &{&1, []})
+
+    opts
+    |> files()
+    |> Enum.reduce(empty, fn file, acc ->
+      source = File.read!(Path.join(@repo_root, file))
+
+      # Binary prefilter: most files name none of the keys, and one compiled
+      # Aho-Corasick pass over the whole source is far cheaper than a per-line
+      # regex — or than re-compiling the same literal list per file.
+      if :binary.match(source, all) != :nomatch do
+        source
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.reduce(acc, fn {line, n}, acc -> record(line, n, file, table, acc) end)
+      else
+        acc
+      end
+    end)
+  end
+
+  @doc """
+  THE ORACLE: `hits/2` exactly as it shipped before 2026-08-09 — uncompiled
+  `String.contains?/2` over the raw variant lists, re-compiling the pattern on
+  every one of the ~1.3M line/key pairs it walks.
+
+  It is kept, and kept SLOW, for one reason: an optimisation that changes what
+  the census SEES is not an optimisation, it is a silent re-ruling on which
+  instruments are reader-less. The equivalence test runs both over the seven
+  register keys and compares FILE:LINE SETS, so a rewrite that quietly narrows
+  the match reds by name instead of shipping as a speed-up.
+
+  Do not call this from the census itself. At 223 keys it does not finish inside
+  four minutes.
+  """
+  @spec hits_uncompiled([binary()], keyword()) :: %{binary() => [hit()]}
+  def hits_uncompiled(keys, opts \\ []) do
     keys = Enum.uniq(keys)
     table = Map.new(keys, &{&1, variants(&1)})
     all = table |> Map.values() |> List.flatten() |> Enum.uniq()
@@ -172,13 +284,23 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
     |> Enum.reduce(empty, fn file, acc ->
       source = File.read!(Path.join(@repo_root, file))
 
-      # Binary prefilter: most files name none of the keys, and `contains?/2`
-      # over a literal list is far cheaper than a per-line regex.
       if String.contains?(source, all) do
         source
         |> String.split("\n")
         |> Enum.with_index(1)
-        |> Enum.reduce(acc, fn {line, n}, acc -> record(line, n, file, table, acc) end)
+        |> Enum.reduce(acc, fn {line, n}, acc ->
+          if comment?(line) do
+            acc
+          else
+            Enum.reduce(table, acc, fn {key, vs}, acc ->
+              if String.contains?(line, vs) do
+                Map.update!(acc, key, &[%{file: file, line: n, text: String.trim(line)} | &1])
+              else
+                acc
+              end
+            end)
+          end
+        end)
       else
         acc
       end
@@ -201,8 +323,8 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
     if comment?(line) do
       acc
     else
-      Enum.reduce(table, acc, fn {key, vs}, acc ->
-        if String.contains?(line, vs) do
+      Enum.reduce(table, acc, fn {key, pattern}, acc ->
+        if :binary.match(line, pattern) != :nomatch do
           Map.update!(acc, key, &[%{file: file, line: n, text: String.trim(line)} | &1])
         else
           acc
@@ -638,6 +760,40 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
            This test exists because D442's corpus OMITTED api/ and therefore
            could not see the reader half of a cross-tree instrument.
            """
+  end
+
+  test "COMPILED == UNCOMPILED, on file:line — the speed-up did not re-rule readership", ctx do
+    slow = ReaderScan.hits_uncompiled(ctx.keys)
+
+    per_key =
+      Enum.map(ctx.keys, fn key ->
+        fast_set = MapSet.new(ctx.hits[key], &"#{&1.file}:#{&1.line}")
+        slow_set = MapSet.new(slow[key], &"#{&1.file}:#{&1.line}")
+
+        {key, fast_set, slow_set}
+      end)
+
+    divergent =
+      Enum.reject(per_key, fn {_key, fast, slow} -> MapSet.equal?(fast, slow) end)
+
+    assert divergent == [],
+           """
+           the compiled scanner and the uncompiled oracle DISAGREE on which
+           lines name a key. Sets compared, not counts — two scanners can hit
+           the same number of lines and not the same lines.
+
+           #{Enum.map_join(divergent, "\n\n", fn {key, fast, slow} -> """
+             #{key}: compiled #{MapSet.size(fast)} vs oracle #{MapSet.size(slow)}
+               only compiled: #{inspect(Enum.sort(MapSet.difference(fast, slow)))}
+               only oracle:   #{inspect(Enum.sort(MapSet.difference(slow, fast)))}
+             """ end)}
+           """
+
+    # And the comparison is not vacuously green over empty sets: the register
+    # carries keys with real, non-trivial hit sets, so agreement means something.
+    assert Enum.count(per_key, fn {_key, fast, _slow} -> MapSet.size(fast) > 10 end) >= 2,
+           "no key derived more than 10 readers, so set equality proves almost nothing here: " <>
+             inspect(Enum.map(per_key, fn {k, f, _} -> {k, MapSet.size(f)} end))
   end
 
   # ---------------------------------------------------------------------------
