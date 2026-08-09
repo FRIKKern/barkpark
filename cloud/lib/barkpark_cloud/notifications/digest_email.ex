@@ -114,6 +114,12 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # 852 against a 7d door of 9,156, with wildly different deferral shares).
   @deploy_windows [{"last 24h", 86_400}, {"last 7d", 604_800}]
 
+  # THE REACH LIMIT, DERIVED FROM THE DOORS THEMSELVES so the disclosure can
+  # never drift from what is actually reported: whatever the widest door is, a
+  # row older than it was never in the population, and a coverage zero over a
+  # bounded window is therefore not a clean bill for the fleet.
+  @widest_window_label @deploy_windows |> Enum.max_by(&elem(&1, 1)) |> elem(0)
+
   @typedoc """
   One box's freshness rung, decided by the control plane's OWN commit
   measurement rather than the box's release-tag self-report.
@@ -560,11 +566,22 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # sentence gets quoted on its own.
   defp coverage_clause(%{coverage: %{cohorts: [_ | _] = cohorts, maturity_seconds: maturity}} = w) do
     "Coverage over #{w.label} (COVERED means the site has since rebuilt, not that an edit " <>
-      "of yours shipped): " <> Enum.map_join(cohorts, "; ", &cohort_clause(&1, maturity))
+      "of yours shipped): " <>
+      Enum.map_join(cohorts, "; ", &cohort_clause(&1, maturity)) <> ". " <> reach_clause()
   end
 
   defp coverage_clause(_),
     do: "Coverage UNMEASURED (the ledger returned no coverage cohorts)"
+
+  # THE WINDOW'S OWN REACH, SAID OUT LOUD. Every number above is counted inside a
+  # bounded door, so a row older than the widest one this email reports was never
+  # in the population being judged — it is OUTSIDE it, not covered. Without this
+  # sentence a `0 still not after 24.0h` reads as a clean bill of health for the
+  # fleet, when it can equally mean the stuck rows are simply older than the door.
+  defp reach_clause do
+    "Reach limit: #{@widest_window_label} is the widest window this email reports, so a row " <>
+      "older than that is OUTSIDE this population rather than covered by it"
+  end
 
   # A cohort with no rows says so. Zero of zero is not 100% coverage and must
   # never render as a percentage.
@@ -583,10 +600,43 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     "#{number(covered)} of #{number(population)} #{cohort} rows have since been " <>
       "covered by a later live build, #{number(never)} still not after " <>
       "#{duration(maturity)}" <>
-      cohort_tail(c)
+      cohort_tail(c) <> environment_clause(never, c)
   end
 
   defp cohort_clause(_c, _maturity), do: "a cohort the digest could not read"
+
+  # WHICH ENVIRONMENTS THE NEVER-COVERED ROWS ARE IN (dr-w33-s3). The ledger has
+  # always computed this split (`never_covered_by_environment`) and the digest
+  # has always thrown it away, which is exactly the pooling the split exists to
+  # refuse: a preview build with no successor is not a production site sitting
+  # dark, and three real production rows must not hide inside a bigger, softer
+  # number. Read with `Map.get/3` and filtered to readable entries for the same
+  # reason the head above names every count it prints — an unreadable shape costs
+  # this fragment, never the morning email.
+  defp environment_clause(never, _c) when not (is_integer(never) and never > 0), do: ""
+
+  defp environment_clause(_never, c) do
+    c
+    |> Map.get(:never_covered_by_environment, [])
+    |> List.wrap()
+    |> Enum.filter(fn
+      %{environment: _, never_covered: n} -> is_integer(n) and n > 0
+      _ -> false
+    end)
+    |> case do
+      [] -> ""
+      entries -> " — of those, " <> Enum.map_join(entries, ", ", &environment_part/1)
+    end
+  end
+
+  # A row whose environment the ledger could not name is still a never-covered
+  # row: it is reported as unnamed rather than dropped, because a dropped row
+  # would make the parts sum to less than the count they are splitting.
+  defp environment_part(%{environment: environment, never_covered: n})
+       when is_binary(environment) and environment != "",
+       do: "#{number(n)} in #{environment}"
+
+  defp environment_part(%{never_covered: n}), do: "#{number(n)} in an unnamed environment"
 
   # The two counts that are neither covered nor never-covered, stated only when
   # they exist: a row too young to judge is not a stuck site, and a row nobody
