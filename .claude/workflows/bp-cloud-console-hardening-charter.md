@@ -3148,6 +3148,77 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-10 — wave 65 REVIEW — grade A, four round-1 slices, all four pushed with PRs open
+
+**Paper:** `cloud-console-hardening-wave-65-2026-08-09` (debrief appended). **Ceiling:** D800 (this PR).
+
+**LANDED (four PRs, opened before this entry was written — the push streak holds three waves running):**
+
+- `cch-w64-s6` **THE DEFERRED PILL STOPS READING CALM** → **#11486**, branch
+  `loop-epic/the-deferred-pill-stops-reading-calm-the-0-r`. Arm A ships CSS-free as D773 ruled
+  (`freshnessModel` gains a `deferred` arm: "Deferred by the box", dot `rebuild`, no pulse — driven
+  `status-pill--neutral` → `status-pill--warn`, `fresh-badge--unknown` → `fresh-badge--rebuild`).
+  Arm B authors `.dep-deferred` in place under `.dep-queued` on the `.dep-cancelled` precedent —
+  warn hue, open chip, solid amber hairline, so queued/building/deferred/cancelled are three-way
+  distinct — and takes the one `CONTRAST_PAIRS` entry the transparent ground owes. `deployIsRefusal`
+  widened to `cancelled|deferred` so the box's own 200-char sentence finally reaches the ladder, and
+  the `DEPLOY_STATUSES` one-word fix co-merges with the rule it guards, proved to red on `origin/main`
+  alone. **Review fix:** the detail de-dup prefix test was narrowed to the two shapes `short_detail/1`
+  can produce (byte equality, or a prefix ending in the clamp's ellipsis) — the builder's own
+  flagged over-suppression, closed.
+- `cch-w65-s2` **THE CLOCK RECORDS A CHECK THAT WAS ACTUALLY MADE** → **#11487**, branch
+  `loop-epic/the-control-plane-stops-stamping-a-check-1-r`. `persist_update_unknown/2` OMITS
+  `update_checked_at` (never an explicit `nil`, D789) on the three rungs that return before a request
+  is built. The console's client-side apology `UPDATE_REFUSAL_UNCLOCKED` is now compensating for
+  nothing — its removal is the separately-filed copy change (D791), NOT done here. Two MIRROR tests
+  keep the fix from degenerating into "never stamp on unknown"; one test discriminates OMIT from
+  NULL; two autoupdate NULL-candidate guards proved by mutation. **No review fix needed.**
+- `cch-w63-s7` **THE SITE REFUSAL MODAL STOPS SAYING A DEPLOY IS RUNNING** → **#11488**, branch
+  `loop-epic/the-site-refusal-modal-stops-saying-a-de-2-r`. The code check sits ABOVE the status arm
+  (the site plane answers 409 for two different facts), and `siteRollbackRefusalTerminal` is widened
+  on the CODE not the status, so Try again stops being offered into a permanent 409.
+  **Review fix:** the refusal sentence shipped as a second source literal held in step only by a test
+  assertion; `siteRollbackFailure` now CALLS `rollbackConflictCopy("identity_refused")` — one fact,
+  one producer, drift impossible.
+- `cch-w63-s8` **A REFUSED WRITE LEAVES A NAMED AUDIT ROW** → **#11489**, branch
+  `loop-epic/a-refused-write-leaves-a-named-audit-row-3-r`. `barkpark.credentials_refused` joins the
+  closed `@actions` vocabulary under a WIRE-VOCABULARY MAP comment, emitted from both
+  `{:error, :identity_refused}` arms through `record_audit/1` (never `audit/3`, which would roll the
+  row back). Proof is PERSISTENCE — the real routes driven through `Router.call/2`, the DATABASE
+  asked what happened — and the census stayed 17/0 through the mutation that reds the persistence
+  test, which is the whole argument for where the guard lives. **No review fix needed.**
+
+**INTEGRATION PROOF (all four `-r` branches merged onto `origin/main@6d8f1f1c43`, RC=0, no conflict):**
+JS harness **1046/1046/0**, `__css_check` **0 errors**, smoke **111 scenarios**, cssom **PARITY PASS**,
+breakpoint census reconciled; `mix compile --force --warnings-as-errors` clean; **full cloud Elixir
+suite 3605 tests / 0 failures**. Every slice's own gate also re-run green on its final `-r` state.
+
+**GRADE: A.** Both clauses of the wave's one subject were actually closed. The SITE card is no longer
+dark on its seventh status and the box's sentence reaches a human; the control plane stopped inventing
+evidence about boxes it never spoke to. Every slice shipped mutation proof, not source proof — s8's
+census-stays-green-through-the-mutation measurement is the wave's best single artifact. Not A+:
+two co-scoped follow-ups are now owed on merge (the client-side apology and the dead `no_previous`
+arm), and no slice was driven in a real browser at a real viewport, so the amber-on-open-chip
+legibility claim rests on the contrast gate and cssom parity rather than on eyes.
+
+**LEDGER:** all four slice tasks in_progress with honest pulses and merge-gated criteria left OPEN for
+the lead (s6 12/14, s2 9/10, s7 6/8, s8 11/13). Two honest `--miss` stamps (s7 c5, s8 c10), each with a
+published follow-up row. No fixes were needed; nothing outside the wave was touched.
+
+**WHAT THE NEXT WAVE MUST TAKE, IN THIS ORDER:**
+
+1. **Merge round 1 first** — #11486, #11487, #11488, #11489 (any order; proved disjoint). Close the
+   merge-gated criteria: s6 c12/c13, s2 c9, s7 c7, s8 c12.
+2. **The two debts this wave CREATED**, both cheap and both now stale-in-the-wrong-direction the moment
+   #11487 merges: remove `UPDATE_REFUSAL_UNCLOCKED` from `app.js` (D791 — it apologises for a column
+   that no longer lies), and make or delete the dead `no_previous` arm
+   (`cch-w65-bl-site-rollback-plane-types-its-box-refusals`).
+3. **`teardown_failed` has ZERO readers in `app.js`** — `DELETE /v1/sites/:id` refusals render nothing
+   typed at all. That is the same defect class this wave just closed twice, one route over, and it is
+   the largest remaining dark surface on the SITE card.
+4. `cch-w65-bl-action-labels-and-actions-are-uncoupled` and
+   `cch-w58-bl-two-unavailable-vocabularies-name-one-fact` remain open and unclaimed.
+
 ### 2026-08-09 — wave 65 DECIDE (build in flight) — THE SITE CARD GOES HONEST, AND THE COLUMN STOPS LYING FOR IT
 
 **Paper:** `cloud-console-hardening-wave-65-2026-08-09`. **This charter PR carries D784-D800.** Ceiling
