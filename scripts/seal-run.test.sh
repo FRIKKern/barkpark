@@ -290,6 +290,49 @@ STATE_AFTER="$(gitq "$CLEAN" rev-parse HEAD; gitq "$CLEAN" status --porcelain; g
                                      || bad "the runner changed git state under --repo"
 
 # ---------------------------------------------------------------------------
+# THE PARSER IS BOUND TO THE REAL EMITTER, NOT ONLY TO THE STAND-IN.
+#
+# Every probe above drives a stand-in predicate, so all of them would still pass
+# if the REAL seal-predicate.mjs renamed `head=` or `b-unavailable=`: `tok()`
+# matches on field NAME, an absent field reads empty, and both post-run refusals
+# are guarded by `[ -n … ]` — so a rename makes the runner silently stop checking
+# and VOUCH for a tree it did not verify. That is a fail-OPEN, and it was the
+# sharpest blind spot in what this slice shipped.
+#
+# It cannot be closed inside the fenced file (D402), so it is closed from here:
+# assert that origin/main's own predicate still EMITS both field names in a
+# `VERDICT-TOKEN:` template literal. A rename now reds this file — where the
+# runner's silence would have been the only other signal.
+section "the runner's field names are the predicate's field names"
+
+PRED_REAL="$ROOT/cloud/priv/static/__preview__/seal-predicate.mjs"
+if [ ! -f "$PRED_REAL" ]; then
+  bad "the real predicate is not at $PRED_REAL — the runner's parser is bound to nothing"
+else
+  EMITTERS="$(grep -c 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" || true)"
+  [ "${EMITTERS:-0}" -ge 1 ] \
+    && ok "the real predicate emits a VERDICT-TOKEN line ($EMITTERS producer(s))" \
+    || bad "the real predicate emits no VERDICT-TOKEN line — the runner would refuse 7 on every read"
+
+  # Both names are asserted ON A TOKEN-EMITTING LINE, not merely somewhere in the
+  # file: the prose above them explains the fields at length, so a bare file-wide
+  # grep would survive the exact rename this probe exists to catch.
+  grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" | grep -q 'head=' \
+    && ok "…and it still emits head= on that line (seal-run.sh's tok head)" \
+    || bad "the predicate no longer emits head= — seal-run.sh's stale-tree refusal has silently stopped checking"
+
+  grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" | grep -q 'b-unavailable=' \
+    && ok "…and it still emits b-unavailable= on that line (seal-run.sh's tok b-unavailable)" \
+    || bad "the predicate no longer emits b-unavailable= — seal-run.sh's history refusal has silently stopped checking"
+
+  # Able to fail: the same two greps against a name the predicate does not use
+  # must NOT match, so the two oks above are matching the field and not the prose.
+  grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" | grep -q 'b-unreadable=' \
+    && bad "the disarm matched a field name the predicate does not emit — these greps are not load-bearing" \
+    || ok "disarm: a field name the predicate does NOT emit fails the same grep"
+fi
+
+# ---------------------------------------------------------------------------
 echo
 echo "seal-run.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
