@@ -1,4 +1,3 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 6000tok -->
 # w28-v13 — prose-rot scope + prior instrument: re-derivation recipes
 
 All commands run 2026-08-09 ~10:00-10:25Z from `/Volumes/SATECHI/github/barkpark`.

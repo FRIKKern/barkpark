@@ -1,4 +1,3 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 4000tok -->
 # W28 · Reclaim roster — mechanical vs live-proof split (re-derivation recipes)
 
 As-of 2026-08-09, origin/main = a95bc7ca9. Every command below is the literal
