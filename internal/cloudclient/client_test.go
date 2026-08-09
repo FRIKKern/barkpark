@@ -1,12 +1,18 @@
 package cloudclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -971,4 +977,149 @@ func TestVerifyInstance401KeepsUnauthorizedPrefix(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "unauthorized:") {
 		t.Fatalf("error = %q, want the unauthorized: prefix", err.Error())
 	}
+}
+
+// --- FleetDeployCensus per-call timeout (dr-w33-s2) -------------------------
+//
+// The census aggregates the whole deploy ledger over the caller's window, so its
+// latency grows with the window's WIDTH. On the shared 30s DefaultTimeout the
+// reader could not reach the window that contains the epic's own never-covered
+// production rows (27 days back): the plane answered 200 in 57.9s under curl
+// while the CLI died on `Client.Timeout exceeded while awaiting headers`.
+//
+// A wall-clock difference of 30s vs 90s is not observable in a unit test without
+// actually waiting, so the install is pinned STRUCTURALLY (go/ast over this
+// package's own source, the same technique as internal/cli's resource census):
+// delete the install line and this test reds. The behavioral half — that the
+// copy-the-client pattern still honors an injected client untouched — is pinned
+// by TestFleetDeployCensusHonorsInjectedClient below, which is the real
+// regression risk of `cc := *c`.
+
+// widestMeasuredCensus is the slowest window the live control plane was
+// observed answering HTTP 200 on 2026-08-09 — the 27-day window, the narrowest
+// one containing the epic's 3 never-covered production rows. It is the FLOOR the
+// cap has to clear; anything at or below it puts the exit gauge's own number
+// back out of reach.
+const widestMeasuredCensus = 58 * time.Second
+
+func TestFleetDeployCensusTimeoutExceedsDefault(t *testing.T) {
+	if FleetDeployCensusTimeout <= DefaultTimeout {
+		t.Fatalf("FleetDeployCensusTimeout = %s, must exceed DefaultTimeout %s — the "+
+			"27-day window the exit gauge needs answered in 57.9s", FleetDeployCensusTimeout, DefaultTimeout)
+	}
+	// The load-bearing property is the MEASUREMENT, not the constant. Pinning
+	// equality with the two 90s precedents would red on a future bump made for a
+	// good reason (a wider window, a slower plane); pinning the measured floor
+	// reds only when the cap stops covering the window it exists to reach.
+	if FleetDeployCensusTimeout < widestMeasuredCensus {
+		t.Fatalf("FleetDeployCensusTimeout = %s, below the widest window measured answering 200 (%s) — "+
+			"the census cannot reach the 27-day window that holds the epic's only non-zero",
+			FleetDeployCensusTimeout, widestMeasuredCensus)
+	}
+	// And a cap is still a cap: an unbounded one turns a sick plane into a hung
+	// CLI, which is the failure this constant exists to make loud rather than
+	// silent. Both precedents in this file sit well inside this band.
+	if FleetDeployCensusTimeout > 5*time.Minute {
+		t.Fatalf("FleetDeployCensusTimeout = %s exceeds 5m — a cap that large hangs the CLI on a "+
+			"sick control plane instead of failing it", FleetDeployCensusTimeout)
+	}
+	for _, precedent := range []struct {
+		name string
+		d    time.Duration
+	}{{"DomainStatusTimeout", DomainStatusTimeout}, {"VerifyTimeout", VerifyTimeout}} {
+		if FleetDeployCensusTimeout < precedent.d {
+			t.Fatalf("FleetDeployCensusTimeout = %s, want at least the headroom of its precedent %s (%s) — "+
+				"the census is the heaviest read in this file, not the lightest",
+				FleetDeployCensusTimeout, precedent.name, precedent.d)
+		}
+	}
+}
+
+// TestFleetDeployCensusInstallsItsOwnTimeout fails if FleetDeployCensus falls
+// back to DefaultTimeout — i.e. if the `cc.HTTP = &http.Client{Timeout: ...}`
+// install line is removed, or if the request is issued through the original
+// receiver instead of the widened copy.
+func TestFleetDeployCensusInstallsItsOwnTimeout(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "client.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse client.go: %v", err)
+	}
+	var body string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "FleetDeployCensus" || fn.Recv == nil {
+			continue
+		}
+		var buf bytes.Buffer
+		if err := printer.Fprint(&buf, fset, fn.Body); err != nil {
+			t.Fatalf("print FleetDeployCensus body: %v", err)
+		}
+		body = buf.String()
+	}
+	if body == "" {
+		t.Fatal("FleetDeployCensus method not found in client.go")
+	}
+	if !strings.Contains(body, "FleetDeployCensusTimeout") {
+		t.Fatalf("FleetDeployCensus does not install FleetDeployCensusTimeout — it falls back to "+
+			"the shared %s DefaultTimeout, which cannot reach the 27-day window.\nbody:\n%s", DefaultTimeout, body)
+	}
+	if !strings.Contains(body, "cc := *c") {
+		t.Fatalf("FleetDeployCensus must widen a COPY of the client (cc := *c), so an injected "+
+			"client is honored untouched.\nbody:\n%s", body)
+	}
+	// `cc.do(` CONTAINS `c.do(`, so a substring check would pass vacuously — match
+	// the bare receiver only when it is not preceded by an identifier character.
+	if regexp.MustCompile(`(^|[^A-Za-z0-9_])c\.do\(`).MatchString(body) {
+		t.Fatalf("FleetDeployCensus still issues its request through the un-widened receiver "+
+			"(c.do), so the installed timeout is dead code.\nbody:\n%s", body)
+	}
+}
+
+// TestFleetDeployCensusHonorsInjectedClient pins the regression risk of the
+// copy-the-client pattern: a caller-supplied *http.Client must reach the request
+// unchanged — same pointer, same Timeout — and must NOT be replaced by the
+// 90s fallback.
+func TestFleetDeployCensusHonorsInjectedClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"total":5,"never_covered":3,"scope":{"kind":"team"}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	rt := &countingTransport{inner: srv.Client().Transport}
+	injected := &http.Client{Timeout: 7 * time.Second, Transport: rt}
+	c := &Client{BaseURL: srv.URL, Token: "sess", HTTP: injected}
+
+	from := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	if _, err := c.FleetDeployCensus(context.Background(), from, from.Add(20*24*time.Hour)); err != nil {
+		t.Fatalf("FleetDeployCensus: %v", err)
+	}
+	if rt.n != 1 {
+		t.Fatalf("injected client carried %d requests, want 1 — the census built its own client "+
+			"instead of honoring the injected one", rt.n)
+	}
+	if injected.Timeout != 7*time.Second {
+		t.Fatalf("injected client Timeout = %s, want 7s untouched", injected.Timeout)
+	}
+	if c.HTTP != injected {
+		t.Fatal("FleetDeployCensus mutated the receiver's HTTP client; it must widen a copy only")
+	}
+}
+
+// countingTransport counts the requests that actually travelled through the
+// injected client — the only way to prove the injected client was USED rather
+// than silently replaced by the lazily-built fallback.
+type countingTransport struct {
+	inner http.RoundTripper
+	n     int
+}
+
+func (t *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	t.n++
+	inner := t.inner
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	return inner.RoundTrip(r)
 }
