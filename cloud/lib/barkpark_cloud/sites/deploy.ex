@@ -1708,6 +1708,21 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp unreachable(%Barkpark{slug: slug}, :decrypt_failed),
     do: "instance #{slug}'s admin token could not be decrypted"
 
+  # THE REFUSAL THAT IS NOT A REACHABILITY PROBLEM (cloud-console-hardening
+  # D741/D757). `BoxRelay` refuses a WRITE to a box whose stored admin credential
+  # the box itself answered 401 — nothing went on the wire, so calling it
+  # "unreachable" would describe a network fault that did not happen. The sentence
+  # ECHOES the one #11337 ships on the instance seam rather than minting a third
+  # wording for one fact: the clause "the instance rejected our access credential"
+  # is `usageUnavailableText("unauthorized")` byte for byte, and the second
+  # sentence is that seam's verbatim. Only the opener is verb-neutral, because
+  # this clause serves BOTH the rollback and the teardown mint.
+  defp unreachable(%Barkpark{}, :identity_refused),
+    do:
+      "The request was never sent — the instance rejected our access credential. " <>
+        "Barkpark Cloud stops asking a box that refused it; the hourly update " <>
+        "check is what notices the credential working again."
+
   defp unreachable(%Barkpark{slug: slug}, _reason),
     do:
       "instance #{slug} is unreachable — the deploy could not be delivered; check instance health"
@@ -1739,7 +1754,9 @@ defmodule BarkparkCloud.Sites.Deploy do
   NOT answer 200.
   """
   @spec rollback(Site.t(), Barkpark.t()) ::
-          {:ok, map()} | {:error, non_neg_integer(), String.t()}
+          {:ok, map()}
+          | {:error, non_neg_integer(), String.t()}
+          | {:error, non_neg_integer(), String.t(), String.t()}
   def rollback(%Site{} = site, %Barkpark{} = bp) do
     was = site.current_deployment_id
 
@@ -1768,6 +1785,13 @@ defmodule BarkparkCloud.Sites.Deploy do
       {:ok, _status, body} ->
         {:error, 422, rollback_refusal(body, "the instance could not roll this site back")}
 
+      # THE REFUSED BOX (D741/D763). Nothing went on the wire, so this is a
+      # CONFLICT with the box's own verdict about our credential, not a 502 about
+      # the network — and it carries a TYPED code, because the console cannot
+      # classify a status the route labels `rollback_failed` on every error.
+      {:error, :identity_refused} ->
+        {:error, 409, unreachable(bp, :identity_refused), "identity_refused"}
+
       {:error, reason} ->
         {:error, 502, unreachable(bp, reason)}
     end
@@ -1782,7 +1806,10 @@ defmodule BarkparkCloud.Sites.Deploy do
   — the CALLER must only deregister the site row on `:ok`, or a still-serving box
   gets orphaned.
   """
-  @spec teardown(Site.t(), Barkpark.t()) :: :ok | {:error, pos_integer(), String.t()}
+  @spec teardown(Site.t(), Barkpark.t()) ::
+          :ok
+          | {:error, pos_integer(), String.t()}
+          | {:error, pos_integer(), String.t(), String.t()}
   def teardown(%Site{} = site, %Barkpark{} = bp) do
     case BoxRelay.teardown(bp, %{
            mode: "teardown",
@@ -1798,6 +1825,11 @@ defmodule BarkparkCloud.Sites.Deploy do
 
       {:ok, _status, body} ->
         {:error, 422, rollback_refusal(body, "the instance could not tear this site down")}
+
+      # Same fence, same typed conflict (D741/D763): the teardown was refused by
+      # the control plane before the wire, not lost on it.
+      {:error, :identity_refused} ->
+        {:error, 409, unreachable(bp, :identity_refused), "identity_refused"}
 
       {:error, reason} ->
         {:error, 502, unreachable(bp, reason)}

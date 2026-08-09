@@ -7027,6 +7027,13 @@ defmodule BarkparkCloud.Web.Router do
 
           json(conn, 200, %{ok: true, status: "deleted", slug: site.slug})
 
+        # Same typed relay as the rollback route (cch-w63-s3 / D763). NAMED
+        # DEFERRAL: `teardown_failed` has ZERO readers in `app.js`, so this
+        # route's refusal has no console surface at all yet — the code is on the
+        # wire so a reader CAN be written; writing it is not this slice.
+        {:error, status, detail, code} ->
+          json(conn, status, %{ok: false, error: code, detail: detail})
+
         {:error, status, detail} ->
           json(conn, status, %{ok: false, error: "teardown_failed", detail: detail})
       end
@@ -7280,6 +7287,15 @@ defmodule BarkparkCloud.Web.Router do
                 previous_deployment_id: result.previous_deployment_id,
                 url: result.url
               })
+
+            # A TYPED refusal (cch-w63-s3 / D763): the plane measured WHICH refusal
+            # this is, so the wire carries that word instead of the flat
+            # `rollback_failed` this route stamps on every other error status —
+            # which is the reason the console cannot classify a site rollback
+            # failure at all. The STATUS still comes from `Sites.Deploy`; this
+            # route only relays it.
+            {:error, status, detail, code} ->
+              json(conn, status, %{ok: false, error: code, detail: detail})
 
             {:error, status, detail} ->
               json(conn, status, %{ok: false, error: "rollback_failed", detail: detail})

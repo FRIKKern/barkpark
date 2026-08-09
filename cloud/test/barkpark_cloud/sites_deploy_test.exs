@@ -611,6 +611,16 @@ defmodule BarkparkCloud.SitesDeployTest do
     # honest reason and start_deploy is never called.
     test "a site whose read token is missing settles failed and never touches the box" do
       {bp, site} = setup_site()
+
+      # cch-w63-s3: ARM THE RECORDER. `FakeBoxRelay.record/1` only appends under a
+      # store key `program/1` created, so a test that never programs records
+      # NOTHING and `calls()` answers `[]` no matter what the box was told to do.
+      # MEASURED at this exact assertion: with three real box calls injected
+      # immediately above it and no `program/1`, this test PASSED — the one
+      # assertion that exists to prove the box was untouched could not lose. With
+      # this line it fails and names all three verbs. (Narrow claim: only
+      # `calls() == []` was vacuous; the row/status assertions above always bit.)
+      FakeBoxRelay.program([])
       {:ok, d} = Deploy.enqueue(site, bp)
 
       # Simulate a row whose token was never stored / cannot be revealed.
@@ -1969,6 +1979,91 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert {:error, status, detail} = Deploy.teardown(site, bp)
       refute status in 200..299
       assert is_binary(detail)
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## cloud-console-hardening W63 (D741/D757/D763) — THE SITE-WRITE FENCE.
+  ##
+  ## A box whose `update_unavailable_reason` is "identity_refused" answered our
+  ## stored admin credential with a 401. `Registry.relay_admin_post/3` has refused
+  ## INSTANCE writes to such a box since #11287; the SITE writes ride
+  ## `relay_admin/4` and bypassed that fence, so every deploy / rollback / teardown
+  ## for the one refused row on the live fleet spent a real request to be told no
+  ## again — and was then reported as an UNREACHABLE box, a claim about the network
+  ## nobody measured.
+  ##
+  ## The fence is at the DISPATCHER, so the assertions below are at the box_relay
+  ## seam (`FakeBoxRelay.calls()`), not at the trigger: deleting the fence must red
+  ## these, and it does — the recorder is armed with `program/1` in every one.
+  ## ---------------------------------------------------------------------------
+
+  describe "the site-write fence (a box that refused our credential)" do
+    defp refused_barkpark(team) do
+      team
+      |> live_barkpark()
+      |> Ecto.Changeset.change(update_unavailable_reason: "identity_refused")
+      |> Repo.update!()
+    end
+
+    test "a rollback is refused BEFORE the wire: zero box calls, a typed 409, never a 502" do
+      bp = team_fixture() |> refused_barkpark()
+      site = static_site(bp)
+      FakeBoxRelay.program([])
+
+      assert {:error, 409, detail, "identity_refused"} = Deploy.rollback(site, bp)
+
+      # The status is a CONFLICT about identity, not a 502 about reachability, and
+      # the sentence never claims a network fault that did not happen.
+      assert detail =~ "the instance rejected our access credential"
+      refute detail =~ "unreachable"
+
+      # THE WHOLE POINT: nothing was driven on the box.
+      assert FakeBoxRelay.calls() == []
+    end
+
+    test "a teardown is refused the same way, with the same typed code" do
+      bp = team_fixture() |> refused_barkpark()
+      site = static_site(bp)
+      FakeBoxRelay.program([])
+
+      assert {:error, 409, detail, "identity_refused"} = Deploy.teardown(site, bp)
+      assert detail =~ "the instance rejected our access credential"
+      assert FakeBoxRelay.calls() == []
+    end
+
+    test "a deploy never starts on a refused box — the row fails with the honest reason" do
+      bp = team_fixture() |> refused_barkpark()
+      site = static_site(bp)
+      FakeBoxRelay.program([])
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      assert final.failure_reason =~ "the instance rejected our access credential"
+
+      # No build was spent asking a box that had already said no.
+      assert FakeBoxRelay.calls() == []
+    end
+
+    test "the READ stays open — poll_deploy still reaches a refused box" do
+      bp = team_fixture() |> refused_barkpark()
+      FakeBoxRelay.program([])
+
+      # A refused box is exactly the box a human most needs to READ. Fencing one
+      # seam up (in Sites.Deploy) would have refused this too.
+      assert {:ok, 200, _} = BarkparkCloud.Sites.BoxRelay.poll_deploy(bp, "blog", "build-1")
+      assert [{:poll_deploy, %{slug: "blog", build_id: "build-1"}}] = FakeBoxRelay.calls()
+    end
+
+    test "a HEALTHY box is untouched by the fence — the writes still go through" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      assert :ok = Deploy.teardown(site, bp)
+      assert [{:teardown, _}] = FakeBoxRelay.calls()
     end
   end
 
