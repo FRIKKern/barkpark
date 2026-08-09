@@ -484,6 +484,100 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     end
   end
 
+  # ── w58-s3: "unreachable" is a claim about the NETWORK ───────────────────────
+  #
+  # A box that ANSWERED and refused our admin credential is a different fact from
+  # a box we never reached, and the meter is what a paying customer reads. These
+  # drive the REAL route through the REAL http seam with four upstream shapes and
+  # demand four distinct answers — before the fix all four were byte-identical.
+  describe "delivered refusals are not unreachability (w58-s3)" do
+    # The four upstream shapes, keyed by the word each one should earn.
+    defp ds_shapes do
+      %{
+        "unauthorized" => ok_json(401, ~s({"error":"unauthorized"})),
+        "refused" => ok_json(404, "<html>nginx</html>"),
+        "instance_error" => ok_json(503, ~s({"error":"upstream down"})),
+        "unreachable" => {:error, {:http_client, :econnrefused}}
+      }
+    end
+
+    defp meters_for(user, bp, ds_response) do
+      Fake.program(%{@ds_path => ds_response})
+
+      meters(call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user)))
+    end
+
+    test "a delivered 401 and a refused connection produce DIFFERENT meters" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      refused_credential = meters_for(user, bp, ok_json(401, ~s({"error":"unauthorized"})))
+      never_answered = meters_for(user, bp, {:error, {:http_client, :econnrefused}})
+
+      # Both are still honest about the NUMBER — no fake zero on either side.
+      assert refused_credential["datasets"]["value"] == "unmetered"
+      assert never_answered["datasets"]["value"] == "unmetered"
+
+      # ...but they no longer tell the customer the same story.
+      refute refused_credential["datasets"] == never_answered["datasets"]
+      assert refused_credential["datasets"]["unavailable_reason"] == "unauthorized"
+      assert never_answered["datasets"]["unavailable_reason"] == "unreachable"
+    end
+
+    test "401 / 404 / 5xx / econnrefused / TLS handshake are FOUR answers, not one" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      for {expected, response} <- ds_shapes() do
+        m = meters_for(user, bp, response)
+
+        # The dataset list is the gate: all three instance meters degrade with
+        # the SAME word, because they all failed on that one read.
+        for name <- ~w(datasets documents webhooks) do
+          assert m[name]["value"] == "unmetered"
+
+          assert m[name]["unavailable_reason"] == expected,
+                 "#{name} on a #{expected} upstream said #{inspect(m[name]["unavailable_reason"])}"
+        end
+      end
+
+      # A TLS handshake failure never delivered a response either — it stays
+      # unreachable, and must not be mistaken for the box saying no.
+      tls = {:error, {:failed_connect, [{:tls_alert, {:handshake_failure, ~c"bad cert"}}]}}
+      assert meters_for(user, bp, tls)["datasets"]["unavailable_reason"] == "unreachable"
+
+      # The whole point, stated once: four upstream shapes, four distinct meters.
+      distinct =
+        ds_shapes()
+        |> Map.values()
+        |> Enum.map(&meters_for(user, bp, &1)["datasets"])
+        |> Enum.uniq()
+
+      assert length(distinct) == 4
+    end
+
+    test "the discrimination SURVIVES record_sample/1 into usage_samples.envelope" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      persisted =
+        for {_word, response} <- ds_shapes() do
+          Fake.program(%{@ds_path => response})
+          {:ok, sample} = Usage.record_sample(bp)
+          # Re-read: the ROW is the artefact the surfaces serve, not the
+          # in-memory map we happened to hand the changeset.
+          Repo.get!(Sample, sample.id).envelope["meters"]["datasets"]
+        end
+
+      # The stored rows differ too — the sparkline / fleet strip read this map,
+      # not the live route, so a live-only fix would still lie from cache.
+      assert length(Enum.uniq(persisted)) == 4
+
+      assert Enum.sort(Enum.map(persisted, & &1["unavailable_reason"])) ==
+               ~w(instance_error refused unauthorized unreachable)
+    end
+  end
+
   describe "instances meter — the fleet's one honest quota (OC11)" do
     # Stamp an active subscription on a team WITHOUT going through the gateway —
     # the row is all `barkpark_limit/1` + `active_subscription/1` read.

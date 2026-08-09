@@ -18962,6 +18962,12 @@
     if (reason === "exception") return "the read crashed";
     if (reason === "deadline_exceeded") return "the read timed out";
     if (reason === "unreachable") return "the instance was unreachable";
+    // The box ANSWERED and said no — three distinct facts, none of them
+    // "unreachable". Each states what happened; none prescribes a fix the
+    // control plane cannot perform on the customer's behalf.
+    if (reason === "unauthorized") return "the instance rejected our access credential";
+    if (reason === "instance_error") return "the instance answered with an error";
+    if (reason === "refused") return "the instance refused the read";
     if (reason === "bad_shape") return "the instance answered in an unexpected shape";
     if (reason === "too_many_datasets") return "too many datasets to tally";
     return "the read failed";
