@@ -694,6 +694,21 @@ jobs:
           dispatched=0
           not_dispatched=""
 
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # Measured by executing this very step body with one upstream =
+          # failure: the step LOG names the offending job one line above, but
+          # the `::error::` — the ONLY line the check-run API carries, and so
+          # the only line a human at the merge button or the merge queue ever
+          # reads — named NOTHING. `bad` is a bit; this is the set behind it.
+          # It is appended at EVERY `bad=1` site, so it can never disagree with
+          # the verdict: a job reaches this list through the same line that
+          # reds the gate. DERIVED from `${job}` — never a hardcoded name, and
+          # never a re-print of the step log.
+          # Comma-joined, not space-joined: job names contain spaces
+          # ("changes (dispatcher)", "path-escape ratchet"), so a space-joined
+          # list cannot be read back as a set.
+          reds=""
+
           # decide <job-name> <result> <gate-value>
           #   gate-value is the dispatcher output that gated the job, or the
           #   literal string NEVER for jobs that must always run. A skip is
@@ -713,20 +728,24 @@ jobs:
                   echo "          most often because an upstream FAILED. Refusing to green a required"
                   echo "          context on it."
                   bad=1
+                  reds="${reds:+${reds}, }${job}"
                 fi
                 ;;
               failure | cancelled)
                 echo "  FAIL    ${job}: ${result}"
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
               '')
                 echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
                 echo "          or the run object is malformed. Cannot tell, therefore red."
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
               *)
                 echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
             esac
             # Tally, for the D377 notice at the bottom of this step. NEVER-gated
@@ -749,7 +768,7 @@ jobs:
 
           echo
           if [ "$bad" -ne 0 ]; then
-            echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
+            echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
             exit 1
           fi
 

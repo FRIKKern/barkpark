@@ -682,6 +682,34 @@ gate() {
 gate_says() {
   if grep -q -- "$1" "$GATE_OUT"; then ok "$2"; else no "$2 (not in the step output)"; fi
 }
+# gate_names <must-name> <must-not-name> — D770/D771.
+#
+# `gate_says` reads the whole step OUTPUT, which has always named the failing
+# job in its log. This reads the `::error::` ANNOTATION ONLY — the single line
+# the check-run API carries, and therefore the only line a human at the merge
+# button or the merge queue ever sees. Until this slice that line said "at least
+# one upstream job" and stopped.
+#
+# It is a PAIR by construction: naming the job that failed is worth nothing on
+# its own (a hardcoded sentence satisfies it), so the same call also refuses an
+# annotation that names a job which PASSED in this very run.
+gate_names() {
+  local ann named
+  ann="$(grep '^::error' "$GATE_OUT" | tr '\n' ' ')"
+  named="${ann#*NOT IN THE ALLOW-SET: }"
+  if [ -z "$ann" ] || [ "$named" = "$ann" ]; then
+    no "  …but the annotation names no job at all: ${ann:-<no ::error:: line>}"
+    return 0
+  fi
+  case "$named" in
+    *"$1"*) ok "  …and the annotation names the refusing '$1'" ;;
+    *) no "  …but the annotation never named the refusing '$1': $ann" ;;
+  esac
+  case "$named" in
+    *"$2"*) no "  …and it names '$2', which PASSED in this run: $ann" ;;
+    *) ok "  …and does not name the passing '$2'" ;;
+  esac
+}
 
 # (a) the happy path: a full cloud/** PR, everything ran and passed
 gate "full run, all green" 0 \
@@ -697,12 +725,17 @@ gate_says "legitimately not dispatched" "…and says so, rather than claiming th
 # (c) an upstream FAILURE reds it
 gate "test failed" 1 \
   R_CHANGES=success R_COMPILE=success R_TEST=failure R_ESCAPE=success O_CLOUD=true
+gate_names "test" "compile"
 
 # (d) THE BYPASS THIS SHAPE EXISTS TO CLOSE: `test` skipped only because an
 #     upstream died, while the dispatcher said it WAS needed.
 gate "test skipped behind a live gate (upstream died)" 1 \
   R_CHANGES=success R_COMPILE=success R_TEST=skipped R_ESCAPE=success O_CLOUD=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
+# …and the SKIP arm accumulates too, not just the failure arm: this red never
+# passes through `failure`, so an accumulator wired only there would leave the
+# annotation contentless on exactly the bypass this shape exists to close.
+gate_names "test" "compile"
 
 # (e) the dispatcher itself failing reds it, with an empty output
 gate "dispatcher failed, output empty" 1 \
