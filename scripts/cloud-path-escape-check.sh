@@ -169,10 +169,54 @@ set -euo pipefail
 #     newly hand every one of them the Postgres-backed Cloud `test` job, against
 #     5 for the exact files. Declaring what is actually read is both the honest
 #     and the cheap answer; widen only when a test starts reading more.
+#
+# THE CALLER CORPUS — dr-w26-s4. `payload_key_set_census_test.exs`'s caller arm
+# scores every `/v1/internal/**` WRITE route against a POSITIVELY declared caller
+# corpus: it walks `.github/workflows/deploy.yml`, `scripts`, `internal`,
+# `cloud/lib` and `deploy`, and reds when a write route ships with no caller in
+# any of them. Those are whole-directory reads, so the honest declaration is a
+# whole-directory glob — an exact-file pin rots the moment a caller moves one
+# file over, and the arm would then report "caller-less" about a route that IS
+# called: a FALSE RED that reads exactly like the true one.
+#
+#   internal/**  supersedes the four exact `internal/…` entries below. They are
+#       KEPT, redundantly, because each carries its own ruling and deleting a
+#       ruling to save a line is how a set stops explaining itself. The cost is
+#       the real one: this is the `internal/cli/**` widening refused above on
+#       CI-cost grounds, and dr-w26-s4 overrules that refusal for the caller arm
+#       — internal/cli IS where `bp cloud` calls the worker seam, so refusing it
+#       would make the corpus lie about which routes have callers. The refusal
+#       was a COST decision; borrowing it as a caller-corpus decision was the
+#       category error.
+#   deploy/**    likewise supersedes the two `deploy/site-deploy*.sh` entries.
+#   cloud/lib/** is REDUNDANT under `cloud/**` and is declared anyway, so that
+#       every root the arm walks appears here BY NAME. The arm asserts exactly
+#       that, which is what turns this block from a voluntary note into
+#       something that can lose: delete a root here and the Cloud suite reds.
+#   .github/workflows/deploy.yml is declared as an EXACT FILE, not
+#       `.github/workflows/**`. It is the only workflow the arm reads (the
+#       recorder seam), and the directory glob is both the expensive shape
+#       (D270: 145 newly-dispatching commits / 60 days) and one the harness pins
+#       against — cloud-path-escape-check.test.sh asserts elixir.yml does NOT
+#       match. Before this line a deploy.yml-only PR dispatched NOTHING in this
+#       set: the recorder could land, or vanish, with no code gate at all.
+#
+# RESIDUE, named rather than left to be found: `scripts/` is represented here by
+# three EXACT files, not `scripts/**`, because the harness pins exact-entry
+# semantics through `scripts/async_env_seam_scan.exs.orig` and a directory glob
+# turns that case red (measured: 164 passed, 1 failed). So a caller added in a
+# NEW scripts/ file does not itself dispatch this suite. The direction is safe —
+# the arm keeps scoring that route caller-less until the next Cloud-dispatching
+# PR, i.e. a LATE red, never a false green — but it is a hole, and closing it
+# means widening the harness first.
 CLOUD_PATHS='cloud/**
+cloud/lib/**
 .github/workflows/cloud.yml
+.github/workflows/deploy.yml
+deploy/**
 deploy/site-deploy.sh
 deploy/site-deploy-node.sh
+internal/**
 internal/caddyfile/caddyfile.go
 internal/cli/cloud/providers_capabilities.json
 internal/cloudclient/**
