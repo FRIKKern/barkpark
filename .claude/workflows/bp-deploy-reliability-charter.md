@@ -11615,3 +11615,83 @@ distinguish abandonment from stuckness (D558); (4) the preview arm is `never_cov
 tail runs 12–30h past it (D569); (6) the crown's scheduled trigger has never once run the reconcile (D570);
 (7) prebuilt deploys and lost fenced CASes are invisible to the abandonment gauge, and it is production-only by
 construction (D559).
+
+### Wave 2026-08-09 (wave 33) — REVIEWED · Paper `deploy-reliability-wave-33-2026-08-09` · grade **A**
+
+**Five of six slices built, reviewed, gate-green on the reviewed state, pushed and PR'd. Nothing merged — the
+lead merges.** The sixth (`dr-w32-followup-coverage-names-no-site`) is round 2 BY DESIGN, behind s1 and s2.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The coverage window contract gets a test that can fail | `dr-w33-s1-coverage-window-contract` | `…contract-gets-a-test-0-r` | [#11478](https://github.com/FRIKKern/barkpark/pull/11478) | 99 tests, 0 failures · format clean |
+| The census reader stops being the limiter | `dr-w33-s2-census-reader-stops-being-the-limiter` | `…being-the-limite-1-r` | [#11479](https://github.com/FRIKKern/barkpark/pull/11479) | go build/vet/test ok · gofmt clean |
+| The digest names the environment and its reach limit | `dr-w33-s3-digest-names-the-environment` | `…names-the-environment-2-r` | [#11480](https://github.com/FRIKKern/barkpark/pull/11480) | 47 tests, 0 failures · format clean |
+| The alarm reaches a human; cancelled stops being silence | `dr-w33-s4-alarm-reaches-a-human` | `…a-human-and-a-cancelle-3-r` | [#11481](https://github.com/FRIKKern/barkpark/pull/11481) | 41 passed, 0 failed (was 23 cases) |
+| The ledger's questions become runnable | `dr-w33-s5-ledger-questions-become-runnable` | `…become-runnable-a-4-r` | [#11482](https://github.com/FRIKKern/barkpark/pull/11482) | six re-worded commands re-run · LEDGER-ROW-PRESENT |
+
+**What landed.** The wind-down was VERIFIED rather than declared, and verifying it split the verdict — which is
+the wave's whole finding and the reason the epic did not seal today. The FLEET half is settled through three
+independent routes and every one of its five never-covered rows is explained; two of the five are preview rows
+that are uncoverable BY CONSTRUCTION (D557). The INSTRUMENT half was not. The same history read 0, 3 or 5
+depending on where an operator put two dates, and the envelope disclosed none of the three mechanisms behind
+that. This wave closed each one at its own seam. The right-edge law that swings the headline ~1,300× now has a
+test that can lose and a wire that says what it does (D555/D556). The exit command can now reach the 27-day
+window that holds the number — the limiter was a 30s client default sitting beside two 90s precedents in its
+own file, while the plane answers that window in 57.9s (D562). The morning digest renders the environment split
+its own fixture had been constructing and watching be dropped since it was written, and states its reach limit
+once (D564). And the alarm learned that a cancelled scheduled run is silence: paper-readers' gate had not run
+for six days while its stale issue sat there looking current (D563).
+
+**What the reviewer changed.** Five slices, all fixed in place, none redesigned. (1) **s4's deploy.yml widening
+was reverted** — the file already measured the argument against it forty lines above the guard the wave
+changed: 344 of 1,378 runs cancelled, `cancel-in-progress: false`, and a diff base anchored to the last
+SUCCESSFUL run, so a burst-merge cancellation is DESIGNED coalescing and prod is not left stale. Widening it
+would have buried `deploy-production`, this epic's loudest alarm key, under exactly the noise the file says
+trains people to ignore the real ones — and the PR left the old bullet standing, so `deploy.yml` shipped two
+comments contradicting each other. The other four guards stand. (2) **s3's reach sentence moved off
+`coverage_clause/1` onto `deploy_block/1`**: `@deploy_windows` has two doors, so it printed verbatim under both
+in every real send, and it was fail-open — had every window fallen to coverage-UNMEASURED the disclosure would
+have vanished exactly when the numbers deserve it most. Mutation-proved once-per-email. (3) **s2's value test
+pinned equality with two sibling constants** and never asserted the property that matters; it now pins the
+measured 57.9s floor (mutation-proved at 45s) with a 5m ceiling, and the builder's named blind spot was cleared
+— `cloudCtx` is `context.Background` at both call sites, so no outer deadline pre-empts the cap. (4) s1's
+non-vacuity mirror counted the never-covered row without saying where it came from; it now pins
+`never_covered_by_environment`, the quantity s3 renders. (5) s5 — see below.
+
+**Ledger fix, and it is the wave's second-best finding.** Charter D567 publishes `GENUINE-OPEN 155` and s5's
+committed count file published `164` — a live contradiction between `main` and the ledger, the exact class of
+thing this wave exists to clear. They reconcile with ZERO residue once the population is cleaned. Seven of the
+thirteen criteria-less rows were ONE row: a Decide-phase filing that retried **seven times at ~45s intervals**
+(20:51:23 → 20:56:26Z), leaving six `drafts.*` shadows counted as GENUINE-OPEN plus one published, criteria-less
+orphan — while the same finding was re-filed correctly ten minutes later as
+`dr-w33-bl-crown-skew-arm-has-no-epsilon`. Six discarded, one cancelled as a duplicate. `nocrit` then falls
+13 → 6, which is D567's six exactly, and the entire remaining gap is +8 rows this wave FILED and +2 rows s5
+CLOSED: **155 was true at 20:45Z, 165 is true at 21:47:56Z, and nothing else moved.** Recorded as §8 of
+`tooling/grip/ledger/w33-ledger-reclaim-2026-08-09.md`, with the count re-derived independently from a third
+worktree using the file's own command verbatim. This is the second live sighting of the draft-shadow mechanism,
+from a different write path and on a bigger burst — `dr-w33-fu-patch-spawns-a-counted-draft-shadow` is the right
+structural cure, not another manual sweep.
+
+**Ledger audit: clean.** All five slice tasks claimed, stamped criterion-by-criterion AS the work happened with
+quotable evidence, and left `in_progress` with the PR-body and merge-gated criteria honestly `--miss`-noted for
+the lead. No row outside this wave was touched by a builder. Three criteria carry appended REVIEW NOTES where a
+reviewer fix changed what the stored evidence describes (s3#1, s4#3, s5#5), each written with the criterion text
+and met flags read back and preserved.
+
+**What the lead must know before merging.** `dr-w33-s4` (#11481) now widens FOUR guards, not five — if the
+merge diff shows `deploy.yml` widened, the wrong branch was taken. **s1 is HIGH-FLIP-RISK (disclose-vs-fix) and
+has had exactly ONE independent re-derivation, the reviewer's; a genuinely independent second reviewer is still
+owed by hand.** Round 2 (`dr-w32-followup-coverage-names-no-site`) dispatches only after #11478 AND #11479 are
+on `origin/main` — it edits `coverage_cohorts/2` in s1's file and the cohort struct in s2's, and it is
+HIGH-FLIP-RISK on tenancy. #10811 and #10129 both red `main` on merge with measured numbers (D571) and neither
+merges as-is. Every merge-gated criterion (index 7 on s1–s4, index 7 on s5) is the lead's to close.
+
+**What the next wave should take.** The epic is ONE live proof from its exit. Nobody has yet run the patched
+`bp cloud deployments --days 27` against the live plane, so "the operator can reach the number" is inferred, not
+witnessed — and `--days 22` still returns HTTP **500** server-side, which a client-side timeout cannot fix.
+Nobody has yet received a digest carrying a coverage sentence: the clause landed 13h50m after the only four
+`fleet_digest` sends that have ever existed, so the first email that can carry it is the next 06:00Z tick. Merge
+round 1, dispatch round 2, then run ONE maintenance-cadence wave whose entire job is those two live reads plus
+the `--days 22` 500 and the comment-path routing hole (`dr-w33-followup-comment-path-routing`). If those come
+back boring, the exit artefact is written and the epic seals on VOUCHED (D565) — never on the word SEAL, whose
+clause (b) is a live readout of another epic's ladder.
