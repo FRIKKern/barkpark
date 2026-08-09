@@ -581,6 +581,137 @@ for spec in elixir.yml:Elixir cloud.yml:Cloud console-harness.yml:Console; do
 done
 echo
 
+# ── case 7: the RED annotation NAMES the job that refused (D770/D771) ───────
+# THE DEFECT, measured by executing these very step bodies with one upstream =
+# failure: every aggregator emitted a bare `<Gate>: at least one upstream job is
+# not in the allow-set (see above).` The step LOG names the job one line above;
+# the ANNOTATION — the only line the check-run API carries, and so the only line
+# a human at the merge button or the merge queue reads — named NOTHING. "See
+# above" is an instruction to open a log the reader was not given.
+#
+# WHY THIS ASSERTION IS SHAPED AS A PAIR, and why a single red run would have
+# proved nothing: a hardcoded sentence (`NOT IN THE ALLOW-SET: test.`, derived
+# from no measurement) satisfies any one-run guard, and satisfied BOTH existing
+# harnesses green at 164/0 and 146/0. So each gate is driven TWICE with a
+# DIFFERENT upstream failing, and the annotation must NAME the failing job in
+# the run where it failed AND NOT name it in the run where it passed. A string
+# that cannot vary cannot pass both halves.
+#
+# It reads the ANNOTATION ONLY — never the step log above it, which has always
+# named the job and is not what the API publishes.
+#
+# It is deliberately NOT a byte-parallel comparison across the four files:
+# security.yml's sentence ends with an advisory-context clause its siblings do
+# not carry (case 6), and a full-string equality assertion would red on it by
+# construction. Only the named SET is compared.
+echo "case 7: the RED ::error:: names the job that refused, and no job that passed"
+
+# red_names <label> <script> <must-name> <must-not-name> KEY=VAL...
+red_names() {
+  local label="$1" script="$2" want_in="$3" want_out="$4" rc
+  shift 4
+  env -i PATH="$PATH" HOME="$HOME" "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    no "$label -> exit $rc, wanted 1 (this input must be RED)"
+    sed 's/^/        /' "$OUT" >&2
+    return 0
+  fi
+  local ann
+  ann="$(grep '^::error' "$OUT" | tr '\n' ' ')"
+  if [ -z "$ann" ]; then
+    no "$label -> RED but emitted NO ::error:: annotation at all"
+    return 0
+  fi
+  local named="${ann#*NOT IN THE ALLOW-SET: }"
+  if [ "$named" = "$ann" ]; then
+    no "$label -> the annotation carries no 'NOT IN THE ALLOW-SET:' clause — it names nothing: $ann"
+    return 0
+  fi
+  # Everything after the first `%0A` belongs to a LATER clause (console appends
+  # its measured-defect list); the set is what precedes it.
+  local nl='%0A'
+  named="${named%%$nl*}"
+  if has "$named" "$want_in"; then
+    ok "$label -> the annotation names '$want_in'"
+  else
+    no "$label -> the annotation never named the failing job '$want_in': $ann"
+  fi
+  if has "$named" "$want_out"; then
+    no "$label -> the annotation names '$want_out', which PASSED in this run: $ann"
+  else
+    ok "$label -> …and does not name the passing '$want_out'"
+  fi
+}
+
+red_names "Elixir gate: mix-test failed" "$elixir_step" "mix-test" "mix-prod-compile" \
+  R_CHANGES=success R_TEST=failure R_PROD=success R_PERF=success R_ESCAPE=success \
+  O_COMPILE=true O_TEST=true
+red_names "Elixir gate: mix-prod-compile failed" "$elixir_step" "mix-prod-compile" "mix-test" \
+  R_CHANGES=success R_TEST=success R_PROD=failure R_PERF=success R_ESCAPE=success \
+  O_COMPILE=true O_TEST=true
+
+red_names "Cloud gate: test failed" "$cloud_step" "test" "compile" \
+  R_CHANGES=success R_COMPILE=success R_TEST=failure R_ESCAPE=success O_CLOUD=true
+red_names "Cloud gate: compile failed" "$cloud_step" "compile" "test" \
+  R_CHANGES=success R_COMPILE=failure R_TEST=success R_ESCAPE=success O_CLOUD=true
+
+red_names "Console gate: cssom-parity failed" "$console_step" "cssom-parity" "tier-floor-render" \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success \
+  R_ESCAPE=success O_CONSOLE=true
+red_names "Console gate: tier-floor-render failed" "$console_step" "tier-floor-render" "cssom-parity" \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success \
+  R_ESCAPE=success O_CONSOLE=true
+
+red_names "Security gate: mix-audit failed" "$security_step" "mix-audit" "sobelow-inline-overlap" \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=failure O_API=true
+red_names "Security gate: sobelow-inline-overlap failed" "$security_step" "sobelow-inline-overlap" "mix-audit" \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=failure R_AUDIT=success O_API=true
+
+# The OTHER `bad=1` sites, which a failure-only guard would leave unaccumulated:
+# a skip against a gate that is not 'false', and an EMPTY result. Both are reds
+# the annotation used to describe as "at least one upstream job" and nothing
+# more.
+red_names "Cloud gate: test skipped against a true gate" "$cloud_step" "test" "compile" \
+  R_CHANGES=success R_COMPILE=success R_TEST=skipped R_ESCAPE=success O_CLOUD=true
+red_names "Cloud gate: test result EMPTY (not in the needs set)" "$cloud_step" "test" "compile" \
+  R_CHANGES=success R_COMPILE=success R_TEST= R_ESCAPE=success O_CLOUD=true
+red_names "Cloud gate: unrecognised result" "$cloud_step" "test" "compile" \
+  R_CHANGES=success R_COMPILE=success R_TEST=neither R_ESCAPE=success O_CLOUD=true
+echo
+
+# ── case 7b: the corrections the named set may not run over ────────────────
+# security.yml's sentence is NOT byte-parallel to its siblings and must stay
+# that way: the advisory-context clause is a correction a previous wave landed
+# (case 6), and appending a named set is exactly the kind of edit that quietly
+# re-parallelises four sentences.
+echo "case 7b: naming the set did not flatten security.yml's advisory clause"
+run_gate "Security gate: RED" "$security_step" no 1 \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=failure O_API=true
+SEC_ANN="$(grep '^::error' "$OUT" | tr '\n' ' ')"
+if has "$SEC_ANN" "advisory context, not one of the four required on main"; then
+  ok "Security gate …still says it is advisory, not one of the four required"
+else
+  no "Security gate …lost the advisory-context clause: $SEC_ANN"
+fi
+if has "$SEC_ANN" "This is the required context"; then
+  no "Security gate …now claims to be the required context: $SEC_ANN"
+else
+  ok "Security gate …still does not claim to be the required context"
+fi
+# …and console still names its measured defects on the plain arm, which is the
+# fact #11377 left on the floor: `measured` was collected and then discarded on
+# every red where no upstream published a REFUSED verdict.
+run_gate "Console gate: RED, no refusal" "$console_step" no 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success \
+  R_ESCAPE=success O_CONSOLE=true V_CSSOM=MEASURED_DEFECT
+CON_ANN="$(grep '^::error' "$OUT" | tr '\n' ' ')"
+if has "$CON_ANN" "Measured defects (exit 1) in this run: cssom-parity"; then
+  ok "Console gate …the plain red arm names the measured defect"
+else
+  no "Console gate …the plain red arm still discards \${measured}: $CON_ANN"
+fi
+echo
+
 echo "----"
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

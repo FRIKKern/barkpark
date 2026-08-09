@@ -196,14 +196,76 @@ jobs:
     # is needed (charter D26). It costs a few seconds of bash.
     name: Console path-escape ratchet
     runs-on: ubuntu-latest
+    # ── THE VERDICT CHANNEL, EXTENDED TO THE LAST EXIT-2-CAPABLE JOB (D776) ──
+    # Same contract as console-unit's and cssom-parity's channels below: read
+    # ONLY to choose the sentence a human reads, never consulted by anything
+    # that computes pass/fail. Wave 63 gave console-unit this channel and left
+    # this job one over, so a path-escape REFUSAL still reached the merge
+    # button as a bare `FAIL path-escape ratchet: failure`.
+    #
+    # THE REFUSAL IS REACHABLE, not theoretical: scripts/console-path-escape-
+    # check.sh exits 2 from three sites — an unknown path-set name, an
+    # unrecognised argument, and a path set that resolves to an EMPTY pattern
+    # (an empty ERE matches every line, so the script refuses rather than
+    # answer). The last one is reached by the BARE `--check` invocation this
+    # job runs, with no argument at all: emptying CONSOLE_PATHS and running
+    # `bash scripts/console-path-escape-check.sh` exits 2 at that site. A
+    # refusal there means the ratchet made NO claim about path coverage — it is
+    # not "the repo is clean" and not "a read escaped", and the two must not
+    # read alike at the merge button.
+    #
+    # A step that PASSES publishes nothing, so this chain reduces to the one
+    # failing step's verdict, and to the empty string when the job dies
+    # somewhere with no exit-2 vocabulary (e.g. checkout). Empty is read by the
+    # aggregator as "no verdict published", exactly as before this channel
+    # existed.
+    outputs:
+      verdict: >-
+        ${{ steps.selftest.outputs.verdict
+        || steps.ratchet.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Harness (the ratchet must be able to fail)
-        run: bash scripts/console-path-escape-check.sh --selftest
+        id: selftest
+        run: |
+          # THE VERDICT WRAPPER (see this job's `outputs:` note). `set -uo
+          # pipefail` WITHOUT `-e`, for the reason cssom-parity gives: `-e`
+          # would kill the shell before the case could read `rc`.
+          # `${GITHUB_OUTPUT:-}` is guarded so publishing a verdict can never
+          # break the classification it describes. Both exits stay non-zero — a
+          # refusal is not a pass.
+          set -uo pipefail
+          rc=0
+          bash scripts/console-path-escape-check.sh --selftest || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=path-escape ratchet ${v} — console-path-escape-check.sh --selftest::console-path-escape-check.sh --selftest exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
 
       - name: Every repo-root read is dispatched on
-        run: bash scripts/console-path-escape-check.sh
+        id: ratchet
+        run: |
+          # Same wrapper, same vocabulary. THIS is the invocation that can
+          # reach the empty-pattern refusal: no argument, so the script takes
+          # its `--check` default and resolves the console path set.
+          set -uo pipefail
+          rc=0
+          bash scripts/console-path-escape-check.sh || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=path-escape ratchet ${v} — console-path-escape-check.sh::console-path-escape-check.sh exited ${rc}. exit 2 is a REFUSAL to measure (an unknown path-set name, an unrecognised argument, or a path set that resolved to an empty pattern) and makes NO claim about path coverage in either direction; exit 1 is a coverage defect the ratchet really measured. The cause is printed by name in this step's own output above."
+          exit 1
 
       # ── TDZ ORDER + THE RUNTIME PIN (cch-w61) ──────────────────────────────
       # Both guards live HERE, in the unfiltered job, and not in console-unit,
@@ -1097,6 +1159,8 @@ jobs:
           V_CSSOM: ${{ needs.cssom-parity.outputs.verdict }}
           V_TIER: ${{ needs.tier-floor-render.outputs.verdict }}
           V_OVERFLOW: ${{ needs.overflow-guard.outputs.verdict }}
+          # D776: the ratchet is the LAST exit-2-capable job to get a channel.
+          V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
         run: |
           set -euo pipefail
 
@@ -1125,6 +1189,20 @@ jobs:
           refusals=""
           measured=""
 
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # `refusals` and `measured` above name the two verdict-bearing kinds
+          # of red. NEITHER is populated on the ordinary paths — a skip whose
+          # gate is not 'false', an EMPTY result, an unrecognised one, a
+          # failure with no verdict published — and on those the `::error::`
+          # (the ONLY line the check-run API carries) named NOTHING at all.
+          # This is the set behind `bad`, appended at EVERY `bad=1` site so it
+          # can never disagree with the verdict. DERIVED from `${job}` — never
+          # a hardcoded name, never a re-print of the step log.
+          # Comma-joined, not space-joined: job names contain spaces
+          # ("changes (dispatcher)", "path-escape ratchet"), so a space-joined
+          # list cannot be read back as a set.
+          reds=""
+
           # decide <job-name> <result> <gate-value> [verdict]
           #   gate-value is the dispatcher output that gated the job, or the
           #   literal string NEVER for jobs that must always run. A skip is
@@ -1149,6 +1227,7 @@ jobs:
                   echo "          most often because an upstream FAILED. Refusing to green a required"
                   echo "          context on it."
                   bad=1
+                  reds="${reds:+${reds}, }${job}"
                 fi
                 ;;
               failure | cancelled)
@@ -1157,6 +1236,7 @@ jobs:
                 # verdict below can be mistaken for a place where red is
                 # decided. Everything after this line only chooses words.
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 case "$verdict" in
                   '')
                     : # this job publishes no verdict (or never ran to publish one) — judged on result alone, as before
@@ -1213,10 +1293,12 @@ jobs:
                 echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
                 echo "          or the run object is malformed. Cannot tell, therefore red."
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
               *)
                 echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
             esac
             # Tally, for the D377 notice at the bottom of this step. NEVER-gated
@@ -1246,7 +1328,6 @@ jobs:
           # values, so nothing downstream can be judged. Same for the ratchet,
           # which is deliberately unfiltered.
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
-          decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
           # `:-` on the VERDICT arguments ONLY, never on an `R_*`: an unbound
           # R_* must keep dying under `set -u` (that LOUD death is how D209's
           # missing-`env:` wiring mistake is caught). A verdict is advisory, and
@@ -1254,6 +1335,7 @@ jobs:
           # very step body supplying only the R_*/O_* environment GitHub had
           # before this channel existed — so an unset verdict must mean "none
           # published", not a crash.
+          decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"          "${V_ESCAPE:-}"
           decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"   "${V_UNIT:-}"
           decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"   "${V_CSSOM:-}"
           decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"   "${V_TIER:-}"
@@ -1273,9 +1355,17 @@ jobs:
               # and never opens the refusing job's log. Naming the cause SET is
               # the strongest honest claim available here; the cause itself
               # belongs to the instrument that measured it.
-              echo "::error title=Console gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2):${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about cloud/priv/static in either direction. It does NOT follow that the environment is at fault. exit 2 is ONE code over MANY causes — headless Chrome that never came up after a bounded retry in a fresh profile; a missing or unreadable input (e.g. the cssom-heads.baseline sidecar); a COVERAGE fault in cloud/priv/static/__preview__ (a breakpoint, screen or vocabulary no sweep accounts for); an unrecognised argument or defect name; a census under its own floor. This aggregate measured none of them and will not guess.%0AREAD THE REFUSING JOB'S OWN SUMMARY LINE — it printed the cause by name, and that cause may well live in the console's own bytes rather than on the runner.%0AMeasured defects (exit 1) in this run:${measured:- none}%0AThis context is RED on purpose: a refusal is not a pass, and only a fix or a re-run can turn it green."
+              echo "::error title=Console gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2):${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about cloud/priv/static in either direction. It does NOT follow that the environment is at fault. exit 2 is ONE code over MANY causes — headless Chrome that never came up after a bounded retry in a fresh profile; a missing or unreadable input (e.g. the cssom-heads.baseline sidecar); a COVERAGE fault in cloud/priv/static/__preview__ (a breakpoint, screen or vocabulary no sweep accounts for); an unrecognised argument or defect name; a census under its own floor. This aggregate measured none of them and will not guess.%0AREAD THE REFUSING JOB'S OWN SUMMARY LINE — it printed the cause by name, and that cause may well live in the console's own bytes rather than on the runner.%0AMeasured defects (exit 1) in this run:${measured:- none}%0AThis context is RED on purpose: a refusal is not a pass, and only a fix or a re-run can turn it green.%0ANOT IN THE ALLOW-SET: ${reds}"
             else
-              echo "::error::Console gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
+              # THE ARM #11377 LEFT NAMING NOTHING (D770). This `else` is not a
+              # rare corner: it fires on EVERY red where no upstream published
+              # a REFUSED verdict — a plain MEASURED_DEFECT run, a skip whose
+              # gate is not 'false', an EMPTY result, a failure from a job with
+              # no verdict channel at all. `measured` was already collected
+              # above and then thrown away on this exact path, so a reader of a
+              # real CSS defect got the same contentless sentence as a reader
+              # of a malformed `needs:` set. Both facts are named here now.
+              echo "::error::Console gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose.%0ANOT IN THE ALLOW-SET: ${reds}%0AMeasured defects (exit 1) in this run:${measured:- none}"
             fi
             exit 1
           fi
