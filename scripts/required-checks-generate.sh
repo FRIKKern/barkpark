@@ -80,6 +80,19 @@
 # shapes is acknowledged ONE AT A TIME with `--expect-unrendered <name>`, which
 # is a decision somebody typed, not a threshold that drifted.
 #
+# AND `.exclusions` GETS THE SAME PAIR (wave 57)
+#
+# `.exclusions` is a ledger of DECISIONS — the reason prose is the only record of
+# why a green, correct check is held out — and it was emitted from the derived
+# array alone, eleven lines below the check list's union. Over the frozen fixture
+# pair that took 25 rows IN and wrote 18 OUT, exit 0, nothing on stderr. It is
+# now the SAME union (the DERIVED reason winning where both sides carry a row) so
+# the merge CARRIES a row the sample could not restate, and the SAME refusal so
+# the carry is never silent: `--expect-unrendered <name>` acknowledges an absence
+# one name at a time. A committed exclusion this run SELECTS as required is a
+# CONTRADICTION rather than an absence and takes `--expect-promoted <name>`,
+# which DROPS the row instead of carrying it.
+#
 # AND AN EXCLUDED AGGREGATOR DEMOTES ITS LEAVES, NEVER PROMOTES THEM (wave 11)
 #
 # S3 subsumption is computed against the SURVIVORS. So when a stage excludes an
@@ -119,6 +132,7 @@ ENFORCED="false"
 MERGE_BASE=""
 NO_MERGE=0
 EXPECT_UNRENDERED=()
+EXPECT_PROMOTED=()
 
 # Advisory BY INTENT: names that run green, are not paths-filtered, and are not
 # subsumed — but must still never gate a merge. Each needs one line of why.
@@ -527,6 +541,7 @@ main() {
       --merge-base) MERGE_BASE="$2"; NO_MERGE=0; shift 2 ;;
       --no-merge) NO_MERGE=1; shift ;;
       --expect-unrendered) EXPECT_UNRENDERED+=("$2"); shift 2 ;;
+      --expect-promoted) EXPECT_PROMOTED+=("$2"); shift 2 ;;
       --explain) EXPLAIN=1; shift ;;
       --status-source) SOURCE_FEED="status"; shift ;;
       --allow-single-sha) ALLOW_SINGLE_SHA=1; shift ;;
@@ -544,13 +559,14 @@ main() {
   # An unreadable base is a hard failure, never a silent fall-back to greenfield:
   # a greenfield emit is exactly the overwrite this stage exists to prevent, and
   # it would look identical in the diff.
-  local base_json='null' committed_required=""
+  local base_json='null' committed_required="" committed_excluded=""
   if [ "$NO_MERGE" -eq 0 ]; then
     local base_file="${MERGE_BASE:-$REPO_ROOT/.github/required-checks.json}"
     [ -f "$base_file" ] || die "no merge base at $base_file — pass --no-merge for a deliberate greenfield emit; a missing base must never silently become one"
     jq -e . "$base_file" >/dev/null 2>&1 || die "$base_file is not valid JSON — refusing to merge onto a file that cannot be read"
     base_json="$(cat "$base_file")"
     committed_required="$(jq -r '.protection.required_status_checks.checks[]?.context // empty' "$base_file" | sort -u)"
+    committed_excluded="$(jq -r '.exclusions[]?.context // empty' "$base_file" | sort -u)"
   fi
 
   local idx
@@ -833,6 +849,90 @@ $dmeta
     die "selection produced ZERO contexts — refusing to emit a spec that protects nothing"
   fi
 
+  # ── S1-LOSS MIRROR: a COMMITTED EXCLUSION this run did not reproduce ─────────
+  #
+  # `.exclusions` is a ledger of DECISIONS, not a scratch pad: its reason prose is
+  # the only record of why a green, correct check is deliberately held out. Until
+  # this block existed the emit read `exclusions: $exclusions` with no base at
+  # all — eleven lines below the check list's base-first union — so a regeneration
+  # took 25 rows IN and wrote 18 OUT, exit 0, nothing on stderr. The loss is
+  # IRRECOVERABLE by re-running: stage 2 iterates the INTERSECTION, so a
+  # paths-filtered name that did not render can never re-enter the derived array.
+  #
+  # THE MERGE ALONE IS NOT THE FIX, and that was measured, not assumed: a
+  # base-first union buys IMMORTALITY as well as survival — a stale reason on a
+  # live row and a ghost row for a job no workflow publishes any more BOTH ride
+  # through unnoticed, because a union cannot tell "the sample could not see it"
+  # from "it should not be here any more". So the merge CARRIES and this block
+  # NOTICES, which is exactly the pair the check LIST has run since wave 11: the
+  # union at the emit, the per-name refusal at :601. Same flag, same discipline —
+  # `--expect-unrendered '<name>'` says "this name provably cannot render on the
+  # shapes I sampled, and I am relying on the MERGE to carry its row."
+  #
+  # A row this run SELECTED as required is a different animal and gets a different
+  # word: that is not an absence, it is a CONTRADICTION — carrying it would emit
+  # one context as both required and excluded — so `--expect-unrendered`, which
+  # means "the sample could not see it", must NOT silence it. Its own
+  # acknowledgement is `--expect-promoted '<name>'`, and unlike the other one it
+  # DROPS the committed row rather than carrying it: the operator is saying the
+  # derivation is right and the held-out decision is spent.
+  local promoted_drop='[]'
+  if [ -n "$committed_excluded" ]; then
+    local derived_excluded lost_ex="" xname xacked xack
+    derived_excluded="$(jq -r '.[].context' <<<"$exclusions_json")"
+    while IFS= read -r xname; do
+      [ -n "$xname" ] || continue
+      grep -qxF "$xname" <<<"$derived_excluded" && continue
+      if grep -qxF "$xname" <<<"$final"; then
+        xacked=0
+        for xack in ${EXPECT_PROMOTED[@]+"${EXPECT_PROMOTED[@]}"}; do
+          [ "$xack" = "$xname" ] && xacked=1 && break
+        done
+        if [ "$xacked" -eq 1 ]; then
+          note "  promoted (ACKNOWLEDGED) $xname — this run REQUIRES it, so its committed exclusion row is dropped"
+          promoted_drop="$(jq --arg c "$xname" '. + [$c]' <<<"$promoted_drop")"
+          continue
+        fi
+        lost_ex="$lost_ex  STALE $xname  [this run SELECTED it as REQUIRED — carrying the row emits one context as both required and excluded; drop the committed row, re-state its ground, or acknowledge with --expect-promoted]
+"
+        continue
+      fi
+      xacked=0
+      for xack in ${EXPECT_UNRENDERED[@]+"${EXPECT_UNRENDERED[@]}"}; do
+        [ "$xack" = "$xname" ] && xacked=1 && break
+      done
+      if [ "$xacked" -eq 1 ]; then
+        note "  unreproduced exclusion (ACKNOWLEDGED) $xname — carried by the merge with its committed reason"
+        continue
+      fi
+      lost_ex="$lost_ex  LOST  $xname$(unrenderable_hint "$xname" "$idx")
+"
+    done <<EOF
+$committed_excluded
+EOF
+    if [ -n "$lost_ex" ]; then
+      {
+        echo "EXCLUSION LOSS — this run did not reproduce exclusion row(s) the COMMITTED spec carries."
+        echo "The merge below WILL carry every row listed, so nothing is being deleted — but a row the"
+        echo "derivation cannot restate is a decision no longer grounded in anything this run observed:"
+        printf '%s' "$lost_ex"
+        echo
+        echo "Sampled shas: ${SHAS[*]}"
+        echo "A LOST row is usually a paths-filtered or pull_request-only name the sampled heads could"
+        echo "not render — its reason is frozen at the committed text until a head that renders it is"
+        echo "sampled. Either sample such a head, or acknowledge it ONE NAME AT A TIME with"
+        echo "  --expect-unrendered '<name>'"
+        echo "which relies on the merge to carry the row and leaves your decision in the command line."
+        echo "A STALE row is a CONTRADICTION, not an absence — this run requires the very name the"
+        echo "committed spec holds out — so --expect-unrendered does not answer for it. Either fix the"
+        echo "committed spec, or say the derivation is right and the decision is spent with"
+        echo "  --expect-promoted '<name>'"
+        echo "which DROPS the committed row instead of carrying it."
+      } >&2
+      exit 1
+    fi
+  fi
+
   local checks_json
   checks_json="$(printf '%s' "$final" | grep . | jq -R --argjson a "$ACTIONS_APP_ID" '{context: ., app_id: $a}' | jq -s '.')"
 
@@ -860,6 +960,7 @@ $dmeta
     --argjson base "$base_json" \
     --argjson checks "$checks_json" \
     --argjson exclusions "$exclusions_json" \
+    --argjson promoted_drop "$promoted_drop" \
     --argjson shas "$(printf '%s\n' "${SHAS[@]}" | jq -R . | jq -s '.')" \
     '
     ($enforced == "true") as $on
@@ -917,7 +1018,22 @@ $dmeta
           lock_branch: false,
           allow_fork_syncing: false
         },
-        exclusions: $exclusions
+        # `exclusions` is a UNION on the context string too, and for the same
+        # reason the check list is one: it is a ledger of DECISIONS, and a
+        # sample that could not render a name must not be able to delete the
+        # sentence explaining why that name is held out. Base FIRST so the
+        # grouping is stable, but the LAST row in each group wins — i.e. the
+        # DERIVED reason beats the committed one when this run restated it, so
+        # the union carries rows without freezing their grounds. `group_by`
+        # already sorts by context; `sort_by` is kept explicit so the diff of a
+        # regeneration stays a diff of decisions and not of stage order.
+        # `$promoted_drop` is never a filter the derivation computes on its own:
+        # it holds exactly the names an operator typed after --expect-promoted,
+        # each of which this run selected as REQUIRED, so keeping the row would
+        # emit one context on both lists.
+        exclusions: ((($b.exclusions // [] | map(select(.context as $c | $promoted_drop | index($c) | not)))
+                      + $exclusions)
+                     | group_by(.context) | map(.[-1]) | sort_by(.context))
       }')"
 
   local emitted
