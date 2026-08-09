@@ -27,6 +27,11 @@ on:
       # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
       - ".github/workflows/**"
       - "scripts/never-cancel-main-check.sh"
+      # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
+      # already rides the `**` glob above; these two lines cover an edit to the
+      # gate scripts themselves, which no other glob matches.
+      - "scripts/check-deployyml-filters.sh"
+      - "scripts/check-deploy-smoke.sh"
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
@@ -157,6 +162,11 @@ on:
       # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
       - ".github/workflows/**"
       - "scripts/never-cancel-main-check.sh"
+      # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
+      # already rides the `**` glob above; these two lines cover an edit to the
+      # gate scripts themselves, which no other glob matches.
+      - "scripts/check-deployyml-filters.sh"
+      - "scripts/check-deploy-smoke.sh"
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
@@ -342,6 +352,31 @@ jobs:
         run: |
           bash scripts/never-cancel-main-check.sh --selftest
           bash scripts/never-cancel-main-check.sh
+
+      # ── the two deploy.yml gates get their FIRST CI caller ──────────────────
+      #
+      # Both gates over .github/workflows/deploy.yml ran in exactly ONE place:
+      # deploy.yml's own `changes` job, on push-to-main. So a PR that edited
+      # deploy.yml was never checked by them BEFORE merge, and neither
+      # --selftest had a caller at all — the tripwires proving the tripwires can
+      # lose were never run by anything. Both were disarmable by the job they
+      # police (wave 25, proven by mutation): a new job's own single-quoted
+      # `grep -qE '^(...)/'` was harvested as a dispatch filter, and an UNNAMED
+      # trailing `- run:` step was absorbed into the control-plane Smoke test
+      # step. This job already triggers on `.github/workflows/**` — the exact
+      # glob added for the never-cancel-main ratchet, and the same reasoning:
+      # the subject of these gates IS the workflow tree, so the file that
+      # reintroduces the hazard must run them. --selftest first (distrust
+      # vacuous green), then the real assertion.
+      - name: Deploy paths↔filters drift gate (blocking)
+        run: |
+          bash scripts/check-deployyml-filters.sh --selftest
+          bash scripts/check-deployyml-filters.sh
+
+      - name: Control-plane smoke can-fail gate (blocking)
+        run: |
+          bash scripts/check-deploy-smoke.sh --selftest
+          bash scripts/check-deploy-smoke.sh
 
       - name: Paper-editor style mirror lockstep (blocking)
         run: bash scripts/paper-editor-mirror-check.sh

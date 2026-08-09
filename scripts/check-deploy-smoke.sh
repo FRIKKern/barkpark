@@ -46,15 +46,25 @@ DEPLOY_YML_DEFAULT=".github/workflows/deploy.yml"
 # ── extraction ───────────────────────────────────────────────────────────────
 
 # The control-plane job's `Smoke test` step, verbatim. Job boundaries are the
-# 2-space keys under `jobs:`; step boundaries the 6-space `- name:` entries — so
-# the instance job's (already-correct) smoke can never be mistaken for this one.
+# 2-space keys under `jobs:`; step boundaries EVERY 6-space `- ` list item — so
+# the instance job's (already-correct) smoke can never be mistaken for this one,
+# and neither can a later step of this job.
+#
+# The step boundary is `- `, not `- name: `, because a step is not required to
+# have a name. Keying on `- name: ` meant an UNNAMED trailing step (`- run: |`,
+# `- uses:`) never closed the smoke, so its body was read as part of the smoke:
+# deleting the /v1/auth/login DB probe from the real probe and echoing those
+# same strings from a trailing recorder step read
+# `OK: the control-plane smoke can fail on a DB-dead box` — a full false green
+# on exactly the invariant this file exists to hold. The deploy job cannot be
+# allowed to satisfy its own gate with a log line.
 extract_cp_smoke() {
   awk '
     /^  [a-zA-Z0-9_-]+:/ {
       job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
       instep = 0
     }
-    job == "control-plane" && /^      - name: / { instep = ($0 ~ /Smoke test/) ? 1 : 0 }
+    job == "control-plane" && /^      - / { instep = ($0 ~ /^      - name: .*Smoke test/) ? 1 : 0 }
     job == "control-plane" && instep { print }
   ' "$1"
 }
@@ -69,6 +79,19 @@ check_file() {
   step="$(extract_cp_smoke "$yml" || true)"
   if [ -z "$step" ]; then
     echo "FAIL[$label]: no 'Smoke test' step found in the control-plane job — the extractor is broken, not the workflow" >&2
+    echo "Cause, in order of likelihood:" >&2
+    echo "  1. A line indented EXACTLY two spaces and ending in ':' appeared inside the control-plane job" >&2
+    echo "     — typically a heredoc body written at that indent inside a 'run: |' block. extract_cp_smoke" >&2
+    echo "     reads that line as the next JOB key, so everything after it is attributed to a job named" >&2
+    echo "     after your heredoc line and the smoke step is never seen. Re-indent the heredoc body." >&2
+    echo "  2. The step was renamed: the boundary matches '      - name: ' containing 'Smoke test'." >&2
+    echo "  3. The job was renamed from 'control-plane'." >&2
+    echo "  4. A line inside the Smoke test step's own 'run: |' body is indented EXACTLY six spaces and" >&2
+    echo "     starts with '- ' (a bullet inside an echo, say). The step boundary is every 6-space '- '" >&2
+    echo "     list item — that is what stops an UNNAMED trailing step from being absorbed into the smoke —" >&2
+    echo "     so such a line closes the step early and the invariants after it go unseen. This direction" >&2
+    echo "     fails CLOSED (you are reading this message, not an OK), but the fix is to re-indent the body," >&2
+    echo "     never to loosen the boundary back to '- name: '." >&2
     return 1
   fi
 
@@ -129,14 +152,14 @@ selftest() {
   local real="$REPO_ROOT/$DEPLOY_YML_DEFAULT"
   local rc=0
 
-  echo "selftest 1/3: the real workflow passes"
+  echo "selftest 1/4: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/3: re-adding 404 to the accept-list must FAIL (the original bug)"
+  echo "selftest 2/4: re-adding 404 to the accept-list must FAIL (the original bug)"
   sed "s/\^(200|301|302)\\\$/^(200|301|302|404)\$/" "$real" > "$tmp/mutated404.yml"
   if cmp -s "$real" "$tmp/mutated404.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the accept-list no longer looks as expected" >&2
@@ -149,7 +172,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/3: deleting the DB (login) probe must FAIL"
+  echo "selftest 3/4: deleting the DB (login) probe must FAIL"
   awk '
     /dbcode="\$\(curl/ { drop = 1 }
     !drop { print }
@@ -163,6 +186,34 @@ selftest() {
     rc=1
   else
     echo "  ok: the gate reds when the DB probe is removed"
+  fi
+
+  echo
+  echo "selftest 4/4: an UNNAMED trailing step must not be absorbed into the smoke"
+  # The disarm shape, verbatim: the probe is deleted from the smoke and its
+  # strings reappear in a later, unnamed `- run:` step of the same job — where
+  # they assert nothing. Before the step boundary became `- ` this read
+  # "OK: the control-plane smoke can fail on a DB-dead box".
+  awk '
+    /dbcode="\$\(curl/ { drop = 1 }
+    !drop && /^  instance:/ {
+      print "      - run: |"
+      print "          echo \047probe reference: /v1/auth/login bad creds should be 401\047"
+      print "          echo \047address used elsewhere: probe@invalid.example\047"
+      print "          : \"$dbcode\" = \"401\""
+      print ""
+    }
+    !drop { print }
+    drop && /test "\$dbcode" = "401"/ { drop = 0 }
+  ' "$real" > "$tmp/trailing.yml"
+  if ! grep -q 'probe reference' "$tmp/trailing.yml"; then
+    echo "SELFTEST FAIL: the trailing-step injection changed nothing" >&2
+    rc=1
+  elif check_file "$tmp/trailing.yml" "trailing" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: a trailing step's echo satisfied the smoke's invariants — the gate is disarmable" >&2
+    rc=1
+  else
+    echo "  ok: only the Smoke test step's own body answers for the invariants"
   fi
 
   rm -rf "$tmp"

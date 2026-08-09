@@ -218,7 +218,7 @@ is harmless:
   go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
   is structurally ineligible to be required, since an absent context reports
   `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 19 `(blocking)` steps below. Until 2026-08-08 it
+  the same sense as doc-gates' 21 `(blocking)` steps below. Until 2026-08-08 it
   appeared in **neither** `.github/required-checks.json` nor this page:
   `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
   caught by re-reading — `required-checks.json` is GENERATED from names observed
@@ -759,10 +759,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is nineteen)
+### The doc-gates roster (it is not two scripts — it is twenty-one)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **19 steps labelled `(blocking)`** plus 6 `(tripwire)`
+undersells it: it runs **21 steps labelled `(blocking)`** plus 6 `(tripwire)`
 self-tests that prove a scanner still reds on a planted defect. A PR touching
 one `.ex` file runs all of them. **`(blocking)` there means blocking inside the
 job, not on the merge**: this workflow carries a workflow-level `on: … paths:`
@@ -784,20 +784,22 @@ order:
 | 3 | Connectors DDL drift | `scripts/connectors-ddl-drift-check.sh` (+ `--selftest`) |
 | 4 | Connectors catalog drift | `scripts/connectors-catalog-drift-check.sh` (+ `--selftest`) |
 | 5 | Never-cancel-main concurrency ratchet | `scripts/never-cancel-main-check.sh` (+ `--selftest`) |
-| 6 | Paper-editor style mirror | `scripts/paper-editor-mirror-check.sh` |
-| 7 | Status manifest drift | `scripts/status-manifest-check.sh` |
-| 8 | Preview parity + no-oEmbed | `scripts/preview-parity-check.sh` |
-| 9 | Design-token drift | `node design/validate.mjs` · `design/check.mjs` · `derive.test.mjs` · `theme-emit.test.mjs` |
-| 10 | Studio literal-color | `scripts/studio-literal-check.sh` |
-| 11 | Studio link/path | `scripts/studio-link-lint.sh` (+ `--selftest`) |
-| 12 | Web literal-color | `scripts/web-literal-check.sh` |
-| 13 | Go literal-color | `scripts/go-literal-check.sh` (+ `--selftest`) |
-| 14 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` |
-| 15 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
-| 16 | Nil-polarity fail-closed gate | `scripts/nil-polarity-check.sh` (+ `--selftest`) |
-| 17 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
-| 18 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
-| 19 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
+| 6 | Deploy paths↔filters drift | `scripts/check-deployyml-filters.sh` (+ `--selftest`) |
+| 7 | Control-plane smoke can-fail | `scripts/check-deploy-smoke.sh` (+ `--selftest`) |
+| 8 | Paper-editor style mirror | `scripts/paper-editor-mirror-check.sh` |
+| 9 | Status manifest drift | `scripts/status-manifest-check.sh` |
+| 10 | Preview parity + no-oEmbed | `scripts/preview-parity-check.sh` |
+| 11 | Design-token drift | `node design/validate.mjs` · `design/check.mjs` · `derive.test.mjs` · `theme-emit.test.mjs` |
+| 12 | Studio literal-color | `scripts/studio-literal-check.sh` |
+| 13 | Studio link/path | `scripts/studio-link-lint.sh` (+ `--selftest`) |
+| 14 | Web literal-color | `scripts/web-literal-check.sh` |
+| 15 | Go literal-color | `scripts/go-literal-check.sh` (+ `--selftest`) |
+| 16 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` |
+| 17 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
+| 18 | Nil-polarity fail-closed gate | `scripts/nil-polarity-check.sh` (+ `--selftest`) |
+| 19 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
+| 20 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
+| 21 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
