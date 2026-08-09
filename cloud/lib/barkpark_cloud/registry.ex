@@ -3079,7 +3079,18 @@ defmodule BarkparkCloud.Registry do
   """
   @spec provision_push_relay_webhook(Barkpark.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def provision_push_relay_webhook(%Barkpark{} = bp, opts \\ []) do
+  def provision_push_relay_webhook(bp, opts \\ [])
+
+  # cch-w58-bl — same refusal as `wire_site_url/2` above, same reason: this
+  # creates/converges the box's `chat_blocked` webhook row over the admin relay,
+  # a credentialed WRITE. The bodiless head above carries the `\\ []` default now
+  # that the function has more than one clause. The route's result mapping ends
+  # in a `{:error, _other} -> 500 provision_failed` catch-all, so it also grew an
+  # explicit 409 clause for `:suspended` — otherwise a deliberate refusal would
+  # surface to the operator as an internal error.
+  def provision_push_relay_webhook(%Barkpark{suspended: true}, _opts), do: {:error, :suspended}
+
+  def provision_push_relay_webhook(%Barkpark{} = bp, opts) do
     workspace = Keyword.get(opts, :workspace) || bp.bootstrap_workspace || "default"
     project = Keyword.get(opts, :project) || bp.bootstrap_project || "default"
     dataset = Keyword.get(opts, :dataset) || bp.bootstrap_dataset || "production"
@@ -3612,6 +3623,8 @@ defmodule BarkparkCloud.Registry do
 
   Returns `{:ok, %{site_url:, webhook_url:}}`, or:
     * `:invalid_url`     — `site_url` isn't an http(s) origin
+    * `:suspended`       — the box is suspended; the control plane no longer
+                           writes its configuration (see the clause below)
     * `:not_live`        — the instance has no `url` yet (still provisioning)
     * `:no_admin_token`  — no stored admin token (pre-feature instance)
     * `:decrypt_failed`  — a stored ciphertext failed to decrypt (fail-closed)
@@ -3627,12 +3640,27 @@ defmodule BarkparkCloud.Registry do
           {:ok, %{site_url: String.t(), webhook_url: String.t()}}
           | {:error,
              :invalid_url
+             | :suspended
              | :not_live
              | :no_admin_token
              | :decrypt_failed
              | :no_bootstrap
              | :no_webhook
              | :instance_error}
+  # cch-w58-bl — a SUSPENDED box is not WRITTEN. Wiring a site URL is a
+  # credentialed WRITE against the instance (LIST then PUT of its revalidation
+  # webhook) with the DECRYPTED stored admin token; on a suspended row that is
+  # the control plane still configuring a server its own console says it has
+  # stopped managing. Keyed on the BOOLEAN, not the reason — both producers set
+  # the same column and the console paints one state from it — and placed as a
+  # LEADING clause (D685: the guard goes where the request is BUILT), so the
+  # refusal fires BEFORE `reveal_admin_token_or_error/1` touches the ciphertext:
+  # no credential is decrypted and no byte leaves the control plane. Prior art:
+  # `mint_studio_link/2` above. Deliberately NOT keyed on reachability
+  # (`verify_reachable` / `last_verified_at`) — D684 retracted that column, and a
+  # never-verified box still wires (pinned by test).
+  def wire_site_url(%Barkpark{suspended: true}, _site_url), do: {:error, :suspended}
+
   def wire_site_url(%Barkpark{url: url} = bp, site_url)
       when is_binary(url) and url != "" and is_binary(site_url) do
     with {:ok, origin} <- normalize_site_origin(site_url),

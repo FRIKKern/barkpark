@@ -3119,6 +3119,11 @@ defmodule BarkparkCloud.Web.Router do
                 push_event(team.id, "audit")
                 json(conn, 200, payload)
 
+              # cch-w58-bl: an EXPLICIT clause, because the `{:error, _other}`
+              # catch-all below would report a deliberate refusal as a 500.
+              {:error, :suspended} ->
+                json(conn, 409, %{error: "suspended"})
+
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
 
@@ -3162,7 +3167,9 @@ defmodule BarkparkCloud.Web.Router do
   #
   # USER-authed + TEAM-SCOPED, fail-closed: any MEMBER of the owning team may wire
   # their site; a wrong-team / nonexistent / malformed id is the SAME 404 (no
-  # existence leak). 422 invalid_url (not an http(s) origin); 409 not_live while
+  # existence leak). 422 invalid_url (not an http(s) origin); 409 suspended (a
+  # suspended box is not written — the refusal fires BEFORE the stored admin
+  # token is decrypted, so nothing reaches a wire); 409 not_live while
   # provisioning; 404 no_admin_token / no_bootstrap (pre-feature / template-less);
   # 409 no_webhook (template registered no revalidation hook); 502 on instance
   # failure; 500 on tampered ciphertext. Idempotent — a re-PUT converges (200).
@@ -3213,6 +3220,12 @@ defmodule BarkparkCloud.Web.Router do
 
               {:error, :invalid_url} ->
                 json(conn, 422, %{error: "invalid_url"})
+
+              # cch-w58-bl: the control plane does not rewrite a SUSPENDED box's
+              # webhook configuration. `app.js` already ships a named human
+              # message for this code (ERRORS.suspended).
+              {:error, :suspended} ->
+                json(conn, 409, %{error: "suspended"})
 
               {:error, :not_live} ->
                 json(conn, 409, %{error: "not_live"})
