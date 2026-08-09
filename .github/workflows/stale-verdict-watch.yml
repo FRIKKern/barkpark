@@ -114,7 +114,7 @@ jobs:
           case "$rc" in
             0) exit 0 ;;
             1) echo "::error::A CONFLICTING pull request is asserting a green required verdict main has moved past. It re-dispatches nothing, so this cannot clear itself: rebase or close the PRs named above. This run fails, and it will keep failing every 30 minutes."; exit 1 ;;
-            2) echo "::warning::rows were still mergeable=UNKNOWN after re-polling, or the pull-request list could not be read. That is a SILENCE, not a green — those rows are named in the log above and will be re-read on the next run."; exit 0 ;;
+            2) echo "::warning::rows were still mergeable=UNKNOWN after re-polling. That is a SILENCE, not a green — those rows are named in the log above and will be re-read on the next run."; exit 0 ;;
             3) echo "::error::CONFIGURATION FAULT — this run's credential cannot read the pull-request list, or the required-check spec is unreadable. A watch that cannot read what it watches must not report success."; exit 1 ;;
             # 4 is a SEPARATE code on purpose. For one release the size fault
             # returned 3 and this step blamed the credential for it — the
@@ -128,6 +128,13 @@ jobs:
             # 23-row RED run on the same tree. Every green a human has ever
             # been shown here was produced by a run that could not look.
             5) echo "::error::BLIND RUN — the pull-request list WAS read and NOT ONE row could be classified: every open row's mergeability was still UNKNOWN after re-polling, so this verdict covers zero pull requests. It is not a green, and this run fails rather than reporting one. GitHub computes mergeability lazily and invalidates it behind a merge, so this is usually TRANSIENT: the next scheduled run re-reads the population and clears this by itself, with nobody touching anything. A 5 that PERSISTS across runs means the read itself is broken — look at the poll budget and the token, not at the pull requests."; exit 1 ;;
+            # 6 and 7 are the two runs that used to leave through the rc=2
+            # warning arm above and conclude SUCCESS. Neither had a population
+            # to be warned about: 6 never read the pull requests at all, and 7
+            # read them but could not measure the distance. The warning arm's
+            # sentence described neither, and it still concluded green.
+            6) echo "::error::UNREACHABLE — the pull-request list could not be read after every attempt, so this run classified ZERO rows and does not know how many pull requests exist. This is not a green: no population was ever read. It is usually TRANSIENT (rate limit, or Actions transport) and the next scheduled run clears it by itself. A 6 that PERSISTS is the token or the poll budget, not the pull requests."; exit 1 ;;
+            7) echo "::error::DISTANCE UNREADABLE — the pull requests WERE read and main's commit history was NOT, so no staleness distance exists this run and no row can be called stale or clean. This is not a credential fault on the pull-request read: that read worked. Look at the commits API for ${{ github.repository }}, not at the PR list."; exit 1 ;;
             *) echo "::error::stale-verdict-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
 

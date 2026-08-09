@@ -19,6 +19,9 @@
 #       dropped, and the sentence carries its coverage            → exit 2
 #  (d2) a run in which NOTHING could be classified is BLIND, and
 #       the clean sentence never appears on it                    → exit 5
+#   (l) the two TRANSPORT silences are not the warning and not each
+#       other: the pull-request list unread                       → exit 6
+#       main's commit history unread                              → exit 7
 #
 # THE REQUIRED SET IS DERIVED, NEVER TYPED. Context names come out of
 # .github/required-checks.json at build time, so a renamed context rebuilds
@@ -470,6 +473,107 @@ grep -qE -- '^[^#]*--argjson (prs|commits) ' "$WATCH" \
 grep -q -- '--slurpfile prs_in' "$WATCH" && grep -q -- '--slurpfile commits_in' "$WATCH" \
   && ok "both payloads travel by --slurpfile from a file (honest-gates D44's ratified idiom)" \
   || bad "the payloads are not on --slurpfile"
+
+# ═══ (l) rc=2's overload is split into 6 = UNREACHABLE and 7 = DISTANCE ══════
+section "(l) transport silence gets its own codes — (e) exit 6, (f) exit 7, (g) the workflow answers both"
+
+# THE DEFECT THIS OWNS (charter D513). rc=2 returned from THREE conditions of
+# two different kinds, and the workflow mapped all three to exit 0: the PR list
+# never being read at all (zero coverage), main's commit history never being
+# read (population known, distance unknown), and the genuine "some rows are
+# still UNKNOWN" warning — the only one the rc=2 sentence ever described.
+# Both silences reproduce with nothing but a PATH that has no `gh` on it, which
+# is what run_watch already builds. The letters (e)/(f)/(g) here are the ones
+# the slice brief names; the earlier sections in this file use them for their
+# own probes, so they are qualified as (l-e)/(l-f)/(l-g) rather than colliding.
+
+# (l-e) NO --fixture: every poll must reach `gh`, which is not on PATH.
+out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" SVW_RETRY_SLEEP="0 0 0" \
+        bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark --attempts 1 2>&1)"; rc=$?
+[ "$rc" = "6" ] && ok "(l-e) the pull-request list being unreadable exits 6 (UNREACHABLE), not the rc=2 warning the workflow maps to success" \
+  || bad "(l-e) expected exit 6 when the PR list was never read, got $rc — a run with ZERO coverage still leaves through the partial-coverage warning"
+grep -q "UNREACHABLE" <<<"$out" && ok "(l-e) …and says UNREACHABLE, naming the zero coverage" \
+  || bad "(l-e) no UNREACHABLE sentence: $out"
+grep -qi "classified nothing" <<<"$out" \
+  && ok "(l-e) …and states it classified nothing, so the log cannot be read as a clean population" \
+  || bad "(l-e) the unreachable sentence does not say it classified nothing: $out"
+
+# (l-f) --fixture PRESENT, --commits omitted: the population is read from the
+# fixture and only the commits call reaches the absent `gh`.
+out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+        bash "$WATCH" --fixture "$TMP/a.json" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1)"; rc=$?
+[ "$rc" = "7" ] && ok "(l-f) an unreadable commit history exits 7 (DISTANCE UNREADABLE), a different code from the unreadable population" \
+  || bad "(l-f) expected exit 7 when only main's commit history was unreadable, got $rc"
+grep -q "DISTANCE UNREADABLE" <<<"$out" && ok "(l-f) …and says DISTANCE UNREADABLE" \
+  || bad "(l-f) no DISTANCE UNREADABLE sentence: $out"
+grep -q "^ok — no CONFLICTING" <<<"$out" \
+  && bad "(l-f) a run that could not measure any distance printed the clean sentence — that is the manufactured clean verdict this early return exists to prevent" \
+  || ok "(l-f) …and never prints the clean sentence: the early return did not fall through into an empty commit window"
+
+# The fall-through this must never become: with an empty commit history every
+# `since` is 0 and MIN_COMMITS=1 drops every stale green. Proven by handing the
+# script an EMPTY commits fixture — the same state a fall-through would produce
+# — over the fixture that reds at exit 1 with a real history.
+: > "$TMP/l-empty-commits.txt"
+out="$(run_watch "$TMP/a.json" --commits "$TMP/l-empty-commits.txt")"; rc=$?
+[ "$rc" = "0" ] \
+  && ok "(l-f) an EMPTY commit window turns the same red fixture green (exit 0) — which is exactly why 7 returns early instead of continuing" \
+  || bad "(l-f) expected exit 0 over an empty commit window (got $rc); if that is no longer the fall-through outcome, re-derive why 7 must return early"
+
+# (l-g) an argument fault must not wear transport silence's name either.
+out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+        bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark --attempts 0 2>&1)"; rc=$?
+[ "$rc" = "3" ] && ok "(l-g) --attempts 0 exits 3 at the argv parse (configuration), not silently through the transport code" \
+  || bad "(l-g) expected exit 3 for --attempts 0, got $rc — a run that never polled reported itself as a run that was not answered"
+grep -q -- "--attempts must be at least 1" <<<"$out" \
+  && ok "(l-g) …and the error line names the ARGUMENT; it used to print the transport sentence ('could not list pull requests after 0 attempts'), blaming a read that never happened" \
+  || bad "(l-g) --attempts 0 did not name the argument: '$out'"
+out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+        bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark --attempts three 2>&1)"; rc=$?
+[ "$rc" = "3" ] && grep -q -- "--attempts must be a positive integer" <<<"$out" \
+  && ok "(l-g) a non-numeric --attempts exits 3 and names the argument" \
+  || bad "(l-g) a non-numeric --attempts did not exit 3 with a message: rc=$rc '$out'"
+
+# (l-g) the workflow must ANSWER both codes, and both must FAIL the run. This
+# is the half of the defect the script alone cannot fix: rc=2 was mapped to
+# exit 0 under a sentence that itself reads "That is a SILENCE, not a green."
+grep -qE '^\s+6\) echo "::error::UNREACHABLE' "$WF" \
+  && ok "(l-g) the workflow has its own 6) arm for UNREACHABLE" \
+  || bad "(l-g) the workflow has no 6) arm — an unreachable run would fall through to the undefined-verdict branch"
+grep -qE '^\s+6\) echo .*exit 1 ;;' "$WF" && ok "(l-g) …and arm 6 exits 1" \
+  || bad "(l-g) arm 6 does not exit 1 — a run that read nothing still reports green"
+grep -qE '^\s+7\) echo "::error::DISTANCE UNREADABLE' "$WF" \
+  && ok "(l-g) the workflow has its own 7) arm for DISTANCE UNREADABLE" \
+  || bad "(l-g) the workflow has no 7) arm"
+grep -qE '^\s+7\) echo .*exit 1 ;;' "$WF" && ok "(l-g) …and arm 7 exits 1" \
+  || bad "(l-g) arm 7 does not exit 1"
+arm6="$(grep -E '^\s+6\) echo' "$WF")"
+arm7="$(grep -E '^\s+7\) echo' "$WF")"
+grep -qi "poll budget" <<<"$arm6" && grep -qi "commits api" <<<"$arm7" \
+  && ok "(l-g) the two arms name DIFFERENT remedies (the poll budget vs the commits API) — which is why they are two codes" \
+  || bad "(l-g) the 6 and 7 arms do not name distinct remedies: 6='$arm6' 7='$arm7'"
+grep -qi "credential" <<<"$arm7" && grep -qi "that read worked" <<<"$arm7" \
+  && ok "(l-g) …and arm 7 refuses the credential explanation, because the PR read succeeded" \
+  || bad "(l-g) arm 7 does not rule out a credential fault on the PR read: $arm7"
+
+# Arm 2 keeps its exit 0 — it is the genuine partial-coverage warning — but it
+# must no longer claim to cover the read that never happened.
+arm2="$(grep -E '^\s+2\) echo' "$WF")"
+grep -q "could not be read" <<<"$arm2" \
+  && bad "arm 2 still says the pull-request list could not be read — that condition is exit 6 now, and arm 2 concludes SUCCESS" \
+  || ok "arm 2 no longer claims to cover an unread pull-request list"
+grep -q "exit 0 ;;" <<<"$arm2" && ok "…and arm 2 keeps exit 0: partial coverage really is a warning" \
+  || bad "arm 2 no longer exits 0: $arm2"
+
+# The codes must be documented where they are defined, or the header drifts off
+# the arms exactly as the 3/4 split did before it.
+grep -q "^#             6 = UNREACHABLE" "$WATCH" && ok "the script's EXIT CODES header documents 6" \
+  || bad "EXIT CODES header does not document 6"
+grep -q "^#             7 = DISTANCE UNREADABLE" "$WATCH" && ok "…and documents 7" \
+  || bad "EXIT CODES header does not document 7"
+grep -q "^#             2 = no red, but SOME rows stayed UNKNOWN after re-polling while" "$WATCH" \
+  && ok "…and 2's wording is TIGHTENED to partial coverage, which is all it still means" \
+  || bad "the EXIT CODES header still describes 2 loosely enough to re-absorb the silences"
 
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"

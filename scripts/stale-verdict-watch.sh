@@ -57,7 +57,11 @@
 #
 # EXIT CODES  0 = no conflicted PR asserts a stale green
 #             1 = at least one does — RED, and it will red again in 30 minutes
-#             2 = no red, but rows stayed UNKNOWN after re-polling (warning)
+#             2 = no red, but SOME rows stayed UNKNOWN after re-polling while
+#                 OTHERS were classified (warning). PARTIAL coverage, and only
+#                 that: the loose wording this line used to carry ("rows stayed
+#                 UNKNOWN") is what made it feel legal to return 2 from a run
+#                 that read nothing at all. Those runs are 6 and 7 now.
 #             3 = CONFIGURATION fault: the credential cannot list PRs, or the
 #                 spec / arguments this run was given are unreadable
 #             4 = COMPUTE fault: the payload WAS read, and the verdict could
@@ -75,6 +79,23 @@
 #                 same tree. Zero coverage and full coverage shared one branch.
 #                 The predicate is `open > 0 AND classified == 0`: an EMPTY
 #                 population is still a legitimate 0, never a 5.
+#             6 = UNREACHABLE: the pull-request list was NEVER READ. Every one
+#                 of $ATTEMPTS polls failed with a non-configuration error
+#                 (`is_config_fault` deliberately routes rate-limit and abuse
+#                 detection here rather than to 3). This run does not even know
+#                 how many pull requests exist — zero coverage, no population,
+#                 no verdict. Remedy: the token, the network, the rate-limit
+#                 budget, the poll budget. NOT the pull requests.
+#             7 = DISTANCE UNREADABLE: the pull-request list WAS read and would
+#                 have classified fine; main's commit history was not, so no
+#                 staleness distance exists this run. Remedy: the commits API.
+#                 6 and 7 are separate codes because their remedies are, and
+#                 because a 7 could later be downgraded into a PARTIAL verdict
+#                 (name the CONFLICTING rows, decline to state the distance)
+#                 while a 6 never can. Neither reuses 2 or 3, for the reason
+#                 the 3/4 split above already gives: for one full release 3 and
+#                 4 were one code and the size fault wore the credential
+#                 fault's name. rc=2 wore both of these.
 #
 # USAGE
 #   scripts/stale-verdict-watch.sh
@@ -289,7 +310,20 @@ main() {
       --spec) SPEC="${2:-}"; shift 2 ;;
       --fixture) FIXTURE="${2:-}"; shift 2 ;;
       --commits) COMMITS_FILE="${2:-}"; shift 2 ;;
-      --attempts) ATTEMPTS="${2:-}"; shift 2 ;;
+      # An ARGUMENT fault must not wear transport silence's name. `--attempts 0`
+      # (or a non-numeric value) makes the poll loop never execute and `out`
+      # stay unset, and the run then left through the transport arm printing
+      # "could not list pull requests after 0 attempts" — a run that never
+      # ASKED, described as a run that asked and was not answered. A
+      # non-numeric value did worse: `[ "$i" -lt three ]` printed a bash
+      # "integer expression expected" error and took the same exit.
+      --attempts)
+        ATTEMPTS="${2:-}"
+        case "$ATTEMPTS" in
+          ''|*[!0-9]*) red "--attempts must be a positive integer, got: '${ATTEMPTS}'"; exit 3 ;;
+        esac
+        [ "$ATTEMPTS" -ge 1 ] || { red "--attempts must be at least 1: 0 polls is not a read, and a run that never polls cannot report anything about the pull requests."; exit 3; }
+        shift 2 ;;
       --min-commits) MIN_COMMITS="${2:-}"; shift 2 ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) red "unknown argument: $1"; exit 3 ;;
@@ -312,8 +346,8 @@ main() {
       3) red "CONFIGURATION FAULT — this run's credential cannot list pull requests (401/403). A watch that cannot read what it watches must not report success."
          red "$(printf '%s' "$prs" | head -3)"
          return 3 ;;
-      *) red "could not list pull requests after $ATTEMPTS attempts — this is a transport silence, not a green."
-         return 2 ;;
+      *) red "UNREACHABLE — the pull-request list could not be read after $ATTEMPTS attempt(s), so this run classified nothing and does not know how many pull requests exist. This is a transport silence, not a green."
+         return 6 ;;
     esac
   fi
 
@@ -321,9 +355,13 @@ main() {
     [ -f "$COMMITS_FILE" ] || { red "no such commits fixture: $COMMITS_FILE"; exit 3; }
     commits="$(grep -v '^[[:space:]]*$' "$COMMITS_FILE")"
   else
+    # The early return is CORRECTNESS, not defence. Falling through with an
+    # empty commits array makes `commits_since` answer 0 for every green and
+    # `select(.since >= $min)` drop all of them at MIN_COMMITS=1 — a
+    # MANUFACTURED CLEAN VERDICT. Never "continue with what we have".
     commits="$(fetch_commits "$repo")" || {
-      red "main's commit history could not be read — the staleness distance is unknowable this run, which is a silence, not a green."
-      return 2
+      red "DISTANCE UNREADABLE — the pull requests were read and main's commit history was not, so the staleness distance is unknowable this run. That is a silence, not a green."
+      return 7
     }
   fi
 
