@@ -1994,6 +1994,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # THE POPULATION, whole and accounted: nothing was silently dropped out of
       # the denominator to make the percentiles prettier.
       assert wait.population == %{deferred: 240, covered: 240, pending: 0, unreadable: 0}
+
       assert wait.population.covered + wait.population.pending + wait.population.unreadable ==
                wait.population.deferred
 
@@ -2067,12 +2068,17 @@ defmodule BarkparkCloud.DeployLedgerTest do
           inserted_at: DateTime.add(@dwait_from, 300, :second)
         },
         # UNREADABLE — the producer's own fail-open for a box it could not read.
-        %{status: "deferred", content_rev: "", inserted_at: DateTime.add(@dwait_from, 400, :second)}
+        %{
+          status: "deferred",
+          content_rev: "",
+          inserted_at: DateTime.add(@dwait_from, 400, :second)
+        }
       ])
 
       wait = DeployLedger.census(@dwait_from, @dwait_to).deferral_wait
 
       assert Enum.map(wait.outcomes, & &1.outcome) == ~w(COVERED PENDING UNREADABLE)
+
       assert Map.new(wait.outcomes, &{&1.outcome, &1.count}) == %{
                "COVERED" => 1,
                "PENDING" => 1,
