@@ -307,7 +307,12 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       door: census.volume,
       deferred: Enum.reduce(census.deferred, 0, &(&1.count + &2)),
       failed: census.failed,
-      rate: census.failure_rate
+      rate: census.failure_rate,
+      # The wait was ALREADY in this census and was being thrown away here: the
+      # deferral count answers "how often did a box say not now", and only the
+      # wait answers "and how long did that cost the site". One key, no second
+      # `census/3` call site.
+      wait: census.deferral_wait
     }
   end
 
@@ -483,7 +488,7 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
   defp deploy_line(w) do
     "  #{w.label} (#{span(w)}): #{number(w.door)} attempted, of which " <>
-      "#{number(w.deferred)} deferred by a busy box — #{rate_clause(w)}."
+      "#{number(w.deferred)} deferred by a busy box — #{rate_clause(w)}. #{wait_clause(w)}."
   end
 
   # The rate node's OWN refusal, carried through verbatim. The counts survive a
@@ -505,6 +510,49 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     do:
       "failure rate UNMEASURED (the ledger returned no usable rate); " <>
         "#{number(w.failed)} of #{number(w.door)} attempted are settled failures"
+
+  # THE COST OF A DEFERRAL, in the same shape as the rate: the number when the
+  # census can name one, the census's OWN refusal reason when it cannot, and the
+  # population beside it either way. `min_sample` is 200 over a TEAM's sites, so
+  # the refusal is the ordinary reading for a small team and it must read as a
+  # withheld ratio, never as "no wait" and never as an empty clause.
+  defp wait_clause(%{wait: %{max: %{refused: true, reason: reason}, population: %{} = pop}}) do
+    "Deferral wait UNMEASURED (#{reason}); #{wait_population(pop)}"
+  end
+
+  defp wait_clause(%{wait: %{max: %{seconds: seconds}, population: %{} = pop}})
+       when is_number(seconds) do
+    "The slowest of those deferrals waited #{duration(seconds)} for a box; #{wait_population(pop)}"
+  end
+
+  # A wait node this renderer does not understand renders as UNMEASURED, for the
+  # same reason `rate_clause/1` does: the one direction this block may never
+  # fail in is a reassuring number nobody measured.
+  defp wait_clause(_),
+    do: "Deferral wait UNMEASURED (the ledger returned no usable wait)"
+
+  # The sample and what it is a sample OF, so a wait can never be quoted without
+  # the rows it excluded — a fast max over 3 of 500 covered rows is not a fast
+  # platform.
+  defp wait_population(%{deferred: deferred, covered: covered, pending: pending}) do
+    "#{number(covered)} of #{number(deferred)} deferred rows have since rebuilt, " <>
+      "#{number(pending)} are still waiting"
+  end
+
+  defp wait_population(_), do: "its deferral population was not reported"
+
+  # Seconds are what the ledger measures; a human reads minutes and hours. One
+  # decimal, never rounded to a whole unit — "0h" for a 4-minute wait would be a
+  # different claim than the one measured.
+  defp duration(seconds) when is_number(seconds) and seconds < 60,
+    do: "#{one_decimal(seconds)}s"
+
+  defp duration(seconds) when is_number(seconds) and seconds < 3600,
+    do: "#{one_decimal(seconds / 60)}m"
+
+  defp duration(seconds) when is_number(seconds), do: "#{one_decimal(seconds / 3600)}h"
+
+  defp one_decimal(n), do: Float.round(n / 1, 1)
 
   defp span(%{from: from, to: to}), do: "#{format_ts(from)} to #{format_ts(to)}"
 
