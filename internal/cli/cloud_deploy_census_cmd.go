@@ -371,10 +371,14 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("  basis: %s", deployCensusBasis(census.FailureRate.Basis))
 	out.outf("")
 
+	boundaries := deployCensusBoundaries(census.Raw)
 	if len(census.Classes) > 0 {
 		out.outf("failure classes (share of the %d failed)", census.Failed)
 		for _, c := range census.Classes {
 			out.outf("  %-28s %6d  %-7s %s", sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(c.Label))
+		}
+		for _, line := range deployCensusShareNotes(census.Classes, boundaries, from, to, census.MinSample) {
+			out.outf("%s", line)
 		}
 		out.outf("")
 	}
@@ -382,6 +386,14 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("deferrals (in the volume, never in the failure numerator)")
 		for _, c := range census.Deferred {
 			out.outf("  %-28s %6d  %-7s %s", sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(c.Label))
+		}
+		// THE DEFERRAL SHARES GET THEIR OWN NOTE, COMPUTED OVER THEIR OWN ROWS.
+		// Failure-class shares divide by the settled failures; deferral shares
+		// divide by the attempted rows. They are different denominators over the
+		// same window, so one merged note would attach a refusal to a population
+		// that never produced it.
+		for _, line := range deployCensusShareNotes(census.Deferred, boundaries, from, to, census.MinSample) {
+			out.outf("%s", line)
 		}
 		out.outf("")
 	}
@@ -596,6 +608,245 @@ func deployCensusShare(r cloudclient.DeployRate) string {
 		return pct
 	}
 	return "—"
+}
+
+// ─── A REFUSED SHARE SAYS WHICH WINDOW WOULD UN-REFUSE IT ────────────────────
+//
+// A share cell that refuses prints an em-dash (deployCensusShare) — honest, and
+// a DEAD END: the operator learns that no percentage is available and nothing
+// about how to obtain one. Measured on the live control plane: over the 7-day
+// default window EVERY one of the fourteen failure-class shares refuses, while
+// the same instrument over a window starting AT the deferred-settle boundary
+// answers all fourteen (5,919 attempted, failure rate 17.7%). Same data, same
+// classifier; only the window moved, and no render said so.
+//
+// NO INSTANT IS WRITTEN DOWN HERE, deliberately. The boundary is a fact about
+// the DATA, not about this code: it moved once already (a second schema-commit
+// boundary now rides the same list), and a constant baked into a renderer is
+// stale the moment the ledger's vocabulary changes again.
+//
+// So each SECTION of shares that refused prints, once, beneath its rows: the
+// control plane's own refusal reason, and — where the envelope supports one —
+// the window that could answer instead.
+//
+// EVERY FACT IN THAT SUGGESTION IS READ, NEVER INVENTED. The boundary instant
+// comes out of the refusal reason the control plane wrote ("… boundary at
+// <instant> …") or out of the envelope's own `boundaries` list; a boundary this
+// reader could not read is rendered as "the control plane named no boundary",
+// because a fabricated --from is worse than none — it sends an operator to a
+// window that answers nothing and looks like the tool's promise.
+//
+// AND IT PROMISES NOTHING IT CANNOT KNOW. Trimming a window to start at the
+// boundary removes the straddle; whether the SMALLER population it leaves still
+// clears min_sample is a fact only the re-run can report, and this line says so
+// rather than implying an answer.
+//
+// THE CREDENTIAL REFUSAL IS NOT REACHED FROM HERE. A 403 never produces a
+// census body, so it renders through deployCensusMessage's own arm and keeps its
+// own wording: no window suggestion is attached to a refusal no window can fix.
+
+// deployCensusBoundary is ONE row of the census envelope's `boundaries` list:
+// an instant at which the ledger's own vocabulary changed, with the derivation
+// that fixed it (method + source), so a suggestion built on it can show its
+// provenance.
+//
+// It is decoded HERE, out of the raw envelope, rather than off a typed field:
+// cloudclient.DeployCensus does not model `boundaries`, and this render must
+// only ever repeat what the control plane actually sent.
+type deployCensusBoundary struct {
+	Subject string `json:"subject"`
+	Instant string `json:"instant"`
+	Method  string `json:"method"`
+	Source  string `json:"source"`
+}
+
+// deployCensusBoundaries decodes the envelope's boundary list. A row whose
+// instant does not parse is DROPPED: a boundary this reader cannot place on the
+// timeline cannot support a `--from`, and half a boundary is not evidence.
+func deployCensusBoundaries(raw []byte) []deployCensusBoundary {
+	if len(raw) == 0 {
+		return nil
+	}
+	var env struct {
+		Boundaries []deployCensusBoundary `json:"boundaries"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil
+	}
+	kept := make([]deployCensusBoundary, 0, len(env.Boundaries))
+	for _, b := range env.Boundaries {
+		if _, ok := deployCensusInstant(b.Instant); ok {
+			kept = append(kept, b)
+		}
+	}
+	return kept
+}
+
+// deployCensusInstant parses an instant the control plane sent, in the one
+// format it sends (RFC3339, UTC).
+func deployCensusInstant(raw string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.UTC(), true
+}
+
+// deployCensusShareNotes renders the lines a section of refused shares owes its
+// reader: one pair per DISTINCT refusal reason (the control plane's words, then
+// the window that could answer). A section where nothing refused prints nothing
+// — this is a note about refusals, not a caption.
+//
+// The sample the shares were denominated on travels on the reason line, so this
+// block can never be read as a claim about some other population.
+func deployCensusShareNotes(rows []cloudclient.DeployCensusClass, boundaries []deployCensusBoundary, from, to time.Time, minSample int) []string {
+	type group struct {
+		reason string
+		sample int
+		rows   int
+	}
+	var groups []group
+	refused := 0
+	for _, r := range rows {
+		if !r.Share.Refused && r.Share.Pct != nil {
+			continue
+		}
+		refused++
+		reason := deployCensusRefusal(r.Share, minSample)
+		// Grouped by (reason, SAMPLE), never by reason alone. The reason the
+		// control plane writes for a straddle does not carry the denominator,
+		// so two rows can share a reason and have been denominated over
+		// different populations — and printing the first row's n beside a
+		// count that includes the second would state a denominator no row was
+		// actually taken over. Splitting the group is the honest render.
+		found := false
+		for i := range groups {
+			if groups[i].reason == reason && groups[i].sample == r.Share.Sample {
+				groups[i].rows++
+				found = true
+				break
+			}
+		}
+		if !found {
+			groups = append(groups, group{reason: reason, sample: r.Share.Sample, rows: 1})
+		}
+	}
+	if refused == 0 {
+		return nil
+	}
+
+	lines := make([]string, 0, 2*len(groups))
+	for _, g := range groups {
+		lines = append(lines,
+			fmt.Sprintf("  NO SHARE for %d of %d rows above (share denominator n=%d) — %s",
+				g.rows, len(rows), g.sample, g.reason))
+		lines = append(lines, "  "+deployCensusShareRemedy(g.reason, boundaries, from, to, minSample))
+	}
+	return lines
+}
+
+// deployCensusShareRemedy is the actionable half: the window that could answer
+// where the envelope supports naming one, and an explicit refusal to guess
+// where it does not.
+//
+// TWO REFUSALS, TWO DIFFERENT REMEDIES, and confusing them would send the
+// operator in a circle:
+//
+//   - the window STRADDLES a vocabulary boundary — the control plane names the
+//     instant inside its own reason, and a window that STARTS at that instant
+//     is the narrowest trim that keeps one vocabulary. That is a real `--from`;
+//   - the sample is below min_sample — a NARROWER window can only shrink the
+//     sample further, so no `--from` un-refuses this one and this line says so
+//     rather than offering a trim that would make it worse.
+func deployCensusShareRemedy(reason string, boundaries []deployCensusBoundary, from, to time.Time, minSample int) string {
+	if inst, ok := deployCensusReasonBoundary(reason); ok {
+		caveat := ""
+		if minSample > 0 {
+			caveat = fmt.Sprintf(" Whether the smaller population that leaves still clears min_sample %d only the re-run can report — this line does not predict it.", minSample)
+		}
+		return fmt.Sprintf("A WINDOW THAT COULD ANSWER: `bp cloud deployments --from %s --to %s`%s — starting AT the boundary is the narrowest trim that keeps the window inside one vocabulary.%s",
+			inst.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339),
+			deployCensusBoundaryProvenance(boundaries, inst), caveat)
+	}
+	if b, rel, ok := deployCensusNearestBoundary(boundaries, from, to); ok {
+		inst, _ := deployCensusInstant(b.Instant)
+		return fmt.Sprintf("NO --from CAN UN-REFUSE THIS: a narrower window can only SHRINK the sample, and this window already sits %s the %s boundary at %s (method: %s, source: %s). The sample has to GROW — a wider --from, or more time.",
+			rel, sanitizeCell(b.Subject), inst.UTC().Format(time.RFC3339), sanitizeCell(b.Method), sanitizeCell(b.Source))
+	}
+	return "NO WINDOW SUGGESTION: this control plane named no vocabulary boundary in its envelope, so nothing here can say which --from would answer. Nothing was invented in its place."
+}
+
+// deployCensusReasonBoundary extracts the instant the control plane NAMED in
+// its own refusal reason ("… boundary at <RFC3339 instant> (method: …)").
+// It returns false unless that instant parses: a suggestion is only ever built
+// on an instant this reader actually read.
+func deployCensusReasonBoundary(reason string) (time.Time, bool) {
+	const marker = "boundary at "
+	i := strings.Index(reason, marker)
+	if i < 0 {
+		return time.Time{}, false
+	}
+	rest := reason[i+len(marker):]
+	fields := strings.FieldsFunc(rest, func(r rune) bool {
+		return r == ' ' || r == '(' || r == ',' || r == '\n'
+	})
+	if len(fields) == 0 {
+		return time.Time{}, false
+	}
+	return deployCensusInstant(strings.TrimRight(fields[0], ".,;"))
+}
+
+// deployCensusBoundaryProvenance names the derivation behind a suggested
+// `--from` when the envelope's boundary list carries that instant, and says
+// plainly when it does not — a suggestion whose provenance is unstated is still
+// usable, but it must not LOOK corroborated.
+func deployCensusBoundaryProvenance(boundaries []deployCensusBoundary, inst time.Time) string {
+	for _, b := range boundaries {
+		if t, ok := deployCensusInstant(b.Instant); ok && t.Equal(inst) {
+			return fmt.Sprintf(" (the %s boundary — method: %s, source: %s)",
+				sanitizeCell(b.Subject), sanitizeCell(b.Method), sanitizeCell(b.Source))
+		}
+	}
+	return " (the control plane named this instant in its refusal; its `boundaries` list does not carry it)"
+}
+
+// deployCensusNearestBoundary picks the boundary a window sits NEXT TO, with
+// the word for where it sits: the latest boundary at or before the window's
+// start, else the earliest one after its end. A boundary strictly inside the
+// window is reported as such — it should have produced a straddle refusal, and
+// saying "inside" is better than silently calling it "after".
+func deployCensusNearestBoundary(boundaries []deployCensusBoundary, from, to time.Time) (deployCensusBoundary, string, bool) {
+	var before, inside, after *deployCensusBoundary
+	var beforeAt, insideAt, afterAt time.Time
+	for i := range boundaries {
+		t, ok := deployCensusInstant(boundaries[i].Instant)
+		if !ok {
+			continue
+		}
+		switch {
+		case t.After(from) && t.Before(to):
+			if inside == nil || t.After(insideAt) {
+				inside, insideAt = &boundaries[i], t
+			}
+		case !t.After(from):
+			if before == nil || t.After(beforeAt) {
+				before, beforeAt = &boundaries[i], t
+			}
+		default:
+			if after == nil || t.Before(afterAt) {
+				after, afterAt = &boundaries[i], t
+			}
+		}
+	}
+	switch {
+	case inside != nil:
+		return *inside, "ACROSS", true
+	case before != nil:
+		return *before, "wholly after", true
+	case after != nil:
+		return *after, "wholly before", true
+	}
+	return deployCensusBoundary{}, "", false
 }
 
 // deployCensusWindowPhrase renders the window as the two RFC3339 UTC instants
@@ -952,6 +1203,13 @@ fleet with zero failures — a 401, a 403 (your token lacks ability "read"), a 4
 no_team (this credential belongs to no team), a 422 invalid_window (bad window)
 and the control plane's own below-min_sample refusal each print as a named
 refusal instead of a number.
+
+A REFUSED SHARE SAYS WHICH WINDOW WOULD ANSWER. Where the class or deferral
+shares refuse, the section prints the control plane's own reason with the
+denominator it was taken over, and — when the envelope names a vocabulary
+boundary — the --from that would keep the window inside ONE vocabulary. Where
+the envelope names no boundary, it says exactly that rather than inventing a
+window: a suggested window that answers nothing is worse than none.
 
 NEEDS 'bp login' and a credential carrying ability "read" on a team. It reads
 GET /v1/deploy-ledger/census — the team-scoped census — so no operator grant is
