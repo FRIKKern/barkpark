@@ -114,6 +114,12 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # 852 against a 7d door of 9,156, with wildly different deferral shares).
   @deploy_windows [{"last 24h", 86_400}, {"last 7d", 604_800}]
 
+  # THE REACH LIMIT, DERIVED FROM THE DOORS THEMSELVES so the disclosure can
+  # never drift from what is actually reported: whatever the widest door is, a
+  # row older than it was never in the population, and a coverage zero over a
+  # bounded window is therefore not a clean bill for the fleet.
+  @widest_window_label @deploy_windows |> Enum.max_by(&elem(&1, 1)) |> elem(0)
+
   @typedoc """
   One box's freshness rung, decided by the control plane's OWN commit
   measurement rather than the box's release-tag self-report.
@@ -473,7 +479,8 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
   defp deploy_block(%{deploy: %{windows: windows} = d}) do
     "Deploy health for this team's sites (control-plane deploy ledger, read " <>
-      "#{format_ts(d.measured_at)}):\n" <> Enum.map_join(windows, "\n", &deploy_line/1)
+      "#{format_ts(d.measured_at)}):\n" <>
+      Enum.map_join(windows, "\n", &deploy_line/1) <> "\n" <> reach_line()
   end
 
   defp deploy_block(_s),
@@ -566,6 +573,25 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   defp coverage_clause(_),
     do: "Coverage UNMEASURED (the ledger returned no coverage cohorts)"
 
+  # THE EMAIL'S OWN REACH, SAID OUT LOUD, ONCE (dr-w33-s3; moved out of
+  # `coverage_clause/1` at review). Every number in this block is counted inside
+  # a bounded door, so a row older than the widest one this email reports was
+  # never in the population being judged — it is OUTSIDE it, not covered. Without
+  # this sentence a `0 still not after 24.0h` reads as a clean bill of health for
+  # the fleet, when it can equally mean the stuck rows are simply older than the
+  # door: the epic's own five never-covered rows are 26 days old and invisible to
+  # BOTH doors.
+  #
+  # It lives on the BLOCK, not on each window line, for two reasons. It is a
+  # property of the email rather than of a line, so repeating it verbatim under
+  # every door is noise in a human's inbox; and per-line it would vanish entirely
+  # whenever every window fell to the coverage-UNMEASURED arm — a disclosure that
+  # disappears exactly when the numbers get less trustworthy is fail-open.
+  defp reach_line do
+    "  Reach limit: #{@widest_window_label} is the widest window this email reports, so a row " <>
+      "older than that is OUTSIDE this population rather than covered by it."
+  end
+
   # A cohort with no rows says so. Zero of zero is not 100% coverage and must
   # never render as a percentage.
   defp cohort_clause(%{cohort: cohort, population: 0}, _maturity),
@@ -583,10 +609,43 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     "#{number(covered)} of #{number(population)} #{cohort} rows have since been " <>
       "covered by a later live build, #{number(never)} still not after " <>
       "#{duration(maturity)}" <>
-      cohort_tail(c)
+      cohort_tail(c) <> environment_clause(never, c)
   end
 
   defp cohort_clause(_c, _maturity), do: "a cohort the digest could not read"
+
+  # WHICH ENVIRONMENTS THE NEVER-COVERED ROWS ARE IN (dr-w33-s3). The ledger has
+  # always computed this split (`never_covered_by_environment`) and the digest
+  # has always thrown it away, which is exactly the pooling the split exists to
+  # refuse: a preview build with no successor is not a production site sitting
+  # dark, and three real production rows must not hide inside a bigger, softer
+  # number. Read with `Map.get/3` and filtered to readable entries for the same
+  # reason the head above names every count it prints — an unreadable shape costs
+  # this fragment, never the morning email.
+  defp environment_clause(never, _c) when not (is_integer(never) and never > 0), do: ""
+
+  defp environment_clause(_never, c) do
+    c
+    |> Map.get(:never_covered_by_environment, [])
+    |> List.wrap()
+    |> Enum.filter(fn
+      %{environment: _, never_covered: n} -> is_integer(n) and n > 0
+      _ -> false
+    end)
+    |> case do
+      [] -> ""
+      entries -> " — of those, " <> Enum.map_join(entries, ", ", &environment_part/1)
+    end
+  end
+
+  # A row whose environment the ledger could not name is still a never-covered
+  # row: it is reported as unnamed rather than dropped, because a dropped row
+  # would make the parts sum to less than the count they are splitting.
+  defp environment_part(%{environment: environment, never_covered: n})
+       when is_binary(environment) and environment != "",
+       do: "#{number(n)} in #{environment}"
+
+  defp environment_part(%{never_covered: n}), do: "#{number(n)} in an unnamed environment"
 
   # The two counts that are neither covered nor never-covered, stated only when
   # they exist: a row too young to judge is not a stuck site, and a row nobody

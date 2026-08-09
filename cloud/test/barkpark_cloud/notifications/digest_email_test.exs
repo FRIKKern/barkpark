@@ -681,10 +681,14 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
     body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
 
+    # THE SPLIT THE LEDGER ALWAYS COMPUTED IS NOW REQUIRED (dr-w33-s3). This
+    # fixture has always passed `by_environment` and this assertion used to watch
+    # it be dropped and pass green; naming the environment is the difference
+    # between "2 never covered" and "2 production sites never covered".
     assert body =~
              "Coverage over last 24h (COVERED means the site has since rebuilt, not that an edit of yours shipped): " <>
                "502 of 502 deferred rows have since been covered by a later live build, 0 still not after 24.0h; " <>
-               "15 of 18 failed rows have since been covered by a later live build, 2 still not after 24.0h (1 too young to judge)."
+               "15 of 18 failed rows have since been covered by a later live build, 2 still not after 24.0h (1 too young to judge) — of those, 2 in production."
 
     # THE FAILED TAIL IS ON THE SAME LINE AS THE DEFERRED ONE and is never
     # pooled with it: the two cohorts are separate populations, and one number
@@ -697,6 +701,104 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     refute body =~ "delivered"
     refute body =~ "superseded"
     refute body =~ "publish reach"
+  end
+
+  test "a cohort with nothing never-covered prints no environment breakdown" do
+    # NON-VACUITY, THE OTHER DIRECTION: the split is a breakdown OF the
+    # never-covered count, so a zero must not sprout an environment clause — a
+    # morning email that names production next to a clean cohort is a false alarm.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [
+            cohort("failed", 18, 18, 0,
+              by_environment: [%{environment: "production", never_covered: 0}]
+            )
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "18 of 18 failed rows have since been covered by a later live build, 0 still"
+    refute body =~ "of those,"
+    refute body =~ "in production"
+  end
+
+  test "a cohort whose by_environment key is ABSENT still renders, and never raises" do
+    # The digest reads the split with `Map.get/3` for the same reason its head
+    # names every count it prints: a ledger shape it cannot read must cost one
+    # fragment, never the whole email.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [
+            cohort("failed", 18, 15, 3)
+            |> Map.delete(:never_covered_by_environment)
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "15 of 18 failed rows have since been covered by a later live build, 3 still not after 24.0h."
+
+    refute body =~ "of those,"
+    refute body =~ "a cohort the digest could not read"
+  end
+
+  test "the reach limit is named, and it is the widest window the email reports" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 18, 0)]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "Reach limit: last 7d is the widest window this email reports, so a row older than that is OUTSIDE this population rather than covered by it."
+  end
+
+  test "the reach limit is stated ONCE per email, not once per window" do
+    # The real send carries EVERY door in `@deploy_windows`, so a per-window
+    # sentence would repeat verbatim under each one. Two windows here, and the
+    # widest door names itself exactly once.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 16, 2)]
+        ),
+        with_coverage(
+          window("last 7d", 9_156, 6_040, 91, measured_rate(91, 9_156)),
+          [cohort("failed", 91, 89, 2)]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert length(String.split(body, "Reach limit:")) - 1 == 1
+  end
+
+  test "the reach limit survives every window falling to coverage-UNMEASURED" do
+    # A disclosure that disappears exactly when the numbers get less trustworthy
+    # is fail-open. Neither window carries a coverage node here.
+    deploy =
+      health([
+        window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+        window("last 7d", 9_156, 6_040, 91, measured_rate(91, 9_156))
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "Coverage UNMEASURED (the ledger returned no coverage cohorts)"
+    assert body =~ "Reach limit: last 7d is the widest window this email reports"
   end
 
   test "a reading that carries no coverage node renders UNMEASURED — never full coverage" do
