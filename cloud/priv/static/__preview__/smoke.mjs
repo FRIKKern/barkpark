@@ -3257,6 +3257,69 @@ const EXPECTATIONS = {
       assert.ok(panel.includes('class="new-step failed'), "the ladder snaps on the failed rung");
     },
   },
+  // ── cch-w61-s2: the Updates panel finally renders in a SECOND state, and the
+  // Roll back button is wired in this harness AT ALL ─────────────────────────
+  // TWO defects meet here, and neither was visible from the other side:
+  //   (a) the corpus had ONE update state across every committed scenario
+  //       (`current`) and NO mock route for POST …/rollback, so a preview click
+  //       "succeeded" against a fixture that could never refuse;
+  //   (b) `wireUpdatePanel` opened with a compound descendant selector this
+  //       shim's query() cannot parse — measured `Roll back click dispatched
+  //       handlers = 0`, in every scenario, since the button shipped. The
+  //       shipped fallback to the `#instance-body` mount fixes it (handlers = 1,
+  //       asserted below). Widening PARSED_TAGS instead was measured WORSE: 6
+  //       scenarios red and still 0 handlers.
+  // The positive click count is MANDATORY here: an empty node list dispatches
+  // nothing and reads as a clean pass — the exact false green this harness exists
+  // to refuse.
+  "instance-update-credential-refused": {
+    what: "credential-refused box — Roll back is WIRED (handlers=1), its 409 renders terminally, and the recovery issues no second POST",
+    async check(reg, hooks, ctx) {
+      const body = reg.get("instance-body");
+      const html = (body || {}).innerHTML || "";
+      assert.ok(html.includes("update-panel"), "the Updates panel must render — this box HAS a host");
+      assert.ok(html.includes("Checked 45m ago"), "the panel states when the probe last ran");
+      assert.ok(html.includes('data-update-state="unknown"'),
+        "…and the badge reads Unknown, which is what update_state actually is for a refused box");
+
+      const rb = body.querySelectorAll("[data-rollback]");
+      assert.equal(rb.length, 1, "exactly one Roll back control renders");
+      const handlers = rb[0].dispatchEvent({ type: "click" });
+      assert.ok(handlers > 0,
+        "Roll back dispatched " + handlers + " handlers — wireUpdatePanel had never wired anything in " +
+        "this harness before the #instance-body fallback (measured: 0)");
+
+      // The sheet's LABEL lives on #modal-body's parsed child; the STATE app.js
+      // writes lives on the #id registry node. They are different objects (the
+      // D54 correction above) — read each fact off the one that carries it.
+      const sheet = (reg.get("modal-body") || {}).innerHTML || "";
+      assert.ok(sheet.includes(">Roll back<"), "the danger confirm sheet must mount, labelled");
+      assert.ok(sheet.includes("btn-danger"), "…on the danger tier");
+      assert.equal(sheet.indexOf("cm-typed"), -1, "…danger-no-echo: no typed field");
+      const confirm = reg.get("cm-confirm");
+      assert.ok(confirm, "the shared confirm trigger must exist");
+
+      const posts = () => ctx.calls.filter((c) => c.method === "POST" && /\/rollback$/.test(c.path)).length;
+      assert.equal(posts(), 0, "opening a confirm sheet POSTs nothing");
+
+      confirm.dispatchEvent({ type: "click" });
+      await ctx.settle();
+      assert.equal(posts(), 1, "confirming issues exactly one POST");
+
+      // THE FIX, END TO END, against a fixture that CAN refuse.
+      assert.equal(confirm.textContent, "Close",
+        "a 409 identity_refused is permanent — the recovery is Close, never a Try again that re-POSTs");
+      const msg = (reg.get("cm-error-msg") || {}).textContent || "";
+      assert.ok(msg.includes("the instance rejected our access credential"),
+        "the inline failure names what actually happened: " + JSON.stringify(msg));
+      assert.equal(msg.indexOf("Please try again in a moment."), -1,
+        "…and never sells a permanent refusal as a transient one");
+
+      confirm.dispatchEvent({ type: "click" });
+      await ctx.settle();
+      assert.equal(posts(), 1, "clicking the terminal recovery issues NO second POST");
+    },
+  },
 };
 
 function countMatches(hay, needle) {

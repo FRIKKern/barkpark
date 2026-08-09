@@ -25,7 +25,7 @@
 //             height-bearing @media, so the derived refusal refuses nothing
 //             today and legA's own output says so. The declared HEIGHTS set
 //             carries a written reason per value.
-//   SCENARIO  104 scenarios, 25 rendered, 79 in a COMMITTED residue literal.
+//   SCENARIO  111 scenarios, 26 rendered, 85 in a COMMITTED residue literal.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  WHY THIS EXISTS (cch wave 14, slice S1)
@@ -179,8 +179,14 @@
 //  COST, HONESTLY
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
-//  costs roughly a second per cell. The full render leg is 26 cells x 2 themes
-//  x 15 widths = 780 cells: budget MINUTES. The theme axis DOUBLED that, for an
+//  costs roughly a second per cell. The full render leg is 27 cells x 2 themes
+//  x 18 boundary widths = 972 renders: budget MINUTES. The width numeral here is
+//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
+//  boundary widths"), not the 15 that this file's residue prose still repeats —
+//  that stale numeral has no arm and is owned by
+//  cch-w63-bl-the-derived-width-axis-has-no-arm-and-its-prose-propagated.
+//  Measured, not assumed: `--render --cell inst-update-refused` reports 36
+//  renders for ONE cell (18 x 2). The theme axis DOUBLED that, for an
 //  axis stated above to be coverage rather than yield — slice it with
 //  `--theme light` when you are chasing a width, not a mode. Two traps proven the hard way: Page.navigate to
 //  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
@@ -280,6 +286,7 @@ export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;
 const SITE = IDS.siteWeb;
+const REFUSED = IDS.refusedInstance;
 
 // The screen axis: SCENARIO x ROUTE. `view` is the section.view that MUST be
 // live, `ready` is what the driver polls for, and `sentinel` is clause 3 of the
@@ -312,6 +319,7 @@ export const CELLS = [
   { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", sentinel: "#instance-tabpanel .tlv-row" },
   { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", sentinel: "#instance-tabpanel .metrics-grid" },
   { name: "inst-webhooks", scen: "webhooks-panel", hash: `#instance/${INST}/webhooks`, view: "view-instance", sentinel: "#instance-tabpanel .wh-card" },
+  { name: "inst-update-refused", scen: "instance-update-credential-refused", hash: `#instance/${REFUSED}`, view: "view-instance", sentinel: '#instance-tabpanel .update-badge[data-update-state="unknown"]' },
   { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
   { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
 ];
@@ -363,10 +371,10 @@ export function familyOf(scen) {
 }
 
 // The 13 families the residue falls into, each with the reason Leg B does not
-// render it. These are REASONS, not an allowlist: the allowlist is the 79
-// name-keyed entries below, which is what makes a 105th scenario refusable.
+// render it. These are REASONS, not an allowlist: the allowlist is the 85
+// name-keyed entries below, which is what makes a 112th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 10 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 9 are member-role, ACTOR-IDENTITY and empty-state variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
@@ -381,19 +389,19 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
 };
 
-// THE RESIDUE — 83 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 85 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
 // derived from the current residue is green under EVERY mutation, because it
 // grows with the artifact and can never refuse anything: it looks itemised, it
-// is even "artifact-derived", and it is 100% vacuous. Typed out, a 103rd
+// is even "artifact-derived", and it is 100% vacuous. Typed out, a 112th
 // scenario has nowhere to hide.
 // WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
-// the 21-member `hash:#instance` family, and goes green while its entry rots
+// the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 110 scenarios · 26 cells over 25 DISTINCT
+// THE CENSUS THIS RECONCILES AGAINST: 111 scenarios · 27 cells over 26 DISTINCT
 // scenarios (mixed-fleet is used twice) · residue exactly 85 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
@@ -436,7 +444,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // "overview-member-empty-fleet" (family hash:#overview)` and the twin until the
 // entries below were written, and all five numerals were then RE-READ from
 // `scenarioReport`, never carried from the brief.
-// `familyOf` over all 110 gives 15; the two with ZERO residue are `hash:#sites`
+// `familyOf` over all 111 gives 15; the two with ZERO residue are `hash:#sites`
 // and `hash:#activity`. 85 is the RESIDUE, not the census.
 //
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
@@ -445,7 +453,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
 // that reads these bytes. Every numeral in this block is now named by the arm
 // that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 110 / 26 / 25 / 85 / 13 — "the census reconciles: …", whose TITLE is now
+//   * 111 / 27 / 26 / 85 / 13 — "the census reconciles: …", whose TITLE is now
 //     built from `scenarioReport` by template literal rather than typed, so the
 //     printed line has no second copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —

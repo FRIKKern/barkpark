@@ -90,7 +90,7 @@
 // ── TWO HONEST LIMITS (stated, not hidden) ───────────────────────────────────
 // L1 COVERAGE IS CORPUS-BOUND. The actor set is DERIVED (a scenario whose own
 //    GET /v1/me answers role === "member"), not typed — but it can only be as
-//    wide as the committed corpus, which is 10 of 110 scenarios today. The
+//    wide as the committed corpus, which is 10 of 111 scenarios today. The
 //    count is PINNED so corpus growth is NAMED rather than silently absorbed.
 // L2 ROUTE ATTRIBUTION IN THE HOOK TABLE IS TYPED, NOT DERIVED. UNACCOUNTED and
 //    DEAD ROW guard completeness in BOTH directions, but a row naming the WRONG
@@ -336,7 +336,7 @@ const KNOWN = [
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
 const PIN_MEMBER_SCENARIOS = 10;
-const PIN_TOTAL_SCENARIOS = 110;
+const PIN_TOTAL_SCENARIOS = 111;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;
