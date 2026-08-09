@@ -535,8 +535,7 @@ func deployCensusEndStates(census cloudclient.DeployCensus) []string {
 // 2026-08-06 excluded 1,584 against 2,182 counted rows, 2026-08-07 excluded 106.
 // Every excluded attempt is non-live, so including them can only LOWER the live
 // rate — which makes live-per-attempt as computed here a CEILING, in the
-// flattering direction. (`coalesced_attempts` now lands on the row but is not in
-// this envelope, so the denominator still excludes them.)
+// flattering direction.
 //
 // It prints on EVERY render, including the payload that sends no basis at all,
 // and it carries no percentage — the basis line must be safe to print beside a
