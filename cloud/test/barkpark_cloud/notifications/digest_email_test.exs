@@ -631,6 +631,97 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     refute body =~ "deferred rows have since rebuilt"
   end
 
+  ## ── THE COVERAGE PARTITION (dr-w32-s3) ────────────────────────────────────
+  ##
+  ## The wait above is a clock over DEFERRED rows only. This is the same clock's
+  ## verdict over the deferred AND the failed-terminating cohorts, and it rides
+  ## the digest for one reason: it is the gauge the epic's wind-down rests on,
+  ## and a gauge nobody is shown every morning is not a gauge.
+
+  defp cohort(cohort, population, covered, never_covered, opts \\ []) do
+    %{
+      cohort: cohort,
+      status: cohort,
+      population: population,
+      covered: covered,
+      pending: never_covered + Keyword.get(opts, :too_young, 0),
+      unreadable: Keyword.get(opts, :unreadable, 0),
+      matured: covered + never_covered,
+      never_covered: never_covered,
+      too_young: Keyword.get(opts, :too_young, 0),
+      never_covered_by_environment: Keyword.get(opts, :by_environment, []),
+      oldest_pending_seconds: Keyword.get(opts, :oldest_pending_seconds)
+    }
+  end
+
+  defp with_coverage(window, cohorts) do
+    Map.put(window, :coverage, %{
+      clock: "the SAME clock as `deferral_wait`",
+      basis: "COVERAGE, and only coverage",
+      as_of: @read_at,
+      maturity_seconds: 86_400,
+      cohorts: cohorts
+    })
+  end
+
+  test "the coverage partition reaches the reader, with its window and its fence named" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [
+            cohort("deferred", 502, 502, 0),
+            cohort("failed", 18, 15, 2,
+              too_young: 1,
+              by_environment: [%{environment: "production", never_covered: 2}]
+            )
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "Coverage over last 24h (COVERED means the site has since rebuilt, not that an edit of yours shipped): " <>
+               "502 of 502 deferred rows have since been covered by a later live build, 0 still not after 24.0h; " <>
+               "15 of 18 failed rows have since been covered by a later live build, 2 still not after 24.0h (1 too young to judge)."
+
+    # THE FAILED TAIL IS ON THE SAME LINE AS THE DEFERRED ONE and is never
+    # pooled with it: the two cohorts are separate populations, and one number
+    # covering both is the reassurance this clause exists to refuse.
+    [line] = for l <- String.split(body, "\n"), l =~ "Coverage over last 24h", do: l
+    assert line =~ "deferred rows"
+    assert line =~ "failed rows"
+
+    # D478's wording fence, on the bytes a human actually receives.
+    refute body =~ "delivered"
+    refute body =~ "superseded"
+    refute body =~ "publish reach"
+  end
+
+  test "a reading that carries no coverage node renders UNMEASURED — never full coverage" do
+    deploy = health([window("last 24h", 852, 564, 53, measured_rate(53, 852))])
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "Coverage UNMEASURED (the ledger returned no coverage cohorts)."
+    refute body =~ "have since been covered"
+  end
+
+  test "an empty cohort says it has no rows — zero of zero is not full coverage" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 0, measured_rate(0, 760)),
+          [cohort("deferred", 502, 502, 0), cohort("failed", 0, 0, 0)]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "no failed rows"
+    refute body =~ "0 of 0 failed rows"
+  end
+
   test "a send that supplied no reading says so — the omission cannot render as a clean team" do
     body = DigestEmail.body(DigestEmail.summary([fresh_box()]))
 

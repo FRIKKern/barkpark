@@ -312,7 +312,14 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       # deferral count answers "how often did a box say not now", and only the
       # wait answers "and how long did that cost the site". One key, no second
       # `census/3` call site.
-      wait: census.deferral_wait
+      wait: census.deferral_wait,
+      # THE COVERAGE PARTITION (dr-w32-s3). The wait above is a clock over the
+      # DEFERRED rows only; this is the same clock's verdict over the deferred
+      # AND the failed-terminating cohorts — "is any of this team's sites
+      # sitting there un-rebuilt". It rides the digest because the digest
+      # already reaches a human every morning: the gauge that decides whether
+      # this epic can wind down must not need somebody to go and look.
+      coverage: census.coverage_cohorts
     }
   end
 
@@ -488,7 +495,8 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
   defp deploy_line(w) do
     "  #{w.label} (#{span(w)}): #{number(w.door)} attempted, of which " <>
-      "#{number(w.deferred)} deferred by a busy box — #{rate_clause(w)}. #{wait_clause(w)}."
+      "#{number(w.deferred)} deferred by a busy box — #{rate_clause(w)}. #{wait_clause(w)}. " <>
+      "#{coverage_clause(w)}."
   end
 
   # The rate node's OWN refusal, carried through verbatim. The counts survive a
@@ -540,6 +548,52 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   end
 
   defp wait_population(_), do: "its deferral population was not reported"
+
+  # THE COVERAGE PARTITION, IN THE SAME SHAPE AS THE RATE AND THE WAIT (dr-w32-s3):
+  # the reading when the census can name one, the word UNMEASURED when it cannot,
+  # and never an empty clause.
+  #
+  # THE WORDING IS THE FEATURE (D478). COVERED means THE SITE HAS SINCE REBUILT.
+  # It does NOT mean the reader's edit shipped, and this sentence says the first
+  # thing out loud precisely so nobody reads the second one into it. The window
+  # is named INSIDE the clause and not left to the line prefix, because this
+  # sentence gets quoted on its own.
+  defp coverage_clause(%{coverage: %{cohorts: [_ | _] = cohorts, maturity_seconds: maturity}} = w) do
+    "Coverage over #{w.label} (COVERED means the site has since rebuilt, not that an edit " <>
+      "of yours shipped): " <> Enum.map_join(cohorts, "; ", &cohort_clause(&1, maturity))
+  end
+
+  defp coverage_clause(_),
+    do: "Coverage UNMEASURED (the ledger returned no coverage cohorts)"
+
+  # A cohort with no rows says so. Zero of zero is not 100% coverage and must
+  # never render as a percentage.
+  defp cohort_clause(%{cohort: cohort, population: 0}, _maturity),
+    do: "no #{cohort} rows"
+
+  defp cohort_clause(%{cohort: cohort} = c, maturity) do
+    "#{number(c.covered)} of #{number(c.population)} #{cohort} rows have since been " <>
+      "covered by a later live build, #{number(c.never_covered)} still not after " <>
+      "#{duration(maturity)}" <>
+      cohort_tail(c)
+  end
+
+  defp cohort_clause(_c, _maturity), do: "a cohort the digest could not read"
+
+  # The two counts that are neither covered nor never-covered, stated only when
+  # they exist: a row too young to judge is not a stuck site, and a row nobody
+  # could classify is not a healthy one.
+  defp cohort_tail(c) do
+    parts =
+      [{Map.get(c, :too_young, 0), "too young to judge"}, {Map.get(c, :unreadable, 0), "unreadable"}]
+      |> Enum.filter(fn {n, _} -> is_integer(n) and n > 0 end)
+      |> Enum.map(fn {n, what} -> "#{number(n)} #{what}" end)
+
+    case parts do
+      [] -> ""
+      parts -> " (" <> Enum.join(parts, ", ") <> ")"
+    end
+  end
 
   # Seconds are what the ledger measures; a human reads minutes and hours. One
   # decimal, never rounded to a whole unit — "0h" for a 4-minute wait would be a
