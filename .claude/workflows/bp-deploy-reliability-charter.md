@@ -10824,3 +10824,52 @@ readable, the crown memory that survives a run boundary, the DOC_ID_EMPTY partit
 rotting for two days, and a scoreboard whose refusal conditions were committed before the first line of build
 code — including the verdict, stated in advance, that every class-level claim this wave could make is
 **INSUFFICIENT VOLUME** by construction and not for want of patience.
+
+### Wave 2026-08-09 (wave 31) — REVIEWED · Paper `deploy-reliability-wave-31-2026-08-09` · grade **B+**
+
+**Three of three round-1 slices built, reviewed, gate-green on their FINAL state, pushed and PR'd. Nothing
+merged — the lead merges. No slice was deferred: round 1 was the whole wave.** The reviewer changed nothing in
+any slice; all three final branches are the builders' own heads.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The 500 names its fault family | `dr-w31-s1-500-names-its-fault-family` | `…unknown-error-error-0` (unchanged) | [#11364](https://github.com/FRIKKern/barkpark/pull/11364) | 39 tests 0 failures · contract 4 doctests/297 tests/0 failures · format clean |
+| The crown's silence stops exiting 0 | `dr-w31-s2-crown-reader-state-and-silence` | `…stops-exiting-0-its--1` (unchanged) | [#11365](https://github.com/FRIKKern/barkpark/pull/11365) | 137 passed, 0 failed (main 91) · `bash -n` clean · `shellcheck -S error` clean |
+| Land the DOC_ID_EMPTY split (#10400) | `dr-w31-s3-land-the-doc-id-split` | `…split-rebase-pr-10-2` (unchanged) | [#11368](https://github.com/FRIKKern/barkpark/pull/11368) | 106 tests 0 failures · full cloud 3572/0 · payload key-set census 23/0 · format clean |
+
+**What landed.** The wave that was convened to CURE the top of D516's ranking discovered, in its own
+verification, that three of its four arms aim at classes with ZERO live rows — and the charter says so with the
+arithmetic (D524–D526) rather than reaching for an AFTER the window cannot supply. What actually shipped is
+smaller than the wish and honestly labelled: s1 turns 100% of the crash-path 500s from `unknown error` into a
+NAMED fault family with the `internal_error` code held byte-identical (so the cloud poll grace and `BOX_500`
+both survive untouched); s2 stops the crown's silence laundering itself into a green, gives its re-ask list a
+home on CP_HOST that outlives the runner VM, and makes WHICH READER ANSWERED a verdict field instead of a
+`note:` printed ten times; s3 lands PR #10400 after two days rotting CONFLICTING, splitting the content API's
+own status into four classes and — the part that matters — making the naming gauge able to LOSE on
+`DOC_ID_EMPTY`, re-verified at review (blind 77/0 on main, 92/5 on the branch under the same relabel).
+
+**What did not land, and why that is the wave's most valuable output.** No number moved, and the charter
+pre-declared that it could not: D526's INHERITED-CURE refusal forbids any window crossing 2026-08-06T22:19:52Z
+from claiming a fleet improvement, and D533 pre-declared INSUFFICIENT VOLUME for every class-level claim before
+the first line of build code. Arm A was dropped as D196-banned with an EMPTY comparison population; Arm C was
+answered without a slice (`BOX_BUSY_DEFERRED` was superseded by `box_at_capacity`, not broken). Three waves in
+a row have now shipped instruments rather than cures — the epic's honest position is that the fleet failure
+rate is 1.36% on a settled basis at three failures a day, and there is no large cause left to cure at this
+volume.
+
+**Verification the reviewer re-ran rather than read.** Both s1 gate halves, s2's harness plus two independent
+mutations (empty-PAT guard disabled → 135/2; `say_reader` removed → 134/3), s3's gate plus the full cloud suite
+plus the D243 relabel mutation. The load-bearing claims survive independent re-execution.
+
+**What the next wave should take, in dispatch order.** (1) Merge round 1 — s1, s2, s3 are fence-disjoint and
+can merge in any order; the lead closes each task's single merge-gated criterion on merge. (2) Before merging
+s2, decide the rc=2 paging question: rc=2 now exits 1 and the scream fires on `failure()`, so a BENIGN in-flight
+SERVING GRACE and an empty 24h population both page every six hours —
+`dr-w31-s2-followup-split-rc2-so-a-benign-grace-does-not-page` is filed and is small enough to fold in. (3)
+Before merging s3, dispatch the INDEPENDENT second re-derivation of its reachability judgment by hand (D523);
+the wave spawns one reviewer, whose own re-derivation AGREES and is recorded in #11368. (4) Then the first
+genuinely legal cure window opens: a BEFORE that starts at the last builder merge instant, run against the
+pinned `tooling/grip/ledger/deploy-reliability-w31-after-2026-08-09.sql`. (5) The one named CODE DEFECT this
+wave surfaced and did not fix — 33 of 299 live 500s are a single `FunctionClauseError` in
+`Ecto.Changeset.traverse_errors/2` (`dr-bl-traverse-errors-functionclause-500`) — is the only cure-shaped work
+the epic currently has with a live population, and it should lead the next wave.
