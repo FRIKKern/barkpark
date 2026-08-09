@@ -813,6 +813,19 @@ type DomainStatusResult struct {
 // the server was about to deliver.
 const DomainStatusTimeout = 90 * time.Second
 
+// FleetDeployCensusTimeout is the wall-clock cap for a FleetDeployCensus call.
+// The census aggregates the whole deploy ledger across the window the caller
+// chose, so its latency grows with the WIDTH of that window — measured against
+// the live control plane on 2026-08-09 under curl: 20d 11.9s, 22d 18.5s, 25d
+// 35.5s, 27d 57.9s. The epic's only non-zero (3 never-covered production rows,
+// 26.4 days old) first appears at a 27-DAY window — the plane answered that
+// window HTTP 200 in 57.9s, while the CLI on the shared 30s DefaultTimeout died
+// at `context deadline exceeded (Client.Timeout exceeded while awaiting
+// headers)`. The shared default made the exit gauge structurally unable to
+// print the number it exists to print. 90s covers the widest window the plane
+// answered, with headroom, and matches the two precedents in this file.
+const FleetDeployCensusTimeout = 90 * time.Second
+
 // DomainStatus fetches the per-host domain checklist for a managed instance via
 // GET /v1/barkparks/:id/domain-status (Bearer). The control plane owns every
 // probe (DNS/points-here/TLS/serving) — this client never touches a resolver or
@@ -2397,7 +2410,14 @@ func (c *Client) FleetDeployCensus(ctx context.Context, from, to time.Time) (Dep
 	q := url.Values{}
 	q.Set("from", from.UTC().Format(time.RFC3339))
 	q.Set("to", to.UTC().Format(time.RFC3339))
-	status, body, err := c.do(ctx, "GET", "/v1/deploy-ledger/census?"+q.Encode(), true, nil)
+	// Give the window-width-proportional aggregation headroom past DefaultTimeout
+	// (see FleetDeployCensusTimeout). An injected HTTP client (tests) is honored
+	// untouched; only the lazily-built fallback is widened, and only for this call.
+	cc := *c
+	if cc.HTTP == nil {
+		cc.HTTP = &http.Client{Timeout: FleetDeployCensusTimeout}
+	}
+	status, body, err := cc.do(ctx, "GET", "/v1/deploy-ledger/census?"+q.Encode(), true, nil)
 	if err != nil {
 		return DeployCensus{}, err
 	}
