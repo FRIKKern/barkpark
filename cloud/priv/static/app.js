@@ -14932,8 +14932,11 @@
   // card" sentences in this file are TRUE (start_trial touches Stripe not at
   // all) and stay. The plan grid opens right below so "below" stays true. Trial
   // expiry is a REAL teardown (TrialExpiryWorker), so this copy never borrows
-  // the dunning "suspended — not deleted" promise; the 3-day/1-day reminders it
-  // names are the worker's real warn schedule.
+  // the dunning banners' reassurance; the 3-day/1-day reminders it names are the
+  // worker's real warn schedule. (This comment used to quote the dunning
+  // "suspended — not deleted" sentence, which cch-w54-s5 retired for promising an
+  // actor no production path reaches — a pointer left naming a retracted promise
+  // is the same defect one layer down, so it is retracted here in the same PR.)
   function trialCardHtml(sub) {
     var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
     var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");
