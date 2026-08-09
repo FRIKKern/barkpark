@@ -25,6 +25,7 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.StudioLinkFakeHttpClient, as: Fake
   alias BarkparkCloud.Web.Router
@@ -73,6 +74,15 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       host: "203.0.113.10",
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
+    |> Repo.update!()
+  end
+
+  # A LIVE box under a BILLING suspension (cch-w57-s4) — everything the proxy
+  # needs is present; only the billing verdict differs.
+  defp suspended_barkpark(team) do
+    team
+    |> live_barkpark()
+    |> Ecto.Changeset.change(suspended: true, suspended_reason: "billing_lapsed")
     |> Repo.update!()
   end
 
@@ -465,6 +475,114 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
              }
 
       assert_token_custody(conn)
+    end
+  end
+
+  # cch-w57-s4 — the :read / :mutate authority split on a SUSPENDED box
+  # (charter D673). Isolation withholds the platform's maintenance attention, so
+  # a `:mutate` relayed with the stored admin credential is refused BEFORE the
+  # ciphertext is decrypted; a `:read` grants nothing durable and still relays.
+  # The caller is a plain "member" — the actually-reachable, non-admin path.
+  describe "a SUSPENDED box — :mutate is refused, :read still relays" do
+    test "a :read still relays and still answers 200 (the grant is NOT withdrawn)" do
+      {user, team} = user_with_team("member")
+      bp = suspended_barkpark(team)
+      program(ok_json(200, ~s({"webhooks":[{"id":"wh_1","name":"revalidation"}]})))
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/api/webhooks", token: session_token(user))
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+      assert [req] = Fake.requests()
+      assert req.url == @instance_url <> "/v1/webhooks/production"
+      assert_token_custody(conn)
+    end
+
+    test "a :mutate (create) → 409 suspended with ZERO upstream requests" do
+      {user, team} = user_with_team("member")
+      bp = suspended_barkpark(team)
+      # Programmed to SUCCEED: if the guard is missing this relays a 201 and the
+      # recorded request carries the plaintext admin token.
+      program(ok_json(201, ~s({"id":"wh_new","secret":"whsec_x"})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks",
+          body: %{"url" => "https://acme.test/hook", "events" => ["create"]},
+          token: session_token(user)
+        )
+
+      # The credential was never spent — asserted FIRST so a lost guard fails
+      # with the relayed request (bearer and all) in the message, not just a 201.
+      assert Fake.requests() == []
+      assert conn.status == 409
+      assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "suspended"}}
+      refute conn.resp_body =~ @instance_admin_token
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    test "every other :mutate verb is refused the same way, upstream untouched" do
+      {user, team} = user_with_team("member")
+      bp = suspended_barkpark(team)
+      Fake.program([])
+      token = session_token(user)
+
+      calls = [
+        call(:put, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9",
+          body: %{"active" => false},
+          token: token
+        ),
+        call(:delete, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9", token: token),
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/rotate", token: token),
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send", token: token),
+        call(
+          :post,
+          "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/deliveries/evt_1/replay",
+          token: token
+        )
+      ]
+
+      for conn <- calls do
+        assert conn.status == 409
+        assert json_body(conn)["error"]["code"] == "suspended"
+      end
+
+      assert Fake.requests() == []
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    # The sweep above enumerates its verbs BY HAND, which is only as complete as
+    # the day it was typed. This arm derives the population from the catalog, so a
+    # capability ADDED at `:mutate` reds here instead of silently gaining a route
+    # around the refusal. It is the ADD direction the hand list cannot have.
+    test "the hand-swept :mutate verbs ARE the catalog's :mutate population" do
+      mutating =
+        InstanceApiCatalog.catalog()
+        |> Enum.filter(&(&1.tier == :mutate))
+        |> Enum.map(& &1.capability)
+        |> MapSet.new()
+
+      swept =
+        MapSet.new([
+          :"webhook.create",
+          :"webhook.update",
+          :"webhook.delete",
+          :"webhook.rotate",
+          :"webhook.test_send",
+          :"webhook.replay"
+        ])
+
+      assert MapSet.equal?(mutating, swept),
+             "the proxy's :mutate population drifted from the suspended-box sweep above.\n" <>
+               "  in the catalog but NOT swept (ADD): " <>
+               "#{inspect(MapSet.difference(mutating, swept) |> MapSet.to_list())}\n" <>
+               "  swept but no longer :mutate (STALE): " <>
+               "#{inspect(MapSet.difference(swept, mutating) |> MapSet.to_list())}\n" <>
+               "A new :mutate capability needs a driven 409-with-zero-upstream-requests row in this " <>
+               "describe; a capability that stopped mutating needs this pin lowered deliberately."
+
+      refute MapSet.size(mutating) == 0,
+             "the catalog reports NO :mutate capability at all — an unreadable population must never " <>
+               "read as 'nothing to refuse'"
     end
   end
 
