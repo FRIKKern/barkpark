@@ -198,6 +198,40 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
       assert length(all_enqueued(worker: PushDeliveryWorker)) == 1
     end
 
+    test "a replay arriving AFTER the first job COMPLETED still enqueues ZERO new jobs" do
+      # The pin on PushDeliveryWorker's bare `unique: [period: 600]`, which
+      # inherits Oban's default state set — :completed INCLUDED. The test above
+      # replays while the first job is still :available, a state BOTH that set
+      # and the incomplete-only set dedupe, so it cannot tell them apart:
+      # narrowing :68 to an incomplete-states list leaves the whole push suite
+      # green. :completed is the ONLY state that separates them, and this is
+      # the test that reaches it — a webhook redelivered minutes after the
+      # push already went out must not ping the device a second time.
+      team = team_fixture()
+      {bp, secret} = relay_barkpark(team)
+      register_device(member_fixture(team))
+
+      body = Jason.encode!(@payload)
+      sig = sign(secret, System.system_time(:second), body)
+
+      first = deliver(bp.id, body, sig)
+      assert first.status == 202
+      assert json_body(first)["enqueued"] == 1
+
+      # The job ran and finished before the replay landed.
+      assert {1, _} =
+               Repo.update_all(Oban.Job,
+                 set: [state: "completed", completed_at: DateTime.utc_now()]
+               )
+
+      replay = deliver(bp.id, body, sig)
+      assert replay.status == 202
+      assert json_body(replay)["enqueued"] == 0
+
+      # Counted over ALL states — the deduped row is :completed, not enqueued.
+      assert Repo.aggregate(Oban.Job, :count) == 1
+    end
+
     test "a genuinely NEW event for the same session (fresh blocked_since) is NOT deduped" do
       team = team_fixture()
       {bp, secret} = relay_barkpark(team)
