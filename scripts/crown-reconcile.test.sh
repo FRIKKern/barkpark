@@ -36,6 +36,15 @@
 #       (this is the false-positive that would drown the real reds)
 #   (i) a CARRIED row naming a sha with no run of its own is correct → exit 0
 #   (j) configuration faults are 3, and never 1 or 2
+#   (j2) UNSET and SET-BUT-EMPTY are different statements about the PAT:
+#        empty is rc 3 with its own sentence, missing still falls through
+#        to the SSH reader CI actually uses                              → 3, 0
+#   (s) the RE-ASK LIST states itself over four states, and the three
+#       fixtures that were byte-identical now DIFFER          → 2, 0, 0 + cmp
+#   (o) WHICH READER ANSWERED is a verdict field: the same script,
+#       driven down the SSH transport against a control plane in effigy,
+#       names `route` when the route answers 200 and
+#       `postgres-container` when it answers 401                        → 0, 0
 #   (m) PREDATES-WRITER: a delivering run created before the
 #       record-delivery job existed is its own printed class, with the
 #       birth instant beside it — never a BEHIND                      → exit 0
@@ -155,13 +164,28 @@ NOTOOLS="$TMP/notools"; mkdir -p "$NOTOOLS"
 # share a list — the whole point of the re-read — sets CR_STATE itself.
 CR_STATE=""
 CR_N=0
+# The STEADY state a real run leaves behind: a list that EXISTS and holds
+# nothing. state_save writes its header unconditionally, so every run after the
+# first finds this shape. Probes start here deliberately — ABSENT is its own
+# arm below, because after the first run an absent list means DESTROYED, and a
+# probe that started ABSENT would fold that named silence into every verdict.
+seed_state() { # <path>
+  mkdir -p "$(dirname "$1")"
+  printf '# crown-reconcile re-ask list — "<sha> <first-seen-epoch>". Written %s.\n' "$NOW" > "$1"
+}
+CR_NOSEED=0
 run_cr() { # <expected-rc> <label> [args…]
   local want="$1" label="$2"; shift 2
   local out rc state
   CR_N=$((CR_N + 1))
   state="${CR_STATE:-$TMP/state-$CR_N.txt}"
-  out="$(env PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" \
-    CROWN_API_TOKEN= CP_HOST= DEPLOY_SSH_KEY= CROWN_STATE_FILE="$state" \
+  [ "$CR_NOSEED" = "1" ] || [ -f "$state" ] || seed_state "$state"
+  # UNSET, not empty: `CROWN_API_TOKEN=` is now its own configuration fault, and
+  # neutralising the ambient environment must not silently assert that fault on
+  # every probe. `-u` says what these probes mean — no PAT was asked for.
+  out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY \
+    PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" \
+    CROWN_STATE_FILE="$state" \
     bash "$CR" --now "$NOW" "$@" 2>&1)"
   rc=$?
   printf '%s\n' "$out" > "$TMP/last.out"
@@ -435,11 +459,187 @@ section "(j) configuration faults are 3 — never a verdict, never a warning"
 run_cr 3 "an unknown flag" --runs-fixture "$RUNS_BASE" --nonsense
 run_cr 3 "--window-hours that is not a number" --runs-fixture "$RUNS_BASE" --window-hours soon
 run_cr 3 "--now that is not an instant" --runs-fixture "$RUNS_BASE" --now yesterday
-out="$(env PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_API_TOKEN= CP_HOST= DEPLOY_SSH_KEY= CROWN_STATE_FILE="$TMP/state-config.txt" bash "$CR" --window-hours 24 2>&1)"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$TMP/state-config.txt" bash "$CR" --window-hours 24 2>&1)"
 rc=$?
 printf '%s\n' "$out" > "$TMP/last.out"
 if [ "$rc" = "3" ]; then ok "no fixture and no credential → exit 3"; else bad "no credential → exit $rc, wanted 3"; fi
 saw "CONFIG: no way to read the crown" "a missing credential says CREDENTIAL, never 'nothing to reconcile'"
+
+section "(j2) UNSET and SET-BUT-EMPTY are different statements about the PAT"
+# They were byte-identical: both printed `reader=ssh` and both returned 0 on the
+# CI path, so an operator who exported an empty token was silently answered by a
+# reader they did not choose. The two halves of this section are the whole point
+# — the empty one must FAULT, and the missing one must still WORK.
+out="$(env -u CP_HOST -u DEPLOY_SSH_KEY CROWN_API_TOKEN= PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$TMP/state-emptypat.txt" bash "$CR" --window-hours 24 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "3" ]; then ok "CROWN_API_TOKEN set but EMPTY → exit 3"; else bad "an empty CROWN_API_TOKEN → exit $rc, wanted 3 (a reader asked for and not supplied is a CONFIGURATION fault)"; fi
+saw "SET BUT EMPTY" "an explicitly-empty PAT names itself, rather than being downgraded in silence"
+not_saw "CONFIG: no way to read the crown" "the empty-PAT fault is DISTINGUISHABLE from having no credential at all"
+
+# The other half, and the one that would break CI if this slice over-reached: a
+# MISSING PAT is not a fault. It falls through to the CP_HOST + DEPLOY_SSH_KEY
+# reader deploy.yml already uses. `gh` is off PATH here, so the run dies later,
+# at the RUN LIST — which is exactly the proof that select_reader let it past.
+out="$(env -u CROWN_API_TOKEN CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$TMP/state-sshpath.txt" bash "$CR" --window-hours 24 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+saw "reader-transport=ssh" "with no PAT and CP_HOST + DEPLOY_SSH_KEY present, the SSH reader is selected — the working CI path is NOT broken"
+not_saw "SET BUT EMPTY" "an absent PAT is never reported as an empty one"
+not_saw "CONFIG: no way to read the crown" "an absent PAT with the SSH credentials present is not a missing credential"
+saw "gh is required" "the run gets PAST reader selection and only then fails on a tool this harness removed"
+
+section "(s) THE RE-ASK LIST STATES ITSELF — four states, one always-printed line"
+# The defect, measured on THIS base fixture before the fix: an ABSENT state file
+# and a PRESENT-but-header-only one produced output with the SAME md5
+# (4b4399a7f447f078b11943d574892e3e), both ending in `RECONCILED: … and no
+# earlier grace is still owed a row` — an assertion about a memory the run did
+# not have. The three fixtures are driven here and required to DIFFER.
+STATE_ABSENT="$TMP/state-absent.txt"; rm -f "$STATE_ABSENT"
+CR_STATE="$STATE_ABSENT"; CR_NOSEED=1
+run_cr 2 "ABSENT: the path is configured and the file is not there" $(base_args)
+CR_NOSEED=0; CR_STATE=""
+saw "— ABSENT; loaded 0 entry(ies), dropped 0 malformed line(s)." "ABSENT prints its own state, its path and its counts"
+saw "either this is the first run ever or the memory was destroyed" "ABSENT is a REASON, not a silent early return"
+saw "COULD NOT FULLY READ" "a destroyed memory is NOT counted clean"
+not_saw "RECONCILED:" "it never asserts 'no earlier grace is still owed a row' over a list it does not have"
+cp "$TMP/last.out" "$TMP/out-absent.txt"
+
+STATE_EMPTY="$TMP/state-empty.txt"; seed_state "$STATE_EMPTY"
+CR_STATE="$STATE_EMPTY"
+run_cr 0 "PRESENT-EMPTY: the file exists and holds nothing" $(base_args)
+CR_STATE=""
+saw "— PRESENT-EMPTY; loaded 0 entry(ies), dropped 0 malformed line(s)." "PRESENT-EMPTY names itself"
+saw "RECONCILED:" "an empty list is NOT a fault — it is the affirmative statement that nothing is owed"
+cp "$TMP/last.out" "$TMP/out-empty.txt"
+
+# PRESENT, and the entry retires cleanly, so the state line is the only thing
+# separating this run from the one above.
+STATE_PRESENT="$TMP/state-present.txt"; seed_state "$STATE_PRESENT"
+printf '%s %s\n' "$SHA_D" "$(( $(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$NOW" +%s 2>/dev/null || date -u -d "$NOW" +%s) - 600 ))" >> "$STATE_PRESENT"
+CROWN_WITH_D="$(crown_json crown-with-d \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_D" cp true "$IN2" 2)")"
+CR_STATE="$STATE_PRESENT"
+run_cr 0 "PRESENT: one entry loaded, and it retires because its row appeared" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_WITH_D" --health-fixture "$HEALTH_BASE"
+CR_STATE=""
+saw "— PRESENT; loaded 1 entry(ies), dropped 0 malformed line(s)." "PRESENT prints how many entries it actually loaded"
+cp "$TMP/last.out" "$TMP/out-present.txt"
+
+for pair in "absent:empty" "absent:present" "empty:present"; do
+  a="$TMP/out-${pair%%:*}.txt"; b="$TMP/out-${pair#*:}.txt"
+  if cmp -s "$a" "$b"; then
+    bad "the ${pair%%:*} and ${pair#*:} runs are still byte-identical — the state line is not distinguishing them"
+  else
+    ok "the ${pair%%:*} and ${pair#*:} runs are no longer byte-identical"
+  fi
+done
+
+# D is counted SEPARATELY from N, so a corrupted list cannot masquerade as a
+# short one.
+STATE_BAD="$TMP/state-malformed.txt"; seed_state "$STATE_BAD"
+printf 'not-a-sha 123\n%s no-instant\n' "$SHA_D" >> "$STATE_BAD"
+CR_STATE="$STATE_BAD"
+run_cr 2 "two malformed lines are DROPPED and counted apart from the entries" $(base_args)
+CR_STATE=""
+saw "— PRESENT-EMPTY; loaded 0 entry(ies), dropped 2 malformed line(s)." "a corrupted list cannot masquerade as a short one"
+
+# The closing half. `wrote M>0` followed by the next run's `loaded 0` is the
+# eviction signature, and it only reads if BOTH halves are always printed.
+STATE_WROTE="$TMP/state-wrote.txt"; seed_state "$STATE_WROTE"
+CR_STATE="$STATE_WROTE"
+run_cr 2 "a grace is granted, so the run must say what it wrote" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+CR_STATE=""
+saw "RE-ASK LIST: wrote 1 entry(ies) to $STATE_WROTE" "state_save closes symmetrically with what it persisted"
+
+# UNCONFIGURED is still rc 2, and now says so on the same line as the others.
+# `--state-file ""` is how a caller says "no list at all" out loud; an unset
+# CROWN_STATE_FILE falls back to the temp-directory default, which is the
+# separate (and also printed) hole below.
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" bash "$CR" --now "$NOW" --state-file "" $(base_args) 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "2" ]; then ok "UNCONFIGURED: no path at all → exit 2"; else bad "an unconfigured re-ask list → exit $rc, wanted 2"; fi
+saw "RE-ASK LIST: <none> [nowhere] — UNCONFIGURED" "UNCONFIGURED prints on the same always-present line as the other three states"
+
+# A path under a temp directory is named as the hole it is, rather than implying
+# a memory it does not have — this is what the production workflow's default was.
+STATE_TMP="${TMPDIR:-/tmp}/crown-reconcile-harness-$$.txt"; seed_state "$STATE_TMP"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" CROWN_STATE_FILE="$STATE_TMP" bash "$CR" --now "$NOW" $(base_args) 2>&1)"
+printf '%s\n' "$out" > "$TMP/last.out"
+rm -f "$STATE_TMP"
+saw "does NOT survive a run boundary" "a state file in a temp directory says so, instead of passing for persistence"
+
+section "(o) WHICH READER ANSWERED is a verdict field, not a repeated note:"
+# The live shape, in effigy. A production run took the 401→postgres downgrade on
+# every read and said so TEN times as a `note:` on stderr, behind a header that
+# named only the TRANSPORT (`reader=ssh`). The transport is not the reader: the
+# SSH transport carries two of them, and only the route's answer to the WORKER
+# principal decides which one produced the rows.
+#
+# So this arm stands up a control plane in effigy — `gh`, `curl` and `ssh` are
+# all fakes on PATH — and drives the SAME script down the SSH reader twice, once
+# where the route answers 200 and once where it answers 401. The verdict field
+# must NAME a different reader in each. A field that printed a constant would
+# pass a single-case assertion, which is why there are two.
+FAKE="$TMP/fake"; mkdir -p "$FAKE"
+cat > "$FAKE/gh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  */jobs*) cat "$CR_FAKE_JOBS" ;;
+  *) cat "$CR_FAKE_RUNS" ;;
+esac
+SH
+cat > "$FAKE/curl" <<'SH'
+#!/usr/bin/env bash
+cat "$CR_FAKE_HEALTH"
+SH
+cat > "$FAKE/ssh" <<'SH'
+#!/usr/bin/env bash
+# The control plane's remote reader, in effigy: it reports which reader answered
+# exactly the way scripts/crown-reconcile.sh's own remote.sh does.
+echo "CR_HTTP=$CR_FAKE_HTTP"
+echo "CR_VIA=$CR_FAKE_VIA"
+echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS")}"
+SH
+chmod +x "$FAKE/gh" "$FAKE/curl" "$FAKE/ssh"
+
+RUNS_FAKE="$(runs_json runs-fake "$SHA_A:$IN1")"
+printf '[{"name":"changes","conclusion":"success"},{"name":"control-plane","conclusion":"success"},{"name":"instance","conclusion":"success"}]' > "$TMP/jobs-fake.json"
+printf '[%s,%s]' "$(row "$SHA_A" cp false "$IN1" 1)" "$(row "$SHA_A" instance false "$IN1" 1)" > "$TMP/rows-fake.json"
+HEALTH_FAKE="$(health_json health-fake "$SHA_A" "$IN1")"
+
+run_fake() { # <expected-rc> <label> <http> <via>
+  local want="$1" label="$2" http="$3" via="$4"
+  local out rc state
+  CR_N=$((CR_N + 1))
+  state="$TMP/state-fake-$CR_N.txt"
+  seed_state "$state"
+  out="$(env -u CROWN_API_TOKEN PATH="$FAKE:$NOTOOLS:/usr/bin:/bin:/usr/sbin:/sbin" \
+    CP_HOST=cp.example.invalid DEPLOY_SSH_KEY=not-a-key \
+    CR_FAKE_RUNS="$RUNS_FAKE" CR_FAKE_JOBS="$TMP/jobs-fake.json" \
+    CR_FAKE_ROWS="$TMP/rows-fake.json" CR_FAKE_HEALTH="$HEALTH_FAKE" \
+    CR_FAKE_HTTP="$http" CR_FAKE_VIA="$via" CROWN_STATE_FILE="$state" \
+    bash "$CR" --now "$NOW" --window-hours 24 2>&1)"
+  rc=$?
+  printf '%s\n' "$out" > "$TMP/last.out"
+  if [ "$rc" = "$want" ]; then ok "$label → exit $rc"; else bad "$label → exit $rc, wanted $want"; printf '%s\n' "$out" | sed 's/^/       | /' >&2; fi
+  return 0
+}
+
+run_fake 0 "the route answers 200 over the SSH transport" 200 route
+saw "READER: transport=ssh, answered by route" "the reader that answered is its own printed field, beside the verdict"
+saw "read by route" "and the green sentence names it too"
+
+run_fake 0 "the route answers 401 to the WORKER principal and postgres answers instead" 401 sql
+saw "READER: transport=ssh, answered by postgres-container" "the 401 downgrade is NAMED in the verdict field, not only in the body"
+saw "the /v1/deliveries route answered HTTP 401 to the WORKER principal" "the field says WHY the reader changed"
+saw "read by postgres-container" "the green sentence carries the downgraded reader, so a green cannot hide which reader produced it"
+not_saw "answered by route" "the transport did not decide the answer — the two runs report DIFFERENT readers"
 
 section "(k) the workflow's own shape"
 if grep -q "cron:" "$WF"; then ok "the workflow carries a cron"; else bad "the workflow has no cron"; fi
@@ -484,6 +684,75 @@ if [ -f "$SPEC" ] && grep -q "crown-reconcile" "$SPEC"; then
 else
   ok "crown-reconcile is not in the required-check spec"
 fi
+
+# THE SILENCE STOPS EXITING 0. The rc=2 arm's own text has always said it is not
+# a green; run 31321844876 exited rc=2 and published a run conclusion of SUCCESS.
+RC2_ARM="$(grep '^            2)' "$WF" | head -1)"
+if [ -z "$RC2_ARM" ]; then
+  bad "there is no rc=2 case arm to check — this assertion would be vacuous, so it fails instead"
+elif printf '%s' "$RC2_ARM" | grep -q 'exit 0'; then
+  bad "the rc=2 arm still exits 0 — a SILENCE is being laundered into a green run conclusion"
+else
+  ok "the rc=2 SILENCE arm exits non-zero"
+fi
+
+# An INPUT that can break this harness must be able to TRIGGER it.
+# crown-reconcile.test.sh reads .github/required-checks.json above, and that file
+# was in no crown-reconcile trigger path at all.
+if grep -q '^      - "\.github/required-checks\.json"' "$WF"; then
+  ok "the spec file this harness reads is in the workflow's pull_request paths"
+else
+  bad "$WF does not trigger on .github/required-checks.json, which this harness READS — an input that can break the harness cannot fire it"
+fi
+
+# …and it must fire ONCE. crown-reconcile.yml carries its own paths-filtered
+# pull_request harness job (proven live by run 31320596893), so adding the same
+# harness to shell-harnesses.yml would double-run it.
+HARNESSES="$REPO_ROOT/.github/workflows/shell-harnesses.yml"
+if [ ! -f "$HARNESSES" ]; then
+  bad "missing $HARNESSES — this assertion would be vacuous, so it fails instead"
+elif grep -q "crown-reconcile" "$HARNESSES"; then
+  bad "crown-reconcile appears in shell-harnesses.yml as well as in its own workflow — the harness would run TWICE"
+else
+  ok "crown-reconcile rides its own harness job only — it is not double-run by shell-harnesses.yml"
+fi
+
+# The PAT env line exists so a human can mint the secret without touching this
+# file again, and the step UNSETS an empty one so an unminted secret cannot be
+# handed to the script as the configuration fault it now (correctly) refuses.
+if grep -q 'CROWN_API_TOKEN: \${{ secrets.CROWN_API_TOKEN }}' "$WF"; then
+  ok "the reconcile step carries the CROWN_API_TOKEN env line"
+else
+  bad "$WF never passes CROWN_API_TOKEN — the PAT reader cannot be armed without editing this file again"
+fi
+if grep -q 'unset CROWN_API_TOKEN' "$WF"; then
+  ok "an empty CROWN_API_TOKEN is unset before the script runs, so an UNMINTED secret cannot fault the working SSH reader"
+else
+  bad "$WF hands CROWN_API_TOKEN straight to the script; an unminted secret renders as the EMPTY string, which is now rc 3 — this would break the CI reader"
+fi
+
+# The re-ask list must be pointed somewhere that survives the VM, and that
+# somewhere must not be a temp directory.
+if grep -q 'CROWN_STATE_FILE:' "$WF"; then
+  ok "the workflow sets CROWN_STATE_FILE — the re-ask list is no longer written to a default nobody carries"
+else
+  bad "$WF never sets CROWN_STATE_FILE, so the re-ask list defaults under \$TMPDIR on a VM that is destroyed — GRACED-UNRECORDED cannot fire"
+fi
+if grep -q '/var/lib/crown-reconcile' "$WF"; then
+  ok "the list is carried to /var/lib/crown-reconcile on the control plane"
+else
+  bad "$WF names no persistent home for the re-ask list"
+fi
+# The KEY, not the word: the file's own prose explains why actions/cache was
+# REFUSED, and a bare grep would red on the explanation.
+if grep -qE '^[[:space:]]*uses:[[:space:]]*actions/cache' "$WF"; then
+  bad "the re-ask list rides actions/cache — a silent eviction is indistinguishable from an empty list, which is the defect being cured"
+else
+  ok "the re-ask list does NOT ride actions/cache"
+fi
+for phrase in "Re-ask list — fetch from the control plane" "Re-ask list — write back to the control plane" "if: always()"; do
+  if grep -qF "$phrase" "$WF"; then ok "the workflow carries: $phrase"; else bad "the workflow is missing '$phrase' — the list cannot make a round trip"; fi
+done
 
 section "(q) the re-ask boundary is STATED in the script, not only implemented"
 # A deferral whose retirement rule lives only in code is a rule the next reader

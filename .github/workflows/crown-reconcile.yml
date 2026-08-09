@@ -26,6 +26,19 @@
 # `pull_request` trigger is paths-filtered to this slice's own three files so the
 # harness below is not orphaned.
 #
+# WHY rc=2 NO LONGER EXITS 0 (charter D532)
+#
+# The rc=2 arm below used to print "That is a SILENCE, not a green" and then
+# `exit 0` — a step whose own text says it is not a green, exiting green. Run
+# 31321844876 (2026-08-09T15:42Z) granted a SERVING GRACE to
+# 1d57725553b39db5feb38bf7d2517f429db1879b, exited rc=2, and published a run
+# conclusion of SUCCESS. HONEST LIMIT, stated rather than overclaimed: that sha
+# DID get its cp row 65 seconds later (platform_deliveries, 2026-08-09
+# 15:44:03), so that particular discard cost nothing. The MECHANISM was broken;
+# that instance was benign. It now exits 1, mirroring the shape #11319 landed at
+# stale-verdict-watch.yml:136-137, where rc=6 UNREACHABLE and rc=7 DISTANCE
+# UNREADABLE both exit 1 rather than being folded into a success.
+#
 # WHY THERE IS NO continue-on-error ANYWHERE IN THIS FILE
 #
 # Job-level `continue-on-error: true` still renders a RED check run but launders
@@ -73,6 +86,11 @@ on:
       - "scripts/crown-reconcile.sh"
       - "scripts/crown-reconcile.test.sh"
       - ".github/workflows/crown-reconcile.yml"
+      # An INPUT to the harness. crown-reconcile.test.sh reads this file and
+      # fails if `crown-reconcile` ever appears in it — so an edit to the
+      # required-check spec can break the harness while triggering nothing.
+      # A file the harness reads has to be a file that fires it.
+      - ".github/required-checks.json"
 
 permissions:
   contents: read
@@ -103,14 +121,63 @@ jobs:
       - name: Prove the verdict can lose (crown-reconcile.test.sh)
         run: bash scripts/crown-reconcile.test.sh
 
+      # ── THE RE-ASK LIST HAS TO OUTLIVE THIS VM ────────────────────────────
+      #
+      # crown-reconcile.sh writes every granted serving grace to a re-ask list
+      # so the NEXT run collects the deferred accusation. Nothing set
+      # CROWN_STATE_FILE, so it defaulted under $TMPDIR on a fresh
+      # ubuntu-latest VM that is destroyed at the end of the job:
+      # GRACED-UNRECORDED was STRUCTURALLY UNABLE TO FIRE in production.
+      #
+      # WHY NOT actions/cache: its eviction (7 days idle, or the 10GB repo cap)
+      # is SILENT, and a cache miss is indistinguishable from an empty list —
+      # which is the exact defect being cured. The list instead lives on the
+      # control plane, at /var/lib/crown-reconcile/, reached over the SSH key
+      # this job ALREADY holds for the read. No new secret, no new dependency.
+      #
+      # A fetch that FAILS deliberately leaves no local file: the script then
+      # says ABSENT and exits 2, which after the fix is a non-zero silence. A
+      # failed fetch must never look like "the first run ever".
+      - name: Re-ask list — fetch from the control plane
+        env:
+          CP_HOST: ${{ secrets.CP_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/crown"
+          install -m 600 /dev/null "$RUNNER_TEMP/crown/key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/crown/key"
+          SSH="ssh -i $RUNNER_TEMP/crown/key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RUNNER_TEMP/crown/known -o ConnectTimeout=20"
+          if $SSH "root@${CP_HOST}" 'mkdir -p /var/lib/crown-reconcile && cat /var/lib/crown-reconcile/graced.txt 2>/dev/null || true' \
+              > "$RUNNER_TEMP/crown/graced.txt"; then
+            echo "::notice::re-ask list fetched from ${CP_HOST}:/var/lib/crown-reconcile/graced.txt ($(wc -l < "$RUNNER_TEMP/crown/graced.txt" | tr -d ' ') line(s))"
+          else
+            rm -f "$RUNNER_TEMP/crown/graced.txt"
+            echo "::warning::the re-ask list could NOT be fetched from the control plane. No local file is left behind on purpose — the reconciler will report the list as ABSENT rather than mistake a failed fetch for an empty memory."
+          fi
+
       - id: reconcile
         name: Does the crown match what was actually deployed?
         env:
           GH_TOKEN: ${{ github.token }}
           CP_HOST: ${{ secrets.CP_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          # INERT UNTIL A HUMAN MINTS IT, AND NEVER INERT-AND-SILENT.
+          # `gh secret list` does not carry CROWN_API_TOKEN today, and a secret
+          # that does not exist renders as the EMPTY STRING — indistinguishable
+          # from one minted empty. crown-reconcile.sh treats a SET-BUT-EMPTY
+          # token as a configuration fault (rc 3) precisely so an operator is
+          # never silently downgraded, so this step must UNSET it rather than
+          # hand the script an empty one and break the working CI reader.
+          CROWN_API_TOKEN: ${{ secrets.CROWN_API_TOKEN }}
+          CROWN_STATE_FILE: ${{ runner.temp }}/crown/graced.txt
+          CROWN_STATE_STORAGE: "CP_HOST:/var/lib/crown-reconcile/graced.txt, fetched and written back over the deploy SSH key"
         run: |
           set -uo pipefail
+          if [ -z "${CROWN_API_TOKEN:-}" ]; then
+            echo "::notice::CROWN_API_TOKEN is absent (a secret that does not exist and one minted empty are INDISTINGUISHABLE to a workflow, so both are treated as absent here). The reconciler falls through to the CP_HOST + DEPLOY_SSH_KEY reader deploy.yml already uses — this is the working path, not a fault."
+            unset CROWN_API_TOKEN
+          fi
           rc=0
           bash scripts/crown-reconcile.sh --repo "${{ github.repository }}" --window-hours 24 || rc=$?
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
@@ -120,10 +187,32 @@ jobs:
           case "$rc" in
             0) echo "::notice::the crown reconciles with what deploy.yml actually delivered over the last 24h"; exit 0 ;;
             1) echo "::error::THE CROWN DOES NOT MATCH WHAT WAS DEPLOYED. A delivering run has no row, a row has no run, or production is serving a sha the record has never heard of — the counts and the population are in the log above. This cannot clear itself: the missing rows must be recorded, or the recorder's gate fixed."; exit 1 ;;
-            2) echo "::warning::the reconciler COULD NOT READ part of what it compares, or the population was empty. That is a SILENCE, not a green — the unreadable shas are named in the log above and will be re-read on the next run."; exit 0 ;;
+            2) echo "::error::SILENCE — the reconciler COULD NOT READ part of what it compares, the population was empty, or its re-ask list was ABSENT. Its own text has always said this is NOT a green, and it exited 0 anyway: run 31321844876 (2026-08-09T15:42Z) granted a SERVING GRACE to 1d57725553b39db5feb38bf7d2517f429db1879b, exited rc=2, and published a run conclusion of SUCCESS. The named conditions are in the log above."; exit 1 ;;
             3) echo "::error::CONFIGURATION FAULT — this run's credential cannot reach the control plane, or a flag is wrong. A reconciler that cannot read what it reconciles must not report success. This is NOT a statement about the crown's contents."; exit 1 ;;
             *) echo "::error::crown-reconcile.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
+
+      # ALWAYS, and especially after a RED: the run that just accused a sha is
+      # exactly the run whose memory the next one needs. `if: always()` is what
+      # makes the deferral survive the accusation.
+      - name: Re-ask list — write back to the control plane
+        if: always()
+        env:
+          CP_HOST: ${{ secrets.CP_HOST }}
+        run: |
+          set -uo pipefail
+          if [ ! -f "$RUNNER_TEMP/crown/graced.txt" ] || [ ! -f "$RUNNER_TEMP/crown/key" ]; then
+            echo "::warning::there is no re-ask list to write back — this run's graces (if any) are LOST, and the next run will report the list as ABSENT."
+            exit 0
+          fi
+          SSH="ssh -i $RUNNER_TEMP/crown/key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RUNNER_TEMP/crown/known -o ConnectTimeout=20"
+          if $SSH "root@${CP_HOST}" 'mkdir -p /var/lib/crown-reconcile && cat > /var/lib/crown-reconcile/graced.txt' \
+              < "$RUNNER_TEMP/crown/graced.txt"; then
+            echo "::notice::re-ask list written back to ${CP_HOST}:/var/lib/crown-reconcile/graced.txt ($(wc -l < "$RUNNER_TEMP/crown/graced.txt" | tr -d ' ') line(s))"
+          else
+            echo "::error::the re-ask list could NOT be written back to the control plane. Every grace this run granted is LOST — the next run will load an empty list and cannot collect the deferred accusation."
+            exit 1
+          fi
 
       # The scream. file-ci-failure-issue.sh exits 1 when the alert was NOT
       # delivered, so a failure to page is itself a failure.
@@ -157,8 +246,13 @@ jobs:
               runs a commit the record has never heard of). The usual cause is
               deploy.yml's `record-delivery` job being gated off by its `if:`,
               or the run never reaching it.
+            - `2` — a SILENCE: part of what this compares could not be read, the
+              population was empty, or the re-ask list was ABSENT (its memory
+              did not survive the run boundary). Nothing here is a statement
+              that the crown is correct. This arm used to `exit 0`.
             - `3` — a CONFIGURATION fault: the runner could not reach the control
-              plane at all. That says nothing about the crown's contents.
+              plane at all, or `CROWN_API_TOKEN` was set to an empty string.
+              That says nothing about the crown's contents.
 
             This issue is idempotent per key (`crown-reconcile`): a continuing
             mismatch appends a comment rather than opening a new issue. CLOSE IT
