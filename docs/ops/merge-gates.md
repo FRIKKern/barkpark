@@ -244,7 +244,11 @@ is harmless:
   both sides carry a row), **and** refuses by name when a run cannot re-derive a
   committed exclusion — acknowledged one name at a time with
   `--expect-unrendered '<name>'`, the same flag the check list already uses — so
-  the carry can never be silent. Both arms are mutation-proven in §14b of
+  the carry can never be silent. A committed exclusion the run instead SELECTS
+  as required is a contradiction rather than an absence — carrying it would emit
+  one context on both lists — so it refuses separately and takes
+  `--expect-promoted '<name>'`, which DROPS the committed row instead of
+  carrying it. Both arms are mutation-proven in §14b of
   `scripts/required-checks.test.sh`.
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
