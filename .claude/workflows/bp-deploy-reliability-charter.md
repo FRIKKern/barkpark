@@ -8416,3 +8416,467 @@ step.
 **Seal state unchanged and honest:** `NO-SEAL a=FAIL orphans=69 roster=147`, D444's caveat and the depth
 caveat attached. The crown has still never held a row an automated writer put there — `dr-w26-s5` is the
 slice that changes that, and it is round 2.
+
+## Wave 27 — FILL THE CROWN, AND MAKE THE WIRE UNABLE TO DRIFT
+
+Wave 27 Paper: `deploy-reliability-wave-27-2026-08-09`. Ground re-derived inside a full-tree
+`git archive origin/main` at `da47f61aa`, never the primary checkout.
+
+**Wave 26 round 1 LANDED** — all six PRs merged 2026-08-09T02:18Z, the first wave in four that did not
+strand its own bytes. What it did not do is give the crown a writer. Nine of `platform_deliveries`'
+fifteen fields still have no producer anywhere in the tree, and the reader lost two keys ON MAIN.
+
+**#11027 MERGED at 2026-08-09T08:20:10Z, by this phase, before writing a byte of this section.** D447-D461
+are now on origin/main and may be cited by number. The unjam was mechanical and is recorded in
+`tooling/grip/ledger/unjam-11027-cure-proven-2026-08-09.md`: the PR was `MERGEABLE`/`BLOCKED` on exactly ONE
+red of 32 checks — `PR references an active task`, because the epic task's wave-25 claim had lapsed 29,877s
+before the PR was opened. `bp task claim task-fb4fb869490b4213 <worker>` then `gh run rerun <id> --failed`
+flipped it to `CLEAN` in 90 seconds. **DO NOT RELEASE that claim** — `pr-task-gate.sh:429` makes
+`released_at >= expired_at` a refusal no re-fire can clear.
+
+### D462 — THE RECORDER'S SEAM IS LIVE TODAY, NEEDS ZERO NEW SECRETS, AND KEYS ON THE IMAGE TAG.
+
+Run, not reasoned. `ssh root@barkpark.cloud` → `CONTAINER=e03840d38963`, `TOKEN_PRESENT_LEN=64`,
+`noauth=401`, **`badbody=422`** — and the 422 is the decisive bit: `router.ex:6659` runs `Auth.require_worker`
+FIRST, so a `deliveries_required` 422 is only reachable when auth did NOT halt. `DEPLOY_SSH_KEY`, `CP_HOST`,
+`GUERRILLA_HOST` are **repository** secrets; all six GitHub environments hold `total_count: 0`, so
+`environment: production` is **optional-but-advised** (convention + drift-immunity), never necessary — stating
+it as necessary would manufacture the exact leg-3 defect this wave audits.
+
+Blue/green changed the container NAME (`cloud-control_plane_green-1`), not the image tag. The recorder MUST
+use `docker ps -q --filter ancestor=cloud-control_plane:latest` (the `cp-ops.yml:213-226` precedent), never a
+container name. `cp-deploy.sh:39/:91` retags the outgoing image to `:rollback` and back on abort, so exactly
+one `:latest` match survives every path. **The guerrilla box has NO DOCKER** (`docker: command not found`) —
+the token seam is CP-ONLY, and a `target=instance` row still sources its bearer from `CP_HOST`.
+
+### D463 — THE RECORDER FAILS SOFT AGAINST THE RUN CONCLUSION AND LOUD IN ITS OWN JOB. THE `needs` FORK IS A FALSE DICHOTOMY.
+
+In `deploy.yml` the run conclusion is not a signal, it is **load-bearing state**: the `changes` job anchors its
+diff base to `gh run list --workflow=deploy.yml --status=success --limit=1`. A red recorder makes the RUN
+`failure` (proved on run 30686555528: `RUN_CONCLUSION=failure` with both deploy jobs `success`), the anchor
+does not advance, and every later merge unions a wider path set. Measured on a real anchor freeze: 230 commits,
+union touching `api/ internal/ cloud/ connectors/ deploy/` — i.e. **both production hosts redeployed on every
+merge** until a run goes green. Given this epic's own swap-thrashing root cause, that is the known outage
+mechanism, not merely waste.
+
+So: IN `report-deploy-failure`'s `needs` **fabricates** (its body hardcodes "the affected host was NOT
+updated — production is running older code than the default branch" while both deploy jobs read `success`, and
+its job-results list enumerates only three jobs). OUT of `needs` is **silent** (`failure()` is evaluated
+against a job's own `needs` graph) *and still poisons the anchor*. **RULED:** `record-delivery` reads curl's
+status explicitly — never `|| true`, the rc is READ not discarded — emits `::error::` on the typed 503,
+sets `outputs.delivered=false`, and **exits 0**; a second job `report-recorder-failure` gates on that output
+with `CI_FAILURE_KEY: deploy-recorder` and job-level `issues: write`. `file-ci-failure-issue.sh` keys one open
+issue per key and exits 1 only when the alert was NOT delivered, so a filed alert leaves the run green and the
+anchor advances. Loud in its own job and in a human-reachable issue; soft against the anchor.
+
+### D464 — BOTH DEPLOY GATES CERTIFY AN UNPARSEABLE WORKFLOW GREEN. THAT IS THE CHEAPEST INSTRUMENT THIS WAVE CAN BUY.
+
+A heredoc body indented at two spaces inside a `run: |` block terminates the block scalar.
+`yaml.safe_load` → `could not find expected ':' … line 293`. **Both `check-deployyml-filters.sh` and
+`check-deploy-smoke.sh` returned `OK` / rc=0 on that file, real run AND `--selftest`.** They are awk/grep text
+scanners and structurally cannot see that the file is not a workflow. GitHub answers an unparseable workflow
+with a `startup_failure` run carrying **`total_jobs=0`** (two exist in this repo's history), so
+`report-deploy-failure` never runs, no issue is filed, and `--status=success` skips it — freezing the anchor.
+This epic's thesis at maximum severity, inside the one file leg 1 edits, and currently ungated. Neither deploy
+gate is a required context (`gh api …/branches/main/protection` → exactly `Elixir gate`, `PR references an
+active task`, `Cloud gate`, `Console gate`; there is no `actionlint` anywhere in the tree), so the ONLY
+blocking gate a `deploy.yml`-only PR gets is the Cloud gate via `CLOUD_PATHS:215` — D440 is confirmed and
+load-bearing.
+
+### D465 — THE HONEST DAY-ONE WRITE SET, PER TARGET, AND THE PICKUP RESIDUAL LAW.
+
+Measured on real run 31301300597 (`da47f61aa`, PR #11121) with `github.token` + the already-granted
+workflow-level `actions: read` — no secret, no PAT:
+
+| field | day one | how |
+|---|---|---|
+| `merged_at` | **WRITE** | `gh api commits/<sha>/pulls -q '.[0].merged_at'`; the commit committer date matches within 0-1s on 4/4 sampled shas, so it is never NULL for a merge |
+| `queued_seconds` | **WRITE** | run `created_at` − `merged_at` (=2s on the sample) |
+| `queued_self_seconds` | **WRITE** | overlap of leg A with the previous deploy run's build window (=126s of 130s). D438 already ruled the split; the digest's "self/stall stay NULL" is superseded |
+| `queued_pickup_seconds` | with stall or NULL | **RESIDUAL ONLY** (D430). `job.started−job.created` was 3s while the residual was 4s. A residual of an incomplete partition is not a measurement: ship all three or self-only |
+| `queued_stall_seconds` | NULL | needs the cross-workflow query; unproven here |
+| `build_seconds` | **WRITE** | the deploy job's own wall clock (=110s). Measured entirely inside the job |
+| `previous_sha` | **WRITE, both targets** | cp: `curl https://barkpark.cloud/health` (ANONYMOUS, live, returns `git_sha`) BEFORE the deploy step. instance: read `/opt/barkpark/.instance-deploy-last` over the SSH the job already holds — zero credentials, zero HTTP |
+| `transition` | **WRITE** | `git rev-list --count --left-right OLD...NEW`, rc-checked, never piped, never `\|\| echo 0`; vocabulary per `platform_delivery.ex:203` |
+| `serving_since` | present, basis-caveated | cp: `/health`, which self-labels `serving_since_basis` as process-derived (a restart "improved" it 6.4s). instance: the mtime of `.instance-deploy-last`, which a restart does NOT move |
+
+**NAMED DECOY:** `deploy.yml:60-62`'s last-successful-deploy base sha looks like `previous_sha` and diverges
+precisely on rollback — the one case the column was added for. Do not use it.
+
+**ServingMemory IS NOT A DAY-ONE SOURCE.** `/opt/barkpark/.bp-site-deploy-runs/serving-memory.json` DOES NOT
+EXIST on live guerrilla while the same directory holds 4,457 other records; its only production caller is the
+authed controller at `instance_site_deploy_controller.ex:86`; `BARKPARK_GIT_SHA` is set nowhere. The FIRST
+call to that route WRITES `first_seen_at = now`, so a recorder that asks would record "serving since the moment
+the recorder asked". The crown criterion must not assert `serving_since` is the flip instant. (The direction's
+`https://guerrilla.barkpark.cloud/instance/site-deploy` 404 was a PATH error — the route is under `/v1` and
+answers a typed 401.)
+
+### D466 — LEG 2 IS ONE ELIXIR SLICE ON THE CLOUD GATE, DERIVED NOT TYPED. DO NOT WIDEN THE GO ROOT.
+
+Only the **Cloud gate** emits a check run on every PR and blocks; `go vet + test` is NOT a required context and
+`go-tests.yml` carries workflow-level `paths:`. So "a future PR that adds a sixteenth key without moving the
+fixture and the decoder cannot merge" is **not achievable by adding Go tests**. The census lives in Elixir.
+
+`Extract` handles `to_json/1` natively — it is the documented map-literal clause case. Adding ONE 4-line
+`@pairs` row moved the emitted floor **126 → 141 (+15, the exact key count)** and the UNREAD arm redded
+immediately with `newly unread: previous_sha, transition`, **with no key list typed anywhere**. That single row
+closes both filed backlog defects at once. `@emitted_floor` must be RE-MEASURED by the 999-technique if the
+slice changes anything else in the same commit — the floors are `==` and the arithmetic guess has been wrong
+in both directions three times.
+
+**REFUSED: widening the UNREAD union to `internal/cli`.** It grows the union 243 → 455 names (+87%) over 228
+files to correct exactly THREE allowlist rows (`fleet_role`, `fleet_parent_id`, `fleet_token_id` — whose
+reasons ARE wrong on main today; fix them by hand with the `cloud_support_cmd.go:1460-1462` citation). It
+multiplies D260's name-collision blind spot by 212 unrelated names and does not green the finding that matters.
+
+**THE FOURTH ARM IS RENDER, and the digest's premise was REFUTED:** deleting an existing render line DOES red
+named tests today (`TestCloudDeliveriesCarriedUnrecordedIsItsOwnState`; `TestCloudDeliveriesFullyClockedTimeline`
++ `TestCloudDeliveriesNullClocksAreUnmetered`). The gap is field-specific, not renderer-wide, and the arm's real
+standing value is the decoded-and-never-rendered set it finds: **`d.SHA`, `page.SHA`, `page.Limit`**. `d.SHA`
+being dropped means the render never proves the rows it printed are the sha you asked for — the header echoes
+the caller's own typed positional.
+
+**MUTATION IS FOUR-ARMED, each reddening a distinct NAMED test** (proved in a throwaway worktree): to_json →
+3 Elixir tests; fixture `live_key_set` → `TestPlatformDeliveriesFixtureRowsCarryExactlyTheLiveKeySet`; Go tag →
+`TestPlatformDeliveryDeclaresEveryLiveKeyOnItself`; render line → the new render test. **LOCAL TRAP:** `go test`
+CACHES a green across a fixture-only mutation (the fixture lives outside the package dir) — the mutation proof
+must use `-count=1` or it proves nothing. **The `!= 13` literal at `cloud_deliveries_cmd_test.go:608` will FIGHT
+the fix and must move in the same commit.** Both new Go fields are `*string` — `transition` is nullable with no
+DB default, and a plain `string` would render NULL as `""`, repeating the `carried`-as-bool lie.
+
+### D467 — LEG 2 OWNS `PlatformDelivery` ONLY. `dr-w23-s6` KEEPS `SiteDeployment`.
+
+`dr-w23-s6-register-per-struct-unread` is OPEN 0/8 and already owns "a per-struct UNREAD arm" plus "assert on
+the rendered output, not on the struct", aimed at `SiteDeployment`. Filing leg 2 without this ruling would put
+two owners on one mechanism — the same defect leg 3 exists to audit. Leg 2's brief carries the scope line.
+
+### D468 — THE EIGHTH CLAUSE IS LATENT, NOT FIRING, AND ITS FIX IS TWO LINES IN ONE FILE — ORDERED BEFORE ANY REGISTER CHANGE.
+
+Both census files are GREEN on `da47f61aa` (35 tests, 0 failures) — #11120's tightening holds. The brittleness
+is **proved by mutation, in both directions**: injecting ONE second, unrelated, REAL violation makes
+`reader_less_instrument_census_test.exs:684` and `:704` red as `match (=) failed` with a two-element right side,
+alongside the correct census red. A single register change produces TWO failures, one of which names the wrong
+line and prints a pattern dump instead of a diagnosis. **CORRECTION TO THE BRIEF:** the sibling census is NOT
+brittle this way — `payload_key_set_census_test.exs` contains ZERO sole-element assertions (`grep -n 'assert
+\[%{'` matches only those two lines across all six census files). **The fix scope is exactly two lines in one
+file**; do not "fix" the set-based arms. Fix: assert the DELTA the plant creates (present-after, absent-before)
+via `Enum.any?`, never the absolute list.
+
+### D469 — THE PROSE-ROT CLASS IS SIX CITATIONS, AND THE RULE IS SYNTACTIC AND OFFLINE.
+
+The root cause was never staleness — it was a **truncated identifier**. `bp task get dr-w26-s5` really does
+answer `not_found`; `dr-w26-s5-crown-gets-its-writer` exists with 12 criteria. "I could not look" came out as
+defect-shaped prose, four times (`:430`, `:434`, `:448`, `:463`), and **`:792` now ASSERTS the truncated id**,
+so correcting the register alone reds the Cloud gate (correcting BOTH sites in one commit is green — measured).
+`dr-w26-s3` is truncated too. `:434` escalates to "never filed at all", which is false. `:261` says #11009
+"is UNSTABLE and must still land"; #11009 is CLOSED, `mergedAt: null`, landed as #11075. `:364-368` claims
+`queued_seconds` has zero readers; it has two (`deliveries.go:88`, `cloud_deliveries_cmd.go:397-400`).
+
+**RULED, tier 1 and 2 only — no network in the unit gate:** (1) every task id appearing anywhere in an epic
+instrument must match `^(dr|cch)-w\d+-(s\d+[a-z]?|bl|hg|r\d+)-[a-z][a-z0-9-]*$`; a tail-less citation is
+unresolvable by construction. (2) Within an instrument file, an id or PR number may not be followed within
+~80 chars by a verdict word (`DOES NOT EXIST`, `not_found`, `never filed`, `is OPEN`, `is CLOSED`, `must still
+land`, `is MERGED`). **Prose may CITE; the machine-readable row ADJUDICATES.** A network re-check tier without
+these two would have re-derived `not_found` and AGREED with the false sentence.
+
+### D470 — `dr-w26-s7` IS REWRITTEN. AS FILED IT REDS MAIN.
+
+Five criteria were false-premised against today's main and are corrected in the ledger:
+
+- **C7 is INVERTED.** `reader_less_instrument_census_test.exs` has **NO** register row for `build_slots` or
+  `runner_queue_len` — the register is exactly SEVEN rows sitting **exactly on `@register_floor 7`** with
+  `assert length(@register) >= @register_floor` at `:553`. A builder obeying C7 literally deletes rows that do
+  not exist and drops the register to 5, **redding main's Cloud gate**. Restated: the census file is UNTOUCHED
+  by this PR, and the floor is why.
+- **C4 REDS A REQUIRED GATE as written.** Deleting the two emissions orphans `defp message_queue_len/1`
+  (`:90-99`); `mix compile --warnings-as-errors` exits 1, and `elixir.yml:403/:573/:628` runs exactly that.
+  C4 must additionally order the helper, the moduledoc lines `:19,:23,:44,:46,:49,:65,:68`, and
+  `router.ex:1637-1638`.
+- **C9 can never be satisfied** — the unscoped grep hits the charter (11 lines) and two ledger rows, which are
+  historical record. Scope it `-- api/ cloud/ internal/ web/ js/`.
+- **C1's second clause is UNSATISFIABLE** — "the nine undeclared trees" are named nowhere. Struck.
+- **C3's inventory is 7 lines, not 5** (two charter lines, two test lines).
+
+**THE FAILURE COUNT IS 3 CAUSAL + 7 SHADOWED + 1 VACUOUS + 2 CASCADE, and the builder will see "18 tests, 5
+failures".** Causal: `:116`, `:225`, `:349`. Cascade (NOT the deletion — each passes in isolation): `:311` and
+`deploy_runner_door_census_test.exs:137`, caused by the wedged-runner test leaking the single build slot.
+**VACUOUS SURVIVOR, a finding in its own right:** `:185` `assert is_nil(body["runner_queue_len"])` — the
+"never a reassuring 0" guard — PASSES after the key is deleted outright. A nil-guard cannot distinguish
+"measured as absent" from "the instrument is gone". This epic's thesis inside this epic's own dark-instrument
+test. Pin the three causal `file:line` assertions, never an exact failure COUNT (the cascade is seed-dependent).
+
+### D471 — THE FREEZE DATE IS FALSE. D375'S SUPPORTING NUMBERS ARE STRUCK.
+
+Measured on `cloud-db-1` at `now() = 2026-08-09 08:05:53Z`: `max(inserted_at) WHERE status='failed'` is
+**2026-08-08 14:55:28.776961**, numerator **18,640**, and 2026-08-08 carries **758 rows / 18 failed** — not
+"259 rows and 0 failed". The delta 18,640 − 18,622 is exactly those 18. D375's "FROZEN at 18,622 since
+2026-08-07T10:02:55Z" is **checkably wrong at three sites** (charter `:6054`, `:6061`, `:6818`) and any wave
+prose repeating it commits the D469 defect the same wave exists to end. Re-derive at print time.
+
+Per-day, so the shape is honest: 08-06 = 2205/866 · 08-07 = 2008/18 · 08-08 = 758/18 · 08-09 = 335/0. The
+collapse is a step function on 08-06→08-07, not a freeze at an instant. **The freeze is in the WRITER, not the
+reporter:** `deployment_failed` deliveries max at 2026-08-08 14:55:43.954614 — 15.2s after the last failed row,
+2,313 sent / 4 failed lifetime. Live rates, deferred population beside each: last-24h door 852 of which 564
+deferrals → **6.25% post-door**; last-7d door 9,156 with 3,043 deferrals → **67.50% post-door**. There is no
+`failure_class` column on `deployments` (the taxonomy is `deferral_cause`), and **59.7% of deferrals cannot
+name a cause** (1,818 NULL vs 1,225 `BOX_AT_CAPACITY_DEFERRED`, the vocabulary switching in a ten-minute gap on
+2026-08-07). Sell on COST, DEGRADATION and BLINDNESS.
+
+### D472 — THE FLEET DIGEST REACHED A HUMAN FOR THE FIRST TIME EVER, TODAY, AND ITS ONLY WITNESS IS A DB ROW.
+
+Four `notification_deliveries` rows, `event=fleet_digest`, `status=sent`, real addresses, **2026-08-09
+06:00:00Z** — two hours before this wave looked. Before today: NEVER. Four `DailyDigestWorker` jobs have ever
+run (08-04, 08-05, 08-07, 08-09) and the first three wrote ZERO delivery rows — the `{:ok, :no_admins}` arm.
+dr-w19-s5's address fix met a cron edge for the first time.
+
+**AND NOTHING SAID SO.** The MUST-RUN log grep returns zero lines — and so does the same grep over EVERY
+container on the host, because blue/green destroyed the container at 07:31/07:33. Worse, `notifications.ex:406`
+and `:504` promise `journalctl -u barkpark-cloud | grep fleet_digest` as the read affordance for "did anyone get
+today's digest?" — **that systemd unit HAS NEVER EXISTED on this host** (`systemctl list-units | grep -c
+barkpark-cloud` → 0). dr-w18-s3's counted-loss record writes to a sink the deploy cadence wipes and the docs
+name wrongly. SMTP-side proof is structurally unavailable: `postconf maillog_file` is EMPTY, no rsyslog, queue
+empty. **`status=sent` means accepted by our own relay — never claim "reached a human inbox".**
+
+And the payload is deploy-blind: `DigestEmail.summary/1` emits release freshness ONLY. The first fleet digest
+ever received told four people nothing about 18,640 failed deployments.
+`dr-w10-bl-digest-email-calls-a-sick-fleet-healthy` stopped being hypothetical at 06:00 today.
+
+### D473 — FIVE TERMINAL WRITES SWALLOW, AND ONE CENSUS REDS ON FOUR OF THEM.
+
+`deploy.ex` has exactly FOUR `_ =` discard sites on origin/main (`:1300`, `:1357`, `:1462`, `:1711`) — the
+direction's "five" is corrected, and `:1357` is benign (it inherits arm A). Proved by driving the real driver
+against a relay that steals `claim_epoch` mid-run:
+
+- **`fail/2` (`:1461-1478`)** — `ARM A: run={:ok, :failed} status=building log=""`. The row is NOT failed,
+  `failure_reason` is nil, nothing is logged, **and no alert fires** because
+  `maybe_dispatch_deployment_failed/2` lives INSIDE the won-CAS branch (`registry.ex:6754-6757`). D193's "the
+  edge fires every time" is true of a won CAS and false here. `TaskStarter` discards the return by
+  construction, so the row write is the failure's ONLY carrier. `auto_deploy_worker.ex:313` states the refuted
+  premise verbatim: "`:failed` is RECORDED on the row with the box's own reason."
+- **`settle_live/2` (`:1127-1150`)** — `ARM B: run={:error, :stale_epoch} status=pushing`, nothing logged about
+  the settle. Then the reaper closes the loop: `reaper=%{failed: 1, …} => row.status=failed`,
+  `failure_reason="exceeded max deploy claim attempts (stale builder lease)"`. **A build that IS serving is
+  terminally reported failed, blaming the lease.** Reachable in prod: `deployment_stale_after_seconds` is 15
+  min and `record_stage` only heartbeats on a stage TRANSITION.
+- **`finish_rollback/4` (`:1704-1731`)** — `ARM C: rollback={:ok, …} pointer_before == pointer_after, log=""`.
+  When the box names a build the CP has no row for, the pointer write is SKIPPED and it still returns 200.
+  Upstream of the very `transition` field the crown gained.
+- **`defer/3` (`:1300`)** — `ARM D: run={:ok, :deferred} status=building log=""`. The rebuild is enqueued, the
+  row never becomes `deferred`, `deferral_depth`/`bound`/`cause` are never written. **A counting defect**: the
+  row is invisible to every deferral census and to the post-door rate this epic publishes.
+
+One predicate covers all four: *a terminal write whose result the driver LOST must be OBSERVABLE — either the
+durable state reflects the terminal outcome, or a log line names the deployment whose terminal write was lost.*
+Behavioural, not source-scanning. On pristine main: **4 tests, 4 failures**, each naming its own arm. With a
+107-line log-only fix: 4/0, and `sites_deploy_test.exs` + `registry_deployment_reaper_test.exs` stay 86/0.
+Mutation matrix removing the fix one site at a time: A→only A, B→only B, C→only C, **zero cross-talk**.
+**DO NOT change any return shape in this slice** — `{:error, _}` from `fail/2` would route through
+`AutoDeployWorker.start_and_report/2`'s "could not start the driver — retrying" arm, a NEW mis-report on a
+build that did start.
+
+### D474 — THE CONFLICTED-PR REPORTER GETS ITS OWN FILE, AND ITS OBVIOUS IMPLEMENTATION OVER-REPORTS BY 25%.
+
+Population, re-derived: **22 CONFLICTING of 40 open**, stable across three samples, zero UNKNOWN (the 59%
+cold-cache under-report did not reproduce — say "not reproduced in 3 samples", never "cannot happen"). **8 assert
+a full 4-of-4 green required set they can no longer earn** (10054, 10085, 10086, 10129, 10256, 10811, 11007,
+11008); two more (#6057, #6086) are 1-of-1 — a WORSE class the 4/4 framing hides entirely. The briefed jq says
+TEN because it counts *occurrences of SUCCESS*: #10722/#10720 render FIVE required-named entries, one of them a
+FAILURE, which the count launders out. **Count ALL-OF-PRESENT, never occurrences-of-SUCCESS**, and the mutation
+proof must include a duplicate-entry fixture. #11008's green completed 2026-08-08T16:38-16:40Z on a head main
+has since passed, with zero re-dispatch — D461, standing inside this epic's own two flagship PRs.
+
+**HOST:** `main-gate-watch.yml` EXISTS (landed 05:49:31Z today as #11122, a cch slice) but is **contended and
+under-permissioned** — `cchi-w60-main-gate-watch-push-arm-cannot-win` is `in_progress` with a live cch builder,
+and its `permissions:` block is `contents: read` + `checks: read` with no `pull-requests: read`. **RULED: a NEW
+file**, cloned from `breakglass-watch.yml`'s level-triggered, no-`continue-on-error` discipline. Editing the
+contended file is the co-scoped-fixes trap.
+
+### D475 — THE GYLDENDAL PACKET CANNOT BE PUBLISHED AS WRITTEN, AND THE UNBLOCK IS TO RETIRE THE INCUMBENT.
+
+Publishing `drafts.dr-w26-hg-gyldendal-operator-packet-corrected` is a BIRTH (no published row exists), so the
+task-transition gate exempts it and **the E4 dedup wall is fully armed**. Scoring the wall's own tokenizer
+against the still-published `dr-w25-hg-gyldendal-operator-stops-the-transmission`: **13 shared tokens, Jaccard
+0.65** against `@refuse 0.55` with `@min_refuse_shared 3` satisfied → hard **409 `duplicate_of`**. The corrected
+packet near-duplicates the very gate it supersedes. **RULED: unpublish or retitle the w25 incumbent FIRST** —
+the only unblock that also stops the wrong-ordered gate from continuing to assert itself. (There is no
+`/v1/data/publish` route; publish is a mutation inside `POST /v1/data/mutate/:dataset`.)
+
+**THE INCIDENT ESCALATED MID-WAVE.** D457 froze 431 rows carrying `unavailable_reason='unreachable'`. Current:
+**460 — 458 `unreachable` plus 3 `unauthorized`**, the first `unauthorized` at **2026-08-09 07:37Z**, and a
+two-hour fleet scan shows exactly one box in each non-null bucket and it is `b1259514` in both. Per
+`usage.ex delivered_failure/1`'s own comment ("None of these is `unreachable`: the packets arrived"), the 458
+prove the platform ATTEMPTED the credentialed call; the 3 are the **first proof the bearer reached and was
+EVALUATED by another tenant's application layer**. Criterion 5's second clause is now half-false: we CAN
+distinguish rejected from unreachable; we cannot distinguish rejected from accepted-but-unlogged on the foreign
+box. **AND D457'S OWN RE-DERIVATION COMMAND IS WRONG** — `unavailable_reason` is not a column of
+`usage_samples`; it is nested at `envelope#>>'{meters,<meter>,unavailable_reason}'`, and the filed command
+errors. The D469 defect on this epic's priority-1 incident evidence. The three rows and the live 200 from
+116.203.98.0 are unchanged; `/v1/tls/ask` still answers 200 and stays fenced.
+
+### D476 — THE SEAL GAUGE LOSES ONE OPEN HUMAN GATE, AND RECLAIM BEATS SPEND.
+
+`bp task get` says 177 children; the seal's own roster read (`seal-predicate.mjs:428`, `filter[parent_id]`,
+limit 500) returns 174. **BOTH numbers are wrong, in opposite directions — the true distinct count is 175.**
+Two of the three dropped rows are `drafts.*` TWINS of rows the query already returns (so 177 double-counts, and
+the twins DIVERGE: published `dr-w24-s5` is 8/9, its draft 7/9). Exactly ONE row is genuinely invisible:
+`drafts.dr-w26-hg-gyldendal-operator-packet-corrected` — an open human gate at 0/5 that the instrument measuring
+whether human gates remain cannot see. Not truncation (174 « 500). cch-D249 already ruled the identical
+mechanism eight days ago; this charter had no equivalent. **A blanket publish would overwrite the published
+8/9 with the draft's 7/9 — resolve the twins individually, published-wins.**
+
+**26 open rows are named in merged origin/main commits and are already paid for**: 11 are pure mechanical
+reclaim (sole unmet criterion is a bare merge gate), 2 need one small act, 5 are compound merges needing a live
+re-read, 8 carry genuine outstanding proof — of which FOUR are "the PR BODY states X" on an already-merged PR,
+i.e. prose acts belonging in one sweep row, not eight slices. **`dr-w26-s6`'s merge criterion is unsatisfiable
+as written** (it demands `git grep -c publish_clock origin/main` return nothing; the code deletion IS complete —
+`git grep -l … -- cloud/lib internal api/lib cloud/priv` exits 1 — but the charter, two ledgers and the two
+census tests that must NAME the term they forbid survive). "26 rows of headroom" is honest for about 18.
+
+### D477 — SEAL IS STRUCTURALLY IMPOSSIBLE, NOT MERELY RESIDUE-BLOCKED.
+
+Run twice today. `--successor TERMINAL` → `NO SEAL — REFUSED reason=TERMINAL-CLAIM-REFUTED`, a/b/c all
+UNEVALUATED, "95 live row(s)". `--successor cloud-console-hardening-epic` → `INFRA FAULT
+code=ROSTER-TRUNCATED`, because the console roster comes back **exactly 500/500**. **No successor value
+produces an evaluated verdict today.** Clause (a) is ONE HOP (`fetchRoster` is a single `filter[parent_id]`
+call), so the **330 rows reparented into `dr-backlog-never-started` are invisible residue** — headroom was
+moved one level down and out of the instrument's sight, and the combined one-hop-down population is **504,
+already past 500**. Clauses (b) and (c) score off `KNOWN_DEFECTS` (six `CCH-D*`) and `PERMANENT_HUMAN_GATES`
+(three `gr-*`/`cch-*`) — **not one deploy-reliability row**. A deploy-reliability seal would certify the console
+epic's defect ladder under this epic's name. Headroom, restated: own roster 326 free, backlog roster 170 free,
+successor roster **0** free.
+
+### The wave 27 plan — 8 slices, ALL ROUND 1, disjoint by file
+
+Fable is unavailable this wave; every slice is `opus`. Two slices touch
+`payload_key_set_census_test.exs` in provably different hunks — s1 deletes the `@caller_less_allowlist` row at
+`:1353-1354`, s2 appends an `@pairs` row (~`:471-518`) plus a new arm — and each brief carries the union rule.
+The gate-script pair belongs exclusively to s7 so s1 never touches it.
+
+| # | task | surface | model | why it is here |
+|---|---|---|---|---|
+| 1 | `dr-w26-s5-crown-gets-its-writer` | `.github/workflows/deploy.yml` + the allowlist row | opus | D462+D463+D465. Both named blockers merged; the crown gets a writer. **HIGH-FLIP-RISK: the prod credential seam and the reporter fork** |
+| 2 | `dr-w27-s2-crown-wire-census-derived-not-typed` | census `@pairs`, `deliveries.go`, the renderer, the fixture | opus | D466+D467. Four ends, four mutation arms, zero typed key lists |
+| 3 | `dr-w27-s3-census-arms-survive-their-own-success` | `reader_less_instrument_census_test.exs` | opus | D468+D469. Two lines, six citations, one syntactic rule |
+| 4 | `dr-w26-s7-delete-the-two-api-side-dark-instruments` | `instance_site_deploy_controller.ex` + router + tests | opus | D470. Elixir gate, not Cloud gate — a separate PR by design |
+| 5 | `dr-w27-s5-terminal-writes-cannot-lose-silently` | `sites/deploy.ex` + a new census | opus | D473. Four arms, mutation-proved, zero cross-talk |
+| 6 | `dr-w27-s6-conflicted-pr-stops-asserting` | new `stale-verdict-watch.{yml,sh,test.sh}` | opus | D474. Its own file — `main-gate-watch.yml` is contended |
+| 7 | `dr-w27-s7-deploy-gates-can-see-a-broken-workflow` | `check-deployyml-filters.sh`, `check-deploy-smoke.sh` | opus | D464. The cheapest instrument on the board |
+| 8 | `dr-w27-s8-the-digest-that-arrives-names-deploy-health` | `digest_email.ex` + its test | opus | D472. The only push channel now provably reaches four humans and says nothing |
+
+**Lead acts this wave, which no slice substitutes for.** Unpublish or retitle
+`dr-w25-hg-gyldendal-operator-stops-the-transmission`, THEN publish the corrected packet (D475). Close the 11
+pure-mechanical reclaim rows and dispose of #11007/#11008 as superseded (D476). Coordinate with
+`cchi-w60-main-gate-watch-push-arm-cannot-win` before anything touches `main-gate-watch.yml`. **A genuinely
+independent second reviewer is owed on s1's credential seam and reporter fork before merge** — the workflow
+spawns one reviewer, so that dispatch is manual.
+
+**Seal state, honest and unchanged in kind:** `NO-SEAL`, and now `INFRA-FAULT` along the only live successor.
+Not residue-blocked — **structurally impossible** until clause (a) walks more than one hop and (b)/(c) are
+scored off a deploy-reliability register. That gap is filed, not built.
+
+### Wave 2026-08-09 (wave 27) — REVIEWED · Paper `deploy-reliability-wave-27-2026-08-09` · grade **A**
+
+**All eight round-1 slices built, reviewed, gate-green on their final state, PUSHED and PR'd. Nothing merged — the lead merges.** No slice was deferred to round 2; the wave plan was round 1 in full.
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| The crown gets its writer | `dr-w26-s5-crown-gets-its-writer` | `…the-crown-gets-its-writer-deploy-yml-rec-0-r` | [#11167](https://github.com/FRIKKern/barkpark/pull/11167) | 4 gate scripts OK · 6 jobs parsed · census 22/0 |
+| The crown's wire cannot drift | `dr-w27-s2-crown-wire-census-derived-not-typed` | `…the-crown-s-wire-cannot-drift-one-elixir-1` | [#11168](https://github.com/FRIKKern/barkpark/pull/11168) | 68 tests, 0 failures · `go test -count=1 ./internal/cli/` ok |
+| Census arms survive their own success | `dr-w27-s3-census-arms-survive-their-own-success` | `…this-epic-s-census-stops-breaking-when-i-2` | [#11169](https://github.com/FRIKKern/barkpark/pull/11169) | 39 tests, 0 failures |
+| Subtract two dark instruments | `dr-w26-s7-delete-the-two-api-side-dark-instruments` | `…subtract-delete-build-slots-and-runner-q-3` | [#11170](https://github.com/FRIKKern/barkpark/pull/11170) | `--warnings-as-errors` rc 0 · 17 tests, 0 failures |
+| Terminal writes cannot lose silently | `dr-w27-s5-terminal-writes-cannot-lose-silently` | `…the-driver-s-four-terminal-writes-stop-s-4` | [#11171](https://github.com/FRIKKern/barkpark/pull/11171) | 90 tests, 0 failures · mutation re-proved |
+| A conflicted PR stops asserting | `dr-w27-s6-conflicted-pr-stops-asserting` | `…a-conflicted-pr-stops-asserting-a-green--5` | [#11172](https://github.com/FRIKKern/barkpark/pull/11172) | harness 35/0 · yaml ok · `bash -n` clean |
+| Deploy gates see a broken workflow | `dr-w27-s7-deploy-gates-can-see-a-broken-workflow` | `…both-deploy-gates-stop-certifying-an-unp-6` | [#11173](https://github.com/FRIKKern/barkpark/pull/11173) | 4 arms, all rc 0, selftests 5/5 |
+| The digest names deploy health | `dr-w27-s8-the-digest-that-arrives-names-deploy-health` | `…the-one-push-channel-that-provably-reach-7` | [#11174](https://github.com/FRIKKern/barkpark/pull/11174) | 45 tests, 0 failures · `format --check-formatted` clean |
+
+**What landed — the wish's three clauses, in the order the wish states them.**
+
+*Failures that were still SILENT.* Four `_ =` terminal writes in `sites/deploy.ex` discarded a fenced CAS and
+said nothing. The worst, ARM B, loses the write on a build the box IS serving, and the `StaleDeploymentReaper`
+then terminally reports that serving build `failed`, blaming the builder lease — a mis-report the epic had
+never seen because the losing write was the only thing that could have named it. All four are now observable,
+proved behaviourally against a relay that steals `claim_epoch` mid-run, not by a source scan. Separately, both
+deploy gates certified an unparseable `deploy.yml` GREEN at rc=0 — a heredoc under-indent terminates the block
+scalar, GitHub answers with `startup_failure` at `total_jobs=0`, `report-deploy-failure` never runs, and the
+`changes` job's diff anchor freezes. Both gates now parse before they scan and fail closed.
+
+*Failures that were still MIS-REPORTED.* A CONFLICTING pull request re-dispatches zero runs and keeps
+asserting its last verdict forever: 22 of 40 open PRs are conflicted today and EIGHT assert a full 4-of-4
+green required set that main has moved past. `stale-verdict-watch` says so every 30 minutes — and it counts
+ALL-OF-PRESENT, never occurrences-of-SUCCESS, because the obvious jq reports TEN (a 25% over-report in the
+comforting direction, laundering a FAILURE entry out of #10720/#10722). And `bp cloud deliveries` silently
+dropped `previous_sha` and `transition`, so a ROLLBACK rendered byte-identically to a forward deploy; one
+Elixir census now reads all four ends of that wire, derived, with no key list typed anywhere.
+
+*Reporting that can LOSE.* The crown finally has a writer: `record-delivery` posts one row per sha per target
+from inside the delivering run, with zero new secrets, and `report-recorder-failure` is the scream the
+recorder is not allowed to be. The fleet digest — the one push channel that provably reached four humans, on
+2026-08-09T06:00:00Z, saying nothing whatsoever about deploy failures — now names both doors, their deferral
+mass and their post-door rate, or the word UNMEASURED. And the epic's own census stopped being able to break
+when it succeeded: two arms pattern-matched a sole-element violations list and would have redded on the very
+finding they exist to report.
+
+**The epic's first subtraction of a live control, said plainly.** `dr-w26-s7` deletes `build_slots` and
+`runner_queue_len`, neither of which ever had a reader — and with them the wedged-Runner test, whose only
+observable of wedge-ness was `runner_queue_len`. **Nothing now pins that `show/2` makes no `GenServer.call`**,
+which is the D113 case that route was built for. Deleting the test whole is more honest than trimming it to
+`elapsed < 1_000`, but the coverage is gone TODAY and the repair
+(`dr-w27-s7-restore-a-wedge-control-that-does-not-need-runner-queue-len`) is filed and unclaimed.
+
+**Reviewer's independent re-derivations and one fix made in place.**
+The HIGH-FLIP-RISK reporter fork was re-derived rather than re-read, and it had a real hole:
+`report-recorder-failure` gated on `needs.record-delivery.outputs.delivered == 'false'` under the default
+`success()`, so the loudest recorder failure — the one where `record-delivery` failed, was cancelled, or hit
+its `timeout-minutes: 8` before its last step and rendered NO output at all — filed nothing. Fixed on
+`…-0-r` (commit 9a2d185c7): the trigger is now the union of "the recorder said it lost" and "the recorder did
+not get to say", under `always()`, with `skipped` still skipped; the folded `if:` was re-indented so it folds
+to one line rather than carrying embedded newlines into a GitHub expression. Cross-slice: dr-w27-s7's stricter
+gates were pointed at dr-w26-s5's `deploy.yml` and both pass at rc=0 — the two cohere, merge order between
+them does not matter. dr-w27-s5's census was mutation-re-proved by the reviewer (removing ARM B's log gives
+4 tests / 1 failure, exactly ARM B, zero cross-talk). dr-w26-s7's surviving-hit claim was re-grepped: 20 hits,
+all in `api/`, zero in `cloud/ internal/ web/ js/` — 18 prose, and **two executable** (`refute Map.has_key?`
+at `…controller_test.exs:138-139`), which is a small overstatement in the builder's "zero executable" note and
+the right kind of executable reference.
+
+**What the LEAD must know before merging.**
+1. **The credential seam has never run in Actions.** If the running image is not tagged
+   `cloud-control_plane:latest`, the first merge files a `deploy-recorder` issue. That is the designed loud
+   failure, but it will be loud on merge day. `date -u -d`, `jq --rawfile`, the `gh api` payloads and the
+   `ancestor=` filter are all first-exercised on merge. **A genuinely independent second reviewer is owed on
+   the prod credential seam and the reporter fork** — the workflow spawns one reviewer, so that dispatch is a
+   manual lead step.
+2. **`stale-verdict-watch` REDS FROM DAY ONE and cannot clear itself** — 20 conflicted PRs today. The red is
+   correct; a permanently failing scheduled workflow is also the alert fatigue this epic refuses to normalise.
+   Merging it without draining the backlog (`dr-w27-s6-followup-drain-the-stale-verdict-backlog`) buys a
+   standing red.
+3. **A tenancy call nobody flagged**: dr-w27-s8's deploy-health block is FLEET-WIDE while the digest is
+   delivered PER TEAM. Counts and percentages only, no site and no team named, `site_limit: 0` so no per-site
+   league table can leak — but a team member now learns platform-wide deploy volume. Scoping it to the team's
+   own site ids needs the Sites context and was outside the slice's file set.
+4. **dr-w26-s7 criterion 10 can never pass as written** (the pathspec grep cannot be empty: an out-of-scope
+   file carries the words on main, and this PR deliberately leaves gravestone prose). Derive "every surviving
+   hit is prose or an absence-assertion" instead. The builder stamped a `--miss` note saying so rather than
+   quietly satisfying it.
+5. **Merge-gated criteria the lead closes**: one each on s2, s3, s5, w26-s7 (see 4), s6 (needs one scheduled
+   run on the live population), s7 (plus its PR-body criterion, which PR #11173's body now satisfies), s8; and
+   **two** on the crown (`dr-w26-s5`) — the crown criterion quoted from real output on the first merge, and
+   the `bp cloud deliveries <sha>` render from a `bp` built from that tree.
+
+**Ledger state: honest across all eight.** Every slice task is published, parented to `task-fb4fb869490b4213`,
+claimed by its builder, carries `wave_paper`, sits `in_progress`, and has ONLY merge-gated criteria open
+(14/16, 12/13, 11/12, 10/11, 11/12, 9/10, 6/8, 10/11). Eight follow-ups were filed and published DURING the
+wave, not after it — `dr-w27-arm-b-serving-build-durable-repair` (P1),
+`dr-w27-s7-restore-a-wedge-control-…`, `dr-w27-instance-serving-since-durable`,
+`dr-w27-s6-followup-drain-the-stale-verdict-backlog`, `dr-w27-bl-register-floor-lags-the-register`,
+`dr-w27-bl-decoded-but-never-rendered-sha`, `dr-w27-bl-two-ledger-slugs-predate-the-id-law`,
+`dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out`. One cosmetic collision: the slug prefix
+`dr-w27-s7-` is used by both a slice and a follow-up.
+
+**Next wave.** Merge round 1 in dependency order — #11173 (gates first, so the crown lands under a gate that
+can see a broken workflow) → #11167 (the crown's writer; **has a review commit on a `-r` branch**) → #11168
+(the wire; UNION with #11167 in `payload_key_set_census_test.exs`, take BOTH sides) → #11169 (census arms;
+if any PR moves a floor, re-measure, never sum) → #11171 → #11174 → #11170 (Elixir gate, not Cloud gate) →
+#11172 LAST, after the conflicted-PR backlog is drained. Then the wave's real residue: the durable repair for
+ARM B (a serving build must not be settled `failed` by the reaper — a log line is not enough), the wedge
+control the epic just deleted, and the first PROOF from a real merge that the crown's row is machine-written.
+
