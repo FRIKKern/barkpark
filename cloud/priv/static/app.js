@@ -7423,18 +7423,71 @@
     if (decomm) decomm.addEventListener("click", function () { confirmDecommission(bp); });
   }
 
+  // cch-w57-s3: the ONE discriminator this modal needs — is `bp.custom_host` a
+  // record the PLATFORM owns, or the customer's own? A platform host is a
+  // `<name>.barkpark.cloud` subdomain whose zone we hold end to end (the attach
+  // modal below accepts nothing else, and domainKindChip calls that kind
+  // "platform"). Anything else was attached with `dns_zone: nil` — the control
+  // plane never held that record, there is no detach route anywhere, and
+  // teardown cannot retract it. Derived from the value the modal ALREADY has
+  // rather than re-implementing the server's platform_custom_host?/1: the
+  // suffix IS the predicate on both sides. Returns the normalized host for the
+  // external case and null for "platform, or none" — so the sentence below
+  // fires on exactly the case that has a dangling record.
+  function externalCustomHost(bp) {
+    var h = String((bp && bp.custom_host) || "").trim().toLowerCase().replace(/\.+$/, "");
+    if (!h) return null;
+    return /(^|\.)barkpark\.cloud$/.test(h) ? null : h;
+  }
+
   // The destroy-tier typed-confirm for Decommission (charter decision 21). Reuses
   // the EXACT deprovision request path the old Remove drove; the typed name echo
   // is the proof-of-attention gate (confirmModal DESTROY tier).
+  //
+  // cch-w57-s3 — THE VERB STATES WHAT IT LEAVES BEHIND. This sheet used to say
+  // "Permanently tears down the server and stops billing." / "This can't be
+  // undone.", and three quarters of that was a claim the control plane does not
+  // support:
+  //   • THE ARCHIVE BUNDLE SURVIVES WITH NO REACH. ArchiveStore exports
+  //     derive_signing_key/4, list_archives/1 and sign_v4/1 — no delete, no
+  //     purge. Teardown makes ZERO object-storage requests and the bundle is
+  //     still listable afterwards. NO SENTENCE HERE NAMES A WINDOW OR A NUMBER
+  //     OF DAYS, because there is no reaper: inventing one would be the exact
+  //     defect this wave exists to remove.
+  //   • BILLING DOES NOT STOP HERE. DELETE /v1/barkparks/:id (web/router.ex)
+  //     reaches no Billing function at all; cancellation is TEAM-scoped and
+  //     lives on the Billing screen. Removing an instance — even the last one —
+  //     leaves the subscription charging.
+  //   • A CUSTOMER-OWNED DNS RECORD DANGLES AT A RECYCLED IP (see
+  //     externalCustomHost above).
+  // The register is the suspension card's ("Nothing is deleted, and nothing on
+  // this server has been touched — Barkpark Cloud has stopped managing it."),
+  // pointed at residue instead of reassurance. Pinned by __preview__/smoke.mjs's
+  // panel-overview leg 5/5 — the first assertions this copy has ever had.
   function confirmDecommission(bp) {
     var live = !!bp.host;
+    var ext = externalCustomHost(bp);
+    var lines = [
+      live
+        ? "Tears down the server for good — the box, its disk and everything on it."
+        : "Removes the instance from your dashboard. There is no server left to tear down.",
+    ];
+    if (ext) {
+      lines.push(ext + " is your own DNS record — Barkpark Cloud never held it. The IP behind it goes back to " +
+        "Hetzner, which hands that address to someone else, and we can't repoint the record for you.");
+    }
+    lines.push("Any archive bundle this team has already made stays in object storage — Barkpark Cloud has no way " +
+      "to delete it.");
+    lines.push("Billing does not stop here. The subscription belongs to the team; cancel it on Billing if this was " +
+      "your last instance.");
+    lines.push(live
+      ? "Tearing down the server can't be undone — and everything named above stays behind."
+      : "Removing the row can't be undone — and everything named above stays behind.");
     openConfirmModal({
       tier: "destroy",
       title: "Decommission " + bp.name + "?",
       resourceName: bp.name,
-      consequences: live
-        ? ["Permanently tears down the server and stops billing.", "This can't be undone."]
-        : ["Removes the instance from your dashboard.", "This can't be undone."],
+      consequences: lines,
       confirmLabel: "Decommission",
       busyLabel: "Decommissioning…",
       onConfirm: function (ctl) { runDecommission(bp, ctl); },
@@ -7457,7 +7510,10 @@
         toast({
           kind: "success",
           title: "Decommissioning " + bp.name,
-          body: r.status === 200 ? bp.name + " is gone." : "Tearing down the server — billing stops once it's gone.",
+          // cch-w57-s3: the 202 arm used to promise "billing stops once it's
+          // gone" — a Stripe claim this DELETE never makes (it reaches no
+          // Billing function; cancellation is team-scoped, on Billing).
+          body: r.status === 200 ? bp.name + " is gone." : "Tearing down the server. Your subscription keeps billing until you cancel it on Billing.",
         });
         location.hash = "#fleet";
         return;
@@ -7515,7 +7571,9 @@
         toast({ kind: "success", title: "Instance removed", body: bp.name + " is gone." });
         location.hash = "#fleet";
       } else if (r.status === 202) {
-        toast({ kind: "success", title: "Removing " + bp.name, body: "Tearing down the server — billing stops once it's gone." });
+        // cch-w57-s3: same correction as runDecommission's 202 arm — this is the
+        // SAME DELETE, so it makes the same (non-)promise about the subscription.
+        toast({ kind: "success", title: "Removing " + bp.name, body: "Tearing down the server. Your subscription keeps billing until you cancel it on Billing." });
         location.hash = "#fleet";
       } else {
         if (btn) { btn.disabled = false; btn.textContent = "Remove"; }

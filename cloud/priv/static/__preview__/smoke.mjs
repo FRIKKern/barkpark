@@ -1753,6 +1753,39 @@ const EXPECTATIONS = {
       const bpPath = "/v1/barkparks/" + bp.id;
       assert.equal(ctx.countCalls("DELETE", bpPath), 0,
         "Decommission tore down the server on the row click — the typed-confirm gate is gone");
+
+      // ── cch-w57-s3: THE FIRST ASSERTIONS THIS COPY HAS EVER HAD ───────────
+      // The consequence bullets were unpinned in the whole tree (grep returned
+      // exactly one hit per string, app.js itself), so the sheet was free to
+      // promise an erasure the plane does not perform. This leg already renders
+      // the REAL sheet into #modal-body; it just never read the words.
+      // The three residues asserted here are all MEASURED, not stylistic: the
+      // archive bundle has no delete path at all, DELETE /v1/barkparks/:id
+      // reaches no Billing function, and a customer-owned DNS record is never
+      // retracted. The FORBIDDEN half matters as much: no window and
+      // no number of days may appear, because there is no reaper to back one.
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes('class="cm-consequences"'),
+        "the destroy sheet must render its consequence list; got: " + sheet.slice(0, 200));
+      assert.ok(sheet.includes("Tears down the server for good"),
+        "the live arm must still say plainly what it destroys; got: " + sheet.slice(0, 400));
+      assert.ok(sheet.includes("archive bundle") && sheet.includes("no way to delete it"),
+        "the sheet must disclose the archive bundle the control plane cannot delete");
+      assert.ok(sheet.includes("Billing does not stop here"),
+        "the sheet must stop implying the teardown cancels the subscription");
+      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(sheet),
+        "the sheet named a window in days — there is no reaper, and inventing one is the very defect this fixes: " +
+        sheet.slice(0, 400));
+      assert.ok(sheet.includes("stays behind"),
+        "the finality line must be about the row, with the residue named beside it");
+      // THE CONDITIONAL, BOTH WAYS. The fixture instance carries NO custom host
+      // (derived, never typed), so the DNS sentence must be absent here…
+      const inst = ctx.state.barkparks[0];
+      assert.equal(inst.custom_host, null,
+        "this branch assertion is only meaningful while the fixture carries no custom host; got: " + inst.custom_host);
+      assert.ok(!sheet.includes("your own DNS record"),
+        "the customer-DNS sentence fired on an instance with no custom host at all");
+
       assertDestroySheetDisarmed(reg, "Decommission");
       reg.get("cm-confirm").click();
       await ctx.settle();
@@ -1772,6 +1805,45 @@ const EXPECTATIONS = {
       const decomToast = (reg.get("toast-stack") || {}).innerHTML || "";
       assert.ok(decomToast.includes("Decommissioning " + bp.name) && decomToast.includes("is gone"),
         "the teardown must report itself, with the server's own 200-vs-202 distinction; got: " + decomToast.slice(0, 200));
+
+      // ── cch-w57-s3: THE CUSTOM-DOMAIN BRANCH, RENDERED FOR REAL ───────────
+      // Attach writes `dns_zone: nil` for a non-platform FQDN and there is no
+      // detach route anywhere, so a customer's own A record outlives the box and
+      // keeps pointing at an address Hetzner will hand to someone else. The
+      // discriminator is the PLATFORM SUFFIX (externalCustomHost in app.js), and
+      // a sentence that fires on the wrong side is worse than none — so BOTH
+      // sides are driven here, through the same real click that opened the sheet
+      // above. `inst` is the per-boot fixture row the rail closed over (the
+      // route serves the state bag's objects by reference), so writing the field
+      // is what the console would see on a box that carries one. Nothing is
+      // armed after this point: these clicks re-render the sheet and issue no
+      // request (the DELETE count assertions above are already sealed).
+      const hostBefore = inst.custom_host;
+      inst.custom_host = "console.acme.example";
+      assert.equal(decomm[0].click(), 1, "the Decommission handler died before the custom-host branch could render");
+      const extSheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(extSheet.includes("console.acme.example is your own DNS record"),
+        "an EXTERNAL custom host must be named as the customer's own record; got: " + extSheet.slice(0, 500));
+      assert.ok(extSheet.includes("Hetzner") && extSheet.includes("someone else"),
+        "and the released IP that Hetzner recycles must be stated, not implied");
+      // Read around the apostrophe: consequences ride through esc(), which
+      // renders "can't" as "can&#39;t" — an assertion typed with the raw
+      // character would be red for a reason that has nothing to do with the copy.
+      assert.ok(extSheet.includes("repoint the record for you"),
+        "and the console must admit it cannot fix that record for them; got: " + extSheet.slice(0, 500));
+      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(extSheet),
+        "the custom-host branch named a window in days; got: " + extSheet.slice(0, 500));
+      // …and the PLATFORM side, whose zone the control plane does own end to end
+      // (the attach modal accepts <name>.barkpark.cloud and nothing else), must
+      // stay silent — the sentence is about a record we never held.
+      inst.custom_host = "production-5b2c1e.barkpark.cloud";
+      assert.equal(decomm[0].click(), 1, "the Decommission handler died before the platform-host branch could render");
+      const platSheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(!platSheet.includes("your own DNS record"),
+        "the customer-DNS sentence fired on a PLATFORM host, whose zone Barkpark Cloud owns; got: " + platSheet.slice(0, 500));
+      assert.ok(platSheet.includes("archive bundle"),
+        "…while the residues that are NOT conditional must still render on that same sheet");
+      inst.custom_host = hostBefore;
     },
   },
 
