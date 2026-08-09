@@ -77,6 +77,29 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
       assert %Barkpark{id: id} = Registry.next_autoupdate_candidate()
       assert id == older.id
     end
+
+    # cch-w65 — `persist_update_unknown/2` stopped stamping a check time for the
+    # three rungs that never reach the transport, so rows can now carry a NULL
+    # `update_checked_at`. These two pin that the rollout has no victim in
+    # EITHER direction: such a row is invisible to this query, and if it somehow
+    # were visible, a NULL must de-prioritise, never jump the queue.
+    test "a NULL-clock unknown row is ALONE in the table and is still not a candidate" do
+      # The exact row the omitting rung writes: state "unknown", no clock. The
+      # only row in the table, so a `nil` here cannot come from a rival.
+      behind_barkpark(%{update_state: "unknown", update_checked_at: nil})
+      assert Registry.next_autoupdate_candidate() == nil
+    end
+
+    test "a NULL clock sorts LAST — a never-checked box does not jump the queue" do
+      _never_checked = behind_barkpark(%{update_checked_at: nil})
+      checked = behind_barkpark(%{update_checked_at: ~U[2026-07-06 12:00:00.000000Z]})
+
+      # `ORDER BY x ASC` puts NULLs last in Postgres. The shipped staleness test
+      # above cannot catch a flip to `asc_nulls_first`: both of its rows carry a
+      # non-null clock, so the NULL branch of the ordering is never exercised.
+      assert %Barkpark{id: id} = Registry.next_autoupdate_candidate()
+      assert id == checked.id
+    end
   end
 
   describe "in-flight markers" do

@@ -151,7 +151,13 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
 
       reloaded = Repo.get!(Barkpark, bp.id)
       assert reloaded.update_state == "unknown"
-      assert %DateTime{} = reloaded.update_checked_at
+
+      # cch-w65 — this assertion used to read `assert %DateTime{} =
+      # reloaded.update_checked_at`, two lines above the assertion that the
+      # instance was never called: the suite pinned, in one breath, both that no
+      # bytes left and that a check time was recorded. The clock now records a
+      # check that was actually made, so there is none here.
+      assert is_nil(reloaded.update_checked_at)
 
       assert StudioLinkFakeHttpClient.requests() == []
     end
@@ -240,6 +246,123 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       refute is_nil(unreadable)
       refute is_nil(errored)
       refute unreadable == errored
+    end
+  end
+
+  describe "the clock records a check that was actually MADE (cch-w65)" do
+    # Three of the nine unknown rungs return BEFORE a request is ever built —
+    # no bytes leave the control plane, so there is no check whose time could be
+    # recorded. Stamping one is the plane inventing evidence about a box it
+    # never spoke to, and the console shipped a client-side apology
+    # (`UPDATE_REFUSAL_UNCLOCKED`) to teach the browser which three server rungs
+    # to disbelieve. A compensating reader is a patch; a column that stops lying
+    # is the fix.
+
+    test "no stored admin token → the row carries NO check time, because no check was made" do
+      bp =
+        team_fixture()
+        |> barkpark_fixture()
+        |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
+        |> Repo.update!()
+
+      StudioLinkFakeHttpClient.program([])
+
+      assert {:error, :no_admin_token} = Registry.refresh_update_status(bp)
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert reloaded.update_state == "unknown"
+      assert reloaded.update_unavailable_reason == "no_admin_token"
+      assert is_nil(reloaded.update_checked_at)
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "a tampered admin token → the row carries NO check time, because no check was made" do
+      bp =
+        team_fixture()
+        |> barkpark_fixture()
+        |> Ecto.Changeset.change(
+          url: @instance_url,
+          host: "203.0.113.10",
+          admin_token_encrypted: "not-a-ciphertext"
+        )
+        |> Repo.update!()
+
+      StudioLinkFakeHttpClient.program([])
+
+      assert {:error, :decrypt_failed} = Registry.refresh_update_status(bp)
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert reloaded.update_state == "unknown"
+      assert reloaded.update_unavailable_reason == "decrypt_failed"
+      assert is_nil(reloaded.update_checked_at)
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "a box that is not live → the row carries NO check time, because no check was made" do
+      bp = barkpark_fixture(team_fixture())
+
+      StudioLinkFakeHttpClient.program([])
+
+      assert {:error, :not_live} = Registry.refresh_update_status(bp)
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert reloaded.update_state == "unknown"
+      assert reloaded.update_unavailable_reason == "not_live"
+      assert is_nil(reloaded.update_checked_at)
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    # The two MIRRORS. The fix is "do not record a check that never happened",
+    # NOT "never record a check on unknown" — every rung reached THROUGH the
+    # transport asked a real question and got a real (useless) answer, and the
+    # hour at which we asked is true. Without these two, the fix degenerates.
+    test "MIRROR — a 401 asked a real question, so the clock IS stamped" do
+      bp = live_barkpark(team_fixture())
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 401, body: ~s({"error":"unauthorized"})}}
+      ])
+
+      assert {:error, :identity_refused} = Registry.refresh_update_status(bp)
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert reloaded.update_state == "unknown"
+      assert %DateTime{} = reloaded.update_checked_at
+      assert [_req] = StudioLinkFakeHttpClient.requests()
+    end
+
+    test "MIRROR — a transport failure asked a real question, so the clock IS stamped" do
+      bp = live_barkpark(team_fixture())
+
+      StudioLinkFakeHttpClient.program([{:error, :econnrefused}])
+
+      assert {:error, :unreachable} = Registry.refresh_update_status(bp)
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert reloaded.update_state == "unknown"
+      assert %DateTime{} = reloaded.update_checked_at
+      assert [_req] = StudioLinkFakeHttpClient.requests()
+    end
+
+    # OMIT, not an explicit NULL (charter D789). A box that answered honestly an
+    # hour ago and has since lost its `url` still has a true last-checked time;
+    # writing `nil` would erase it and trade one lie for another. Only this test
+    # discriminates the two shapes — the three rung tests above pass under both,
+    # because a fresh row's clock is NULL to begin with.
+    test "a box that answered honestly and later goes dark KEEPS its historical clock" do
+      bp = live_barkpark(team_fixture())
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: check_body("behind")}}])
+      assert {:ok, checked} = Registry.refresh_update_status(bp)
+      assert %DateTime{} = honest_clock = checked.update_checked_at
+
+      # The box loses its url — the plane can no longer ask.
+      dark = checked |> Ecto.Changeset.change(url: nil) |> Repo.update!()
+      assert {:error, :not_live} = Registry.refresh_update_status(dark)
+
+      reloaded = Repo.get!(Barkpark, bp.id)
+      assert reloaded.update_state == "unknown"
+      assert reloaded.update_checked_at == honest_clock
     end
   end
 end
