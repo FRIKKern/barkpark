@@ -2310,6 +2310,47 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert structured_abandonments(site) == 2
     end
 
+    # THE POPULATION THAT ACTUALLY OUTNUMBERS EVERYTHING ELSE (review, wave 32).
+    # "An ordinary build failure" is the neighbour the brief named, but the
+    # neighbour with THOUSANDS of rows is the pre-W28 DEFERRED row: same site,
+    # same table, NULLs in all three columns, and a sentence that also counts
+    # refusals ("refusal 3 of 12 in this site's current chain"). If the predicate
+    # keyed on the round count alone it would stamp every one of them, and each
+    # stamped row would satisfy `deferral_depth = deferral_bound` only by
+    # accident — silently inflating the abandonment cohort the W28 swap is about
+    # to trust. The terminal verdict is what separates the two, and this pins it.
+    test "a pre-writer DEFERRED row that also counts refusals is NOT stamped" do
+      {bp, site} = setup_site()
+
+      deferred =
+        seed_failed(site, bp,
+          status: "deferred",
+          failure_reason:
+            "the instance was at its concurrent-build cap — deferred: refusal 3 of 12 in " <>
+              "this site's current chain — a rebuild carrying this content has been re-queued",
+          inserted_at: @capacity_at
+        )
+
+      abandoned =
+        seed_failed(site, bp,
+          failure_reason: Deploy.abandonment_reason("at the cap", 12, "BOX_AT_CAPACITY_DEFERRED"),
+          inserted_at: @capacity_at
+        )
+
+      # ONE row is stamped, and it is the abandonment — not the deferral that
+      # merely sits in the same chain.
+      assert run_backfill() == 1
+
+      deferred = Repo.get(Deployment, deferred.id)
+      assert deferred.deferral_depth == nil
+      assert deferred.deferral_bound == nil
+      assert deferred.deferral_cause == nil
+
+      abandoned = Repo.get(Deployment, abandoned.id)
+      assert abandoned.deferral_depth == 12
+      assert abandoned.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+    end
+
     test "the bound is the DERIVED depth, never today's constant" do
       {bp, site} = setup_site()
 
@@ -2318,8 +2359,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       # here instead of the sentence would rewrite this row's history to 12.
       row =
         seed_failed(site, bp,
-          failure_reason:
-            Deploy.abandonment_reason("at the cap", 9, "BOX_AT_CAPACITY_DEFERRED"),
+          failure_reason: Deploy.abandonment_reason("at the cap", 9, "BOX_AT_CAPACITY_DEFERRED"),
           inserted_at: @capacity_at
         )
 
@@ -2336,8 +2376,7 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       row =
         seed_failed(site, bp,
-          failure_reason:
-            Deploy.abandonment_reason("at the cap", 12, "BOX_AT_CAPACITY_DEFERRED"),
+          failure_reason: Deploy.abandonment_reason("at the cap", 12, "BOX_AT_CAPACITY_DEFERRED"),
           inserted_at: @capacity_at
         )
 
@@ -2393,13 +2432,15 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert writer_era.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
     end
 
-    # A `failed` row carrying whatever the fixture says, minted through the real
-    # enqueue path so every NOT NULL column is what production would hold.
+    # A row carrying whatever the fixture says, minted through the real enqueue
+    # path so every NOT NULL column is what production would hold. `failed` is the
+    # default because that is what an abandonment is; `put_new` so a fixture can
+    # seed the neighbouring `deferred` population instead.
     defp seed_failed(site, bp, attrs) do
       {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
 
       d
-      |> Ecto.Changeset.change(Keyword.put(attrs, :status, "failed"))
+      |> Ecto.Changeset.change(Keyword.put_new(attrs, :status, "failed"))
       |> Repo.update!()
     end
 
