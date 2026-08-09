@@ -130,21 +130,39 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorkerTest do
     refute fresh.autoupdate_triggered_at, "not marked in-flight (it never started)"
   end
 
-  # ── cch-w58-s2: a refusal is not a started run ────────────────────────────
-  test "a 409 (the box REFUSING the trigger) is not recorded as a started run" do
+  # ── cch-w58-s2: a 409 is `already_running`, not a refusal ─────────────────
+  #
+  # The instance's own handler answers 409 for exactly one reason —
+  # `already_running` (api/…/self_update_controller.ex `trigger/2`) — and the
+  # relay carries the status intact. So a 409 says a run is in flight that this
+  # tick did not start. These two tests pin the two ways that can be told wrong:
+  # announcing it as ours, and punishing the box for being busy.
+  #
+  # HONEST ABOUT WHAT THESE ARE: regression PINS, not mutation proofs. They pass
+  # on origin/main too, because main's behaviour on a 409 was already right — it
+  # was main's LOG LINE ("triggered <slug> (HTTP 409)") that claimed a trigger
+  # this plane never performed, and that is what the slice actually corrects.
+  # They exist so the first build's reading of a 409 (pause the box, step past it
+  # to another) cannot come back without reddening something.
+  test "a 409 (a run already in flight) does not pause a box for being busy" do
     bp = live_behind()
     StudioLinkFakeHttpClient.program([{:ok, %{status: 409, body: ~s({"error":{}})}}])
 
     tick()
 
     fresh = reload(bp)
-    refute fresh.autoupdate_triggered_at, "a 409 refusal must NOT read as in-flight"
-    assert fresh.autoupdate_paused, "contained (paused) — a refusing box leaves the queue"
+
+    refute fresh.autoupdate_paused,
+           "a box that is merely mid-update must not have autoupdate disabled — a human " <>
+             "pressing Apply in the Console is exactly what produces this 409"
+
+    assert fresh.autoupdate_triggered_at,
+           "a run IS in flight, so the row is in-flight and the settle grace bounds it"
   end
 
-  test "a permanently-409 address does not block a second eligible box in the same tick" do
-    # Oldest-stale first: the 409 box is the head candidate.
-    refusing = live_behind(%{update_checked_at: ~U[2026-07-01 00:00:00.000000Z]})
+  test "a box that is already updating does not let a SECOND box be triggered in the same tick" do
+    # Oldest-stale first: the already-running box is the head candidate.
+    busy = live_behind(%{update_checked_at: ~U[2026-07-01 00:00:00.000000Z]})
     other = live_behind()
 
     StudioLinkFakeHttpClient.program([
@@ -154,9 +172,14 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorkerTest do
 
     tick()
 
-    refute reload(refusing).autoupdate_triggered_at, "the refusal never stamped an in-flight run"
-    assert reload(other).autoupdate_triggered_at, "the fleet advanced past the lying address"
-    assert length(StudioLinkFakeHttpClient.requests()) == 2, "both boxes were tried this tick"
+    assert reload(busy).autoupdate_triggered_at, "the in-flight run is tracked"
+
+    refute reload(other).autoupdate_triggered_at,
+           "serial-of-1 is this worker's stated safety property: no second box is touched " <>
+             "while one is mid-run"
+
+    assert length(StudioLinkFakeHttpClient.requests()) == 1,
+           "exactly one trigger left the plane this tick"
   end
 
   # ── isu-w5.2: fleet kill switch ───────────────────────────────────────────
