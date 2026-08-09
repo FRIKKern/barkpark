@@ -995,17 +995,41 @@ func TestVerifyInstance401KeepsUnauthorizedPrefix(t *testing.T) {
 // by TestFleetDeployCensusHonorsInjectedClient below, which is the real
 // regression risk of `cc := *c`.
 
+// widestMeasuredCensus is the slowest window the live control plane was
+// observed answering HTTP 200 on 2026-08-09 — the 27-day window, the narrowest
+// one containing the epic's 3 never-covered production rows. It is the FLOOR the
+// cap has to clear; anything at or below it puts the exit gauge's own number
+// back out of reach.
+const widestMeasuredCensus = 58 * time.Second
+
 func TestFleetDeployCensusTimeoutExceedsDefault(t *testing.T) {
 	if FleetDeployCensusTimeout <= DefaultTimeout {
 		t.Fatalf("FleetDeployCensusTimeout = %s, must exceed DefaultTimeout %s — the "+
 			"27-day window the exit gauge needs answered in 57.9s", FleetDeployCensusTimeout, DefaultTimeout)
 	}
+	// The load-bearing property is the MEASUREMENT, not the constant. Pinning
+	// equality with the two 90s precedents would red on a future bump made for a
+	// good reason (a wider window, a slower plane); pinning the measured floor
+	// reds only when the cap stops covering the window it exists to reach.
+	if FleetDeployCensusTimeout < widestMeasuredCensus {
+		t.Fatalf("FleetDeployCensusTimeout = %s, below the widest window measured answering 200 (%s) — "+
+			"the census cannot reach the 27-day window that holds the epic's only non-zero",
+			FleetDeployCensusTimeout, widestMeasuredCensus)
+	}
+	// And a cap is still a cap: an unbounded one turns a sick plane into a hung
+	// CLI, which is the failure this constant exists to make loud rather than
+	// silent. Both precedents in this file sit well inside this band.
+	if FleetDeployCensusTimeout > 5*time.Minute {
+		t.Fatalf("FleetDeployCensusTimeout = %s exceeds 5m — a cap that large hangs the CLI on a "+
+			"sick control plane instead of failing it", FleetDeployCensusTimeout)
+	}
 	for _, precedent := range []struct {
 		name string
 		d    time.Duration
 	}{{"DomainStatusTimeout", DomainStatusTimeout}, {"VerifyTimeout", VerifyTimeout}} {
-		if FleetDeployCensusTimeout != precedent.d {
-			t.Fatalf("FleetDeployCensusTimeout = %s, want the same headroom as its precedent %s (%s)",
+		if FleetDeployCensusTimeout < precedent.d {
+			t.Fatalf("FleetDeployCensusTimeout = %s, want at least the headroom of its precedent %s (%s) — "+
+				"the census is the heaviest read in this file, not the lightest",
 				FleetDeployCensusTimeout, precedent.name, precedent.d)
 		}
 	}
