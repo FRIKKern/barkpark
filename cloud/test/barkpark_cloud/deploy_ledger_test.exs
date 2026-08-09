@@ -2900,6 +2900,14 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert failed.pending == 1
       assert failed.never_covered == 1
       assert failed.too_young == 0
+
+      # And the row is ATTRIBUTED, not just counted. This is the quantity the
+      # morning digest renders (dr-w33-s3) and the only discriminating half of
+      # the gauge — a never-covered count that cannot say which environment it
+      # came from is the anonymity this epic exists to kill.
+      assert failed.never_covered_by_environment == [
+               %{environment: "production", never_covered: 1}
+             ]
     end
 
     # UNREADABLE ROWS SIT BESIDE BOTH SIDES, never inside either. A row whose
