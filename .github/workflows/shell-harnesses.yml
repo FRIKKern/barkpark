@@ -46,6 +46,39 @@ name: Shell harnesses
 # that can only lose. NOT a Cloud tenant: the script is deliberately absent from
 # cloud-path-escape-check.sh's CLOUD_PATHS (see that file, lines 115-127, on why
 # widening the set publishes green contexts over jobs that never ran).
+#
+# ── Sixth through thirteenth tenants: the ORPHAN SWEEP (deploy-reliability W30)
+# A census of all 32 behavioural shell harnesses on origin/main found exactly 16
+# that NO workflow executes — over a thousand mutation assertions guarding
+# nothing between waves. `scripts/seal-run.sh` and its harness did not appear in
+# any of the 48 workflow files at all: the runner itself was uninvoked, not just
+# its test. The proof that this is not theoretical: #11082 widened CLOUD_PATHS
+# with `internal/**`, which silently invalidated
+# `scripts/registration-sample.test.sh` (40 pass / 3 fail on origin/main, green
+# on the parent commit) and NOTHING reported it. That harness is fixed and wired
+# in the same change, and the two ratchets it delegates classification to are in
+# the paths list below precisely so the NEXT path-set edit reds here instead of
+# rotting in silence.
+#
+# MENTION IS NOT EXECUTION, and absence of mention is not proof of orphanhood.
+# `console-path-escape-check.test.sh` appears four times across
+# console-harness.yml and elixir.yml and every one is a COMMENT — it is wired
+# here. `cloud-path-escape-check.test.sh` and `elixir-path-escape-check.test.sh`
+# are already REACHED by a wired parent's `--selftest` (cloud.yml:175,
+# elixir.yml:241) and are deliberately NOT duplicated here.
+#
+# Two harnesses read OTHER workflow files as fixtures — seal-run.test.sh copies
+# `.github/workflows/cloud.yml` plus the real seal predicate into its e2e
+# fixture, and console-path-escape-check.test.sh extracts and executes
+# console-harness.yml's own skip-shim steps. Both are in the paths list, so this
+# lane runs on edits to them. That is deliberately wider than "the script and its
+# test": an input that can break a harness must be able to trigger it.
+#
+# The honest limit, stated once for all thirteen tenants: this workflow is NOT
+# one of main's required contexts (those are exactly: Elixir gate, PR references
+# an active task, Cloud gate, Console gate). Wiring makes a harness RUN, not
+# BLOCK. Running is the prerequisite; registering is a separate, evidence-gated
+# decision that scripts/registration-sample.sh exists to adjudicate.
 
 on:
   pull_request:
@@ -60,6 +93,40 @@ on:
       - "scripts/epic-zero-criteria-census.sh"
       - "scripts/webhook-fanout-watch.sh"
       - "scripts/webhook-fanout-watch.test.sh"
+      # ORPHAN SWEEP (W30). Per file, never a directory glob — D26.
+      - "scripts/seal-run.sh"
+      - "scripts/seal-run.test.sh"
+      - "cloud/priv/static/__preview__/seal-predicate.mjs"
+      - ".github/workflows/cloud.yml"
+      - "scripts/registration-sample.sh"
+      - "scripts/registration-sample.test.sh"
+      - "scripts/lib/check-runs.sh"
+      - "scripts/cloud-path-escape-check.sh"
+      - "scripts/console-path-escape-check.sh"
+      - "scripts/console-path-escape-check.test.sh"
+      - ".github/workflows/console-harness.yml"
+      - "scripts/pds-ledger-census.sh"
+      - "scripts/pds-ledger-census_test.sh"
+      - "scripts/pds-record-parity.sh"
+      - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-scratch-target.sh"
+      - "scripts/pds-scratch-target_test.sh"
+      - "scripts/file-ci-failure-issue.sh"
+      - "scripts/file-ci-failure-issue.test.sh"
+      - "scripts/install-cli.sh"
+      - "scripts/install-cli.test.sh"
+      - "scripts/fetch-prebuilt.sh"
+      - "scripts/fetch-prebuilt.test.sh"
+      - "deploy/site-runtime-install.sh"
+      - "deploy/site-runtime-install_test.sh"
+      - "tooling/task-obsession/reland_check.py"
+      - "tooling/task-obsession/reland_check.test.sh"
+      - "tooling/fleet/fleet-run.sh"
+      - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "scripts/audit-paper-readers.sh"
+      - "scripts/audit-paper-readers-test.sh"
+      - "bin/barkpark"
+      - "scripts/barkpark-boot-selftest.sh"
       - ".github/workflows/shell-harnesses.yml"
   push:
     branches: [main]
@@ -74,6 +141,41 @@ on:
       - "scripts/epic-zero-criteria-census.sh"
       - "scripts/webhook-fanout-watch.sh"
       - "scripts/webhook-fanout-watch.test.sh"
+      # ORPHAN SWEEP (W30). Must mirror the pull_request list above exactly: a
+      # harness wired on PRs only goes dark the moment a merge lands.
+      - "scripts/seal-run.sh"
+      - "scripts/seal-run.test.sh"
+      - "cloud/priv/static/__preview__/seal-predicate.mjs"
+      - ".github/workflows/cloud.yml"
+      - "scripts/registration-sample.sh"
+      - "scripts/registration-sample.test.sh"
+      - "scripts/lib/check-runs.sh"
+      - "scripts/cloud-path-escape-check.sh"
+      - "scripts/console-path-escape-check.sh"
+      - "scripts/console-path-escape-check.test.sh"
+      - ".github/workflows/console-harness.yml"
+      - "scripts/pds-ledger-census.sh"
+      - "scripts/pds-ledger-census_test.sh"
+      - "scripts/pds-record-parity.sh"
+      - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-scratch-target.sh"
+      - "scripts/pds-scratch-target_test.sh"
+      - "scripts/file-ci-failure-issue.sh"
+      - "scripts/file-ci-failure-issue.test.sh"
+      - "scripts/install-cli.sh"
+      - "scripts/install-cli.test.sh"
+      - "scripts/fetch-prebuilt.sh"
+      - "scripts/fetch-prebuilt.test.sh"
+      - "deploy/site-runtime-install.sh"
+      - "deploy/site-runtime-install_test.sh"
+      - "tooling/task-obsession/reland_check.py"
+      - "tooling/task-obsession/reland_check.test.sh"
+      - "tooling/fleet/fleet-run.sh"
+      - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "scripts/audit-paper-readers.sh"
+      - "scripts/audit-paper-readers-test.sh"
+      - "bin/barkpark"
+      - "scripts/barkpark-boot-selftest.sh"
       - ".github/workflows/shell-harnesses.yml"
 
 permissions:
@@ -89,6 +191,7 @@ concurrency:
 jobs:
   doctor-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,6 +206,7 @@ jobs:
 
   merge-verb-table:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: bp-merge.sh syntax check
@@ -117,6 +221,7 @@ jobs:
   release-scan-verdict:
     name: release-scan.sh CI-verdict derivation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,6 +242,7 @@ jobs:
   zero-criteria-census:
     name: epic-zero-criteria-census.sh self-test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: python3 is present (the classifier is python3; absence would be exit 2)
@@ -164,6 +270,7 @@ jobs:
   webhook-fanout-guard:
     name: webhook-fanout-watch.sh mutation matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: jq is present (the row parser is jq; absence would be exit 3)
@@ -191,3 +298,181 @@ jobs:
         # exit 3 forever. It is a runbook command + the named open human gate
         # dr-w19-hg-cloud-control-plane-read-token (see the script's header).
         run: bash scripts/webhook-fanout-watch.test.sh
+
+  # ── ORPHAN SWEEP (deploy-reliability W30) ──────────────────────────────────
+  # Every job below runs a harness that, before this change, NO workflow
+  # executed. Each was measured green against a clean `git archive origin/main`
+  # extract first; registration-sample was the one exception (40/3, RC 1) and is
+  # repaired in the same change rather than wired red.
+
+  seal-run-guard:
+    name: seal-run.sh probe matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # FULL checkout, not a sparse one: with only scripts/ present the harness
+        # drops to 63 passed / 2 FAILED — its e2e fixture copies the real seal
+        # predicate and .github/workflows/cloud.yml into a temp repo. It does NOT
+        # need full git history (it builds its own shallow fixture from a file://
+        # clone), so the default fetch-depth is correct here.
+      - name: node is present (seal-run.test.sh exits 2 without it)
+        # The harness drives a Node stand-in predicate and hard-refuses at :43
+        # with exit 2 — correctly red, but illegibly so. ubuntu-latest ships node;
+        # this makes the dependency fail BY NAME if an image change removes it,
+        # matching the python3 and jq name-checks above.
+        run: |
+          command -v node >/dev/null || {
+            echo "node missing on the runner image — seal-run.test.sh drives a node predicate" >&2
+            exit 1
+          }
+          node --version
+      - name: seal-run.sh syntax check
+        run: bash -n scripts/seal-run.sh
+      - name: seal-run.test.sh syntax check
+        run: bash -n scripts/seal-run.test.sh
+      - name: seal-run probe matrix (hermetic, offline, stand-in predicate)
+        # Neither scripts/seal-run.sh NOR its harness appeared in any of the 48
+        # workflow files: the runner the fleet seals waves with was itself
+        # uninvoked. Tracked as dr-seal-run-harness-runs-in-no-ci.
+        run: bash scripts/seal-run.test.sh
+
+  registration-sample-bar:
+    name: registration-sample.sh mutation matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: registration-sample.sh syntax check
+        run: bash -n scripts/registration-sample.sh
+      - name: registration-sample.test.sh syntax check
+        run: bash -n scripts/registration-sample.test.sh
+      - name: the sampler can still REFUSE (control + 3 plants + 2 traps)
+        # THE REASON THIS LANE EXISTS. #11082 widened CLOUD_PATHS with
+        # `internal/**`; the harness's control fixture head `internal/tui/x.go`
+        # stopped being NEITHER-shape and three `of which NEITHER` expectations
+        # went stale in one commit, with nothing running to say so. The
+        # expectations now DERIVE from the same ratchets the sampler consults, and
+        # both ratchets are in this workflow's paths list, so the next path-set
+        # edit reds here on the PR that makes it.
+        run: bash scripts/registration-sample.test.sh
+
+  console-path-ratchet:
+    name: console-path-escape-check.sh classification matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: console-path-escape-check.sh syntax check
+        run: bash -n scripts/console-path-escape-check.sh
+      - name: console path classification + console-harness.yml skip-shim invariants
+        # Its four appearances in console-harness.yml and elixir.yml are all
+        # COMMENTS — mention is not execution. The cloud and elixir siblings are
+        # deliberately absent from this file: they are already REACHED by a wired
+        # parent's --selftest (cloud.yml:175, elixir.yml:241), and wiring them
+        # twice would buy a second runner for the same assertions.
+        run: bash scripts/console-path-escape-check.test.sh
+
+  pds-harnesses:
+    name: PDS census / parity / scratch-target harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: jq is present (pds-record-parity.test.sh exits 99 without it)
+        # :143 turns a missing jq into exit 99 TEST HARNESS FAIL while building
+        # fixtures. Fail by name instead.
+        run: |
+          command -v jq >/dev/null || {
+            echo "jq missing on the runner image — the PDS fixtures are built with jq" >&2
+            exit 1
+          }
+          jq --version
+      - name: pds-ledger-census ordering + response-shape matrix
+        run: bash scripts/pds-ledger-census_test.sh
+      - name: pds-record-parity 108-check matrix
+        run: bash scripts/pds-record-parity.test.sh
+      - name: pds-scratch-target two-root coexistence + teardown
+        run: bash scripts/pds-scratch-target_test.sh
+
+  ci-failure-issue-filer:
+    name: file-ci-failure-issue.sh behaviour matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: file-ci-failure-issue.sh syntax check
+        run: bash -n scripts/file-ci-failure-issue.sh
+      - name: issue-filer matrix (fake gh on PATH, no live GitHub)
+        run: bash scripts/file-ci-failure-issue.test.sh
+
+  distribution-harnesses:
+    name: install-cli / fetch-prebuilt / site-runtime-install harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: install-cli.sh syntax check
+        run: bash -n scripts/install-cli.sh
+      - name: install-cli replay matrix (fake curl, temp HOME, no network)
+        run: bash scripts/install-cli.test.sh
+      - name: fetch-prebuilt.sh syntax check
+        run: bash -n scripts/fetch-prebuilt.sh
+      - name: fetch-prebuilt replay matrix (fake curl, no network)
+        run: bash scripts/fetch-prebuilt.test.sh
+      - name: site-runtime-install.sh syntax check
+        run: bash -n deploy/site-runtime-install.sh
+      - name: site-runtime-install replays (fake-only PATH, no box touched)
+        # cp-ops.yml ships this script to a real box on manual dispatch; until
+        # now nothing checked it could still be parsed, let alone that it behaves.
+        run: bash deploy/site-runtime-install_test.sh
+
+  tooling-harnesses:
+    name: reland-check / fleet-run-verdict / paper-reader-audit harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (reland_check.py is the classifier)
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — add actions/setup-python" >&2
+            exit 1
+          }
+          python3 --version
+      - name: reland_check damper matrix
+        # reland-check.yml runs reland_check.py in anger (and swallows its
+        # stderr with `|| true`); its harness ran nowhere.
+        run: bash tooling/task-obsession/reland_check.test.sh
+      - name: fleet-run verdict matrix
+        run: bash tooling/fleet/fleet-run-verdict-test.sh
+      - name: audit-paper-readers.sh syntax check
+        run: bash -n scripts/audit-paper-readers.sh
+      - name: paper-reader audit fixture
+        # paper-readers.yml executes audit-paper-readers.sh on every run; its
+        # fixture harness — the only thing that proves the audit can report a
+        # miss — executed nowhere.
+        run: bash scripts/audit-paper-readers-test.sh
+
+  launcher-boot-selftest:
+    name: bin/barkpark up/stop differential selftest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # MANDATORY. The selftest is DIFFERENTIAL against a PINNED pre-fix
+          # blob (0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark, an
+          # ancestor of main). On a shallow checkout that object is absent and
+          # the script exits 2 on every run forever — a gate that can only lose.
+          fetch-depth: 0
+      - name: the pinned pre-fix reference blob is readable
+        # Fail by NAME if history ever stops carrying the pin, rather than as an
+        # opaque exit 2 from the selftest itself.
+        run: git cat-file -e 0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark
+      - name: bin/barkpark syntax check
+        run: bash -n bin/barkpark
+      - name: up/stop selftest (6 differential fixtures, 2 controls, no postgres)
+        # Hermetic: temp BARKPARK_HOME, a probed-free port, curl/mix stubs, and
+        # only pids the harness itself spawned are ever signalled.
+        run: bash scripts/barkpark-boot-selftest.sh
