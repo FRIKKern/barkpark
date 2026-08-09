@@ -5665,6 +5665,66 @@ test("siteRollbackResult: deployment_id NULL → 'previous' branch (no row, prev
   assert.equal(hooks.siteRollbackResult({ ok: true, deployment_id: null }).url, null);
 });
 
+test("cch-w63-s7: a 409 identity_refused stops rendering 'A deploy is already running' — and stops offering Try again", () => {
+  // THE WIRE, from the MERGED site rollback route: Sites.Deploy mints the typed
+  // 4-tuple {:error, 409, unreachable(bp, :identity_refused), "identity_refused"}
+  // and the route relays it FLAT — {ok:false, error:<code>, detail:<prose>} —
+  // where the instance seam speaks NESTED {error:{code}}. Both shapes are driven
+  // below, because the reader normalises both and a fix that only reads one is
+  // half a fix.
+  const IDENTITY_DETAIL =
+    "The request was never sent — the instance rejected our access credential. " +
+    "Barkpark Cloud stops asking a box that refused it; the hourly update " +
+    "check is what notices the credential working again.";
+  const refused = { ok: false, error: "identity_refused", detail: IDENTITY_DETAIL };
+
+  // BEFORE this slice, `status === 409` was the FIRST arm a credential refusal
+  // reached, so the console told a human a busy-deploy story about a box that
+  // refused our credential — and classified it TRANSIENT, offering Try again
+  // into a 409 that can never change by clicking.
+  const cred = hooks.siteRollbackFailure(409, refused);
+  assert.notEqual(cred.title, "A deploy is already running");
+  assert.equal(cred.body.indexOf("Let the in-flight deploy finish"), -1);
+
+  // The sentence is #11337's instance-seam copy BYTE-IDENTICAL — one fact, one
+  // wording (D734/D757), not a third phrasing minted on the site plane.
+  const seam = hooks.rollbackConflictCopy("identity_refused", {});
+  assert.equal(cred.title, seam.title);
+  assert.equal(cred.body, seam.body);
+  assert.equal(cred.body.indexOf(hooks.usageUnavailableText("unauthorized")) >= 0, true,
+    "the refusal clause is usageUnavailableText('unauthorized'), composed not copied");
+
+  // The ORDERING is the fix: the code check must sit ABOVE the status arm. Same
+  // 409, same envelope, only the code differs — a real in-flight deploy still
+  // gets the in-flight sentence, so the arm below is not shadowed either way.
+  const inflight = hooks.siteRollbackFailure(409, {
+    ok: false, error: "rollback_failed",
+    detail: "a deploy is running on the box — try again once it finishes",
+  });
+  assert.equal(inflight.title, "A deploy is already running");
+  assert.equal(inflight.body, "Let the in-flight deploy finish, then roll back.");
+
+  // Envelope parity: the NESTED shape reads identically.
+  assert.equal(hooks.siteRollbackFailure(409, { error: { code: "identity_refused" } }).title, seam.title);
+
+  // THE AFFORDANCE. A refused credential is TERMINAL — Close is the only honest
+  // recovery — while the in-flight 409 and the generic failures stay retryable.
+  assert.equal(hooks.siteRollbackRefusalTerminal(409, refused), true);
+  assert.equal(hooks.siteRollbackRefusalTerminal(409, { error: { code: "identity_refused" } }), true);
+  assert.equal(hooks.siteRollbackRefusalTerminal(409, { error: "rollback_failed" }), false);
+  assert.equal(hooks.siteRollbackRefusalTerminal(502, { error: "rollback_failed" }), false);
+
+  // The three statuses the plane actually answers with, each a DIFFERENT, correct
+  // title — the state this slice exists to reach.
+  const t502 = hooks.siteRollbackFailure(502, { ok: false, error: "rollback_failed", detail: "instance shop is unreachable — the deploy could not be delivered; check instance health" });
+  const t422 = hooks.siteRollbackFailure(422, { ok: false, error: "rollback_failed", detail: "there is no previous build to roll back to — this site has only ever had one release" });
+  const titles = new Set([t502.title, t422.title, cred.title]);
+  assert.equal(titles.has("A deploy is already running"), false,
+    "no non-in-flight refusal may claim a deploy is running");
+  assert.equal(t502.body, "instance shop is unreachable — the deploy could not be delivered; check instance health");
+  assert.equal(t422.body, "there is no previous build to roll back to — this site has only ever had one release");
+});
+
 test("siteRollbackFailure maps every typed refusal to one honest sentence", () => {
   const notRb = hooks.siteRollbackFailure(422, { error: "not_rollbackable" });
   assert.match(notRb.title, /can't be rolled back/);
