@@ -373,3 +373,75 @@ the deltas are arithmetic, the errata are one-off transcription slips rather tha
 systematic drift, and the remaining disorder has exactly two named shapes —
 13 criteria-less rows and a transient draft term — both with a structural cure
 filed rather than a manual sweep scheduled.
+
+---
+
+## 8. Review addendum — the charter and this file are reconciled, exactly
+
+Appended at wave-33 review. Two numbers looked like a contradiction between
+`main` and the ledger, which is precisely what this wave exists to clear:
+charter **D567 publishes `GENUINE-OPEN = 163 − 2 − 6 = 155`** (read 20:20–20:45Z)
+and §1 above publishes **164–169** (read 21:17–21:30Z). Both are right, the same
+command produced both, and the gap decomposes with zero residue.
+
+### The read, re-run independently
+
+```
+2026-08-09T21:45:47Z  total=324  cancelled=18 done=128 in_progress=5 open=173
+                      openish=178 full=0 nocrit=13 GENUINE-OPEN=165
+```
+
+Run from a third worktree with §1's command verbatim, it reproduces read 2
+(`165`) exactly. The file is reproducible, which is the property it was written
+to have.
+
+### What the 13 criteria-less rows actually were
+
+Seven of them were ONE row. A Decide-phase filing retried **seven times at ~45s
+intervals** (20:51:23 → 20:56:26Z), and every attempt landed:
+
+| doc_id | state before | disposition |
+|---|---|---|
+| `drafts.task-89df296faff8e793` | open (draft shadow) | discarded |
+| `drafts.task-6d880b2b50f28b89` | open (draft shadow) | discarded |
+| `drafts.task-ff1bcf58b557f27b` | open (draft shadow) | discarded |
+| `drafts.task-8082dddb1b9e5a41` | open (draft shadow) | discarded |
+| `drafts.task-39815714006452db` | open (draft shadow) | discarded |
+| `drafts.task-19821582f6154665` | open (draft shadow) | discarded |
+| `task-7aa685d254609ad1` | open, published, 0 criteria | cancelled as duplicate |
+
+All seven carry the same subject, and the finding was re-filed **correctly** ten
+minutes later as `dr-w33-bl-crown-skew-arm-has-no-epsilon` (21:06:40Z, 3
+criteria, open) — that is the row to work. This is §6's draft-shadow mechanism
+caught a second time, from a different write path, on a bigger burst: it is not a
+one-off, and `dr-w33-fu-patch-spawns-a-counted-draft-shadow` is the right
+structural cure.
+
+### The reconciliation
+
+```
+2026-08-09T21:47:56Z  total=318  cancelled=19 done=128 in_progress=5 open=166
+                      openish=171 full=0 nocrit=6 GENUINE-OPEN=165
+```
+
+`nocrit` falls **13 → 6**, which is D567's six, unchanged. The gap to D567 is then
+entirely in the other two terms:
+
+| term | D567 (20:45Z) | after this fix (21:47Z) | Δ |
+|---|---|---|---|
+| openish (`open ∪ in_progress`) | 163 | 171 | **+8** — rows this wave FILED (5 slices' followups + backlog) |
+| − rows at 100% met | 2 | 0 | **+2** — both closed by this slice (§4) |
+| − rows with no criteria | 6 | 6 | 0 |
+| **GENUINE-OPEN** | **155** | **165** | **+10 = 8 + 2** |
+
+Zero residue. **D567's 155 is not superseded and this file's number is not a
+correction of it** — 155 was true at 20:45Z, 165 is true at 21:47Z, and every one
+of the ten rows between them is a row this wave filed or a row this wave closed.
+An epic whose count moves only by its own filings and closes is an epic whose
+numbers are boring.
+
+**The published upper bound is therefore `GENUINE-OPEN 165 at
+2026-08-09T21:47:56Z`,** superseding §7's 164 (which counted the seven duplicate
+rows above inside `nocrit`, so it was arithmetically right and substantively
+stale). §7's caveat stands unchanged: this is an upper bound on remaining work,
+never a census.
