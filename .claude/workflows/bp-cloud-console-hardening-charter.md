@@ -3212,6 +3212,14 @@ on two points: the `forbidden` noun swap in #11435 (this reviewer's re-derivatio
 opinion, not two), and #11438's fail-closed `ROSTER-INCOMPLETE` arm, which can cost a false exit-2 if a
 child is unpublished or reparented mid-walk.
 
+**THE UNION WAS MEASURED, NOT ASSUMED.** File-disjointness is a claim about a plan; the reviewer octopus-
+merged all four branches onto `origin/main` (16 files, +1181/−75, **zero conflicts**) and ran the union:
+`__app.test.mjs` **1043/0**, `smoke.mjs` **all 111 scenarios rendered**, `__css_check.mjs` **0 error(s)**,
+`cssom-parity` **PARITY PASS · MISSES 0**, `member-authority-sweep` **ok corpus-size 111 (pinned 111) · 0
+guard failure(s)**, `gate-announces-skips.test.sh` **173/0**, `seal-predicate.test.mjs` **80/0**. The one
+cross-slice hazard worth naming — `cch-w63-s6` makes the corpus literal able to red, and `cch-w63-s5` is the
+slice most likely to have moved it — is measured CLEAR: s5 touches no fixture, so the corpus stays 111.
+
 **WHAT THIS WAVE DID NOT PROVE.** Nothing in #11436 was proved on live GitHub — every run is the extracted
 step body under `env -i`, so whether the appended `NOT IN THE ALLOW-SET:` clause survives GitHub's
 annotation rendering is inference from a working precedent until these four PRs' own contexts render.
