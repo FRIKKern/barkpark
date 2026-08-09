@@ -7987,3 +7987,372 @@ round 3 = `dr-w25-s8-crown-gets-its-writer` once s3, s4 and s7 are in AND #10942
 reader/serializer gap above. **Seal state unchanged and honest:** `NO-SEAL a=FAIL b=PASS c=PASS orphans=57
 roster=135`, with D444's caveat sentence attached — and the crown has still never held a row an automated
 writer put there.
+
+## Wave 26 — 2026-08-09 — THE FIRST HONEST ROW, AND THE FIRST DELETION
+
+Ground: `origin/main @ 0239dd4ee`, re-derived from a fresh worktree, not inherited. **The primary checkout is
+717 commits behind and does not contain `cloud/lib/barkpark_cloud/platform_delivery.ex` or
+`cloud/test/barkpark_cloud/payload_key_set_census_test.exs` — a plain `grep` there returns FALSE ABSENCE.**
+Every read this wave goes through `git show origin/main:<path>` or a detached worktree. A verifier's first pass
+of two MUST-RUN commands in that checkout produced a confident refutation that was purely a stale-bytes
+artifact — the epic's own thesis, firing inside the epic's own instrument.
+
+### D447 — LEG 1 IS THREE DIFFERENT JOBS, NOT ONE REBASE, AND ONE OF THE THREE IS A CODE SLICE.
+
+The inherited "three DIRTY conflicting PRs" is wrong on one of three and understates a second.
+
+- **#11009 is MERGEABLE (`merge-tree` rc=0), not DIRTY.** Its red is real and is its own doing: it adds two
+  `(blocking)` steps to `doc-gates.yml` (19 → 21) and never moves `docs/ops/merge-gates.md`, whose roster
+  `scripts/required-checks.test.sh` CLAUSE 11 (`:2929-2946`) derives THREE ways — a grep count off the
+  workflow, a `**N steps labelled` prose claim, and an awk row count under the `| # | Step |` header. **Proven
+  on the merge tree** (`git merge-tree --write-tree origin/main <head>` → `4376259708…`): REAL 21 vs CLAIM 19 vs
+  ROWS 19. `Required-check spec gate` is NOT one of main's four required contexts
+  (`["Elixir gate","PR references an active task","Cloud gate","Console gate"]`, `strict:false`), so the button
+  is live — **and merging it unfixed turns MAIN's own honesty gate red**, which is the mis-report this epic
+  exists to end. **RULED: it does not merge without the doc edit in the same PR**, and the edit is
+  insert-at-positions-6-7-and-renumber (the page says "In workflow order"), never append-two-rows: prose-only
+  leaves ROWS at 19 and the clause still fails (mutation-proved), and append-only greens the clause while the
+  page lies about ordering. Two further sites (`:762` "it is nineteen", `:221` "doc-gates' 19 `(blocking)`
+  steps") are invisible to every clause and must be fixed anyway. After the fix: **166 passed, 0 failed**.
+- **#11008 is ONE `@columns` union hunk PLUS a silent second breakage.** The schema block, `changeset`,
+  `normalize` and `to_json/1` all auto-merge carrying BOTH key sets, and main's nullable `field :carried,
+  :boolean` (no default, D422) wins correctly. But `platform_delivery_test.exs:837` auto-merged into a LIE: its
+  `to_json/1` key-set assertion still pins 12 keys and omits main's three `queued_*`. **45 tests, 1 failure**
+  until three keys are added; then 45/0 and the full cloud suite **3443 tests, 0 failures**. Anyone treating
+  this as "one hunk, done" ships a red.
+- **#11007 is NOT a rebase.** See D449.
+
+**RULED merge order: #11009 → #11008 → #11007.** D439's "#11009 first" stands, for a stronger reason than
+filed: it is also the cheapest and its counter is shared.
+
+### D448 — THE `@go_tag_floor` IS READ OFF THE REFUSAL. EVERY ARITHMETIC GUESS THIS EPIC HAS MADE IS WRONG.
+
+Main is **228**, confirmed by the 999-technique on a clean worktree (`228 json tag(s) found in
+internal/cloudclient, floor is EXACTLY 999`), with `@emitted_floor 126`. On the **merged + forward-ported**
+tree the test's own refusal line reads **243** — not 228 (main), not 237 (#11007's pre-rebase value, measured
+against a base predating W24 S2), not 240 (228+12 hand-count). Set to 243 → 13 tests, 0 failures.
+
+**FOUR contenders, not one.** #10811 (+2, touches the census test), **#10129 (+5, does NOT touch the census
+test → REDS MAIN ON MERGE)**, #10086 (+1, same), plus this wave's own slice. All three are DIRTY and all three
+conflict **inside `internal/cloudclient/client.go` itself**, the file the census reads. **And the sharpest
+fact: the census test did not exist when either #10129 or #10086 was last gated** — it landed 2026-08-07 10:09
+(#10190), both PRs' bases are earlier that day, and `git show <head>:…census_test.exs` returns "exists on disk,
+but not in <sha>". Their frozen greens are green against a tree with NO census. #10086's Cloud gate additionally
+reports `skipping` on a `internal/cloudclient/client.go` change, because `internal/cloudclient/**` was added to
+`CLOUD_PATHS` LATER (#10726). **A guard's coverage GREW and nothing re-checked the open PRs frozen under the
+narrower version.** Only a push re-fires. That is this epic's thesis in its purest form and it is unowned.
+
+**RULED: whichever of the four lands first, the other three re-measure by RUNNING, never by summing.**
+
+### D449 — `carried` IS OMITTED WHEN UNMEASURED, AND THE READER MUST SAY THE THIRD ANSWER OUT LOUD.
+
+The schema is already right (`platform_delivery.ex:122`, no default, D422): an omitted key lands NULL. **But
+#11007 — the crown's ONLY human reader — decodes `Carried bool`**, so a JSON `null` becomes Go `false` and
+renders `run 31255918184 · target cp · this sha's OWN run`: a confident attribution of another run's seconds to
+this commit. **DEFECT REPRODUCED against main's real wire shape.** And its struct carries none of the three
+`queued_*` splits, so the FINISHED FEEL sentence "waited Ns split three ways" is **unrenderable by any code on
+any branch today**.
+
+**RULED:** `Carried *bool` with a three-state render (`carried` / `not carried` / `carried UNRECORDED — whether
+this run is this sha's own was never measured`), plus `QueuedSelf/Pickup/Stall *int` rendered as `split: self
+9s · stall 0s · pickup 5s (pickup is the RESIDUAL, not a threshold)` with per-bucket `UNMETERED`. **Mutation
+proof is the acceptance test**: with the OLD fixture, narrowing `*bool` back to `bool` reds NOTHING — no
+scenario reached `carried:null` at all; with the new fixture it reds EXACTLY
+`TestCloudDeliveriesCarriedNullIsItsOwnSentence` and nothing else. The recorder must never send `carried:false`
+as a placeholder — omit the key.
+
+### D450 — THE CROWN CRITERION IS A WINDOW, NOT A SHAPE. A SHAPE-ONLY ASSERTION PASSES TODAY.
+
+`platform_deliveries` holds **exactly ONE row** (not three, not two junk): `sha 2e38228b0…`, `delivering_run_id
+31255918184`, `target cp`, `carried f`, `inserted_at 2026-08-08 12:23:21.862544`. It was **hand-posted** — the
+literal curl with every value verbatim is at
+`tooling/grip/ledger/crown-writer-seam-live-2026-08-08.md:31-33` — but its run id is a REAL
+`Deploy (production)` run whose `headSha` equals the row's sha. **So `dr-w25-s8` criterion 12 as filed
+("asserted on delivering_run_id SHAPE") is GREEN on a probe today.**
+
+**RULED — five clauses, each quoted from real output, lead-stamped after merge on the first merge to main:**
+**C1 SHAPE** `^[1-9][0-9]{5,19}$` (an evidence assertion, never a `validate_format` — D438 keeps the column a
+free string so a box writer can self-name). **C2 PROVENANCE** `gh run view <id>` exits 0 (check `$?` with NO
+PIPE — a pipe eats the rc and prints 0) and `workflowName == "Deploy (production)"`. **C3 WINDOW — the clause
+that cannot be hand-posted** — `inserted_at` inside `[createdAt − 120s, updatedAt + 120s]`. The probe row misses
+by **22m47.86s**; a genuine recorder row cannot be late, because a run's `[createdAt, updatedAt]` provably
+contains every one of its jobs' intervals (run 31284795417: created 23:48:15Z ≤ first job start 23:49:15Z, last
+job end 23:54:20Z ≤ updated 23:54:21Z), CP clock skew is sub-second, and the failure margin is 1367s.
+**C4 CARRIED HONESTY** `t`, or `f` only when the run's `headSha` equals the row's `sha`, or NULL.
+**C5 TARGET AGREES** — `target='cp'` requires a non-skipped `control-plane` job (stated honestly: C5 does not
+discriminate today's probe; `target='instance'` has NEVER been written). **Never assert "the table is
+non-empty" and never assert shape alone.**
+
+### D451 — THE CALLER CORPUS IS POSITIVELY DECLARED, FIVE ROOTS, AND IT SELF-DECLARES INTO `CLOUD_PATHS`.
+
+D441's corpus is SUBTRACTIVE and therefore **vacuous**: with only `router.ex`, `cloud/test/**` and
+`internal/cli/**` excluded, `tooling/grip/ledger/crown-writer-seam-live-2026-08-08.md:32,34` carries the crown
+literal twice in curl recipes, so the arm scores the crown **CALLED** and is green on the day it lands. That
+file was already present at D441's own measurement commit — the prose and the number never agreed.
+
+**RULED:** positively declare five roots — `.github/workflows`, `scripts`, `internal`, `cloud/lib`, `deploy`
+(605 files; identical verdict to the 9-root 1,741-file corpus, measured) — with an extension allowlist and
+`tooling/**` + `*.md` refused BY NAME. **`internal/cli/**` stays IN**: `cloud-path-escape-check.sh:133-141`
+refuses it as a CI DISPATCH-COST decision, and borrowing a cost decision as a CALLER decision is a category
+error — `bp cloud hetzner instance` puts real `WORKER_TOKEN` requests on the seam
+(`hetzner_instance_cmd.go:274,300`). Under that corpus **exactly ONE write route is caller-less: the crown.**
+Under D441's no-CLI reading there are two, and the second one's green is derived from an `@doc` heredoc naming
+the WRONG VERB (`registry.ex:272`, `GET /v1/internal/barkparks`) — a docstring as a route's entire proof of
+life. A call-shaped predicate is REFUTED by measurement: requiring a same-line verb token reds **21 of 23**
+routes, because the worker binds paths to named constants (`worker.ex:58`, `warmpool.go:73`).
+
+**AND THE ARM MUST SELF-DECLARE.** `scripts/cloud-path-escape-check.sh` reports "10 distinct repo-root read(s)"
+BEFORE and AFTER adding a 1,741-file directory walk to `cloud/test` — it scans for literal repo-root path
+strings, not a `Path.expand` walk over `~w()` roots. **So D440's one `CLOUD_PATHS` line is a VOLUNTARY
+declaration nothing enforces.** The arm asserts every one of its own `@roots` appears in `CLOUD_PATHS`. That is
+a second line, and it is the one that can lose.
+
+### D452 — RIDER 1 IS DEAD AS WRITTEN. THE STAY IS RE-DERIVED, NOT INHERITED.
+
+Re-derived as "OPEN and mergeable ≠ CONFLICTING and the deciding check ran against the CURRENT head sha", all
+three stayed PRs (#10811, #11007, #11008) FAIL — but **not for the predicted reason**. Clause 2 is SATISFIED by
+all three: 36 / 36 / 32 check-runs attached to the live head, **100% success-or-skipped, ZERO failures**. The
+rot is on the BASE side: the newest run across the three completed **2026-08-08T16:40:46Z** and the merge burst
+was 23:46–23:48Z the same day. GitHub attaches PR checks to the head sha and never re-fires when the base
+advances. **#10811's rollup literally reads `Required-check spec gate SUCCESS`** on a PR that cannot merge.
+
+**RULED: the stay is `state == OPEN` AND `mergeStateStatus != DIRTY` AND the deciding check is newer than the
+PR's last base movement — re-derived at build time, never read off D442's table**, which was already stale
+about three instruments when written. **Consequence: `coalesced_attempts` loses its only stay.** And note the
+stay predicate is NOT the merge predicate — #11009 is UNSTABLE and must still land.
+
+### D453 — VERBATIM PASSTHROUGH IS TRANSPORT, NOT READERSHIP.
+
+`census.Raw = body` (`client.go:2261`) → `fmt.Fprintln(out.stdout, …)` (`cloud_deploy_census_cmd.go:222`) does
+put the CP's exact bytes, `coalesced_attempts` included, in a human's terminal under `-o json`. It still fails
+the test on three grounds: `git grep -rn 'coalesced_attempts' origin/main -- internal/` returns **NOTHING** (no
+field, no render, no test — deleting the key reds nothing reader-side); the DEFAULT `-o table` render omits it;
+and a byte pipe prints absence and presence identically, i.e. the "reader" structurally cannot lose (D397).
+**RULED: "reader" = a code path that NAMES the key.**
+
+**AND D442's "1 reader hit" cell for `coalesced_attempts` is a FALSE POSITIVE.** Its single hit is the comment
+at `cloud_deploy_census_cmd.go:538` — *"`coalesced_attempts` now lands on the row but is not in this
+envelope"* — which is **FALSE on main**: `deploy_ledger.ex:893` emits it inside `census/3`. The true reader
+count is 0. That comment is deleted, not cited. **Rider 2 still protects the COLUMN** (`deployment.ex:206`,
+written by `auto_deploy_worker.ex:412` across ~31,697 rows): what is deletable is the EMISSION plus the
+allowlist row plus the false comment. "`coalesced_attempts` is deletable" must never become "drop the column".
+
+### D454 — THE THREE `queued_*` COLUMNS ARE NOT DELETE TARGETS THIS WAVE. THEY GET A READER AND A WRITER IN IT.
+
+They have **zero** rendered-bytes readers today (hits in exactly three files: schema, migration, test) and are
+never written on prod (0 of 1 rows non-null). Under a naive reading of D442 they are the cleanest delete
+targets in the epic. **RULED: they stay in the guard's declared corpus and are NOT exempted** — that is how
+D441's corpus went vacuous. The reader lands in slice 3 and the writer in slice 5, in this wave. If either
+misses, **the guard's red is the correct outcome and the honest line in the wave report.**
+
+### D455 — D375 IS REFUTED. THE NUMERATOR MOVED, AND IT MOVED INSIDE A FIVE-SITE PRODUCTION OUTAGE.
+
+Live: `failed_total = 18640`, `last_failed = 2026-08-08 14:55:28.776961`. **Eighteen failed rows landed
+2026-08-08 10:00:14Z → 14:55:28Z** across five sites, one team (guerrilla), all `trigger=content-auto` /
+`source=box-build`: 8 × *"instance guerrilla is unreachable"*, 7 × *"HEALTH gate failed … bp-doc-id marker is
+empty"*, 3 × *"deploy process died abnormally"*. 2026-08-08 carried **758 rows — 238 live, 502 deferred, 18
+failed**, not D375's "259 rows and 0 failed". 2026-08-07 also carried 18 failed. All 1,019 post-cutoff
+deferrals carry `BOX_AT_CAPACITY_DEFERRED`, zero NULL.
+
+**RULED: D375's retirement VERDICT stands — a lifetime rate is dilution-dominated regardless — but its stated
+REASON is STRUCK.** "The numerator is dead" was never true; it was a 33-hour quiet patch read as a permanent
+state, and the doctrine built on it is precisely why a 4h55m outage the next day produced zero operator
+reaction. The corrected sentence: *the lifetime rate is retired because it is structurally dilution-dominated,
+NOT because the numerator stopped moving — it moved 18 rows on 2026-08-08 and nobody noticed.* The charter
+contradicted itself here already (wave 23 line 6457 says the numerator "moved twice in the last 33 hours");
+both figures were stale.
+
+**Carried-sha rate, re-derived and burst-free:** 98 `Deploy (production)` runs since the cutoff — 47 success, 51
+cancelled, **0 failed**. Excluding the lead's 23:40–23:48Z merge burst entirely: **45 cancelled / 45 success =
+exactly 50.0%**. Half of all merged shas are carried by a LATER run in steady state. That is the crown's reason
+to exist and it is not a burst artifact.
+
+### D456 — SOMETHING DID REPORT THE OUTAGE. IT TOLD THE CUSTOMER, THIRTY TIMES, AND TOLD THE PLATFORM NOTHING.
+
+`notification_deliveries` carries **exactly 30 rows** in the window: 18 `alert/email/deployment_failed`
+(10:17:01 → 14:55:43) and 12 `alert/email/agent_unreachable`, all `status=sent`, **all to one address —
+`frikk@guerrilla.no`, the tenant's own user.** Not one platform recipient. The operator side is not merely
+silent, it is structurally incapable: `DailyDigestWorker` has completed **four times in its life** (08-02,
+08-04, 08-05, 08-07) and **did not run on the outage day**; when it does run, prod prints
+`NO_PLATFORM_ADMIN_ENV` so `deliver_fleet_digest/1` takes the `[] -> {:ok, :no_admins}` branch
+(`notifications.ex:350-357`) — a silent success Oban records as `completed`, and **zero `fleet_digest` rows
+exist in `notification_deliveries` lifetime**; `DigestEmail` carries no deployment-failure content at all; and
+the console's `platform_operator` boolean resolves from the SAME empty allowlist. GitHub reported nothing: 14
+cancelled + 14 success on `deploy.yml`, **zero failures**; 185 issues created in-window, all wave-56 findings,
+none about the outage; 3 `audit_events` rows.
+
+**AND THE EPIC FILED THIS SEVEN WAVES AGO.** `dr-w19-fleet-digest-audience-still-empty` (issue #10516,
+priority 1) — *"The fleet digest's AUDIENCE is still the empty platform allowlist"* — is **open, 0/3, filed in
+wave 19, untouched into wave 26.**
+
+**RULED, and it changes LEG 3:** the reporting did not fail to exist, it failed to reach the party who could
+act. **A deletion law that counts "has a reader" MUST count WHICH HUMAN** — otherwise `deployment_failed`
+scores as instrumented while being, from the platform's seat, exactly as blind as no instrument at all.
+
+**Two further silences the same night, both unreported.** The ~23:51Z control-plane restart was a clean
+blue/green DEPLOY (blue `Exited (137)` 23:48:20, green started 23:51:03, `oom=false`, host up 40 days) — and it
+**ate a scheduled `usage_samples` tick**: the 15-minute series reads 23:22 · 23:37 · **[nothing]** · 00:07 ·
+00:22, `UsageSamplerWorker` shows 664 completed / 1 discarded, so a lost tick leaves no failed row and nothing
+reports a missing measurement. The same cutover **recreated `cloud-postfix-1`** (`docker logs | grep -c .` → 7),
+destroying the maillog covering all 30 alert sends: `status='sent'` with NULL `http_status` is a mailer-accepted
+claim, not a delivery. **The one instrument that did fire cannot be audited, because a deploy erased its
+receipts.**
+
+### D457 — GYLDENDAL IS LIVE, THE ORDER OF THE REMEDIATION IS LOAD-BEARING, AND THE FILED FLOOR IS THE WRONG NUMBER TWICE.
+
+**It reproduced while a verifier watched** — a fresh `usage_samples` row landed at 00:22:00Z on the
+`7,22,37,52` crontab. Row `b1259514` (team **yo**) stores `https://gyldendal.barkpark.cloud` as its `url` while
+DNS points that name at **116.203.98.0**, team **Gyldendal**'s box (LE cert `notBefore=Jul 8 10:50:19 2026`,
+the takeover date). yo's own box (167.233.194.23) is DEAD (`curl` → 000), so **100% of credentialed calls for
+that row land on another tenant's application layer.** Both teams hold live subscriptions.
+
+**Nulling `url` DOES stop it end to end — proved by exhaustion, not assumption.** All 12 admin-token decrypt
+sites in `cloud/lib` gate on the same column: `Usage.instance_base_url/1` (`usage.ex:886`, and `router.ex:10814`
+delegates to it, so the whole `/v1/instance-api/*` proxy shares the guard) plus seven `registry.ex` relays
+(`3224, 3344, 3442, 3636, 3811, 4017, 4058`) and `verify.ex:130`. The `:studio_link_http_client` seam is a
+TRANSPORT module, not a target. The one non-`url` reach, `DomainStatus.probe_serving/3`
+(`domain_status.ex:507`), probes `gyldendal-71069eaa.barkpark.cloud`, which is **NXDOMAIN**, and carries no
+credential.
+
+**THE ORDERING TRAP — the remediation disarms the guard built to catch this.** `provisioning_fqdn_claim/1`
+opens `url = "https://" <> host; where([b], b.url == ^url)` (`registry.ex:5416-5417`), and the three hard-block
+legs are evaluated ONLY on rows that query finds. **Null the url and the claim answers `:free` and none of the
+three legs ever runs** — including `:admin_credential`, whose whole purpose is to stop handing the next tenant a
+name the platform keeps dialling with someone else's live credential. **RULED: null `admin_token_encrypted`
+FIRST, `url` SECOND, in one transaction.** With the ciphertext gone every relay refuses at
+`:no_admin_token` before the URL is read, so the fix survives a later revert of the url write. Use `NULL`, never
+a repoint to the suffixed FQDN (NXDOMAIN).
+
+**THE FLOOR IS WRONG IN BOTH DIRECTIONS.** The filed "1,376" is a count of `usage_samples` ROWS, and
+`UsageSamplerWorker`'s own moduledoc says a row is written on EVERY tick even for a DOWN box — the sweep is
+`host`-keyed. The honest evidence is `unavailable_reason`, emitted only at `usage.ex:732/821/840`, strictly
+AFTER `instance_api_headers(admin_token)` went on the wire: **431 rows carry `"unreachable"` (2026-08-04
+11:22 → 2026-08-09 00:22) — that is the PROVED floor.** 981 rows carry no reason key at all (2026-07-25 →
+2026-08-04 11:07) because the field did not exist. **RULED: 431 proved, ~3,800 estimated since 2026-07-08, and
+the gap is UNRECOVERABLE because the instrument that could report it was added 27 days into the incident.**
+That is this epic's thesis firing on its own priority-1 evidence.
+
+**AND THE GATE TASK'S CRITERION 3 IS UNSATISFIABLE AS WRITTEN.** "usage_samples shows no new row" will never be
+true — the sweep is host-keyed and keeps writing rows. The correct assertion is **no new row carrying
+`unavailable_reason`**. Anyone stamping it honestly today records a FAILURE on a working remediation.
+**DO NOT de-register `gyldendal.barkpark.cloud` from `/v1/tls/ask`** — the 200 belongs to team Gyldendal's
+LEGITIMATE `custom_host` and removing it breaks a paying customer's cert renewal. And **#10944 is OPEN and
+DIRTY**: main still runs `provisioning_fqdn_taken?/1` at arity 1 with no self-exclusion, so the self-service
+attach path (own-team admin, DNS proof SKIPPED for any `*.barkpark.cloud` name via
+`Barkpark.platform_custom_host?/1`) is open today to every paying customer.
+
+**THE GENERALIZABLE FINDING, sharper than "a guard's coverage shrank":** *the guard against handing a name to
+the next tenant while the platform still dials it is keyed on the same column the remediation clears. The
+instrument and the fix read the same field, so applying the fix makes the instrument answer `:free` — not
+because the danger passed, but because the evidence of it was the thing that got erased. A guard whose input is
+destroyed by its own remedy cannot lose, and cannot warn twice.*
+
+### D458 — THE NAME-CLAIM PREDICATE HAS SIX LEGS AND NO SET CENSUS. THE 2026-07-08 HOTFIX WOULD STILL PASS PART OF CI.
+
+**Premise correction:** "ZERO tests reference these predicates" is FALSE — merged #11010 gave
+`registry_attach_domain_test.exs` seven behavioural cases and three of six legs are covered by atom. What is
+genuinely missing: **no SET census** (a seventh leg, a rename, or a reorder is invisible); **`:active_job` has
+no test of any kind**; `:agent_reporting` and `:within_grace` are covered only through `{:error, :taken}`, which
+never names WHICH leg refused, so either could be swapped for the other undetected; and **the three coverage
+CONSTANTS are pinned by nothing** — `@recent_sample_window_hours 24 → 1` and dropping `past_due` from the live
+status list leave the leg SET identical.
+
+**RULED: rungs 1+2 ship as one slice.** Rung 1 = an AST leg-atom set census with EXACT set equality against a
+declared allowlist, plus the three constants pinned in **THREE SEPARATE TESTS** (stacked in one body the first
+failing assert shadows the other two, so a diff moving all three reports only one — the reporting
+under-reporting itself). Rung 2 = one behavioural case per leg, because a leg present in source but dead-coded
+still passes a source census (`row.active_job and false ->` leaves rung 1 fully GREEN and reds only rung 2 —
+mutation-proved). **A per-line regex extractor is 67% blind on this function** (AST finds 6, regex finds 2)
+because four legs wrap their tuple across lines. Rung 3 (a live releasable-row meter) is BLOCKED on
+`dr-w19-hg-cloud-control-plane-read-token` and is NOT filed as buildable.
+
+**NOTED, NOT FIXED:** `claim_leg/2` builds a careful operator sentence that reaches a human through exactly ONE
+path — `Logger.info` at `registry.ex:5372`. The API hands the operator `409 {"error":"taken"}`
+(`router.ex:4137-4138`); leg and sentence are dropped before the wire. **A reader-less instrument inside the
+very predicate this wave hardens.** Filed, not taken.
+
+### D459 — THE CENSUS'S GO-TAG ARM IS 36% BLIND, AND THE DELETION LAW INHERITS THAT BLINDNESS.
+
+`Go.all_tags/1` is a file-global union of NAMES, so it measures vocabulary, not coverage. **Mutation-proved on
+a struct that is on main TODAY:** turning `SiteDeleteResult.Status` (`client.go:1701`, a name declared at 11
+sites) into `json:"-"` — the reader STOPS DECODING a live envelope key — leaves the census at **13 tests, 0
+failures** AND `go test ./internal/cloudclient/...` green. Deleting a UNIQUE name (`live_rate`, `:2071`) reds
+three arms at once. **82 of 228 names (36.0%) and 190 of 418 tag sites (45.5%) are silently deletable.**
+`PlatformDelivery.to_json/1` has **no Elixir-side emitted-key guard at all** (zero census hits).
+
+**RULED: `dr-w23-s6-register-per-struct-unread` is the only fix that can lose and it is NOT this wave.** The
+deletion law must therefore state its own blindness in writing rather than claim coverage it lacks.
+
+### D460 — THE SEAL, AND THE GAUGE'S OWN HOLE.
+
+Honest state, re-derived from a fresh detached worktree at `origin/main`:
+
+`SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=69 considering=0 successor=am-bl-idle-p95-anomaly
+epic=task-fb4fb869490b4213 mode=live stubbed=0 waived=0 roster=147 repo=<worktree> head=0239dd4ee` — exit 1.
+
+Residue GREW: roster 135 → 147, orphans 57 → 69, and **again zero of the +12 is finished work**. **D444's
+caveat is mandatory on every citation** (`b`/`c` are scored off Cloud Console's flat epic-unfenced registers;
+proven by mutation — `--epic totally-fake-epic-xyz` emits the identical six `CCH-D1..D6` and the same
+`b-clean=6/6`). **Depth caveat re-derived: 69 direct plus 332 one level below that clause (a) structurally
+cannot see** (drafts subtract ZERO — across 5,757 published task docs, `_draft:true` = 0). D444 quoted 57+319;
+today it is 69+332 — **the number went UP while orphans went 57 → 69.**
+
+**HOLE A CONFIRMED AND WORSE THAN FILED.** `fetchRoster` (`seal-predicate.mjs:427-435`) is ONE non-recursive
+`filter[parent_id]` query called twice. A fixture modelling ONE filing act — 69 open direct children reparented
+under an already-done sibling, **nothing finished** — prints `VERDICT: SEAL a=PASS orphans=0`, exit 0, with
+`stubbed=0 waived=0`. **And the gauge is already blind with no filing act at all:** `task-1b20109435e5bd19` and
+`task-973918c0fc635953` are live, published, non-draft, open, and parented to DONE gen-1 rows — the token says
+69, not 71.
+
+**HOLE B IS HALF-REFUTED, and the surviving half is sharper.** `--ladder-only --epic totally-fake-epic-xyz`
+does exit 0 with `b-clean=6/6`, but the token carries `a=NOT-READ c=NOT-READ` and prints five numbered "WHAT
+THIS READING IS NOT" paragraphs — it is not a quotable seal. **The real defect is the LABEL**: `--epic` is
+accepted on that path without ANY resolution, so the run attributes six Cloud Console defects to a string that
+resolves to nothing. Any slice written on the "arbitrary green" framing would produce a guard that cannot fail.
+
+**FENCE HELD:** `cloud/priv/static/__preview__/*` is ceded by D402. **DR ships the spec and the mutation
+fixture into `dr-w25-bl-seal-clause-a-is-one-level-deep` (issue 10979) and updates its 57+319=376 to
+69+332=401 — DR does NOT ship the fix.** Pin the RELATION (both numbers must be printed), never the integers:
+they moved 12 and 13 in a day on filing activity alone.
+
+### D461 — A CONFLICTED PR RE-DISPATCHES ZERO CHECKS AND KEEPS ASSERTING. NOTHING IN THE REPO READS IT.
+
+Going DIRTY does not make a check "stop running" — it re-dispatches NOTHING. #11007 and #11008 carry 36 and 32
+check-runs, **every one started 2026-08-08T16:36–16:40Z, zero after 23:00Z**, all four required contexts still
+SUCCESS. The PR renders green and unmergeable, and the green measures a base 14 PRs stale. `grep` for
+`mergeStateStatus|CONFLICTING|mergeable` over `.github/` and `scripts/` returns **NOTHING**; repo-wide the
+concept exists only in human `.md` prose. Zero comments on either PR. `docs/ops/merge-gates.md:277` anticipates
+the ABSENT-check case and does not cover the present-but-stale-pass case that actually occurs.
+
+**RULED: LEG 1 IS SLICES WITH MERGE-TO-MAIN CRITERIA, NOT A LEAD ACT.** Wave 25 delegated merging to the lead
+and it half-happened. A slice is DONE when its bytes are ON MAIN. The generic reporter (after a merge, name the
+open PRs that went DIRTY and the merged PR that did it — derivable in one `git log -1 -- <conflicting file>`) is
+FILED, not built: it is a ninth instrument in a wave whose mandate is SUBTRACT.
+
+### The wave 26 plan — 8 slices, two rounds
+
+**Round-1 file sets are disjoint by design.** Slices 3 and 4 both touch
+`cloud/test/barkpark_cloud/payload_key_set_census_test.exs` but in provably different hunks — slice 3 edits the
+`@go_tag_floor` literal at `:725`, slice 4 appends a new module at EOF — and each brief carries the union rule.
+Round-2 slices do NOT dispatch beside their dependencies and each carries an `AFTER <task_id> MERGES` line as
+the first line of its brief.
+
+| # | round | task | surface | model | why it is here |
+|---|---|---|---|---|---|
+| 1 | 1 | `dr-w26-s1-land-11009-with-the-roster-fix` | `docs/ops/merge-gates.md` + rebase | opus | D447. Merging it unfixed reds MAIN's own honesty gate |
+| 2 | 1 | `dr-w26-s2-land-11008-union-and-the-key-set-lie` | `platform_delivery.ex` + its test + migration | opus | D447. The auto-merge left a 12-key assertion against a 15-key map |
+| 3 | 1 | `dr-w26-s3-deliveries-reader-stops-lying-about-carried` | `internal/cloudclient/`, `internal/cli/`, fixture, census floor line | fable | D449 + D448. Not a rebase — a code slice, and the floor is 243 |
+| 4 | 1 | `dr-w26-s4-census-scores-a-caller-less-producer` | census test tail + `cloud-path-escape-check.sh` | fable | D451. **HIGH-FLIP-RISK: the caller corpus ruling** |
+| 5 | 2 | `dr-w26-s5-crown-gets-its-writer` | `.github/workflows/deploy.yml` | fable | D437 + D450. **AFTER s1 and s4 merge.** **HIGH-FLIP-RISK: prod credential seam** |
+| 6 | 1 | `dr-w26-s6-reader-less-instrument-guard-and-the-first-deletion` | new census test + `publish_clock.ex` + `router.ex` | fable | D452 + D453 + D456. The law, and the first subtraction |
+| 7 | 2 | `dr-w26-s7-delete-the-two-api-side-dark-instruments` | `api/lib/…/instance_site_deploy_controller.ex` + tests | opus | D453. **AFTER s6 merges.** Elixir gate, not Cloud gate — a separate PR by design |
+| 8 | 1 | `dr-w26-s8-name-claim-legs-cannot-shrink-silently` | new `registry_name_claim_census_test.exs` | opus | D458. **HIGH-FLIP-RISK: which populations a leg protects** |
+
+**Lead acts this wave, which no slice substitutes for.** The gyldendal OPERATOR packet in D457's order
+(`admin_token_encrypted` first, `url` second, one transaction) plus notifying BOTH teams; merging the leg-1
+slices in order #11009 → #11008 → #11007; and deciding what to do about **#10129 and #10086, which are DIRTY,
+unowned, frozen-green against a tree with no census, and will RED main's census on merge** (D448).
+
+**Seal state after this wave: honest NO-SEAL, `a=FAIL orphans=69 roster=147 head=0239dd4ee`,** with D444's
+caveat AND the depth caveat (69 direct plus 332 one level below) attached. Sealing while the crown has never
+held an automated row would be the epic's most expensive false green.
