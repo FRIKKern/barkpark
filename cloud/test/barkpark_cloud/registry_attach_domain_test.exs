@@ -181,22 +181,13 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       assert {:ok, %Barkpark{custom_host: ^host}} = Registry.set_custom_host(claimer, host)
     end
 
-    test "a usage sample OLDER than 24h does not hold the claim on its own" do
-      team = team_fixture()
-      ghost = ghost_row(team, "stale-sample.barkpark.cloud")
-      with_usage_sample(ghost, DateTime.add(DateTime.utc_now(), -49, :hour))
-
-      assert :free = Registry.provisioning_fqdn_claim("stale-sample.barkpark.cloud")
-    end
-
-    test "a canceled subscription does not hold the claim (only live ones do)" do
-      team = team_fixture()
-      ghost_row(team, "canceled-team.barkpark.cloud")
-
-      Repo.insert!(%Subscription{team_id: team.id, plan: "supporter", status: "canceled"})
-
-      assert :free = Registry.provisioning_fqdn_claim("canceled-team.barkpark.cloud")
-    end
+    # The two boundary negatives that used to sit here (a usage sample older
+    # than the window, a cancelled subscription) now live in the `:free` case of
+    # registry_name_claim_census_test.exs, alongside the per-leg census that
+    # pins the window and the live-status list themselves. The two tests KEPT
+    # above earn their place: `the LIVE shape …` is the end-to-end path
+    # (claim → set_custom_host → {:error, :taken}), and `MUTATION per leg …` is
+    # the priority CASCADE across legs, which no single-leg case can express.
 
     test "a young silent row keeps the claim (still provisioning, not yet abandoned)" do
       young = barkpark_fixture(team_fixture())
