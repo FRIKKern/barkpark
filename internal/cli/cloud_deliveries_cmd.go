@@ -320,6 +320,7 @@ func renderDelivery(out *writer, d cloudclient.PlatformDelivery) {
 	out.outf("  split      %s", deliveriesSplitLine(d))
 	out.outf("  built      %s", deliveriesBuiltLine(d))
 	out.outf("  serving    %s", deliveriesServingLine(d))
+	out.outf("  moved      %s", deliveriesTransitionLine(d))
 	out.outf("  first seen %s · recorded %s (when the control plane wrote the row, not a deploy clock)",
 		sanitizeCell(d.FirstSeenAt), sanitizeCell(d.RecordedAt))
 }
@@ -469,6 +470,65 @@ func deliveriesServingLine(d cloudclient.PlatformDelivery) string {
 	return sanitizeCell(*d.ServingSince)
 }
 
+// deliveriesTransitionLine renders THE ROLLBACK VERDICT — what this delivery did
+// to the platform, graded PREVIOUS-vs-NEW: was the sha it delivered ahead of,
+// behind, or off the line from what the box was serving before.
+//
+// This is the field the crown gained so a rollback would stop reading as an
+// ordinary deploy, and until dr-w27-s2 it never reached a human at all: the
+// serializer emitted it, the decoder declared no field for it, and
+// `json.Unmarshal` dropped it in silence, so a row whose transition was
+// `rollback` printed byte-identically to one that moved `forward`.
+//
+// nil IS "NEVER ATTEMPTED" AND IS NOT "unknown". The schema keeps two distinct
+// statements here on purpose (platform_delivery.ex): the word `unknown` means
+// the writer TRIED to grade the move and could not decide — a gc'd sha, an
+// unreachable box, a shallow clone — while a NULL means no verdict was ever
+// attempted, usually because the row predates the columns. Collapsing them
+// would tell an operator a grading was attempted and failed on every historical
+// row in the table, which is a fact about this code rather than about the
+// deploy. So nil gets its own UNRECORDED sentence, in the shape the carried
+// block already established for the same reason.
+//
+// AN UNRECOGNISED WORD IS PRINTED, NEVER SWALLOWED. The vocabulary is closed
+// today (forward | rollback | diverged | noop | unknown) and the writer holds it
+// as a changeset inclusion, but a control plane running ahead of this binary can
+// send a sixth word — and a `default:` that dropped it would render a graded
+// move as an ungraded one, which is precisely the silence this line exists to
+// end.
+func deliveriesTransitionLine(d cloudclient.PlatformDelivery) string {
+	previous := "previous sha NOT RECORDED"
+	if d.PreviousSHA != nil && strings.TrimSpace(*d.PreviousSHA) != "" {
+		previous = "from " + shortSha(strings.TrimSpace(*d.PreviousSHA))
+	}
+
+	if d.Transition == nil {
+		return "UNRECORDED — NO rollback verdict was ever attempted for this delivery (the wire sent null, and the schema keeps\n" +
+			"             no default so 'never attempted' cannot be recorded as a word). It is NOT the same as `unknown`, which\n" +
+			"             means the writer TRIED to grade the move and could not decide. Whether this deploy went forward or\n" +
+			"             rolled the platform back is not knowable from this row · " + previous
+	}
+
+	switch verdict := strings.TrimSpace(*d.Transition); verdict {
+	case "rollback":
+		return "ROLLBACK — this delivery moved the platform BACK: the sha it delivered is an ANCESTOR of what was being served before · " + previous
+	case "forward":
+		return "forward — the delivered sha is a descendant of what was being served before · " + previous
+	case "diverged":
+		return "DIVERGED — neither sha is an ancestor of the other, so the platform is serving code that left the line · " + previous
+	case "noop":
+		return "noop — the delivered sha is the one already being served, so this deploy delivered nothing new · " + previous
+	case "unknown":
+		return "unknown — the writer TRIED to grade this move and could NOT decide (a gc'd sha, an unreachable box, a shallow clone).\n" +
+			"             This is a recorded refusal, not a missing one · " + previous
+	case "":
+		return "UNRECORDED — the wire carried an EMPTY transition, which is neither a verdict nor an honest null · " + previous
+	default:
+		return sanitizeCell(verdict) + " — a transition word this binary does not know (it grades PREVIOUS-vs-NEW, and the vocabulary it knows is\n" +
+			"             forward · rollback · diverged · noop · unknown). Printed verbatim rather than dropped; upgrade `bp` to read it · " + previous
+	}
+}
+
 // deliveriesSeconds renders a measured duration as SECONDS first, with a coarse
 // human reading beside it once it stops being readable in seconds. Seconds lead
 // because seconds are what was recorded — the parenthetical is a convenience and
@@ -498,7 +558,7 @@ WHAT IT READS
   tenant instance's webhook send log and shares nothing with this but a word.
 
 WHAT IT PRINTS
-  merged · waited · split · built · serving, in causal order, for one sha — plus
+  merged · waited · split · built · serving · moved, in causal order, for one sha — plus
   the run that delivered it, saying OUT LOUD when that run is not the sha's own
   (a run that carried zero jobs gets its sha swept up by a later run, and then
   the waited/built seconds belong to that later run).
@@ -509,6 +569,12 @@ WHAT IT PRINTS
   ATTRIBUTION HAS THREE STATES, NOT TWO: this sha's OWN run, CARRIED by a later
   sha's run, or carried UNRECORDED — nobody measured which, in which case the
   OWNERSHIP of the seconds is unknown even when the seconds themselves are not.
+
+  'moved' is the ROLLBACK VERDICT: forward · ROLLBACK · DIVERGED · noop, graded
+  PREVIOUS-vs-NEW (what this box served before against what it serves now), plus
+  the sha it moved from. A RECORDED 'unknown' means the writer tried and could
+  not decide; UNRECORDED means no verdict was ever attempted — every row older
+  than the columns reads that way, and it is not the same statement.
 
   A field the recorder could not reach prints as UNMETERED with the reason. It is
   never 0, never false and never blank: a missing build is not a build that took

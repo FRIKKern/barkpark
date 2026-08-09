@@ -388,6 +388,30 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Go do
     |> Enum.map_join("\n", &File.read!/1)
   end
 
+  @doc """
+  The Go FIELD names of one struct that carry a real json tag, or nil when the
+  struct does not exist.
+
+  Field names, not tag names, because the RENDER arm below scans the reader for
+  `d.PreviousSHA` — Go source refers to the field, never to the wire key.
+  `json:"-"` fields (DeployCensus.Raw, DeliveriesPage.Raw) are excluded for the
+  same reason `tags/1` excludes them: they are an explicit do-not-decode.
+  """
+  @spec struct_fields(binary, binary) :: MapSet.t() | nil
+  def struct_fields(src, name) do
+    case Regex.run(~r/^type #{name} struct \{\n(.*?)\n\}$/ms, src, capture: :all_but_first) do
+      [body] ->
+        ~r/^\s*([A-Z][A-Za-z0-9_]*)\s+[^\s]+\s+`json:"([^",]*)/m
+        |> Regex.scan(body, capture: :all_but_first)
+        |> Enum.reject(fn [_f, tag] -> tag in ["", "-"] end)
+        |> Enum.map(fn [f, _tag] -> f end)
+        |> MapSet.new()
+
+      _ ->
+        nil
+    end
+  end
+
   @doc "The json tag names of one struct, or nil when the struct does not exist."
   @spec struct_tags(binary, binary) :: MapSet.t() | nil
   def struct_tags(src, name) do
@@ -449,6 +473,38 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
   ## Why this test is what enforces the dispatcher declaration
 
+  ## SCOPE (dr-w27-s2)
+
+  The `PlatformDelivery.to_json/1` pair and the RENDER arm below own
+  **PlatformDelivery ONLY**. `dr-w23-s6-register-per-struct-unread` owns the
+  per-struct UNREAD arm and the render assertion for **SiteDeployment**; nothing
+  here generalises into that ground, because two owners on one mechanism is the
+  defect this epic keeps finding rather than a second layer of safety.
+
+  ## The RENDER arm's BOUND, stated up front rather than discovered later
+
+  DECODING IS NOT RENDERING. A field can be declared, decoded and never printed,
+  and every arm above would stay green — the census's own subject matter one hop
+  further along. The arm below therefore scans
+  `internal/cli/cloud_deliveries_cmd.go` for `d.<Field>` / `page.<Field>` and
+  reports what is decoded but never reaches a human.
+
+  IT IS A TEXT SCAN, and its honesty is ASYMMETRIC: reliable about ABSENCE (no
+  mention at all means the field truly cannot reach the render), OPTIMISTIC
+  about PRESENCE. A mention inside a dead branch, behind a receiver bound to
+  another variable name, or in a comment counts as "rendered". It is a tripwire
+  for silence, never a proof of output — the proof of output is a rendered-BYTES
+  assertion in Go (`TestCloudDeliveriesRollbackVerdictReachesTheHuman`), which
+  is what actually holds what a human reads.
+
+  What it finds TODAY, declared and not repaired here: `PlatformDelivery.SHA`,
+  `DeliveriesPage.SHA` and `DeliveriesPage.Limit` are decoded and never printed.
+  The row's own `SHA` is the interesting one — the render prints the sha the
+  CALLER ASKED FOR in its header and never the sha each row carries, so it never
+  demonstrates that the rows it printed are the sha you asked for. Repairing
+  that is a reader change with its own render decisions and is filed, not
+  smuggled in here.
+
   It reads `internal/cloudclient/` through a `"../../../internal/cloudclient"`
   literal, which `scripts/cloud-path-escape-check.sh` resolves as a repo-root
   read of the Cloud suite. That ratchet FAILS unless `internal/cloudclient/**`
@@ -463,7 +519,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
   @router Path.expand("../../lib/barkpark_cloud/web/router.ex", __DIR__)
   @ledger Path.expand("../../lib/barkpark_cloud/deploy_ledger.ex", __DIR__)
+  @platform_delivery Path.expand("../../lib/barkpark_cloud/platform_delivery.ex", __DIR__)
   @cloudclient Path.expand("../../../internal/cloudclient", __DIR__)
+  @deliveries_reader Path.expand("../../../internal/cli/cloud_deliveries_cmd.go", __DIR__)
 
   # The censused pairs: one Elixir serializer, one Go decoder. `nested` selects a
   # nested literal map inside the entry's payload (`pressure`, `window`), which
@@ -515,6 +573,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       file: @ledger,
       entry: {:site_row, 2},
       go: "DeployCensusSite"
+    },
+    # dr-w27-s2. The CROWN's own wire, and the pair that was missing while this
+    # epic's flagship record drifted: `to_json/1` emitted FIFTEEN keys and
+    # `cloudclient.PlatformDelivery` pinned THIRTEEN, so `previous_sha` and
+    # `transition` — the rollback verdict — were dropped by `json.Unmarshal` in
+    # silence. Two exact pins existed and both stayed green because neither
+    # crossed the language boundary: Elixir pinned 15 against a hand-written
+    # literal, Go pinned 13 against a fixture. This row is the only assertion in
+    # the tree that reads BOTH ends, and it types no key list at all.
+    %{
+      name: "PlatformDelivery.to_json/1",
+      file: @platform_delivery,
+      entry: {:to_json, 1},
+      go: "PlatformDelivery"
     }
   ]
 
@@ -551,12 +623,30 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — the in-flight rollout marker; without it a CLI status can print a stale cached verdict over a landing rollout."},
     {"barkpark_json/4", :unread, "custom_host",
      "dr-w11-payload-divergence-close — the attached platform-zone host."},
+    # THE THREE FLEET ROWS SAID SOMETHING FALSE (corrected by hand, dr-w27-s2).
+    # They read as "decoded by NOBODY", and all three are decoded today by
+    # `internal/cli/cloud_support_cmd.go:1460-1462`, which declares
+    # json:"fleet_role" / "fleet_parent_id" / "fleet_token_id" on its own support
+    # row. What is true is narrower: no CLIENT struct decodes them, because this
+    # arm's union root is `internal/cloudclient` ONLY.
+    #
+    # WIDENING THE ROOT TO internal/cli WAS CONSIDERED AND REFUSED, MEASURED on
+    # this branch (2 non-test files -> 103): the union grows 245 -> 457 tag
+    # names, +212 exactly, and buys precisely THESE THREE allowlist flips. Every
+    # one of those 212 unrelated names multiplies charter D260's collision blind
+    # spot, which is not theoretical here — the UNREAD arm greens a key the
+    # moment ANY name in the union matches it, on a struct that need not decode
+    # the payload at all. And it would NOT have greened the finding this slice
+    # exists for: no non-test file under internal/cli declares json:"previous_sha"
+    # or json:"transition" either (`grep -rn 'json:"previous_sha"' internal/cli`
+    # returns nothing), so the rollback verdict stays newly-unread under the
+    # widened union too. Three correct sentences cost less than 212 blind spots.
     {"barkpark_json/4", :unread, "fleet_role",
-     "dr-w11-payload-divergence-close — Personal Dev Fleet group record (PDF-D61)."},
+     "dr-w11-payload-divergence-close — Personal Dev Fleet group record (PDF-D61). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1460 (json:\"fleet_role\"), which is outside this arm's internal/cloudclient union root."},
     {"barkpark_json/4", :unread, "fleet_parent_id",
-     "dr-w11-payload-divergence-close — the main this box binds to."},
+     "dr-w11-payload-divergence-close — the main this box binds to. No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1461 (json:\"fleet_parent_id\"), outside this arm's union root."},
     {"barkpark_json/4", :unread, "fleet_token_id",
-     "dr-w11-payload-divergence-close — the opaque revocation-token id (not a secret)."},
+     "dr-w11-payload-divergence-close — the opaque revocation-token id (not a secret). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1462 (json:\"fleet_token_id\"), outside this arm's union root."},
     {"barkpark_json/4 pressure", :unread, "p95_ms",
      "dr-w11-payload-divergence-close — charter D131's p95 vital. The Pressure struct's own doc comment asserts its tags are @unmetered_pressure VERBATIM; that sentence is now false by two keys."},
     {"barkpark_json/4 pressure", :unread, "req_per_s",
@@ -737,8 +827,24 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # floor does NOT move: this slice writes no serializer, it reads one.
   # MERGE HAZARD, unchanged: these floors are `==`, so any other PR that also
   # moves them must be re-measured after this one lands, never summed with it.
-  @emitted_floor 126
-  @go_tag_floor 243
+  # W27 S2 (the CROWN's own wire joins the census): the emitted floor moves
+  # 126 -> 141 and the go-tag floor 243 -> 245, BOTH re-measured by the
+  # 999-technique on this branch — floors set to 999, the two refusals printed
+  # "141 emitted key(s) collected" and "245 json tag(s) found in
+  # internal/cloudclient" — and neither is arithmetic. The emitted number is the
+  # one a reader would get wrong: `to_json/1` emits fifteen keys, but eleven of
+  # them (`sha`, `target`, `carried`, `merged_at`, the four queued_*/build
+  # clocks, `serving_since`, `first_seen_at`, `recorded_at`) are names the other
+  # censused serializers ALREADY emit — and the floor is a SUM OF PER-PAIR SET
+  # SIZES, not a union, so the whole fifteen counts here while the go-tag union
+  # gains only the two names that are new package-wide. That the go-tag delta
+  # happens to equal the two fields added is a coincidence of `previous_sha` and
+  # `transition` being new EVERYWHERE in internal/cloudclient; `team` and
+  # `scope` rode free in W19 S1 and `sha`/`count`/`limit` rode free in W26 S3.
+  # MERGE HAZARD, unchanged: these floors are `==`, so any other PR that also
+  # moves them must be re-measured after this one lands, never summed with it.
+  @emitted_floor 141
+  @go_tag_floor 245
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
@@ -959,6 +1065,54 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
           #{fmt(MapSet.difference(actual, expected))}
         no longer unread (allowlisted but now decoded — DELETE the allowlist row):
           #{fmt(MapSet.difference(expected, actual))}
+      """
+    end
+  end
+
+  # THE THIRD ARM: DECODED, BUT NEVER RENDERED (dr-w27-s2, PlatformDelivery
+  # only — SiteDeployment is dr-w23-s6's).
+  #
+  # The UNREAD arm asks whether Go declares the key. That is one hop short of the
+  # thing an operator actually experiences: `transition` could have been declared
+  # tomorrow, decoded correctly, and still never printed — and every assertion in
+  # this file would have stayed green while the rollback verdict remained
+  # invisible on the only surface anybody uses.
+  #
+  # The scan's bound is in the moduledoc and is not restated here: honest about
+  # ABSENCE, optimistic about PRESENCE. The declared set below is a REPORT of
+  # today's tree, not a blessing — each entry names what a reader cannot see.
+  @never_rendered %{
+    "PlatformDelivery" => {"d", ["SHA"]},
+    "DeliveriesPage" => {"page", ["Limit", "SHA"]}
+  }
+
+  test "RENDER: every decoded delivery field reaches the human render, or is DECLARED unrendered" do
+    src = Go.source(@cloudclient)
+    reader = File.read!(@deliveries_reader)
+
+    for {struct, {var, declared}} <- @never_rendered do
+      fields = Go.struct_fields(src, struct)
+      assert fields, "internal/cloudclient declares no `type #{struct} struct`"
+
+      rendered = Enum.filter(fields, &Regex.match?(~r/\b#{var}\.#{&1}\b/, reader))
+      unrendered = MapSet.difference(fields, MapSet.new(rendered))
+
+      # ANTI-VACUITY: a regex that stopped matching reports EVERY field as
+      # unrendered, and a `reader` that failed to load would report the same. Two
+      # fields whose render is asserted in Go bytes must be found, or the scanner
+      # is what broke, not the reader.
+      for anchor <- ~w(Deliveries Count), anchor in fields do
+        assert anchor in rendered,
+               "the render scan lost `#{var}.#{anchor}` — the SCANNER is broken, not the reader"
+      end
+
+      assert unrendered == MapSet.new(declared), """
+      #{struct}: the DECODED-BUT-NEVER-RENDERED set moved.
+
+        newly unrendered (decoded and no longer printed — an operator cannot see it):
+          #{fmt(MapSet.difference(unrendered, MapSet.new(declared)))}
+        now rendered (declared unrendered but the reader prints it — DELETE the declaration):
+          #{fmt(MapSet.difference(MapSet.new(declared), unrendered))}
       """
     end
   end

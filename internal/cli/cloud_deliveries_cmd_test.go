@@ -591,6 +591,94 @@ func TestCloudDeliveriesRefusesJunkShaBeforeAskingAnything(t *testing.T) {
 	}
 }
 
+// TestCloudDeliveriesRollbackVerdictReachesTheHuman is THE mutation target for
+// dr-w27-s2: delete the `moved` line from renderDelivery and this test, and only
+// this test, reds.
+//
+// It asserts RENDERED BYTES, not a struct field, because the struct field was
+// never the problem — the problem was that the field did not exist while both
+// key-count pins stayed green, so `json.Unmarshal` dropped `transition` and a
+// delivery that rolled the platform BACK printed byte-identically to one that
+// moved forward. The proof that matters is therefore a comparison between the
+// two renders, not the presence of a word.
+//
+// THREE STATES, AND THE THIRD IS THE ONE THAT NEEDED A DECISION. `rollback` and
+// `unknown` are both RECORDED verdicts; a NULL is the absence of one. `unknown`
+// means the writer tried and could not decide (a gc'd sha, an unreachable box, a
+// shallow clone) — a NULL means it never attempted a verdict at all, which is
+// what every row written before #11078 carries. Rendering them with one sentence
+// would announce a failed grading on the entire history of the table.
+func TestCloudDeliveriesRollbackVerdictReachesTheHuman(t *testing.T) {
+	fx := loadDeliveriesFixture(t)
+
+	status, body := deliveriesScenario(t, fx, "rollback_verdict")
+	newDeliveriesServer(t, status, body)
+	rolled, stderr, code := runDeliveries(t, "table", "c0e43440b1a2938475d6c7b8a9e0f1d2c3b4a596")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, rolled, stderr)
+	}
+	for _, want := range []string{
+		"ROLLBACK — this delivery moved the platform BACK",
+		"is an ANCESTOR of what was being served before",
+		"from b976637",
+	} {
+		if !strings.Contains(rolled, want) {
+			t.Fatalf("the rollback verdict never reached the render (%q missing):\n%s", want, rolled)
+		}
+	}
+
+	// THE SILENCE, ASSERTED GONE. Same row, verdict flipped to `forward`: if the
+	// two renders are equal, the verdict is being dropped exactly as it was
+	// before this slice — and every assertion above would still pass on a
+	// renderer that printed the word from somewhere else.
+	forward := strings.Replace(body, `"transition": "rollback"`, `"transition": "forward"`, 1)
+	if forward == body {
+		t.Fatal("the rollback_verdict fixture no longer carries `\"transition\": \"rollback\"` — this test cannot compare the two renders")
+	}
+	newDeliveriesServer(t, status, forward)
+	forwardOut, _, _ := runDeliveries(t, "table", "c0e43440b1a2938475d6c7b8a9e0f1d2c3b4a596")
+	if forwardOut == rolled {
+		t.Fatalf("a ROLLBACK renders byte-identically to a FORWARD delivery — the verdict is being dropped:\n%s", rolled)
+	}
+	if strings.Contains(forwardOut, "ROLLBACK") {
+		t.Fatalf("a forward delivery rendered the ROLLBACK sentence — the line is decoration, not a signal:\n%s", forwardOut)
+	}
+
+	// NULL IS "NEVER ATTEMPTED", NOT "unknown". all_null_clocks carries a null
+	// transition, which is the shape of every row older than #11078.
+	nullStatus, nullBody := deliveriesScenario(t, fx, "all_null_clocks")
+	newDeliveriesServer(t, nullStatus, nullBody)
+	nullOut, _, nullCode := runDeliveries(t, "table", "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678")
+	if nullCode != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", nullCode, nullOut)
+	}
+	for _, want := range []string{
+		"UNRECORDED — NO rollback verdict was ever attempted",
+		"It is NOT the same as `unknown`",
+		"previous sha NOT RECORDED",
+	} {
+		if !strings.Contains(nullOut, want) {
+			t.Fatalf("a NULL transition did not render as UNRECORDED (%q missing):\n%s", want, nullOut)
+		}
+	}
+	if strings.Contains(nullOut, "the writer TRIED to grade this move") {
+		t.Fatalf("a NULL transition rendered as the wire's `unknown` — never attempted is not tried-and-failed:\n%s", nullOut)
+	}
+
+	// And a RECORDED `unknown` still says the writer tried: two_rows_one_sha's
+	// instance leg carries it, so the distinction is exercised in both
+	// directions rather than asserted in one.
+	twoStatus, twoBody := deliveriesScenario(t, fx, "two_rows_one_sha")
+	newDeliveriesServer(t, twoStatus, twoBody)
+	twoOut, _, _ := runDeliveries(t, "table", "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c")
+	if !strings.Contains(twoOut, "the writer TRIED to grade this move and could NOT decide") {
+		t.Fatalf("a recorded `unknown` transition did not say the writer tried:\n%s", twoOut)
+	}
+	if strings.Contains(twoOut, "NO rollback verdict was ever attempted") {
+		t.Fatalf("a recorded `unknown` rendered as never-attempted — the two are different statements:\n%s", twoOut)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // the fixture's key sets
 // ---------------------------------------------------------------------------
@@ -604,9 +692,10 @@ func TestPlatformDeliveriesFixtureRowsCarryExactlyTheLiveKeySet(t *testing.T) {
 	fx := loadDeliveriesFixture(t)
 	want := append([]string(nil), fx.LiveKeySet...)
 	sort.Strings(want)
-	if len(want) != 13 {
-		t.Fatalf("live_key_set has %d keys, want the 13 PlatformDelivery.to_json/1 emits "+
-			"(it was 10 until #10942 added queued_self/pickup/stall_seconds; they are LIVE, not pending)", len(want))
+	if len(want) != 15 {
+		t.Fatalf("live_key_set has %d keys, want the 15 PlatformDelivery.to_json/1 emits "+
+			"(10 until #10942 added queued_self/pickup/stall_seconds, 13 until #11078 added previous_sha "+
+			"and transition — the rollback verdict; all are LIVE, none are pending)", len(want))
 	}
 
 	rows := 0

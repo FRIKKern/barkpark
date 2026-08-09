@@ -14,7 +14,7 @@ package cloudclient
 // its header line so the two can never be confused on screen either.
 //
 // EVERY UNMEASURED FIELD IS A POINTER, AND nil MEANS UNMEASURED — NEVER 0 AND
-// NEVER false. SEVEN of the thirteen wire keys are legitimately NULL on a live
+// NEVER false. SEVEN of the fifteen wire keys are legitimately NULL on a live
 // row: the four clocks (`merged_at`, `queued_seconds`, `build_seconds`,
 // `serving_since`), the three queue-split columns (`queued_self_seconds`,
 // `queued_pickup_seconds`, `queued_stall_seconds`) — and `carried`, which the
@@ -27,6 +27,11 @@ package cloudclient
 // into a confident "it did" — the precise class of comforting lie this epic
 // exists to end, and `carried` is the one where the zero value is not merely
 // wrong but ARGUES FOR ITSELF: false is a real, meaningful reading.
+//
+// `previous_sha` and `transition` are nullable as well and are counted with
+// `carried` rather than with the seven clocks: they are a VERDICT about the move
+// this row records, not a measurement of it, and their null says "no verdict was
+// ever attempted" rather than "this interval went unmetered".
 //
 // A REFUSAL IS TYPED, NOT A ZERO PAGE. The route answers a 503
 // {"error":"unavailable","reason":"platform_deliveries_missing","detail":…} when
@@ -46,7 +51,28 @@ import (
 )
 
 // PlatformDelivery is one row of the platform delivery record — exactly the
-// THIRTEEN keys PlatformDelivery.to_json/1 emits, in its order.
+// FIFTEEN keys PlatformDelivery.to_json/1 emits, in its order.
+//
+// IT WAS THIRTEEN UNTIL dr-w27-s2, AND THE TWO MISSING ONES WERE THE ROLLBACK
+// VERDICT. #11078 added `previous_sha` and `transition` to the serializer;
+// nothing here followed, `json.Unmarshal` dropped both in silence, and a row
+// whose transition was `rollback` rendered byte-identically to one that moved
+// `forward`. Neither of the two exact key-count pins could see it — the Elixir
+// one counts the Elixir side, the Go one counts a fixture — so the census pair
+// in cloud/test/barkpark_cloud/payload_key_set_census_test.exs is what now reads
+// both ends at once.
+//
+// PREVIOUSSHA AND TRANSITION ARE *string FOR THE SAME REASON CARRIED IS *bool.
+// Both columns are NULLABLE with NO DATABASE DEFAULT (proved against
+// information_schema in platform_delivery_test.exs), and a NULL `transition`
+// says the writer NEVER ATTEMPTED a verdict — which is NOT the wire's own
+// `"unknown"`, the word reserved for a writer that tried and could not decide (a
+// gc'd sha, an unreachable box, a shallow clone). A plain `string` would decode
+// both of those into ""; the renderer would then have one branch where the
+// schema deliberately keeps two, and "never attempted" would read as "tried and
+// failed" forever. The vocabulary is forward | rollback | diverged | noop |
+// unknown, and it is deliberately NOT `commit_ancestry`'s words: this grades
+// PREVIOUS-vs-NEW, that one grades BOX-vs-MAIN.
 //
 // SHA and DeliveringRunID together with Target are the row IDENTITY: ~36% of
 // merged shas are CARRIED by a later sha's run, so one sha can legitimately have
@@ -93,6 +119,8 @@ type PlatformDelivery struct {
 	ServingSince        *string `json:"serving_since"`
 	Target              string  `json:"target"`
 	Carried             *bool   `json:"carried"`
+	PreviousSHA         *string `json:"previous_sha"`
+	Transition          *string `json:"transition"`
 	RecordedAt          string  `json:"recorded_at"`
 }
 
