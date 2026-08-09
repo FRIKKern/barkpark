@@ -80,6 +80,15 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # fallback for pre-feature instances (404) and failed/unreachable checks.
   @update_states ~w(unknown current behind disabled)
 
+  # cch-w58 — the reasons `update_state` reads "unknown". `update_states/0` says
+  # WHAT the row shows; this says WHY, so the five worlds behind that one rung
+  # stop being one word. `identity_refused` (401) is the only REFUTATION of the
+  # stored admin token; `no_self_update_route` (404) is a PRE-FEATURE box and is
+  # deliberately its own rung — folding a 404 into "refused" is the exact
+  # conflation that made `verify_reachable` useless (charter D684). NULL (absent
+  # from this list) is the un-enumerated state: no refusal on file.
+  @update_unavailable_reasons ~w(identity_refused forbidden no_self_update_route unreachable bad_shape instance_error no_admin_token decrypt_failed not_live)
+
   # The rollout channels (isu-w5.2): "staging" boxes are the canary the rollout
   # worker advances first; "prod" is the fleet default and only advances once the
   # staging gate is green.
@@ -196,6 +205,21 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :update_latest_release, :string
     field :update_checked_at, :utc_datetime_usec
 
+    # cch-w58 — WHY the mirror above says "unknown". `update_state: "unknown"` is
+    # the one rung that collapses five different worlds: the box refused OUR
+    # credential (401), refused the principal (403), has no such route at all
+    # (404 — a pre-feature box), was unreachable, or answered something we could
+    # not read. Only the first is a refutation of the stored admin token, and
+    # before this column the discriminating byte was read once an hour and
+    # thrown away. NULL means "no refusal on file" — every row before this
+    # column's first write, and every row whose last check was a clean 200
+    # (`persist_update_check/2` CLEARS it, so a stale refusal cannot survive a
+    # recovery). Whitelisted against `update_unavailable_reasons/0`.
+    #
+    # READ-ONLY VERDICT: nothing refuses on this column yet. It is the evidence
+    # a later slice needs, not the guard.
+    field :update_unavailable_reason, :string
+
     # deploy-reliability W21 (S2) — the DERIVED freshness verdict, deliberately
     # NOT a fifth `update_state` rung (a fifth rung excludes the row from the
     # rollout that would fix it and can freeze the staging gate fail-CLOSED).
@@ -286,6 +310,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def health_statuses, do: @health_statuses
   def agent_statuses, do: @agent_statuses
   def update_states, do: @update_states
+  def update_unavailable_reasons, do: @update_unavailable_reasons
   def channels, do: @channels
   def providers, do: @providers
   def fleet_roles, do: @fleet_roles
@@ -587,12 +612,18 @@ defmodule BarkparkCloud.Registry.Barkpark do
   end
 
   @doc """
-  Narrow changeset for a self-update status refresh (isu-6) — only the four
+  Narrow changeset for a self-update status refresh (isu-6) — only the five
   update-status cache columns are castable, so mirroring the instance's verdict
   can never rename a Barkpark or reassign its Team (the same containment posture
   as `health_changeset/2` / `suspend_changeset/2`). `update_state` is whitelisted
   against `update_states/0`; the caller (`Registry.refresh_update_status/1`)
   maps anything else to `"unknown"` before it gets here.
+
+  The fifth column, `update_unavailable_reason` (cch-w58), is whitelisted against
+  `update_unavailable_reasons/0` and is the WHY behind an "unknown" state. `nil`
+  is a legal value and means "no refusal on file" — `validate_inclusion` skips a
+  nil change, which is exactly how `persist_update_check/2` CLEARS a stale
+  refusal on a recovered box. This changeset stays narrow: five columns, no more.
   """
   def update_status_changeset(barkpark, attrs) do
     barkpark
@@ -600,9 +631,11 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :update_state,
       :update_running_release,
       :update_latest_release,
-      :update_checked_at
+      :update_checked_at,
+      :update_unavailable_reason
     ])
     |> validate_inclusion(:update_state, @update_states)
+    |> validate_inclusion(:update_unavailable_reason, @update_unavailable_reasons)
     |> validate_length(:update_running_release, max: 255)
     |> validate_length(:update_latest_release, max: 255)
   end

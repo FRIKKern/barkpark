@@ -3802,12 +3802,35 @@ defmodule BarkparkCloud.Registry do
   against `Barkpark.update_states/0`, anything else → `"unknown"`), the
   running/latest releases, and the check time, returning `{:ok, bp}`.
 
+  THE REASON IS PERSISTED (cch-w58). "unknown" alone collapses five different
+  worlds, and this call is the one question per hour that CAN lose, so its
+  answer lands in `update_unavailable_reason`:
+
+    * `identity_refused` (401) — the box does not hold THIS row's admin token.
+      A refutation of our stored credential, not a transient.
+    * `forbidden` (403) — the box knows the credential and refuses the principal.
+    * `no_self_update_route` (404) — a PRE-FEATURE box: no such route, nothing
+      refused. Deliberately NOT folded into `identity_refused` (charter D684).
+    * `unreachable` — no response at all (transport failure).
+    * `instance_error` — any other status, or a 200 we could not read.
+
+  A clean 200 CLEARS the column, so a stale refusal can never outlive a
+  recovery. Nothing REFUSES on this column yet — it is evidence, not a guard.
+
   Transport is the same swappable seam `mint_studio_link/1` uses
   (`:studio_link_http_client`; tests wire `StudioLinkFakeHttpClient`).
   """
   @spec refresh_update_status(Barkpark.t()) ::
           {:ok, Barkpark.t()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :identity_refused
+             | :forbidden
+             | :no_self_update_route
+             | :unreachable
+             | :instance_error}
   def refresh_update_status(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
@@ -3830,6 +3853,22 @@ defmodule BarkparkCloud.Registry do
               {:ok, %{"check" => %{} = check}} -> persist_update_check(bp, check)
               _ -> persist_update_unknown(bp, :instance_error)
             end
+
+          # The box's OWN admin route answered, and its answer DISCRIMINATES —
+          # each of these is a different world, and collapsing them is what made
+          # "unknown" unreadable (cch-w58). 404 stays its own third outcome: a
+          # pre-feature box has no such route and has refused nothing.
+          {:ok, %{status: 401}} ->
+            persist_update_unknown(bp, :identity_refused)
+
+          {:ok, %{status: 403}} ->
+            persist_update_unknown(bp, :forbidden)
+
+          {:ok, %{status: 404}} ->
+            persist_update_unknown(bp, :no_self_update_route)
+
+          {:error, _} ->
+            persist_update_unknown(bp, :unreachable)
 
           _ ->
             persist_update_unknown(bp, :instance_error)
@@ -3854,14 +3893,25 @@ defmodule BarkparkCloud.Registry do
       update_state: state,
       update_running_release: string_field(check["running_release"]),
       update_latest_release: string_field(check["latest_release"]),
-      update_checked_at: DateTime.utc_now()
+      update_checked_at: DateTime.utc_now(),
+      # The box answered us on its own admin route: whatever it refused an hour
+      # ago, it does not refuse now. A stale refusal must not survive a recovery.
+      update_unavailable_reason: nil
     })
+    # FORCED, not cast: `cast` emits no change when the value already matches the
+    # IN-MEMORY struct, and the caller may hold a struct read BEFORE the refusal
+    # was persisted (the router's fire-and-forget kick, a retry on a struct
+    # carried across calls). That would leave the accusation in the row while the
+    # box is demonstrably answering. The clear is unconditional.
+    |> Ecto.Changeset.force_change(:update_unavailable_reason, nil)
     |> Repo.update()
   end
 
   # Best-effort "unknown" landing for every failure mode — the row always
-  # reflects that we asked and got no usable verdict. The write itself is
-  # best-effort too (a changeset/DB failure never masks the original reason).
+  # reflects that we asked and got no usable verdict, AND (cch-w58) WHICH
+  # no-usable-verdict it was. The write itself is best-effort too (a
+  # changeset/DB failure never masks the original reason), and every atom that
+  # reaches here is in `Barkpark.update_unavailable_reasons/0`.
   defp persist_update_unknown(bp, reason) do
     _ =
       bp
@@ -3869,7 +3919,8 @@ defmodule BarkparkCloud.Registry do
         update_state: "unknown",
         update_running_release: nil,
         update_latest_release: nil,
-        update_checked_at: DateTime.utc_now()
+        update_checked_at: DateTime.utc_now(),
+        update_unavailable_reason: Atom.to_string(reason)
       })
       |> Repo.update()
 
