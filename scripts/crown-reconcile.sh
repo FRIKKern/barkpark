@@ -22,8 +22,8 @@
 #   BEHIND    a successful DELIVERING deploy.yml run in the window delivered a
 #             head sha the crown has no row for. The run happened; the record
 #             does not exist.
-#   WRONG     a crown row inside the window names a sha that no successful
-#             delivering run delivered. The record exists; the run does not.
+#   WRONG     a crown row inside the window was written by no successful
+#             delivering run. The record exists; the run does not.
 #   SERVING   the sha barkpark.cloud reports it is SERVING has no `cp` row. This
 #             is the a95bc7ca9 case, and it is the sharpest of the three: the
 #             box is running code the platform's own record has never heard of.
@@ -51,6 +51,36 @@
 # be WRONG. A row whose `carried` is absent was never measured — it is printed as
 # UNCLASSIFIED and is never counted clean.
 #
+# THE ALIBI IS `delivering_run_id`, NOT THE HEAD SHA (charter D496).
+#
+# This axis first alibied a non-carried row by looking for its sha among the
+# delivering runs' HEAD shas, and that premise was inverted four minutes before
+# this script merged: the recorder now writes the sha the BOX WAS SERVING as the
+# primary `carried=false` row and stores the run's own trigger sha as `carried=true`.
+# When a deploy's `git pull` races past its trigger sha — two merges 13s apart,
+# coalesced into one run — the served sha structurally CANNOT appear in a set built
+# from head shas, and a correct row was accused of being a ghost (measured live:
+# `wrong=1/28` naming 8e83b709a, a row that was right).
+#
+# So a non-carried row is legitimate iff its `delivering_run_id` is in the
+# delivering set — the recorder's own statement of which run wrote it, already on
+# both read paths (PlatformDelivery.to_json/1 and the SQL fallback's SELECT above),
+# so no migration and no route change. The head-sha comparison survives ONLY as the
+# fallback for a row that carries no `delivering_run_id` at all, which is how rows
+# written before that field existed are still judged rather than waved through.
+#
+# PREDATES-WRITER IS A NAMED CLASS, NOT A NARROWED WINDOW (charter D496).
+#
+# `record-delivery` — the only thing that writes `platform_deliveries` from inside
+# a run — came into existence at RECORDER_BIRTH_ISO below (PR #11167, merge
+# 67f4a6ab2). A delivering run created BEFORE that instant had nothing that could
+# have recorded it, so calling it BEHIND is an accusation with no defendant. It is
+# reported in its OWN class, with its own count and the birth instant printed, and
+# it is excluded from the BEHIND denominator. It is deliberately NOT hidden by
+# shrinking the window: an exemption has to be a printed denominator, never a
+# quieter one. If EVERY delivering run in the window predates the writer there is
+# no denominator left, and that is a warning (rc 2), never a green.
+#
 # CREDENTIALS: NONE ARE ADDED. Two read paths, in this order, and the one that
 # answered is printed:
 #
@@ -72,8 +102,10 @@
 # EXIT CODES  0 = reconciled — every delivering run has its row, every row has its
 #                 run, and the serving sha is recorded
 #             1 = BEHIND or WRONG (or SERVING-UNRECORDED), WITH COUNTS
-#             2 = could not read, or the population was empty — a WARNING that is
-#                 never counted clean. A rate with no denominator is refused.
+#             2 = could not read, or the population was empty (including a window
+#                 whose every delivering run PREDATES the recorder) — a WARNING
+#                 that is never counted clean. A rate with no denominator is
+#                 refused.
 #             3 = CONFIGURATION fault only (no jq/gh, no credential, bad flag)
 #
 # USAGE
@@ -106,6 +138,13 @@ GRACE_HOURS=6
 # be a deploy still in flight whose recorder has not posted yet. Younger than this
 # is a WARNING; older is a RED.
 SERVING_GRACE_SECONDS=1200
+# The instant `record-delivery` first existed: PR #11167, merge commit 67f4a6ab2.
+# Re-derivable by hand, which is why the commit is named beside it:
+#   TZ=UTC git show -s --format='%H %cd %s' --date=iso-strict 67f4a6ab2
+# A delivering run created before this could not have been recorded by anything.
+RECORDER_BIRTH_ISO="2026-08-09T09:39:44Z"
+RECORDER_BIRTH_PR="#11167"
+RECORDER_BIRTH_COMMIT="67f4a6ab2"
 API_BASE="${CROWN_API_BASE:-https://api.barkpark.cloud}"
 HEALTH_URL="${CROWN_HEALTH_URL:-https://barkpark.cloud/health}"
 
@@ -178,6 +217,7 @@ if [ -n "$NOW_OVERRIDE" ]; then
 else
   NOW_EPOCH="$(date -u +%s)"
 fi
+RECORDER_BIRTH_EPOCH="$(epoch_of "$RECORDER_BIRTH_ISO")" || { warn "CONFIG: RECORDER_BIRTH_ISO is not an ISO-8601 instant: $RECORDER_BIRTH_ISO"; exit 3; }
 CUTOFF_EPOCH=$((NOW_EPOCH - WINDOW_HOURS * 3600))
 WIDE_EPOCH=$((CUTOFF_EPOCH - GRACE_HOURS * 3600))
 iso_of() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null; }
@@ -381,26 +421,31 @@ fi
 : > "$WORK/delivering.txt"
 JOBS_UNREADABLE=0
 NONDELIVERING=0
-while IFS=' ' read -r id sha; do
+while IFS=' ' read -r id sha at; do
   [ -n "$id" ] || continue
   run_delivers "$id"
   case $? in
-    0) printf '%s %s\n' "$id" "$sha" >> "$WORK/delivering.txt" ;;
+    0) printf '%s %s %s\n' "$id" "$sha" "$at" >> "$WORK/delivering.txt" ;;
     1) NONDELIVERING=$((NONDELIVERING + 1)) ;;
     *) JOBS_UNREADABLE=$((JOBS_UNREADABLE + 1)); UNREADABLE=1
        warn "  run $id: its job list could not be read — it is NOT counted as reconciled" ;;
   esac
-done < <(jq -r '.examined[] | "\(.id) \(.sha)"' "$WORK/runs.json")
+done < <(jq -r '.examined[] | "\(.id) \(.sha) \(.at)"' "$WORK/runs.json")
 
 DELIVERING="$(awk 'NF' "$WORK/delivering.txt" | wc -l | tr -d ' ')"
 
-# The wide set of delivering head shas, for the reverse direction. Runs outside
-# the examined window are included here only as an ALIBI for a row, never as a
-# population this verdict reports a rate over.
+# The wide set of delivering runs, for the reverse direction — BOTH their ids
+# (the alibi a row states for itself) and their head shas (the fallback for a row
+# that states none). Runs outside the examined window are included here only as an
+# ALIBI for a row, never as a population this verdict reports a rate over.
 : > "$WORK/wide-shas.txt"
+: > "$WORK/wide-runs.txt"
 while IFS=' ' read -r id sha; do
   [ -n "$id" ] || continue
-  run_delivers "$id" && printf '%s\n' "$sha" >> "$WORK/wide-shas.txt"
+  if run_delivers "$id"; then
+    printf '%s\n' "$sha" >> "$WORK/wide-shas.txt"
+    printf '%s\n' "$id" >> "$WORK/wide-runs.txt"
+  fi
 done < <(jq -r '.wide[] | "\(.id) \(.sha)"' "$WORK/runs.json")
 
 say ""
@@ -409,9 +454,18 @@ say "POPULATION: ${SUCCESS_COUNT}${FLOOR} successful deploy.yml run(s) on main i
 # ── BEHIND: a delivering run whose head sha the crown has no row for ─────────
 BEHIND=0
 BEHIND_UNREADABLE=0
+PREDATES=0
 : > "$WORK/behind.txt"
-while IFS=' ' read -r id sha; do
+: > "$WORK/predates.txt"
+while IFS=' ' read -r id sha at; do
   [ -n "$sha" ] || continue
+  # A run that finished before `record-delivery` existed cannot be BEHIND: there
+  # was no writer to be behind. It gets its own printed class, not silence.
+  if [ -n "${at:-}" ] && [ "$at" -lt "$RECORDER_BIRTH_EPOCH" ] 2>/dev/null; then
+    PREDATES=$((PREDATES + 1))
+    printf '%s %s\n' "$sha" "$id" >> "$WORK/predates.txt"
+    continue
+  fi
   if crown_read "sha=$sha" "$WORK/rows-$sha.json"; then
     n="$(jq --arg sha "$sha" '[.deliveries[] | select(.sha == $sha)] | length' "$WORK/rows-$sha.json" 2>/dev/null)"
     [ -n "$n" ] || n=0
@@ -425,12 +479,18 @@ while IFS=' ' read -r id sha; do
   fi
 done < "$WORK/delivering.txt"
 
+# The BEHIND denominator is the delivering runs that a writer actually existed
+# for. It is printed beside PREDATES below, so the exemption is a denominator a
+# reader can subtract, never a hidden window.
+RECONCILABLE=$((DELIVERING - PREDATES))
+
 # ── WRONG: a row inside the window naming a sha no delivering run delivered ──
 WRONG=0
 UNCLASSIFIED=0
 ROWS_EXAMINED=0
 : > "$WORK/wrong.txt"
 sort -u "$WORK/wide-shas.txt" > "$WORK/wide-shas-sorted.txt"
+sort -u "$WORK/wide-runs.txt" > "$WORK/wide-runs-sorted.txt"
 WIDE_SHAS="$(awk 'NF' "$WORK/wide-shas-sorted.txt" | wc -l | tr -d ' ')"
 if [ "$WIDE_SHAS" -eq 0 ]; then
   # Without a single delivering run in the widened window there is no ALIBI
@@ -446,7 +506,7 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
       | select(.at >= $cut)]' "$WORK/recent.json" > "$WORK/recent-window.json" 2>/dev/null
   if [ -s "$WORK/recent-window.json" ]; then
     ROWS_EXAMINED="$(jq 'length' "$WORK/recent-window.json")"
-    while IFS=' ' read -r sha carried; do
+    while IFS=' ' read -r sha carried run; do
       [ -n "$sha" ] || continue
       if [ "$carried" = "true" ]; then
         continue
@@ -456,14 +516,22 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
         warn "  row $sha: 'carried' was never measured — it cannot be ruled correct or wrong, and is NOT counted clean"
         continue
       fi
-      if ! grep -qx "$sha" "$WORK/wide-shas-sorted.txt"; then
-        WRONG=$((WRONG + 1))
-        printf '%s\n' "$sha" >> "$WORK/wrong.txt"
+      # The alibi the row states for ITSELF, first: the run the recorder says
+      # wrote it. The head-sha comparison is reached only when the row states no
+      # run at all, because a served sha legitimately differs from every run's
+      # head sha whenever a deploy's pull races past its trigger.
+      if [ "$run" != "-" ]; then
+        grep -qx "$run" "$WORK/wide-runs-sorted.txt" && continue
+      else
+        grep -qx "$sha" "$WORK/wide-shas-sorted.txt" && continue
       fi
+      WRONG=$((WRONG + 1))
+      printf '%s %s\n' "$sha" "$run" >> "$WORK/wrong.txt"
       # `.carried // "null"` would be WRONG here: jq's `//` treats `false` as
       # empty, so every honestly-measured `carried: false` row would report as
-      # unmeasured — the comforting direction. Presence is asked for explicitly.
-    done < <(jq -r '.[] | "\(.sha) \(if has("carried") and .carried != null then (.carried | tostring) else "null" end)"' "$WORK/recent-window.json" | sort -u)
+      # unmeasured — the comforting direction. Presence is asked for explicitly,
+      # and `delivering_run_id` is read the same way for the same reason.
+    done < <(jq -r '.[] | "\(.sha) \(if has("carried") and .carried != null then (.carried | tostring) else "null" end) \(if has("delivering_run_id") and .delivering_run_id != null and ((.delivering_run_id | tostring) != "") then (.delivering_run_id | tostring) else "-" end)"' "$WORK/recent-window.json" | sort -u)
   else
     UNREADABLE=1
     warn "  the recent-row page did not parse — the reverse direction was NOT checked"
@@ -515,16 +583,27 @@ pct() { # <numerator> <denominator>
 }
 
 say ""
+if [ "$PREDATES" -gt 0 ]; then
+  say "PREDATES-WRITER: ${PREDATES} of ${DELIVERING} delivering run(s) were created before the record-delivery job existed (born ${RECORDER_BIRTH_ISO}, PR ${RECORDER_BIRTH_PR}, merge ${RECORDER_BIRTH_COMMIT}) — nothing could have recorded them, so they are NOT counted BEHIND. They are printed here rather than hidden by a narrower window:"
+  while IFS=' ' read -r sha id; do
+    say "    ${sha}  (run ${id}) — delivered before any recorder existed"
+  done < "$WORK/predates.txt"
+  say ""
+fi
 if [ "$BEHIND" -gt 0 ]; then
-  say "BEHIND: ${BEHIND} of ${DELIVERING} delivering run(s) examined ($(pct "$BEHIND" "$DELIVERING")) delivered a sha the crown has NO row for:"
+  say "BEHIND: ${BEHIND} of ${RECONCILABLE} delivering run(s) examined ($(pct "$BEHIND" "$RECONCILABLE")) delivered a sha the crown has NO row for:"
   while IFS=' ' read -r sha id; do
     say "    ${sha}  (run ${id}) — delivered, never recorded"
   done < "$WORK/behind.txt"
 fi
 if [ "$WRONG" -gt 0 ]; then
-  say "WRONG: ${WRONG} of ${ROWS_EXAMINED} crown row(s) examined ($(pct "$WRONG" "$ROWS_EXAMINED")) name a sha no delivering run delivered:"
-  while read -r sha; do
-    say "    ${sha} — recorded, no delivering run"
+  say "WRONG: ${WRONG} of ${ROWS_EXAMINED} crown row(s) examined ($(pct "$WRONG" "$ROWS_EXAMINED")) were written by no delivering run:"
+  while IFS=' ' read -r sha run; do
+    if [ "${run:--}" = "-" ]; then
+      say "    ${sha} — recorded with no delivering run id, and no delivering run has that head sha"
+    else
+      say "    ${sha} — recorded as delivered by run ${run}, which is not a delivering run in the window"
+    fi
   done < "$WORK/wrong.txt"
 fi
 if [ "$SERVING_RED" -gt 0 ]; then
@@ -533,13 +612,19 @@ fi
 
 if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${DELIVERING} delivering runs, wrong=${WRONG}/${ROWS_EXAMINED} rows, serving-unrecorded=${SERVING_RED}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${ROWS_EXAMINED} rows, serving-unrecorded=${SERVING_RED}, predates-writer=${PREDATES}/${DELIVERING}."
   exit 1
 fi
 
 if [ "$DELIVERING" -eq 0 ]; then
   say ""
   say "COULD NOT VERIFY: the population was EMPTY — ${SUCCESS_COUNT}${FLOOR} successful run(s) in the window and none of them delivered. A rate with no denominator is refused, so this is a warning, not a green."
+  exit 2
+fi
+
+if [ "$RECONCILABLE" -eq 0 ]; then
+  say ""
+  say "COULD NOT VERIFY: all ${DELIVERING} delivering run(s) in the window PREDATE the recorder's birth (${RECORDER_BIRTH_ISO}, PR ${RECORDER_BIRTH_PR}) — there is nothing a writer could have recorded, so the BEHIND denominator is zero. A rate with no denominator is refused, so this is a warning, not a green."
   exit 2
 fi
 
@@ -550,5 +635,5 @@ if [ "$UNREADABLE" != "0" ]; then
 fi
 
 say ""
-say "RECONCILED: all ${DELIVERING} delivering run(s) in the window have their row, all ${ROWS_EXAMINED} row(s) in the window have their run, and the serving sha ${SERVING_SHA:-<not checked>} is recorded."
+say "RECONCILED: all ${RECONCILABLE} delivering run(s) in the window have their row, all ${ROWS_EXAMINED} row(s) in the window have their run, and the serving sha ${SERVING_SHA:-<not checked>} is recorded."
 exit 0

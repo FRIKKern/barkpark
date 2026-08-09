@@ -14,6 +14,11 @@
 #   (a) a consistent window reconciles                              → exit 0
 #   (b) ROW MISSING: a delivering run whose head sha has no row      → exit 1
 #   (c) SHA MISMATCHED: a non-carried row no run delivered           → exit 1
+#   (c2) RUN ID MISMATCHED: a row whose delivering_run_id is a ghost  → exit 1
+#        (its SHA is one a run really delivered, so the old sha-only
+#         comparison would have waved it through — this case is the
+#         one that keeps the repaired WRONG axis able to LOSE)
+#   (c3) NO RUN ID AT ALL: the head-sha comparison is the fallback    → 0 and 1
 #   (d) WINDOW EMPTY: nothing to compare is never a green            → exit 2
 #   (e) CROWN UNREADABLE: a read that did not happen is never green  → exit 2
 #   (f) SERVING-UNRECORDED: the box serves a sha with no cp row      → exit 1
@@ -23,6 +28,10 @@
 #       (this is the false-positive that would drown the real reds)
 #   (i) a CARRIED row naming a sha with no run of its own is correct → exit 0
 #   (j) configuration faults are 3, and never 1 or 2
+#   (m) PREDATES-WRITER: a delivering run created before the
+#       record-delivery job existed is its own printed class, with the
+#       birth instant beside it — never a BEHIND                      → exit 0
+#       and a window with NOTHING BUT such runs has no denominator     → exit 2
 #
 #   bash scripts/crown-reconcile.test.sh
 
@@ -48,9 +57,16 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 [ -f "$WF" ] || { echo "missing $WF" >&2; exit 2; }
 
 NOW="2026-08-09T12:00:00Z"
-IN1="2026-08-09T09:40:00Z"   # inside a 24h window ending at NOW
-IN2="2026-08-09T06:00:00Z"
+IN1="2026-08-09T09:40:00Z"   # inside a 24h window ending at NOW, AFTER the recorder's birth
+IN2="2026-08-09T10:00:00Z"   # ditto
+PRE="2026-08-09T06:00:00Z"   # inside the window, but BEFORE the recorder existed
 OUT="2026-08-01T00:00:00Z"   # far outside it
+
+# The recorder's birth instant is DERIVED from the script's own constant, never
+# re-typed here: changing it there must move this harness, not rot into a stale
+# literal. An underivable constant is a FAILURE, because an empty needle would
+# match anything.
+BIRTH="$(sed -n 's/^RECORDER_BIRTH_ISO="\([^"]*\)".*/\1/p' "$CR" | head -1)"
 
 SHA_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 SHA_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -92,12 +108,14 @@ jobs_json() { # <name> <run-id:legresult>...
   echo "$out"
 }
 
-row() { # <sha> <target> <carried:true|false|omit> <first_seen> <run>
-  if [ "$3" = "omit" ]; then
-    printf '{"sha":"%s","target":"%s","first_seen_at":"%s","delivering_run_id":"%s"}' "$1" "$2" "$4" "$5"
-  else
-    printf '{"sha":"%s","target":"%s","carried":%s,"first_seen_at":"%s","delivering_run_id":"%s"}' "$1" "$2" "$3" "$4" "$5"
-  fi
+row() { # <sha> <target> <carried:true|false|omit> <first_seen> <run:id|omit>
+  # Either field can be OMITTED, because both absences are real shapes the crown
+  # can hand back: a row written before `carried` was measured, and a row written
+  # before `delivering_run_id` existed.
+  local carried_kv="" run_kv=""
+  [ "$3" = "omit" ] || carried_kv=",\"carried\":$3"
+  [ "$5" = "omit" ] || run_kv=",\"delivering_run_id\":\"$5\""
+  printf '{"sha":"%s","target":"%s"%s,"first_seen_at":"%s"%s}' "$1" "$2" "$carried_kv" "$4" "$run_kv"
 }
 
 crown_json() { # <name> <row-json>...
@@ -196,6 +214,51 @@ run_cr 1 "the crown carries a non-carried row for $SHA_C that no run delivered" 
 saw "WRONG: 1 of 4 crown row(s) examined (25.0%)" "the WRONG rate prints its POPULATION too"
 saw "$SHA_C" "it names the ghost sha"
 
+section "(c2) MUTATION: the delivering_run_id is a ghost, though the sha is real"
+# This is the case the old sha-keyed comparison could not lose on: $SHA_A WAS
+# delivered, so a sha-only alibi waves this row through. The row states run 9999
+# wrote it, and no such delivering run exists.
+CROWN_GHOSTRUN="$(crown_json crown-ghostrun \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 9999)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)")"
+run_cr 1 "a row for the delivered $SHA_A claims delivering run 9999, which does not exist" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_GHOSTRUN" --health-fixture "$HEALTH_BASE"
+saw "WRONG: 1 of 3 crown row(s) examined" "the run-id alibi can LOSE even when the sha is one a run delivered"
+saw "run 9999" "it names the delivering run the row invented"
+
+section "(c2b) the inverse: a served sha no run has as its HEAD sha is CORRECT"
+# The live false accusation, in fixture form. #11203 made the recorder write the
+# sha the BOX WAS SERVING as the primary carried=false row, so a legitimate row
+# routinely names a sha that appears in no run's head_sha — as long as the run
+# that wrote it is real. Before this slice, this exact shape printed WRONG.
+CROWN_SERVED="$(crown_json crown-served \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN2" 2)")"
+run_cr 0 "$SHA_C was SERVED by run 2, whose own head sha is $SHA_B" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_SERVED" --health-fixture "$HEALTH_BASE"
+not_saw "WRONG:" "a row whose delivering run is real is never accused over its sha"
+
+section "(c3) NO delivering_run_id at all — the head sha is the FALLBACK, not dead"
+CROWN_NORUNID_OK="$(crown_json crown-norunid-ok \
+  "$(row "$SHA_A" cp false "$IN1" omit)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)")"
+run_cr 0 "a row with no run id whose sha a run DID deliver is clean" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_NORUNID_OK" --health-fixture "$HEALTH_BASE"
+not_saw "WRONG:" "the fallback clears a legacy row whose sha is accounted for"
+
+CROWN_NORUNID_BAD="$(crown_json crown-norunid-bad \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN2" omit)")"
+run_cr 1 "a row with no run id and a sha no run delivered is still WRONG" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_NORUNID_BAD" --health-fixture "$HEALTH_BASE"
+saw "no delivering run id" "it says the row stated no run and was judged on its sha"
+
 section "(d) MUTATION: the window is empty — nothing compared is never a green"
 RUNS_OLD="$(runs_json runs-old "$SHA_A:$OUT" "$SHA_B:$OUT")"
 run_cr 2 "every successful run predates the window" \
@@ -251,6 +314,37 @@ CROWN_UNMEASURED="$(crown_json crown-unmeasured \
 run_cr 2 "$SHA_C's carried flag is absent — unclassifiable, never assumed correct" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_UNMEASURED" --health-fixture "$HEALTH_BASE"
 saw "never measured" "it says which row it could not classify"
+
+section "(m) PREDATES-WRITER: a run older than the recorder is not BEHIND"
+if [ -n "$BIRTH" ]; then
+  ok "the recorder's birth instant is derivable from the script's own constant ($BIRTH)"
+else
+  bad "could not derive RECORDER_BIRTH_ISO from $CR — this section would be vacuous, so it fails instead"
+fi
+RUNS_PREDATE="$(runs_json runs-predate "$SHA_A:$IN1" "$SHA_B:$PRE")"
+CROWN_ONLY_A="$(crown_json crown-only-a \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)")"
+run_cr 0 "run 2 delivered $SHA_B before any recorder existed and has no row" \
+  --runs-fixture "$RUNS_PREDATE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_ONLY_A" --health-fixture "$HEALTH_BASE"
+not_saw "BEHIND:" "a run older than the writer is never accused of being BEHIND"
+saw "PREDATES-WRITER: 1 of 2 delivering run(s)" "the exemption prints its own count over the full population"
+saw "$BIRTH" "the birth instant is printed, so the exemption can be re-derived"
+saw "$SHA_B" "the exempted run is named, not swallowed"
+
+# The identical fixture judged BEHIND when its run is NEWER than the writer: the
+# exemption keys on the run's own age, not on the row being absent.
+RUNS_AFTER="$(runs_json runs-after "$SHA_A:$IN1" "$SHA_B:$IN2")"
+run_cr 1 "the same missing row, but run 2 is newer than the writer" \
+  --runs-fixture "$RUNS_AFTER" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_ONLY_A" --health-fixture "$HEALTH_BASE"
+saw "BEHIND: 1 of 2" "after the writer existed, a missing row is BEHIND again"
+
+section "(m2) a window of NOTHING BUT pre-writer runs has no denominator"
+RUNS_ALL_PRE="$(runs_json runs-all-pre "$SHA_A:$PRE" "$SHA_B:$PRE")"
+run_cr 2 "every delivering run in the window predates the recorder" \
+  --runs-fixture "$RUNS_ALL_PRE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "PREDATE the recorder's birth" "an all-exempt window is refused, not rounded to reconciled"
+not_saw "RECONCILED:" "it never claims reconciliation over an empty BEHIND denominator"
 
 section "(j) configuration faults are 3 — never a verdict, never a warning"
 run_cr 3 "an unknown flag" --runs-fixture "$RUNS_BASE" --nonsense
