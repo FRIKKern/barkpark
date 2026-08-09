@@ -622,16 +622,28 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
 
     {_entries, callers} = measured()
 
-    # TWO external call sites, and the pair is PINNED — dr-w16-s6 widened this
-    # from the single-element `[%{arity: 2}]` it was, because the operator route
-    # (`census(from, to)`, arity 2) 403s for every real account and the
+    # THREE external call sites, and the multiset is PINNED — dr-w16-s6 widened
+    # this from the single-element `[%{arity: 2}]` it was, because the operator
+    # route (`census(from, to)`, arity 2) 403s for every real account and the
     # team-scoped route (`census(from, to, site_ids: …)`, arity 3) is the read a
-    # non-operator can actually reach. Widened by naming the EXACT arity SET, not
-    # by loosening the match: `!= []` or a `>= 1` count would admit a third
-    # entry point silently, and "exactly one census computation" is the property
-    # this row exists to hold. A new caller must edit this line on purpose.
+    # non-operator can actually reach. dr-w28-s5 widened it again, ON PURPOSE,
+    # for the THIRD site: `Notifications.DigestEmail.window_health/3` in
+    # `notifications/digest_email.ex`, which reads
+    # `census(from, to, site_ids: …, site_limit: 0)` — arity 3, `site_ids`
+    # because the digest is delivered per team and a fleet-wide total inside a
+    # per-team email is a cross-team disclosure, and `site_limit: 0` because the
+    # email reports a RATE and never a per-site league table (counts and
+    # percentages name nobody).
+    #
+    # Widened by naming the EXACT arity MULTISET, not by loosening the match:
+    # `!= []` or a `>= 1` count would admit a fourth entry point silently, and
+    # "exactly one census computation" is the property this row exists to hold.
+    # A new caller must edit this line on purpose. Nor may a new consumer be
+    # hidden behind a `DeployLedger` wrapper: `Census.callers/4` buckets a site
+    # `:internal` iff the file IS deploy_ledger.ex, so a wrapper would hold this
+    # list at `[2, 3]` and conceal the consumer permanently.
     arities = census_caller_arities(callers)
-    assert arities == [2, 3]
+    assert arities == [2, 3, 3]
 
     # AND THE WIDENED FORM CAN STILL LOSE. The same assertion against the walker
     # that matches no call shape — a widening that survived a dead extractor
@@ -640,7 +652,7 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
     assert census_caller_arities(broken) == []
 
     assert_raise ExUnit.AssertionError, fn ->
-      assert census_caller_arities(broken) == [2, 3]
+      assert census_caller_arities(broken) == [2, 3, 3]
     end
   end
 
