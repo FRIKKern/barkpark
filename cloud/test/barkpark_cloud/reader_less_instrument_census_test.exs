@@ -618,13 +618,26 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
         "its two halves live in DIFFERENT trees: internal/agent/report.go:639 names the route it probes, api/lib/barkpark_web/router.ex:1633 mounts it, and five more api/ files name the identifier. D442's corpus omitted api/ entirely, so a key whose readership lives there scored dark by construction. This row makes that concrete and testable.",
       disposition: :has_reader,
       stay: nil
+    },
+    %{
+      key: "coverage_cohorts",
+      what:
+        "the coverage partition over BOTH never-live cohorts — deferred rows AND the failed-terminating tail the deferral clock is blind to — COVERED / never covered / too young / unreadable, per environment",
+      surface:
+        "GET /v1/deploy-ledger/census — emitted at the TOP LEVEL of DeployLedger.census/3; and the DAILY DIGEST EMAIL, whose deploy-health block renders the partition beside the rate",
+      audience:
+        "a human, every morning, WITHOUT being asked to go and look: DailyDigestWorker runs at 06:00 UTC and digest_email.ex renders the sentence. Second surface: the operator's terminal — internal/cloudclient/client.go decodes CoverageCohorts and internal/cli/cloud_deploy_census_cmd.go renders it.",
+      reason:
+        "REGISTERED AT BIRTH, in the same commit as the key (dr-w32-s3). This census FAILS OPEN — the register is hand-typed and nothing derives the emitted set — so a key that ships without its row is a key this guard silently does not cover. The row is here because the gauge the epic's wind-down rests on must not be the next instrument nobody reads: its reader ships in the same PR rather than being promised to a later slice.",
+      disposition: :has_reader,
+      stay: nil
     }
   ]
 
   # THE ANTI-VACUITY FLOOR. A deleted register row would otherwise be a silent
   # green — zero instruments examined is zero reader-less instruments found.
   # Lowered only in the same commit as the instrument that went away.
-  @register_floor 7
+  @register_floor 8
 
   # The corpus floor, per root. A `find` that silently returns nothing (a moved
   # tree, a refused-dirs change that eats a whole root) reports every instrument

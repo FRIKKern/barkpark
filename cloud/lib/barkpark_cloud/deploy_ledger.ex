@@ -397,6 +397,40 @@ defmodule BarkparkCloud.DeployLedger do
      "the box's content marker could not be read when this row was written, so this deferral cannot be classified at all"}
   ]
 
+  # THE FAILED-TERMINATING TAIL, AND WHY THE DEFERRAL CLOCK ALONE IS BLIND TO IT
+  # (dr-w32-s3).
+  #
+  # `deferral_wait/2`'s population is `status == "deferred"` and nothing else.
+  # That is the right population for the question it answers ("how long did the
+  # re-queue take"), and the WRONG population for the question the wind-down
+  # gauge asks ("is any site sitting there un-rebuilt"). Measured on the corpus
+  # that motivated this: of 504 never-live chains, 33 terminate `failed`, not
+  # `deferred` — a third of the tail, invisible to a gauge built on the deferred
+  # cohort alone.
+  #
+  # So the SAME `{site_id, environment}` later-live clock is applied to the
+  # failed-terminating rows and reported as its own named cohort, side by side.
+  # Same clock, same three outcomes, two populations that are never summed: a
+  # failed row is not a deferral and the two must not be pooled into one
+  # reassuring percentage.
+  @coverage_cohort_statuses ["deferred", "failed"]
+
+  # THE MATURITY FENCE. A row written four minutes ago that has no later live
+  # build is not an uncovered site — it is a row whose covering build has not had
+  # time to happen. Counting it as NEVER COVERED would make the gauge report the
+  # fleet's own arrival rate as damage, and it would report the most damage at
+  # the exact moment the fleet is busiest.
+  #
+  # 24h because the digest that carries this reading runs daily: a row younger
+  # than one digest cycle has not yet been given a full cycle to be covered in.
+  # PENDING rows younger than the fence are reported as their own count
+  # (`too_young`) and never folded into either side.
+  @coverage_maturity_seconds 86_400
+
+  @coverage_clock "the SAME clock as `deferral_wait` — a row's `inserted_at` → the FIRST later `inserted_at` of a live row on the same site and environment — applied to BOTH the deferred and the failed-terminating cohorts. Never keyed on `content_rev` (D170(a)/D162) and never on `became_live_at`"
+
+  @coverage_basis "COVERAGE, and only coverage: a row counts as COVERED when THE SITE has since rebuilt (a later live build was minted for it). It is never a claim about this row's own payload. NEVER COVERED counts only PENDING rows older than the maturity fence; younger ones are reported separately as too_young, and UNREADABLE rows are reported beside both, never inside either"
+
   # The `content_rev` an unreadable box degrades to (`Sites.Deploy`'s
   # `@unknown_content_rev`): the empty string, its honest fail-open. Read as a
   # PER-ROW READABILITY FLAG — never as a join key, which is the thing D478
@@ -1180,6 +1214,14 @@ defmodule BarkparkCloud.DeployLedger do
       # the ledger calls "re-queued, not lost"; this is the number that says
       # whether the re-queue arrived in four minutes or in fourteen hours.
       deferral_wait: deferral_wait(scoped, to),
+      # THE COVERAGE PARTITION, OVER BOTH NEVER-LIVE COHORTS (dr-w32-s3). The
+      # wait above answers "how long did the re-queue take" over DEFERRED rows
+      # only; this answers "is anything sitting there un-rebuilt" over the
+      # deferred AND the failed-terminating rows, which is the reading the daily
+      # digest carries to a human. Emitted HERE, at the top level of `census/3`,
+      # and not inside a helper: a key added inside `class_rows/3` is invisible
+      # to both payload censuses (proved by mutation, D550).
+      coverage_cohorts: coverage_cohorts(scoped, to),
       # THE SECOND INDEPENDENT COUNT, in the code and not in a test.
       completeness: completeness(scoped, volume, not_attempted_rows),
       boundaries: @boundaries,
@@ -1446,6 +1488,102 @@ defmodule BarkparkCloud.DeployLedger do
     end
   end
 
+  # THE COVERAGE PARTITION OVER BOTH NEVER-LIVE COHORTS (dr-w32-s3).
+  #
+  # ONE query, ONE covering fold, TWO cohorts that are never summed. The
+  # classifier is `deferral_outcome/3` — unchanged, and deliberately reused
+  # rather than forked: a second copy of the COVERED/PENDING/UNREADABLE rule is
+  # a second place for the vocabulary to drift, and the vocabulary is the part
+  # D478 fences.
+  #
+  # WHAT COVERED MEANS HERE IS WHAT IT MEANS THERE, VERBATIM: the site has since
+  # rebuilt. It is NOT a claim that this row's own content reached the web, and
+  # the fact that the cohort now includes FAILED rows does not weaken that — it
+  # does not strengthen it either. A failed row whose site later rebuilt is a
+  # site that is not stuck; it is not a failure that turned out fine.
+  defp coverage_cohorts(scoped, as_of) do
+    rows =
+      Repo.all(
+        from(d in scoped,
+          where: d.status in ^@coverage_cohort_statuses,
+          select: %{
+            site_id: d.site_id,
+            environment: d.environment,
+            inserted_at: d.inserted_at,
+            content_rev: d.content_rev,
+            status: d.status
+          }
+        )
+      )
+
+    # ONE covering query for BOTH cohorts — the marks are keyed on
+    # `{site_id, environment}` and do not care which status asked for them.
+    marks = live_marks(rows)
+
+    observations =
+      Enum.map(rows, fn row ->
+        row
+        |> deferral_outcome(marks, as_of)
+        |> Map.merge(%{status: row.status, environment: row.environment})
+      end)
+
+    by_status = Enum.group_by(observations, & &1.status)
+
+    %{
+      clock: @coverage_clock,
+      basis: @coverage_basis,
+      as_of: as_of,
+      maturity_seconds: @coverage_maturity_seconds,
+      cohorts:
+        Enum.map(@coverage_cohort_statuses, fn status ->
+          coverage_cohort(status, Map.get(by_status, status, []))
+        end)
+    }
+  end
+
+  # ONE cohort's partition. Every count that is not COVERED is reported by name:
+  # a cohort that printed only `covered` would let a never-covered row and a
+  # row nobody could classify look like the same silence.
+  defp coverage_cohort(status, observations) do
+    by_outcome = Enum.group_by(observations, & &1.outcome)
+    covered = Map.get(by_outcome, "COVERED", [])
+    pending = Map.get(by_outcome, "PENDING", [])
+    unreadable = Map.get(by_outcome, "UNREADABLE", [])
+
+    # `seconds` on a PENDING observation is the time it HAS ALREADY WAITED, so
+    # the maturity fence is a predicate on that lower bound and needs no second
+    # clock.
+    {never_covered, too_young} =
+      Enum.split_with(pending, &(&1.seconds >= @coverage_maturity_seconds))
+
+    %{
+      cohort: status,
+      status: status,
+      population: length(observations),
+      covered: length(covered),
+      pending: length(pending),
+      unreadable: length(unreadable),
+      matured: length(never_covered) + length(covered),
+      never_covered: length(never_covered),
+      too_young: length(too_young),
+      # THE SPLIT THAT DECIDES WHETHER A NEVER-COVERED ROW MATTERS. A preview
+      # build that never got a successor is not a production site sitting dark,
+      # and pooling the two is how three real production rows would hide inside
+      # a bigger, softer number — or be inflated by one.
+      never_covered_by_environment: never_covered_by_environment(never_covered),
+      oldest_pending_seconds: pending |> Enum.map(& &1.seconds) |> Enum.max(fn -> nil end)
+    }
+  end
+
+  defp never_covered_by_environment(never_covered) do
+    never_covered
+    |> Enum.group_by(& &1.environment)
+    |> Enum.map(fn {environment, rows} ->
+      %{environment: environment, never_covered: length(rows)}
+    end)
+    |> Enum.sort_by(&{-&1.never_covered, &1.environment})
+  end
+
   # THE COMPLETENESS AUDIT. A second query SHAPE over the same `scoped` source:
   # a bare row count with no GROUP BY and no classification fold, reconciled
   # against the numbers this envelope actually reports. `volume` PLUS
@@ -1704,9 +1842,34 @@ defmodule BarkparkCloud.DeployLedger do
   14/14 with the empirical test — whether the row AT `ceil(n*q)` is itself
   censored — which is applied as a third policy anyway.
 
-  ON TODAY'S CORPUS p95 REFUSES AT EVERY WIDTH. That is the true answer, not a
-  broken feature: 40%+ of rows in any window are still waiting, and no estimator
-  can name a 95th percentile of a distribution whose top 40% has not finished.
+  WHAT THE CORPUS ACTUALLY SAYS NOW (re-measured 2026-08-09, cloud-db-1, this
+  clock — attempt `inserted_at` → `became_live_at`, floored). The sentence that
+  stood here said p95 REFUSES AT EVERY WIDTH because 40%+ of rows in any window
+  are still waiting. That is FALSE on today's corpus and had gone stale without
+  anything reddening: the censored fraction reads 0.0139 at 24h, 0.0027 at 72h,
+  0.0013 at 7d and 0.0004 at 14d, so p95 NAMES A NUMBER at every width from 6h
+  up — 948.782s at 24h and 1256.78s at 72h. `max` still refuses, and it refuses
+  STRUCTURALLY rather than because the fleet is sick: q=1.0 leaves 0.0 headroom,
+  so any censored row at all is more than the headroom max needs.
+
+  THE REFUSAL MACHINERY IS INTACT AND UNTOUCHED. Nothing in the predicate,
+  the floor or the wording moved — what moved is the corpus underneath it, and
+  the honest report of that is a doc edit, not a code edit. A window whose top
+  mass goes back to still-waiting will refuse again on the same rule.
+
+  AND ITS OWN SUITE CANNOT TELL YOU THAT. The censoring tests pin the refusal on
+  HAND-BUILT ~40%-censored FIXTURES, so they assert the RULE, never the corpus:
+  they stay green whether the fleet is 40% censored or 0.04% censored, and they
+  can never red when the corpus gets well. The numbers above come from reading
+  the corpus, and only from that.
+
+  EVERY PERCENTILE ABOVE IS QUOTED WITH ITS WINDOW AND ITS CLOCK, because the
+  same healthy fleet reads p95 948.8s at 24h, 211,338s at 7d and 540,548s at
+  14d — a 570x spread produced by the window width alone. And the clocks are not
+  interchangeable either: the deferral-row-to-covering-build clock reads p50
+  182.8s / p95 1,200.8s, while a chain-keyed clock reads p50 61s / p95 422s —
+  the chain clock drops the censored third AND its p50 equals the measured
+  enqueue lag, i.e. it is measuring the scheduler floor and not the wait.
 
   ## Scope (D163)
 

@@ -1256,6 +1256,163 @@ func TestCloudDeploymentsWithoutDeferralWaitSaysNotMeasured(t *testing.T) {
 	t.Logf("`bp cloud deployments` against a control plane older than #11207:\n%s", stdout)
 }
 
+// ─── THE COVERAGE PARTITION, OVER BOTH NEVER-LIVE COHORTS (dr-w32-s3) ────────
+//
+// The deferral wait above is a clock over `status == "deferred"` rows and
+// NOTHING else, so a reader who took it as the coverage gauge was reading a
+// number that structurally could not see the chains terminating `failed` — a
+// third of the never-live tail on the corpus that motivated this key. The
+// envelope below carries the shape the control plane emits: two cohorts, side by
+// side, never summed.
+const censusCoverageEnvelope = `{
+  "window": {"from": "2026-08-09T11:00:00Z", "to": "2026-08-09T12:00:00Z"},
+  "volume": 60,
+  "failed": 12,
+  "failure_rate": {"sample": 60, "pct": 20.0, "numerator": 12, "min_sample": 200, "refused": true, "reason": "sample 60 below min_sample 200"},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [],
+  "min_sample": 200,
+  "coverage_cohorts": {
+    "clock": "the SAME clock as deferral_wait, applied to BOTH cohorts",
+    "basis": "COVERAGE, and only coverage: a row counts as COVERED when THE SITE has since rebuilt",
+    "as_of": "2026-08-09T12:00:00Z",
+    "maturity_seconds": 86400,
+    "cohorts": [
+      {"cohort": "deferred", "status": "deferred", "population": 2816, "covered": 2816,
+       "pending": 0, "unreadable": 0, "matured": 2816, "never_covered": 0, "too_young": 0,
+       "never_covered_by_environment": [], "oldest_pending_seconds": null},
+      {"cohort": "failed", "status": "failed", "population": 18640, "covered": 18630,
+       "pending": 10, "unreadable": 0, "matured": 18635, "never_covered": 5, "too_young": 5,
+       "never_covered_by_environment": [
+         {"environment": "production", "never_covered": 3},
+         {"environment": "preview", "never_covered": 2}
+       ],
+       "oldest_pending_seconds": 913247.0}
+    ]
+  }
+}`
+
+// TestCloudDeploymentsCoverageEveryEmittedKeyIsRead: DisallowUnknownFields is
+// the whole assertion. A key the control plane emits and cloudclient does not
+// declare is a key the operator's terminal silently drops — which is exactly how
+// a coverage gauge would ship green and show nobody anything.
+func TestCloudDeploymentsCoverageEveryEmittedKeyIsRead(t *testing.T) {
+	var envelope struct {
+		CoverageCohorts json.RawMessage `json:"coverage_cohorts"`
+	}
+	if err := json.Unmarshal([]byte(censusCoverageEnvelope), &envelope); err != nil {
+		t.Fatalf("fixture is not JSON: %v", err)
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(envelope.CoverageCohorts))
+	dec.DisallowUnknownFields()
+	var c cloudclient.DeployCoverageCohorts
+	if err := dec.Decode(&c); err != nil {
+		t.Fatalf("an emitted coverage_cohorts key is UNREAD by cloudclient: %v", err)
+	}
+
+	if c.MaturitySeconds != 86400 || c.AsOf != "2026-08-09T12:00:00Z" ||
+		!strings.Contains(c.Basis, "THE SITE has since rebuilt") {
+		t.Fatalf("clock/basis/as_of/fence decoded wrong: %+v", c)
+	}
+	if len(c.Cohorts) != 2 {
+		t.Fatalf("cohorts decoded wrong: %+v", c.Cohorts)
+	}
+	deferred, failed := c.Cohorts[0], c.Cohorts[1]
+	if deferred.Cohort != "deferred" || deferred.Population != 2816 || deferred.NeverCovered != 0 {
+		t.Fatalf("deferred cohort decoded wrong: %+v", deferred)
+	}
+	if failed.Cohort != "failed" || failed.Population != 18640 || failed.NeverCovered != 5 ||
+		failed.TooYoung != 5 || failed.Matured != 18635 {
+		t.Fatalf("failed cohort decoded wrong: %+v", failed)
+	}
+	// The split that turns five never-covered rows into THREE production ones.
+	if len(failed.NeverCoveredByEnvironment) != 2 ||
+		failed.NeverCoveredByEnvironment[0] != (cloudclient.DeployCoverageEnvironment{Environment: "production", NeverCovered: 3}) ||
+		failed.NeverCoveredByEnvironment[1] != (cloudclient.DeployCoverageEnvironment{Environment: "preview", NeverCovered: 2}) {
+		t.Fatalf("environment split decoded wrong: %+v", failed.NeverCoveredByEnvironment)
+	}
+	if failed.OldestPendingSeconds == nil || *failed.OldestPendingSeconds != 913247.0 {
+		t.Fatalf("oldest_pending_seconds decoded wrong: %v", failed.OldestPendingSeconds)
+	}
+	// A pointer, so "no row is pending" stays absent instead of decoding into a
+	// bound of zero seconds.
+	if deferred.OldestPendingSeconds != nil {
+		t.Fatalf("a null bound must stay nil, not 0.0: %v", deferred.OldestPendingSeconds)
+	}
+}
+
+// TestCloudDeploymentsCoverageRendersBothCohorts: the human render, on RENDERED
+// BYTES. The failed tail must be visible AS ITS OWN COHORT and the production /
+// preview split must reach the screen — three production rows hidden inside a
+// five-row total is the mis-report this section exists to end.
+func TestCloudDeploymentsCoverageRendersBothCohorts(t *testing.T) {
+	newCensusServer(t, 200, censusCoverageEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-09T11:00:00Z", "--to", "2026-08-09T12:00:00Z")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+
+	deferredLine := censusLineContaining(t, stdout, "deferred   2816 of 2816 covered")
+	if !strings.Contains(deferredLine, "0 NEVER COVERED") {
+		t.Fatalf("the deferred cohort must print its never-covered count:\n%s", stdout)
+	}
+	failedLine := censusLineContaining(t, stdout, "failed     18630 of 18640 covered")
+	for _, want := range []string{"5 NEVER COVERED", "5 too young to judge", "0 unreadable", "oldest still uncovered >="} {
+		if !strings.Contains(failedLine, want) {
+			t.Fatalf("the failed cohort must print %q beside its coverage:\n%s", want, stdout)
+		}
+	}
+	if !strings.Contains(stdout, "never covered in production: 3") ||
+		!strings.Contains(stdout, "never covered in preview: 2") {
+		t.Fatalf("the environment split must reach the screen:\n%s", stdout)
+	}
+	// The fence is stated, so "5 never covered" can never be read without the
+	// bar those five rows cleared.
+	if !strings.Contains(stdout, "older than 24h") {
+		t.Fatalf("the maturity fence must be printed beside the counts:\n%s", stdout)
+	}
+	// D478's wording fence, on the bytes an operator receives.
+	for _, forbidden := range []string{"delivered", "superseded", "publish reach"} {
+		if strings.Contains(strings.ToLower(stdout), forbidden) {
+			t.Fatalf("the struck word %q reached the coverage render:\n%s", forbidden, stdout)
+		}
+	}
+	// And the inference the fence alone cannot stop: on the FAILED cohort,
+	// COVERED must be denied the reading "that failure turned out fine".
+	if !strings.Contains(stdout, "never that the failure was repaired") {
+		t.Fatalf("the failed cohort's COVERED must state what it does NOT mean:\n%s", stdout)
+	}
+	t.Logf("`bp cloud deployments` coverage section:\n%s", stdout)
+}
+
+// TestCloudDeploymentsWithoutCoverageSaysNotMeasured: an absent key is not an
+// empty backlog. A control plane that does not send `coverage_cohorts` has not
+// measured coverage, and the section must say so rather than print nothing —
+// printing nothing is what let an unmeasured gauge read as a clean one.
+func TestCloudDeploymentsWithoutCoverageSaysNotMeasured(t *testing.T) {
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no coverage census")
+	if !strings.Contains(line, "UNCOUNTED here, and that is NOT the same as none") {
+		t.Fatalf("a missing coverage census must refuse out loud:\n%s", stdout)
+	}
+	for _, forbidden := range []string{"NEVER COVERED", "never covered in "} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("nothing may be claimed about coverage when none was sent (%q):\n%s", forbidden, stdout)
+		}
+	}
+}
+
 // ─── A REFUSED SHARE NAMES THE WINDOW THAT WOULD ANSWER (dr-w30-s5) ──────────
 //
 // Measured against the live control plane on 2026-08-09: over the 7-day default

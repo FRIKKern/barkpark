@@ -2094,6 +2094,13 @@ type DeployCensus struct {
 	// into "the re-queue took zero seconds", which is the most flattering
 	// possible reading of an absence.
 	DeferralWait *DeployDeferralWait `json:"deferral_wait"`
+	// CoverageCohorts is the dr-w32-s3 addition: the SAME later-live clock as
+	// DeferralWait, applied to BOTH the deferred and the failed-terminating
+	// cohorts, so the rows that never reached live are visible whichever status
+	// they terminated in. A POINTER for the same reason its two neighbours are:
+	// a control plane that does not send the key has not measured coverage, and
+	// that must never decode into "nothing is uncovered".
+	CoverageCohorts *DeployCoverageCohorts `json:"coverage_cohorts"`
 	// Scope is the dr-w18-s1 addition: the population these numbers were taken
 	// over, NAMED. A POINTER because the operator route (and any control plane
 	// predating the team route) sends no `scope` key at all, and an absent key
@@ -2260,6 +2267,54 @@ type DeployDeferralWait struct {
 	P95                  DeployDeferralWaitQuantile   `json:"p95"`
 	Max                  DeployDeferralWaitQuantile   `json:"max"`
 	MinSample            int                          `json:"min_sample"`
+}
+
+// DeployCoverageEnvironment splits ONE cohort's never-covered count by
+// environment. A preview build with no successor is not a production site
+// sitting dark, and pooling the two hides the rows that matter inside a bigger,
+// softer number.
+type DeployCoverageEnvironment struct {
+	Environment  string `json:"environment"`
+	NeverCovered int    `json:"never_covered"`
+}
+
+// DeployCoverageCohort is ONE never-live cohort — `deferred` or `failed` —
+// partitioned by the coverage clock. Population == Covered + Pending +
+// Unreadable, and Pending splits again into NeverCovered (older than the
+// maturity fence) and TooYoung.
+//
+// COVERED IS THE CONTROL PLANE'S WORD AND IT MEANS "the site has since rebuilt".
+// It is not a claim that any particular edit shipped, and a renderer that
+// upgrades it into one is the mis-report this whole section exists to prevent.
+type DeployCoverageCohort struct {
+	Cohort                    string                      `json:"cohort"`
+	Status                    string                      `json:"status"`
+	Population                int                         `json:"population"`
+	Covered                   int                         `json:"covered"`
+	Pending                   int                         `json:"pending"`
+	Unreadable                int                         `json:"unreadable"`
+	Matured                   int                         `json:"matured"`
+	NeverCovered              int                         `json:"never_covered"`
+	TooYoung                  int                         `json:"too_young"`
+	NeverCoveredByEnvironment []DeployCoverageEnvironment `json:"never_covered_by_environment"`
+	OldestPendingSeconds      *float64                    `json:"oldest_pending_seconds"`
+}
+
+// DeployCoverageCohorts is `coverage_cohorts` on the census envelope: the
+// coverage partition over BOTH never-live cohorts. DeferralWait one struct up
+// answers "how long did the re-queue take" over DEFERRED rows only, and is blind
+// by construction to the chains that terminate `failed` — a third of the
+// never-live tail on the corpus that motivated this key.
+//
+// MaturitySeconds is the fence under which a PENDING row is not counted as never
+// covered: a row written minutes ago has not been given time to be covered, and
+// counting it as damage would report the fleet's own arrival rate as failure.
+type DeployCoverageCohorts struct {
+	Clock           string                 `json:"clock"`
+	Basis           string                 `json:"basis"`
+	AsOf            string                 `json:"as_of"`
+	MaturitySeconds int                    `json:"maturity_seconds"`
+	Cohorts         []DeployCoverageCohort `json:"cohorts"`
 }
 
 // DeployCensusError is a census the control plane REFUSED to answer, with the

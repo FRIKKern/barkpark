@@ -398,6 +398,7 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("")
 	}
 	renderDeployDeferralWait(out, census.DeferralWait)
+	renderDeployCoverageCohorts(out, census.CoverageCohorts)
 
 	if len(census.NotAttempted) > 0 {
 		out.outf("never attempted (outside every denominator)")
@@ -1121,6 +1122,81 @@ func deployDeferralWaitBound(w *cloudclient.DeployDeferralWait) string {
 	}
 	return fmt.Sprintf("nothing was unresolved %s — %d of %d deferred row(s) unreadable, a reading taken at that instant, not a standing fact",
 		asOf, p.Unreadable, p.Deferred)
+}
+
+// renderDeployCoverageCohorts prints the COVERAGE PARTITION over both never-live
+// cohorts: the same later-live clock the deferral wait uses, applied to the
+// `deferred` rows AND to the rows that terminated `failed`.
+//
+// WHY IT IS A SECOND SECTION AND NOT A COLUMN ON THE FIRST: the deferral wait's
+// population is `status == "deferred"` and nothing else, so a reader who took it
+// as the coverage gauge was reading a number that structurally could not see the
+// failed tail — a third of the never-live chains on the corpus that motivated
+// this key. The two cohorts print side by side and are never summed: a failed
+// row is not a deferral.
+//
+// It refuses the same way its neighbour does, and none of the refusals is a
+// zero: no node at all prints NOT MEASURED (an absent key is not an empty
+// backlog), a cohort with no rows prints "no rows" and never a percentage, and
+// the counts that are neither covered nor never-covered — too young to judge,
+// unreadable — print by name so a silence can never pass for health.
+//
+// COVERED is the control plane's word, rendered with the control plane's meaning
+// attached: the SITE has since rebuilt. Not "your edit shipped".
+func renderDeployCoverageCohorts(out *writer, c *cloudclient.DeployCoverageCohorts) {
+	out.outf("coverage — did the site ever rebuild after a row that never went live")
+	if c == nil {
+		out.outf("  NOT MEASURED — this control plane sends no coverage census. Nothing was read: the rows that never reached live are UNCOUNTED here, and that is NOT the same as none.")
+		out.outf("")
+		return
+	}
+
+	if clock := strings.TrimSpace(c.Clock); clock != "" {
+		out.outf("  clock: %s", sanitizeCell(clock))
+	}
+	if basis := strings.TrimSpace(c.Basis); basis != "" {
+		out.outf("  basis: %s", sanitizeCell(basis))
+	}
+	// THE ONE INFERENCE THE SHARED VOCABULARY CANNOT STOP ON ITS OWN (review,
+	// wave 32). "A deferral was covered" reads as "the re-queue worked", which is
+	// true. "A FAILED row was covered" reads as "that failure turned out fine",
+	// which is NOT what was measured: the clock only ever says the SITE rebuilt
+	// afterwards. The basis line above states what COVERED means; this one states
+	// what it does not, because the failed cohort is new here and the wrong
+	// reading of it is the comforting one.
+	out.outf("  and NOT: a COVERED row in the failed cohort means the site is not stuck — never that the failure was repaired or its content shipped")
+	out.outf("  fence: a row is only counted NEVER COVERED once it is older than %s %s",
+		deployDeliveryDuration(float64(c.MaturitySeconds)), deployDeliveryAsOf(c.AsOf))
+
+	if len(c.Cohorts) == 0 {
+		out.outf("  NOT MEASURED — the control plane named no cohorts at all, which is not the same as no uncovered rows.")
+		out.outf("")
+		return
+	}
+
+	for _, cohort := range c.Cohorts {
+		out.outf("  %-10s %s", sanitizeCell(cohort.Cohort), deployCoverageCohortLine(cohort))
+		for _, env := range cohort.NeverCoveredByEnvironment {
+			out.outf("             never covered in %s: %d", sanitizeCell(env.Environment), env.NeverCovered)
+		}
+	}
+	out.outf("")
+}
+
+// deployCoverageCohortLine renders ONE cohort INSEPARABLY: the covered count
+// never travels without the population it came from, nor without the rows that
+// are neither covered nor overdue.
+func deployCoverageCohortLine(c cloudclient.DeployCoverageCohort) string {
+	if c.Population == 0 {
+		return "no rows in this window — nothing to cover, which is not the same as full coverage"
+	}
+
+	line := fmt.Sprintf("%d of %d covered (the site has since rebuilt) · %d NEVER COVERED · %d too young to judge · %d unreadable",
+		c.Covered, c.Population, c.NeverCovered, c.TooYoung, c.Unreadable)
+	if c.OldestPendingSeconds != nil {
+		line += fmt.Sprintf(" · oldest still uncovered >= %s", deployDeliveryDuration(*c.OldestPendingSeconds))
+	}
+	return line
 }
 
 // deployDeferralWaitAsOf is deployDeliveryAsOf's wording without the enclosing
