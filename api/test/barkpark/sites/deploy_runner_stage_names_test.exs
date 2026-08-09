@@ -85,7 +85,9 @@ defmodule Barkpark.Sites.DeployRunnerStageNamesTest do
     test "does not contain ROUTE — the arm report must never become a verdict" do
       names =
         read!(@runner_ex)
-        |> then(&Regex.run(~r/^\s*@stage_names\s+~w\(([^)]*)\)\s*$/m, &1, capture: :all_but_first))
+        |> then(
+          &Regex.run(~r/^\s*@stage_names\s+~w\(([^)]*)\)\s*$/m, &1, capture: :all_but_first)
+        )
 
       assert [captured] = names
       refute "ROUTE" in String.split(captured)
