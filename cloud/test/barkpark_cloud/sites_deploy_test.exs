@@ -985,6 +985,128 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert Repo.get(Deployment, clean.id).deferral_depth == nil
     end
 
+    # dr-w28 S6. The previous test makes every DEFERRED round queryable — and
+    # left the one row that matters most out of it. The terminal round is the
+    # publish the fleet GAVE UP ON, and `fail/2` wrote only status /
+    # failure_reason / detail, so all seven abandonments on the live control
+    # plane carried NULL depth, NULL bound and NULL cause: `deferral_cause =
+    # 'BOX_AT_CAPACITY_DEFERRED'` returned the eleven survivable refusals and
+    # NOT the drop, and the drop itself was reachable only by
+    # `failure_reason LIKE '%rebuilds in a row for this site%'`.
+    #
+    # IT CAN LOSE: delete the third argument from the `fail(ctx,
+    # abandonment_reason(...), %{…})` call in `Deploy.defer/3` and every column
+    # assertion below reds on nil, while the prose assertions stay green — the
+    # same asymmetry, one row further down the chain.
+    test "the ABANDONMENT is readable as data too — the terminal row stamps its own depth, bound and cause" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "4 of 4 build slots in use"}}}
+      )
+
+      rows =
+        for _ <- 1..12 do
+          {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+          {:ok, _outcome} = Deploy.run(d.id)
+          Repo.get(Deployment, d.id)
+        end
+
+      abandoned = List.last(rows)
+      assert abandoned.status == "failed"
+
+      # THE ARITHMETIC, pinned. `defer/3` abandons at `prior >= bound - 1`, so
+      # the bound-th round is written `failed` and NEVER `deferred`: the deepest
+      # DEFERRED row is 11, and the abandonment above it is 12 — the same number
+      # the sentence interpolates. An off-by-one here would make the terminal
+      # round indistinguishable from the last survivable one.
+      assert Enum.map(Enum.take(rows, 11), & &1.deferral_depth) == Enum.to_list(1..11)
+      assert abandoned.deferral_depth == 12
+      assert abandoned.deferral_bound == 12
+      assert abandoned.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+
+      # FINDABLE BY COLUMN, not by a LIKE over prose. This is the query an
+      # operator (or a census) actually runs, and before this it returned the
+      # eleven refusals the fleet SURVIVED while omitting the one it lost.
+      by_column =
+        Repo.all(
+          from(d in Deployment,
+            where:
+              d.site_id == ^site.id and d.status == "failed" and
+                d.deferral_cause == "BOX_AT_CAPACITY_DEFERRED" and
+                d.deferral_depth == d.deferral_bound,
+            select: d.id
+          )
+        )
+
+      assert by_column == [abandoned.id]
+
+      # …and the prose is UNCHANGED, because `deploy_ledger.ex`'s `@abandoned`
+      # regex is deliberately coupled to it: the columns are added beside the
+      # sentence, never in place of it.
+      assert abandoned.failure_reason =~ "refused 12 rebuilds in a row for this site"
+      assert abandoned.failure_reason =~ "concurrent-build cap"
+      assert DeployLedger.classify(abandoned) == "ABANDONED_AT_CAPACITY"
+
+      # ONE WRITE, ONE TRUTH: the stamped depth is the number the sentence says.
+      assert abandoned.failure_reason =~ "refused #{abandoned.deferral_depth} rebuilds in a row"
+    end
+
+    # The busy/stuck cause has a SHORTER leash, and its abandonment must stamp
+    # ITS bound — 6, not 12 — or an aggregate over `deferral_bound` would report
+    # every drop against the capacity budget.
+    test "a busy-box abandonment stamps the busy bound: depth 6 of 6, not 5 and not 12" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      rows =
+        for _ <- 1..6 do
+          {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+          {:ok, _outcome} = Deploy.run(d.id)
+          Repo.get(Deployment, d.id)
+        end
+
+      abandoned = List.last(rows)
+      assert abandoned.status == "failed"
+
+      # Five deferrals then the drop — so the terminal depth is 6, the bound
+      # itself, and the deepest DEFERRED row is 5.
+      assert Enum.map(Enum.take(rows, 5), & &1.deferral_depth) == Enum.to_list(1..5)
+      assert abandoned.deferral_depth == 6
+      assert abandoned.deferral_bound == 6
+      assert abandoned.deferral_cause == "BOX_BUSY_DEFERRED"
+
+      assert abandoned.failure_reason =~ "refused 6 rebuilds in a row for this site"
+      assert DeployLedger.classify(abandoned) == "ABANDONED_BOX_STUCK"
+    end
+
+    # STRUCTURE IS FOR CHAINS ONLY. A failure that never deferred must keep
+    # writing NULL — `fail/…`'s `extra` defaults to empty — because a zero would
+    # read as "a chain of depth 0" and put every ordinary build failure into the
+    # abandonment numerator.
+    test "an ordinary failure carries NO chain columns — the abandonment stamp is not blanket" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start: {:ok, 500, %{"error" => %{"code" => "box_exploded", "message" => "boom"}}}
+      )
+
+      {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "failed"
+      assert row.deferral_depth == nil
+      assert row.deferral_bound == nil
+      assert row.deferral_cause == nil
+    end
+
     # The bound is READ FROM THE CAUSE (`max_consecutive_deferrals/1`), never a
     # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
     # sentence that hardcoded either would misstate the other cause's whole
