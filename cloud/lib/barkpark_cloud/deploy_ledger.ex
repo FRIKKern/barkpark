@@ -408,11 +408,18 @@ defmodule BarkparkCloud.DeployLedger do
   @spec classes() :: [class()]
   def classes, do: @classes
 
-  # `not_attempted_classes/0` used to sit here: a public accessor for
-  # `@not_attempted_classes`. Deleted by dr-w16-s3 after the reachability census
-  # measured it at ZERO callers in cloud/lib AND zero references in cloud/test —
-  # the only genuinely dead public on this module. The attribute stays; the
-  # membership question is answered by `not_attempted?/1`, which is called.
+  # `not_attempted_classes/0` was deleted by dr-w16-s3 when it had ZERO callers
+  # in cloud/lib AND zero references in cloud/test. It is BACK, and the reason it
+  # is back is the reason it was allowed to go: the agency map's exhaustiveness
+  # assertion is keyed off the ENUMS rather than a hand-listed set (D242), and
+  # the enum it must cover is `classes/0 ++ not_attempted_classes/0` — every
+  # value `classify/2` can return, tombstones included. `not_attempted?/1`
+  # answers membership and cannot ENUMERATE, so it cannot key that assertion.
+  # It has no cloud/lib caller and says so, in the reachability table's
+  # allowlist, with that reason attached.
+  @doc "Classes for rows that were never a real deploy ATTEMPT — never in a rate denominator."
+  @spec not_attempted_classes() :: [class()]
+  def not_attempted_classes, do: @not_attempted_classes
 
   # No `in_flight_statuses/0` accessor. `@in_flight_statuses` is read by
   # `census/3` in this file and by nobody else, and a public accessor with zero
@@ -500,6 +507,16 @@ defmodule BarkparkCloud.DeployLedger do
     # #10129, which mapped it `:box` back when the class still meant "the box's
     # SSR served an empty marker" — the split is what changed its meaning.)
     "DOC_ID_EMPTY" => :ambiguous,
+    # `ABANDONED_UNCLASSIFIED` is the abandonment terminal whose cause the ledger
+    # has NOT named — its two named siblings above are `:box` because the box's
+    # own refusal is what ended the chain, and this one is the tail where no
+    # refusal was recorded. Its label "NAMES NO CAUSE, deliberately"; naming an
+    # owner here would put a specific accusation on rows that are mostly not it,
+    # the same error the label gauge's assertion B refuses. (Caught BY the
+    # exhaustiveness assertion during this rebase: the class landed on main after
+    # the agency map was written, which is precisely the drift a hand-listed set
+    # would have merged green.)
+    "ABANDONED_UNCLASSIFIED" => :ambiguous,
     # A timeout can be a swapping box or a build that genuinely got bigger;
     # unfetchable inputs can be an empty artifact url or a box that cannot reach
     # storage; a died process names no owner at all; and UNCLASSIFIED is by
@@ -1551,6 +1568,17 @@ defmodule BarkparkCloud.DeployLedger do
   # takes one: a class share is denominated on `failed`, a deferral share on
   # `volume`, and a single default would put the wrong sentence beside half the
   # percentages this module emits.
+  #
+  # THE AGENCY RIDES THE SAME ROW AS THE COUNT (D148/D242), and this is the
+  # agency map's READER — the one thing dr-w26-s6 says an instrument must have
+  # before it is allowed to exist. It goes here rather than on a new route
+  # because `census/3`'s map is already serialised whole by
+  # `Web.Router.deploy_census_json/2` (router.ex:9901): putting the accusation
+  # on the class row puts it in front of an operator WITHOUT this slice touching
+  # router.ex, which belongs to a sibling fence. Measured, not assumed — the
+  # payload key-set census (`payload_key_set_census_test.exs`) stays 23/0 with
+  # this key present, so the wire shape gains a name no Go decoder has to grow
+  # for the suite to pass.
   defp class_rows(groups, denominator, basis) do
     groups
     |> Enum.filter(& &1.class)
@@ -1561,6 +1589,7 @@ defmodule BarkparkCloud.DeployLedger do
       %{
         class: class,
         label: label(class),
+        agency: agency(class),
         count: count,
         share: rate_basis(count, denominator, basis)
       }
