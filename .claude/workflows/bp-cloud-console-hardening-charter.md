@@ -2797,6 +2797,90 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 57 REVIEW — grade A — EIGHT round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; six reviewer commits; zero round-2 deferrals; the wave audited what the console says when something ENDS, and closed three of its own builders' stated ceilings
+
+| Slice | Task | Final branch | PR | Gate re-run by the reviewer |
+|---|---|---|---|---|
+| The terminal-act residue register | `cch-w57-s1-terminal-act-residue-register` | `loop-epic/every-terminal-verb-states-what-it-leave-0-r` | #11070 | `terminal_act_residue_manifest_test.exs` + the two sibling manifests **26 / 0**; `__terminal_verb_dump.mjs` exit 0, 6 verbs, **432** combos, `painted_equals_declared_always=true`; `mix format` clean |
+| The dunning banners state ISOLATION and name no day (console half) | `cch-w54-s5-the-dunning-grace-clock-names-a-day-nothing-acts-on` | `loop-epic/the-dunning-grace-clock-stops-naming-a-d-1-r` | #11071 | `__app.test.mjs` **1020 / 0**; smoke **110 scenarios** |
+| billing.ex stops naming a phantom actor; the portal un-cancel lands | `cch-w57-s2-billing-tells-the-truth-in-both-directions` | `loop-epic/billing-ex-stops-naming-an-actor-that-do-2` (builder's, unchanged) | #11072 | `billing_lifecycle_test` + `router_billing_lifecycle_test` + `promise_actor_manifest_test` **57 / 0**; `mix format` clean |
+| Decommission states what it LEAVES BEHIND | `cch-w57-s3-terminal-verbs-state-their-residue` | `loop-epic/decommission-and-remove-stop-implying-an-3` (builder's, unchanged) | #11073 | `__app.test.mjs` **1018 / 0**; smoke **110 scenarios** |
+| The proxy stops spending the admin token on a suspended box | `cch-w57-s4-instance-proxy-stops-spending-the-admin-token-on-a-suspended-box` | `loop-epic/a-suspended-box-stops-being-mutated-thro-4-r` | #11074 | `instance_api_proxy_test` + `router_audit_test` **106 / 0**; `__app.test.mjs` **1018 / 0**; `mix format` clean |
+| `RecordLister` pinned so the by-value DNS sweep cannot silently degrade | `cch-w57-s5-the-dns-sweep-cannot-silently-degrade` | `loop-epic/the-by-value-dns-sweep-stops-being-one-r-5-r` | #11076 | `go build ./...` · `go vet ./internal/cli/cloud/...` · `go test ./internal/cli/cloud/...` **and** `./internal/cli/` all ok; `gofmt -l` clean |
+| `.exclusions` survive regeneration, and the repair can red | `cch-w57-s6-exclusions-survive-regeneration-and-the-fix-can-lose` | `loop-epic/the-required-checks-generator-stops-sile-6-r` | #11077 | `required-checks.test.sh --hermetic` **177 / 0**; `check-doc-budgets.sh` PASS; `docs-anchors-check.sh` PASS |
+| `PAPER_BLOCK` mandates top-level `blocks` + a read-back that can fail | `cch-w57-s7-the-wave-paper-producer-stops-writing-unreadable-memory` | `loop-epic/the-epic-cycle-stops-birthing-papers-its-7-r` | #11079 | `node --check .claude/workflows/bp-epic-cycle.workflow.js` exit 0 |
+
+**What landed.**
+
+(1) **THE CROWN SHIPPED FULL, NOT DECLARED-NARROW (D664-D667).** The residue register is a NEW SIBLING of the two
+existing manifest instruments, keyed `(verb) -> (DESTROYED, SURVIVES, TOLD)`, with a population that is a UNION of a
+run-read console half (a `node:vm` dump over the SHIPPED `app.js`, 432 derived combos, numbered non-zero exits, never an
+empty array) and a source-SCANNED server half — and the moduledoc states the asymmetry in plain words: *a scan survives a
+refactor that keeps the bytes and changes the value*. Eight driven rows, including the `:nilify_all` seventh FK edge as a
+built-in negative control, the LIVE 202 that destroys nothing, the LIVE teardown that writes NO audit at all, and the
+archive bundle with a recorder proven non-vacuous. A wording guard scans the sentinel-bracketed rows region and reds on
+sweep-claiming phrasing: **no row overclaims foreign residue** — the only honest class is "our tree makes no such call".
+
+(2) **D657's PREMISE IS MADE TRUE RATHER THAN INHERITED (D670/D671).** Both dunning banners stop naming a calendar day
+back-computed from an anchor `mark_past_due/2` slides forward on every webhook delivery, AND stop promising a suspension
+`maybe_enforce/1` cannot reach in production. The word is ISOLATION, derived by running: `entitled?/1`'s only lib call
+site outside `billing.ex` is `router.ex`:8744's go-live gate, so what a lapsed grace costs is a NEW LAUNCH. The
+retraction lives INSIDE `billingPeriodLine`, so one edit moves the owner card and the non-owner card — and the non-owner
+past-due path is pinned for the FIRST time. `billing.ex` retracts the same claim on the server side and stops naming an
+Oban `ReconcileWorker` "blocked on a missing substrate" (17 files / 17 real `use Oban.Worker` under `cloud/lib`,
+re-measured), and the Stripe-portal un-cancel stops being discarded — with `current_period_end` deliberately NOT synced
+(D672's schema ground; `promise_actor_manifest_test.exs`:548 stays armed).
+
+(3) **TWO GUARDS THAT COULD NOT LOSE NOW CAN.** The by-value DNS sweep's `RecordLister` satisfaction was unpinned:
+renaming `CloudDNS.ListRecords` dropped the whole fleet onto the by-name arm with the entire cloud package suite still
+green. It is now a build failure AND a runtime table test. And the required-checks generator silently took 25 exclusion
+rows in and wrote 18 out, exit 0, zero bytes on stderr — while the repo's own 166-assertion harness returned a
+**byte-identical verdict** on the broken and the fixed tree, so the two-line repair would have been exactly as silently
+revertible as the loss. Both arms ship: a base-first union to CARRY, and a per-name refusal to NOTICE, with a third state
+the brief did not anticipate (`--expect-promoted` for a committed exclusion this run selects as required).
+
+(4) **THE EPIC'S OWN MEMORY.** `PAPER_BLOCK` now mandates a top-level `blocks` array, shows a `value`-keyed text leaf,
+and imposes a read-back obligation whose failure is a PHASE FAILURE — proven by publishing a probe paper both ways
+(the `text`-keyed dialect answers **200 with zero prose characters**) and deleting both.
+
+**REVIEWER COMMITS (six, all in place, none a redesign).** The dump's sample-output comment said 360 where the matrix
+drives 432. `app.js`:14935's comment still quoted the dunning promise this wave retires — the last occurrence in the
+file, retracted in the same PR (discharges `task-097a01b583366335`). The suspended-box `:mutate` sweep enumerated verbs
+BY HAND, missed `webhook.replay`, and pinned no population — replaced with a catalog-DERIVED ADD direction, mutation-proven
+by flipping `webhook.deliveries` to `:mutate` (reds by name). `supportDNSFor` returns an INTERFACE, so it is the one
+production wiring no `var _ RecordLister` in package `cloud` can see — a call-site guard was added in package `cli`,
+mutation-proven with a `DNSProvider`-only decorator. `merge-gates.md` named only one of the two refusals a regeneration
+can now hit — `--expect-promoted` added. And `PAPER_BLOCK`'s read-back recipe named `bp doc get bulldoc`, where the type
+is `paper` (verified live) — a stale pointer inside the bullet about unreadable memory.
+
+**HIGH-FLIP-RISK, and an independent second reviewer is genuinely owed on ONE slice.** `cch-w57-s4`'s `:read`-grants /
+`:mutate`-refuses split was re-derived independently from `InstanceApiCatalog` rather than re-read from the builder: v1 is
+webhooks only, three `:read` (all side-effect-free GETs) and six `:mutate` (including `replay` and `test_send`, which make
+the box perform outbound requests). The split holds on that reading. **The residual risk is not the split but its blast
+radius:** `suspended` has TWO producers and only one is money — `Billing.reconcile_plan_limit/1` suspends for
+`quota_exceeded` on a fully-paid team, which now sees a billing-flavoured refusal for a capacity condition. That is D673
+as ruled; a second pair of eyes should confirm the product wants it.
+
+**LAW 0 (D680), STATED IN BOTH DERIVATIONS, AND THIS WAVE CLOSED ZERO ROWS.** Lifetime children **796**. Live by the
+briefed derivation (open + considering) **405**; live by the honest derivation (also counting `in_progress`) **413**,
+against wave 56's measured 394 — **net +19**. Filed on 2026-08-09: **21 rows**, of which one was a self-cancelled
+duplicate (`cch-w57-s5-followup-hetzner-dns-recordlister`) and one was a ledger artefact the reviewer cancelled during
+the audit (`drafts.cch-w57-s1-…`, the unpublished DRAFT twin of a live slice, which was double-counting one slice in the
+denominator). **Closes: ZERO — and the reason is structural, not neglect:** every one of the eight slices ends
+`in_progress` at N−1/N with only its merge-gated criterion open, because the lead closes those on merge and this wave's
+work is eight OPEN PRs. The honest reading is that wave 57 is the third consecutive wave to close nothing, and the
+arrears are now large enough that a wave spent entirely on closing merged rows is a legitimate next move.
+
+**WHAT THE NEXT WAVE MUST KNOW.** (a) **Merge order matters**: three slices touch `app.js` in disjoint regions
+(#11071 at :6480/:14786-:14842, #11073 at :7405-:7510, #11074 at :9842) — merge #11071 first per D669, then rebase the
+other two; each later one will need a trivial rebase, never a conflict resolution by hand. (b) `cch-w57-s2` (#11072) is
+the Elixir half of the same crown row as #11071 — until it lands the console is honest and the module doc is not.
+(c) The follow-ups this wave filed are the visible arrears and several are one-slice-sized:
+`cch-hollow-paper-write-guard` (the server-side `hollow_body` 422 — the only version of the Paper fix that cannot be
+skipped), `cch-w57-bl-current-period-end-is-three-clocks-in-one-column` (D672's real remedy),
+`cch-archive-residue-disclosure-conditional`, `cch-w57-s4-followup-console-suspended-branch-has-no-js-test`, and
+`cch-w57-fu-exclusion-acks-are-typed-by-hand-every-regeneration`.
+
 ### 2026-08-08 — wave 56 REVIEW — grade A− — five round-1 slices built, reviewed, re-gated and ALL PUSHED WITH PRs; four reviewer commits; one round-2 slice deferred by design; the wave's own instrument was the biggest thing it fixed
 
 | Slice | Task | Final branch | PR | Gate re-run by the reviewer |
