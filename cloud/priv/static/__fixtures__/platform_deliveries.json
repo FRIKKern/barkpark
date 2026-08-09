@@ -9,6 +9,7 @@
     "delivering_run_id",
     "first_seen_at",
     "merged_at",
+    "previous_sha",
     "queued_pickup_seconds",
     "queued_seconds",
     "queued_self_seconds",
@@ -16,10 +17,11 @@
     "recorded_at",
     "serving_since",
     "sha",
-    "target"
+    "target",
+    "transition"
   ],
 
-  "live_key_set_source": "PlatformDelivery.to_json/1 on origin/main at 0239dd4ee — exactly THIRTEEN keys, and every scenario row below carries all thirteen. A row missing a key is a reader deciding for itself what a NULL means; a row carrying an extra one is a serializer that shipped without this fixture following it. This set was TEN until #10942 merged at 2026-08-08T23:46:33Z; the three queue-split columns are live on the wire now, not pending.",
+  "live_key_set_source": "PlatformDelivery.to_json/1 on origin/main at 48a200aa7 — exactly FIFTEEN keys, RE-DERIVED off the serializer itself (`git show origin/main:cloud/lib/barkpark_cloud/platform_delivery.ex`, the map literal at to_json/1), and every scenario row below carries all fifteen. A row missing a key is a reader deciding for itself what a NULL means; a row carrying an extra one is a serializer that shipped without this fixture following it. The set was TEN until #10942 (the three queue-split columns) and THIRTEEN until #11078 merged at 5f2eeb76f, which added `previous_sha` and `transition` — the rollback verdict. This file went on claiming '0239dd4ee — exactly THIRTEEN keys' for a day after that, and the claim was FALSE while both key-count pins stayed green: the Elixir one counts to_json/1 against a hand-written literal, the Go one counts THIS file, and neither crosses the wire. That gap is now closed from the other side by the census pair in cloud/test/barkpark_cloud/payload_key_set_census_test.exs, which reads the serializer AST and internal/cloudclient's json tags in one assertion. THE TWO NEW KEYS ARE DELIBERATELY NOT IN `null_clocks.keys`, which stays at EXACTLY SEVEN (a Go test pins that count, and the seven are what UNMETERED means): both are nullable, but they are a VERDICT about the move this row records rather than a measurement of an interval, so their null says 'no verdict was ever attempted' — not 'this clock went unread'. They sit beside `carried` in that respect and, like it, are kept OUT of `not_null` so the unrecorded state stays renderable.",
 
   "retired_key_sets": "`pending_key_set_after_10942` used to sit here, declaring the shape the wire WOULD take once #10942 landed, with a Go test asserting the delta was exactly the three queued_* columns. #10942 IS MERGED — the prediction came true, so the prediction is deleted rather than kept as a second, permanently-satisfied copy of live_key_set that no future change can ever red. A prediction that has landed is not evidence; it is a decoy that greens.",
 
@@ -45,7 +47,7 @@
   "scenarios": {
     "fully_clocked": {
       "why": "The clocked-in-full render: every one of the seven nullable clocks present, and `carried` MEASURED false, so the run is this sha's own and the seconds are this sha's own. Built on the FIRST and only real row the crown has ever held (sha 2e38228…, recorded 2026-08-08T12:23:21Z, read back through a PAT against https://barkpark.cloud/v1/deliveries).",
-      "synthetic": "PARTLY. sha, delivering_run_id, target, carried, queued_seconds (14), build_seconds (216) and all four datetimes are the LIVE prod row verbatim. The three queue-split values (self 6 · stall 5 · pickup 3) are FABRICATED: that row was written before #10942 added the columns, so the real row carries null for all three and could not exercise a fully-metered split. They are chosen to sum to the real queued_seconds — 6+5+3=14 — because the split is a decomposition of that same wait, and a fixture whose buckets contradicted its own total would teach a reader the wrong arithmetic.",
+      "synthetic": "PARTLY. sha, delivering_run_id, target, carried, queued_seconds (14), build_seconds (216) and all four datetimes are the LIVE prod row verbatim. The three queue-split values (self 6 · stall 5 · pickup 3) are FABRICATED: that row was written before #10942 added the columns, so the real row carries null for all three and could not exercise a fully-metered split. They are chosen to sum to the real queued_seconds — 6+5+3=14 — because the split is a decomposition of that same wait, and a fixture whose buckets contradicted its own total would teach a reader the wrong arithmetic. `previous_sha` and `transition` are FABRICATED for the same reason: the live row predates #11078 and carries null for both, so it could not exercise a graded move. The previous_sha is guerrilla's real then-green slot commit (b97663730, the pair charter D437's rollback probe was measured on) padded to 40 hex, and the verdict is `forward` — the ordinary case, so that the ROLLBACK render has its own scenario and the two can never mask each other.",
       "status": 200,
       "body": {
         "deliveries": [
@@ -62,6 +64,8 @@
             "serving_since": "2026-08-08T11:55:11.517221Z",
             "target": "cp",
             "carried": false,
+            "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
+            "transition": "forward",
             "recorded_at": "2026-08-08T12:23:21.862544Z"
           }
         ],
@@ -73,7 +77,7 @@
     },
 
     "all_null_clocks": {
-      "why": "The day-one rendering case, not a hypothetical: the recorder writes NULL for every clock it could not reach, and the row still exists because the sha WAS delivered. All SEVEN nullable clocks are NULL at once — the shape that a nil-coalescing reader renders as a flawless zero-second deploy that went live at the epoch, with a queue split that adds up to nothing. `carried` is MEASURED false here on purpose: this scenario is about the CLOCKS, and the unmeasured-attribution case has its own scenario below so the two failures can never mask each other.",
+      "why": "The day-one rendering case, not a hypothetical: the recorder writes NULL for every clock it could not reach, and the row still exists because the sha WAS delivered. It carries the UNRECORDED transition too — `transition` and `previous_sha` are both null, which is the shape EVERY row written before #11078 has and is NOT the wire's word `unknown`: null means no rollback verdict was ever attempted, `unknown` means the writer tried and could not decide. A reader that collapsed the two would tell an operator a grading failed on every historical row in the table. All SEVEN nullable clocks are NULL at once — the shape that a nil-coalescing reader renders as a flawless zero-second deploy that went live at the epoch, with a queue split that adds up to nothing. `carried` is MEASURED false here on purpose: this scenario is about the CLOCKS, and the unmeasured-attribution case has its own scenario below so the two failures can never mask each other.",
       "synthetic": "YES — fabricated wholesale. No real row with all seven clocks null has been captured; the shape is the one PlatformDelivery's own schema law describes ('NULL, never 0') and the recorder's failure branches produce.",
       "status": 200,
       "body": {
@@ -91,6 +95,8 @@
             "serving_since": null,
             "target": "instance",
             "carried": false,
+            "previous_sha": null,
+            "transition": null,
             "recorded_at": "2026-08-06T09:20:44.000001Z"
           }
         ],
@@ -120,6 +126,8 @@
             "serving_since": "2026-08-08T11:55:11.517221Z",
             "target": "cp",
             "carried": true,
+            "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
+            "transition": "forward",
             "recorded_at": "2026-08-08T12:23:21.862544Z"
           }
         ],
@@ -149,6 +157,8 @@
             "serving_since": "2026-08-08T11:55:11.517221Z",
             "target": "cp",
             "carried": null,
+            "previous_sha": null,
+            "transition": null,
             "recorded_at": "2026-08-08T12:23:21.862544Z"
           }
         ],
@@ -174,7 +184,7 @@
 
     "two_rows_one_sha": {
       "why": "REVIEW ADDITION. The row identity is (sha, delivering_run_id, target), so ONE sha routinely has SEVERAL rows — the normal post-merge shape is the cp leg and the instance leg of the same merge, and a carried sha can additionally be re-delivered by a later run. Every other scenario here carries 0 or 1 rows, so the multi-row path (row ordering, the blank line between blocks, one carried row beside one that is not) never executed. That is the most likely place for an ugly-but-not-wrong render, and it is the DEFAULT outcome of the recorder slice 8 ships. It also carries the ONLY PARTIAL split in this file: row 2 has self and pickup measured and stall NULL, which is the shape a reader does arithmetic on without noticing — two buckets present reads as 'the third was about zero', and pickup being the residual makes that reading actively wrong.",
-      "synthetic": "YES — fabricated. Both rows are modelled on the live cp row's clocks; the second row's run id, its 940s build and its partial split are invented to exercise the partial-split and per-row-attribution paths.",
+      "synthetic": "YES — fabricated. Both rows are modelled on the live cp row's clocks; the second row's run id, its 940s build and its partial split are invented to exercise the partial-split and per-row-attribution paths. The transitions are invented too, and they differ on purpose: row 1 is `forward` and row 2 is `unknown` — the writer TRIED to grade the instance leg's move and could not decide, which is the one state a null cannot express and the reason `transition` is a word rather than a boolean (charter D437 rejected a `rolled_back` bool for exactly this).",
       "status": 200,
       "body": {
         "deliveries": [
@@ -191,6 +201,8 @@
             "serving_since": "2026-08-08T11:55:11.517221Z",
             "target": "cp",
             "carried": false,
+            "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
+            "transition": "forward",
             "recorded_at": "2026-08-08T12:23:21.862544Z"
           },
           {
@@ -206,11 +218,44 @@
             "serving_since": null,
             "target": "instance",
             "carried": true,
+            "previous_sha": "c0e43440b1a2938475d6c7b8a9e0f1d2c3b4a596",
+            "transition": "unknown",
             "recorded_at": "2026-08-08T12:52:00.000000Z"
           }
         ],
         "count": 2,
         "sha": "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
+    "rollback_verdict": {
+      "why": "THE ROLLBACK, and the reason this file moved again. `transition` is the one field the crown gained so that a deploy which moved the platform BACKWARDS would stop reading like an ordinary one — and from #11078 until dr-w27-s2 it never reached a human: to_json/1 emitted it, cloudclient.PlatformDelivery declared no field for it, json.Unmarshal dropped it in silence, and this row rendered BYTE-IDENTICALLY to the fully_clocked row above. Every clock here is present and healthy, exactly as in the row it must not be confused with; the ONLY difference is the verdict. That is what makes it the mutation row: delete the transition line from the renderer and this scenario, and only this scenario, reds.",
+      "synthetic": "YES — fabricated, but the SHAPE is a real event: guerrilla's own slot pair on 2026-08-08 was a genuine two-commit rollback (green b97663730 -> idle c0e43440b), and it is the pair charter D437's `git rev-list --count --left-right` primitive was measured on. The two shas here are those commits padded to 40 hex; the clocks are the live cp row's.",
+      "status": 200,
+      "body": {
+        "deliveries": [
+          {
+            "sha": "c0e43440b1a2938475d6c7b8a9e0f1d2c3b4a596",
+            "delivering_run_id": "31261111222",
+            "first_seen_at": "2026-08-08T13:10:00.000000Z",
+            "merged_at": "2026-08-08T13:04:12Z",
+            "queued_seconds": 14,
+            "queued_self_seconds": 6,
+            "queued_pickup_seconds": 3,
+            "queued_stall_seconds": 5,
+            "build_seconds": 216,
+            "serving_since": "2026-08-08T13:10:00.000000Z",
+            "target": "cp",
+            "carried": false,
+            "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
+            "transition": "rollback",
+            "recorded_at": "2026-08-08T13:12:44.000000Z"
+          }
+        ],
+        "count": 1,
+        "sha": "c0e43440b1a2938475d6c7b8a9e0f1d2c3b4a596",
         "limit": 50,
         "scope": "platform"
       }
