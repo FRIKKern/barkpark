@@ -260,5 +260,133 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
     end
   end
 
+  describe "identity refusal on the shared admin-POST seam (cch-w60-s4)" do
+    # A live box carrying a decryptable admin token AND a probe verdict. The
+    # `update_state: "unknown"` mirrors the producer: `persist_update_unknown/2`
+    # writes the reason and "unknown" in the SAME changeset.
+    defp probed_barkpark(reason) do
+      behind_barkpark(%{
+        admin_token_encrypted: Vault.encrypt(@admin_token),
+        update_state: "unknown",
+        update_unavailable_reason: reason
+      })
+    end
+
+    # Program the 202 the box WOULD have answered: a refusal that slipped BELOW
+    # the relay would then return {:ok, 202, _} and the return-value assertion
+    # alone would still look like a pass. The wire assertion is the real proof.
+    defp program_the_202_it_would_have_answered do
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: ~s({"ok":true,"status":"started"})}}
+      ])
+    end
+
+    test "a REFUTED box refuses the self-update trigger and NOTHING reaches the wire" do
+      bp = probed_barkpark("identity_refused")
+      program_the_202_it_would_have_answered()
+
+      result = Registry.trigger_self_update(bp)
+
+      # THE WIRE FIRST: the stored credential was never decrypted, never spent.
+      assert StudioLinkFakeHttpClient.requests() == []
+      assert result == {:error, :identity_refused}
+    end
+
+    test "a REFUTED box refuses the ROLLBACK trigger and NOTHING reaches the wire" do
+      bp = probed_barkpark("identity_refused")
+      program_the_202_it_would_have_answered()
+
+      result = Registry.trigger_rollback(bp)
+
+      assert StudioLinkFakeHttpClient.requests() == []
+      assert result == {:error, :identity_refused}
+    end
+
+    test "a NULL update_unavailable_reason PERMITS both triggers (the unprobed rung)" do
+      bp = probed_barkpark(nil)
+
+      program_the_202_it_would_have_answered()
+      assert {:ok, 202, _} = Registry.trigger_self_update(bp)
+      assert [%{url: url}] = StudioLinkFakeHttpClient.requests()
+      assert url =~ "/v1/admin/self-update"
+
+      program_the_202_it_would_have_answered()
+      assert {:ok, 202, _} = Registry.trigger_rollback(bp)
+      assert [%{url: rollback_url}] = StudioLinkFakeHttpClient.requests()
+      assert rollback_url =~ "/v1/admin/rollback"
+    end
+
+    test "EVERY OTHER rung of update_unavailable_reasons/0 PERMITS — iterated, never hand-copied" do
+      rungs = Barkpark.update_unavailable_reasons()
+
+      # Anti-vacuity floor: if the whitelist ever shrinks to just the refusing
+      # rung (or to nothing), this loop would iterate zero permitting rungs and
+      # pass while proving nothing.
+      assert "identity_refused" in rungs
+      assert length(rungs) >= 9
+
+      others = rungs -- ["identity_refused"]
+      assert length(others) >= 8
+
+      for reason <- others do
+        bp = probed_barkpark(reason)
+        program_the_202_it_would_have_answered()
+
+        result = Registry.trigger_self_update(bp)
+        wire = StudioLinkFakeHttpClient.requests()
+
+        assert match?({:ok, 202, _}, result),
+               "rung #{inspect(reason)} must PERMIT the trigger — only identity_refused refuses. " <>
+                 "Got #{inspect(result)} with wire #{inspect(wire)}"
+
+        assert length(wire) == 1,
+               "rung #{inspect(reason)} must reach the wire — got #{inspect(wire)}"
+      end
+    end
+
+    test "PIN PRECEDENCE: pinned+refused is :pinned unforced, :identity_refused forced, wire EMPTY both" do
+      bp =
+        behind_barkpark(%{
+          admin_token_encrypted: Vault.encrypt(@admin_token),
+          update_state: "unknown",
+          update_unavailable_reason: "identity_refused",
+          pinned_release: "v0.2.24"
+        })
+
+      # UNFORCED: the pin head-clause on trigger_self_update/2 matches above the
+      # relay, so the operator is told about the pin. Both verdicts are terminal
+      # and the wire is empty either way — only the WORD differs.
+      program_the_202_it_would_have_answered()
+      unforced = Registry.trigger_self_update(bp)
+      assert StudioLinkFakeHttpClient.requests() == []
+      assert unforced == {:error, :pinned}
+
+      # FORCED: the pin is overridden, and the refusal underneath it holds.
+      program_the_202_it_would_have_answered()
+      forced = Registry.trigger_self_update(bp, force: true)
+      assert StudioLinkFakeHttpClient.requests() == []
+      assert forced == {:error, :identity_refused}
+    end
+
+    # REVIEW ADDITION (cch-w61 review): the seam choice — refuse on
+    # `relay_admin_post/3`, NOT on `relay_admin/4` — was argued structurally
+    # ("relay_admin/4 is untouched") but never measured. A future refactor that
+    # hoisted the clause one seam up would silently refuse every READ at a
+    # refuted box (webhook lists, dataset reads, token mints) and no test would
+    # notice. This pins the scope: a READ still reaches the wire.
+    test "SCOPE: a READ through relay_admin/4 at a REFUTED box still reaches the wire" do
+      bp = probed_barkpark("identity_refused")
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: ~s({"ok":true})}}
+      ])
+
+      assert {:ok, 200, _} = Registry.relay_admin(bp, :get, "/v1/admin/health", nil)
+
+      assert [%{url: url}] = StudioLinkFakeHttpClient.requests()
+      assert url =~ "/v1/admin/health"
+    end
+  end
+
   defp unset_url(bp), do: bp |> Ecto.Changeset.change(url: nil, host: "") |> Repo.update!()
 end

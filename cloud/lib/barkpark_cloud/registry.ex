@@ -4018,10 +4018,24 @@ defmodule BarkparkCloud.Registry do
   is pinned. `force: true` overrides (an explicit "yes, update the pinned box").
   The rollout worker never hits this — it already excludes pinned rows from its
   candidate query — but the interactive relay must not silently no-op a pin.
+
+  IDENTITY REFUSAL (cch-w60-s4): a box whose last probe was refused
+  (`update_unavailable_reason == "identity_refused"` — it answered our stored
+  admin credential 401) returns `{:error, :identity_refused}` BEFORE the token
+  is decrypted and before anything reaches the wire. A pinned AND refused box
+  still returns `:pinned` on an unforced trigger (the pin clause matches
+  above); `force: true` reaches the refusal. Both are terminal, and the wire is
+  empty either way — only the word differs.
   """
   @spec trigger_self_update(Barkpark.t(), keyword()) ::
           {:ok, non_neg_integer(), map()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error | :pinned}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :instance_error
+             | :pinned
+             | :identity_refused}
   def trigger_self_update(bp, opts \\ [])
 
   def trigger_self_update(%Barkpark{pinned_release: pin} = bp, opts)
@@ -4055,17 +4069,51 @@ defmodule BarkparkCloud.Registry do
   target_sha>` on 202), so the operator's explicit rollback wins over the
   stale pin. An unpinned rollback would be undone within one rollout tick —
   a lie.
+
+  IDENTITY REFUSAL (cch-w60-s4): rollback rides the same shared POST seam, so a
+  box that refuted our stored admin credential returns `{:error,
+  :identity_refused}` with nothing on the wire — there is no pin clause above
+  this trigger, so the refusal is the only verdict.
   """
   @spec trigger_rollback(Barkpark.t(), keyword()) ::
           {:ok, non_neg_integer(), map()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :instance_error
+             | :identity_refused}
   def trigger_rollback(bp, _opts \\ []), do: relay_admin_post(bp, "/v1/admin/rollback")
 
   # The shared instance-admin relay: reveal the stored admin token, POST `body`
   # (default: an empty object) to <instance_url><path>, hand back the instance's
   # verdict with its semantics intact (undecodable body degrades to %{} — the
   # status alone is the verdict). Both admin triggers ride this one seam.
-  defp relay_admin_post(bp, path, body \\ %{}), do: relay_admin(bp, :post, path, body)
+  #
+  # cch-w60-s4 — THE PLANE STOPS ASKING A REFUTED BOX TO EXECUTE. When the last
+  # update probe was refused by the box itself (`update_unavailable_reason ==
+  # "identity_refused"` — the box answered our stored admin credential 401), an
+  # EXECUTE ask is spending a decrypted secret at an address that has already
+  # told us the secret is wrong. Refuse here, ABOVE `relay_admin/4` — so the
+  # refusal fires BEFORE `reveal_admin_token/1` and nothing reaches the wire.
+  #
+  # The guard sits on this shared POST seam (exactly two callers repo-wide, both
+  # admin triggers, and it is `defp`) rather than on either trigger, so a third
+  # admin trigger added later INHERITS the refusal instead of escaping it. It is
+  # deliberately NOT on `relay_admin/4`: that seam also carries token mints, site
+  # deploys and READS, and refusing a read because a WRITE credential was refuted
+  # is a different doctrine call.
+  #
+  # ONE RUNG ONLY. The column is `:string` (`Barkpark` :224) with a nine-rung
+  # whitelist, so the pattern is the literal STRING — an atom pattern would ship
+  # a refusal that can never fire. `"forbidden"` (the box knows our token but
+  # denies the route) is a DIFFERENT fact and is deliberately not matched here.
+  defp relay_admin_post(bp, path, body \\ %{})
+
+  defp relay_admin_post(%Barkpark{update_unavailable_reason: "identity_refused"}, _path, _body),
+    do: {:error, :identity_refused}
+
+  defp relay_admin_post(bp, path, body), do: relay_admin(bp, :post, path, body)
 
   @doc """
   The PUBLIC instance-admin relay (site-spawner D22/D29): reveal `bp`'s stored
