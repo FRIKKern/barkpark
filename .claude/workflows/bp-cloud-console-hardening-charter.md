@@ -3117,6 +3117,71 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-09 — wave 63 REVIEW — grade A−, three round-1 code slices + the Law-0 repayment; all three pushed with PRs open
+
+**LANDED (three PRs, all reviewer `-r` branches, all pushed — the streak stays broken):**
+
+- `cch-w63-s1` **THE CROWN LANDS** → **#11376**, `loop-epic/the-crown-lands-one-cause-one-cell-three-0-r`.
+  **STACKED ON #11337** (base = `loop-epic/a-permanent-refusal-renders-terminally-a-0-r`); merge that
+  first. #11337's Console gate and tier-floor-render were refusing on ONE cause: the scenario
+  `instance-update-credential-refused` was UNLISTED, and the census is a precondition ahead of the
+  render leg, so tier-floor never reached Chrome. One render cell (`inst-update-refused`, hash naming
+  `IDS.refusedInstance` because the fixture puts exactly ONE barkpark on the fleet), 36/36 with a
+  3-clause liveness line and a falsifiable sentinel. Census now `111 scenarios · 26 distinct covered
+  by 27 cells · 85 residue over 13 families`; the three literals were re-derived ONE ROUND PER
+  LITERAL (`assert.equal` masks the next). **`PIN_MEMBER_SCENARIOS` stays 10** — the sweep's own
+  printed "update both pins" instruction is actively wrong and reds the one check the file enforces.
+  Eleven prose sites corrected; review added two more the cell falsified (the family is 22-member,
+  not 21; the render leg is 27 x 2 x 18 = 972, not 26 x 2 x 15 = 780).
+- `cch-w63-s2` **THE GATE STOPS NAMING CHROME** → **#11377**,
+  `loop-epic/the-console-gate-stops-naming-chrome-for-1-r`. The aggregate banner and the per-job
+  `REFUSED` arm both asserted a bring-up failure; run 31322709682 refutes it — tier-floor parsed 25
+  preludes, 6 breakpoints, 13 views, then refused over a COVERAGE fault in
+  `cloud/priv/static/__preview__`, the console defect the sentence denied. Both now name the cause
+  SET and hand the cause back to the instrument's own summary line. `console-unit` gained a verdict
+  channel (six exit-2-capable steps classify their own exit code), so the gate names **2 of 2**
+  refusals instead of 1. **The arm can now lose**: gutting it plus a nonsense banner title used to
+  yield 205/0; it now reds 8 named cases. Review found the last per-instrument banner still naming
+  ONE cause (`cssom-parity`'s own, counted at SIX exit-2 shapes, three of them committed files) and
+  pinned it in both directions. 205 → 240 → **246 passing assertions**.
+- `cch-w63-s3` **THE SITE-WRITE FENCE** → **#11378**,
+  `loop-epic/the-site-write-fence-lands-at-the-dispat-2-r`. Site writes rode `relay_admin/4` and
+  bypassed #11287's identity fence BY CONSTRUCTION — every deploy/rollback/teardown for a refused box
+  spent a real request to be told no again, then reported a **502 about the network for a refusal
+  about identity**. `BoxRelay` gains `defp dispatch/3` with `@reads [:poll_deploy]`: three writes
+  fence, the READ stays open (a refused box is exactly the box a human needs to read). `impl/0` is
+  `defp` (zero external callers). A typed **409 `identity_refused`** replaces the 502 at the two
+  places it is actually minted, and both routes relay the code instead of stamping `rollback_failed`
+  on every status. The D37 guard at `sites_deploy_test.exs:628` was **proven vacuous** (three real box
+  calls injected, test still PASSED) and armed. Review closed the hole the builder named himself:
+  deleting both router clauses reded nothing — now it reds 2 wire-level tests, and the real failure
+  mode is a `CaseClauseError` rendered as a **500 crash_envelope**.
+
+**STALLED / PARTIAL:** `cch-w63-s4` (the Law-0 repayment) — MOVES 0, CLOSES **11**, LIVE
+**429 → 418**. Six of seven obligations discharged; the brief's target of "below 416" is an **honest
+miss**, stamped as a miss rather than flipped, because the brief's 826/416 was already stale at claim
+time (the wave's own 13 slice rows are children of the same epic). Two D-rows corrected: D745 records
+`cch-w58-s2` at 6/8 when it is **3/8** — four criteria carry `[WITHDRAWN BY WAVE REVIEW]` while still
+flagged `met:true`, and the withdrawal is correct against shipped bytes
+(`autoupdate_rollout_worker.ex:170-171` stamps on a 409). Held open, not closed. Nine stamps were
+REJECTED by the `merge_gated_criterion` rail before any evidence was accepted — a guard that can
+lose, proven by losing.
+
+**ROUND 2 NOT BUILT, BY DESIGN** (the sequenced-rounds law): `cch-w63-s5` (the resting state),
+`cch-w63-s6` (`PIN_TOTAL_SCENARIOS` learns to lose), `cch-w63-s7` (the site refusal modal),
+`cch-w63-s8` (the audit row).
+
+**WHAT THE NEXT WAVE MUST KNOW.** Dispatch order is fixed by file collision, not preference:
+merge **#11337 → #11376 → #11377 → #11378**, then `s6` (needs the crown's corpus) and `s5` (needs the
+crown; owns `app.js` + `app.css` + the `cssom-heads.baseline` bump) in parallel, then `s8` (needs s3's
+`router.ex`; rebase for the one `app.js` line s5 owns), then `s7` LAST (needs s3's MERGED wire shape
+AND s5's `app.js`). **Verify `s7` against the merged body, not against any brief.** Round 1's payoff
+is instrument-side: every `app.js` change this wave touches a human with is in round 2, so the
+console a person actually looks at has not moved yet — that gap is the next wave's whole job.
+`console-unit`'s `||` chain over SIX step ids is the one thing that could not be run locally; read
+that job's output line on #11377's first CI run. It degrades to "no verdict published" — the
+pre-slice behaviour — never to a lie.
+
 ### 2026-08-09 — wave 62 REVIEW — grade A−, four round-1 slices built, four pushed with PRs open
 
 **Round 1 shipped four of four; every branch is the reviewer's `-r` and every one is pushed with a PR
