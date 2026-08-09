@@ -2507,6 +2507,48 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # A REFUSED WRITE LEAVES A NAMED ROW (cch-w63-s8). When the plane refuses to
+  # send an instance write because the box already answered our stored admin
+  # credential 401, the operator gets a 409 in a browser they will close. The
+  # audit trail is the only surface where that refusal is still findable an hour
+  # later — and a silence there is indistinguishable from "nobody tried".
+  #
+  # DELIBERATELY NOT `Accounts.audit/3`. That wrapper runs the mutation inside a
+  # transaction and `Repo.rollback`s the WHOLE thing on `{:error, reason}` —
+  # correct for a mutation that must never outlive its record, and certified by
+  # accounts_audit_test.exs's "writes NO event when the inner mutation fails".
+  # But a REFUSAL is an error by definition, so routed through `audit/3` it could
+  # never leave a row. `record_audit/1` directly, outside any transaction, on the
+  # OC24 best-effort discipline: the refusal already happened, so a failed insert
+  # is LOGGED and never turns a 409 into a 500.
+  #
+  # The verb is a LITERAL here rather than a parameter, unlike the two
+  # call-site-keyed helpers above. A shared helper reached with the verb in a
+  # module attribute is invisible to EVERY arm of the audit vocabulary census at
+  # once while `validate_inclusion` rejects every write at runtime — 0 failures
+  # over a producer that has never written a row.
+  #
+  # `attempted` names WHICH write was refused ("self_update" / "rollback");
+  # `reason` is the wire word verbatim, so the console's expanded timeline detail
+  # (payload = e.metadata, rendered as pretty JSON by tlvDetailHtml) carries the
+  # same slug the 409 body carried. Facts only — never the credential itself.
+  defp audit_credentials_refused(conn, team, bp_id, attempted) do
+    case Accounts.record_audit(%{
+           team_id: team.id,
+           actor_user_id: conn.assigns.current_user.id,
+           action: "barkpark.credentials_refused",
+           target_type: "barkpark",
+           target_id: bp_id,
+           metadata: %{reason: "identity_refused", attempted: attempted}
+         }) do
+      {:ok, _event} ->
+        push_event(team.id, "audit")
+
+      {:error, cs} ->
+        Logger.error("audit barkpark.credentials_refused failed: #{inspect(cs)}")
+    end
+  end
+
   # POST /v1/barkparks/:id/retry → 201 {job} — re-enqueue provisioning for an
   # instance whose LAST provision attempt FAILED. Gated on a failed latest job so
   # a retry can never open a second concurrent provision (and a second billed
@@ -3408,7 +3450,11 @@ defmodule BarkparkCloud.Web.Router do
       # us, which is this epic's own thesis defect committed by the fix. 409 is
       # the shipped family for terminal refusals here (`pinned`, `not_live`) and
       # the code is the Registry's whitelist word verbatim — no third vocabulary.
+      #
+      # cch-w63-s8: and it leaves a ROW. The 409 is gone the moment the tab is,
+      # so the refusal is recorded before it is relayed.
       {:error, :identity_refused} ->
+        audit_credentials_refused(conn, team, bp.id, "self_update")
         json(conn, 409, %{error: %{code: "identity_refused"}})
 
       {:error, _reason} ->
@@ -3579,7 +3625,11 @@ defmodule BarkparkCloud.Web.Router do
       # cch-w60-s4: same refusal as the self-update relay — the box refuted our
       # stored admin credential, so the plane did not spend it on a rollback
       # either. Above the catch-all, or a refuted box reads as unreachable.
+      #
+      # cch-w63-s8: same named row as the self-update arm, differing only in the
+      # `attempted` fact — one verb, two writes it refused.
       {:error, :identity_refused} ->
+        audit_credentials_refused(conn, team, bp.id, "rollback")
         json(conn, 409, %{error: %{code: "identity_refused"}})
 
       {:error, _reason} ->

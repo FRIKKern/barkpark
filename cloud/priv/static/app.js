@@ -15886,7 +15886,12 @@
     "site.github_connected": "connected a repo",
     "barkpark.go_live": "launched a Barkpark",
     "barkpark.deleted": "removed a Barkpark",
-    "barkpark.autoupdate_changed": "changed autoupdate"
+    "barkpark.autoupdate_changed": "changed autoupdate",
+    // cch-w63-s8. The row a REFUSED write leaves: the plane declined to send an
+    // instance write because the box answered our stored admin credential 401.
+    // The actor tried; the request never left. The expanded detail carries the
+    // wire word (reason: "identity_refused") and which write it was.
+    "barkpark.credentials_refused": "was refused — the instance rejected our access credential"
   };
 
   function humanAction(a) { return ACTION_LABELS[a] || a; }
