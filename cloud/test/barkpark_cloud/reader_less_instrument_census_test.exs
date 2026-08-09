@@ -231,7 +231,17 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   asserted rather than assumed.
   """
   @spec hits([binary()], keyword()) :: %{binary() => [hit()]}
-  def hits(keys, opts \\ []) do
+  def hits(keys, opts \\ [])
+
+  # REVIEW ADDITION (cch-w61 review): the empty key set. The uncompiled oracle
+  # returns `%{}` for it (`String.contains?(source, [])` is simply false);
+  # `:binary.compile_pattern([])` RAISES ArgumentError. Without this clause the
+  # two implementations diverge at exactly the boundary the equivalence test
+  # claims they agree on, and a derived-admission arm that reflected zero fields
+  # would crash the census instead of reporting an empty one.
+  def hits([], _opts), do: %{}
+
+  def hits(keys, opts) do
     keys = Enum.uniq(keys)
     table = Enum.map(keys, &{&1, :binary.compile_pattern(variants(&1))})
     all = keys |> Enum.flat_map(&variants/1) |> Enum.uniq() |> :binary.compile_pattern()
@@ -794,6 +804,16 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
     assert Enum.count(per_key, fn {_key, fast, _slow} -> MapSet.size(fast) > 10 end) >= 2,
            "no key derived more than 10 readers, so set equality proves almost nothing here: " <>
              inspect(Enum.map(per_key, fn {k, f, _} -> {k, MapSet.size(f)} end))
+  end
+
+  test "COMPILED == UNCOMPILED at the EMPTY key set — the one input that raises" do
+    # Set equality over the seven register keys says nothing about zero keys,
+    # and zero keys is not hypothetical: a derived-admission arm that reflects
+    # an empty field list would hand exactly this in. `:binary.compile_pattern/1`
+    # raises on `[]`, so without the guarding clause `hits/2` would crash where
+    # the oracle returns an empty map.
+    assert ReaderScan.hits([]) == %{}
+    assert ReaderScan.hits([]) == ReaderScan.hits_uncompiled([])
   end
 
   # ---------------------------------------------------------------------------
