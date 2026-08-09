@@ -681,8 +681,22 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
     assert hits["publish_clock_shadow_metric"] == []
 
-    assert [%{key: "publish_clock_shadow_metric", kind: :lost_reader}] =
-             violations(register, hits, :lost_reader)
+    lost = violations(register, hits, :lost_reader)
+
+    # AMONG, not SOLE: the injected row must be FOUND, not be the only finding.
+    # A genuine reader-less row elsewhere in the register is a real finding, and
+    # must not read as this instrument breaking.
+    assert Enum.any?(
+             lost,
+             &match?(%{key: "publish_clock_shadow_metric", kind: :lost_reader}, &1)
+           ),
+           """
+           the injected reader-less row did NOT surface as a :lost_reader
+           violation. The census cannot see a metric nothing emits and nothing
+           reads — the instrument is broken, whatever else it found.
+
+           #{fmt(lost)}
+           """
   end
 
   test "MUTATION: a reader-less row given a REAL reader reds as ROT" do
@@ -701,7 +715,23 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
     register = Enum.reject(@register, &(&1.key == "failure_class")) ++ [rotten]
     hits = ReaderScan.hits(Enum.map(register, & &1.key))
 
-    assert [%{key: "failure_class", kind: :rot} = v] = violations(register, hits, :rot)
+    rots = violations(register, hits, :rot)
+    v = Enum.find(rots, &(&1.key == "failure_class"))
+
+    # AMONG, not SOLE: a second, genuine stale stay elsewhere in the register is
+    # a real finding — it must not make this positive control read as instrument
+    # failure. `v` stays BOUND so the reader assertion still interrogates the
+    # injected row itself, not "some row somewhere".
+    assert v,
+           """
+           the injected stale stay (`failure_class` declared `:stay` while it
+           genuinely has readers) did NOT surface as a :rot violation. The
+           census cannot catch a stay that stopped being true.
+
+           #{fmt(rots)}
+           """
+
+    assert v.kind == :rot
     assert v.readers > 0
   end
 
