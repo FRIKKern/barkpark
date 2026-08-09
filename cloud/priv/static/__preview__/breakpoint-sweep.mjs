@@ -179,8 +179,14 @@
 //  COST, HONESTLY
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
-//  costs roughly a second per cell. The full render leg is 26 cells x 2 themes
-//  x 15 widths = 780 cells: budget MINUTES. The theme axis DOUBLED that, for an
+//  costs roughly a second per cell. The full render leg is 27 cells x 2 themes
+//  x 18 boundary widths = 972 renders: budget MINUTES. The width numeral here is
+//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
+//  boundary widths"), not the 15 that this file's residue prose still repeats —
+//  that stale numeral has no arm and is owned by
+//  cch-w63-bl-the-derived-width-axis-has-no-arm-and-its-prose-propagated.
+//  Measured, not assumed: `--render --cell inst-update-refused` reports 36
+//  renders for ONE cell (18 x 2). The theme axis DOUBLED that, for an
 //  axis stated above to be coverage rather than yield — slice it with
 //  `--theme light` when you are chasing a width, not a mode. Two traps proven the hard way: Page.navigate to
 //  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
@@ -393,7 +399,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // scenario has nowhere to hide.
 // WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
-// the 21-member `hash:#instance` family, and goes green while its entry rots
+// the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
 // THE CENSUS THIS RECONCILES AGAINST: 111 scenarios · 27 cells over 26 DISTINCT
 // scenarios (mixed-fleet is used twice) · residue exactly 85 · 13 families.
