@@ -22,7 +22,15 @@ defmodule BarkparkWeb.Telemetry do
       # `prometheus_metrics/0` and holds the running aggregates in ETS; the
       # token-gated `GET /v1/instance/metrics` route scrapes them. It runs in
       # EVERY env (not dev-gated) so the prod hole cannot reopen unnoticed.
-      {TelemetryMetricsPrometheus.Core, name: :barkpark_metrics, metrics: prometheus_metrics()}
+      {TelemetryMetricsPrometheus.Core, name: :barkpark_metrics, metrics: prometheus_metrics()},
+
+      # Distributions in Core keep every observation in ETS until a scrape folds
+      # them into buckets. `prometheus_metrics/0` puts distributions on
+      # `barkpark.repo.query.*`, which fire per QUERY, so an instance nobody
+      # scrapes grows that table without bound — see the module doc for the
+      # measurements. This prunes only when the endpoint looks unused, so an
+      # instance with a real Prometheus attached is unaffected.
+      BarkparkWeb.Telemetry.DistributionPruner
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

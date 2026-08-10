@@ -20,6 +20,9 @@ defmodule BarkparkWeb.MetricsController do
 
   def scrape(conn, _params) do
     metrics = TelemetryMetricsPrometheus.Core.scrape(@aggregator)
+    # Tells the pruner the endpoint is in use, so it leaves the samples between
+    # this scrape and the next one alone.
+    BarkparkWeb.Telemetry.DistributionPruner.note_scrape()
 
     conn
     |> put_resp_content_type("text/plain", "utf-8")
