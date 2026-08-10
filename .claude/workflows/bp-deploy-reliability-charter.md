@@ -11974,3 +11974,47 @@ STUCK SITES and cannot distinguish abandonment from stuckness, that the preview 
 construction, and that `failure_rate` is not measurable over any window wide enough to show a non-zero coverage
 number. The maintenance cadence is unchanged from wave 33 EXCEPT that the digest rail is demoted from witness to
 convenience (D589) — the exit instrument is the owner-run command, not an inbox.
+
+### Wave 2026-08-10 (wave 34) — REVIEWED · Paper `deploy-reliability-wave-34-2026-08-10` · grade **A**
+
+**THE EXIT NUMBER NOW MEANS ONE THING, AND THE COMMAND THAT TAKES IT REFUSES RATHER THAN LIES.** All five round-1
+slices built, reviewed, gate-green and PUSHED with PRs open. Nothing stalled; there were no deferred rounds.
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `dr-w34-s1-coverage-envelope-window-and-sites` | `…-can-l-0-r` | #11534 | Eight ordered edits shipped. Deferral side of the open-right law now reds alone; `never_covered_sites` names the tail bounded at 20 with total/truncated; `covering_bound` on `coverage_cohorts` (never on `window`); ONE `as_of` per envelope. Floors re-measured on-branch (144→149, 264→268), not derived. |
+| `dr-w34-s2-provenance-ancestry-refuses-off-history` | `…-ances-1-r` | #11535 | `provenance.mjs` grades the five ratified rungs; QUOTABLE ⇔ ancestry ∈ {current, behind}; rc=128 routes to `unknown` WITH its reason. `doctor.sh` stops prescribing a rebuild loop to a diverged tree. |
+| `dr-w34-s3-crown-in-flight-before-skew` | `…-that--2-r` | #11536 | `&status=success` dropped (the success population unchanged by construction), chain reordered IN-FLIGHT→EPSILON→SKEW→GRACE→RED, epsilon pinned as a BAND read back out of the script. 198/0. |
+| `dr-w34-s4-twin-collapse-stops-double-counting` | `…-dr-3-r` | #11537 | ONE `collapse_twins/1`, twin-collapse and never the blanket exclusion. **Reviewer extended it to the FIFTH producer the brief missed.** |
+| `dr-w34-s5-exit-artefact-committed-and-rerunnable` | `…-re--4-r` | #11538 | **THE DELIVERABLE.** A sibling of `seal-run.sh` (never a re-point of its decoy `--predicate`), refusing `--days`, branching ancestry on 0/1/128, publishing `live_rate` + `never_covered` + the split and NEVER a fleet failure percentage. 96/0 offline, 8 mutation proofs. |
+
+**WHAT THE REVIEW CHANGED, AND ONE OF IT WAS LOAD-BEARING FOR THE WISH.** `Params.batch_child_counts/2` is a
+FIFTH producer of `child_count` — `?view=brief` and the ready cards — grouping on the same drafts-stripped
+`parent_id` key and equally unpredicated. The brief called `child_tasks/2` the only producer. Shipping the four
+briefed paths alone would have made `bp task get <epic>` answer 326 while `bp task ls --view=brief` answered 332:
+**one quantity with two numbers, moved one surface over rather than removed** — the exact disease the wish names,
+reproduced by the fix meant to cure it. Fixed in-wave on s4's branch with the same helper plus an agreement test
+that asserts the two surfaces AGAINST EACH OTHER rather than against two literals that could drift together.
+The builder's follow-up row `dr-w34-bl-brief-card-child-count-still-double-counts` is superseded, not deferred.
+Three smaller fixes: s1's never-covered header named "sites" over a total counting `{site, environment}` PAIRS
+(and its NOT-NAMED forbidden-string guard was repointed and re-proved); s2's unmetered-distance banner rendered
+"an unmetered number of OF ITS commits" and "1 of its commit" on a branch nothing exercised; s5 stored the
+narrower word `diverged` for an rc=1 that covers `ahead_of_main` too — and its refusal guard tested the old
+literal, so the rename alone would have silently disabled refusal 5.
+
+**WHAT THE LEAD OWNS ON MERGE.** Every slice keeps its merge-gated criterion OPEN. Beyond those: s1's
+`delivery/3` default `as_of` change is a NUMBER MOVING on historical windows, not a stamp aligning — agree with it
+deliberately. s3's in-flight deferral has **no age cap** (`dr-w34-fu-inflight-deferral-is-unbounded`); the cap was
+deliberately not invented, because every other threshold in that block carries a measured derivation. s4 wants a
+`(type, doc_id, dataset, workspace_id, project_id)` index and its post-deploy count should read **326** — 324
+would mean the blanket predicate shipped. s1's TENANCY judgment was flagged HIGH-FLIP-RISK and independently
+re-derived by the reviewer (no widening: the fold receives a source-scoped query and the `Site` join only ever
+sees ids harvested from it) — but that is still ONE pair of eyes, and an independent second reviewer is owed
+before merge.
+
+**WHAT WAVE 35 TAKES.** Merge round 1 in any order — the five file sets are disjoint. Then, in this order: run
+`scripts/deploy-reliability-exit-run.sh` post-merge to capture the live `as_of` twin-stamp (s1's deferred
+criterion) and to see whether the named sites now reach the wire; re-derive s4's `326`; and settle the four
+residual sentences the wave's verifier could not (its host ran out of disk), which are the last L4 prose in the
+exit artefact's UNVERIFIED section. Only then is there an exit reading with nothing unverified behind it. The
+epic still does not seal on the word SEAL — clause (b) remains a live readout of another epic's ladder.
