@@ -2363,6 +2363,12 @@ type DeployCoverageSite struct {
 // NeverCoveredSitesTotal is the unbounded population and
 // NeverCoveredSitesTruncated says whether the list was cut. A list that cuts
 // silently is the same anonymity one level down.
+//
+// COUNT UNIT, said once so nobody has to guess: both the list and the total are
+// over {site_id, environment} PAIRS, never over distinct sites. One site dark in
+// both production and preview contributes TWO entries and TWO to the total, and
+// the per-cohort NeverCovered counts one struct up are over ROWS — three units,
+// three names, none of them interchangeable.
 type DeployCoverageCohorts struct {
 	Clock                      string                 `json:"clock"`
 	Basis                      string                 `json:"basis"`

@@ -1524,7 +1524,10 @@ func TestCloudDeploymentsCoverageRendersBothCohorts(t *testing.T) {
 	// A never-covered count with no name sends a human looking through the whole
 	// fleet for the three rows that are dark.
 	for _, want := range []string{
-		"never-covered sites (2 of 7)",
+		// PAIRS, not sites: the total counts {site_id, environment} groups, so a
+		// header saying "sites" would give 7 a different meaning here than in the
+		// cut marker three lines down.
+		"never-covered {site, environment} pairs (2 of 7)",
 		"jarl-website",
 		"preview-box",
 		"3 row(s) never covered",
@@ -1603,7 +1606,10 @@ func TestCloudDeploymentsCoverageWithoutSitesSaysNotNamed(t *testing.T) {
 		t.Fatalf("an absent covering_bound must say so rather than assume:\n%s", stdout)
 	}
 	// And nothing may be invented: no name, no cut, no zero.
-	for _, forbidden := range []string{"never-covered sites (", "the list is CUT", "sites: none"} {
+	// The forbidden prefix must track the header VERBATIM — a stale literal here
+	// would pass vacuously against a renamed header, which is the one way this
+	// negative assertion can stop being a guard.
+	for _, forbidden := range []string{"never-covered {site, environment} pairs (", "the list is CUT", "sites: none"} {
 		if strings.Contains(stdout, forbidden) {
 			t.Fatalf("nothing may be claimed about WHICH sites when none were sent (%q):\n%s", forbidden, stdout)
 		}

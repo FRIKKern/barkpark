@@ -1238,7 +1238,12 @@ func renderDeployCoverageSites(out *writer, c *cloudclient.DeployCoverageCohorts
 		return
 	}
 
-	out.outf("  never-covered sites (%d of %d)", len(c.NeverCoveredSites), c.NeverCoveredSitesTotal)
+	// The header counts {site, environment} PAIRS, not distinct sites, because
+	// that is what the total beside it counts — one site dark in both production
+	// and preview is TWO rows here and TWO in the total. Saying "sites" would
+	// make "7" mean one thing in the header and another in the cut marker below,
+	// which is the exact ambiguity this section exists to end.
+	out.outf("  never-covered {site, environment} pairs (%d of %d)", len(c.NeverCoveredSites), c.NeverCoveredSitesTotal)
 	for _, s := range c.NeverCoveredSites {
 		out.outf("    %-28s %-12s %d row(s) never covered", deployCoverageSiteName(s), sanitizeCell(s.Environment), s.NeverCovered)
 	}
