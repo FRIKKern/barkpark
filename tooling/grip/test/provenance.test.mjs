@@ -44,9 +44,15 @@ import {
   treeProvenance,
   provenanceLine,
   emitProvenance,
+  ancestryOf,
+  isQuotable,
+  ANCESTRY,
+  ANCESTRIES,
+  QUOTABLE_ANCESTRIES,
   PROVENANCE_PREFIX,
   PROVENANCE_STATE,
   FETCHED_PHRASE,
+  FETCHED_NOTE,
   MODULE_TREE,
 } from "../provenance.mjs";
 
@@ -216,6 +222,198 @@ test("HEAD at origin/main reports differs_from_origin=false — the signal is no
     assert.equal(p.differs_from_origin, false);
     assert.match(provenanceLine(p), /in sync with origin\/main/);
     assert.equal(/DIFFERS/.test(provenanceLine(p)), false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE RUNGS — three states that used to wear one boolean (W34 S2)
+//
+// `differs_from_origin` was `head !== origin_main`: true for a tree one commit
+// behind AND for a tree 49 commits off main's history entirely, rendered with
+// the same sentence. These tests pin each rung SEPARATELY, and pin that the two
+// non-quotable rungs do not render as the quotable ones.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("the rung vocabulary is the one commit_distance.ex already ratified — no second one is minted", () => {
+  // Parsed from the Elixir owner, not retyped: if that module ever renames a
+  // rung, this fails instead of two vocabularies drifting apart in silence.
+  const ex = readFileSync(join(REPO_ROOT, "cloud/lib/barkpark_cloud/github/commit_distance.ex"), "utf8");
+  const m = ex.match(/def ancestries,\s*do:\s*~w\(([^)]*)\)/);
+  assert.ok(m, "commit_distance.ex no longer declares ancestries/0 as a ~w() list");
+  assert.deepStrictEqual([...ANCESTRIES], m[1].trim().split(/\s+/));
+  assert.deepStrictEqual([...QUOTABLE_ANCESTRIES], ["current", "behind"]);
+  for (const rung of ANCESTRIES) assert.equal(isQuotable(rung), ["current", "behind"].includes(rung));
+});
+
+test("HEAD at origin/main is `current`, distance 0, QUOTABLE", () => {
+  withTempRepo(({ dir, second }) => {
+    git(dir, "update-ref", "refs/remotes/origin/main", second);
+    const p = treeProvenance({ cwd: dir });
+    assert.equal(p.ancestry, ANCESTRY.CURRENT);
+    assert.equal(p.distance, 0);
+    assert.equal(p.quotable, true);
+    assert.match(provenanceLine(p), /ancestry current \(QUOTABLE\)/);
+  });
+});
+
+test("HEAD behind origin/main is `behind` with the count of main's commits it lacks — QUOTABLE", () => {
+  withTempRepo(({ dir, first, second }) => {
+    git(dir, "update-ref", "refs/remotes/origin/main", second);
+    git(dir, "checkout", "-q", first);
+    const p = treeProvenance({ cwd: dir });
+    assert.equal(p.ancestry, ANCESTRY.BEHIND);
+    assert.equal(p.distance, 1, "distance is commits of main this tree does not have");
+    assert.equal(p.quotable, true);
+    const line = provenanceLine(p);
+    assert.match(line, /ancestry behind by 1 commit;/);
+    assert.equal(/DIVERGED/.test(line), false, "a behind tree must not be accused of being off history");
+  });
+});
+
+test("HEAD ahead of origin/main is `ahead_of_main`, distance 0, and NOT quotable", () => {
+  withTempRepo(({ dir, first, second }) => {
+    // origin/main parked at the older commit: this tree misses NONE of main's
+    // commits and carries one main has never seen.
+    git(dir, "update-ref", "refs/remotes/origin/main", first);
+    void second;
+    const p = treeProvenance({ cwd: dir });
+    assert.equal(p.ancestry, ANCESTRY.AHEAD_OF_MAIN);
+    assert.equal(p.distance, 0);
+    assert.equal(p.quotable, false, "code main has never seen cannot be quoted as what main ships");
+    assert.match(provenanceLine(p), /ancestry ahead_of_main: .*\(NOT QUOTABLE\)/);
+  });
+});
+
+test("a sibling off main's history is `diverged` — REFUSED, and it does not read as `behind`", () => {
+  // The owner's own shape, in miniature: commits main will never have AND
+  // commits of main it does not have. The old boolean rendered this identically
+  // to one-commit-behind, which is the reading that invites "close enough".
+  withTempRepo(({ dir, first, second }) => {
+    git(dir, "update-ref", "refs/remotes/origin/main", second);
+    git(dir, "checkout", "-q", "-b", "sibling", first);
+    writeFileSync(join(dir, "b.txt"), "sibling\n");
+    git(dir, "add", "b.txt");
+    git(dir, "commit", "-q", "--no-gpg-sign", "-m", "sibling");
+
+    const p = treeProvenance({ cwd: dir });
+    assert.equal(p.ancestry, ANCESTRY.DIVERGED);
+    assert.equal(p.distance, 1, "distance keeps its single meaning: main's commits this tree lacks");
+    assert.equal(p.quotable, false);
+    const line = provenanceLine(p);
+    // Anchored on the SEMICOLON that ends the clause: a bare `.../ its commit/`
+    // prefix matches "commit" and "commits" alike, so it could not tell a
+    // pluralisation bug from a correct line.
+    assert.match(line, /ancestry DIVERGED: off origin\/main's history AND missing 1 of its commits;/);
+    assert.match(line, /a rebuild here reinstalls the same off-history code/);
+    assert.equal(/ancestry behind by/.test(line), false, "diverged must not render as behind");
+  });
+});
+
+test("an UNMETERED distance still reads as English on both rungs — the count is missing, not the sentence", () => {
+  // `distance` is null whenever `rev-list --count` fails, and that branch reaches
+  // an operator's screen exactly when something is already wrong — the worst
+  // moment for the line to be unreadable. It shipped as "an unmetered number of
+  // OF ITS commits" because the phrase already ended in "of" and the diverged
+  // arm prefixed a second one; nothing exercised the null path, so nothing said
+  // so. Both rungs are pinned here, and the doubled preposition is refuted by
+  // name so the bug cannot come back silently.
+  const base = {
+    in_repo: true,
+    state: "measured",
+    root: "/tmp/x",
+    head_short: "aaaaaaaa",
+    origin_main_short: "bbbbbbbb",
+    distance: null,
+    dirty: false,
+    dirty_files: 0,
+    fetched_note: FETCHED_NOTE,
+  };
+
+  const diverged = provenanceLine({ ...base, ancestry: ANCESTRY.DIVERGED, quotable: false });
+  assert.match(diverged, /missing an unmetered number of its commits;/);
+  assert.equal(/number of of/.test(diverged), false, "the possessive must not double the preposition");
+
+  const behind = provenanceLine({ ...base, ancestry: ANCESTRY.BEHIND, quotable: true });
+  assert.match(behind, /behind by an unmetered number of commits;/);
+  assert.equal(/number of of/.test(behind), false);
+
+  // …and a metered SINGULAR still agrees with itself on both rungs.
+  assert.match(provenanceLine({ ...base, ancestry: ANCESTRY.BEHIND, distance: 1 }), /behind by 1 commit;/);
+  assert.match(
+    provenanceLine({ ...base, ancestry: ANCESTRY.DIVERGED, distance: 1 }),
+    /missing 1 of its commits;/,
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rc=128 — "I could not look" is not "no"
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("an unknown sha exits 128 and routes to `unknown` WITH a reason — never to a confident refusal", () => {
+  withTempRepo(({ dir, second }) => {
+    git(dir, "update-ref", "refs/remotes/origin/main", second);
+    const ghost = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+
+    // The measurement this test exists to pin, taken here rather than quoted:
+    // --is-ancestor answers 128 for a sha it does not have, NOT 1.
+    const probe = spawnSync("git", ["merge-base", "--is-ancestor", ghost, second], { cwd: dir, encoding: "utf8" });
+    assert.equal(probe.status, 128, "the third outcome is gone — re-check the branch on r.code");
+
+    const graded = ancestryOf({ head: ghost, origin_main: second, cwd: dir });
+    assert.equal(graded.ancestry, ANCESTRY.UNKNOWN);
+    assert.notEqual(graded.ancestry, ANCESTRY.DIVERGED, "128 collapsed into a refusal is a confidently wrong answer");
+    assert.equal(graded.distance, null, "unmetered is null, never 0");
+    assert.equal(graded.quotable, false, "unknown is refused fail-CLOSED");
+    assert.match(graded.reason, /exit 128/);
+    assert.match(graded.reason, /object database/);
+  });
+});
+
+test("a SHALLOW clone — the real world that answers 128 — grades unknown, not diverged", () => {
+  withTempRepo(({ dir, first, second }) => {
+    const clone = join(dir, "..", `grip-prov-shallow-${Date.now()}`);
+    const r = spawnSync("git", ["clone", "-q", "--depth", "1", `file://${dir}`, clone], { encoding: "utf8" });
+    assert.equal(r.status, 0, `shallow clone failed: ${r.stderr}`);
+    try {
+      // `first` is outside the shallow boundary: the ref graph knows the tip and
+      // nothing else, which is exactly a CI checkout's world.
+      const graded = ancestryOf({ head: first, origin_main: second, cwd: clone });
+      assert.equal(graded.ancestry, ANCESTRY.UNKNOWN);
+      assert.equal(graded.quotable, false);
+      assert.ok(graded.reason && graded.reason.length > 0, "a refusal without a reason is a shrug");
+    } finally {
+      rmSync(clone, { recursive: true, force: true });
+    }
+  });
+});
+
+test("ancestryOf is total over junk input and never claims a rung it did not measure", () => {
+  for (const args of [
+    { head: null, origin_main: null },
+    { head: "abc", origin_main: null },
+    { head: null, origin_main: "abc" },
+    { head: "", origin_main: "" },
+  ]) {
+    let graded;
+    assert.doesNotThrow(() => { graded = ancestryOf({ ...args, cwd: REPO_ROOT }); });
+    assert.equal(graded.ancestry, ANCESTRY.UNKNOWN);
+    assert.equal(graded.distance, null);
+    assert.equal(graded.quotable, false);
+  }
+});
+
+test("every not-in-a-repo world is REFUSED — the rung defaults to unknown, not to a plausible one", () => {
+  withNonRepo((dir) => {
+    const p = treeProvenance({ cwd: dir });
+    assert.equal(p.ancestry, ANCESTRY.UNKNOWN);
+    assert.equal(p.quotable, false);
+  });
+  withTempRepo(({ dir }) => {
+    // In a repo, but with no origin/main to compare against.
+    const p = treeProvenance({ cwd: dir });
+    assert.equal(p.ancestry, ANCESTRY.UNKNOWN);
+    assert.equal(p.quotable, false);
+    assert.match(provenanceLine(p), /ancestry unknown, REFUSED/);
   });
 });
 
