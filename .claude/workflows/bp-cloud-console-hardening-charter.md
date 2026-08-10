@@ -3330,6 +3330,77 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-10 — wave 67 REVIEW — grade A−, THE CROWN LANDED: the console can delete a site. Two round-1 slices, both pushed with PRs open, three review fixes
+
+**Paper:** `cloud-console-hardening-wave-67-2026-08-10` (debrief appended). **Decisions:** D811–D827
+(this PR). **Wave log entry written on the charter PR branch**, not on a copy of main — the charter
+for this wave is PR #11540 and appending locally would have dropped D811–D827 silently.
+
+**LANDED (two PRs, opened before this entry was written — the push streak holds FIVE waves running):**
+
+- `cch-w63-bl-teardown-failed-has-no-console-reader-at-all` **THE CROWN** → **#11552**, branch
+  `loop-epic/the-crown-the-console-can-delete-a-site--0-r`. The console gains its FIRST
+  `DELETE /v1/sites/:id` caller: a destroy-tier confirm (typed echo of the domain, `btn-danger`, four
+  consequences that name only what was measured) wired to a Delete button placed LAST in the site
+  head's `.fleet-badges` row (D815), with NO client authority predicate (D816). `siteDeleteFailureCopy`
+  is a pure exported status+data classifier over the envelope the route actually emits — 409
+  `identity_refused` composed from `usageUnavailableText("unauthorized")`, 401, a hedged 404, a 422
+  refusal relaying the plane's own measured detail, a 422 TIMEOUT discriminated from that refusal by
+  `detail` ALONE (status and code are byte-identical), a 502 wearing the console's own opener (D814),
+  and the crash envelope. It reads singular `data.detail`, never calls `friendly()` (plural `detailS`),
+  never gates on `data.ok`. No optimistic row removal; a failure sentence survives a modal dismissed
+  mid-flight as a toast and a late success never navigates (D818); the 30s arm offers a Re-check that
+  re-issues `GET /v1/sites/:id` rather than sending a browser operator to the CLI (D819). Same diff:
+  `loadSite` keeps `previewFault` beside the `[]` it degraded to and the previews section grew four
+  honest arms (D821) — it used to VANISH on a 403/500 while the rail badged "Previews: On". Zero
+  Elixir, zero new CSS, exactly three instrument edits (D817).
+- `cch-w66-bl-site-delete-cascades-are-untested-and-one-is-three-days-old` → **#11553**, branch
+  `loop-epic/the-plane-stops-carrying-dead-code-and-i-1-r`. NEW `site_cascade_census_test.exs`
+  asserting the EXACT SET of FKs referencing `sites` and that each is `confdeltype='c'`, plus the
+  FK-less-child catch over every `site_id`-bearing base table. The exact-set form is the point: an
+  "every FK to sites is cascade" form is green the moment a new correct child lands, which is exactly
+  how `content_publishes` entered the delete path unasserted on 2026-08-07. Behavioural delete-path
+  cover for `site_artifacts` (bound AND unbound) and `content_publishes`; the unreachable
+  `if is_nil(bp), do: :ok` arm and the constant-true `box_present` audit field DELETED with the FK
+  named as the reason (D811); the "has no console surface at all yet" deferral comment retired in the
+  same wave the surface shipped.
+
+**REVIEW FIXES (three, all mutation-proved, all on the `-r` branches):**
+
+1. The crown's crash arm asserted *"The instance teardown had already run when the control plane
+   failed"*. `crash_slug/2` stamps `server_error` for EVERY status ≥ 500 without reading how far the
+   route body got — an outcome nothing measured, inside the arm written to hunt exactly that. It now
+   states the ORDER (box-first, measured in the route) and refuses the OUTCOME, and keys on the slug
+   plus 5xx-except-502 rather than on 500 alone, so a 503 carrying the slug no longer falls through.
+2. The crown's fallthrough told a `forbidden` refusal the plane *"didn't say why"* — `Auth.forbidden/2`
+   sends `{required, scope}` and no `detail`. `forbiddenEvidenceCopy` (the shipped reader
+   `readFailureCopy` already composes) is wired in; a BARE forbidden keeps the generic sentence.
+3. **THE CENSUS DID NOT OWN THE TRIPWIRE THE ROUTER CLAIMED FOR IT.** D811's deletion rests on
+   `sites.barkpark_id` — an FK whose CHILD is `sites` — while all four census tests look at FKs whose
+   PARENT is `sites`, and `fk_census_test.exs` reads no delete behaviour at all (`confdeltype` in zero
+   of its bytes). The route was citing a guard nobody had written. A fifth test now asserts NOT NULL +
+   cascade; `ON DELETE SET NULL` reds it **while `fk_census_test.exs` stays green**, which is the
+   proof it was the only cover.
+
+**WHAT THE NEXT WAVE MUST KNOW:**
+
+- **DISPATCH ORDER IS FIXED BY FILE COLLISION.** Merge round 1 (#11552, #11553) FIRST. Then
+  `cch-w67-s4` and `cch-w65-bl` unblock (both edit `app.js`, both wait on #11552), and
+  `cch-w66-bl-the-delete-route-lies-in-its-own-two-hundred-and-its-five-oh-two` unblocks on #11553.
+  S4 and S5 collide with each other in `app.js`, so they do not fly in the same round either.
+- **ONE LINE IN THIS WAVE IS STILL UNPROVEN BY ANY GATE**: `loadSite`'s
+  `$("#site-delete").addEventListener`. The census greps the path out of the SOURCE, the member sweep
+  proves the button RENDERS, and the review's new drives enter AT `runSiteDelete` — a typo there ships
+  a dead button behind five green gates. Filed as
+  `cch-w67-followup-site-delete-button-wiring-unproven`; the same hole covers `#site-deploy` and
+  `#site-rollback`, so it is the badges ROW that needs the proof, not this button.
+- **Both HIGH-FLIP-RISK judgments were re-derived independently and HELD** — authority (D816) from
+  `@ability_implies["root"] = ~w(root read write deploy)` plus `get_team_site/2`'s tenancy-only where
+  clause; reachability (D811) by MEASURING the live schema (`attnotnull=t`, `confdeltype=c`), not by
+  re-reading the migration. An independent second reviewer on those two is still owed before merge.
+- **`box_present` is gone from the `site.deleted` audit metadata.** Zero readers repo-wide, but rows
+  already in prod carry the key. Two-line revert if the lead disagrees.
+
 ### 2026-08-10 — wave 66 REVIEW — grade A, four round-1 slices, all four pushed with PRs open, ZERO review fixes needed
 
 **Paper:** `cloud-console-hardening-wave-66-2026-08-10` (debrief appended). **Ceiling:** D810 (this PR),
