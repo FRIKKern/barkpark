@@ -363,6 +363,7 @@ const PIN = [
   { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
   { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
   { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
+  { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_primary_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
   { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
   // cch-w48-s2, pinned here in review: BOTH of these routes are reached ONLY
@@ -764,7 +765,11 @@ if (unresolved.length) {
 // direction on a fence it did not already know about. MERGE ORDER, therefore:
 // cch-w48-s2 must be in the tree before this file, or (2i-2) reds on a
 // loadSite that does not yet call the band.
-const EXPECT = { total: 79, elevated: 40, predicated: 33, unpredicated: 7 };
+// cch-w67 crown: 79 -> 80. ONE row moved — runSiteDelete, the console's first
+// DELETE /v1/sites/:id caller. `elevated` DELIBERATELY UNMOVED at 40: that route
+// is plain team membership (see the row's own note), so bumping it would be a
+// false statement about the router AND would red arm (2b) at rc=2.
+const EXPECT = { total: 80, elevated: 40, predicated: 33, unpredicated: 7 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

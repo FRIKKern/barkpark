@@ -12118,6 +12118,10 @@
       // so the list can speak while every other consumer keeps its safe [].
       var deployFault = res[1] && res[1].ok ? null : res[1] || {};
       var previews = (res[3] && res[3].ok && res[3].data && res[3].data.previews) || [];
+      // cch-w67 crown (D821): the previews read that FAILED, kept beside the []
+      // it degraded to — the same shape deployFault already uses one line down.
+      // Without it the section simply disappeared while the rail badged "On".
+      var previewFault = res[3] && res[3].ok ? null : res[3] || {};
       var bp = (res[2] || []).filter(function (x) { return String(x.id) === String(site.barkpark_id); })[0];
       var domain = (site.domains && site.domains[0]) || site.slug || site.name || "site";
       setBreadcrumb([
@@ -12129,13 +12133,15 @@
       setScopeLabel(parseHash(), shellNavLayer(parseHash()));
       // cch-w48-s2 (D539): the ONE authority read this screen takes, taken HERE
       // and threaded in — #site-github is the only admin-gated control on it.
-      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority(), deployFault);
+      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority(), deployFault, previewFault);
       var dlr = $("#site-deploys-retry");
       if (dlr) dlr.addEventListener("click", function () { loadSite(id, { quiet: true }); });
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       var srb = $("#site-rollback");
       if (srb) srb.addEventListener("click", function () { confirmSiteRollback(site, domain); });
+      var sdel = $("#site-delete");
+      if (sdel) sdel.addEventListener("click", function () { confirmSiteDelete(site, domain); });
       wireDeployConsoles(box);
       wireDeployActions(box, site, deployments);
       // W4: mount the live six-stage rail for the in-flight deployment (if any),
@@ -12284,7 +12290,58 @@
   // "unknown" (/v1/me in flight or failed), a stale answer, and an OMITTED
   // argument all take the closed arm. That last case matters — a call site
   // that never heard about this parameter must not silently re-open the door.
-  function siteDetailHtml(site, bp, deployments, domain, previews, authority, deployFault) {
+  // cch-w67 crown (D821): THE PREVIEWS SECTION, WITH ITS THREE MISSING STATES.
+  //
+  // Until now `previews.length ? section : ""` was the whole model, and loadSite
+  // degrades a FAILED GET …/previews to [] — so a 403, a 500 and a dead socket
+  // all made the section VANISH while the rail two rows down still badged
+  // "Previews: On". Absence asserted over failure, on the same payload that
+  // carries the answer.
+  //
+  // Four arms, in the order a reader must ask them:
+  //   fault             → say the read failed; claim NOTHING about branches.
+  //   previews_enabled  → the site's own switch is off (NOT NULL DEFAULT true on
+  //                       sites; the rail badge reads the same field), so there
+  //                       is nothing to serve — an empty that is a SETTING.
+  //   empty             → nothing is being served RIGHT NOW. Deliberately NOT
+  //                       "nothing has been pushed": list_preview_deployments
+  //                       drops failed and torn-down branches too, so a branch
+  //                       that built and broke reads identically to one that was
+  //                       never pushed. The copy says what the list IS.
+  //   rows              → today's section, byte-identical.
+  // Pure; ZERO new CSS (.previews-heading/.previews-count/.deploys/.empty-state
+  // all already have rule heads).
+  function sitePreviewsSectionHtml(previews, site, fault) {
+    previews = previews || [];
+    site = site || {};
+    var head = '<h2 class="previews-heading">Branch previews' +
+      (previews.length && !fault
+        ? '<span class="previews-count">' + esc(String(previews.length)) + "</span>"
+        : "") + "</h2>";
+    if (fault) {
+      var detail = faultDetail(fault.text);
+      return head + '<div class="empty-state"><h2>Couldn\'t load branch previews</h2>' +
+        "<p>" + esc(readFailureCopy(fault, "You don't have access to this site's branch previews.",
+          "The branch previews couldn't be loaded, and the answer didn't say why.")) +
+        " This says nothing about which branches are being served — reload the page to read it again.</p>" +
+        (detail ? '<p class="muted">The server replied: ' + esc(detail) + "</p>" : "") +
+        "</div>";
+    }
+    if (site.previews_enabled === false) {
+      return head + '<div class="empty-state"><h2>Branch previews are off</h2>' +
+        "<p>This site has branch previews turned off, so pushing a branch publishes nothing. " +
+        "Turn them on with <span class=\"mono\">bp cloud site settings</span> to serve one preview per branch.</p></div>";
+    }
+    if (!previews.length) {
+      return head + '<div class="empty-state"><h2>No branch previews are being served</h2>' +
+        "<p>This lists the previews the instance is serving right now. A branch whose preview failed, " +
+        "or was torn down when the branch was deleted, is not listed here — so this is not a record of " +
+        "what has been pushed.</p></div>";
+    }
+    return head + '<div class="deploys previews">' + previews.map(previewRow).join("") + "</div>";
+  }
+
+  function siteDetailHtml(site, bp, deployments, domain, previews, authority, deployFault, previewFault) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
     // ssw8 (D82): the content binding, derived once for the rail rows below.
@@ -12349,11 +12406,7 @@
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).
-    var previewSection = previews.length
-      ? '<h2 class="previews-heading">Branch previews' +
-          '<span class="previews-count">' + esc(String(previews.length)) + "</span></h2>" +
-        '<div class="deploys previews">' + previews.map(previewRow).join("") + "</div>"
-      : "";
+    var previewSection = sitePreviewsSectionHtml(previews, site, previewFault);
     var previewsFlag = site.previews_enabled === false ? "Off" : "On";
     // cch-w16-s4: BOTH detail-head doors — the full-URL line in .fleet-url and
     // the Visit button in .fleet-badges — hang off this one binding, so the head
@@ -12368,7 +12421,19 @@
         '<div class="fleet-badges">' +
           (live ? '<a class="btn btn-ghost btn-sm site-open" href="' + esc(live) + '" target="_blank" rel="noopener">Visit&nbsp;&#8599;</a>' : "") +
           githubControl +
-          '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
+          '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button>' +
+          // cch-w67 crown (D815/D816): the site's destroy tier, LAST in the
+          // badges row. NOT in .deploys-head — that row is
+          // justify-content:space-between and strands a third child 186px from
+          // its sibling (measured in a browser; green on every gate, wrong on
+          // the screen). NO authority predicate: DELETE /v1/sites/:id is
+          // with_team_site(conn, {:ability,"write"}) and a browser session
+          // carries ["root"], so require_ability can never refuse one and
+          // Registry.get_team_site filters on TENANCY only — no role read exists
+          // anywhere on that path. Gating it on instanceAdminAuthority (the
+          // INSTANCE Decommission's band, require_primary_team_admin — a
+          // strictly higher tier) would withhold a control the server honours.
+          '<button class="btn btn-danger btn-sm" id="site-delete" type="button">Delete</button></div></div>' +
       '<div class="detail-grid">' +
         '<div class="detail-main"><div id="deploy-rail-slot"></div>' + deploysHead + rollbackBanner +
           '<div class="deploys" id="site-deploys">' + list + "</div>" +
@@ -13181,6 +13246,284 @@
           runSiteRollback(site, domain, c);
         });
       }
+    });
+  }
+
+  // ══ cch-w67 crown: DELETE /v1/sites/:id — the console's first caller ═══════
+  //
+  // Until this slice the console could not delete a site AT ALL: 14 api("DELETE"
+  // …) call sites and not one of them this route, and `teardown_failed` appeared
+  // ZERO times in the file. The route has been correct and typed the whole time
+  // — and its own comment said, in writing, that its refusal "has no console
+  // surface at all yet".
+  //
+  // THE ROUTE IS BOX FIRST. `Sites.Deploy.teardown` runs on the instance and
+  // `Registry.delete_site` fires only in its `:ok` arm, so a refusal leaves the
+  // site REGISTERED and still serving. That single fact writes three rules the
+  // copy below obeys: no optimistic row removal, every refusal sentence states
+  // that the site is still registered, and no arm invites a person to "check
+  // whether it went through" anywhere but here.
+
+  // Pure: the destroy-tier confirm for a site. Typed echo of the domain (the
+  // string the head is titled with), btn-danger, and consequences that name only
+  // what was READ: deployments carry `references(:sites, on_delete: :delete_all)`
+  // so the build history really does go; DNS is the customer's own record and
+  // Barkpark Cloud never touches it (the same clause the instance decommission
+  // ships). Node-pinned.
+  function siteDeleteConfirmOpts(site, domain) {
+    var name = String(domain || (site && (site.slug || site.name)) || "this site");
+    return {
+      tier: "destroy",
+      title: "Delete " + name + "?",
+      resourceName: name,
+      consequences: [
+        "The site is torn down on its instance FIRST — slots stopped, route disarmed, release tree deleted — " +
+          "and deregistered here only if that succeeds.",
+        "Its deployment history goes with it: every build row and build console for this site is deleted.",
+        "Any DNS record you pointed at this site is your own — Barkpark Cloud never held it, and can't repoint it for you.",
+        "This can't be undone. There is no restore for a deleted site.",
+      ],
+      confirmLabel: "Delete site",
+      busyLabel: "Deleting…",
+    };
+  }
+
+  // THE SEVEN-ARM REFUSAL READER (D813). Pure; node-pinned. Returns
+  // {title, body, recovery} where recovery is the ONE recovery ctl.fail offers:
+  //   "close"   — nothing a re-click can change
+  //   "retry"   — re-issuing the DELETE is a legitimate next move
+  //   "recheck" — the outcome is UNKNOWN and the honest next move is a READ
+  //
+  // WHY NOT friendly(): friendly() reads `data.error` and `data.detailS`
+  // (PLURAL) — it has never read singular `data.detail`, and every refusal on
+  // this route puts its whole meaning in singular `detail`. And 401/404/500
+  // carry NO `ok` key at all, so an `ok === false` guard would silently drop
+  // three arms. The shipped precedent this copies is siteRollbackFailure: a
+  // status+data classifier with a detail-relay fallthrough.
+  //
+  // THE DISCRIMINATOR PROBLEM: `teardown_failed` is the code on BOTH the 422 and
+  // the 502, and the 30s no-confirmation case arrives as a 422 whose status AND
+  // code are byte-identical to a box refusal. Only `detail` separates them —
+  // BoxRelay.await_teardown's budget exit writes "did not confirm the teardown
+  // in time", Deploy.teardown wraps it, and that phrase is the only signal on
+  // the wire. It is matched, not assumed: an unmatched 422 falls to the refusal
+  // arm, which relays the plane's own measured sentence.
+  var SITE_DELETE_TIMEOUT_RE = /did not confirm the teardown in time/i;
+
+  function siteDeleteFailureCopy(status, data) {
+    data = data || {};
+    var err = data.error || {};
+    var code = typeof err === "string" ? err : err.code;
+    var detail = typeof data.detail === "string" && data.detail ? data.detail
+      : (err && typeof err.detail === "string" && err.detail) || "";
+
+    // (1) 409 identity_refused — the ONE typed refusal, and the only one where
+    // nothing went on the wire. The "rejected our access credential" clause is
+    // usageUnavailableText("unauthorized"), the SAME producer the instance seam
+    // and rollbackConflictCopy compose from — not a fourth wording for one fact.
+    // The opener is this verb's, because rollbackConflictCopy's says "rollback".
+    if (code === "identity_refused") {
+      return {
+        title: "The instance refused our credential",
+        body: "The teardown was never sent — " + usageUnavailableText("unauthorized") +
+          ". Barkpark Cloud stops asking a box that refused it; the hourly update check is what " +
+          "notices the credential working again. The site is still registered and still serving.",
+        recovery: "close",
+      };
+    }
+    // (2) 401 — the session, not the site. No `ok`, no `detail`.
+    if (status === 401) {
+      return {
+        title: "You're signed out",
+        body: "This session is no longer valid, so nothing was sent and nothing was deleted. " +
+          "Sign in again, then re-open this site.",
+        recovery: "close",
+      };
+    }
+    // (3) 404 — HEDGED, because it collapses four causes and one of them is the
+    // FRIENDLY outcome of this verb. Reading it as a flat error would tell a
+    // person their delete failed when it is the answer a completed delete gives.
+    if (status === 404) {
+      return {
+        title: "This site isn't there to delete",
+        body: "The control plane has no site with this id for your team. That is exactly what it answers " +
+          "once a site is already deleted — the outcome you asked for — but it answers the same for a site " +
+          "in another team, an id that never existed, and a session with no team. Go back to Sites to see " +
+          "which one it is.",
+        recovery: "close",
+      };
+    }
+    // (4) 500 server_error — no `ok`, no `detail`, and it fires AFTER the box is
+    // torn down: the route destroys the box tree first and only then writes the
+    // deregistration + audit row. So this is the one arm where the site may be
+    // listed with nothing serving behind it. The request_id is the only handle
+    // on it, so it is quoted rather than swallowed.
+    if (status === 500 || code === "server_error") {
+      var rid = typeof data.request_id === "string" && data.request_id ? data.request_id : "";
+      return {
+        title: "The teardown ran, but the site wasn't deregistered",
+        body: "The instance teardown had already run when the control plane failed, so this site may still be " +
+          "listed here with nothing serving behind it. Nothing retries this on its own." +
+          (rid ? " Quote request " + rid + " when you report it." : ""),
+        recovery: "close",
+      };
+    }
+    // (5) 422 + the timeout detail — the UNKNOWN-OUTCOME arm. api() has no
+    // AbortController and no timeout, so the browser never gave up on anything:
+    // what expired is the control plane's own 30s teardown budget, and it says
+    // so. NOT "we stopped waiting", and no `bp cloud site status` — that is the
+    // CLI's re-check, and this reader already has the route wired (loadSite).
+    if (status === 422 && SITE_DELETE_TIMEOUT_RE.test(detail)) {
+      return {
+        title: "The instance didn't confirm the teardown",
+        body: "The instance never reported the teardown finished, so the control plane could not confirm it " +
+          "either way — it may still be tearing down. The site is STILL REGISTERED here, and it will stay " +
+          "registered until a teardown is confirmed. Re-check to read where it stands now.",
+        recovery: "recheck",
+      };
+    }
+    // (6) 422 refused — the box answered and said no. The plane MEASURED the
+    // cause and wrote it into `detail`; render the plane's own sentence rather
+    // than a second guess about a failure this console did not observe.
+    if (status === 422) {
+      return {
+        title: "The instance couldn't tear this site down",
+        body: (detail || "The instance refused the teardown and didn't say why.") +
+          " Nothing was deleted — the site is still registered.",
+        recovery: "retry",
+      };
+    }
+    // (7) 502 — unreachable. THE CONSOLE WRITES ITS OWN OPENER (D814): two of
+    // the plane's five `unreachable/2` clauses say "the deploy could not be
+    // delivered", on a DELETE. Echoing them would name the wrong verb, so the
+    // detail is deliberately NOT relayed here; the plane-side copy fix is filed.
+    if (status === 502) {
+      return {
+        title: "Couldn't reach the instance",
+        body: "The teardown was never delivered — the instance didn't answer. Nothing was torn down and the " +
+          "site is still registered. Check the instance's health, then try again.",
+        recovery: "retry",
+      };
+    }
+    // Fallthrough — the detail relay, same shape siteRollbackFailure ends on.
+    return {
+      title: "Couldn't delete this site",
+      body: (detail || "The control plane refused and didn't say why.") +
+        " The site is still registered.",
+      recovery: "retry",
+    };
+  }
+
+  // Pure: WHERE a settle lands, given whether this modal is still mounted
+  // (`live`) and whether the operator is still on this site's screen (`onSite`).
+  // Extracted so both late-settle paths are LOSABLE in node — the DOM call sites
+  // below make no decision of their own.
+  //   ok    → always a toast receipt; navigate ONLY from a live modal on this
+  //           screen (a late success must not yank a person off wherever they
+  //           went, D818).
+  //   fail  → inline beside the ONE recovery while the modal is ours; on a
+  //           dismissed modal ctl.fail returns early, so the sentence would be
+  //           LOST — it becomes a toast, with no recovery to offer.
+  function siteDeleteSettlePlan(live, onSite, ok, recovery) {
+    if (ok) return { succeed: true, navigate: !!live && !!onSite, surface: "toast", recovery: null };
+    return { succeed: false, navigate: false, surface: live ? "inline" : "toast", recovery: live ? recovery : null };
+  }
+
+  function confirmSiteDelete(site, domain) {
+    var opts = siteDeleteConfirmOpts(site, domain);
+    opts.onConfirm = function (ctl) { runSiteDelete(site, domain, ctl); };
+    openConfirmModal(opts);
+  }
+
+  // The live DELETE. NO optimistic removal anywhere: the route is box first, so
+  // on EVERY refusal the row survives server-side and a removed row would have
+  // to be put back. Escape/Cancel stay live through the busy hold (openConfirmModal's
+  // contract), which makes a LATE SETTLE a real state: `btn` is captured before
+  // the request so both settle paths can ask whether this modal is still mounted.
+  //   late FAILURE  → ctl.fail returns early on a dismissed modal, so the
+  //                   sentence would be lost; it is routed to a toast instead.
+  //   late SUCCESS  → the toast still lands, but the console does NOT navigate:
+  //                   the operator moved somewhere on purpose.
+  function runSiteDelete(site, domain, ctl) {
+    var name = String(domain || site.slug || site.name || "The site");
+    var btn = $("#cm-confirm");
+    api("DELETE", "/v1/sites/" + encodeURIComponent(site.id)).then(function (r) {
+      var live = !!btn && btn.isConnected !== false;
+      var onSite = String(currentSiteId) === String(site.id);
+      if (r.status === 200 && r.data && r.data.ok && r.data.status === "deleted") {
+        var okPlan = siteDeleteSettlePlan(live, onSite, true, null);
+        ctl.succeed();
+        // D812 — DEREGISTERED, with the CLI's own limit clause. `bp cloud site
+        // delete`'s renderSiteDeleted says the teardown ran first "but this
+        // envelope carries no measured box state"; the 200 is {ok,status,slug}
+        // and nothing more, so the console must not upgrade that to "the server
+        // is clean". One fact, one vocabulary, on both surfaces.
+        toast({
+          kind: "success", title: "Site deregistered",
+          body: name + " is deleted from the control plane. The teardown ran on the instance first — " +
+            "this receipt carries no measured box state, so the teardown itself is unverified here.",
+        });
+        if (okPlan.navigate) location.hash = "#sites";
+        return;
+      }
+      var copy = siteDeleteFailureCopy(r.status, r.data);
+      var sentence = copy.title + " — " + copy.body;
+      var plan = siteDeleteSettlePlan(live, onSite, false, copy.recovery);
+      if (plan.surface === "toast") {
+        toast({ kind: "error", title: copy.title, body: copy.body });
+        return;
+      }
+      if (plan.recovery === "recheck") {
+        ctl.fail(sentence, "Re-check", function (c) {
+          c.busy("Re-checking…");
+          recheckSiteDeleted(site, name, c);
+        });
+        return;
+      }
+      if (plan.recovery === "retry") {
+        ctl.fail(sentence, "Try again", function (c) {
+          c.busy();
+          runSiteDelete(site, domain, c);
+        });
+        return;
+      }
+      ctl.fail(sentence, "Close", function () { closeModal(); });
+    });
+  }
+
+  // The re-check the unknown-outcome arm authors: re-READ the site the console
+  // already knows how to read. Gone (404, or a 200 with no site) is the delete
+  // having landed after all; anything else is still registered and says so
+  // rather than inventing a verdict from a read that itself failed.
+  function recheckSiteDeleted(site, name, ctl) {
+    var btn = $("#cm-confirm");
+    api("GET", "/v1/sites/" + encodeURIComponent(site.id)).then(function (r) {
+      var live = !!btn && btn.isConnected !== false;
+      var onSite = String(currentSiteId) === String(site.id);
+      var gone = r.status === 404 || (r.ok && !(r.data && r.data.site));
+      var plan = siteDeleteSettlePlan(live, onSite, gone, "recheck");
+      if (gone) {
+        ctl.succeed();
+        toast({
+          kind: "success", title: "Site deregistered",
+          body: name + " is no longer registered — the teardown completed after all.",
+        });
+        if (plan.navigate) location.hash = "#sites";
+        return;
+      }
+      var msg = r.ok
+        ? name + " is STILL REGISTERED — the control plane still has it, so the teardown has not been " +
+          "confirmed. Delete it again to retry the teardown."
+        : "The re-check itself failed, so this still doesn't say whether the teardown finished — " +
+          name + " was registered a moment ago and nothing here has seen it change.";
+      if (plan.surface === "toast") {
+        toast({ kind: "error", title: "Teardown still unconfirmed", body: msg });
+        return;
+      }
+      ctl.fail(msg, "Re-check", function (c) {
+        c.busy("Re-checking…");
+        recheckSiteDeleted(site, name, c);
+      });
     });
   }
 
@@ -22921,6 +23264,12 @@
       siteRollbackResult: siteRollbackResult, siteRollbackFailure: siteRollbackFailure,
       siteRollbackFlashView: siteRollbackFlashView, deployRollbackBannerHtml: deployRollbackBannerHtml,
       deployTriggerLabel: deployTriggerLabel,
+      // cch-w67 crown: the site DESTROY tier. The pure confirm-opts + the
+      // seven-arm refusal reader pin here; confirmSiteDelete / runSiteDelete /
+      // recheckSiteDeleted (openConfirmModal + api + toast) are browser-verified.
+      siteDeleteConfirmOpts: siteDeleteConfirmOpts, siteDeleteFailureCopy: siteDeleteFailureCopy,
+      siteDeleteSettlePlan: siteDeleteSettlePlan,
+      sitePreviewsSectionHtml: sitePreviewsSectionHtml,
       // W4 (charter D15-D17/D18): the SSE-driven deploy stage rail + one-motion
       // create-and-deploy. Only the PURE fold/signature/status/markup helpers are
       // node-pinned; the EventSource wiring + DOM mount are browser-verified.
