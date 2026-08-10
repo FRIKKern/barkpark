@@ -13353,19 +13353,26 @@
         recovery: "close",
       };
     }
-    // (4) 500 server_error — no `ok`, no `detail`, and it fires AFTER the box is
-    // torn down: the route destroys the box tree first and only then writes the
-    // deregistration + audit row. So this is the one arm where the site may be
-    // listed with nothing serving behind it. The request_id is the only handle
-    // on it, so it is quoted rather than swallowed.
-    if (status === 500 || code === "server_error") {
+    // (4) THE CRASH ENVELOPE — no `ok`, no `detail`, just a slug and a
+    // request_id. The route is BOX FIRST, so a crash can land on either side of
+    // the teardown and the envelope does not say which: `crash_slug/2` stamps
+    // "server_error" for every status >= 500 without reading how far the body
+    // got. The copy therefore states the ORDER (measured, in the route) and
+    // refuses to state the OUTCOME (not measured, anywhere) — the one thing an
+    // operator must not be told confidently here is that the box is already
+    // gone. `status !== 502` keeps a genuine unreachable-instance 502 on its own
+    // arm below while a 502-shaped crash still lands here; reviewed in cch-w67
+    // because the original `status === 500 || code === "server_error"` gave a
+    // 503 carrying that slug this grave, and then-unhedged, sentence.
+    if (code === "server_error" || (status >= 500 && status !== 502)) {
       var rid = typeof data.request_id === "string" && data.request_id ? data.request_id : "";
       return {
-        title: "The teardown ran, but the site wasn't deregistered",
-        body: "The instance teardown had already run when the control plane failed, so this site may still be " +
-          "listed here with nothing serving behind it. Nothing retries this on its own." +
+        title: "This delete failed partway through",
+        body: "The control plane crashed while deleting this site. The teardown on the instance runs FIRST, so it " +
+          "may already have happened while the deregistration did not — this answer doesn't say how far it got, " +
+          "and the site can be left listed here with nothing serving behind it. Nothing retries this on its own." +
           (rid ? " Quote request " + rid + " when you report it." : ""),
-        recovery: "close",
+        recovery: "recheck",
       };
     }
     // (5) 422 + the timeout detail — the UNKNOWN-OUTCOME arm. api() has no
@@ -13405,7 +13412,26 @@
         recovery: "retry",
       };
     }
-    // Fallthrough — the detail relay, same shape siteRollbackFailure ends on.
+    // Fallthrough — the detail relay, same shape siteRollbackFailure ends on,
+    // with ONE refinement added in cch-w67 review. A `forbidden` refusal carries
+    // NO `detail`: Auth.forbidden/2 sends {error:"forbidden", required, scope},
+    // so the bare relay below would tell an operator the plane "didn't say why"
+    // about the one refusal in this family that DOES say why — this epic's own
+    // disease, on the fallthrough. forbiddenEvidenceCopy is the shipped reader
+    // for exactly those two fields (readFailureCopy already composes it), and a
+    // refusal of authority is not something a second click can change, so it
+    // takes "close" rather than "retry". This is NOT an eighth typed arm: a bare
+    // forbidden with no evidence still falls through to the same sentence.
+    if (data.error === "forbidden") {
+      var forbiddenWhy = forbiddenEvidenceCopy(data);
+      if (forbiddenWhy) {
+        return {
+          title: "You're not allowed to delete this site",
+          body: forbiddenWhy + " Nothing was deleted — the site is still registered.",
+          recovery: "close",
+        };
+      }
+    }
     return {
       title: "Couldn't delete this site",
       body: (detail || "The control plane refused and didn't say why.") +
@@ -23265,10 +23291,16 @@
       siteRollbackFlashView: siteRollbackFlashView, deployRollbackBannerHtml: deployRollbackBannerHtml,
       deployTriggerLabel: deployTriggerLabel,
       // cch-w67 crown: the site DESTROY tier. The pure confirm-opts + the
-      // seven-arm refusal reader pin here; confirmSiteDelete / runSiteDelete /
-      // recheckSiteDeleted (openConfirmModal + api + toast) are browser-verified.
+      // seven-arm refusal reader pin here; confirmSiteDelete's openConfirmModal
+      // wiring and loadSite's click listener are browser-verified.
+      // runSiteDelete / recheckSiteDeleted are exported in cch-w67 REVIEW for the
+      // same reason rollbackInstance is (cch-w61-s2): without the impure arm the
+      // harness can only assert a pure classifier and never touches the WIRE —
+      // and the wire is where "the console can delete a site" is either true or
+      // a dead button behind five green gates.
       siteDeleteConfirmOpts: siteDeleteConfirmOpts, siteDeleteFailureCopy: siteDeleteFailureCopy,
       siteDeleteSettlePlan: siteDeleteSettlePlan,
+      runSiteDelete: runSiteDelete, recheckSiteDeleted: recheckSiteDeleted,
       sitePreviewsSectionHtml: sitePreviewsSectionHtml,
       // W4 (charter D15-D17/D18): the SSE-driven deploy stage rail + one-motion
       // create-and-deploy. Only the PURE fold/signature/status/markup helpers are
