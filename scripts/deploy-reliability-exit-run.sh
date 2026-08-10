@@ -285,8 +285,17 @@ fi
 # `git merge-base --is-ancestor` answers with THREE exit codes, and the third is
 # the one that matters:
 #   0    the commit is on $ORIGIN_REF's history  -> current (it IS the tip) or behind
-#   1    the commit is HERE and is not on it     -> diverged (refusal 5)
+#   1    the commit is HERE and is not on it     -> refusal 5
 #   128  the commit is not in this object database at all -> unknown (refusal 6)
+#
+# NOTE ON THE WORD, so this file and tooling/grip/provenance.mjs cannot be read
+# as disagreeing: provenance.mjs grades FIVE rungs and separates `diverged` from
+# `ahead_of_main`. rc=1 here covers BOTH of them — a commit ahead of main is
+# also not on main's history — and this script does not need to tell them apart,
+# because the LAW is the same for both: quotable iff ancestry is current or
+# behind, so both refuse with 5. The refusal text below therefore says "is NOT
+# on origin/main's history", which is true of either rung, and never claims the
+# narrower word `diverged` at the operator.
 # Both were measured on the owner's host: rc=1 for the PATH binary's real commit
 # 0789ab90a, rc=128 for an invented sha. Collapsing 128 into "not an ancestor"
 # turns "I could not look" into a confident refusal.
@@ -300,14 +309,18 @@ if [ -n "$PRODUCER_COMMIT" ]; then
        else
          ANCESTRY="behind"
        fi ;;
-    1)   ANCESTRY="diverged" ;;
+    # rc=1 is "not on main's history" and covers BOTH provenance.mjs rungs
+    # `diverged` and `ahead_of_main`; this script never has to separate them
+    # because both are non-quotable and both refuse with 5. Named for the law
+    # it triggers, not for one of the two rungs it might be.
+    1)   ANCESTRY="off_history" ;;
     128) ANCESTRY="unknown" ;;
     *)   ANCESTRY="unknown" ;;
   esac
 fi
 
 # QUOTABLE <=> ancestry IN {current, behind}. Anything else fails closed.
-if [ "$ANCESTRY" = "diverged" ]; then # MUT:G-DIVERGED
+if [ "$ANCESTRY" = "off_history" ]; then # MUT:G-DIVERGED
   refuse 5 "the producing binary was built from $PRODUCER_COMMIT, which EXISTS here and is NOT on $ORIGIN_REF's history (--is-ancestor rc=1) — its reading describes a program that was never shipped." \
            "$(rebuild_remedy)"
 fi
