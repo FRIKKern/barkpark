@@ -404,15 +404,22 @@ export function provenanceLine(p) {
   // The rung, not the boolean. Every non-quotable rung says WHICH kind of
   // not-contained it is, because "behind" and "off history entirely" call for
   // different actions: one is a pull, the other cannot be fixed by rebuilding.
-  const behindBy = (n) => (n === null ? "an unmetered number of" : `${n}`);
-  const commits = (n) => (n === 1 ? "commit" : "commits");
+  // TWO COMPLETE PHRASES, not a count and a noun glued together at the call
+  // site. The unmetered branch already ends in "of", so the diverged line's
+  // "of its" produced "an unmetered number of OF ITS commits"; and pluralising
+  // on the count alone produced "1 of its commit". Each phrase owns its own
+  // preposition and its own plural, so neither can disagree with the other.
+  const commitsPhrase = (n) =>
+    n === null ? "an unmetered number of commits" : `${n} ${n === 1 ? "commit" : "commits"}`;
+  const ofItsCommits = (n) =>
+    n === null ? "an unmetered number of its commits" : `${n} of its commits`;
   const missing = `${p.origin_main_short} ${FETCHED_PHRASE}`;
 
   if (p.ancestry === ANCESTRY.CURRENT) {
     parts.push(`in sync with origin/main ${FETCHED_PHRASE} · ancestry current (QUOTABLE)`);
   } else if (p.ancestry === ANCESTRY.BEHIND) {
     parts.push(
-      `DIFFERS from origin/main ${missing} — ancestry behind by ${behindBy(p.distance)} ${commits(p.distance)}; ` +
+      `DIFFERS from origin/main ${missing} — ancestry behind by ${commitsPhrase(p.distance)}; ` +
         `origin/main CONTAINS this tree (QUOTABLE)`,
     );
   } else if (p.ancestry === ANCESTRY.AHEAD_OF_MAIN) {
@@ -423,7 +430,7 @@ export function provenanceLine(p) {
   } else if (p.ancestry === ANCESTRY.DIVERGED) {
     parts.push(
       `DIFFERS from origin/main ${missing} — ancestry DIVERGED: off origin/main's history AND missing ` +
-        `${behindBy(p.distance)} of its ${commits(p.distance)}; a rebuild here reinstalls the same off-history code ` +
+        `${ofItsCommits(p.distance)}; a rebuild here reinstalls the same off-history code ` +
         `(NOT QUOTABLE)`,
     );
   } else {

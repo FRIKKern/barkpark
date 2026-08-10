@@ -52,6 +52,7 @@ import {
   PROVENANCE_PREFIX,
   PROVENANCE_STATE,
   FETCHED_PHRASE,
+  FETCHED_NOTE,
   MODULE_TREE,
 } from "../provenance.mjs";
 
@@ -299,10 +300,49 @@ test("a sibling off main's history is `diverged` — REFUSED, and it does not re
     assert.equal(p.distance, 1, "distance keeps its single meaning: main's commits this tree lacks");
     assert.equal(p.quotable, false);
     const line = provenanceLine(p);
-    assert.match(line, /ancestry DIVERGED: off origin\/main's history AND missing 1 of its commit/);
+    // Anchored on the SEMICOLON that ends the clause: a bare `.../ its commit/`
+    // prefix matches "commit" and "commits" alike, so it could not tell a
+    // pluralisation bug from a correct line.
+    assert.match(line, /ancestry DIVERGED: off origin\/main's history AND missing 1 of its commits;/);
     assert.match(line, /a rebuild here reinstalls the same off-history code/);
     assert.equal(/ancestry behind by/.test(line), false, "diverged must not render as behind");
   });
+});
+
+test("an UNMETERED distance still reads as English on both rungs — the count is missing, not the sentence", () => {
+  // `distance` is null whenever `rev-list --count` fails, and that branch reaches
+  // an operator's screen exactly when something is already wrong — the worst
+  // moment for the line to be unreadable. It shipped as "an unmetered number of
+  // OF ITS commits" because the phrase already ended in "of" and the diverged
+  // arm prefixed a second one; nothing exercised the null path, so nothing said
+  // so. Both rungs are pinned here, and the doubled preposition is refuted by
+  // name so the bug cannot come back silently.
+  const base = {
+    in_repo: true,
+    state: "measured",
+    root: "/tmp/x",
+    head_short: "aaaaaaaa",
+    origin_main_short: "bbbbbbbb",
+    distance: null,
+    dirty: false,
+    dirty_files: 0,
+    fetched_note: FETCHED_NOTE,
+  };
+
+  const diverged = provenanceLine({ ...base, ancestry: ANCESTRY.DIVERGED, quotable: false });
+  assert.match(diverged, /missing an unmetered number of its commits;/);
+  assert.equal(/number of of/.test(diverged), false, "the possessive must not double the preposition");
+
+  const behind = provenanceLine({ ...base, ancestry: ANCESTRY.BEHIND, quotable: true });
+  assert.match(behind, /behind by an unmetered number of commits;/);
+  assert.equal(/number of of/.test(behind), false);
+
+  // …and a metered SINGULAR still agrees with itself on both rungs.
+  assert.match(provenanceLine({ ...base, ancestry: ANCESTRY.BEHIND, distance: 1 }), /behind by 1 commit;/);
+  assert.match(
+    provenanceLine({ ...base, ancestry: ANCESTRY.DIVERGED, distance: 1 }),
+    /missing 1 of its commits;/,
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
