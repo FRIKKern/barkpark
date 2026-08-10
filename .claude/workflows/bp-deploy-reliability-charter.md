@@ -11695,3 +11695,282 @@ round 1, dispatch round 2, then run ONE maintenance-cadence wave whose entire jo
 the `--days 22` 500 and the comment-path routing hole (`dr-w33-followup-comment-path-routing`). If those come
 back boring, the exit artefact is written and the epic seals on VOUCHED (D565) — never on the word SEAL, whose
 clause (b) is a live readout of another epic's ladder.
+
+
+## WAVE 34 — 2026-08-10 — THE EXIT NUMBER GETS A WIDTH, AND THE BINARY GETS A PEDIGREE · Paper `deploy-reliability-wave-34-2026-08-10`
+
+Wave 33 ruled WIND DOWN THE FLEET, NOT YET ON THE INSTRUMENT. Wave 34 re-ran that ruling's premises with a
+tip-built binary and kept the second half. **The fleet is still boring and the instrument is still not exit-grade,
+but for a different and sharper reason than wave 33 knew: the exit number is not 0/3/5, it is 0/2/3/5, and the
+step changes are all on the LEFT edge.** Four of wave 33's inherited premises died under a run, and one of the
+deaths is load-bearing for the wish.
+
+**D573 — THE EXIT NUMBER IS 5, AND ITS LAW IS A WIDTH THAT SATURATES.** Eleven invocations of a binary built at
+`45e2611552` (`origin/main`), every rc taken without a pipe, zero timeouts: `--days 7` (the command's OWN default)
+→ **0**; 14 and 21 → **2** (preview 2); 23, 24, 26 → **3**; 27, 30, 45 → **5** (production 3 + preview 2). **5 is
+the ceiling — 27, 30 and 45 are identical, so the population is exhausted by 27 days.** `too_young` is 0 in the
+failed cohort at every width, so this is plain LEFT-edge population truncation, not the maturity fence. The three
+admitting instants, derived from `oldest_pending_seconds` against each envelope's own `as_of` and cross-checked
+against a second envelope whose delta matches exactly: the preview pair at **2026-07-31T02:47:38.185Z** (width ≥
+9.835 d — below every width wave 33 tested, which is why nobody had located the 7→14 step), one production row at
+**2026-07-18T03:08:44.129Z** (width ≥ 22.814 d, site `15e29aee-6836-4816-bd85-1a624666e163`, `top_class:
+PROCESS_DIED`), and TWO production rows entering together at **2026-07-14T11:28:18.059Z** (width ≥ 26.465 d — so
+26→27 is a **+2 jump, not +1**). **THE LAW: a published coverage reading uses an explicit `--from/--to` with
+`from ≤ 2026-07-01T00:00:00Z`, never `--days`.** A `--days N` reading is not re-runnable by construction — its
+right edge is `now`, so two runs of the same command minutes apart are two different windows, and there is no
+`--as-of` flag.
+
+**D574 — AND THE READING MAY NOT PUBLISH A FAILURE RATE AT ALL.** `failure_rate` is **REFUSED at every width from
+7 to 45**, because every one of those windows straddles the deferred-settle boundary `2026-08-05T21:13:50Z`
+(`#9615`). A non-straddling window needs `from > 2026-08-05T21:13:50Z` — at the reading instant that is a width
+under ~4 days, and at any width under 9.8 days `never_covered` is **0**. **The window that makes the failure rate
+a measurement and the window that makes the coverage number non-zero are DISJOINT.** `live_rate` is never refused
+at any width (its numerator and denominator are label-independent, D229). So the exit reading publishes
+`live_rate` + `never_covered` + the environment split, and **never a fleet failure percentage**. This kills the
+last temptation to headline this epic with a rate.
+
+**D575 — ONE `as_of` PER ENVELOPE. Today there are two.** `coverage_cohorts.as_of` equals `window.to` equals the
+request instant; `delivery.as_of` is a **different, later wall-clock stamp** taken when the delivery section ran —
+measured 2.5 s apart at `--days 7` and **15.7 s apart** at `--days 23` (`22:41:03Z` vs `22:41:18.671493Z`). Two
+numbers in one block pinned to two different "now"s is the same disease as two dates producing three answers,
+one level down. The envelope stamps `as_of` ONCE and both sections reuse it.
+
+**D576 — THE OPEN-RIGHT LAW BECOMES A STRUCTURED KEY, AND IT GOES ON `coverage_cohorts`, NOT ON `window`.** D556
+shipped the law as PROSE inside `coverage_cohorts.basis` and it is still prose at the tip. The fix is a key a
+machine can branch on — **but `census/3`'s `window: %{from:, to:}` is genuinely half-open `[from, to)` and
+RIGHT-BOUNDED** (`deploy_ledger.ex:1087`, `:1188`). The open-right property belongs to the COVERING query inside
+`coverage_cohorts/2` (`:1320-1331`), not to the population window. **Putting `right_edge: "open"` on `window`
+would trade prose ambiguity for a machine-readable falsehood.** The key is `covering_bound: "left_only"` beside
+`basis`/`clock`/`as_of`, and `basis` stays as the human sentence.
+
+**D577 — D555'S PIN IS HALF A GUARD, MEASURED, AND THE MISSING HALF IS NOW WRITTEN.** The mutation matrix, four
+states, run on the merged tree: unmutated → 0 failures; **coverage site `:1521` alone → 1 failure** (the wave-33
+test, at `:2862`); **deferral site `:1349` alone → 0 failures**; both → 2. The deferral clock's open-right law was
+pinned by NOTHING, and not by accident: every `@dwait_*` fixture mints its covering live row INSIDE the window
+(`covered_deferrals!/3` puts it at `at + wait`), so the exercise surface was genuinely empty. A positive-offset
+pair now exists and reds the deferral site alone, reproduced at seeds 0, 42 and 965547. **Correction to the wave-33
+brief: `deferral_wait` publishes `oldest_pending_seconds`, NOT `still_waiting_at_least_seconds`** — that field
+belongs to `delivery/3`'s censored node (`:1984`). Any artefact written against the wrong name points at a
+different population.
+
+**D578 — THE SITES ARE NAMEABLE AND THE BLOCKER IS ONE `Map.merge`.** `coverage_cohorts/2` already SELECTs
+`site_id` (`:1512`); it is discarded one line later, because `deferral_outcome/3` returns only
+`%{outcome:, seconds:}` and the caller merges back only `%{status:, environment:}`. **That single omission is why
+the split could be built by environment and never by site.** No new query, no widened `select`, no Site join in
+the hot path. **TENANCY IS FRIENDLY, and this settles wave 33's HIGH-FLIP-RISK flag:** `coverage_cohorts/2` never
+touches `site_ids` itself — it receives the ALREADY-SCOPED query, narrowed at the SOURCE by `scope_to_sites/2`
+(`:1616-1619`), and the team route intersects the caller's list with team-owned ids in Elixir (`router.ex:3872-3877`)
+so junk can never reach a `binary_id` column. A site named inside the fold can only be a site already inside scope.
+There is no post-filter to defeat. The one genuinely new surface is the first `Registry.Site` join in this module,
+needed because the module is UUID-anonymous end to end and the wish names slugs, not UUIDs.
+
+**D579 — THE D260 BLIND SPOT IS AT ITS STRUCTURAL MAXIMUM ON EXACTLY THESE KEYS, SO THE ROW MUST BE PAIRED.**
+Measured against the real tag corpus the `==` floor reads (`client.go` + `deliveries.go`, 265 raw unique minus the
+single `json:"-"` = **264, reconciling exactly with `@go_tag_floor 264`**): **every field of the proposed site row
+— `site_id`, `name`, `slug`, `environment`, `never_covered` — ALREADY EXISTS as a tag elsewhere in the package.**
+Only the container name is novel. So the control plane could emit the full named list, `internal/cloudclient` could
+declare it with zero fields, every name would be dropped on the floor, and **both the UNREAD arm and `@go_tag_floor`
+would stay green** — the exact failure `PlatformDelivery.to_json/1` already shipped. Register the pair. Note the
+precondition: a pair needs a named single-clause serializer the extractor can walk, so extracting
+`coverage_site_row/1` out of the inline fold is the FIRST edit, not a follow-up (the `dr-w18-s2` precedent). And
+the floors fork: `@emitted_floor 144` does NOT move unpaired and DOES move by the row's full width when paired
+(the floor is a SUM of per-pair set sizes, not a union); `@register_floor 8` and `@corpus_floor 400` are `>=`, not
+`==`, and move for nothing. **Never write a floor by arithmetic — measure it with the 999-technique on the branch.**
+
+**D580 — A BOUNDED LIST THAT CUTS SILENTLY REPRODUCES THE BUG THE ARTEFACT EXISTS TO KILL.** `census/3` already
+learned this for `sites` (`:1204-1207`: "a reader who cannot tell a 50-site fleet from the top 50 of a larger one
+is reading a number with no population"). `never_covered_sites` carries its `total`/`truncated` companions or it
+does not ship. **And the command's own default width must disclose that it truncates:** `--days 7` answers 0 with
+an EMPTY environment split in 3.2 s, and that is the "0" in "reads 0, 3 or 5". The renderer says so.
+
+**D581 — PROVENANCE: `QUOTABLE ⇔ ancestry ∈ {current, behind}`, IN THE VOCABULARY THIS REPO ALREADY RATIFIED.**
+Re-measured this turn on the owner's own machine: `bp --version` → `0789ab90a`, `bp cloud deployments --days 27`
+→ **rc=2, `unknown cloud command "deployments"`** (rc taken without a pipe), and
+`git merge-base --is-ancestor 0789ab90a origin/main` → **rc=1, NOT AN ANCESTOR**. The census source file does not
+exist in that commit at all (`git cat-file -e 0789ab90a:internal/cli/cloud_deploy_census_cmd.go` → rc=128). **This
+is a provenance bug, not a timeout bug and not a code bug.** `tooling/grip/provenance.mjs` is the owner and it
+computes a bare `head !== origin_main` — three states collapsed into one boolean rendered "may not contain what
+main ships", which invites exactly the reading "just behind, close enough". The truth is DIVERGED: 49 commits
+`origin/main` will never have, 828 it has that the owner does not. **Do not invent a vocabulary** —
+`commit_distance.ex:120` already ships `~w(unknown current behind ahead_of_main diverged)` mirrored across five
+surfaces. **THE TRAP THAT MUST BE CODED, NOT REASONED: `git merge-base --is-ancestor` has THREE outcomes, not two
+— 0 yes, 1 no, and 128 "not in this object database", which is what a shallow clone answers.** Re-measured this
+turn: rc=1 for the owner's real commit, rc=128 for an unknown sha. Collapsing 128 into "not an ancestor" converts
+"I could not look" into a confident refusal — this module's own documented disease. 128 routes to `unknown` and
+`unknown` is REFUSED fail-closed.
+
+**D582 — AND `make doctor`'s REMEDY FOR THIS OWNER IS A LOOP.** doctor DOES red (`! installed bp (0789ab90a)
+predates Go changes on origin/main — run: make cli-install`), so wave 33's condition was reported and ignored —
+but the sentence is FALSE for a diverged tree (`0789ab90a` predates nothing; it is off-history), and
+`cli-install` → `cli-build` → `go build ./cmd/barkpark` builds from the SAME diverged checkout and reinstalls the
+same broken binary. doctor also `exit 0`s — advisory, so nothing can gate on it. The remedy for `diverged` is a
+rebase, never a rebuild, and that is a one-line branch in an elif chain that already calls `git merge-base` and
+simply never asks `--is-ancestor`. **This does NOT downgrade D581 to ceremony** (the second attack on the wave's
+direction): doctor cannot distinguish behind from off-history, so there is no existing check to route to.
+
+**D583 — `scripts/seal-run.sh --predicate` IS A DECOY. Do not re-point it; build a sibling.** The flag is
+advertised in its own usage block and cannot work: refusal 4 compares the passed file against a **hardcoded
+constant** `PRED_REL="cloud/priv/static/__preview__/seal-predicate.mjs"` that `--predicate` never feeds, so any
+re-point is a guaranteed exit 4 **pre-run**, and the refusal text names the WRONG file in its remedy. Three further
+independent binds: the interpreter is hardcoded `node "$PREDICATE"`, an unsolicited `--repo` is injected that
+`bp cloud deployments` would reject (it parses only `from,to,days,sites`), and the token grep is the literal
+`^VERDICT-TOKEN: SEAL-PREDICATE`. **And the flag has ZERO test coverage** — all 73 harness fixtures install their
+stand-in at the canonical path. The sibling runner REUSES seal-run's ratified refusal taxonomy verbatim
+(`0 reading · 1 negative · 2 infra · 3 shallow · 4 drift · 5 stale head · 6 unavailable-history · 7 unusable
+input`) and its two doctrines — refusals are COLLECTED not short-circuited, and a post-run refusal WITHHOLDS the
+reading rather than printing it with a warning.
+
+**D584 — THE CROWN'S TWO OPEN PROPOSALS ARE ONE HUNK AND ARE ORDER-DEPENDENT.** Wave 33's premise that the
+in-flight signal needs no new input is **FALSE**: `fetch_runs()` requests `status=success` in the URL
+(`crown-reconcile.sh:709`) and the jq reshape filters on `conclusion == "success"` again (`:763`), so `in_progress`
+rows were never fetched. The fix is one word (drop `&status=success`; the existing jq keeps the success population
+identical by construction) plus a reorder. The skew arm at `:939` is unconditional and runs FIRST, so a future
+`serving_since` can never reach the in-flight grace at `:946`. **Correct chain: IN-FLIGHT → EPSILON → SKEW →
+GRACE → RED.** The epsilon is derivable, not a feel: two live future-stamps bracket it — **3 s** (run
+`31332764821`, NTP-healthy plane, inter-host jitter, will recur) and **54 s** (run `31334953628`, a genuine
+in-flight deploy). It must exceed 3 and must NOT reach 54, because the 54 s case belongs to the in-flight arm.
+**Proved by run: baseline 177 passed / 0 failed; case A reds on today's tree with `SERVING-CLOCK-SKEW` +
+`SERVING-UNRECORDED`; after the fix 192 passed / 0 failed; mutation direction 1 reds exactly 5, all case A.**
+Mutation direction 2 was NOT run and is owed. **And the lead's P0 `task-7aa685d254609ad1` is CANCELLED** as a
+duplicate — the live row is `dr-w33-bl-crown-skew-arm-has-no-epsilon`, whose criteria cover the epsilon ONLY and
+must be extended, or the in-flight half ships uncriteria'd.
+
+**D585 — THE ABANDONMENT PREDICATE IS `deferral_depth >= deferral_bound`. `=` IS A FOURTH FAILURE ARM NOBODY
+BRIEFED.** D559's release condition is MET — all four bases reconcile at 7, live, and the two bases are the SAME
+seven rows (`stamped_but_no_prose` = 0). But the swap task's own title names `deferral_cause IS NOT NULL`, which
+reads **1,665**, not 7 — that column is written on EVERY ordinary deferred row (`deploy.ex:1370`). And the
+assignment's `deferral_depth = deferral_bound` is an equality where the producer's guard is `prior >= bound - 1`
+(`:1272`), so the invariant is `>=`, never `==`. Overshoot is reachable: the head-of-stream scan is 14
+(`@deferral_scan_depth`) while the busy bound is 6, so a chain at depth 7–14 with bound 6 is **silently dropped and
+the count goes DOWN** — the vacuous-green shape the `@abandoned` docblock exists to refuse, reintroduced by the
+swap meant to harden it. **Also stale and misleading: `registry/deployment.ex:184-185` still says the chain
+columns are "NULL on every other row", which `deploy.ex:1294` contradicts by writing them onto a row it settles
+`failed`.** A builder reading the schema comment would conclude the swap is impossible.
+
+**D586 — THE EXIT ARTEFACT'S HOME IS HALF-GATED, AND HALF IS ENOUGH IF YOU KNOW WHICH HALF.** Measured by running
+the gates, including a mutation. `scripts/*.md` buys **exactly ONE enforced invariant**: `docs-anchors-check.sh`
+§5 walks the whole repo (`prune_find`, `:225`) and canonical-for uniqueness DOES reach it — proved able to fail by
+planting a duplicate slug, which took the gate to rc=1 and named both `scripts/` paths. It buys **NO size budget**
+(`check-doc-budgets.sh` is a hardcoded 26-path heredoc plus `docs/cards/*.md`; a `budget:` header there is
+DECORATIVE) and **NO link-rot protection** (§3c's `LINK_DOCS` is `docs/` plus maxdepth-2 CLAUDE/AGENTS/README — a
+deliberately broken relative link in a `scripts/*.md` passed rc=0). `doc-gates.yml` fires on `**/*.md` under both
+push and pull_request, so the trigger is fine; the checkers' internal file sets are the hole. **Therefore: the
+artefact carries a unique `canonical-for` slug, adds its own explicit line to the CAPS heredoc so its size is
+actually gated, and carries NO relative `.md` links.** It is a verdict doc in the
+`scripts/pds-crown-verdict-2026-07-20.md` form — which is confirmed by read, not inferred, and which sets the
+precedent of correcting its own headline ("The banner phrase is an overclaim — do not repeat it"). It is NOT a
+grip ledger row: that schema **rejects a stored value** by design (`VALUE-STORED`), so the artefact quotes its own
+re-run rather than storing the number as an assertion with a timestamp on it.
+
+**D587 — REMAINING WORK IS 165, AND THE LAW IS NAME-DO-NOT-EXCLUDE.** Two reads 140 s apart produced
+**byte-identical** raw JSON: 319 children → 172 live (172 open, **0 in_progress**) → −7 zero-criteria → −0
+at-100%-criteria → **165**. **164 is REFUTED and the digest's mechanism for it is wrong: there is no twin.** The
+six published/draft pairs on the roster are all `cancelled` on the draft side; `drafts.dr-w26-hg-gyldendal-operator-
+packet-corrected` is the ONLY live `drafts.*` row, it is unpaired, and it cannot stop being a draft on its own —
+`dr-w27-bl-gyldendal-packet-409s-on-the-dedup-wall` is an open tracked defect saying so. Deducting it deletes real
+work. **164 does have an honest derivation nobody found (171 published-live − 7), but that is a different corpus,
+not a deduplication.** Per D557 the number is printed BESIDE its full partition and the draft shadow is disclosed
+by name with its blocking defect id; a bare "165" is forbidden exactly as a bare percentage is. **D567's `−2`
+at-100% term is currently EMPTY**, and its `in_progress` heartbeat worry is structurally inert today at 0.
+**"Landed-but-open" has two senses and neither may be called "landed":** at-100%-criteria is 0, and
+PR-merged-but-open is **24 at L4** — inherited, unverified, tracked by `dr-w32-fu-24-landed-rows-need-eyes` at
+0/2 criteria.
+
+**D588 — THE SEAL PREDICATE CANNOT PRINT AN ORPHAN COUNT FOR THIS EPIC, AND 170 IS UNREPRODUCIBLE.** From a clean
+full-history clone at `origin/main`: `--epic task-fb4fb869490b4213` → `REFUSED reason=NO-SUCCESSOR
+a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED`; with `--successor TERMINAL` → `REFUSED reason=TERMINAL-CLAIM-REFUTED`
+("the roster read refutes it: **171 live row(s)**"). **Clause (a) never evaluates, so `orphans=` is never
+printed.** The only predicate-produced number obtainable is 171, and it reconciles exactly: 172 − 1 draft. With a
+real out-of-epic successor the letters are `a=FAIL b=PASS c=PASS orphans=171` — **note 171, not 170: the number
+moved between the survey and the run, which is itself the argument for the artefact quoting its own instant.**
+D565's trap is confirmed verbatim in code and it is worse than "unrelated": clause (b) reads a frozen six-entry
+`CCH-D1…CCH-D6` ladder and bucket (c) is three hardcoded ids all parented to `cloud-console-hardening-epic` with
+`in-epic-roster=false`. **b=PASS and c=PASS carry ZERO deploy-reliability information.**
+
+**D589 — THE DIGEST RAIL IS THE WRONG WITNESS FOR THE EXIT READING, AND THE PROOF IS STRONGER THAN "NOT YET
+DELIVERED".** The 2026-08-10 06:00Z tick had not fired at verification time (the control plane's own clock read
+`2026-08-09T22:36:17Z`). `DailyDigestWorker` has **four rows in its entire life** — 08-04, 08-05, 08-07, 08-09 —
+and the ONLY send ever produced **4 deliveries to 3 addresses across 3 teams**, at 06:00Z on 08-09. The commit
+live at that instant was `026c5b1d7` (prod reflog: last pull 05:50:42Z, next 07:30:45Z), and
+`git show 026c5b1d7:...digest_email.ex | grep -c deploy_health` → **0**, with none of `66d9bd7e9`, `a9e70d52a`,
+`c0b556aa3`, `4c8314c94` an ancestor of it. **So the only digest that ever reached a human carried release
+freshness only — the coverage renderer landed 13.9 hours AFTER it. The digest rail has never once carried the
+number this epic exits on.** The 08-06/08-08 gaps are NOT leadership loss or restarts (both refuted: cron inserted
+9–10 workers per minute through both gaps, and `AgentRetentionWorker` fired 7 of 7 days) — they are the Oban
+rolling unique window, already diagnosed AND already fixed (`#11255`), whose fix is deployed now but was deployed
+at NO successful send. **And `notification_deliveries` has 12 columns and none is a body**, so a delivery row can
+prove a send happened and can never prove what it said.
+
+**D590 — THE ALARM'S ROUTING FIX IS INERT FOR ITS LOUDEST KEY, BY CONSTRUCTION.** `#11481` added assignee +
+@-mention on the **new-issue path only**; the comment path posts `{body: "Still failing.\n\n" + context}` and
+`exit 0`s with no assignee and no mention. **Issue `#5658` "CI failure: paper-readers" is OPEN, `assignees=0`,
+8 comments, all `github-actions[bot]`, since 2026-07-22.** So the next firing appends a ninth unrouted comment and
+reaches nobody — **that is entailed by the tree as it stands, not a risk to observe later.** The widened guard has
+**zero witnesses** and could not have any: it merged `2026-08-09T22:04:51Z`, **16 h 07 m AFTER** the most recent
+`paper-readers` run. **Correction to `#11481`'s own commit message: FOUR alert steps were widened, not five** —
+the contradiction lives in the message, not the tree, and `deploy.yml`'s bare `failure()` fence is intact
+(`failure() && github.ref == 'refs/heads/main'`), defended by its sibling `report-recorder-failure` which names
+`cancelled` explicitly. **And the six cancelled nights are 30-minute JOB TIMEOUTS, not coalescing** — step 5 ran
+29 m 46 s against `timeout-minutes: 30`, and `cancel-in-progress: false` means nothing can cancel it but the
+clock. Widening the guard makes the silence audible; it does not make the audit finish.
+
+**D591 — THE DRAFT-SHADOW COUNT DEFECT IS FIVE READ PATHS, AND THE OBVIOUS FIX IS THE WRONG ONE.** Neither
+`child_tasks/2` (`tasks_controller.ex:395-408`) nor the `/v1/tasks` index base (`:271-276`) carries any draft or
+twin predicate, and `maybe_filter_parent_id` makes it worse by stripping `^drafts\.` from BOTH sides, so a draft
+twin is GUARANTEED to match its parent. `Tasks.Query` has no exclusion anywhere in 814 lines — every `drafts.`
+use is a STRIP — so `docs_for_query/2` and `agg_docs/2` are holed identically, and a partial fix would leave
+papers double-counting while the API does not. **There are THREE distinct in-repo predicates and they are NOT
+equivalent.** `queue.ex:146-173` and `board.ex:210-219` are twin collapse (published-wins, scope-matched);
+`studio_chat.ex:1807` is a BLANKET `not like(d.doc_id, "drafts.%")` — correct there, and **wrong here, because it
+would delete every mutate-created task that legitimately lives at `drafts.<id>` with no published twin**, a
+population `claim.ex:128-139` exists precisely to claim. **Shipping the obvious wording would trade a documented
+over-count for an undocumented under-count.** Twin collapse also dissolves the open index question by
+construction: a drafts-only row has no distinct same-scope published twin, so the `NOT EXISTS` is vacuously true
+and the row survives in BOTH places. One mechanical precondition: `queue.ex`'s form uses `parent_as(:doc)` and
+neither target base binds `as: :doc` — it will not compile without that.
+
+**D592 — WHAT THIS WAVE MAY NOT CLAIM.** Four residual sentences (really seven — the list is a seven-item block,
+and items 3, 6 and 7 were never assigned a re-derivation either) went UNVERIFIED because the verifier's host lost
+all shell execution to `ENOSPC` mid-run. **They stay L4 prose.** The two saved-publish shas `947c0dbd0de8` and
+`91284be29666` appear NOWHERE in the charter except the sentence being audited — a self-citation, not evidence.
+**If the exit artefact prints them at L1 it commits the level-skip this epic exists to cure**; it prints them
+under an explicit UNVERIFIED heading with the re-run command beside each, or not at all. **The host condition is
+itself a finding:** the wish's clause "runnable where the owner stands" failed for a second, entirely non-code
+reason — five of thirteen verifiers lost `Bash` outright, and one recorded a mutation run reporting 4 failures
+that reproduced as 2 on a host with disk. **Any count taken on a full disk is suspect, in both directions.**
+
+**THE VERDICT: NOT YET, AND NAMED EXACTLY.** `a=FAIL` on 165 live rows with no forwarding address; the exit
+number has a law only once D573–D576 land; the binary on the owner's PATH still cannot run the command
+(re-measured rc=2 this turn); the sites are still unnamed on the wire; and the alarm guarding all of it will
+reach nobody on its next firing. **The fleet front stays wound down and is not re-litigated.** What is left is
+the instrument, and it is now five slices rather than an open question.
+
+| slice | title | task | surface | round | model |
+|---|---|---|---|---|---|
+| s1 | The coverage envelope's window law can lose, and its non-zero names its sites | `dr-w34-s1-coverage-envelope-window-and-sites` | `deploy_ledger.ex` + 3 census tests + `client.go` + census cmd(+test) | 1 | opus |
+| s2 | A reading whose producer is not an ancestor of origin/main is REFUSED | `dr-w34-s2-provenance-ancestry-refuses-off-history` | `tooling/grip/provenance.mjs`(+test) + `doctor.sh`(+test) | 1 | opus |
+| s3 | The crown stops paging on a deploy that is still running | `dr-w34-s3-crown-in-flight-before-skew` | `scripts/crown-reconcile.sh` + its harness | 1 | opus |
+| s4 | The task ledger stops double-counting draft twins | `dr-w34-s4-twin-collapse-stops-double-counting` | `api/…/tasks/query.ex` + `tasks_controller.ex` + its test | 1 | opus |
+| s5 | The exit reading becomes a committed, re-runnable, provenance-stamped artefact | `dr-w34-s5-exit-artefact-committed-and-rerunnable` | `scripts/deploy-reliability-exit-*` + `check-doc-budgets.sh` | 1 | opus |
+
+**ALL FIVE ARE ROUND 1 AND FILE-DISJOINT.** s1 absorbs what wave 33 filed as its own s1/s6 pair precisely because
+they collide: the deferral pin, the `covering_bound` key and the site row all edit `coverage_cohorts/2` and its
+test file, and the last two both move `@go_tag_floor`, which is an `==` pin whose deltas may never be summed
+(D571). Two slices would each re-measure a floor the other is also moving — textbook stale-green. One slice, one
+blast radius, one 999-measurement.
+
+**HIGH-FLIP-RISK, named here and in the briefs.** **s1**: TENANCY — whether naming a site inside a team-scoped
+census can leak across teams. This wave rules NO and states the mechanism (source-scoped, not post-filtered), but
+it is the judgment a wrong answer makes expensive, so an independent re-derivation is owed before merge and the
+lead dispatches it by hand. **s4**: REACHABILITY — whether twin collapse preserves the drafts-only population.
+This wave rules YES by construction and requires a non-vacuity test proving a drafts-only child is STILL counted;
+if that test cannot be made to fail when the predicate is swapped for the blanket form, the slice is not done.
+
+**WHAT THE ARTEFACT WILL SAY WHEN THESE LAND**, so wave 35 writes it rather than re-deriving it: the number is
+`never_covered` over an explicit `--from/--to` at saturation (5 = production 3 + preview 2), printed beside
+`live_rate`, its environment split, its named sites, its `covering_bound`, and its single `as_of`; the producer
+commit is stamped and refused unless `origin/main` contains it; and the sentence beside it says this gauge detects
+STUCK SITES and cannot distinguish abandonment from stuckness, that the preview arm is uncoverable by
+construction, and that `failure_rate` is not measurable over any window wide enough to show a non-zero coverage
+number. The maintenance cadence is unchanged from wave 33 EXCEPT that the digest rail is demoted from witness to
+convenience (D589) — the exit instrument is the owner-run command, not an inbox.
