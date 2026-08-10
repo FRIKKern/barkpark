@@ -179,6 +179,56 @@ defmodule BarkparkCloud.SiteCascadeCensusTest do
            "census names site_id-carrying tables that do not exist: #{inspect(expected -- live)}"
   end
 
+  # ── THE OTHER DIRECTION (added in W67 REVIEW) ──────────────────────────────
+  # Everything above censuses the FKs where `sites` is the PARENT. D811 rests on
+  # an FK where `sites` is the CHILD, and router.ex's own comment claims this
+  # file is what guards it: the `if is_nil(bp), do: :ok` arm was deleted, and
+  # `Sites.Deploy.teardown(site, bp)` now takes `bp` on a `%Barkpark{}` clause,
+  # because a persisted site cannot have a missing box row. That is true only
+  # while `sites.barkpark_id` is NOT NULL *and* its FK is ON DELETE CASCADE:
+  # loosen it to SET NULL (or drop the NOT NULL) and `get_barkpark/1` starts
+  # answering nil for a live site, at which point the route raises
+  # FunctionClauseError and answers 500 on a request that used to work.
+  #
+  # Nothing measured that. `fk_census_test.exs` enumerates constraints and casts
+  # but reads no delete behaviour at all (`confdeltype` appears in zero of its
+  # bytes), and the four tests above only ever look at `confrelid = sites`. So
+  # the router comment was, until this test, asserting a guard that did not
+  # exist — the same defect class this wave shipped a console reader to fix.
+  # Mutation-proved 2026-08-10 (W67 review): ALTER TABLE sites DROP CONSTRAINT
+  # sites_barkpark_id_fkey, re-add ON DELETE SET NULL → this test reds naming
+  # confdeltype "n"; ALTER TABLE sites ALTER COLUMN barkpark_id DROP NOT NULL →
+  # it reds naming the nullable column.
+  test "sites.barkpark_id is NOT NULL and ON DELETE CASCADE (this is what makes the delete route's no-box arm dead code, D811)" do
+    sql = """
+    SELECT a.attnotnull, c.confdeltype, c.conname
+    FROM pg_constraint c
+    JOIN pg_class cl ON cl.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    JOIN unnest(c.conkey) k(attnum) ON true
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    WHERE cl.relname = 'sites' AND n.nspname = 'public'
+      AND c.contype = 'f' AND a.attname = 'barkpark_id'
+    """
+
+    rows = Repo.query!(sql, []).rows
+
+    assert [[not_null, del, name]] = rows,
+           "expected exactly one FK on sites.barkpark_id, measured: #{inspect(rows)}"
+
+    assert not_null == true,
+           "sites.barkpark_id is NULLABLE — a site can now exist with no box row, so " <>
+             "`Sites.Deploy.teardown(site, bp)` in router.ex's DELETE /v1/sites/:id raises " <>
+             "FunctionClauseError (500) on a live request. Restore the NOT NULL, or put the " <>
+             "no-box arm back and give it a reader."
+
+    assert to_string(del) == @cascade,
+           "#{name} is confdeltype #{inspect(to_string(del))}, expected #{inspect(@cascade)} — " <>
+             "deleting a Barkpark no longer deletes its sites, so a site can outlive its box " <>
+             "and reach the same FunctionClauseError. D811 deleted the guard that used to " <>
+             "cover this; this constraint is what replaced it."
+  end
+
   test "DIAGNOSTIC: the measured census, printed" do
     fks = site_fks()
 

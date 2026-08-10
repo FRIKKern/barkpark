@@ -7061,9 +7061,12 @@ defmodule BarkparkCloud.Web.Router do
   # a persisted site ALWAYS has its box row, `get_barkpark/1` cannot answer nil
   # for one, and `box_present` could only ever record `true`. A constant dressed
   # as a measurement is exactly what this epic exists to remove. The FK is now
-  # asserted by `site_cascade_census_test.exs` (which reds if any FK touching
-  # `sites` is loosened), so if that guarantee is ever relaxed the census says so
-  # before this route surprises anyone. The one residual window — another request
+  # asserted by `site_cascade_census_test.exs` — specifically by its
+  # "sites.barkpark_id is NOT NULL and ON DELETE CASCADE" test, added in W67
+  # REVIEW because the four census tests it shipped with all looked the OTHER way
+  # (FKs whose PARENT is `sites`) and `fk_census_test.exs` reads no delete
+  # behaviour at all, so this sentence was claiming a guard nobody had written.
+  # Drop the NOT NULL or loosen the FK now and that test reds, naming this arm. The one residual window — another request
   # deleting the Barkpark between the load above and this line, cascading this
   # site away — is a 500 either way: it was `Repo.delete` raising
   # `Ecto.StaleEntryError` before, it is `teardown/2`'s function clause now.
