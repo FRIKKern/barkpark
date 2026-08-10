@@ -38,6 +38,12 @@
 #   (n3) the grace is charged against FIRST-SEEN, so a restart buys
 #        no second grace                                              → exit 1
 #   (p) a serving_since in the FUTURE is a FAULT, not leniency        → exit 1
+#   (r) …unless a deploy for that EXACT sha is still running, which is
+#       the disagreement's own explanation                             → exit 4
+#       and unless it is inside the measured jitter epsilon            → exit 4
+#       with both non-vacuity halves held down: the same future stamp
+#       with nothing in flight still accuses, and a run in flight for
+#       ANOTHER sha still accuses                                  → 1, 1
 #   (h) a docs-only run delivered nothing and MUST NOT be counted    → exit 0
 #       (this is the false-positive that would drown the real reds)
 #   (i) a CARRIED row naming a sha with no run of its own is correct → exit 0
@@ -114,6 +120,33 @@ runs_json() { # <name> <sha:created>...
     done
     printf ']}'
   } > "$out"
+  echo "$out"
+}
+
+# A fixture that is EMPTY or truncated reds as an unnamed exit 2, which is
+# indistinguishable from a real failure — one verification run on a full disk
+# reported ~34 failures across nine unrelated sections that reproduced as 5 on a
+# healthy host. Every write that can be checked for nothing is checked here.
+fixture_ok() { # <path>
+  [ -s "$1" ] && return 0
+  echo "FIXTURE WRITE FAILED (out of disk?): $1 is empty — every verdict below would be an unnamed exit 2, not a real red" >&2
+  exit 2
+}
+
+# runs_json hardcodes conclusion=success / status=completed, so it cannot express
+# the one shape this whole arm is about: a deploy that is STILL RUNNING. This
+# appends exactly that row — status in_progress, conclusion null — to an
+# otherwise ordinary run page. The in-flight run is deliberately NOT a success,
+# so a harness that stopped filtering conclusion would show up as a moved count.
+with_inflight() { # <name> <in-flight-sha> <in-flight-created> <sha:created>...
+  local name="$1" isha="$2" icreated="$3"; shift 3
+  local base out
+  base="$(runs_json "$name-completed" "$@")"
+  out="$TMP/$name.json"
+  jq --arg sha "$isha" --arg created "$icreated" \
+    '.workflow_runs += [{id: 9001, head_sha: $sha, conclusion: null, status: "in_progress", created_at: $created}]' \
+    "$base" > "$out" 2>/dev/null
+  fixture_ok "$out"
   echo "$out"
 }
 
@@ -486,6 +519,69 @@ saw "SERVING-CLOCK-SKEW" "clock skew is its own named fault"
 saw "300s in the FUTURE" "it says how far ahead the reported instant is"
 saw "SERVING-UNRECORDED" "and the missing row is accused rather than excused"
 not_saw "SERVING GRACE:" "no grace is granted off a clock that disagrees"
+
+section "(r) A DEPLOY THAT IS STILL RUNNING IS NOT A CLOCK FAULT, AND NOT A PAGE"
+# The two live stamps that bracket this whole arm: run 31332764821 reported the
+# serving_since 3s ahead of now on an NTP-healthy plane (inter-host jitter), and
+# run 31334953628 reported it 54s ahead because a deploy was genuinely IN FLIGHT.
+# Before this, BOTH landed on the negative-age skew arm and paged.
+FUTURE54="2026-08-09T12:00:54Z"   # 54s AHEAD of NOW — the measured in-flight stamp
+FUTURE3="2026-08-09T12:00:03Z"    # 3s AHEAD of NOW — the measured jitter stamp
+HEALTH_FUT54="$(health_json health-fut54 "$SHA_D" "$FUTURE54")"
+
+# THE EPSILON IS A BAND, DERIVED OUT OF THE SCRIPT — never a literal re-typed
+# here. Below 4 it re-swallows the measured 3s jitter; at 54 or above it swallows
+# the in-flight case this section exists to route elsewhere. A later widening
+# past either edge reds HERE rather than quietly muting the arm.
+EPS="$(sed -n 's/^SERVING_SKEW_EPSILON_SECONDS=\([0-9][0-9]*\).*/\1/p' "$CR" | head -1)"
+if [ -z "$EPS" ]; then
+  bad "SERVING_SKEW_EPSILON_SECONDS is not derivable from $CR — an epsilon nobody can read back is not pinned by anything"
+elif [ "$EPS" -ge 4 ] && [ "$EPS" -lt 54 ]; then
+  ok "the skew epsilon (${EPS}s) is inside the measured band 4 <= EPS < 54 — above the 3s jitter, below the 54s in-flight stamp"
+else
+  bad "the skew epsilon is ${EPS}s, outside the measured band 4 <= EPS < 54 — it either re-pages on 3s jitter or swallows the 54s in-flight case"
+fi
+
+# (r1) IN FLIGHT: a deploy.yml run for the SERVED sha is still running.
+RUNS_INFLIGHT_D="$(with_inflight runs-inflight-d "$SHA_D" "$IN2" "$SHA_A:$IN1" "$SHA_B:$IN2")"
+run_cr 4 "a deploy for the served sha is STILL RUNNING — not yet due, not a page" \
+  --runs-fixture "$RUNS_INFLIGHT_D" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FUT54"
+saw "SERVING IN FLIGHT" "the in-flight arm is its own named deferral"
+saw "9001" "and it NAMES the run that is still running, so the reader can go look at it"
+not_saw "SERVING-CLOCK-SKEW" "a running deploy is no longer reported as a clock fault"
+not_saw "SERVING-UNRECORDED" "and the row is not accused while the run that would write it is still going"
+saw "NOT YET DUE" "it is a deferral — never a page, and never a green either"
+
+# (r2) NON-VACUITY: the SAME future stamp with NOTHING in flight still accuses.
+# Without this the arm above would be indistinguishable from a blanket amnesty.
+run_cr 1 "the same 54s-ahead stamp with no run in flight is STILL a clock fault" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FUT54"
+saw "SERVING-CLOCK-SKEW" "with nothing running, a future serving_since is still a fault"
+saw "54s in the FUTURE" "and it still says how far ahead the reported instant is"
+saw "SERVING-UNRECORDED" "and the missing row is still accused"
+not_saw "SERVING IN FLIGHT" "no in-flight deferral is invented out of an empty run page"
+
+# (r3) THE SHA MATCH: some OTHER deploy being busy is not an alibi for this sha.
+RUNS_INFLIGHT_C="$(with_inflight runs-inflight-c "$SHA_C" "$IN2" "$SHA_A:$IN1" "$SHA_B:$IN2")"
+run_cr 1 "a run in flight for a DIFFERENT sha does not excuse the served one" \
+  --runs-fixture "$RUNS_INFLIGHT_C" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FUT54"
+saw "SERVING-CLOCK-SKEW" "the accusation stands when the running run belongs to another commit"
+not_saw "SERVING IN FLIGHT" "the arm keys on the SERVED sha, not on any run being busy"
+
+# (r4) THE EPSILON: 3s of inter-host jitter is not a clock fault either, and it
+# is still a DEFERRAL — the debt is written, nothing is forgiven.
+HEALTH_FUT3="$(health_json health-fut3 "$SHA_D" "$FUTURE3")"
+run_cr 4 "a serving_since 3s ahead is jitter, not a fault" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FUT3"
+not_saw "SERVING-CLOCK-SKEW" "3s of inter-host jitter no longer pages"
+saw "SERVING GRACE:" "it is the grace, named, and not a silent pass"
+not_saw "RECONCILED:" "and a deferral is still not a green"
+
+# (r5) The in-flight row does NOT enter the success population: the jq filter
+# still asks for conclusion == success, so every count downstream is unmoved.
+run_cr 4 "the in-flight run is not counted as a successful run" \
+  --runs-fixture "$RUNS_INFLIGHT_D" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FUT54"
+saw "POPULATION: 2 successful deploy.yml run(s)" "the success population is unchanged by construction — the in-flight row is fetched, never counted"
 
 section "(h) a docs-only run delivered NOTHING and must not be counted BEHIND"
 RUNS_DOCS="$(runs_json runs-docs "$SHA_A:$IN1" "$SHA_C:$IN2")"

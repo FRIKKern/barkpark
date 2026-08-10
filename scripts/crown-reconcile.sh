@@ -300,6 +300,16 @@ GRACE_HOURS=6
 # be a deploy still in flight whose recorder has not posted yet. Younger than this
 # is a WARNING; older is a RED.
 SERVING_GRACE_SECONDS=1200
+# How far a serving_since may sit AHEAD of now before the disagreement is called
+# a clock fault rather than inter-host jitter. DERIVED FROM TWO LIVE MEASUREMENTS,
+# not felt: run 31332764821 reported 3s ahead on an NTP-healthy plane (ordinary
+# jitter between the box and the runner, and it will recur), and run 31334953628
+# reported 54s ahead because a deploy was genuinely IN FLIGHT. So the value must
+# EXCEED 3 and must never REACH 54 — the 54s shape belongs to the in-flight arm
+# below, which names the running run, not to a widened epsilon that would swallow
+# it silently. scripts/crown-reconcile.test.sh reads this constant back out and
+# asserts the BAND 4 <= EPS < 54, so a later widening reds.
+SERVING_SKEW_EPSILON_SECONDS=15
 # How long a graced sha stays on the RE-ASK LIST. It is accused on every run in
 # between, so this bounds the LIST, not the accusation. See the boundary above.
 REASK_MAX_SECONDS=86400
@@ -706,11 +716,36 @@ fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
     return 0
   fi
   command -v gh >/dev/null 2>&1 || { warn "CONFIG: gh is required to enumerate deploy.yml runs"; return 3; }
-  if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=100" \
+  # NO `&status=success` HERE, DELIBERATELY. A deploy that is STILL RUNNING is
+  # the single most useful thing to know before accusing the sha it is putting
+  # on the box, and `status=success` meant those bytes were never fetched at
+  # all. The success POPULATION is unchanged by construction: the jq that builds
+  # .examined/.wide still filters `.conclusion == "success"` itself, so every
+  # count downstream sees exactly what it saw before. The only other reader of
+  # this file is PAGE_ROWS/PAGE_OLDEST, which counts the raw page and already
+  # discloses truncation as `N+`; run_delivers() is called for examined success
+  # runs only, so an in_progress run never reaches a jobs lookup.
+  if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=100" \
     > "$WORK/runs-raw.json" 2>"$WORK/runs-err.txt"; then
     warn "  could not list deploy.yml runs: $(head -1 "$WORK/runs-err.txt")"
     return 2
   fi
+  return 0
+}
+
+# Is a deploy.yml run for this exact sha STILL RUNNING right now? Keyed on the
+# SERVED sha and nothing else: "some deploy is busy" is not an alibi for the
+# particular commit being accused. Answered out of the same run page every other
+# question is answered from — no second request, no second credential — which is
+# only possible because fetch_runs stopped asking the API for successes only.
+serving_run_in_flight() { # <sha> -> prints the run id, 0 in flight / 1 not
+  local sha="$1" id
+  [ -s "$WORK/runs-raw.json" ] || return 1
+  id="$(jq -r --arg sha "$sha" \
+    'first(.workflow_runs[]? | select(.head_sha == $sha and .status == "in_progress") | .id | tostring) // empty' \
+    "$WORK/runs-raw.json" 2>/dev/null)"
+  [ -n "$id" ] || return 1
+  printf '%s' "$id"
   return 0
 }
 
@@ -909,6 +944,7 @@ SERVING_RED=0
 SERVING_SHA=""
 SERVING_SKEW=0
 SERVING_SKEW_AHEAD=0
+SERVING_INFLIGHT_RUN=""
 SERVING_SINCE=""
 GRACED_THIS_RUN=""
 if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
@@ -931,13 +967,48 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
       if [ "$cp_rows" -eq 0 ]; then
         # The grace is charged against the FIRST time this sha was seen serving
         # and unrecorded, not against the process age the box reports now. A sha
-        # already on the re-ask list cannot buy a fresh grace by being restarted,
-        # and no sha can be graced forever.
+        # already on the re-ask list cannot buy a fresh grace by being restarted.
+        #
+        # `graced_age` bounds the EPSILON and GRACE arms below at
+        # SERVING_GRACE_SECONDS, so neither can defer forever. THE IN-FLIGHT ARM
+        # IS NOT BOUNDED BY IT and that is a real gap, stated here rather than
+        # left for a reader to discover: it re-defers for as long as GitHub
+        # reports the run `in_progress`, so a HUNG deploy run buys amnesty
+        # bounded only by GitHub's own run timeout — which is not a bound this
+        # script states or can see. Tracked as
+        # dr-w34-fu-inflight-deferral-is-unbounded; the cap is deliberately NOT
+        # invented here, because every other threshold in this block carries a
+        # measured derivation and a felt number would be the one unmeasured
+        # constant in the chain.
         first_seen="$(state_first_seen "$SERVING_SHA")"
         [ -n "$first_seen" ] || first_seen="$NOW_EPOCH"
         graced_age=$((NOW_EPOCH - first_seen))
-        if [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt 0 ]; then
-          # A serving_since AHEAD of now means the clocks disagree. "Probably in
+        # THE ORDER OF THESE ARMS IS THE BEHAVIOUR: IN-FLIGHT, then EPSILON,
+        # then SKEW, then GRACE, then RED. The negative-age skew guard is right
+        # about a real clock fault and WRONG about a deploy that is still
+        # running, because there the disagreement IS the in-flight signal — a
+        # box that came up seconds ago reports a serving_since the runner's
+        # clock has not reached. Asked in the other order, the skew arm wins
+        # first and the crown pages on a deploy nobody has finished.
+        inflight_run="$(serving_run_in_flight "$SERVING_SHA")"
+        if [ -n "$inflight_run" ]; then
+          SERVING_INFLIGHT_RUN="$inflight_run"
+          # defer(), NOT reason(). Everything was read; the answer is "not yet".
+          # The debt goes to the re-ask list with every other deferral, so a
+          # deploy that runs and still never records is accused by a later run.
+          GRACED_THIS_RUN="$SERVING_SHA"
+          defer "SERVING IN FLIGHT: the serving sha $SERVING_SHA has no cp row, but deploy.yml run ${inflight_run} for that exact sha is STILL RUNNING — the recorder has not had its turn, so the accusation is DEFERRED to the next run rather than fired at a deploy in progress (first seen $(iso_of "$first_seen"))"
+        elif [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt 0 ] && [ $((0 - age)) -le "$SERVING_SKEW_EPSILON_SECONDS" ] && [ "$graced_age" -lt "$SERVING_GRACE_SECONDS" ]; then
+          # Ordinary inter-host jitter, measured at 3s on an NTP-healthy plane.
+          # A few seconds of disagreement between two machines is not a fault,
+          # and calling it one turns every fresh deploy into a page. It is still
+          # a DEFERRAL, never a pass: the debt is written exactly as the grace's
+          # is, so nothing is forgiven — only postponed.
+          GRACED_THIS_RUN="$SERVING_SHA"
+          defer "SERVING GRACE: the serving sha $SERVING_SHA has no cp row and its serving_since is ${SERVING_SKEW_EPSILON_SECONDS}s-or-less ahead of now ($((0 - age))s) — inter-host jitter, not a clock fault, so the accusation is DEFERRED to the next run rather than dropped (first seen $(iso_of "$first_seen"))"
+        elif [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt 0 ]; then
+          # A serving_since AHEAD of now by more than the epsilon, with no run
+          # in flight to explain it, means the clocks disagree. "Probably in
           # flight" is the comforting reading of a disagreement, so this is a
           # FAULT with its own sentence, and the missing row is accused.
           SERVING_SKEW=1
