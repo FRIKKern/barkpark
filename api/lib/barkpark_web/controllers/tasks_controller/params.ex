@@ -498,6 +498,16 @@ defmodule BarkparkWeb.TasksController.Params do
   #
   # Returns %{drafts-stripped parent doc_id => child_count}; parents with no
   # children are simply absent (callers default to 0).
+  #
+  # dr-w34-s4 (review): TWIN COLLAPSE APPLIES HERE TOO, and this is the FIFTH
+  # producer of a child count — the one the slice's brief called the "only
+  # producer" list and missed. It groups on the SAME drafts-stripped
+  # `parent_id` key that `maybe_filter_parent_id/2` matches on, so a
+  # `drafts.<id>` shadow child is guaranteed to fall in its published parent's
+  # bucket and count +2 exactly as `child_tasks/2` did. Without the collapse
+  # here, `bp task get <epic>` and `bp task ls --view=brief` report DIFFERENT
+  # child counts for the same epic — one number with two meanings, which is the
+  # defect this wave exists to remove rather than relocate.
   def batch_child_counts(docs, scope \\ [])
   def batch_child_counts([], _scope), do: %{}
 
@@ -522,6 +532,7 @@ defmodule BarkparkWeb.TasksController.Params do
             {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
              count(d.id)}
         )
+        |> TaskQuery.collapse_twins()
         |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
         |> maybe_filter_project(Keyword.get(scope, :project_id))
         |> Repo.all()

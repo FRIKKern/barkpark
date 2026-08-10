@@ -2552,6 +2552,51 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert card["child_count"] == 2
     end
 
+    # dr-w34-s4 (review). `batch_child_counts/2` is a FIFTH producer of a child
+    # count and the slice's brief did not list it. It groups on the same
+    # drafts-stripped `parent_id` key, so a twinned child landed in its
+    # published parent's bucket twice — and with only the four briefed paths
+    # collapsed, `bp task get <epic>` would answer 1 while
+    # `bp task ls --view=brief` answered 2 for the same epic. Two numbers for
+    # one quantity is the defect this wave removes, not one it may relocate, so
+    # the two surfaces are asserted AGAINST EACH OTHER here rather than against
+    # two independently written literals.
+    test "dr-w34-s4: the brief card's child_count agrees with GET /v1/tasks/:id on a twinned child",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("brief-twin-root"), scope, %{})
+      child = mk_published_task!(uniq("brief-twin-child"), scope, %{"parent_id" => root})
+
+      shadow = mk_task!(child, scope, %{"parent_id" => "drafts." <> root})
+      assert shadow.doc_id == "drafts." <> child
+
+      show = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      brief = conn |> authed() |> get("/v1/tasks?view=brief") |> json_response(200)
+      card = Enum.find(brief["docs"], &(&1["doc_id"] == root))
+      assert card, "root task missing from brief index"
+
+      assert show["child_count"] == 1
+
+      assert card["child_count"] == show["child_count"],
+             "the brief card and the show payload must not disagree about one epic's child count"
+    end
+
+    # …and the same non-vacuity guard the show path carries: the collapse must
+    # not become a blanket `drafts.` exclusion here either, or every
+    # mutate-created task disappears from the brief cards' counts.
+    test "dr-w34-s4 non-vacuity: an UNPAIRED drafts.<id> child still counts on the brief card",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("brief-orphan-root"), scope, %{})
+      mk_published_task!(uniq("brief-orphan-pub"), scope, %{"parent_id" => root})
+      orphan = mk_task!(uniq("brief-orphan-shadow"), scope, %{"parent_id" => "drafts." <> root})
+      assert String.starts_with?(orphan.doc_id, "drafts.")
+
+      brief = conn |> authed() |> get("/v1/tasks?view=brief") |> json_response(200)
+      card = Enum.find(brief["docs"], &(&1["doc_id"] == root))
+      assert card, "root task missing from brief index"
+      assert card["child_count"] == 2
+    end
+
     test "prime?view=brief trims recent_events to 5 and is ≥10x smaller than full on fat fixtures",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-brief-prime")
