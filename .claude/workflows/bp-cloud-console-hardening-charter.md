@@ -1233,7 +1233,7 @@ fence dispute moot for it (D825) instead of arbitrated. Two further premises fai
 findings: the "false-done" is an honest documented dedupe (D823), and the "two receipt corrections" is
 one (D812). **Six consecutive waves have now overturned a headline they were handed.**
 
-**THE WAVE — 2 slices build this run, 4 are deferred to round 2 by the sequenced-rounds law.**
+**THE WAVE — 2 slices build this run, 3 are deferred to round 2 by the sequenced-rounds law.** The 502 copy fix (D814 Option A) is NOT a sixth slice: it rides S3, which already owns `deploy.ex` and the rollback-copy leak, so the fact keeps one owner.
 
 | # | Slice | Task | Files | Round | Gate |
 |---|---|---|---|---|---|
@@ -1242,7 +1242,6 @@ one (D812). **Six consecutive waves have now overturned a headline they were han
 | S3 | The delete route's untested arms (502, the 30s timeout, the FK-regression 500) get route tests that can lose | `cch-w66-bl-the-delete-route-lies-in-its-own-two-hundred-and-its-five-oh-two` | `router_sites_test.exs`, `deploy.ex` | **2** — AFTER S2 merges (same files) | `mix test` |
 | S4 | The other seven degrade-to-empty console reads, plus a per-function census that reds when a NEW one ships | `cch-w67-s4-the-console-stops-asserting-absence-over-failure-in-seven-more-places` | `app.js`, `__app.test.mjs` | **2** — AFTER S1 merges (same file) | `node --test` |
 | S5 | One fact, one name: the 36 declared audit verbs with no console label get one manifest both sides read | `cch-w65-bl-action-labels-and-actions-are-uncoupled` | `design/audit-actions.json` (new), `audit_event.ex`, `app.js`, `design/emit.mjs`, `emit-manifest.json`, `doc-gates.yml` | **2** — AFTER S1 merges (`app.js`) | `mix test` + `design/check.mjs` |
-| S6 | The teardown 502 stops telling a deleting user their deploy failed (Option A, teardown-local clause) | `cch-w67-bl-the-teardown-five-oh-two-says-deploy-inside-a-delete-receipt` | `deploy.ex` | **2** — after the lead's `sites/deploy.ex` fence lifts | `mix test` |
 
 **HIGH-FLIP-RISK, NAMED SO THE REVIEWER RE-DERIVES RATHER THAN RE-READS.** S1 carries two: the
 **AUTHORITY** judgment (D816 — the Delete gets NO client predicate because the route is plain team
