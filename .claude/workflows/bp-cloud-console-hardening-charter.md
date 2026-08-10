@@ -3245,6 +3245,104 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-10 — wave 66 REVIEW — grade A, four round-1 slices, all four pushed with PRs open, ZERO review fixes needed
+
+**Paper:** `cloud-console-hardening-wave-66-2026-08-10` (debrief appended). **Ceiling:** D810 (this PR),
+plus **Surface-fence ADD 1** (`api/lib/barkpark/tasks/close.ex` + its two pins, one subject).
+
+**LANDED (four PRs, opened before this entry was written — the push streak holds FOUR waves running):**
+
+- `cch-w59-bl` **THE FONT PIN STOPS REFUSING ABOUT A DOCUMENT IT NEVER READ** → **#11530**, branch
+  `loop-epic/the-font-pin-stops-refusing-about-a-docu-0`. One pass of `FONT_PIN_JS` is now a
+  `measure()` closure carrying `captured` — the face count AT SNAPSHOT — and the pin re-collects
+  while `!ok && captured === 0`, the capture-then-report race signature and nothing else, bounded at
+  20 x 100ms with the bound's arbitrariness stated in both a header paragraph and an inline comment
+  (bringup-retry doctrine). The report gains `captured`/`retries` and the refusal prints them, so an
+  exhausted retry says how long it waited instead of pretending it asked once. NO `nav()` commit
+  fence (D807 measured it HARMFUL), NO exit-mapping change, NO instrument file touched. One file,
+  three callers fixed. **This unblocks the whole repo** — it was redding the REQUIRED Console gate on
+  ~1 run in 8, on PRs with no console surface at all. **No review fix needed.**
+- `cch-w66-s2` **THE AUTOSTAMP RECORDS WHAT IT ACTUALLY OBSERVED** → **#11531**, branch
+  `loop-epic/an-auto-stamped-merge-gate-records-what--1`. The wish's own sentence pointed at the
+  epic's own ledger. The evidence sentence stops asserting a lead and a merge nothing observed
+  (`auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest…`), and the
+  deduction now leaves a durable trace: new content key `merge_gate_autostamp` in `close_override`'s
+  shape, riding the SAME rev-CAS write, with `close` (`verified:false`) and `merge_event`
+  (`verified:true`) sub-keys that never overwrite each other. `caller_token_id` — the only
+  authenticated identity — is recorded beside the client-asserted `worker_id`, each labelled. Both
+  refused shapes stayed refused: no `worker_id` authority check (vacuous, D803), no GitHub round-trip
+  inside the advisory lock. The Go whitelist gained a THIRD pinned key-set and a both-directions
+  failure proof, and a **vacuous green was killed** — `-run ClosePayload` had matched NONE of the
+  key-set tests. **No review fix needed.**
+- `cch-w66-s3` **THE SITE CARD STOPS ASSERTING A DELETION IT NEVER OBSERVED** → **#11532**, branch
+  `loop-epic/the-site-card-stops-asserting-a-deletion-2`. The same sentence one altitude down. A
+  BRANCH SPLIT, not a copy replacement: the 404 arm keeps its hedged card BYTE FOR BYTE (pinned by
+  its own assertion, because the inverse lie silences a genuine deletion), and statuses 0/403/5xx
+  route to the new pure `siteLoadFailureHtml(r)` built from already-shipped helpers with ZERO new
+  CSS. Second arm, same function: a failed `/deployments` read stops rendering "No deployments yet"
+  over a site with a hundred builds, while a genuine 200-with-zero-rows still reads as one — the
+  mirror lie is pinned too. `friendly()` and `app.css` byte-untouched (D395/D740). **No review fix
+  needed.**
+- `cch-w66-s4` **LAW 0 — NINE CLOSES, THREE INTEGERS, ON EACH ROW'S OWN IDENTITY** → **#11533**,
+  branch `loop-epic/law-0-nine-closes-three-integers-on-each-3`. NO CODE. Nine shipped-but-open rows
+  closed on their OWN stored `previous_worker`, zero `close_override.holder` minted. Three brief
+  corrections recorded: the stored epoch is NOT closable (a lapsed lease reverts the row to `open`;
+  identity, not epoch, avoids the override), THREE of nine worker strings are unreconstructable from
+  their slug, and the gate's seven-PR list was short by two. Three rows close SHORT on purpose as
+  honest misses. LIVE 437 → 429, with the 8-vs-9 gap NAMED rather than rounded (437 − 9 − 1 + 2 =
+  429, exact). **No review fix needed.**
+
+**REVIEW RE-RAN EVERY GATE ON THE FINAL TREE.** overflow-guard rc=0 / breakpoint-sweep rc=0 /
+modal-oracle rc=0 (8 states, 0 failing) **and the font mutation leg**: hiding
+`IBMPlexMono-SemiBold-latin.woff2` still refuses at rc=2 with `declared 3/3 … 600=error/check:false`,
+`size=4 captured=4` and NO retry text — the retry provably cannot launder a real defect.
+`close_test.exs` **65/0**, `test/barkpark/tasks/` **522/0**, `tasks_controller_test.exs` **118/0**,
+`go test -run ClosePayload` **4/4**, `mix format`/`gofmt` clean. `__app.test.mjs` **1049/1049/0**,
+`__css_check` **0 errors**, `__binding_census` **79/79**. Slice 4's gate re-run independently on all
+NINE PRs: `compare=ahead` with all four required contexts `success`, and the nine closes read back
+live — `closed_by` matches each row's stored worker exactly, zero `.holder`, `close_override.criteria`
+on exactly the three short-closing rows, `cch-w63-s4`/`cch-w38-s1` still open and unclaimed.
+
+**LEDGER AUDIT: CLEAN, NOTHING FIXED.** All four built slices sit `in_progress` with per-criterion
+evidence stamped as the builders worked and the merge-gated criterion left `met:false` for the lead.
+The round-2 slice is `open` and untouched. Every filed/cancelled row the builders claimed was verified
+live: `task-4ab4a5b58bce97a6` and `cch-w66-fu-font-pin-race-has-no-committed-regression-test` open on
+this epic, `task-45bb283f60656942` cancelled here, `dr-w12-bl-overflow-guard-font-pin-flake` cancelled
+on `dr-backlog-never-started` (a cross-epic move, correctly NOT this epic's repayment), and
+`task-80d117829feec84e` filed on `cch-instruments-epic`.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+
+1. **DISPATCH ORDER IS NOT OPTIONAL.** Merge round 1 first (#11530 → #11531 → #11532 → #11533; the
+   font pin FIRST because it is what stops reddening everything else's Console gate). Only then
+   dispatch `cch-w63-bl-teardown-failed-has-no-console-reader-at-all` (round 2), REBASED onto s3 —
+   both edit `app.js` and `__app.test.mjs`, and wave 65's own lesson is that individually-green
+   branches sharing a file prove nothing under `strict:false`. That slice must also budget for THREE
+   gate edits (`__binding_census` PIN row, `EXPECT.total` 79→80, and a member-authority-sweep HOOKS
+   row whose corpus count is itself pinned).
+2. **s2 IS HIGH-FLIP-RISK AND A SECOND INDEPENDENT REVIEWER IS OWED.** The reviewer re-derived the
+   authority judgment independently from the controller (`worker_id` is `params["worker_id"]`,
+   `landed` is a raw `Params.put_opt` passthrough, `caller_token_id(conn)` is the only authenticated
+   identity) and AGREES with the refusals — but this amends another epic's CLOSED, evidenced contract
+   (D70, `task-felix-close-merge-gate-autostamp`), and one reviewer agreeing is not independence.
+3. **s2 MAKES THE FABRICATION TELLABLE, NOT IMPOSSIBLE.** The criterion still flips `met:true` and
+   every downstream gate reading `met` alone is unchanged. Nobody may quote this wave as "the merge
+   gate can no longer be fabricated." `task-4ab4a5b58bce97a6` carries the residue, and NOTHING
+   consumes `merge_gate_autostamp` yet — an unwatched record is one refactor from being dropped as
+   unused. **A reader for it is the strongest single candidate for wave 67.**
+4. **TWO NAMED, UNPINNED WIRINGS.** `loadSite` is not exported, so nothing pins that `deployFault` is
+   threaded or that `#site-load-retry` gets its listener; and no committed check fails if the font
+   retry is removed (`cch-w66-fu-…-no-committed-regression-test`). Both are honest gaps, both filed,
+   neither quietly widened.
+5. **s4's FINISH COUNT IS MID-WAVE, NOT A SEAL** — `in_progress` was 4 with siblings writing. Whoever
+   seals wave 66 re-reads LIVE on a quiet board. And `--merge-gated` was exercised nine times by a
+   BUILDER identity; if repayment should run under a distinct identity, that rule is worth writing
+   down.
+6. **A SMALL FENCE-SHAPED QUESTION FOR THE LEAD:** s3's diff is 3 files, not the 2 its `files:` label
+   named, because `__unknown_census.mjs`'s own REMOVE arm fired. The deviation was declared on the
+   task the moment it happened — which is the behaviour the wave wanted — but a `files:` label that
+   cannot anticipate an instrument's self-instruction is a dispatch-frontier gap worth a ruling.
+
 ### 2026-08-10 — wave 65 REVIEW — grade A, four round-1 slices, all four pushed with PRs open
 
 **Paper:** `cloud-console-hardening-wave-65-2026-08-09` (debrief appended). **Ceiling:** D800 (this PR).
