@@ -102,8 +102,19 @@ a lying harness and a lying rate limiter are the same defect class pointed at di
    a classification, land the sentence.
 5. **MERGE-GATED criteria are stamped by the LEAD, never the builder.** `autostamp_merge_gate`
    (`api/lib/barkpark/tasks/close.ex`) only fires on a criterion literally carrying
-   `merge_gate: true`; this epic's criteria do not carry the flag (systemic gap, tracked in
-   `pds-bl-merge-gated-criteria-carry-the-flag`, out of fence). The lead pastes the merge SHA by hand.
+   `merge_gate: true`. **CORRECTED AT WAVE 66 (D801): the flag is NOT out of fence and NOT
+   unwritable — it is an AUTHORING choice this epic controls.** `Validation.check_optional_map_list`
+   is shape-only with no per-entry key allowlist, and `Internal.apply_entry_update/2` `Map.put`s
+   INTO the stored entry, so the marker survives create, stamp and close. `bp task create --set
+   'acceptance_criteria:=[{"criterion":"MERGE-GATED …","met":false,"merge_gate":true}]'` emits it
+   today (raw typed-JSON passthrough, no key filtering). **Author the boolean beside the MERGE-GATED
+   wording on every gate criterion this epic files.** Retrofit onto an ALREADY-FILED row is
+   create-time-asymmetric — `Params.parse_criteria_entry/1` rebuilds each update from a four-key
+   allowlist (`index`/`met`/`evidence`/`criterion`), so adding it later needs a raw whole-array
+   `/v1/data/mutate` patch, which is a read-modify-write with NO rev-CAS and is MEASURED LOSSY.
+   **Never bulk-retrofit; author at birth.** The lead closes the gate with
+   `bp task close … --set 'landed:={"prs":[N]}'`, which DEDUCTS the marked indices and mints no
+   `criteria_override` at all (D797).
 6. **Never branch from the primary checkout.** `/Volumes/SATECHI/github/barkpark` is shared by many
    concurrent sessions, is routinely ahead/behind origin, and at the time of writing carried an
    uncommitted comment-corrupting edit to `cloud/priv/static/app.css`. Cut every branch from
@@ -297,6 +308,29 @@ sentence in this charter.
   classifies Vercel, and the Sobelow baseline pins a finding to `router.ex:2505` that now sits at
   `:2530`, so a stale entry reds `main` itself. Dead centre of the frame; nothing in `cloud/` can fix
   either.
+
+**Wave-66 dispensation — ADD 1 (granted at wave-66 Decide, ONE SUBJECT, narrow, stated out loud):**
+- **Subject — an auto-stamped merge gate must leave a durable record naming what was ACTUALLY
+  observed, and nothing else.** `api/lib/barkpark/tasks/close.ex`,
+  `api/test/barkpark/tasks/close_test.exs`, and `internal/apiclient/client_close_payload_test.go`
+  — *and nothing else.* This is the fresh ADD **D679 demanded by name** ("out of fence in
+  `api/lib/barkpark/tasks/**` and `internal/cli/**`, needs a fresh ADD"; "honesty-gate parity with
+  `close`'s `content.close_override` is the right ceiling"). It is granted for the RECORD, never for
+  authorization: `close.ex`:26-31 states that `worker_id` is a client-supplied body param and that
+  "NONE OF THIS IS AUTHORIZATION", so **an authority check keyed on `worker_id` is vacuous by
+  construction and is explicitly OUT of this grant.** Also OUT: any GitHub round-trip inside the
+  close (it runs under `pg_advisory_xact_lock`; verification belongs in `reconcile_merge_gate/3`,
+  which is already async and webhook-driven), any change to `check_in_progress/1`, any change to the
+  homework guard, and any loosening of the Go whitelist pin — that pin is EXTENDED with a third
+  key-set or not touched at all.
+  **Second epic named:** D70 places `close.ex` inside **felix-pristine's** active surface, and
+  `task-felix-close-merge-gate-autostamp` is **CLOSED** (2026-07-13, epoch 4) with criteria that
+  DEFINE the current trigger verbatim — so this ADD amends another epic's closed, evidenced
+  contract, and says so rather than pretending the missing lead check was an oversight.
+  **Concurrency, measured at Decide (2026-08-10):** ZERO open PRs and ZERO of 592 worktrees hold
+  `close.ex` or `stamp.ex` dirty; deploy-reliability wave 34 is live and holds only
+  `deploy_ledger.ex`, `deploy_ledger_test.exs` and `crown-reconcile*`.
+**Not to be widened** — a further file or subject requires its own numbered sentence.
 
 **Out of fence, hands off:** `tooling/grip/` (truth-grip **wave 5** running, PR #5314), `scripts/pds-*`
 and `api/lib/barkpark/tenancy/` (PDS **wave 15** running — paper `pds-wave-15-2026-07-21`; wave 2's
@@ -1134,8 +1168,71 @@ already been wrong three times in prose.
 | D798 | **WAVE 64's CLOSES AUDIT CLEAN — NO FABRICATED `met:true` — AND LAW 0's CLOSES INTEGER IS FIFTEEN, NOT FOURTEEN** | 148 acceptance criteria across the 14 rows wave 64 closed; **135 `met:true` on the 13 `done` rows, with ZERO empty-evidence flags, ZERO `auto:`-prefixed evidence, median evidence length 588 characters and a minimum of 194** — every one command-shaped or `file:line`-shaped. All 12 cited PRs are MERGED and every merge sha written into evidence matches GitHub byte-for-byte. Two independent origin/main spot-checks of NON-PR evidence matched verbatim (`breakpoint-sweep.test.mjs:596-602` carries 111/27/26 with residue 85 and families 13; `registry_update_status_test.exs:161` carries the named test and its three refutes). **D781's own fabrication test PASSES:** `cch-w53-s3` criterion 9 is stored `met:false`, the row closes 10/11, its evidence opens "HONEST MISS, NAMED", and the grep it claims exits 1 on #10727's merged body when re-run independently while line 26 carries the one fact that IS there — not flipped green, body not retro-edited. And `cch-w63-s1`'s close cites **#11376/`8ad2f0ff12`**, not the #11337 its criterion text names, recording the difference as a "CORRECTION OF RECORD"; GitHub confirms #11337 CLOSED and never merged, #11376 MERGED, sha `ahead` of main, and the head's check-runs at `per_page=100` show `total_count=38` with the duplicated "PR references an active task" context the evidence flagged — a fabricator does not invent a duplicated check-run. **CORRECTIONS TO THE LAW-0 ARITHMETIC.** A fifteenth cch row was cancelled in the same window and nobody counted it (`cch-backlog-law0-curl-has-no-truncation-guard`, 19:46:26Z): **CLOSES 15, MOVES 4, SELF-FILED 14**, board flat at 855 published / 419 LIVE. `cch-w60-s6` is `cancelled` with **`claim: null`** — no `closed_at`, no `closed_by`, no epoch — so a claim-rail census cannot see it while a lifecycle census sees it without a worker; its description says "this row closes with it" and its successor `cch-w63-s8` **is still open**, i.e. it was cancelled ahead of its successor. And 56 of the window's 70 closes are `dr-w*`: deploy-reliability swept w1–w31 between 18:59 and 19:10, before the cch block ran at 19:39 — the neighbour is far more active than "zero code, one open PR" suggests. **THE INSTRUMENT'S OWN HOLE, stated because it is this epic's subject one layer up: a task document carries NO author field at all.** "Self-filed vs foreign" is a slug-prefix INFERENCE with five known holes on this epic's own roster (four hash-slugged rows created 08-08/09 plus a typo'd `cchi-` prefix). Every wave's "zero foreign filers" claim, D780's included, rests on a convention any filer can imitate or omit. |
 | D799 | **SHORT HANDLES DO NOT RESOLVE, AND `bp search` CANNOT RESOLVE THEM EITHER — DISPATCH USES FULL `doc_id`s** | `bp task get cch-w64-s6` returns `not_found`; so do `cch-w63-s7` and `cch-w63-s8`. **And the prescribed fallback does not work:** prefix-filtering every `bp search query "<handle>"` result set returns NONE for **11 of 15** handles, because FTS indexes CONTENT, not slug prefixes — an empty prefix-match is indistinguishable from a genuine absence. The only method that resolves is `bp task ls --all -o json` (58MB, top-level key `docs`, slug in `doc_id`, UUID in `id`) then prefix-filter `doc_id`. **RULING: every builder brief carries the FULL `doc_id`.** The three dispatch-blocking ones are `cch-w64-s6-the-deferred-pill-stops-reading-calm`, `cch-w63-s7-the-site-refusal-modal-stops-saying-a-deploy-is-already-running`, `cch-w63-s8-a-refused-write-leaves-a-named-audit-row-with-its-stale-criterion-corrected`. |
 | D800 | **STANDING LAW 0 FOR WAVE 65 — 855 / 419 AT OPEN, AND THIS WAVE CLAIMS RATHER THAN FILES OVER** | The published instrument reads **855 children / 419 LIVE (413 open + 5 in_progress + 1 considering) / 370 done / 66 cancelled**; 413+5+1+370+66 = 855 reconciles to the unit. `bp task get`'s 886 is draft-inflated and is never the Law-0 number. The seal predicate on origin/main (post-#11438 pagination fix) no longer refuses its own epic on truncation — it paginated the whole roster and refused on the CORRECT ground, `TERMINAL-CLAIM-REFUTED`, naming 418 live rows plus the one `considering` row separately. **Three of this wave's four slices CLAIM already-open rows (`cch-w64-s6`, `cch-w63-s7`, `cch-w63-s8`) rather than filing over them; only S2 is newly filed, and it supersedes an already-open backlog row rather than adding to it.** Score against `LIVE_final − self_filed` per D780. **AND NOTE THE TREND HONESTLY: growth has been 100% ENDOGENOUS for three waves running. The exit condition is not receding — it is STATIONARY. The epic is paying its debts at exactly the rate it incurs them, which is a different and less alarming failure than the one the direction feared, and it should be said in those words rather than dressed up either way.** |
+| D801 | **THE SLEEPER'S PREMISE IS DEAD: THE MARKER IS WRITABLE, ALREADY IN USE, AND THE HONEST CLOSE ALREADY WORKS — THE HOLE IS ONE LAYER UP** | The direction wrote "the honest path has one input it never receives." **Five independent surveyors refuted it.** A live write-then-independent-read round-trip on guerrilla persisted `"merge_gate": true` through create AND patch (isolated `cchscratch` dataset, probe deleted, count back to 0); `Validation.check_optional_map_list` is shape-only; `Internal.apply_entry_update/2` `Map.put`s into the stored entry so the marker survives the whole lifecycle; `bp task create --set` is a raw typed-JSON passthrough that emits it today. The census settles it in integers: **25 tasks ledger-wide carry the boolean, 16 of them `done` with the marked criterion `met:true` and NO `close_override` at all** — the honest lane completes end-to-end. **Seven of this epic's OWN rows already carry it** (`cch-w63-s7`, `cch-w63-s8`, `cch-w64-s6`, `cch-w65-s2`, three `cch-w65-bl-*`), all `met:false` with empty evidence. The contradicting "NOTHING writes it" is a grep artifact: it searched for a writer SYMBOL, and the writer is an author typing JSON. **The real number is ADOPTION: 25 marked rows against 1,577 rows carrying MERGE-GATED prose — 1.6%.** Quote that, never "unreachable". |
+| D802 | **THE FENCE GRANT THE DIRECTION CITED DOES NOT EXIST, AND A DECISIONS ROW STRUCTURALLY CANNOT GRANT ONE — SO WAVE 66 MINTS ADD 1 INSTEAD** | `git show origin/main` on this charter: `api/lib/barkpark/tasks/` appears **four times and every one is an EXCLUSION** (:129, :151, :385/D70, :1015/D679). Grants live in the **Surface fence** block as numbered ADDs with an "and nothing else" clause, and this charter has ruled three times that D-row prose about a path is not a licence over it (D377: the filename "appears only in D-row prose at D89/D99/D100/D108/D110/D116/D119/D369" and D377 **still minted a fresh ADD**; D346: citing a grant outside its scope "would be a phantom wearing a number"; D377: "an unnoticed omission is not a dispensation"). **So the ruling does not turn on D797's text: whatever a D-row says, it cannot widen a fence.** The lead's instruction to widen is honoured the only way it can be — as a numbered ADD written INTO the Surface fence block, one subject, with its second epic and its concurrency measured. **This is the phantom-citation class at full size, caught by premise smoke for the price of one `git show`.** |
+| D803 | **THE FABRICATION SURFACE IS `autostamp_merge_gate/6`, AND ITS FIX IS A RECORD, NOT AN AUTHORITY CHECK** | The chain has no break in it and every link was read on origin/main. `tasks_controller.ex:484` is `Params.put_opt(:landed, params["landed"])` — a RAW, UNVALIDATED passthrough of a client body field on the ordinary `:token_root` tier (every other opt on that pipeline gets a `Params.parse_*`; `landed` gets nothing). `close.ex:675` guards ONLY on `status == "done" and is_map(landed) and map_size(landed) > 0` — **no lead check, no PR verification, no task-reference check.** `compose_merge_gate_evidence/4` (:728) then writes *"auto: lead-closed on merge by <worker> (epoch N) — landed PR #N"* **entirely from caller-supplied bytes; nothing contacts GitHub.** And `unmet_after_autostamp/2` (:448) rejects every autostamped index, so `check_criteria_proven/4` returns `{:ok, nil}` and `compose_override_record(nil, nil, _)` (:467) returns `nil` — **no `close_override` is minted at all.** The fabricated close and the honest close leave BYTE-IDENTICAL ledger shapes. D797 recorded the live proof: a scratch worker paid a merge gate citing PR **#11435**, a different epic's PR it never touched. **RULING: the deliverable is provenance — the autostamp stops asserting a lead and a merge nothing observed, and its deduction leaves a trace instead of erasing one. An authority arm keyed on `worker_id` is REFUSED as vacuous (`close.ex`:26-31 refutes it in the module's own words); a GitHub call inside the close transaction is REFUSED as an availability bug wearing a fabrication bug's clothes.** |
+| D804 | **CLAUSE B IS CORRECTED BY MEASUREMENT TWICE, AND BOTH CORRECTIONS MAKE THE WAVE BETTER** | **(a) The producer is richer and LESS typed than the direction assumed: EIGHT envelopes with THREE hidden collapses**, re-derived on origin/main with the worktree proved byte-identical (`git diff --stat origin/main` empty on both files). 404 collapses FOUR causes (no team / other team / unknown id / malformed id) and carries no `ok` and no `detail`; 401 likewise. **There is NO 504 at the route** — `BoxRelay.await_teardown/3` mints one on the 30s budget (`box_relay.ex:240-247`) and `Sites.Deploy.teardown/2` REWRITES it to `{:error, 422, …}` (`deploy.ex:1822`), so "the box may still be tearing down and we do not know" ships with the SAME status AND the SAME code as "the box refused", discriminated only by English prose. The 200 arm silently covers `box_present:false` — the route KNOWS (`metadata: %{… box_present: not is_nil(bp)}`, :7072) and puts the fact in the AUDIT ROW, never the response. **That is this wave's own sentence sitting inside the route Clause B wants to expose; a reader that renders the timeout like the refusal ships the disease as a new bug.** **(b) MY OWN "two route tests" SENTENCE WAS WRONG IN THE OPPOSITE DIRECTION FROM THE SURVEY'S:** the 409 IS tested (`router_sites_test.exs:2225`, asserting status, code, a `refute … "teardown_failed"`, the detail text and row survival) — the delete route has FOUR tests, not three, and the 409 is its BEST-tested arm. The survey's "grep returns nothing" was a `describe`-scoped miss; the earlier flat denial that `identity_refused` exists at all was a STALE-WORKING-TREE read. **Untested: 502 (four causes, two of whose sentences say "deploy" inside a delete receipt), the 422 timeout collapse, and 200-with-no-box.** |
+| D805 | **THE SITE CARD'S BIGGEST LIE IS NOT AN UNTYPED REFUSAL — IT IS AN ASSERTED ABSENCE, AND IT OUTRANKS THE TEARDOWN ON THE WISH'S OWN TEST** | `loadSite`'s guard (`app.js:12051`) is `sr.status === 404 \|\| !sr.ok \|\| !sr.data \|\| !sr.data.site`, and `!sr.ok` swallows every non-2xx AND `api()`'s `{ok:false,status:0}` transport envelope. **Driving the VERBATIM shipped bytes (lines 12037-12107 sliced out of `git show origin/main`, behind a guard that exits 2 if the slice is not `function loadSite`), SIX distinct statuses — 0, 403, 404, 500, 502, 504 — return the byte-identical `<h2>Site not found</h2><p>It may have been removed.</p>`. A wifi blip tells the user their site was deleted.** Same `Promise.all`: `res[1]` collapses to `[]` (:12058) so a failed deployments read renders "No deployments yet. Trigger the first build with Deploy." on a site with a hundred deployments. **It beats the teardown on reachability (highest-traffic deep link vs a route with NO console caller and therefore no live victim), on debt (`grep 'Site not found'` in `__app.test.mjs` = 0, `grep 'may have been removed'` in this charter = 0 — no assertion, no D-ruling, no prior refusal, so a fail-before is free and structurally cannot be vacuous), and on cost (`faultCopy` at :421, `faultDetail` at :471 and `fleetLoadErrorHtml` at :489 already ship — the fix is a 25-line clone of a working sibling, zero new CSS).** The 404 arm KEEPS its hedged copy verbatim: this is a BRANCH SPLIT, not a copy replacement, and a careless predicate that routes 404 into the fault card silences a genuine deletion — the exact inverse lie. **A THIRD READER WAS PROPOSED AND REFUTED: `loadSiteDomains` does NOT leave the checklist blank — it calls `restoreDomainRecheck`, which writes "That re-check didn't go through — nothing above has changed." It is the honest EXEMPLAR, not the disease; including it would have shipped a fix for correct code.** |
+| D806 | **`friendly()` CANNOT RENDER ANY DELETE REFUSAL, AND FIXING THAT IS OUT OF FENCE BY THIS CHARTER'S OWN LAW** | Every refusal on the delete route puts its whole meaning in SINGULAR `detail`; `friendly()` (`app.js:346`) reads `data.error` and `data.detailS` (plural) only — **and the repo documents this about itself at `app.js:12169`: "data.detailS (plural) — it has never read data.detail".** Exactly one line in 23,339 reads singular `detail` and it prefers `error` anyway. Eleven site routes lose their actionable meaning to this (`no_build_source` tells a user to retry a permanently impossible action, while the console already owns honest copy for that same slug on the PROMOTE path). **But this charter has ruled on `friendly()` ELEVEN times** (D353, D395, D404, D406, D412, D415-D419, D740), and D395 is explicit: "THE CLIENT FIX IS `friendly()`'s PRECEDENCE FENCED TO ONE SLUG — NOT THE FOUR BARE SITES, NOT THE `ERRORS` MAP, NOT A `readFailureCopy` SPRAY. ALL THREE RIVALS WERE KILLED BY MEASUREMENT", calling a spray "a 20k-line-file death march"; D740 filed a ONE-LINE `friendly()` fix as explicitly not-this-wave at 1027 pass / 1 fail "because it changes behaviour under ~55 delegating call sites". **RULING: FILED, not folded. Population correction while we are here — the assignment's "84 call sites" is wrong in both directions: raw grep is 116, D740's paren-matched census is 73 real calls (9 arity-1, 64 arity-2). Quote D740's 73.** Consequence for any reader built this wave: **do NOT call `friendly()`, and do NOT gate on `r.data.ok`** — 401 and 404 carry no `ok` key at all, so an `ok === false` guard silently drops three arms. |
+| D807 | **THE FONT PIN IS SOLVED, AND THE OBVIOUS FIX IS MEASURED HARMFUL** | Run-proved, both arms, on a repaired host. **The mechanism is INSIDE the pin, not inside `nav()`:** `FONT_PIN_JS` captures `Array.from(document.fonts)` at `font-pin.mjs:102` **before** its two awaits and reads `document.fonts.size` at `:131` **after** them, so a capture on an unparsed stylesheet yields `faces = []` while `size` later reports 4. With `/app.css` delayed 600ms the pin returns D702's recorded CI string **character for character, 4 of 4 rounds, including the `size=4` that made it look impossible**: `Inter [declared 0/1 face(s): none] · IBM Plex Mono [declared 0/3 face(s): none] document.fonts.status=loaded size=4`. **`declared 0` with `size 4` is not a contradiction — it is the signature of a capture-then-report split across an await, and it names the line that owns it.** **THE NAMED FIX IS REFUTED BY RUNNING IT:** a `nav()` document-identity fence discriminates correctly in isolation but, wired in, dies at exit 2 — `W27-failed-retry-reachable-after-flick` (`overflow-guard.mjs:1530`) navigates the SAME fragment-bearing URL three times, which is a SAME-DOCUMENT navigation the sentinel cannot see past, **converting a 1-in-8 false refusal into a 100% false timeout.** THE FIX THAT WORKS: a bounded retry inside `FONT_PIN_JS` gated on `!ok && captured === 0` — closes the reproduction 4/4, and a genuinely missing woff2 STILL refuses at exit 2 with `declared 3/3 … 600=error/check:false`, `size=4`, because the retry never fires there (`captured === 4`). **`cch-w59-bl`'s criterion c1 IS WRONG AS WRITTEN** ("refuse IMMEDIATELY with size 0" — measured `size 4`); a literal-minded builder gates a retry on `size === 0`, which fires on nothing. **AND DO NOT TOUCH THE EXIT MAPPING:** `task-45bb283f60656942`'s premise ("an ENVIRONMENT fault is indistinguishable from a DEFECT at the merge gate") is REFUTED — `console-harness.yml:1086-1105` publishes `verdict=REFUSED` with its own `::error` title vs `verdict=MEASURED_DEFECT`, and `console-gate:1358` re-separates them; both `exit 1` deliberately because a refusal is not a pass, and `:1235-1238` sets `bad=1` BEFORE reading any verdict with a comment saying so. #11377 is precedent AGAINST making REFUSED non-blocking. |
+| D808 | **STANDING LAW 0 FOR WAVE 66 — THE CLOSE LIST WAS ALREADY EXECUTED, AND WHAT IS ACTUALLY UNPAID IS NINE SHIPPED-BUT-OPEN ROWS** | **The direction's premise is FALSE and the correction is the finding.** D781's twelve-row list was executed in full on **2026-08-09T19:39:08Z-19:39:51Z by `epic-builder-the-law-0-repayment-twelve-evidence-back`: THIRTEEN rows closed** (the twelve plus the omitted thirteenth `cch-w61-s2`), and D798 already audits it row-by-row. `cch-w60-s6` is `cancelled` with `claim: {}` — that cancel is PAID too. All twelve re-verified live today: MERGED, four required contexts `success` at `?per_page=100`, every merge sha `ahead`; `c2dbadfd78...main` still `diverged`, so D781's substitution of `8ad2f0ff12` stands. **What IS unpaid: NINE rows that shipped code and stayed open** — `cch-w63-s5/s6/s7/s8`, `cch-w64-s2/s4/s5/s6`, `cch-w65-s2 `— and every merge gate they wait on is satisfied on origin/main RIGHT NOW (#11435→`26b8614259`, #11436→`6b82ebf151`, #11437→`6d8f1f1c43`, #11438→`a1d27149e7`, #11488→`845388d53a`, #11489→`7326aa4a85`, and for `cch-w64-s5` c11 the D780/D781 charter PR is **#11420**→`730c465f0c`, proved by diffing all three candidate charter PRs and counting added `| D780 |`/`| D781 |` rows: 2, 0, 0). **THE CLOSE MECHANICS, MEASURED:** all nine have `worker: null` with a lapsed lease and `released_by: null`, and `Internal.close_holder/2` (:105-123) admits a released row as `:self_resume` ONLY when the closer equals `previous_worker` — **so the row's own stored `previous_worker` is the ONLY identity that closes without minting a `close_override.holder`, and those strings are TRUNCATED to 52 chars and must be copied byte-for-byte, not reconstructed from the slug.** `cch-w63-s6`'s is `epic-reviewer-wave-64`, not a builder id — a mechanical derivation fails on exactly that row. **BASELINE (published perspective, `count 866 == len(documents) 866`, ZERO `drafts.` twins): open 429 · in_progress 0 · done 370 · cancelled 66 · considering 1 → LIVE 429, SELF-FILED 0 at first claim.** Board is FLAT against the survey's own read (427 open + 2 in_progress = 429): the two in_progress leases lapsed to open between reads, so **a wave scoring itself on `open` alone would have manufactured a phantom +2 regression out of two expired leases.** |
+| D809 | **`UPDATE_REFUSAL_UNCLOCKED` STAYS, AND THE PROD CENSUS THAT WAS SUPPOSED TO SETTLE IT PROVES LESS THAN IT LOOKS** | The census finally ran on cloud-db-1 and the answer is **ZERO stranded rows** — but it is zero for a reason unrelated to the fix, and saying so is the whole point. **The reachability census is `8 total \| 0 no-token \| 0 no-url \| 0 no-host \| 0 suspended`: no row on prod can currently reach ANY of the three unclocked rungs, so the census cannot distinguish "the fix worked" from "the condition never arose here."** The only non-null reason present is `identity_refused` (1 row), which is a legitimately CLOCKED rung. **And no post-#11487 write exists yet to test against:** all 8 stamps read `2026-08-09 22:17:0x`, the hourly sweep FOUR MINUTES before the fix commit (`02ab46d0f8`, 22:21:35Z; container recreated 22:26:42Z; `merge-base --is-ancestor` confirms the deployed sha carries it). #11487 OMITS `update_checked_at` rather than nulling it (D789 — writing nil would erase a genuinely-true older stamp), and **NO backfill migration exists**, so the fix stops new lies and cannot un-tell old ones. **Two traps recorded for whoever re-runs it: the briefed `-U postgres -d barkpark_cloud` fails with `FATAL: role "postgres" does not exist` — an error that reads like an outage and is not one; the real pair is `-U barkpark_cloud -d barkpark_cloud_prod`. And `audit_events` carries NO update-status history, so the PRE-fix stranded population is permanently unrecoverable: a slice scoped as "measure the damage" is UNBUILDABLE and should be refused.** **RULING: D791 stands unchanged — the removal is a COPY choice, not a deletion (`app.js:8345` returns the BARE sentence, `:8346`/`:8348` prepend "Not yet tried — ", and removing the map reds FOUR assertion sites in `__app.test.mjs`), and no wave sentence may claim a data warrant in either direction.** A hypothesis was formed and REFUTED in passing: the omit-vs-null discrimination IS already pinned (`registry_update_status_test.exs:352`, "a box that answered honestly and later goes dark KEEPS its historical clock"). Do not file a slice for it. |
+| D810 | **THE HARNESS FAULT THAT INVALIDATED DIGEST WAS REAL, IS REPAIRED, AND ITS INSTRUMENT LIED IN THIS EPIC'S OWN VOICE** | The survey and digest rounds ran on a host at **ENOSPC with 117Mi free**, where `Bash` died creating its own `tasks/*.output` file before executing anything — a bare `true` failed. Repaired to **11Gi** during verify, and every gate in this Decide ran clean afterwards (console `1046/1046`, `__binding_census` 79/79, `__css_check` 0 errors, `api` `close_test.exs` 60/60). **Three lessons worth more than the outage.** (1) **The briefed remedy was a proved no-op**: `rm -rf …/tasks/*.output` matched ZERO files and freed ZERO bytes — those files are the fault's VICTIM, not its cause; the 10.9Gi came from a FOREIGN project's scratch tree. (2) **`du` over-reported reclaimable space by ~66x** (33GB claimed, <0.5GB delivered — APFS clones); size every reclaim by `df` before/after. (3) **`noo-noo status` printed "not filling: -414.5 MB/day" while the volume sat at 117MB free** — a trend model that cannot tell "no headroom left" from "healthy", which is this epic's subject running on the box running this epic. **Filed under Law 0's owner as `task-80d117829feec84e` on `cch-instruments-epic`, a create and never a re-parent; it therefore does NOT count against this epic's live-row ledger.** Two instrument holes found on the way and recorded because a future wave will hit them: **`bp task get` DROPS `wave_status` from its projection** (reads `None` whether or not a stamp exists — verify heartbeats with `bp doc get task`, never `bp task get`), and the epic-Paper publish gate refuses with `invalid_epic_paper_quality` while emitting **no `details` key at any verbosity**, so its own hint names a field it does not send. |
 
 ## Roadmap
+
+### Wave 66 — A REFUSAL YOU CAN TELL FROM AN APPROVAL; AN ABSENCE YOU CAN TELL FROM A FAILURE (build in flight)
+
+**Paper:** `cloud-console-hardening-wave-66-2026-08-10`. **This charter PR carries D801-D810 and
+Surface-fence ADD 1.** Ceiling was D800. One subject at two altitudes — the same defect in the
+epic's own ledger and on the site card it exists to fix.
+
+**Brief from `git show origin/main:`, never the checkout.** The primary checkout's charter copy tops
+out at **D682** — 118 D-rows and eight waves behind — and it is `MM` in `git status`. A verifier
+authoring from it could read neither D797 nor D791 nor D781 and correctly reported them ABSENT.
+D682 predicted this failure in writing; it fired again on this wave. Every fact below was
+re-derived on origin/main or by running.
+
+| # | Slice | Surface | Model | Round |
+|---|---|---|---|---|
+| S1 | The font pin stops refusing about a document it never read | `cloud/priv/static/__preview__/font-pin.mjs` | opus | 1 |
+| S2 | An auto-stamped merge gate leaves a record of what was actually observed | `api/lib/barkpark/tasks/close.ex` + tests + the Go pin | opus | 1 |
+| S3 | The site card stops asserting a deletion it never observed | `cloud/priv/static/app.js` `loadSite` + `__app.test.mjs` | opus | 1 |
+| S4 | Law 0 — nine closes, three integers, on each row's own identity | ledger only | opus | 1 |
+| S5 | The console can unmake a site, and its refusal arrives typed | `app.js` + census + sweep + preview | opus | **2 — after S3 merges** |
+
+**S1 FIRST, AND IT IS THE WAVE'S OWN UNBLOCKER.** The `overflow-guard` FONT PIN reds the REQUIRED
+Console gate on ~1 run in 8, on PRs with no console surface at all — it blocked a
+deploy-reliability PR this round and it will block this wave's. D807 carries the run-proved
+mechanism, the run-proved refutation of the obvious fix, and the mutation proof that the working
+fix can still lose. **Three live rows describe this one defect across two epics**
+(`cch-w59-bl-…-one-run-in-eight`, `task-45bb283f60656942` with ZERO acceptance criteria, and
+`dr-w12-bl-overflow-guard-font-pin-flake` under deploy-reliability). S1 builds on the survivor and
+cancels the other two into it; the `dr-w12` cancel is a CROSS-EPIC movement and is counted as a
+MOVE, never as this epic's repayment. **Law 0, both halves out loud: by Standing Law 0 this row's
+artifacts are instruments and belong to `cch-instruments-epic`. It stays here because it is already
+filed here, because re-parenting mid-wave orphans it, and because it blocks this epic's own merges.
+Urgency is not ownership.**
+
+**S3 BEFORE S5, DELIBERATELY.** Both touch `app.js`. Wave 65's own merge lesson is that four
+individually-green branches sharing a file prove nothing under `strict:false` — the union had to be
+run in a scratch worktree (1046/1046 on node 20 AND node 22) before any merge. Rather than dispatch
+two builders into one file and discover it at merge, S5 is **round 2 with `after: [S3]`**: the lead
+merges S3, then dispatches S5. S5's brief is complete enough to build the day S3 lands, and it
+carries the full eight-envelope producer map (D804) so it is authored from what the route actually
+emits rather than from an invented ladder.
+
+**WHAT WAS REFUSED AND WHY, so a later wave does not re-litigate it.** The `data.detail` blindness
+(D806) is real, bigger than a slice, and out of fence by eleven of this charter's own rulings —
+FILED, with the measurement attached. `loadSiteDomains` was proposed as a third dark reader and
+REFUTED: it is the honest exemplar. The `UPDATE_REFUSAL_UNCLOCKED` removal is unmoved by a prod
+census that reads zero for corpus-shape reasons (D809). A `nav()` commit fence was built and
+measured HARMFUL (D807). An authority check on `worker_id` is vacuous by the module's own words
+(D803). And the `no_previous` plane-side typing was refused last wave "by fence" — **that fence does
+not exist**: origin/main's deploy-reliability charter has ZERO `dr-w34` rows, live DR w34 holds only
+`deploy_ledger.ex` and `crown-reconcile*`, and this epic ALREADY OWNS
+`cch-w65-bl-site-rollback-plane-types-its-box-refusals`. It is refused this wave on WAVE SHAPE, not
+on fence, and that correction is recorded so the next wave can simply claim its own row.
 
 ### Wave 63 — "UNKNOWN" IS A LIE WITH NINE KNOWN CAUSES. LOOK BEFORE CLICK. (build in flight)
 
@@ -3147,6 +3244,104 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 ## Wave log
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
+
+### 2026-08-10 — wave 66 REVIEW — grade A, four round-1 slices, all four pushed with PRs open, ZERO review fixes needed
+
+**Paper:** `cloud-console-hardening-wave-66-2026-08-10` (debrief appended). **Ceiling:** D810 (this PR),
+plus **Surface-fence ADD 1** (`api/lib/barkpark/tasks/close.ex` + its two pins, one subject).
+
+**LANDED (four PRs, opened before this entry was written — the push streak holds FOUR waves running):**
+
+- `cch-w59-bl` **THE FONT PIN STOPS REFUSING ABOUT A DOCUMENT IT NEVER READ** → **#11530**, branch
+  `loop-epic/the-font-pin-stops-refusing-about-a-docu-0`. One pass of `FONT_PIN_JS` is now a
+  `measure()` closure carrying `captured` — the face count AT SNAPSHOT — and the pin re-collects
+  while `!ok && captured === 0`, the capture-then-report race signature and nothing else, bounded at
+  20 x 100ms with the bound's arbitrariness stated in both a header paragraph and an inline comment
+  (bringup-retry doctrine). The report gains `captured`/`retries` and the refusal prints them, so an
+  exhausted retry says how long it waited instead of pretending it asked once. NO `nav()` commit
+  fence (D807 measured it HARMFUL), NO exit-mapping change, NO instrument file touched. One file,
+  three callers fixed. **This unblocks the whole repo** — it was redding the REQUIRED Console gate on
+  ~1 run in 8, on PRs with no console surface at all. **No review fix needed.**
+- `cch-w66-s2` **THE AUTOSTAMP RECORDS WHAT IT ACTUALLY OBSERVED** → **#11531**, branch
+  `loop-epic/an-auto-stamped-merge-gate-records-what--1`. The wish's own sentence pointed at the
+  epic's own ledger. The evidence sentence stops asserting a lead and a merge nothing observed
+  (`auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest…`), and the
+  deduction now leaves a durable trace: new content key `merge_gate_autostamp` in `close_override`'s
+  shape, riding the SAME rev-CAS write, with `close` (`verified:false`) and `merge_event`
+  (`verified:true`) sub-keys that never overwrite each other. `caller_token_id` — the only
+  authenticated identity — is recorded beside the client-asserted `worker_id`, each labelled. Both
+  refused shapes stayed refused: no `worker_id` authority check (vacuous, D803), no GitHub round-trip
+  inside the advisory lock. The Go whitelist gained a THIRD pinned key-set and a both-directions
+  failure proof, and a **vacuous green was killed** — `-run ClosePayload` had matched NONE of the
+  key-set tests. **No review fix needed.**
+- `cch-w66-s3` **THE SITE CARD STOPS ASSERTING A DELETION IT NEVER OBSERVED** → **#11532**, branch
+  `loop-epic/the-site-card-stops-asserting-a-deletion-2`. The same sentence one altitude down. A
+  BRANCH SPLIT, not a copy replacement: the 404 arm keeps its hedged card BYTE FOR BYTE (pinned by
+  its own assertion, because the inverse lie silences a genuine deletion), and statuses 0/403/5xx
+  route to the new pure `siteLoadFailureHtml(r)` built from already-shipped helpers with ZERO new
+  CSS. Second arm, same function: a failed `/deployments` read stops rendering "No deployments yet"
+  over a site with a hundred builds, while a genuine 200-with-zero-rows still reads as one — the
+  mirror lie is pinned too. `friendly()` and `app.css` byte-untouched (D395/D740). **No review fix
+  needed.**
+- `cch-w66-s4` **LAW 0 — NINE CLOSES, THREE INTEGERS, ON EACH ROW'S OWN IDENTITY** → **#11533**,
+  branch `loop-epic/law-0-nine-closes-three-integers-on-each-3`. NO CODE. Nine shipped-but-open rows
+  closed on their OWN stored `previous_worker`, zero `close_override.holder` minted. Three brief
+  corrections recorded: the stored epoch is NOT closable (a lapsed lease reverts the row to `open`;
+  identity, not epoch, avoids the override), THREE of nine worker strings are unreconstructable from
+  their slug, and the gate's seven-PR list was short by two. Three rows close SHORT on purpose as
+  honest misses. LIVE 437 → 429, with the 8-vs-9 gap NAMED rather than rounded (437 − 9 − 1 + 2 =
+  429, exact). **No review fix needed.**
+
+**REVIEW RE-RAN EVERY GATE ON THE FINAL TREE.** overflow-guard rc=0 / breakpoint-sweep rc=0 /
+modal-oracle rc=0 (8 states, 0 failing) **and the font mutation leg**: hiding
+`IBMPlexMono-SemiBold-latin.woff2` still refuses at rc=2 with `declared 3/3 … 600=error/check:false`,
+`size=4 captured=4` and NO retry text — the retry provably cannot launder a real defect.
+`close_test.exs` **65/0**, `test/barkpark/tasks/` **522/0**, `tasks_controller_test.exs` **118/0**,
+`go test -run ClosePayload` **4/4**, `mix format`/`gofmt` clean. `__app.test.mjs` **1049/1049/0**,
+`__css_check` **0 errors**, `__binding_census` **79/79**. Slice 4's gate re-run independently on all
+NINE PRs: `compare=ahead` with all four required contexts `success`, and the nine closes read back
+live — `closed_by` matches each row's stored worker exactly, zero `.holder`, `close_override.criteria`
+on exactly the three short-closing rows, `cch-w63-s4`/`cch-w38-s1` still open and unclaimed.
+
+**LEDGER AUDIT: CLEAN, NOTHING FIXED.** All four built slices sit `in_progress` with per-criterion
+evidence stamped as the builders worked and the merge-gated criterion left `met:false` for the lead.
+The round-2 slice is `open` and untouched. Every filed/cancelled row the builders claimed was verified
+live: `task-4ab4a5b58bce97a6` and `cch-w66-fu-font-pin-race-has-no-committed-regression-test` open on
+this epic, `task-45bb283f60656942` cancelled here, `dr-w12-bl-overflow-guard-font-pin-flake` cancelled
+on `dr-backlog-never-started` (a cross-epic move, correctly NOT this epic's repayment), and
+`task-80d117829feec84e` filed on `cch-instruments-epic`.
+
+**WHAT THE NEXT WAVE MUST KNOW.**
+
+1. **DISPATCH ORDER IS NOT OPTIONAL.** Merge round 1 first (#11530 → #11531 → #11532 → #11533; the
+   font pin FIRST because it is what stops reddening everything else's Console gate). Only then
+   dispatch `cch-w63-bl-teardown-failed-has-no-console-reader-at-all` (round 2), REBASED onto s3 —
+   both edit `app.js` and `__app.test.mjs`, and wave 65's own lesson is that individually-green
+   branches sharing a file prove nothing under `strict:false`. That slice must also budget for THREE
+   gate edits (`__binding_census` PIN row, `EXPECT.total` 79→80, and a member-authority-sweep HOOKS
+   row whose corpus count is itself pinned).
+2. **s2 IS HIGH-FLIP-RISK AND A SECOND INDEPENDENT REVIEWER IS OWED.** The reviewer re-derived the
+   authority judgment independently from the controller (`worker_id` is `params["worker_id"]`,
+   `landed` is a raw `Params.put_opt` passthrough, `caller_token_id(conn)` is the only authenticated
+   identity) and AGREES with the refusals — but this amends another epic's CLOSED, evidenced contract
+   (D70, `task-felix-close-merge-gate-autostamp`), and one reviewer agreeing is not independence.
+3. **s2 MAKES THE FABRICATION TELLABLE, NOT IMPOSSIBLE.** The criterion still flips `met:true` and
+   every downstream gate reading `met` alone is unchanged. Nobody may quote this wave as "the merge
+   gate can no longer be fabricated." `task-4ab4a5b58bce97a6` carries the residue, and NOTHING
+   consumes `merge_gate_autostamp` yet — an unwatched record is one refactor from being dropped as
+   unused. **A reader for it is the strongest single candidate for wave 67.**
+4. **TWO NAMED, UNPINNED WIRINGS.** `loadSite` is not exported, so nothing pins that `deployFault` is
+   threaded or that `#site-load-retry` gets its listener; and no committed check fails if the font
+   retry is removed (`cch-w66-fu-…-no-committed-regression-test`). Both are honest gaps, both filed,
+   neither quietly widened.
+5. **s4's FINISH COUNT IS MID-WAVE, NOT A SEAL** — `in_progress` was 4 with siblings writing. Whoever
+   seals wave 66 re-reads LIVE on a quiet board. And `--merge-gated` was exercised nine times by a
+   BUILDER identity; if repayment should run under a distinct identity, that rule is worth writing
+   down.
+6. **A SMALL FENCE-SHAPED QUESTION FOR THE LEAD:** s3's diff is 3 files, not the 2 its `files:` label
+   named, because `__unknown_census.mjs`'s own REMOVE arm fired. The deviation was declared on the
+   task the moment it happened — which is the behaviour the wave wanted — but a `files:` label that
+   cannot anticipate an instrument's self-instruction is a dispatch-frontier gap worth a ruling.
 
 ### 2026-08-10 — wave 65 REVIEW — grade A, four round-1 slices, all four pushed with PRs open
 
