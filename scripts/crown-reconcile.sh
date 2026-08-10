@@ -967,8 +967,19 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
       if [ "$cp_rows" -eq 0 ]; then
         # The grace is charged against the FIRST time this sha was seen serving
         # and unrecorded, not against the process age the box reports now. A sha
-        # already on the re-ask list cannot buy a fresh grace by being restarted,
-        # and no sha can be graced forever.
+        # already on the re-ask list cannot buy a fresh grace by being restarted.
+        #
+        # `graced_age` bounds the EPSILON and GRACE arms below at
+        # SERVING_GRACE_SECONDS, so neither can defer forever. THE IN-FLIGHT ARM
+        # IS NOT BOUNDED BY IT and that is a real gap, stated here rather than
+        # left for a reader to discover: it re-defers for as long as GitHub
+        # reports the run `in_progress`, so a HUNG deploy run buys amnesty
+        # bounded only by GitHub's own run timeout — which is not a bound this
+        # script states or can see. Tracked as
+        # dr-w34-fu-inflight-deferral-is-unbounded; the cap is deliberately NOT
+        # invented here, because every other threshold in this block carries a
+        # measured derivation and a felt number would be the one unmeasured
+        # constant in the chain.
         first_seen="$(state_first_seen "$SERVING_SHA")"
         [ -n "$first_seen" ] || first_seen="$NOW_EPOCH"
         graced_age=$((NOW_EPOCH - first_seen))
