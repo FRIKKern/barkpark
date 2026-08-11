@@ -78,17 +78,57 @@ defmodule BarkparkWeb.Telemetry.DistributionPrunerTest do
     test "a recent external scrape suppresses the tick", %{pruner: pruner} do
       _ = TelemetryMetricsPrometheus.Core.scrape(@aggregator)
 
-      # This is what MetricsController.scrape/2 reports on every real request.
-      DistributionPruner.note_scrape(pruner)
+      # MetricsController.scrape/2 routes every real request through this call.
+      assert is_binary(DistributionPruner.scrape(pruner))
 
       emit_queries(500)
       before = rows()
 
       refute GenServer.call(pruner, :prune_now),
-             "pruner stole samples from an endpoint that was just scraped"
+             "pruner ran despite an external scrape having just completed"
 
       assert rows() == before,
              "table changed despite the prune being suppressed"
+    end
+  end
+
+  describe "scrape serialization" do
+    test "a timer tick cannot overlap an external scrape" do
+      test_pid = self()
+
+      scrape_fun = fn _aggregator ->
+        send(test_pid, {:scrape_started, self()})
+
+        receive do
+          :finish_scrape -> "serialized metrics"
+        end
+      end
+
+      pruner =
+        start_supervised!(
+          {DistributionPruner,
+           [
+             name: :serial_pruner_under_test,
+             aggregator: @aggregator,
+             scrape_fun: scrape_fun,
+             tick: :timer.hours(1),
+             idle_after: :timer.minutes(5)
+           ]},
+          id: :serial_pruner_under_test
+        )
+
+      external = Task.async(fn -> DistributionPruner.scrape(pruner) end)
+      assert_receive {:scrape_started, ^pruner}
+
+      send(pruner, :prune)
+      refute_receive {:scrape_started, ^pruner}, 50
+
+      send(pruner, :finish_scrape)
+      assert Task.await(external) == "serialized metrics"
+
+      # The queued timer runs only after the external scrape records its fresh
+      # timestamp, so it is suppressed instead of starting a second Core fold.
+      refute_receive {:scrape_started, ^pruner}, 50
     end
   end
 end

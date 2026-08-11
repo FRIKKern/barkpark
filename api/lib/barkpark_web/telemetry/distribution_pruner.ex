@@ -21,15 +21,15 @@ defmodule BarkparkWeb.Telemetry.DistributionPruner do
   which calls that question "a real OOM scar". Unscraped, the answer-machine
   became the cause.
 
-  ## Why this doesn't steal samples from a real scraper
+  ## Why this owns every scrape
 
-  The naive fix — aggregate on a timer, unconditionally — would prune rows out
-  from under an external Prometheus between its scrapes, quietly lowering the
-  sample counts it sees. So this only acts when the endpoint looks UNUSED:
-  `BarkparkWeb.MetricsController` reports each external scrape via
-  `note_scrape/0`, and a tick prunes only if none has arrived within
-  `:idle_after`. An instance with Prometheus attached never sees this process do
-  anything; an instance without one stays flat.
+  Core folds raw distribution rows into cumulative histogram buckets, so an
+  internal scrape does not steal already-counted samples from Prometheus. The
+  fold itself is not serialized, though: overlapping scrapes can both read an
+  old aggregate and then overwrite one another's update. This process therefore
+  owns both external and timer-driven scrapes. A tick runs only if the endpoint
+  has been unused for `:idle_after`, avoiding redundant exposition work when a
+  real Prometheus is attached while keeping an unscraped instance flat.
   """
 
   use GenServer
@@ -52,22 +52,23 @@ defmodule BarkparkWeb.Telemetry.DistributionPruner do
   end
 
   @doc """
-  Records that an external scraper just read the endpoint.
+  Serializes an external scrape with timer-driven distribution pruning.
 
-  A cast, not a call: a scrape must never block on, or fail because of, this
-  bookkeeping. Tolerates the pruner not running at all — some test setups start
-  the aggregator on its own.
+  Falls back to Core when the pruner is absent. Some focused test setups start
+  the aggregator without the full telemetry supervision tree; with no pruner
+  running, there is no timer scrape to race.
   """
-  def note_scrape(server \\ __MODULE__) do
-    GenServer.cast(server, :external_scrape)
+  def scrape(server \\ __MODULE__) do
+    GenServer.call(server, :scrape, :infinity)
   catch
-    :exit, _ -> :ok
+    :exit, _ -> TelemetryMetricsPrometheus.Core.scrape(@aggregator)
   end
 
   @impl true
   def init(opts) do
     state = %{
       aggregator: Keyword.get(opts, :aggregator, @aggregator),
+      scrape_fun: Keyword.get(opts, :scrape_fun, &TelemetryMetricsPrometheus.Core.scrape/1),
       tick: Keyword.get(opts, :tick, @tick),
       idle_after: Keyword.get(opts, :idle_after, @idle_after),
       # `nil` = nobody has ever scraped. The common case, and the one this
@@ -79,8 +80,16 @@ defmodule BarkparkWeb.Telemetry.DistributionPruner do
   end
 
   @impl true
-  def handle_cast(:external_scrape, state) do
-    {:noreply, %{state | last_scrape: now_ms()}}
+  def handle_call(:scrape, _from, state) do
+    metrics = scrape_metrics(state)
+    {:reply, metrics, %{state | last_scrape: now_ms()}}
+  end
+
+  # Exposed for the test: lets it drive a tick without waiting a minute.
+  def handle_call(:prune_now, _from, state) do
+    pruned? = idle?(state)
+    if pruned?, do: prune(state)
+    {:reply, pruned?, state}
   end
 
   @impl true
@@ -89,21 +98,13 @@ defmodule BarkparkWeb.Telemetry.DistributionPruner do
     {:noreply, schedule(state)}
   end
 
-  # Exposed for the test: lets it drive a tick without waiting a minute.
-  @impl true
-  def handle_call(:prune_now, _from, state) do
-    pruned? = idle?(state)
-    if pruned?, do: prune(state)
-    {:reply, pruned?, state}
-  end
-
   defp idle?(%{last_scrape: nil}), do: true
   defp idle?(%{last_scrape: at, idle_after: idle_after}), do: now_ms() - at >= idle_after
 
-  defp prune(%{aggregator: aggregator}) do
+  defp prune(state) do
     # The return value is the whole exposition text and is deliberately dropped —
     # we want the side effect (aggregate + delete), not the numbers.
-    _ = TelemetryMetricsPrometheus.Core.scrape(aggregator)
+    _ = scrape_metrics(state)
     :ok
   rescue
     error ->
@@ -111,6 +112,10 @@ defmodule BarkparkWeb.Telemetry.DistributionPruner do
       # a misconfiguration to report, not a reason to restart the tree.
       Logger.warning("distribution prune failed: #{Exception.message(error)}")
       :error
+  end
+
+  defp scrape_metrics(%{aggregator: aggregator, scrape_fun: scrape_fun}) do
+    scrape_fun.(aggregator)
   end
 
   defp schedule(state) do

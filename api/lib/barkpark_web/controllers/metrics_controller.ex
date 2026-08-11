@@ -16,13 +16,11 @@ defmodule BarkparkWeb.MetricsController do
   """
   use BarkparkWeb, :controller
 
-  @aggregator :barkpark_metrics
-
   def scrape(conn, _params) do
-    metrics = TelemetryMetricsPrometheus.Core.scrape(@aggregator)
-    # Tells the pruner the endpoint is in use, so it leaves the samples between
-    # this scrape and the next one alone.
-    BarkparkWeb.Telemetry.DistributionPruner.note_scrape()
+    # Core's distribution fold is a read-modify-write over ETS, not a serialized
+    # GenServer call. Route every scrape through the pruner so an idle timer and
+    # an external Prometheus request cannot overwrite one another's aggregate.
+    metrics = BarkparkWeb.Telemetry.DistributionPruner.scrape()
 
     conn
     |> put_resp_content_type("text/plain", "utf-8")
