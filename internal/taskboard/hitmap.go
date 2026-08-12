@@ -187,7 +187,7 @@ func (m Model) composeInner() (int, int) {
 // origin offsets exactly once (charter D89) so the mouse reducer does zero
 // coordinate math. It mirrors Compose/composeAt: the leading blank row (LineNone,
 // compose.go), then the board frame's HitMapFor OR a pushed reading frame's
-// breadcrumb (chrome) + windowed body + footer (chrome). The left gutter is a
+// windowed body + footer (chrome; the breadcrumb row was retired). The left gutter is a
 // pure X shift that never changes a row's identity — a board row's click target
 // is the FULL row width — so only the Y axis is mapped here. len(ComposeHitMap)
 // == len(strings.Split(m.View(), "\n")) by construction. Wide mode returns nil:
@@ -205,13 +205,13 @@ func (m Model) ComposeHitMap() []LineTarget {
 		body = HitMapFor(m.board, m.ui, bw, bh, now)
 	} else {
 		width, height := m.composeInner()
-		avail := height - 2 // breadcrumb + footer, exactly as composeAt reserves
+		avail := height - 1 // footer only, exactly as composeAt reserves (crumb retired)
 		if avail < 1 {
 			avail = 1
 		}
-		content, stops := m.frameContent(top, width, now)
-		body = make([]LineTarget, 0, avail+2)
-		body = append(body, chromeTarget) // breadcrumb
+		docW, _ := docLayout(width)
+		content, stops := m.frameContent(top, docW, now)
+		body = make([]LineTarget, 0, avail+1)
 		body = append(body, frameHitTargets(content, stops, top.Cursor, top.Scroll, avail)...)
 		body = append(body, chromeTarget) // reading footer
 	}
