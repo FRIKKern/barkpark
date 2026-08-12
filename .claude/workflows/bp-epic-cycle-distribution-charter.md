@@ -43,4 +43,18 @@ Later waves / seal:
 
 ## Wave log
 
-(wave 1 in flight — story: /papers/epic-cycle-distribution-wave-2026-08-12)
+### Wave 2026-08-12 (wave 1 — round 1 built, reviewed, pushed)
+
+Story: /papers/epic-cycle-distribution-wave-2026-08-12 · Grade: A-
+
+**Landed (6/6 round-1 slices, all gates re-run green at review):**
+- s1 view-edit-parity delocalized — zero `/Volumes|/Users` literals, computed `docs/specs/<run-date>` report path, scriptPath INVOKE in meta (`loop-epic/view-edit-parity-engine-carries-zero-mac-0`).
+- s2 bp-epic-cycle portability — scriptPath launch taught, CC=clang host-conditional, derived-host read-back (`.server.base_url` verified live), PAPER_BLOCK rewritten to the wall dialect + #6086's two bullets folded in. Reviewer independently re-derived the wall set from `epic_quality.ex` — faithful (`loop-epic/bp-epic-cycle-engine-teaches-scriptpath--1`).
+- s3 wild-bulk portability — NO_FABLE switch wraps all 4 fable joints, xhigh gone (0 hits), wall dialect, meta.phases 11→6 (`loop-epic/wild-bulk-cycle-engine-gains-the-no-fabl-2`).
+- s4 deep-investigation listing 2396→1513 chars with INVOKE first + wall dialect. Review fix on `-r`: wall bullet re-scoped to the tag-gated cohort (this engine has no wave Paper) (`loop-epic/deep-investigation-listing-survives-the--3-r`).
+- s5 gitignore + doctor honesty — 9 runtime ignores tracked (virgin-repo proven), missing-bp is loud under `--hook`, doctor.test.sh 11/11, Go TestDoctor green (`loop-epic/a-fresh-clone-ignores-harness-runtime-st-4`).
+- s7 launch runbook in docs/setup/CLAUDE-CODE.md + thin `.claude/workflows/README.md`; both doc gates green (`loop-epic/the-honest-epic-wave-launch-runbook-ride-5`).
+
+**Deferred by design:** s6 portability tripwire (round 2 — dispatch only after s1–s4 merge; guard-lands-after-fix, D6).
+
+**Next wave:** merge round 1 (s2 before PR #6086's rebase; s7 append-only vs open PR #6028), then dispatch s6, then the second-environment launch proof (`ecd-bl-second-env-launch-proof`, human-gated) — that proof IS the epic seal. Residuals: wild-bulk dispatch `phase:` labels reference 5 titles meta no longer declares (harmless today, worth one look when s6's clause C lands); no CI check re-runs the 1536-char listing gate until s6 merges.
