@@ -6,13 +6,13 @@
 #
 # WHY A DEDICATED HARNESS AND NOT upgrade_test.go: the Go
 # TestDoctorReleaseCadence fixture has NO fake `bp` on PATH and NO merge-base
-# stub, so its fixture takes the `else skip "no bp on PATH"` branch and NEVER
+# stub, so its fixture takes the `else` (no-bp) branch and NEVER
 # exercises section 2. Copying it verbatim reproduces the blind spot one level
 # down. So this harness builds REAL git repos (bare origin.git + working clone)
 # and puts a REAL fake `bp` on PATH that emits {"commit":"<sha>"} — the only way
 # to drive section 2's cat-file / rev-parse / merge-base / diff ladder.
 #
-# The full 10-cell verdict matrix (the flip-risk surface):
+# The full 11-cell verdict matrix (the flip-risk surface):
 #   1. at-tip                → GREEN  (bp commit == origin/main tip)
 #   2. behind-Go             → RED    (Go input changed on origin/main since bp)
 #   3. behind-docs-only      → GREEN  (only non-Go paths changed since bp)
@@ -24,6 +24,7 @@
 #   8. offline / no ref      → SKIP   (origin/main ref unavailable — LOUD, not ok)
 #   9. behind vs diverged    → the two RED sentences must DIFFER (W34 S2)
 #  10. exit code             → still 0: doctor is advisory, never a gate
+#  11. no bp on PATH         → LOUD under --hook (not a silent skip), exit 0
 #
 # Templated on scripts/install-cli.test.sh.
 set -uo pipefail
@@ -146,7 +147,7 @@ run_doctor() { # <work> <bindir> — full doctor output, fake bp shadowing real 
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-echo "== doctor.sh section 2 — 10-cell verdict matrix =="
+echo "== doctor.sh section 2 — 11-cell verdict matrix =="
 
 # ── 1. at-tip → GREEN ────────────────────────────────────────────────────────
 R1="$TMP/c1"; mkdir -p "$R1"; W1="$(base_repo "$R1")"
@@ -259,6 +260,30 @@ RC5=$?
 if [ "$RC5" -eq 0 ]; then pass "10. doctor still exits 0 on the diverged RED (advisory)"; else
   fail "10. doctor exited $RC5 on the diverged RED — it must never block a chain"; fi
 
+# ── 11. no bp on PATH → LOUD in --hook mode, still exit 0 ────────────────────
+# A second environment (a fresh clone on another machine) has no bp at all, and
+# that is precisely the case the SessionStart hook exists to catch. Before this
+# case the branch called `skip`, which prints NOTHING under --hook (doctor.sh:20)
+# — the hook stayed silent about the most likely failure it could report. This
+# case FAILS against that old code, so it is a guard that can lose.
+# The PATH is rebuilt from scratch (a bindir holding only a git symlink) so a bp
+# installed anywhere on this host cannot satisfy `command -v bp` by accident.
+R11="$TMP/c11"; mkdir -p "$R11"; W11="$(base_repo "$R11")"
+NOBP="$R11/nobp"; mkdir -p "$NOBP"
+for t in git curl; do
+  p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$NOBP/$t"
+done
+if command -v bp >/dev/null 2>&1 && PATH="$NOBP" command -v bp >/dev/null 2>&1; then
+  fail "11. fixture PATH still resolves a bp — the no-bp case cannot be tested"
+fi
+OUT11="$(env -i PATH="$NOBP" HOME="$TMP" \
+  BARKPARK_RELEASES_API_URL="https://example.invalid/releases" \
+  /bin/bash "$W11/scripts/doctor.sh" --hook 2>&1)"
+RC11=$?
+assert_has "11. hook mode NAMES the missing bp out loud" "$OUT11" "no bp on PATH"
+if [ "$RC11" -eq 0 ]; then pass "11. missing bp stays advisory (exit 0)"; else
+  fail "11. doctor exited $RC11 with no bp on PATH — it must never block a session"; fi
+
 # ── negative control: prove the harness can SEE a false-green ────────────────
 # If section 2 ever regresses to comparing against the ancestor-only diff and
 # calls the behind-Go binary current, sec2_green would fire on cell 2. We assert
@@ -271,4 +296,4 @@ if [ "$fails" -ne 0 ]; then
   echo "doctor tests: $fails failure(s)" >&2
   exit 1
 fi
-echo "doctor tests: PASS (10/10 verdict cells)"
+echo "doctor tests: PASS (11/11 verdict cells)"
