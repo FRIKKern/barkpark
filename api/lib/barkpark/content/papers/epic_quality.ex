@@ -32,6 +32,7 @@ defmodule Barkpark.Content.Papers.EpicQuality do
   a mirror with its own list silently diverges the day this one grows.
   """
   def nested_keys, do: @nested_keys
+
   @intrinsically_meaningful_types ~w(audio callout code divider embed figure gallery image quote sheet video)
 
   @type failure ::

@@ -73,7 +73,12 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
     test "pipeline string nodes normalize to a shape pipeline_html actually renders" do
       block = %{"type" => "pipeline", "nodes" => ["source", "emit", "gate"]}
 
-      assert [%{"nodes" => [%{"title" => "source"}, %{"title" => "emit"}, %{"title" => "gate"}] = nodes} = normalized] =
+      assert [
+               %{
+                 "nodes" =>
+                   [%{"title" => "source"}, %{"title" => "emit"}, %{"title" => "gate"}] = nodes
+               } = normalized
+             ] =
                BlockOps.normalize_render_shapes([block])
 
       # The shape assertion above is necessary but not sufficient — the first
