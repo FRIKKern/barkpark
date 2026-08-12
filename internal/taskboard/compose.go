@@ -41,6 +41,12 @@ const (
 	// symmetric margin; a left-pinned document on an ultrawide pane reads
 	// lopsided.
 	maxDocWidth = 72
+	// docEdgePad is the inner breathing space between a sheet edge (│) and the
+	// document text; docFrameExtra is what the whole sheet adds to the content
+	// column: two edge cells + two inner pads. docLayout subtracts it BEFORE
+	// capping, so the text measure stays maxDocWidth even inside the frame.
+	docEdgePad    = 1
+	docFrameExtra = 2 + 2*docEdgePad
 	// scrollFollow is the Frame.Scroll sentinel for "follow the cursor stop"
 	// (charter D18). A frame's zero-value Scroll is 0 — a real absolute offset
 	// (the top of the frame), so a freshly opened frame shows its title, never a
@@ -177,36 +183,53 @@ func (m Model) boardGeometry() (int, int) {
 }
 
 // docLayout is the ONE reading-column seam: given a pane width it returns the
-// width the document renders at (capped at maxDocWidth) and the left margin
-// that centers the capped column in the pane. Paint (composeAt, previewLines),
-// the scroll clamp (scrollPreview), and the mouse stop resolver
-// (rightPaneStopAt) all derive the pair here, so line wrapping and the click
-// hit-map can never disagree about where a body line falls.
+// text measure the document renders at (capped at maxDocWidth, after the sheet
+// frame's docFrameExtra is spent) and the left margin the SHEET starts at,
+// centered. Paint (composeAt, previewLines), the scroll clamp (scrollPreview),
+// and the mouse stop resolvers (rightPaneStopAt, ComposeHitMap) all derive the
+// pair here, so line wrapping and the click hit-map can never disagree about
+// where a body line falls.
 func docLayout(paneW int) (contentW, leftPad int) {
-	contentW = paneW
+	contentW = paneW - docFrameExtra
 	if contentW > maxDocWidth {
 		contentW = maxDocWidth
 	}
-	return contentW, (paneW - contentW) / 2
+	if contentW < 1 {
+		contentW = 1
+	}
+	return contentW, (paneW - contentW - docFrameExtra) / 2
 }
 
-// padDocLines shifts rendered document lines right by leftPad so the capped
-// column sits centered in its pane; blank lines stay byte-empty (the compositor
-// and the goldens treat "" as a skippable row).
-func padDocLines(lines []string, leftPad int) []string {
-	if leftPad <= 0 {
-		return lines
+// renderDocPane windows a document body into a pane and dresses it as a sheet:
+// a ─ top edge, │ left/right edges the full pane height, the text at the
+// docLayout measure between them (both glyphs already in the structure
+// allowlist). It spends ONE pane row on the top edge, so the mouse resolvers
+// subtract the same row through docBodyRow — the twin they must never drift
+// from. body must be rendered at docLayout's contentW.
+func renderDocPane(body []string, stops []Stop, cursor, scroll, hoverStop, paneW, paneH int) []string {
+	docW, pad := docLayout(paneW)
+	avail := paneH - 1 // the top edge row
+	if avail < 1 {
+		avail = 1
 	}
-	pad := strings.Repeat(" ", leftPad)
-	out := make([]string, len(lines))
-	for i, l := range lines {
-		if l == "" {
-			continue
-		}
-		out[i] = pad + l
+	win := windowFrame(body, stops, cursor, scroll, hoverStop, avail, docW)
+	for len(win) < avail {
+		win = append(win, "")
+	}
+	margin := strings.Repeat(" ", pad)
+	edge := dimStyle.Render("│")
+	innerPad := strings.Repeat(" ", docEdgePad)
+	out := make([]string, 0, avail+1)
+	out = append(out, margin+innerPad+dimStyle.Render(strings.Repeat("─", docW+docFrameExtra-2*docEdgePad)))
+	for _, l := range win {
+		out = append(out, margin+edge+innerPad+padTo(l, docW)+innerPad+edge)
 	}
 	return out
 }
+
+// docBodyRow maps a pane row to its document body-window row: the ─ top edge is
+// pane row 0, content starts one below. Negative means edge chrome, not body.
+func docBodyRow(pl int) int { return pl - 1 }
 
 func composeAt(m Model, width, height int) string {
 	if width < 20 {
@@ -232,11 +255,11 @@ func composeAt(m Model, width, height int) string {
 			return Render(m.board, ui, width, height, now)
 		}
 		footer := readingFooter(m.ui, width)
-		avail := height - 1 // footer
-		if avail < 1 {
-			avail = 1
+		paneH := height - 1 // footer; renderDocPane spends one more row on the top edge
+		if paneH < 2 {
+			paneH = 2
 		}
-		docW, docPad := docLayout(width)
+		docW, _ := docLayout(width)
 		body, stops := m.frameContent(top, docW, now)
 		// The narrow reading frame paints the hovered rail stop (charter D99 /
 		// D105, the wide right pane's twin below): mouseMotion resolves the
@@ -244,11 +267,8 @@ func composeAt(m Model, width, height int) string {
 		// that stop's body line in the accent foreground. HoverStop defaults to -1
 		// (newModel; keyboard input clears it), so a pointer-free frame paints
 		// nothing and the goldens stay byte-frozen.
-		win := padDocLines(windowFrame(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, avail, docW), docPad)
-		for len(win) < avail {
-			win = append(win, "")
-		}
-		out := make([]string, 0, avail+1)
+		win := renderDocPane(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, width, paneH)
+		out := make([]string, 0, paneH+1)
 		out = append(out, win...)
 		out = append(out, footer)
 		return strings.Join(out, "\n")
@@ -283,12 +303,12 @@ func composeAt(m Model, width, height int) string {
 			rightLines = []string{dimStyle.Render(truncate("no task selected", rightW))}
 		}
 	} else {
-		docW, docPad := docLayout(rightW)
+		docW, _ := docLayout(rightW)
 		body, stops := m.frameContent(top, docW, now)
 		// The wide reading pane paints the hovered rail stop (charter D99): a
 		// board-row hover would have taken the preview branch above and cleared
 		// HoverStop, so a non-negative HoverStop here always belongs to THIS frame.
-		rightLines = padDocLines(windowFrame(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, inner, docW), docPad)
+		rightLines = renderDocPane(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, rightW, inner)
 	}
 
 	rows := make([]string, 0, inner)
@@ -340,11 +360,11 @@ func (m Model) previewLines(t Task, width, avail int, now time.Time) []string {
 	if m.previewRef == t.DocID {
 		scroll = m.previewScroll
 	}
-	docW, docPad := docLayout(width)
+	docW, _ := docLayout(width)
 	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, docW, now)
 	// The depth-0 preview has NO stops (stops=nil, cursor=-1) — nothing to select,
 	// nothing to hover-paint (hoverStop=-1); #4240 owns depth-0 hover.
-	return padDocLines(windowFrame(body, nil, -1, scroll, -1, avail, docW), docPad)
+	return renderDocPane(body, nil, -1, scroll, -1, width, avail)
 }
 
 // previewDetail is a task's preview-pane detail: the reading index's entry, or
@@ -878,14 +898,22 @@ func (m Model) rightPaneStopAt(pl, innerW, inner int, now time.Time) int {
 	}
 	docW, _ := docLayout(rightW)
 	body, stops := m.frameContent(top, docW, now)
-	wtop := readingWindowTop(len(body), stops, top.Cursor, top.Scroll, inner)
-	if wtop > 0 && pl == 0 {
+	row := docBodyRow(pl)
+	if row < 0 {
+		return -1 // the ─ top edge — chrome, never a stop
+	}
+	avail := inner - 1 // renderDocPane's window height under the top edge
+	if avail < 1 {
+		avail = 1
+	}
+	wtop := readingWindowTop(len(body), stops, top.Cursor, top.Scroll, avail)
+	if wtop > 0 && row == 0 {
 		return -1 // ↑ more-above marker
 	}
-	if len(body)-(wtop+inner) > 0 && pl == inner-1 {
+	if len(body)-(wtop+avail) > 0 && row == avail-1 {
 		return -1 // ↓ more-below marker
 	}
-	bodyLine := wtop + pl
+	bodyLine := wtop + row
 	for i, s := range stops {
 		if s.Line == bodyLine {
 			return i
@@ -907,7 +935,7 @@ func (m *Model) scrollPreview(t Task, delta, innerW, inner int, now time.Time) {
 	}
 	docW, _ := docLayout(rightW)
 	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, docW, now)
-	maxTop := len(body) - inner
+	maxTop := len(body) - (inner - 1) // renderDocPane spends one row on the top edge
 	if maxTop < 0 {
 		maxTop = 0
 	}
