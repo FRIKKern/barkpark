@@ -432,9 +432,9 @@ func paintedBodyWindow(t *testing.T, m Model) int {
 		t.Fatalf("compose produced too few lines to hold a window: %d", len(lines))
 	}
 	if m.wide {
-		return len(lines) - 1 // leading blank (crumb retired)
+		return len(lines) - 2 // leading blank + the sheet's ─ top edge
 	}
-	return len(lines) - 2 // leading blank + footer (crumb retired)
+	return len(lines) - 3 // leading blank + top edge + footer
 }
 
 // readingViewportHeight() must equal the body-window Compose paints, at EVERY
@@ -860,8 +860,8 @@ func TestWideMouseRightRailClickMatchesEnter(t *testing.T) {
 	}
 	// Click stop index 1 (a fresh frame opens on cursor 0, so 1 proves movement).
 	target := stops[1]
-	// composeAt Y == pane line (crumb retired); the body fits so pane line == body line.
-	m2, cmd := m.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line))
+	// composeAt Y == body line + 1 (the sheet's ─ top edge); the body fits the pane.
+	m2, cmd := m.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line+1))
 	if cmd != nil {
 		t.Errorf("a rail select fired a command: %v", cmd)
 	}
@@ -1035,10 +1035,10 @@ func TestWideRailHoverPaintsStop(t *testing.T) {
 	m.ui.HoverStop = -1
 	before := composeAt(m, innerW, m.height-1)
 
-	// Drive a hover Motion over stop 1's body line (body fits ⇒ pane line == body
-	// line ⇒ composeAt row == body line; the crumb row was retired).
+	// Drive a hover Motion over stop 1's body line (body fits ⇒ composeAt row ==
+	// body line + 1: the sheet's ─ top edge).
 	target := stops[1]
-	m2, _ := m.wideMouseMotion(boardPaneWidth+paneGutter2, target.Line, innerW, inner, m.now())
+	m2, _ := m.wideMouseMotion(boardPaneWidth+paneGutter2, target.Line+1, innerW, inner, m.now())
 	if m2.ui.HoverStop != 1 {
 		t.Fatalf("motion over stop 1 set HoverStop %d, want 1", m2.ui.HoverStop)
 	}
@@ -1069,8 +1069,8 @@ func TestWideRailHoverPaintsStop(t *testing.T) {
 	if changed != 1 {
 		t.Fatalf("hover restyled %d lines, want exactly 1 (only the hovered stop)", changed)
 	}
-	if changedIdx != target.Line {
-		t.Fatalf("hover painted composeAt row %d, want %d (the stop's pane row)", changedIdx, target.Line)
+	if changedIdx != target.Line+1 {
+		t.Fatalf("hover painted composeAt row %d, want %d (the stop's pane row)", changedIdx, target.Line+1)
 	}
 	// The painted change lands in the RIGHT pane, never the left board pane.
 	r := []rune(ansi.Strip(al[changedIdx]))
@@ -1092,7 +1092,7 @@ func TestWideRailHoverFlickerGuard(t *testing.T) {
 	if len(stops) < 1 {
 		t.Fatalf("need >=1 rail stop, got %d", len(stops))
 	}
-	x, y := boardPaneWidth+paneGutter2, stops[0].Line
+	x, y := boardPaneWidth+paneGutter2, stops[0].Line+1
 
 	m2, _ := m.wideMouseMotion(x, y, innerW, inner, m.now())
 	if m2.ui.HoverStop != 0 {
@@ -1129,11 +1129,11 @@ func TestWideRailHoverClearsOffStop(t *testing.T) {
 	x := boardPaneWidth + paneGutter2
 
 	// Hover a stop, then slide into the dead gutter → cleared.
-	hov, _ := m.wideMouseMotion(x, stops[0].Line, innerW, inner, m.now())
+	hov, _ := m.wideMouseMotion(x, stops[0].Line+1, innerW, inner, m.now())
 	if hov.ui.HoverStop != 0 {
 		t.Fatalf("hover a stop set HoverStop %d, want 0", hov.ui.HoverStop)
 	}
-	gutter, _ := hov.wideMouseMotion(boardPaneWidth, stops[0].Line, innerW, inner, hov.now())
+	gutter, _ := hov.wideMouseMotion(boardPaneWidth, stops[0].Line+1, innerW, inner, hov.now())
 	if gutter.ui.HoverStop != -1 {
 		t.Fatalf("motion into the dead gutter kept HoverStop %d, want -1", gutter.ui.HoverStop)
 	}
@@ -1300,47 +1300,54 @@ func TestNarrowRailHoverAtCursorCollapsesColorOnly(t *testing.T) {
 
 // ── Centered document column (paper 100-col standard) ────────────────────────
 
-// On an ultrawide pane the reading document renders at maxDocWidth and sits
-// CENTERED: every non-blank right-pane line carries the docLayout left margin,
-// and no line's content extends past pad+maxDocWidth. Mutating docLayout to
-// return pad 0 (left-pinned) or an uncapped width MUST fail this test.
+// On an ultrawide pane the reading document renders as a centered SHEET: a ─
+// top edge, │ edges left and right the full pane height, the text at the
+// maxDocWidth measure between them. Mutating docLayout to left-pinned or
+// uncapped, or dropping an edge, MUST fail this test.
 func TestWideReadingDocumentCenteredAtCap(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 200, 40, true
 	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
-	_, innerW, _ := m.wideGeom()
+	_, innerW, inner := m.wideGeom()
 	rightW := innerW - m.boardPaneCols(innerW) - paneGutter2
-	if rightW <= maxDocWidth {
+	if rightW <= maxDocWidth+docFrameExtra {
 		t.Fatalf("fixture pane too narrow to exercise the cap: rightW=%d", rightW)
 	}
 	docW, pad := docLayout(rightW)
-	if docW != maxDocWidth || pad != (rightW-maxDocWidth)/2 {
-		t.Fatalf("docLayout(%d) = (%d, %d), want (%d, %d)", rightW, docW, pad, maxDocWidth, (rightW-maxDocWidth)/2)
+	if docW != maxDocWidth || pad != (rightW-maxDocWidth-docFrameExtra)/2 {
+		t.Fatalf("docLayout(%d) = (%d, %d), want (%d, %d)",
+			rightW, docW, pad, maxDocWidth, (rightW-maxDocWidth-docFrameExtra)/2)
 	}
 	lines := strings.Split(ansi.Strip(composeAt(m, innerW, m.height-1)), "\n")
+	if len(lines) != inner {
+		t.Fatalf("wide composeAt painted %d rows, want inner=%d", len(lines), inner)
+	}
 	paneStart := m.boardPaneCols(innerW) + paneGutter2
-	sawContent := false
+	leftEdgeCol := paneStart + pad
+	rightEdgeCol := leftEdgeCol + docW + docFrameExtra - 1
 	for i, ln := range lines {
 		r := []rune(ln)
 		if len(r) <= paneStart {
+			t.Fatalf("row %d: no right pane painted", i)
+		}
+		right := r[paneStart:]
+		if i == 0 {
+			top := strings.TrimSpace(string(right))
+			if top == "" || strings.Trim(top, "─") != "" {
+				t.Fatalf("row 0 is not the ─ top edge: %q", string(right))
+			}
 			continue
 		}
-		right := string(r[paneStart:])
-		if strings.TrimSpace(right) == "" {
-			continue
+		if len(r) <= rightEdgeCol {
+			t.Fatalf("row %d: shorter than the right edge column %d: %q", i, rightEdgeCol, ln)
 		}
-		sawContent = true
-		if lead := len(right) - len(strings.TrimLeft(right, " ")); lead < pad {
-			t.Fatalf("row %d: right-pane content starts at col %d, want >= the %d-col centering margin:\n%q",
-				i, lead, pad, right)
+		if r[leftEdgeCol] != '│' || r[rightEdgeCol] != '│' {
+			t.Fatalf("row %d: expected │ edges at cols %d and %d, got %q / %q in %q",
+				i, leftEdgeCol, rightEdgeCol, string(r[leftEdgeCol]), string(r[rightEdgeCol]), string(right))
 		}
-		if disp(strings.TrimRight(right, " ")) > pad+maxDocWidth {
-			t.Fatalf("row %d: right-pane content is wider than the centered %d-col document:\n%q",
-				i, maxDocWidth, right)
+		if inner := strings.TrimRight(string(r[rightEdgeCol+1:]), " "); inner != "" {
+			t.Fatalf("row %d: content leaks past the right edge: %q", i, inner)
 		}
-	}
-	if !sawContent {
-		t.Fatal("no right-pane content rendered — the guard proved nothing")
 	}
 }
