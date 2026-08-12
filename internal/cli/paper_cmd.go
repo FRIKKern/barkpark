@@ -1546,6 +1546,10 @@ func usagePaper(out *writer, toStdout bool) {
 	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
 	p("                   to opening it in the browser)")
 	p("  capture <url>    capture immutable CLI, task-board, and TUI readers")
+	p("")
+	p("to WRITE a paper: bp bulldocs publish <slug> --file payload.json")
+	p("  (blocks payload — never hand-rolled HTML; the slug also goes INSIDE the")
+	p("   JSON). Guide: /papers/paper-authoring-excellence")
 }
 
 // usagePaperView prints the `bp paper view` command signature. An explicit
