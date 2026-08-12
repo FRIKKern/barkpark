@@ -1,0 +1,43 @@
+{
+  "label": "hobby-hardening-capstone",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "hobby-hardening-capstone__light__1440",
+      "file": "hobby-hardening-capstone__light__1440@1x.jpeg",
+      "scale": 1,
+      "bytes": 3482316,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 27,
+      "columnWidth": 720,
+      "maxWidth": "720px",
+      "blockedRequests": 3
+    },
+    {
+      "cell": "hobby-hardening-capstone__dark__1440",
+      "file": "hobby-hardening-capstone__dark__1440@1x.jpeg",
+      "scale": 1,
+      "bytes": 3604761,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 27,
+      "columnWidth": 720,
+      "maxWidth": "720px",
+      "blockedRequests": 3
+    }
+  ]
+}
