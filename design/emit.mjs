@@ -551,17 +551,23 @@ const paperThemeBlock = (name, t) => [
 
 function paperBlock(themes = loadThemes()) {
   const r = tokens.type.reading;
+  // Each reading step emits size + line-height, and a tracking var ONLY where
+  // tokens.json declares a letterSpacing. The tracking leaves were declared in
+  // the source and emitted NOWHERE until pe-w1-reader-editorial-typography — the
+  // `--bp-*-tracking` vars were hand-authored beside a token that claimed to own
+  // them, so the single source was single in name only.
+  const step = (name, s) => [
+    `--tok-reading-${name}-size: ${s.size}px;`,
+    `--tok-reading-${name}-lh: ${s.lineHeight};`,
+    ...(s.letterSpacing == null ? [] : [`--tok-reading-${name}-tracking: ${s.letterSpacing}em;`]),
+  ];
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
     `--tok-reading-heading-weight: ${r.headingWeight};`,
-    `--tok-reading-body-size: ${r.body.size}px;`,
-    `--tok-reading-body-lh: ${r.body.lineHeight};`,
-    `--tok-reading-h1-size: ${r.h1.size}px;`,
-    `--tok-reading-h1-lh: ${r.h1.lineHeight};`,
-    `--tok-reading-h2-size: ${r.h2.size}px;`,
-    `--tok-reading-h2-lh: ${r.h2.lineHeight};`,
-    `--tok-reading-h3-size: ${r.h3.size}px;`,
-    `--tok-reading-h3-lh: ${r.h3.lineHeight};`,
+    ...step("body", r.body),
+    ...step("h1", r.h1),
+    ...step("h2", r.h2),
+    ...step("h3", r.h3),
   ].map((l) => "  " + l).join("\n");
 
   const lifeClasses = (theme) =>

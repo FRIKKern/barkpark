@@ -291,6 +291,20 @@ for (const step of ["body", "h1", "h2", "h3"]) {
   ok(s && typeof s.size === "number" && typeof s.lineHeight === "number", `type.reading.${step} needs {size,lineHeight}`);
 }
 ok(type.reading && type.reading.headingWeight === 600, "type.reading.headingWeight must be 600");
+// The EDITORIAL SCALE floor. A reading scale whose display size barely clears
+// its prose reads as a memo, not a paper — the reader shipped h1 32 over body
+// 18 (1.78) until pe-w1-reader-editorial-typography. Floor the ratio here so the
+// scale cannot drift flat again without someone deciding to.
+if (type.reading && type.reading.h1 && type.reading.body) {
+  const ratio = type.reading.h1.size / type.reading.body.size;
+  ok(ratio >= 2.0, `type.reading h1/body is ${ratio.toFixed(2)}; the editorial scale floor is 2.0`);
+}
+// Tracking is optional per step, but when present it is an em number — the
+// emitter appends the unit, so a string here would emit `-0.02emem`.
+for (const step of ["body", "h1", "h2", "h3"]) {
+  const ls = ((type.reading || {})[step] || {}).letterSpacing;
+  ok(ls === undefined || typeof ls === "number", `type.reading.${step}.letterSpacing must be a number (em)`);
+}
 
 // --- scalar ladders --------------------------------------------------------
 for (const k of ["1", "2", "3", "4", "5", "6", "7", "8"]) {

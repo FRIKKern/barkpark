@@ -19,24 +19,24 @@
       "cell": "portabledoc-showcase__light__1440",
       "file": "portabledoc-showcase__light__1440.jpeg",
       "scale": 2,
-      "bytes": 2155679,
+      "bytes": 2284149,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     },
     {
       "cell": "portabledoc-showcase__dark__1440",
       "file": "portabledoc-showcase__dark__1440.jpeg",
       "scale": 2,
-      "bytes": 2211443,
+      "bytes": 2277382,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     }
   ]

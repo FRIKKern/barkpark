@@ -19,24 +19,24 @@
       "cell": "hobby-hardening-capstone__light__1440",
       "file": "hobby-hardening-capstone__light__1440@1x.jpeg",
       "scale": 1,
-      "bytes": 3482316,
+      "bytes": 3773304,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     },
     {
       "cell": "hobby-hardening-capstone__dark__1440",
       "file": "hobby-hardening-capstone__dark__1440@1x.jpeg",
       "scale": 1,
-      "bytes": 3604761,
+      "bytes": 3770026,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     }
   ]

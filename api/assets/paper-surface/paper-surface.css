@@ -85,21 +85,26 @@ html[data-theme="dark"] .bp-paper-body {
    design/tokens.json via design/emit.mjs), declared just below on this same
    `.bp-paper-surface, .bp-paper-body` scope, so the un-fallbacked var()s always
    resolve. tokens.json is now the ONE source; change a reading value THERE and
-   `node design/emit.mjs --write` moves View AND Edit together. Only the
-   `--bp-*-tracking` letter-spacings stay hand-authored (no `--tok` twin exists).
+   `node design/emit.mjs --write` moves View AND Edit together. Since
+   pe-w1-reader-editorial-typography the `--bp-*-tracking` letter-spacings bridge
+   too: `type.reading.<step>.letterSpacing` was declared in tokens.json and
+   emitted nowhere, so hand-authored numbers sat beside a source that claimed to
+   own them. A step with no letterSpacing emits no tracking var and no --bp-*
+   twin (h3 today), rather than a var() that resolves to nothing.
    Still byte-aligned with the standalone bundle (api/assets/paper-editor/src/
-   styles.css `:root`, re-derived by the mirror) and with render.ex
-   heading_style/2 INLINE values (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View
-   inline wins, so these mirror it).
+   styles.css `:root`, re-derived by the mirror). NOT related to walk.ex
+   heading_style/2: that is the NON-ARTICLE (email / stylesheet-less) fallback
+   and is byte-frozen at its own 32/24/20px scale — article headings emit bare
+   `<hN>` and read the tokens below.
    NOTE: the VIEW-only list bottom-margin (`ul,ol { margin:0 0 24px }`) is
    deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
    re-introduces double-spacing; see styles.css :84). */
 .bp-paper-surface, .bp-paper-body {
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
-  --bp-body-tracking: 0.005em;
-  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: -0.02em;
-  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);
+  --bp-body-tracking: var(--tok-reading-body-tracking);
+  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
+  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);   --bp-h2-tracking: var(--tok-reading-h2-tracking);
   --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
@@ -128,6 +133,35 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-img-radius: 3px;
 }
 
+/* ── The reading surface's OWN type. Until pe-w1-reader-editorial-typography
+   these six declarations lived ONLY in root.html.heex, so `--bp-body-size`
+   resolved 18px on every surface and exactly one surface consumed it: Studio.
+   The public /papers reader carries `.bp-paper-surface` on its <main> but read
+   nothing from it and inherited the browser's 16px — the token was single-source
+   and unread, which looks identical to single-source and honoured until you
+   measure. Measured on the rig's 5-paper panel at 1440: 16px/26.4px and 86.7
+   characters per line, against an editorial band of 66-72.
+
+   Declared HERE (portable, both sinks) rather than as surface CHROME, which is
+   the one thing the header excludes from this file — the exclusion is about the
+   Studio PAGE (background, column width, padding), not about the type. Type is
+   the portable half: the reader and the canvas must set a word in the same size
+   or every parity rule below compares against a different baseline.
+
+   Left in root.html.heex deliberately: background/color/font-family (the Studio
+   page paints its own), max-width/padding (each surface owns its column). */
+.bp-paper-surface {
+  font-size: var(--bp-body-size);
+  line-height: var(--bp-body-lh);
+  letter-spacing: var(--bp-body-tracking);
+  /* onum = oldstyle figures: numerals that sit on the prose's x-height instead
+     of standing at cap height mid-sentence. */
+  font-feature-settings: "kern", "liga", "onum";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 /* ── Block typography (ported from paper.css). These apply to BOTH the
    View-mode read-only stream rows and the Edit-mode block list, so a
    paper reads as clean prose in either mode. */
@@ -152,9 +186,14 @@ html[data-theme="dark"] .bp-paper-body {
    source feeds both surfaces; the first heading is clamped to 0 by each surface's
    :first-child rule. */
 .bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
 .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
-.bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+/* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
+   hyphenation earns its keep in JUSTIFIED text, where the alternative is rivers
+   of white space; nothing on this surface is justified (text-align stays
+   `start`, ragged right), so all `auto` bought was broken words down the right
+   edge of every paragraph. `manual` still honours an author's own soft hyphen. */
+.bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
 /* Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
    2026-07-31): an exact empty paragraph is never published layout. The engines
    (walk.ex paragraph/3, blocks/core.ts paragraph) no longer emit `<p></p>` at
@@ -198,22 +237,37 @@ html[data-theme="dark"] .bp-paper-body {
    error mark, hr thickness) stays INLINE on the same element. */
 
 /* Text ROLES (apply_text_role). Author marks (italic/bold/colour) still ride
-   inline on the same span; these own only the role typography. */
+   inline on the same span; these own only the role typography.
+
+   ROLE SIZES ARE `em`, NOT `rem` — the rem-inverse trap, and the reason raising
+   the body size alone would have made the page WORSE. `rem` resolves against the
+   ROOT font size, which no paper token touches, so every role was pinned to the
+   browser's 16px while the body moved to 18px: the ingress would have gone from
+   1.28x the prose to 1.14x, the eyebrow from 0.78x to 0.69x, and the editorial
+   hierarchy would have compressed exactly as the body grew. `em` resolves
+   against the inherited body size, so a role holds its RATIO at any body size —
+   which is what the ratio was chosen for. (The `rem` SPACING on these rules
+   stays rem on purpose: margins and padding belong to the page's spacing grid,
+   not to the role's own size, and should not grow when a role does.)
+
+   The fix must never be "clamp the root font-size instead" — moving `:root`
+   moves the roles and leaves the body behind, i.e. the same divergence with the
+   sign flipped, plus it overrides the reader's own browser text-size setting. */
 .bp-paper-surface .bp-role-eyebrow {
   font-family: var(--paper-font-serif); color: var(--paper-accent);
-  letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem;
+  letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em;
 }
 .bp-paper-surface .bp-role-byline {
   border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
-  color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em;
 }
 .bp-paper-surface .bp-role-ingress {
-  color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem;
+  color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em;
 }
 .bp-paper-surface .bp-role-pullquote {
   display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
   border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft);
-  line-height: 1.5; font-size: 1.2rem;
+  line-height: 1.5; font-size: 1.2em;
 }
 
 /* Blockquote — a semantic attributed quotation (distinct from the styled
@@ -225,9 +279,11 @@ html[data-theme="dark"] .bp-paper-body {
   font-style: italic;
 }
 .bp-paper-surface .bp-blockquote > p { margin: 0; }
+/* `em`, like the roles above: a cite line annotates the quotation it hangs off,
+   so it holds a ratio to the prose rather than to the root. */
 .bp-paper-surface .bp-blockquote__cite {
   display: block; margin-top: 0.4rem; font-style: normal;
-  font-size: 0.9rem; color: var(--paper-ink-soft);
+  font-size: 0.9em; color: var(--paper-ink-soft);
 }
 .bp-paper-surface .bp-blockquote__cite::before { content: "\2014\00a0"; }
 
@@ -385,13 +441,16 @@ html[data-theme="dark"] .bp-paper-body {
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
   --tok-reading-heading-weight: 600;
   --tok-reading-body-size: 18px;
-  --tok-reading-body-lh: 1.65;
-  --tok-reading-h1-size: 32px;
-  --tok-reading-h1-lh: 1.1;
-  --tok-reading-h2-size: 24px;
+  --tok-reading-body-lh: 1.6;
+  --tok-reading-body-tracking: 0.005em;
+  --tok-reading-h1-size: 40px;
+  --tok-reading-h1-lh: 1.05;
+  --tok-reading-h1-tracking: -0.02em;
+  --tok-reading-h2-size: 27px;
   --tok-reading-h2-lh: 1.2;
-  --tok-reading-h3-size: 20px;
-  --tok-reading-h3-lh: 1.25;
+  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h3-size: 21px;
+  --tok-reading-h3-lh: 1.3;
   --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -1245,8 +1304,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-expandable__body { padding: 2px 15px 12px; border-top: 1px solid var(--paper-rule); }
 .bp-paper-surface .bp-expandable__body > :first-child { margin-top: 0.6rem; }
 
-/* footnote: the endnote list — small, ruled off from the prose. */
-.bp-paper-surface .bp-footnote { margin: 1.6rem 0; padding: 0.9rem 0 0 1.4rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; color: var(--paper-ink-soft); }
+/* footnote: the endnote list — small, ruled off from the prose. Sized in `em`
+   with the roles: it is prose ABOUT prose. This is where the em sweep stops.
+   The rest of this sheet's `rem` sizes are COMPONENT chrome — chart keys, gauge
+   labels, task rows, table headers, form furniture — fixed-size UI that happens
+   to sit on a paper, and that should NOT grow when someone raises the reading
+   size. The dividing line is whether a reader reads it as part of the sentence. */
+.bp-paper-surface .bp-footnote { margin: 1.6rem 0; padding: 0.9rem 0 0 1.4rem; border-top: 1px solid var(--paper-rule); font-size: 0.82em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-footnote__note { margin: 0.25rem 0; }
 .bp-paper-surface .bp-footnote__note::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-faint); }
 

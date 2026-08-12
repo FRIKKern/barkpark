@@ -43,12 +43,13 @@
   --bp-tone-neutral-fg: #4a544f;
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
-  --bp-body-tracking: 0.005em;
+  --bp-body-tracking: var(--tok-reading-body-tracking);
   --bp-h1-size: var(--tok-reading-h1-size);
   --bp-h1-lh: var(--tok-reading-h1-lh);
-  --bp-h1-tracking: -0.02em;
+  --bp-h1-tracking: var(--tok-reading-h1-tracking);
   --bp-h2-size: var(--tok-reading-h2-size);
   --bp-h2-lh: var(--tok-reading-h2-lh);
+  --bp-h2-tracking: var(--tok-reading-h2-tracking);
   --bp-h3-size: var(--tok-reading-h3-size);
   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
@@ -91,13 +92,16 @@
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
   --tok-reading-heading-weight: 600;
   --tok-reading-body-size: 18px;
-  --tok-reading-body-lh: 1.65;
-  --tok-reading-h1-size: 32px;
-  --tok-reading-h1-lh: 1.1;
-  --tok-reading-h2-size: 24px;
+  --tok-reading-body-lh: 1.6;
+  --tok-reading-body-tracking: 0.005em;
+  --tok-reading-h1-size: 40px;
+  --tok-reading-h1-lh: 1.05;
+  --tok-reading-h1-tracking: -0.02em;
+  --tok-reading-h2-size: 27px;
   --tok-reading-h2-lh: 1.2;
-  --tok-reading-h3-size: 20px;
-  --tok-reading-h3-lh: 1.25;
+  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h3-size: 21px;
+  --tok-reading-h3-lh: 1.3;
   --ok-hsl: 142 72% 26%;
   --warn-hsl: 35 92% 38%;
   --danger-hsl: 0 68% 42%;
@@ -470,9 +474,9 @@
  * returns. Heading margins are TOP-only vertical rhythm (h1 1.2em, h2 1.9em,
  * h3 1.5em), byte-mirrored with the reader's .bp-paper-surface hN rules. */
 .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
 .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
-.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
 .bp-paper-editor-body a  {
   color: var(--paper-accent); text-decoration: none;
   border-bottom: 1px solid var(--paper-accent-soft);
@@ -489,10 +493,10 @@
  * node emits `<p class="bp-role-*">` matching the reader; pullquote's italic rides
  * INLINE off the node (font-style:italic), not the class. Keep byte-aligned with
  * root.html.heex + paper-surface.css (view_edit_parity_test enforces it). */
-.bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem; }
-.bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
-.bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
-.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
+.bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; }
+.bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
+.bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; }
+.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
 /* editable-table: the three reader table class rules, mirrored byte-for-byte from
  * paper-surface.css `.bp-paper-surface .bp-table*` (the embedder sink — the standalone
  * bundle has no `.bp-paper-surface` ancestor, so it carries the hand-copied mirror).

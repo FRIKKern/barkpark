@@ -691,10 +691,19 @@
       --mail-ink: #dedee5; --mail-soft: #9e9ea6; --mail-accent: #9d8cff;
     }
     /* END GENERATED: tokens */
+    <%!-- The article column. 660/40 = a 580px measure, matching the Studio
+          `.bp-paper-surface` rule byte-for-byte so a line wraps at the same word
+          on both (measure_parity_test pins the pair).
+
+          `line-height` is GONE from this rule, and its absence is the fix, not
+          an omission: it hardcoded 1.65 at a specificity (0,2,0) that outranked
+          the shared `.bp-paper-surface` rule, so the reader's leading could not
+          follow `--bp-body-lh` even once the shared sheet started declaring it.
+          The reader now takes size, leading, tracking and font-features from the
+          one source like every other paper surface. --%>
     .bp-paper-shell.bp-paper-article {
-      max-width: 720px;
+      max-width: 660px;
       padding: 56px 40px 96px;
-      line-height: 1.65;
     }
 
     /* pdd-t19 → parity: the article stream's VERTICAL RHYTHM now lives in the
