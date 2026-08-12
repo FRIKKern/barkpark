@@ -18,8 +18,13 @@ WORK="${TMPDIR:-/tmp}/bp-paper-baseline"
 
 SLUGS=("$@")
 if [ ${#SLUGS[@]} -eq 0 ]; then
-  SLUGS=(heggemsnes-act hobby-hardening-capstone mechanical-spacing-doctrine \
-         paper-excellence-wave-2026-08-12 portabledoc-showcase)
+  # eight-minute-erasure joined the panel with the air scale (pe-w1-air-beat): it
+  # is the ONE committed fixture carrying all six evidence kinds at once — table,
+  # stats, figure, code, callout, asciicast — so an evidence-spacing regression
+  # shows up here in a single shot instead of across five papers.
+  SLUGS=(eight-minute-erasure heggemsnes-act hobby-hardening-capstone \
+         mechanical-spacing-doctrine paper-excellence-wave-2026-08-12 \
+         portabledoc-showcase)
 fi
 
 mkdir -p "$OUT_DIR" "$WORK"

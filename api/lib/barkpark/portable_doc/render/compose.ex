@@ -2499,7 +2499,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
               else:
                 ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{Figures.figcaption_inner(caption)}</figcaption>|
 
-          {~s(<figure style="margin:1.6rem 0">), c}
+          {~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;overflow-x:auto">|, c}
 
         _ ->
           c =

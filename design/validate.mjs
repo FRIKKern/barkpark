@@ -310,6 +310,30 @@ for (const step of ["body", "h1", "h2", "h3"]) {
 for (const k of ["1", "2", "3", "4", "5", "6", "7", "8"]) {
   ok(typeof (tokens.space || {})[k] === "number", `space.${k} is required (px)`);
 }
+// space.air — the reader's EVIDENCE beat scale, stored as ratios of `beat`.
+// Two floors, both of which encode the law rather than the numbers:
+//   1. every step is a real OPENING — >= 1.0x the paragraph beat. A step below 1
+//      would make an evidence block sit TIGHTER than two paragraphs, which is the
+//      exact defect this scale exists to fix (the reader's table opened at 0px).
+//   2. the ladder is MONOTONIC in the documented order, so the heavier a block is
+//      the more room it takes. Flattening it is a decision, not a typo.
+const AIR_LADDER = ["code", "table", "asciicast", "callout", "stats", "figure"];
+const air = (tokens.space || {}).air || {};
+ok(typeof air.beat === "number" && air.beat > 0, "space.air.beat is required (px, the paragraph beat the scale is a ratio of)");
+let prevAir = 0;
+for (const k of AIR_LADDER) {
+  const v = air[k];
+  ok(typeof v === "number", `space.air.${k} is required (a ratio of space.air.beat)`);
+  if (typeof v !== "number") continue;
+  ok(v >= 1.0, `space.air.${k} is ${v}; an evidence block must open at or above the paragraph beat (1.0x)`);
+  ok(v >= prevAir, `space.air ladder is not monotonic: ${k} (${v}) opens tighter than the step before it (${prevAir})`);
+  prevAir = v;
+}
+for (const k of Object.keys(air)) {
+  if (k === "_note" || k === "beat") continue;
+  ok(AIR_LADDER.includes(k), `space.air.${k} is not on the emitted ladder — a token with no consumer is the drift this gate exists to catch; add it to AIR_STEPS in design/emit.mjs and to AIR_LADDER here, or delete it`);
+}
+
 for (const k of ["sm", "base", "lg", "pill"]) {
   ok(typeof (tokens.radius || {})[k] === "number", `radius.${k} is required`);
 }

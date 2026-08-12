@@ -1,5 +1,5 @@
 {
-  "label": "paper-excellence-wave-2026-08-12",
+  "label": "eight-minute-erasure",
   "deviceScaleFactor": 2,
   "fullPage": true,
   "format": "jpeg",
@@ -16,25 +16,25 @@
   ],
   "shots": [
     {
-      "cell": "paper-excellence-wave-2026-08-12__light__1440",
-      "file": "paper-excellence-wave-2026-08-12__light__1440.jpeg",
+      "cell": "eight-minute-erasure__light__1440",
+      "file": "eight-minute-erasure__light__1440.jpeg",
       "scale": 2,
-      "bytes": 5272648,
+      "bytes": 2250832,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 29,
+      "paragraphs": 21,
       "columnWidth": 660,
       "maxWidth": "660px",
       "blockedRequests": 3
     },
     {
-      "cell": "paper-excellence-wave-2026-08-12__dark__1440",
-      "file": "paper-excellence-wave-2026-08-12__dark__1440.jpeg",
+      "cell": "eight-minute-erasure__dark__1440",
+      "file": "eight-minute-erasure__dark__1440.jpeg",
       "scale": 2,
-      "bytes": 5264296,
+      "bytes": 2258541,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 29,
+      "paragraphs": 21,
       "columnWidth": 660,
       "maxWidth": "660px",
       "blockedRequests": 3

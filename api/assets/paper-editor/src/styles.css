@@ -54,6 +54,12 @@
   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
+  --bp-air-code: var(--tok-air-code);
+  --bp-air-table: var(--tok-air-table);
+  --bp-air-asciicast: var(--tok-air-asciicast);
+  --bp-air-callout: var(--tok-air-callout);
+  --bp-air-stats: var(--tok-air-stats);
+  --bp-air-figure: var(--tok-air-figure);
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
   --bp-code-size: 0.92em;
@@ -67,7 +73,7 @@
   --bp-codeblock-size: 0.9rem;
   --bp-codeblock-lh: 1.5;
   --bp-codeblock-pad: 0.9rem 1.1rem;
-  --bp-codeblock-margin: 1.2rem 0;
+  --bp-codeblock-margin: var(--bp-air-code) 0 0;
   --bp-codeblock-radius: 0;
   --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
@@ -102,6 +108,13 @@
   --tok-reading-h2-tracking: -0.01em;
   --tok-reading-h3-size: 21px;
   --tok-reading-h3-lh: 1.3;
+  --tok-air-beat: 22px;
+  --tok-air-code: calc(var(--tok-air-beat) * 1.1);
+  --tok-air-table: calc(var(--tok-air-beat) * 1.36);
+  --tok-air-asciicast: calc(var(--tok-air-beat) * 1.45);
+  --tok-air-callout: calc(var(--tok-air-beat) * 1.55);
+  --tok-air-stats: calc(var(--tok-air-beat) * 1.64);
+  --tok-air-figure: calc(var(--tok-air-beat) * 1.82);
   --ok-hsl: 142 72% 26%;
   --warn-hsl: 35 92% 38%;
   --danger-hsl: 0 68% 42%;
@@ -503,7 +516,7 @@
  * Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the reader binds — never
  * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
  * §2 guards drift vs the reader). */
-.bp-paper-editor-body .bp-table { border-collapse: collapse; width: 100%; }
+.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; border-collapse: collapse; width: 100%; }
 .bp-paper-editor-body .bp-table__th { border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
 .bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
@@ -783,7 +796,7 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * the reader rules via the surface cascade) — this is the blessed standalone-
  * host extra pattern. view_edit_parity_test.exs §"callout tone mirror" locks it
  * byte-for-byte to the reader. Tokens `--bp-tone-*` are defined above. */
-.bp-paper-editor-body .bp-callout { padding: 16px; border-left: 4px solid transparent; }
+.bp-paper-editor-body .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 16px; border-left: 4px solid transparent; }
 .bp-paper-editor-body .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
 .bp-paper-editor-body .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
 .bp-paper-editor-body .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }

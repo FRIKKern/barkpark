@@ -193,6 +193,10 @@ export const instRoleChannels = (role) =>
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
 // ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
 export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
+// The reader AIR ladder (tokens.space.air), lightest opening → heaviest. Emission
+// order IS the ladder order design/validate.mjs asserts monotonic, and every step
+// here has a consumer in paper-surface.css — an entry with none is a dead token.
+export const AIR_STEPS = ["code", "table", "asciicast", "callout", "stats", "figure"];
 // Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
 // for the bulldocs reader skin (bulldocsBlock). VERBATIM (rgba/hex as-authored).
@@ -561,6 +565,16 @@ function paperBlock(themes = loadThemes()) {
     `--tok-reading-${name}-lh: ${s.lineHeight};`,
     ...(s.letterSpacing == null ? [] : [`--tok-reading-${name}-tracking: ${s.letterSpacing}em;`]),
   ];
+  // The AIR scale (space.air): the beat an EVIDENCE block opens with. Emitted as
+  // a ratio of `--tok-air-beat` rather than a resolved pixel, so the LAW ("evidence
+  // opens at 1.1-1.85x the paragraph beat") is what ships — retune the beat and the
+  // whole scale moves together instead of eight literals drifting apart.
+  const a = tokens.space.air;
+  const airVars = [
+    `--tok-air-beat: ${a.beat}px;`,
+    ...AIR_STEPS.map((k) => `--tok-air-${k}: calc(var(--tok-air-beat) * ${a[k]});`),
+  ];
+
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
     `--tok-reading-heading-weight: ${r.headingWeight};`,
@@ -568,6 +582,7 @@ function paperBlock(themes = loadThemes()) {
     ...step("h1", r.h1),
     ...step("h2", r.h2),
     ...step("h3", r.h3),
+    ...airVars,
   ].map((l) => "  " + l).join("\n");
 
   const lifeClasses = (theme) =>
