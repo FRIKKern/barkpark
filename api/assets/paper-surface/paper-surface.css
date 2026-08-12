@@ -953,7 +953,15 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 
 .bp-paper-surface .bp-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-chart__t { font-size: 0.78rem; font-weight: 600; color: var(--paper-ink); margin-bottom: 8px; }
-.bp-paper-surface .bp-chart svg { display: block; width: 100%; height: auto; }
+/* Legibility floor (probe-figure-fidelity-2026-08-12): the svg's text is sized
+   in viewBox units (640 wide), so a bare width:100% scaled EVERY label with the
+   container — 11px ticks painted 4.26px at a 360 viewport. The min-width pins
+   the svg at its viewBox size so text never paints below its authored px; the
+   scroll wrapper (same idiom as .bp-heat__scroll) scrolls the figure at narrow
+   widths instead of shrinking it. The 720px article shell keeps the wide end
+   unchanged. */
+.bp-paper-surface .bp-chart__scroll { overflow-x: auto; padding-bottom: 2px; }
+.bp-paper-surface .bp-chart svg { display: block; width: 100%; min-width: 640px; height: auto; }
 .bp-paper-surface .bp-chart__grid { stroke: var(--paper-rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .bp-paper-surface .bp-chart__axis { stroke: var(--paper-ink-faint); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .bp-paper-surface .bp-chart__tick { fill: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 11px; }
@@ -976,12 +984,17 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
 /* chart ANNOTATION layer (regions / refLines / points — data_viz.ex
    `annotations` attr): washes behind the series, guides above them, labels in
-   the tick voice. Tones ride the same --bp-tone-* family as the series. */
+   the tick voice. Tones ride the same --bp-tone-* family as the series.
+   Region opacity climbs with severity (info/ok 0.10 → warn 0.14 → danger 0.18)
+   so tone reads as weight as well as hue — at a flat 0.08 the info and danger
+   washes were indistinguishable in both themes
+   (probe-figure-fidelity-2026-08-12); the ceiling stays low enough that the
+   series always paints clearly through the wash. */
 .bp-paper-surface .bp-chart__region { fill: var(--paper-ink-soft); opacity: 0.08; }
-.bp-paper-surface .bp-chart__region--info { fill: var(--bp-tone-info-fg); }
-.bp-paper-surface .bp-chart__region--ok { fill: var(--bp-tone-success-fg); }
-.bp-paper-surface .bp-chart__region--warn { fill: var(--bp-tone-warning-fg); }
-.bp-paper-surface .bp-chart__region--danger { fill: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__region--info { fill: var(--bp-tone-info-fg); opacity: 0.1; }
+.bp-paper-surface .bp-chart__region--ok { fill: var(--bp-tone-success-fg); opacity: 0.1; }
+.bp-paper-surface .bp-chart__region--warn { fill: var(--bp-tone-warning-fg); opacity: 0.14; }
+.bp-paper-surface .bp-chart__region--danger { fill: var(--bp-tone-danger-fg); opacity: 0.18; }
 .bp-paper-surface .bp-chart__refline { stroke: var(--paper-ink-soft); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; opacity: 0.65; }
 .bp-paper-surface .bp-chart__refline--info { stroke: var(--bp-tone-info-fg); }
 .bp-paper-surface .bp-chart__refline--ok { stroke: var(--bp-tone-success-fg); }
@@ -1152,7 +1165,19 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    first character visible and the scroll usable; the centered look is
    unchanged once the (max-width-bounded) SVG replaces the source. */
 .bp-paper-surface pre.mermaid { display: flex; justify-content: safe center; margin: 0; max-width: 100%; overflow-x: auto; }
-.bp-paper-surface pre.mermaid svg { max-width: 100%; height: auto; }
+/* Legibility floor (probe-figure-fidelity-2026-08-12): with useMaxWidth the
+   engine emits width="100%" and stamps the diagram's NATURAL width as an
+   inline max-width — so a wide sequence diagram scaled its labels down to
+   3.73px at a 360 viewport. Requesting an over-large width lets the ALWAYS-
+   BINDING max-width clamp resolve the actual size: the engine's inline stamp
+   wins the cascade and pins the svg at EXACTLY its natural width — labels
+   paint at their authored px and the pre's overflow-x:auto scrolls the
+   diagram at narrow widths instead of shrinking its text away — while an
+   unstamped svg falls back to this rule's own max-width:100% and stays
+   container-bound exactly as before. `flex:none` is load-bearing: the pre is
+   a flex row, and default flex-shrink would squeeze the svg right back to
+   the container width. */
+.bp-paper-surface pre.mermaid svg { width: 9999px; max-width: 100%; height: auto; flex: none; }
 
 /* ── unsupported-block degrade (gui-premium w5) ──
    The walker (walk.ex) and compose.ex both emit `<div class="bp-unknown-block">`
