@@ -151,7 +151,13 @@ if command -v bp >/dev/null 2>&1; then
     ok "installed bp ($BP_COMMIT) is current with origin/main"
   fi
 else
-  skip "no bp on PATH — install: make cli-install"
+  # NOT a skip. `skip` prints nothing under --hook (line 20), and a missing bp is
+  # the single most likely failure in a second environment — a fresh clone on
+  # another machine has no bp at all, and the SessionStart hook staying silent
+  # about it is exactly the case the hook exists to catch. `bad` prints in both
+  # modes and counts toward the issue summary; the script still exits 0 below
+  # (doctor is advisory, never a gate).
+  bad "no bp on PATH — install: make cli-install"
 fi
 
 # ── 3. Pending migrations on the local dev DB? ──────────────────────────────
