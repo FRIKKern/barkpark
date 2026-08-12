@@ -1711,9 +1711,9 @@ func (m Model) readingViewportHeight() int {
 		h = 8 // composeAt re-floors, so short panes never over-report
 	}
 	if m.wide {
-		return h // panes span the full inner height (crumb retired)
+		return h - 1 // the sheet's ─ top edge (renderDocPane)
 	}
-	return h - 1 // the reading footer
+	return h - 2 // the reading footer + the sheet's ─ top edge
 }
 
 // readingSubjectTask resolves the task the act verbs (c/x/o) target in a pushed
