@@ -21,4 +21,10 @@ Conventions:
 - Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.
 - If a close 409s `doc_changed_since_claim`, re-read the changed brief, then close with `--set observed_rev=<current_rev>` (the rev the 409 names); a bare re-read then close just repeats the 409.
 
+Papers (design docs, specs, reports) live in Barkpark too — never hand-roll an HTML file:
+- `bp bulldocs publish <slug> --file payload.json` — the write door; the same slug MUST also appear as `"slug"` INSIDE the JSON, not just on the command line.
+- The payload is `blocks` — the renderer's own block deck (chart, diagram, asciicast, diff, table, callout, …). `body_html` is a legacy last resort that renders flat.
+- Inline leaves are VALUE-KEYED: every `items`/`cells` entry is an object carrying a `value` key, never a bare string — a bare string publishes clean and renders BLANK.
+- `bp paper view <slug>` reads one back in the terminal. Authoring guide: `/papers/paper-authoring-excellence`.
+
 MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `docs/setup/CLAUDE-CODE.md`.
