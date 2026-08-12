@@ -48,3 +48,16 @@ A reader opening `/papers/<slug>` gets what the Eight-Minute Erasure artifact de
 - Corpus repair of the 10 hollow text-keyed papers: adopt `cch-w57-bl-eleven-papers-render-200-with-prose-the-reader-drops` (open, p1) — do not re-file.
 
 ## Wave log
+
+### Wave 2026-08-12 — wave 1 (Twin and Close), reviewed A-
+
+All six round-1 slices landed green, file-disjoint (octopus merge onto origin/main is conflict-free; integrated tree runs content+portable_doc at 2222/0). Review re-ran every gate, mutation-proved the parity gate (§2 reds on the exact crown-fix shape) and the evidence manifest (tamper → FAILED), and independently re-derived the S2 HIGH-FLIP-RISK blast radius: 46 live corpus blocks byte-identical through `normalize_render_shapes`, byline string items untouched, notes/text-keyed leaves rescued and rendering their prose. No review fixes were needed — final branches are the builders' own.
+
+- **S1 `pe-w1-parity-gate-one-sided-adds`** — §2/§5/§6 now producer-exhaustive with a 9-entry `@documented_divergences` allowlist + rot guard. One direction per section is still ungated (mirror-only adds ship green) — recorded, acceptable this wave.
+- **S2 `pe-w1-write-path-normalizer`** — all five defects fixed at the one chokepoint; refusals only got MORE satisfiable. Steps/columns nested containers are still unwalked by the leaf pass (narrow, recorded). Second independent review before merge is warranted per flip-risk protocol.
+- **S3 `pe-w1-figure-legibility`** — measured floor: ticks 5.09→11.0px, mermaid 3.60→16.0px at 360; annotation clamp; region tone ladder. Every chart now scrolls below ~670px containers (uniform floor, accepted). Rig baselines with charts go stale on merge — regen after S3 lands.
+- **S4 `pe-w1-erasure-twin`** — `/papers/eight-minute-erasure` (46 top-level blocks, zero HTML, zero spacers) + `/papers/paper-authoring-excellence` live; FRICTION.md's 12-row residual table classifies every gap SYSTEMIC/BESPOKE with an owner. The two .cast media assets are draft docs (purge hazard → `pe-bl-asciicast-selfhost`). Dedup wall non-fire on an exact-title clone is residual 12.
+- **S5 `pe-w1-hermetic-screenshot-rig`** — rig green end-to-end in a cold worktree (render → 6 full-page 2x shots → 30 content assertions); 27-file evidence manifest verifies and can fail. Baselines are macOS-face; nothing may be pinned numerically until `pe-w2-rig-ci-image-baselines`. Gate not yet wired into CI.
+- **S6 `pe-w1-paper-door-copy`** — all three door surfaces sell blocks + the leaf law + the guide slug; openapi hand-edit independently re-verified byte-equal to the Elixir literal. "56 renderer block types" is the survey's census (tiers.ex holds 77 incl. 14 field atoms + 6 chat rows) — defensible, not re-counted from scratch.
+
+Merge order: any; S6's guide pointer is already live (S4 published before merge). Lead closes each task's "PR merged" criterion on merge. Deferred by design: **S7 `pe-w1-reader-editorial-typography` (round 2) dispatches only after S1 merges** — it is the wave's crown payoff (18px token, rem→em roles, 66–72 CPL, hyphens off). After S3 merges, refresh the rig baselines; after the corpus normalizer deploys, re-publish repairs ride `cch-w57-bl-…` (adopted, not re-filed). Wave Paper: `paper-excellence-wave-2026-08-12` (debrief appended).
