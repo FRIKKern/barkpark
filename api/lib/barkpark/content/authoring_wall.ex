@@ -296,10 +296,7 @@ defmodule Barkpark.Content.AuthoringWall do
     content = content_of(ref) || %{}
     blocks = List.wrap(content["blocks"])
 
-    spacer_count =
-      Enum.count(blocks, fn b ->
-        is_map(b) and b["type"] == "paragraph" and List.wrap(b["content"]) == []
-      end)
+    spacer_count = count_spacer_paragraphs(blocks)
 
     if content["style"] == "article" and spacer_count > 0 do
       Warnings.put(
@@ -314,6 +311,37 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   defp emit_spacing_norm_advisory(_ref, _pid, _type), do: :ok
+
+  # The advisory's counter mirrors the tagged HARD gate's semantics
+  # (`EpicQuality.empty_paragraph?/1` and its whole-tree walk): a paragraph is
+  # a spacer only when it has no content AND no non-blank `text` key — a
+  # text-keyed paragraph is legal prose, not a scaffold — and nested
+  # `blocks`/`children` containers (expandables, sections) are descended, so
+  # the advisory warns exactly where the tagged gate would refuse instead of
+  # passing an author it later 422s.
+  defp count_spacer_paragraphs(blocks) when is_list(blocks),
+    do: blocks |> Enum.map(&spacer_paragraphs_in/1) |> Enum.sum()
+
+  defp count_spacer_paragraphs(_), do: 0
+
+  defp spacer_paragraphs_in(%{"type" => "paragraph"} = block) do
+    text = Map.get(block, "text")
+
+    if List.wrap(block["content"]) == [] and not (is_binary(text) and String.trim(text) != ""),
+      do: 1,
+      else: 0
+  end
+
+  defp spacer_paragraphs_in(%{} = block) do
+    Enum.reduce(["blocks", "children"], 0, fn key, acc ->
+      case Map.get(block, key) do
+        children when is_list(children) -> acc + count_spacer_paragraphs(children)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp spacer_paragraphs_in(_), do: 0
 
   defp content_of(%Document{content: content}), do: content
   defp content_of(%{content: content}), do: content
