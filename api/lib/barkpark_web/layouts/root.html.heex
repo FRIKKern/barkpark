@@ -3840,24 +3840,34 @@
 
     /* The page — a single centered serif column on warm paper. The
        `.bp-paper-shell` already wraps the Beta editor content (View +
-       Edit). We add `.bp-paper-surface` to it for the tokens + the page. */
+       Edit). We add `.bp-paper-surface` to it for the tokens + the page.
+
+       The TYPE half of this rule (font-size / line-height / letter-spacing /
+       font-feature-settings / text-rendering / font-smoothing) MOVED to the
+       shared source in pe-w1-reader-editorial-typography — `paper_stylesheet()`
+       above inlines it, so Studio still resolves the same six declarations from
+       one rule earlier in this same <style>. It was never Studio-only chrome:
+       while it lived here, Studio was the ONLY surface consuming
+       `--bp-body-size`, and the public reader — which carries
+       `.bp-paper-surface` on its <main> — inherited the browser's 16px beside a
+       token that said 18. What stays here is what really is page chrome: the
+       Studio ground, ink and serif stack. */
     .bp-paper-surface.bp-paper-shell,
     .bp-paper-surface {
       background: var(--paper-bg);
       color: var(--paper-ink);
       font-family: var(--paper-font-serif);
-      font-size: var(--bp-body-size);
-      /* A2: airier rhythm (~30.6px at 18px) to match the original editor. */
-      line-height: var(--bp-body-lh);
-      letter-spacing: var(--bp-body-tracking);
-      font-feature-settings: "kern", "liga", "onum";
-      text-rendering: optimizeLegibility;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
     }
-    /* Measure parity: the reader article column is 720px / 40px side padding
-       (640px measure). The edit surface matches it exactly so a line wraps at
+    /* Measure parity: the reader article column is 660px / 40px side padding
+       (580px measure). The edit surface matches it exactly so a line wraps at
        the same word on both.
+
+       660, not 720, since pe-w1-reader-editorial-typography. The column was
+       sized for 16px prose; at the 18px the token always specified, a 640px
+       measure runs ~75 characters per line, past the top of the 60-75 editorial
+       band and well past the 66-72 this wave targets. Measured on the rig's
+       5-paper panel at 1440: 86.7 CPL at 16px/640px before, 69 at 18px/580px
+       after. The MEASURE is what moved; the gutter token did not.
 
        --paper-gutter IS THE SIDE PADDING, and it is a token so that the
        Studio's protected floor can consume the SAME number instead of
@@ -3874,7 +3884,7 @@
        that no longer has one. measure_parity_test.exs guards both halves. */
     .bp-paper-surface {
       --paper-gutter: 40px;
-      max-width: 720px;
+      max-width: 660px;
       margin: 0 auto;
       padding: 56px var(--paper-gutter);
       min-height: 100%;
@@ -4584,9 +4594,9 @@
        Top-only so the flat ProseMirror (collapse) and div-wrapped reader (additive)
        land identical. */
     .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-    .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+    .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
     .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
-    .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+    .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
     .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
     .bp-paper-editor-body ul,
     .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
@@ -4599,10 +4609,10 @@
        italic is an author mark the node emits INLINE (font-style:italic), NOT in the
        class, so it stays out of these rules on both surfaces. Keep byte-aligned with
        paper-surface.css + assets/paper-editor/src/styles.css. */
-    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem; }
-    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
-    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
-    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
+    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; }
+    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
+    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
     /* editable-table: the three reader table class rules, mirrored byte-for-byte from
        paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
        guards drift). Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the

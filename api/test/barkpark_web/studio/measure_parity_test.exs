@@ -50,10 +50,19 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   ## What "parity" means here
 
   The Studio edit surface and the PUBLIC reader share one `.bp-paper-surface`
-  rule: `max-width: 720px; padding: 56px var(--paper-gutter)` → a **640px
+  rule: `max-width: 660px; padding: 56px var(--paper-gutter)` → a **580px
   content column** at the base 40px gutter. The Studio-only floor must add
   back exactly the reader's own horizontal padding, or the protected measure
   quietly under-delivers against the column it is supposed to match.
+
+  The column was 720/640 until pe-w1-reader-editorial-typography. That width was
+  sized for 16px prose, which is what the reader actually rendered — the 18px in
+  `type.reading.body` had no consumer on that surface. Once the surface really
+  reads its own token, 640px runs ~75 characters per line; 580px runs 68,
+  measured on the rig's 5-paper panel at 1440 (86.7 → 68.1 CPL). The GUTTER did
+  not move, so every relation this file pins — two gutters given back, the
+  padding consuming the token, each breakpoint redeclaring it — is unchanged.
+  What moved is one literal, and it moved on BOTH surfaces together.
 
   Since spd-w5 both sides read ONE token, the relation is no longer
   something a plain comparison can catch — `2 * gutter` versus `2 * gutter` is true
@@ -398,18 +407,18 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
              """
     end
 
-    test "the reader column the floor is measured against is still 720px wide" do
+    test "the reader column the floor is measured against is still 660px wide" do
       reader = blocks!(css(), @reader_selector)
       max_width = value!(reader, "max-width", @reader_selector)
       side = base_gutter!()
 
-      assert max_width == "720px",
+      assert max_width == "660px",
              "the public reader column moved to #{max_width}; re-derive the parity story"
 
-      content = 720 - 2 * side
+      content = 660 - 2 * side
 
-      assert content == 640,
-             "the reader's content column is now #{content}px, not the 640px the " <>
+      assert content == 580,
+             "the reader's content column is now #{content}px, not the 580px the " <>
                "Studio floor was sized against"
     end
 

@@ -19,24 +19,24 @@
       "cell": "mechanical-spacing-doctrine__light__1440",
       "file": "mechanical-spacing-doctrine__light__1440.jpeg",
       "scale": 2,
-      "bytes": 734935,
+      "bytes": 809191,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     },
     {
       "cell": "mechanical-spacing-doctrine__dark__1440",
       "file": "mechanical-spacing-doctrine__dark__1440.jpeg",
       "scale": 2,
-      "bytes": 757164,
+      "bytes": 806429,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     }
   ]

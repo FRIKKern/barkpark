@@ -19,24 +19,24 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1440",
       "file": "paper-excellence-wave-2026-08-12__light__1440.jpeg",
       "scale": 2,
-      "bytes": 4565056,
+      "bytes": 5265463,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 29,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     },
     {
       "cell": "paper-excellence-wave-2026-08-12__dark__1440",
       "file": "paper-excellence-wave-2026-08-12__dark__1440.jpeg",
       "scale": 2,
-      "bytes": 4771019,
+      "bytes": 5257315,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 29,
-      "columnWidth": 720,
-      "maxWidth": "720px",
+      "columnWidth": 660,
+      "maxWidth": "660px",
       "blockedRequests": 3
     }
   ]
