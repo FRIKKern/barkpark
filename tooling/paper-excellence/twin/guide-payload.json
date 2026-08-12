@@ -1,0 +1,1066 @@
+{
+  "slug": "paper-authoring-excellence",
+  "description": "The canonical premium-paper guide for agents: the bulldocs publish door, the payload shape, the authoring laws, the top-10 block vocabulary with evidence devices, and every publish-wall error decoded — seeded from the Eight-Minute Erasure port's friction log.",
+  "tags": [
+    {
+      "tag": "authoring-excellence",
+      "strength": 90,
+      "rationale": "the canonical agent onramp for authoring premium papers through the deck"
+    },
+    {
+      "tag": "bulldocs",
+      "strength": 70,
+      "rationale": "documents the bulldocs publish door, payload contract and wall behavior"
+    },
+    {
+      "tag": "bp-cli",
+      "strength": 45,
+      "rationale": "teaches the bp bulldocs and bp media upload command surface"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "pax-eyebrow",
+      "type": "eyebrow",
+      "text": "BARKPARK · AGENT ONRAMP · CANONICAL PREMIUM-PAPER GUIDE"
+    },
+    {
+      "id": "pax-h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Paper Authoring Excellence"
+    },
+    {
+      "id": "pax-ingress",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "How an agent publishes a premium Paper through the real door — the payload shape, the authoring laws, the block vocabulary, and every wall error decoded. Seeded from the friction log of porting the Eight-Minute Erasure benchmark artifact into a native Paper. If you are about to hand-roll an HTML page: stop — the deck below expressed a 55 KB editorial evidence artifact with zero raw HTML."
+        }
+      ]
+    },
+    {
+      "id": "pax-h2-door",
+      "type": "heading",
+      "level": 2,
+      "text": "The door"
+    },
+    {
+      "id": "pax-p-door1",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Papers are published by upserting a portable-doc payload to a slug. The CLI door:"
+        }
+      ]
+    },
+    {
+      "id": "pax-code-door",
+      "type": "code",
+      "lang": "bash",
+      "value": "bp bulldocs publish <slug> --file payload.json --yes\n# HTTP (ingest token):\n#   POST /v1/plugins/bulldocs/papers        (canonical)\n#   POST /v1/paperflow/papers               (back-compat alias)\n# The paper renders live at /papers/<slug>."
+    },
+    {
+      "id": "pax-p-door2",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The slug must ALSO be a top-level key inside the JSON — the CLI does not inject the positional argument. Publishing the same slug again upserts in place. "
+        },
+        {
+          "type": "strong",
+          "children": [
+            {
+              "type": "text",
+              "value": "Do not use the body_html path"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "value": ": it is a degradation, not a door — an HTML-only paper collapses to run-together text in the terminal reader and is invisible to every block-aware surface (editor, email, TUI, patch ops)."
+        }
+      ]
+    },
+    {
+      "id": "pax-h2-shape",
+      "type": "heading",
+      "level": 2,
+      "text": "The payload shape"
+    },
+    {
+      "id": "pax-code-shape",
+      "type": "code",
+      "lang": "json",
+      "value": "{\n  \"slug\": \"my-paper\",\n  \"description\": \"At least 20 characters describing the paper.\",\n  \"tags\": [\n    {\"tag\": \"authoring-excellence\", \"strength\": 90,\n     \"rationale\": \"at least 20 characters on why this tag\"},\n    {\"tag\": \"bulldocs\", \"strength\": 60,\n     \"rationale\": \"registered tags only; distinct strengths\"}\n  ],\n  \"blocks\": [\n    {\"id\": \"b1\", \"type\": \"eyebrow\", \"text\": \"KICKER · CONTEXT LINE\"},\n    {\"id\": \"b2\", \"type\": \"heading\", \"level\": 1, \"text\": \"The title\"},\n    {\"id\": \"b3\", \"type\": \"ingress\",\n     \"content\": [{\"type\": \"text\", \"value\": \"The standfirst paragraph.\"}]},\n    {\"id\": \"b4\", \"type\": \"paragraph\",\n     \"content\": [{\"type\": \"text\", \"value\": \"Body prose. Inline leaves are \"},\n                 {\"type\": \"strong\", \"children\": [{\"type\": \"text\", \"value\": \"value-keyed\"}]},\n                 {\"type\": \"text\", \"value\": \", always.\"}]}\n  ]\n}"
+    },
+    {
+      "id": "pax-p-shape1",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The paper's title is the level-1 "
+        },
+        {
+          "type": "code",
+          "value": "heading"
+        },
+        {
+          "type": "text",
+          "value": " block (content-first doctrine: title and featured image are body blocks, not metadata). Every "
+        },
+        {
+          "type": "code",
+          "value": "tags[].tag"
+        },
+        {
+          "type": "text",
+          "value": " must be a registered tag document — "
+        },
+        {
+          "type": "code",
+          "value": "bp doc ls tag"
+        },
+        {
+          "type": "text",
+          "value": " lists them — with 2–4 weighted entries, distinct strengths (the max marks the main tag), and rationales of at least 20 characters. The description must also clear 20 characters."
+        }
+      ]
+    },
+    {
+      "id": "pax-h2-laws",
+      "type": "heading",
+      "level": 2,
+      "text": "The authoring laws"
+    },
+    {
+      "id": "pax-p-laws0",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Each law below was proven live — violate it and the wall refuses, or worse, the reader silently drops your content behind a 200."
+        }
+      ]
+    },
+    {
+      "id": "pax-laws",
+      "type": "list",
+      "ordered": true,
+      "items": [
+        [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "Inline leaves are value-keyed."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Every text leaf is "
+          },
+          {
+            "type": "code",
+            "value": "{\"type\":\"text\",\"value\":\"…\"}"
+          },
+          {
+            "type": "text",
+            "value": ". A "
+          },
+          {
+            "type": "code",
+            "value": "text"
+          },
+          {
+            "type": "text",
+            "value": "-keyed leaf renders as the EMPTY string — the paragraph publishes fine and then vanishes on the page. This is the worst failure class: no error, no placeholder, just missing prose."
+          }
+        ],
+        [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "Table cells are maps or content arrays."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " A cell is either "
+          },
+          {
+            "type": "code",
+            "value": "{\"text\":\"…\"}"
+          },
+          {
+            "type": "text",
+            "value": " or an inline-content array "
+          },
+          {
+            "type": "code",
+            "value": "[{\"type\":\"text\",\"value\":\"…\"}]"
+          },
+          {
+            "type": "text",
+            "value": ". Bare strings are refused: “paper contains block content that readers cannot render … has no renderable inline content”."
+          }
+        ],
+        [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "Grid span and order are top-level child keys."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " On a "
+          },
+          {
+            "type": "code",
+            "value": "section"
+          },
+          {
+            "type": "text",
+            "value": " grid child, write "
+          },
+          {
+            "type": "code",
+            "value": "\"span\": 2"
+          },
+          {
+            "type": "text",
+            "value": " beside "
+          },
+          {
+            "type": "code",
+            "value": "\"type\""
+          },
+          {
+            "type": "text",
+            "value": ", never inside a "
+          },
+          {
+            "type": "code",
+            "value": "layout"
+          },
+          {
+            "type": "text",
+            "value": " map — nested placement is ignored."
+          }
+        ],
+        [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "Code blocks carry source under the value key."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "code",
+            "value": "{\"type\":\"code\",\"lang\":\"elixir\",\"value\":\"…\"}"
+          },
+          {
+            "type": "text",
+            "value": ". A "
+          },
+          {
+            "type": "code",
+            "value": "code"
+          },
+          {
+            "type": "text",
+            "value": "-keyed source renders an empty "
+          },
+          {
+            "type": "code",
+            "value": "<pre>"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "Zero empty-paragraph spacers."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Spacing is reader-owned — the shared reader tokens own section rhythm, and empty paragraphs are editor scaffolds the doctrine forbids in published payloads (351 were purged from the corpus)."
+          }
+        ],
+        [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "container is not a block type."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " It renders an Unsupported placeholder and silently DROPS its children. Nest with "
+          },
+          {
+            "type": "code",
+            "value": "section"
+          },
+          {
+            "type": "text",
+            "value": " (optionally "
+          },
+          {
+            "type": "code",
+            "value": "\"layout\":{\"mode\":\"grid\",\"tracks\":2}"
+          },
+          {
+            "type": "text",
+            "value": "), "
+          },
+          {
+            "type": "code",
+            "value": "columns"
+          },
+          {
+            "type": "text",
+            "value": ", or "
+          },
+          {
+            "type": "code",
+            "value": "figure"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "Asciicast sources must be hosted URLs."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " "
+          },
+          {
+            "type": "code",
+            "value": "data:"
+          },
+          {
+            "type": "text",
+            "value": " URIs are silently neutered to "
+          },
+          {
+            "type": "code",
+            "value": "#"
+          },
+          {
+            "type": "text",
+            "value": " at render. Upload the "
+          },
+          {
+            "type": "code",
+            "value": ".cast"
+          },
+          {
+            "type": "text",
+            "value": " file via "
+          },
+          {
+            "type": "code",
+            "value": "bp media upload recording.cast --yes"
+          },
+          {
+            "type": "text",
+            "value": " and use the returned "
+          },
+          {
+            "type": "code",
+            "value": "/media/files/…"
+          },
+          {
+            "type": "text",
+            "value": " path."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "pax-h2-vocab",
+      "type": "heading",
+      "level": 2,
+      "text": "The top-10 block vocabulary"
+    },
+    {
+      "id": "pax-p-vocab0",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The renderer speaks ~56 types; these ten cover almost every paper (they are 96% of all published blocks). Shapes below are the load-bearing keys only — every block also takes an "
+        },
+        {
+          "type": "code",
+          "value": "id"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ]
+    },
+    {
+      "id": "pax-vocab",
+      "type": "table",
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Block"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Shape essentials"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Use for"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "paragraph"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "content: [inline…]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "body prose; inline marks: strong, em, code, link"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "heading"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "level: 1–4, text: \"…\""
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "level 1 is the paper title; plain text only, no inline marks"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "ingress"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "content: [inline…]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the standfirst under the title"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "eyebrow"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "text: \"…\""
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the kicker line above the title, or a section label"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "list"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "ordered: bool, items: [[inline…]]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "each item is an inline-content array"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "table"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "head: [cell], rows: [[cell]]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cells are content arrays or text-keyed maps, never bare strings"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "callout"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "title, tone: info|success|warning|danger|neutral, content"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "verdicts, warnings, quoted evidence rails"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "code"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "lang, value: \"source\""
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "source, transcripts, command lines"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "stats"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "items: [{label, value, spark?}]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "stat tiles; spark takes a numeric array"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "section"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "blocks: […], layout: {mode: \"grid\", tracks: N}"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "grouping and grid layout; children may carry top-level span"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "pax-h2-devices",
+      "type": "heading",
+      "level": 2,
+      "text": "The evidence devices"
+    },
+    {
+      "id": "pax-p-dev0",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "A premium paper shows its receipts. Five deck devices carry evidence natively — all five are live on the worked example, "
+        },
+        {
+          "type": "link",
+          "href": "/papers/eight-minute-erasure",
+          "children": [
+            {
+              "type": "text",
+              "value": "the Eight-Minute Erasure twin"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "value": ":"
+        }
+      ]
+    },
+    {
+      "id": "pax-devices",
+      "type": "table",
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Device"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Shape"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "What it proves"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "asciicast"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "src: \"/media/files/….cast\", caption"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a replayable terminal session — the strongest “this actually ran” device; pair it with an expandable transcript"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "expandable"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "summary: \"…\", children: [blocks]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "full transcripts and long appendices without crushing the page; closed expandables are exempt from first-pass word caps"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "diagram"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "source: \"mermaid…\", caption"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mermaid hydrates natively on the reader AND draws in the TUI; double-quote every label"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "chart"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "series + annotations: regions, refLines, points"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "measured data with verdict annotations — regions and reference lines nobody else uses yet"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "stats"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "items: [{label, value, spark?}]"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "headline numbers with per-item sparklines"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "pax-h2-errors",
+      "type": "heading",
+      "level": 2,
+      "text": "Wall errors decoded"
+    },
+    {
+      "id": "pax-errors",
+      "type": "table",
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "What you see"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "What it means"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The fix"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "“paper contains block content that readers cannot render” + a blocks[] path list"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a cell, list item, or nested block has no renderable inline shape (bare string cells are the classic)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "rewrite the named paths as content arrays or text-keyed maps, republish"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "“publish references unregistered tag(s)” + suggestions"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a tags[].tag names no registered tag document"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "pick from details.suggestions, or register the tag as a type:tag doc, then republish"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "409 duplicate / similarity refusal"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the dedup wall matched your title/description/tags against an existing paper"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "differentiate the title and description, rebalance tag weights, republish"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "422 with details.failures (block/heading/word caps)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the epic-quality caps — 80 blocks, 16 headings, 5,000 first-pass words — which bind ONLY papers tagged epic-cycle-wave-paper"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "trim, or move appendices into closed expandables (exempt); ordinary papers never hit these caps"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "400 malformed"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the payload lacks slug plus blocks (or body_html)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "send slug top-level AND in the file; blocks must be a list"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "warning[label_norm] on success"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "advisory band, not a refusal — tag count outside the 2–4 norm"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tune tags; the paper is already live"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "nothing at all — a 200, and content missing on the page"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the silent classes: text-keyed leaves, container children, data: URIs, plain-string notes items"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "author to the laws above; curl the rendered page and grep for your sentences before calling it done"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "pax-p-verify",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The last row is the discipline that matters most: "
+        },
+        {
+          "type": "strong",
+          "children": [
+            {
+              "type": "text",
+              "value": "a 200 is not a render."
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "value": " After publishing, fetch "
+        },
+        {
+          "type": "code",
+          "value": "/papers/<slug>"
+        },
+        {
+          "type": "text",
+          "value": " and grep for a distinctive sentence from every section you authored. The twin's port did exactly that and shipped with zero silent drops."
+        }
+      ]
+    },
+    {
+      "id": "pax-callout-close",
+      "type": "callout",
+      "tone": "info",
+      "title": "The worked example",
+      "content": [
+        {
+          "type": "text",
+          "value": "Everything this guide teaches was exercised in one real port: "
+        },
+        {
+          "type": "link",
+          "href": "/papers/eight-minute-erasure",
+          "children": [
+            {
+              "type": "text",
+              "value": "/papers/eight-minute-erasure"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "value": " — a 55 KB self-contained benchmark artifact expressed in 46 deck blocks, zero raw HTML, with its full friction log at "
+        },
+        {
+          "type": "code",
+          "value": "tooling/paper-excellence/twin/FRICTION.md"
+        },
+        {
+          "type": "text",
+          "value": " in the Barkpark repository. Read the payload next to the page; that pairing is the fastest way to learn the deck."
+        }
+      ]
+    }
+  ]
+}
