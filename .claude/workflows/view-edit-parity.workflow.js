@@ -1,7 +1,7 @@
 export const meta = {
   name: 'view-edit-parity',
   description: 'View↔Edit parity audit — diff every block type\'s View inline styles against its Edit CSS rules; adversarially verify each divergence; write a parity matrix HTML report.',
-  whenToUse: 'Run after touching render.ex heading_style/paragraph/list/callout styling, or after touching root.html.heex .bp-paper-surface or .bp-paper-editor-body rules, to catch View↔Edit drift before it ships.',
+  whenToUse: 'Run after touching render.ex heading_style/paragraph/list/callout styling, or after touching root.html.heex .bp-paper-surface or .bp-paper-editor-body rules, to catch View↔Edit drift before it ships. INVOKE: Workflow({scriptPath: ".claude/workflows/view-edit-parity.workflow.js"}) — launch by scriptPath, not by name (the name registry is a session-start snapshot). Paths are repo-relative: run it from the repo root.',
   phases: [
     { title: 'Enumerate', detail: 'list every block type that emits visible HTML' },
     { title: 'Sources',   detail: 'extract render.ex inline emitters + root.html.heex CSS rules' },
@@ -62,8 +62,13 @@ const VERDICT_SCHEMA = {
   required: ['isReal', 'reasoning', 'confidence'],
 };
 
-const RENDER_EX = '/Volumes/SATECHI/github/barkpark/api/lib/barkpark/portable_doc/render.ex';
-const ROOT_HEEX = '/Volumes/SATECHI/github/barkpark/api/lib/barkpark_web/layouts/root.html.heex';
+// Repo-relative on purpose: agents resolve these against the session cwd (the repo root),
+// so the workflow runs on any checkout, any machine. No machine-local prefixes here — ever.
+const RENDER_EX = 'api/lib/barkpark/portable_doc/render.ex';
+const ROOT_HEEX = 'api/lib/barkpark_web/layouts/root.html.heex';
+
+const RUN_DATE = new Date().toISOString().slice(0, 10);
+const REPORT_PATH = `docs/specs/${RUN_DATE}-view-edit-parity-matrix.html`;
 
 phase('Enumerate');
 
@@ -283,8 +288,9 @@ phase('Report');
 const passedBlocks = expanded.filter(b => !confirmed.some(c => c.block === b.name && (c.variant || 'default') === b.variant));
 
 await agent(
-  `Write a native paper-article-style HTML parity report at:
-  /Users/pelle/docs/specs/2026-05-31-view-edit-parity-matrix.html
+  `Write a native paper-article-style HTML parity report at this repo-relative path
+  (resolve it against the repo root, i.e. your session cwd):
+  ${REPORT_PATH}
 
 CONFIRMED DIVERGENCES (sorted by severity, both refuters agreed):
 ${JSON.stringify(confirmed.map(c => ({
@@ -299,7 +305,7 @@ ${JSON.stringify(passedBlocks.map(b => ({ block: b.name, variant: b.variant })),
 
 WRITE THE REPORT
 Strict paper-article conventions:
-- Eyebrow "View ↔ Edit parity" + h1 "View ↔ Edit parity matrix" + byline (date string "2026-05-31").
+- Eyebrow "View ↔ Edit parity" + h1 "View ↔ Edit parity matrix" + byline (date string "${RUN_DATE}").
 - Link <link rel="stylesheet" href="/paper/_lib/doc.css">
 - Mermaid CDN <script> in <head>.
 - Two <figure><pre class="mermaid">…</pre><figcaption><b>Figure N.</b> …</figcaption></figure>:
@@ -319,14 +325,15 @@ Strict paper-article conventions:
 - H2 "Methodology" — short paragraph: workflow phases (Enumerate, Sources,
   Diff, Verify, Report), 2-voter adversarial gate, static-analysis basis
   (compares emitted inline styles against editor CSS rules; no browser).
-- H2 "Re-run" — quote the workflow name "view-edit-parity" and explain it
-  re-runs via the Workflow tool with that name.
+- H2 "Re-run" — quote the launch line
+  Workflow({scriptPath: ".claude/workflows/view-edit-parity.workflow.js"})
+  and explain it re-runs from the repo root via the Workflow tool.
 - Close with:
     <script>window.PAPER_NO_RAIL = true;</script>
     <script src="/paper/_lib/doc.js"></script>
 - No inline <style> block.
 
-Return the absolute path of the file you wrote.`,
+Return the repo-relative path of the file you wrote.`,
   { agentType: 'paper-doc-writer', phase: 'Report', label: 'parity matrix report' }
 );
 
@@ -340,5 +347,5 @@ return {
   mediumSeverity: confirmed.filter(c => c.severity === 'medium').length,
   lowSeverity: confirmed.filter(c => c.severity === 'low').length,
   confirmedSample: confirmed.slice(0, 8),
-  reportPath: '/Users/pelle/docs/specs/2026-05-31-view-edit-parity-matrix.html',
+  reportPath: REPORT_PATH,
 };
