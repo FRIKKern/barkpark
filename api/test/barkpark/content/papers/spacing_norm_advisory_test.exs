@@ -123,6 +123,45 @@ defmodule Barkpark.Content.Papers.SpacingNormAdvisoryTest do
     assert warning.message =~ "1 empty paragraph"
   end
 
+  test "empty paragraphs inside columns and steps ARE counted — the walk descends every key the hard gate walks" do
+    # The independent review of #11616 proved the two-key ["blocks","children"]
+    # walk missed spacers under EpicQuality's other eight @nested_keys: an
+    # author passed the advisory and 422'd at the tagged gate. The counter now
+    # reads EpicQuality.nested_keys/0 — one owner — and this test plants
+    # spacers under two of the previously-missed keys.
+    warnings =
+      publish_article!(
+        "spacing-deep-nested",
+        [
+          %{"type" => "heading", "level" => 1, "text" => "Deep nested spacer paper"},
+          para("Honest top-level prose."),
+          %{
+            "type" => "columns",
+            "columns" => [
+              %{"blocks" => [para("Left prose."), %{"type" => "paragraph", "content" => []}]}
+            ]
+          },
+          %{
+            "type" => "steps",
+            "steps" => [
+              %{
+                "title" => "Step one",
+                "blocks" => [para("Step prose."), %{"type" => "paragraph", "content" => []}]
+              }
+            ]
+          }
+        ],
+        "Spacing norm deep blind spot"
+      )
+
+    warning = spacing_warning(warnings)
+
+    assert warning,
+           "expected a spacing_norm advisory for spacers under columns/steps, got: #{inspect(warnings)}"
+
+    assert warning.message =~ "2 empty paragraph"
+  end
+
   test "top-level flat spacers still draw the advisory with an exact count" do
     warnings =
       publish_article!(

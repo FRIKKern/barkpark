@@ -25,6 +25,13 @@ defmodule Barkpark.Content.Papers.EpicQuality do
   @required_readers ~w(public studio tui80 email cli_api)
   @text_keys ~w(alt blocks caption children content description head items label lead rows steps subtitle summary text title value)
   @nested_keys ~w(blocks children columns content items panels rows sections steps tabs)
+
+  @doc """
+  The container keys the wall's whole-tree walk descends. Public so advisory
+  mirrors (AuthoringWall.count_spacer_paragraphs/1) descend EXACTLY this set —
+  a mirror with its own list silently diverges the day this one grows.
+  """
+  def nested_keys, do: @nested_keys
   @intrinsically_meaningful_types ~w(audio callout code divider embed figure gallery image quote sheet video)
 
   @type failure ::

@@ -70,11 +70,22 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
                BlockOps.normalize_render_shapes([block])
     end
 
-    test "pipeline string nodes normalize to the text-map shape" do
+    test "pipeline string nodes normalize to a shape pipeline_html actually renders" do
       block = %{"type" => "pipeline", "nodes" => ["source", "emit", "gate"]}
 
-      assert [%{"nodes" => [%{"text" => "source"}, %{"text" => "emit"}, %{"text" => "gate"}]}] =
+      assert [%{"nodes" => [%{"title" => "source"}, %{"title" => "emit"}, %{"title" => "gate"}] = nodes} = normalized] =
                BlockOps.normalize_render_shapes([block])
+
+      # The shape assertion above is necessary but not sufficient — the first
+      # version of this arm emitted %{"text" => s}, which no pipeline reader
+      # renders, and a shape-only test stayed green (independent review of
+      # #11616). The rendered output is the oracle: every node's label must
+      # appear in the HTML, where the raw-string input renders empty nodes.
+      html = Barkpark.PortableDoc.Render.Components.pipeline_html(normalized)
+      for %{"title" => title} <- nodes, do: assert(html =~ title)
+
+      raw_html = Barkpark.PortableDoc.Render.Components.pipeline_html(block)
+      refute raw_html =~ "source"
     end
 
     test "an inline-array item normalizes to a text map carrying the flattened inline text" do

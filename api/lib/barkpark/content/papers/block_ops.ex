@@ -1472,8 +1472,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   Beyond the wrapper reductions, two rescue arms run here (the ONE write
   chokepoint every producer path routes through — pe-w1-write-path-normalizer):
 
-    * `notes`/`cards` ITEMS and `pipeline` NODES that arrive as bare strings
-      (or inline arrays) become text maps — the readers address item FIELDS
+    * `notes`/`cards` ITEMS that arrive as bare strings (or inline arrays)
+      become text maps, and `pipeline` NODES become TITLE maps (the key its
+      readers render) — the readers address item FIELDS
       through `get/2`, which is nil on a binary, so the raw shape renders an
       EMPTY row while the paper answers 200 (live: `heggemsnes-act`). The arm
       is TYPE-KEYED, never generic over `items` — `byline` string items are
@@ -1699,12 +1700,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  # `notes`/`cards` items and `pipeline` nodes are addressed as MAPS by every
-  # reader (`components.ex` reads `label`/`title`/`text`/`kind`/`detail`
-  # through `get/2`, which is nil on a binary) — an agent raised on prose
-  # blocks hands them bare strings (or inline arrays) and the row renders
-  # EMPTY behind a 200. Rescue the two derivable shapes into the text-map
-  # dialect; canonical map items pass byte-identical (idempotent).
+  # `notes`/`cards` items are addressed as MAPS by every reader
+  # (`components.ex` reads `label`/`title`/`text` through `get/2`, which is
+  # nil on a binary) — an agent raised on prose blocks hands them bare strings
+  # (or inline arrays) and the row renders EMPTY behind a 200. Rescue the two
+  # derivable shapes into the text-map dialect; canonical map items pass
+  # byte-identical (idempotent).
   # TYPE-KEYED on purpose: `byline` string items are the DESIGNED shape
   # (compose.ex:231-245 joins stringish items; 215 live papers = 28% of the
   # corpus) — a generic items-must-be-maps arm is forbidden.
@@ -1713,9 +1714,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
     Map.put(block, "items", Enum.map(items, &normalize_widget_item/1))
   end
 
+  # Pipeline nodes get their OWN rescue key: every pipeline reader renders
+  # `title` (components.ex pipeline_html, pdrender stageRenderer, the web
+  # projection's `title`/`detail`) and NONE reads `text` — a `%{"text" => s}`
+  # rescue here would rewrite stored bytes into a shape that still renders an
+  # empty node (proven against Components.pipeline_html/1 in the independent
+  # second review of #11616).
   defp normalize_render_block(%{"type" => "pipeline", "nodes" => nodes} = block)
        when is_list(nodes) do
-    Map.put(block, "nodes", Enum.map(nodes, &normalize_widget_item/1))
+    Map.put(block, "nodes", Enum.map(nodes, &normalize_pipeline_node/1))
   end
 
   defp normalize_render_block(block) when is_map(block) do
@@ -1747,6 +1754,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp normalize_widget_item(item), do: item
+
+  # ONE pipeline node → the title-map dialect the pipeline readers render.
+  # Same rescue discipline as normalize_widget_item, different key.
+  defp normalize_pipeline_node(node) when is_binary(node), do: %{"title" => node}
+
+  defp normalize_pipeline_node(node) when is_list(node) do
+    case inline_plain_text(node) do
+      "" -> node
+      text -> %{"title" => text}
+    end
+  end
+
+  defp normalize_pipeline_node(node), do: node
 
   # Flatten an inline array (or one inline node) to concatenated PLAIN text,
   # marks dropped: a leaf contributes its `value` (or TipTap `text`), a mark

@@ -315,10 +315,12 @@ defmodule Barkpark.Content.AuthoringWall do
   # The advisory's counter mirrors the tagged HARD gate's semantics
   # (`EpicQuality.empty_paragraph?/1` and its whole-tree walk): a paragraph is
   # a spacer only when it has no content AND no non-blank `text` key — a
-  # text-keyed paragraph is legal prose, not a scaffold — and nested
-  # `blocks`/`children` containers (expandables, sections) are descended, so
-  # the advisory warns exactly where the tagged gate would refuse instead of
-  # passing an author it later 422s.
+  # text-keyed paragraph is legal prose, not a scaffold — and every container
+  # key the gate's walk descends is descended HERE too, read from
+  # `EpicQuality.nested_keys/0` (one owner), so the advisory warns exactly
+  # where the tagged gate would refuse instead of passing an author it later
+  # 422s. The independent review of #11616 caught the previous two-key walk
+  # missing spacers inside columns/steps/panels/tabs/sections/content/items/rows.
   defp count_spacer_paragraphs(blocks) when is_list(blocks),
     do: blocks |> Enum.map(&spacer_paragraphs_in/1) |> Enum.sum()
 
@@ -333,7 +335,7 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   defp spacer_paragraphs_in(%{} = block) do
-    Enum.reduce(["blocks", "children"], 0, fn key, acc ->
+    Enum.reduce(EpicQuality.nested_keys(), 0, fn key, acc ->
       case Map.get(block, key) do
         children when is_list(children) -> acc + count_spacer_paragraphs(children)
         _ -> acc
