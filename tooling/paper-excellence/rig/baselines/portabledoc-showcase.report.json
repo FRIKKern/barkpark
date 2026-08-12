@@ -1,0 +1,43 @@
+{
+  "label": "portabledoc-showcase",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "portabledoc-showcase__light__1440",
+      "file": "portabledoc-showcase__light__1440.jpeg",
+      "scale": 2,
+      "bytes": 2155679,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 32,
+      "columnWidth": 720,
+      "maxWidth": "720px",
+      "blockedRequests": 3
+    },
+    {
+      "cell": "portabledoc-showcase__dark__1440",
+      "file": "portabledoc-showcase__dark__1440.jpeg",
+      "scale": 2,
+      "bytes": 2211443,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 32,
+      "columnWidth": 720,
+      "maxWidth": "720px",
+      "blockedRequests": 3
+    }
+  ]
+}
