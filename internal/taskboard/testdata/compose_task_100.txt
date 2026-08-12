@@ -1,5 +1,4 @@
 
- tasks › Wire the SSE live bridge
  Wire the SSE live bridge to the task board pane
  ⠋ in_progress · P1 · task · fable-3
 
@@ -40,5 +39,6 @@
    ⠋ Debounce the refetch at 750ms  30m
    ○ Honest connection dot states  5h
 
+ papers
    ↓ more below
  jk move · enter open · esc back · space scroll · opt/shift-click selects · M mouse

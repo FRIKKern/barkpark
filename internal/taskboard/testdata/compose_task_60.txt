@@ -1,5 +1,4 @@
 
- tasks › Wire the SSE live bridge
  Wire the SSE live bridge to the task board pane
  ⠋ in_progress · P1 · task · fable-3
 
@@ -40,5 +39,6 @@
 
  labels  proj:task-tui · area:live
 
+ claim  fable-3 · epoch 4 · claimed 4m ago (Jul 04, 17:2…
    ↓ more below
  jk move · enter open · esc back · space scroll · M mouse
