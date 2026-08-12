@@ -34,12 +34,13 @@ const (
 	// minReadingWidth is the pathological floor for the wide right pane.
 	minReadingWidth = 24
 	minBoardWidth   = 24
-	// maxDocWidth caps the reading/preview document column at the paper TUI
-	// standard (paperTUIMaxWidth in internal/cli — `bp paper capture` renders at
-	// the same 100-col ceiling). A wider pane centers the capped column and the
-	// surplus becomes symmetric margin — terminal typography dies past ~100
-	// cells, and a left-pinned document on an ultrawide pane reads lopsided.
-	maxDocWidth = 100
+	// maxDocWidth caps the reading/preview document column at the 72-cell
+	// prose measure the renderers already use internally (charter D24,
+	// detailMeasure) — the document column and its prose now share one
+	// measure. A wider pane centers the capped column and the surplus becomes
+	// symmetric margin; a left-pinned document on an ultrawide pane reads
+	// lopsided.
+	maxDocWidth = 72
 	// scrollFollow is the Frame.Scroll sentinel for "follow the cursor stop"
 	// (charter D18). A frame's zero-value Scroll is 0 — a real absolute offset
 	// (the top of the frame), so a freshly opened frame shows its title, never a
