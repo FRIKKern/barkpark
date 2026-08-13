@@ -19,12 +19,13 @@
       "cell": "hobby-hardening-capstone__light__1280",
       "file": "hobby-hardening-capstone__light__1280.jpeg",
       "scale": 2,
-      "bytes": 7413507,
+      "bytes": 7410011,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The grand view",
           "gap": 92,
           "rule": 2,
@@ -32,6 +33,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The corrected defect model",
           "gap": 92,
           "rule": 2,
@@ -39,6 +41,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The proposed shape — three epics on the risk",
           "gap": 92,
           "rule": 2,
@@ -46,6 +49,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Ground truth — how the system works today",
           "gap": 92,
           "rule": 2,
@@ -53,6 +57,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Files likely to change — the consolidated pi",
           "gap": 92,
           "rule": 2,
@@ -60,6 +65,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Absorb, cite, defer — the ownership rulings",
           "gap": 92,
           "rule": 2,
@@ -67,6 +73,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Contradictions and resolutions",
           "gap": 92,
           "rule": 2,
@@ -74,6 +81,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Proof obligations — every done-claim can fai",
           "gap": 92,
           "rule": 2,
@@ -81,6 +89,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Risks, unknowns, and the judgment calls",
           "gap": 92,
           "rule": 2,
@@ -88,6 +97,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The recommendation and the first wave",
           "gap": 92,
           "rule": 2,
@@ -95,6 +105,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The paper stack — where to descend",
           "gap": 92,
           "rule": 2,
@@ -103,6 +114,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -117,84 +129,108 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1085.9,
+          "inkOffCentre": 22.9
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -205,12 +241,13 @@
       "cell": "hobby-hardening-capstone__light__1920",
       "file": "hobby-hardening-capstone__light__1920.jpeg",
       "scale": 2,
-      "bytes": 9714710,
+      "bytes": 9782396,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The grand view",
           "gap": 92,
           "rule": 2,
@@ -218,6 +255,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The corrected defect model",
           "gap": 92,
           "rule": 2,
@@ -225,6 +263,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The proposed shape — three epics on the risk",
           "gap": 92,
           "rule": 2,
@@ -232,6 +271,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Ground truth — how the system works today",
           "gap": 92,
           "rule": 2,
@@ -239,6 +279,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Files likely to change — the consolidated pi",
           "gap": 92,
           "rule": 2,
@@ -246,6 +287,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Absorb, cite, defer — the ownership rulings",
           "gap": 92,
           "rule": 2,
@@ -253,6 +295,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Contradictions and resolutions",
           "gap": 92,
           "rule": 2,
@@ -260,6 +303,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Proof obligations — every done-claim can fai",
           "gap": 92,
           "rule": 2,
@@ -267,6 +311,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Risks, unknowns, and the judgment calls",
           "gap": 92,
           "rule": 2,
@@ -274,6 +319,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The recommendation and the first wave",
           "gap": 92,
           "rule": 2,
@@ -281,6 +327,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The paper stack — where to descend",
           "gap": 92,
           "rule": 2,
@@ -289,6 +336,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -303,84 +351,108 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -391,12 +463,13 @@
       "cell": "hobby-hardening-capstone__dark__1280",
       "file": "hobby-hardening-capstone__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 7391084,
+      "bytes": 7386542,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The grand view",
           "gap": 92,
           "rule": 2,
@@ -404,6 +477,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The corrected defect model",
           "gap": 92,
           "rule": 2,
@@ -411,6 +485,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The proposed shape — three epics on the risk",
           "gap": 92,
           "rule": 2,
@@ -418,6 +493,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Ground truth — how the system works today",
           "gap": 92,
           "rule": 2,
@@ -425,6 +501,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Files likely to change — the consolidated pi",
           "gap": 92,
           "rule": 2,
@@ -432,6 +509,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Absorb, cite, defer — the ownership rulings",
           "gap": 92,
           "rule": 2,
@@ -439,6 +517,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Contradictions and resolutions",
           "gap": 92,
           "rule": 2,
@@ -446,6 +525,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Proof obligations — every done-claim can fai",
           "gap": 92,
           "rule": 2,
@@ -453,6 +533,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Risks, unknowns, and the judgment calls",
           "gap": 92,
           "rule": 2,
@@ -460,6 +541,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The recommendation and the first wave",
           "gap": 92,
           "rule": 2,
@@ -467,6 +549,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The paper stack — where to descend",
           "gap": 92,
           "rule": 2,
@@ -475,6 +558,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -489,84 +573,108 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1085.9,
+          "inkOffCentre": 22.9
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -583,6 +691,7 @@
       "paragraphs": 27,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The grand view",
           "gap": 92,
           "rule": 2,
@@ -590,6 +699,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The corrected defect model",
           "gap": 92,
           "rule": 2,
@@ -597,6 +707,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The proposed shape — three epics on the risk",
           "gap": 92,
           "rule": 2,
@@ -604,6 +715,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Ground truth — how the system works today",
           "gap": 92,
           "rule": 2,
@@ -611,6 +723,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Files likely to change — the consolidated pi",
           "gap": 92,
           "rule": 2,
@@ -618,6 +731,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Absorb, cite, defer — the ownership rulings",
           "gap": 92,
           "rule": 2,
@@ -625,6 +739,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Contradictions and resolutions",
           "gap": 92,
           "rule": 2,
@@ -632,6 +747,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Proof obligations — every done-claim can fai",
           "gap": 92,
           "rule": 2,
@@ -639,6 +755,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "Risks, unknowns, and the judgment calls",
           "gap": 92,
           "rule": 2,
@@ -646,6 +763,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The recommendation and the first wave",
           "gap": 92,
           "rule": 2,
@@ -653,6 +771,7 @@
           "skippedEmpty": 2
         },
         {
+          "kind": "heading",
           "head": "The paper stack — where to descend",
           "gap": 92,
           "rule": 2,
@@ -661,6 +780,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -675,84 +795,108 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,

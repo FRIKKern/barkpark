@@ -25,6 +25,7 @@
       "paragraphs": 16,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The case, in full",
           "gap": 92,
           "rule": 2,
@@ -32,6 +33,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What we hold",
           "gap": 92,
           "rule": 2,
@@ -39,6 +41,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The Articles",
           "gap": 92,
           "rule": 2,
@@ -46,6 +49,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Remedies executed under this Act",
           "gap": 92,
           "rule": 2,
@@ -53,6 +57,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Scope and force",
           "gap": 92,
           "rule": 2,
@@ -61,6 +66,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -75,7 +81,9 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -92,6 +100,7 @@
       "paragraphs": 16,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The case, in full",
           "gap": 92,
           "rule": 2,
@@ -99,6 +108,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What we hold",
           "gap": 92,
           "rule": 2,
@@ -106,6 +116,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The Articles",
           "gap": 92,
           "rule": 2,
@@ -113,6 +124,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Remedies executed under this Act",
           "gap": 92,
           "rule": 2,
@@ -120,6 +132,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Scope and force",
           "gap": 92,
           "rule": 2,
@@ -128,6 +141,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -142,7 +156,9 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -159,6 +175,7 @@
       "paragraphs": 16,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The case, in full",
           "gap": 92,
           "rule": 2,
@@ -166,6 +183,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What we hold",
           "gap": 92,
           "rule": 2,
@@ -173,6 +191,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The Articles",
           "gap": 92,
           "rule": 2,
@@ -180,6 +199,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Remedies executed under this Act",
           "gap": 92,
           "rule": 2,
@@ -187,6 +207,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Scope and force",
           "gap": 92,
           "rule": 2,
@@ -195,6 +216,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -209,7 +231,9 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -226,6 +250,7 @@
       "paragraphs": 16,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The case, in full",
           "gap": 92,
           "rule": 2,
@@ -233,6 +258,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What we hold",
           "gap": 92,
           "rule": 2,
@@ -240,6 +266,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The Articles",
           "gap": 92,
           "rule": 2,
@@ -247,6 +274,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Remedies executed under this Act",
           "gap": 92,
           "rule": 2,
@@ -254,6 +282,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Scope and force",
           "gap": 92,
           "rule": 2,
@@ -262,6 +291,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -276,7 +306,9 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,

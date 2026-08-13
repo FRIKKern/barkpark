@@ -25,6 +25,7 @@
       "paragraphs": 32,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "1 · Prose — the elements",
           "gap": 92,
           "rule": 2,
@@ -32,6 +33,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "info Context worth knowing.success The gate ",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "2 · Rich blocks — code, tables, media",
           "gap": 92,
           "rule": 2,
@@ -39,6 +49,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "3 · Fields — the document is the form",
           "gap": 92,
           "rule": 2,
@@ -46,6 +57,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "4 · Widgets — note, stage, card and their gr",
           "gap": 92,
           "rule": 2,
@@ -53,6 +65,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "5 · Containers — sections, columns, terminal",
           "gap": 92,
           "rule": 2,
@@ -60,6 +73,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "A 3-track grid with a spanning childThis cal",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "6 · Task widgets — live data as blocks",
           "gap": 92,
           "rule": 2,
@@ -67,6 +89,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "7 · The terminal-first slate",
           "gap": 92,
           "rule": 2,
@@ -74,6 +97,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "8 · Compositions — what the deck is for",
           "gap": 92,
           "rule": 2,
@@ -81,6 +105,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "Reader",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "9 · Slate 2 — the fidelity pass",
           "gap": 92,
           "rule": 2,
@@ -88,6 +121,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The newborn blocks — born via bp scaffy run",
           "gap": 92,
           "rule": 2,
@@ -96,6 +130,7 @@
         }
       ],
       "nestedH2s": 3,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -110,77 +145,99 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 541.7,
+          "inkOffCentre": -249.2
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1008,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1008,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -197,6 +254,7 @@
       "paragraphs": 32,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "1 · Prose — the elements",
           "gap": 92,
           "rule": 2,
@@ -204,6 +262,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "info Context worth knowing.success The gate ",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "2 · Rich blocks — code, tables, media",
           "gap": 92,
           "rule": 2,
@@ -211,6 +278,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "3 · Fields — the document is the form",
           "gap": 92,
           "rule": 2,
@@ -218,6 +286,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "4 · Widgets — note, stage, card and their gr",
           "gap": 92,
           "rule": 2,
@@ -225,6 +294,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "5 · Containers — sections, columns, terminal",
           "gap": 92,
           "rule": 2,
@@ -232,6 +302,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "A 3-track grid with a spanning childThis cal",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "6 · Task widgets — live data as blocks",
           "gap": 92,
           "rule": 2,
@@ -239,6 +318,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "7 · The terminal-first slate",
           "gap": 92,
           "rule": 2,
@@ -246,6 +326,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "8 · Compositions — what the deck is for",
           "gap": 92,
           "rule": 2,
@@ -253,6 +334,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "Reader",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "9 · Slate 2 — the fidelity pass",
           "gap": 92,
           "rule": 2,
@@ -260,6 +350,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The newborn blocks — born via bp scaffy run",
           "gap": 92,
           "rule": 2,
@@ -268,6 +359,7 @@
         }
       ],
       "nestedH2s": 3,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -282,77 +374,99 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 541.7,
+          "inkOffCentre": -349.2
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1208,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1208,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -369,6 +483,7 @@
       "paragraphs": 32,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "1 · Prose — the elements",
           "gap": 92,
           "rule": 2,
@@ -376,6 +491,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "info Context worth knowing.success The gate ",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "2 · Rich blocks — code, tables, media",
           "gap": 92,
           "rule": 2,
@@ -383,6 +507,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "3 · Fields — the document is the form",
           "gap": 92,
           "rule": 2,
@@ -390,6 +515,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "4 · Widgets — note, stage, card and their gr",
           "gap": 92,
           "rule": 2,
@@ -397,6 +523,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "5 · Containers — sections, columns, terminal",
           "gap": 92,
           "rule": 2,
@@ -404,6 +531,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "A 3-track grid with a spanning childThis cal",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "6 · Task widgets — live data as blocks",
           "gap": 92,
           "rule": 2,
@@ -411,6 +547,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "7 · The terminal-first slate",
           "gap": 92,
           "rule": 2,
@@ -418,6 +555,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "8 · Compositions — what the deck is for",
           "gap": 92,
           "rule": 2,
@@ -425,6 +563,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "Reader",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "9 · Slate 2 — the fidelity pass",
           "gap": 92,
           "rule": 2,
@@ -432,6 +579,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The newborn blocks — born via bp scaffy run",
           "gap": 92,
           "rule": 2,
@@ -440,6 +588,7 @@
         }
       ],
       "nestedH2s": 3,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -454,77 +603,99 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 541.7,
+          "inkOffCentre": -249.2
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1008,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1008,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -541,6 +712,7 @@
       "paragraphs": 32,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "1 · Prose — the elements",
           "gap": 92,
           "rule": 2,
@@ -548,6 +720,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "info Context worth knowing.success The gate ",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "2 · Rich blocks — code, tables, media",
           "gap": 92,
           "rule": 2,
@@ -555,6 +736,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "3 · Fields — the document is the form",
           "gap": 92,
           "rule": 2,
@@ -562,6 +744,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "4 · Widgets — note, stage, card and their gr",
           "gap": 92,
           "rule": 2,
@@ -569,6 +752,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "5 · Containers — sections, columns, terminal",
           "gap": 92,
           "rule": 2,
@@ -576,6 +760,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "A 3-track grid with a spanning childThis cal",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "6 · Task widgets — live data as blocks",
           "gap": 92,
           "rule": 2,
@@ -583,6 +776,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "7 · The terminal-first slate",
           "gap": 92,
           "rule": 2,
@@ -590,6 +784,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "8 · Compositions — what the deck is for",
           "gap": 92,
           "rule": 2,
@@ -597,6 +792,15 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "container",
+          "head": "Reader",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
           "head": "9 · Slate 2 — the fidelity pass",
           "gap": 92,
           "rule": 2,
@@ -604,6 +808,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The newborn blocks — born via bp scaffy run",
           "gap": 92,
           "rule": 2,
@@ -612,6 +817,7 @@
         }
       ],
       "nestedH2s": 3,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -626,77 +832,99 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 541.7,
+          "inkOffCentre": -349.2
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1208,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-chart",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1208,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-diff",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-filetree",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
