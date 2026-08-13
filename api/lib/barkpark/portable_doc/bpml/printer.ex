@@ -106,7 +106,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           []
 
         cells ->
-          ths = Enum.map_join(cells, "", &"<th>#{esc(Map.get(&1, "text", ""))}</th>")
+          ths = Enum.map_join(cells, "", &"<th>#{head_cell(&1)}</th>")
           ["#{pad(d + 1)}<tr>#{ths}</tr>"]
       end
 
@@ -130,6 +130,13 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
         ArgumentError,
         "BPML printer: block type #{inspect(type)} is outside the kernel vocabulary"
       )
+
+  # Head cells arrive in TWO shapes: the write chokepoint normalizes them to
+  # inline-node lists (the canonical form BPML round-trips), while hand-authored
+  # payloads may still carry the legacy %{"text" => …} map — accepted as input,
+  # canonicalized on round-trip.
+  defp head_cell(cells) when is_list(cells), do: inline(cells)
+  defp head_cell(%{} = cell), do: esc(Map.get(cell, "text", ""))
 
   # ── inline ──────────────────────────────────────────────────────────────────
 
