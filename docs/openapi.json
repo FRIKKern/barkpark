@@ -105,6 +105,9 @@
               "code": {
                 "enum": [
                   "batch_too_large",
+                  "bpml",
+                  "bpml_unavailable",
+                  "bpml_unprintable",
                   "build_id_mismatch",
                   "bundle_import_disabled",
                   "chat_create_failed",
@@ -122,6 +125,7 @@
                   "forbidden",
                   "forbidden_field",
                   "halted",
+                  "hollow_paper",
                   "idempotency_key_in_use",
                   "import_body_read_failed",
                   "import_body_too_large",
@@ -167,7 +171,9 @@
                   "share_expired",
                   "source_not_found",
                   "storage_unavailable",
+                  "structure",
                   "unauthorized",
+                  "unknown_format",
                   "unknown_tag",
                   "unprocessable",
                   "unsupported_if_match_for_batch",

@@ -209,6 +209,12 @@ defmodule Barkpark.Plugins.Bulldocs do
       {:get, "/d/:dataset/papers/:slug/email", BarkparkWeb.BulldocsEmailController, :show,
        auth: :public_root},
       {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
+      # Validate-all dry-run (BPML masterplan W0): same body shapes as ingest,
+      # every violation (BPML parse, wall gates, structure) in one reply,
+      # nothing persisted. Registered BEFORE the :slug routes conceptually but
+      # unambiguous either way — "validate" is a fixed segment, not a slug arg.
+      {:post, "/bulldocs/papers/validate", BarkparkWeb.BulldocsIngestController, :validate,
+       auth: :ingest},
       {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},
       # Session-handoff (task-3): a `session` is a blocks-doc twin of a paper

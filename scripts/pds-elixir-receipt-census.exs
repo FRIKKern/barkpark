@@ -413,6 +413,12 @@ defmodule PDS.Census do
     {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
     {:post, "/api/documents/:type", "BarkparkWeb.LegacyController", :create, :status_only_receipt},
+    # BPML validate-all dry-run (masterplan W0): a POST that deliberately moves NO
+    # state — it renders {valid, violations}, a receipt richer than `ok: true` but
+    # not the spelling this lens keys on, and there is no stored row a test could
+    # read back because nothing is stored. Exactly the class prose's case.
+    {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController",
+     :validate, :status_only_receipt},
     {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
     {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
@@ -979,9 +985,12 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.touch_session_conversation/2", "104647366", "61088078"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:630
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex — the batch receipt.
+    # BPML wave: the batch clause of apply_op/2 split into apply_op_batch/4 (clause
+    # grouping under --warnings-as-errors) — the SAME receipt at a new def, so this
+    # row re-keys; verdict and note carry over unchanged.
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.apply_op/2", "133005745", "10224315"},
+            "BarkparkWeb.BulldocsIngestController.apply_op_batch/4", "93603959", "10224315"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. The brief ruled it end_to_end_unmutated; the arm refused the citation (bulldocs_ingest_controller_test.exs:595 drives the batch route but never reads the paper back), so the receipt-vs-stored-row question is unjudged."},

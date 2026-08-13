@@ -155,6 +155,43 @@ defmodule Barkpark.Content.AuthoringWall do
     end
   end
 
+  @doc """
+  Dry-run the whole wall and return EVERY failing gate at once (BPML
+  masterplan W0's validate-all): where `enforce/5` is a `with` chain that
+  stops at the first refusal — correct for a real write — this runs each gate
+  independently and collects the raw error tuples, so a producer learns all
+  its violations in ONE round trip instead of one 4xx at a time.
+
+  Deliberately side-effect-free: no exemption ratchet (a dry-run must never
+  spend a grandfathering), no rejection telemetry (dashboards count real
+  refusals, not rehearsals), nothing persisted. Returns `[]` on a clean pass.
+  """
+  @spec validate_all(Document.t() | map(), String.t(), String.t() | nil, String.t(), keyword()) ::
+          [{atom(), term()}]
+  def validate_all(ref, type, pid, dataset, opts \\ []) do
+    exempt? = type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset)
+
+    [
+      case label_gate(ref, type, pid, exempt?) do
+        {:ok, _spine_passed?} -> nil
+        {:error, tuple} -> tuple
+      end,
+      case epic_quality_gate(ref, type) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end,
+      case TagRegistry.validate_publish(ref, dataset, opts) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end,
+      case dedup_gate(ref, type, dataset, opts, exempt?) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
+
   # The wall's first observability (charter D28): a structured telemetry event
   # + a Logger.warning at every publish-wall rejection, so a label_spine 422 is
   # attributable in prod logs and countable on a dashboard (BarkparkWeb.Telemetry
