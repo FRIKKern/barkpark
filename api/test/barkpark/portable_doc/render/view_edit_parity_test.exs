@@ -769,7 +769,8 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     reader = declarations_for(view, "bp-paper-surface", @section_head_reader)
 
     copies = [
-      {"Studio inline (root.html.heex)", declarations_for(edit_css(), "bp-paper-editor-body", @section_head_edit)},
+      {"Studio inline (root.html.heex)",
+       declarations_for(edit_css(), "bp-paper-editor-body", @section_head_edit)},
       {"embedder bundle (assets/paper-editor/src/styles.css)",
        declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_edit)}
     ]
@@ -823,9 +824,11 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     # drift tripwire silently stops tripping (distrust-vacuous-green).
     surfaces = [
       {"reader", declarations_for(view_css(), "bp-paper-surface", @section_head_reader)},
-      {"reader keyed-stream leg", declarations_for(view_css(), "bp-paper-surface", @section_head_stream)},
+      {"reader keyed-stream leg",
+       declarations_for(view_css(), "bp-paper-surface", @section_head_stream)},
       {"Studio inline", declarations_for(edit_css(), "bp-paper-editor-body", @section_head_edit)},
-      {"embedder bundle", declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_edit)}
+      {"embedder bundle",
+       declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_edit)}
     ]
 
     for {name, decls} <- surfaces do
