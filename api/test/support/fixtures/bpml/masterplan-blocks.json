@@ -1,0 +1,330 @@
+[
+ {
+  "id": "eyebrow",
+  "type": "eyebrow",
+  "text": "MASTERPLAN v3 · BPML · SIMPLE, WITH PROOFS · 2026-08-13"
+ },
+ {
+  "id": "title",
+  "type": "heading",
+  "level": 1,
+  "text": "BPML — papers as files"
+ },
+ {
+  "id": "byline",
+  "type": "byline",
+  "items": [
+   "masterplan v3 — supersedes v2 in place",
+   "goal: agents fast at writing and editing papers",
+   "every claim below carries its meter"
+  ]
+ },
+ {
+  "id": "ingress",
+  "type": "ingress",
+  "content": [
+   {
+    "type": "text",
+    "value": "BPML is a readable, strict markup that carries the same information as a paper's blocks. That one property gives everything else: a paper can be a file, an edit can be a diff, and every mistake can teach. Four small pieces of work; every claim measured."
+   }
+  ]
+ },
+ {
+  "id": "headline-stats",
+  "type": "stats",
+  "items": [
+   {
+    "value": "2.1×",
+    "label": "denser than block JSON",
+    "body": "Measured: the identical example paper is 504 bytes in BPML, 1,034 as blocks JSON. The saving repeats on every read and every write."
+   },
+   {
+    "value": "9–35×",
+    "label": "cheaper edits via derived ops",
+    "body": "Measured on this plan's own history: op batches of 0.7–3.1KB did what full republishes of 13–51KB were doing."
+   },
+   {
+    "value": "3→1",
+    "label": "publish retries collapsed",
+    "body": "Observed: three sequential 409s (slug, description, tags) that one validate-all reply would have taught at once."
+   },
+   {
+    "value": "2",
+    "label": "server endpoints, total",
+    "body": "Vocabulary on /v1/capabilities and validate-all. Everything else below the API line already exists."
+   }
+  ]
+ },
+ {
+  "id": "flow-diagram",
+  "type": "diagram",
+  "caption": "The whole system. Right of the API, nothing changes.",
+  "source": "graph LR; A[agent or human] -->|bp paper pull| F[.barkpark/papers/x.bpml]; F -->|edit the file| F; F -->|bp paper push| D[id-keyed diff]; D -->|derived op batch, ifRev| API[/v1 ops + validate-all/]; API --> B[blocks — the only truth]; B --> S[reader · TUI · email · SSE]"
+ },
+ {
+  "id": "s-example",
+  "type": "section",
+  "title": "One paper, two spellings",
+  "blocks": [
+   {
+    "id": "nt-markup",
+    "type": "code",
+    "value": "<paper slug=\"deploy-status\" title=\"Deploy status\">\n  <eyebrow>OPS · LIVE</eyebrow>\n  <h1>Rollout</h1>\n  <stats>\n    <stat label=\"p95 latency\" value=\"182ms\">Across all API routes, last 24h.</stat>\n    <stat label=\"error rate\" value=\"0.3%\">5xx over total.</stat>\n  </stats>\n  <callout tone=\"warning\" title=\"Attention\">3 failing checks — see below.</callout>\n  <section title=\"Detail\">\n    <p>Canary at <b>5%</b> — full plan in <a href=\"/papers/rollout-plan\">the rollout paper</a>.</p>\n  </section>\n</paper>"
+   },
+   {
+    "id": "nt-json",
+    "type": "code",
+    "value": "{ \"slug\": \"deploy-status\", \"title\": \"Deploy status\", \"blocks\": [\n  { \"id\": \"b1\", \"type\": \"eyebrow\", \"text\": \"OPS · LIVE\" },\n  { \"id\": \"b2\", \"type\": \"heading\", \"level\": 1, \"text\": \"Rollout\" },\n  { \"id\": \"b3\", \"type\": \"stats\", \"items\": [\n    { \"label\": \"p95 latency\", \"value\": \"182ms\", \"body\": \"Across all API routes, last 24h.\" },\n    { \"label\": \"error rate\", \"value\": \"0.3%\", \"body\": \"5xx over total.\" } ] },\n  { \"id\": \"b4\", \"type\": \"callout\", \"tone\": \"warning\", \"title\": \"Attention\", \"content\": [\n    { \"type\": \"text\", \"value\": \"3 failing checks — see below.\" } ] },\n  { \"id\": \"b5\", \"type\": \"section\", \"title\": \"Detail\", \"blocks\": [\n    { \"id\": \"b6\", \"type\": \"paragraph\", \"content\": [\n      { \"type\": \"text\", \"value\": \"Canary at \" },\n      { \"type\": \"text\", \"marks\": [\"strong\"], \"value\": \"5%\" },\n      { \"type\": \"text\", \"value\": \" — full plan in \" },\n      { \"type\": \"link\", \"href\": \"/papers/rollout-plan\", \"children\": [\n        { \"type\": \"text\", \"value\": \"the rollout paper\" } ] },\n      { \"type\": \"text\", \"value\": \".\" } ] } ] }\n] }"
+   },
+   {
+    "id": "nt-law",
+    "type": "callout",
+    "tone": "info",
+    "title": "Same object — 504 vs 1,034 bytes",
+    "content": [
+     {
+      "type": "text",
+      "value": "No logic, no variables, no loops: BPML is a second spelling of the block tree, so blocks → BPML → blocks round-trips byte-equal (pinned by a CI property test). Strict everywhere — unknown tags and misplaced elements are teaching errors — and free inside the fence: a <demo> island carries sandboxed raw HTML with a declared fallback for email and TUI. Freedom is a block, not a loophole."
+     }
+    ]
+   },
+   {
+    "id": "nt-agents",
+    "type": "callout",
+    "tone": "info",
+    "title": "Why untrained agents won't get lost",
+    "content": [
+     {
+      "type": "text",
+      "value": "HTML priors are the asset; the design makes them mostly correct and always correctable. Naming law: when HTML has a name for it, BPML uses HTML's name (<h1>, <p>, <ul>, <blockquote>); new tags name what the reader shows (<stats>, <callout>). Wrong priors teach in one round: <div> → 'no generic containers — use <section>'; class= → 'BPML carries no styling'. Every pull prints canonical BPML, so agents few-shot themselves during normal work. And confusion is metered, not guessed: the unknown-tag error log drives vocabulary decisions, and the ≥90% first-try kill criterion is the confusion meter."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "s-proofs",
+  "type": "section",
+  "title": "Proofs — every claim with its meter",
+  "blocks": [
+   {
+    "id": "proofs-table",
+    "type": "table",
+    "head": [
+     {
+      "text": "Claim"
+     },
+     {
+      "text": "Meter"
+     },
+     {
+      "text": "Result"
+     }
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "BPML halves payloads"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "The identical paper above, both encodings, bytes"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "504B vs 1,034B — 2.1×"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "Derived ops beat republishing"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "This plan's own edit history: 6 op batches vs the full payloads they replaced"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "0.7–3.1KB vs 13–51KB — 9× to 35×"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "One validate beats retry-discovery"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "Observed publish-wall session: violations surfaced one 409 at a time"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "3 round trips → 1"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "The server pattern already exists"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "Shipped code: portable_doc/from_markdown.ex (GFM→blocks, fail-soft) and html_sanitizer.ex"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "parser+printer is the same species — no new architecture"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "The round-trip is total"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "Construct map: tag↔type, attribute↔scalar key, children↔content/blocks, CDATA↔opaque value"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "isomorphic by construction; CI property test keeps it that way"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "Ops machinery works today"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "This paper's revisions: 6 atomic op batches applied under ifRev, zero conflicts, zero losses"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "the write path needs nothing new"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "s-workingcopy",
+  "type": "section",
+  "title": "The working copy",
+  "blocks": [
+   {
+    "id": "wc-layout",
+    "type": "code",
+    "value": ".barkpark/\n  papers/\n    deploy-status.bpml         <- slug = filename\n  state.json                   <- tool-owned: slug -> {server, dataset, rev}\n\npull   server blocks -> file            (Studio edits are drift; pull absorbs them)\nstatus id-keyed diff, both directions\npush   diff -> derived op batch, ifRev  (conflicts surface; nothing silently lost)"
+   },
+   {
+    "id": "wc-p1",
+    "type": "paragraph",
+    "content": [
+     {
+      "type": "text",
+      "value": "A .bpml file is a checkout, not a fork — the server stays the only source of truth. Agents edit files with their native tools; push derives the ops. Nobody hand-writes an op again."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "s-plan",
+  "type": "section",
+  "title": "The plan",
+  "blocks": [
+   {
+    "id": "plan-steps",
+    "type": "steps",
+    "steps": [
+     {
+      "title": "W0 · Contract — vocabulary + constraints on GET /v1/capabilities; validate-all on publish and patch. Two endpoints, valuable regardless of everything else.",
+      "blocks": []
+     },
+     {
+      "title": "W1 · BPML — parser + printer beside FromMarkdown; GET ?format=bpml; publish accepts BPML. Gate: the round-trip property test.",
+      "blocks": []
+     },
+     {
+      "title": "W2 · Ergonomics — ops accept BPML fragments; bp speaks BPML; agent docs teach: read BPML, patch ops, never republish.",
+      "blocks": []
+     },
+     {
+      "title": "W3 · Working copy — bp paper pull / status / diff / push over .barkpark/.",
+      "blocks": []
+     }
+    ]
+   },
+   {
+    "id": "kill",
+    "type": "callout",
+    "tone": "warning",
+    "title": "Kill criterion — written before the first line of code",
+    "content": [
+     {
+      "type": "text",
+      "value": "At one month of real agent use: first-try publish ≥90% and median edit ≤2KB — or retire BPML, keep the two endpoints, write the debrief. Sunk cost: days. Deliberately unbuilt, forever unless proven needed: client runtimes, codegen toolchains, npm packages, custom file syntax."
+     }
+    ]
+   }
+  ]
+ }
+]
