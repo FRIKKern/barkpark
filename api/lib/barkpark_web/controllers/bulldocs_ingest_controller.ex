@@ -97,6 +97,92 @@ defmodule BarkparkWeb.BulldocsIngestController do
   @body_html_learn_code "legacy_body_html"
   @body_html_learn_message "This paper was ingested as opaque body_html; the preferred path is a native `blocks` list (in-canvas editing, ~50 block types). Learn the block vocabulary and composition grammar in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan, then re-ingest with `blocks`."
 
+  @doc """
+  `POST /v1/plugins/bulldocs/papers/validate` — the validate-all dry-run (BPML
+  masterplan W0). Accepts the SAME body shapes as ingest (`blocks` or `bpml`,
+  plus `slug`/`title`/`tags`/`description`) and returns EVERY violation in one
+  reply, nothing persisted:
+
+    * BPML parse errors (strict grammar, teaching hints, line numbers) — when
+      the document doesn't parse, wall gates can't run and the parse errors ARE
+      the reply;
+    * every failing publish-wall gate at once (`AuthoringWall.validate_all/5`:
+      label spine, tag registry, dedup, epic quality) instead of one 4xx at a
+      time;
+    * the paper structural gates: template declarations and the hollow-body
+      check.
+
+  Always 200 with `{valid, violations}` — the VALIDATION ran successfully; the
+  paper's shortcomings are data, not transport errors. Advisory by design: the
+  real write's wall stays authoritative.
+  """
+  def validate(conn, params) do
+    case validate_normalize(params) do
+      {:error, bpml_errors} ->
+        json(conn, %{valid: false, violations: Enum.map(bpml_errors, &bpml_violation/1)})
+
+      {:ok, slug, blocks, merged} ->
+        ref = %Barkpark.Content.Document{
+          doc_id: slug,
+          type: "paper",
+          dataset: Content.paper_default_dataset(),
+          title: merged["title"],
+          content: %{
+            "blocks" => blocks,
+            "tags" => merged["tags"],
+            "description" => merged["description"]
+          }
+        }
+
+        wall =
+          Barkpark.Content.AuthoringWall.validate_all(
+            ref,
+            "paper",
+            slug,
+            Content.paper_default_dataset()
+          )
+          |> Enum.map(fn tuple ->
+            {:error, tuple} |> Errors.to_envelope(conn) |> Map.delete(:status)
+          end)
+
+        structure =
+          Barkpark.Content.Papers.Template.validate(blocks || []) ++
+            if Barkpark.Content.Papers.Hollow.hollow?(blocks) do
+              [
+                %{
+                  code: "hollow_paper",
+                  message: "the paper is a skeleton — a title with no content blocks",
+                  hint: "add body blocks before publishing"
+                }
+              ]
+            else
+              []
+            end
+
+        violations = wall ++ Enum.map(structure, &structure_violation/1)
+        json(conn, %{valid: violations == [], violations: violations})
+    end
+  end
+
+  # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
+  defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do
+    case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+      {:ok, parsed} -> {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
+      {:error, errors} -> {:error, errors}
+    end
+  end
+
+  defp validate_normalize(%{} = params) do
+    {:ok, params["slug"] || "unvalidated-paper", params["blocks"], params}
+  end
+
+  defp bpml_violation(e),
+    do: %{code: "bpml-" <> e.code, message: e.message, line: e.line, hint: e.hint}
+
+  defp structure_violation(%{code: _} = v), do: v
+  defp structure_violation(other) when is_binary(other), do: %{code: "structure", message: other}
+  defp structure_violation(other), do: %{code: "structure", message: inspect(other)}
+
   # Native portable-doc blocks path (preferred). Renders in article mode so
   # the doc shows native typography at /papers/:slug. `style` defaults to
   # "article" since this endpoint only ingests article-grammar docs;

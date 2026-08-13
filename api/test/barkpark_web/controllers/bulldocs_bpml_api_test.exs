@@ -157,6 +157,60 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
     end
   end
 
+  describe "POST papers/validate (validate-all dry-run)" do
+    test "a compliant BPML paper validates clean and persists NOTHING", %{conn: conn} do
+      slug = "bpml-validate-clean"
+      attrs = LabelFixtures.paper_attrs(%{})
+
+      bpml = """
+      <paper slug="#{slug}" title="Clean">
+        <meta>
+          <description>#{attrs["description"]}</description>
+      #{Enum.map_join(attrs["tags"], "\n", fn t -> ~s(    <tag tag="#{t["tag"]}" strength="#{t["strength"]}">#{t["rationale"]}</tag>) end)}
+        </meta>
+        <h1>Clean</h1>
+        <p>A real paragraph of content, long enough to be honest.</p>
+      </paper>
+      """
+
+      conn = authed(conn) |> post("#{@ingest_path}/validate", %{"bpml" => bpml})
+      assert %{"valid" => true, "violations" => []} = json_response(conn, 200)
+      refute Content.get_paper(slug)
+    end
+
+    test "every violation arrives in ONE reply — wall + structure together", %{conn: conn} do
+      # unregistered tag + hollow body (title only): two different gates
+      bpml = """
+      <paper slug="bpml-validate-bad" title="Bad">
+        <meta>
+          <description>A perfectly reasonable description of this paper.</description>
+          <tag tag="never-registered-tag" strength="50">not in the registry</tag>
+        </meta>
+        <h1>Bad</h1>
+      </paper>
+      """
+
+      conn = authed(conn) |> post("#{@ingest_path}/validate", %{"bpml" => bpml})
+      assert %{"valid" => false, "violations" => violations} = json_response(conn, 200)
+      codes = Enum.map(violations, & &1["code"])
+      assert "unknown_tag" in codes
+      assert "hollow_paper" in codes
+      refute Content.get_paper("bpml-validate-bad")
+    end
+
+    test "a BPML parse failure returns the teaching errors as violations", %{conn: conn} do
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/validate", %{
+          "bpml" => "<paper slug=\"x\" title=\"X\"><div>no</div></paper>"
+        })
+
+      assert %{"valid" => false, "violations" => [v]} = json_response(conn, 200)
+      assert v["code"] == "bpml-unknown-tag"
+      assert v["hint"] =~ "<section"
+    end
+  end
+
   describe "full circle" do
     test "BPML in → blocks stored → BPML out → identical blocks", %{conn: conn} do
       slug = "bpml-circle-paper"
