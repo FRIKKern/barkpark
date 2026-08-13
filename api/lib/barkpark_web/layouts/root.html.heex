@@ -4596,6 +4596,18 @@
     .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
     .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
     .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
+    /* THE SECTION HEAD — the Studio canvas's copy of the device the reader draws
+       with `.bp-paper-surface > #paper-body > h2` (paper-surface.css carries the
+       full reasoning) and the embedder bundle repeats. A TOP-LEVEL level-2
+       heading is a section boundary: `--bp-section-beat` of air above the rule,
+       the rule, `--bp-section-gap` between rule and words. DIRECT child, so a
+       component node-view's own h2 is untouched. Byte-mirrored across all three
+       editor copies AND the reader — view_edit_parity_test.exs §9 pins the set. */
+    .bp-paper-editor-body > h2 {
+      margin-top: var(--bp-section-beat);
+      border-top: var(--bp-section-rule) solid var(--paper-ink);
+      padding-top: var(--bp-section-gap);
+    }
     .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
     .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
     .bp-paper-editor-body ul,

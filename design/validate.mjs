@@ -334,6 +334,37 @@ for (const k of Object.keys(air)) {
   ok(AIR_LADDER.includes(k), `space.air.${k} is not on the emitted ladder — a token with no consumer is the drift this gate exists to catch; add it to AIR_STEPS in design/emit.mjs and to AIR_LADDER here, or delete it`);
 }
 
+// space.section — the boundary between two sections of a paper: the air that ends
+// one (a ratio of the same `space.air.beat` the evidence ladder hangs off) and the
+// rule + gap that open the next. Three floors, each the LAW rather than the number:
+//   1. `beat` clears the heaviest evidence step. A section boundary that opened
+//      tighter than a figure would rank a picture above a whole argument — and it
+//      is the failure this token was added to fix (h2 opened at 1.9em = 51.3px,
+//      BELOW figure's 1.82x = 40px only because the h2 is bigger than a paragraph;
+//      measured against the same beat it was barely twice a paragraph's air).
+//   2. `rule >= 1` — a zero-width rule leaves the token emitted, consumed and
+//      INVISIBLE: the shape that looks single-sourced until you photograph it.
+//   3. `gap >= rule` — the words must sit further from the rule than the rule is
+//      thick, or the head reads as underlined text rather than a ruled opening.
+const SECTION_KEYS = ["beat", "rule", "gap"];
+const sec = (tokens.space || {}).section || {};
+for (const k of SECTION_KEYS) {
+  ok(typeof sec[k] === "number" && sec[k] > 0, `space.section.${k} is required (a positive number)`);
+}
+for (const k of Object.keys(sec)) {
+  if (k === "_note") continue;
+  ok(SECTION_KEYS.includes(k), `space.section.${k} is not emitted — a token with no consumer is the drift this gate exists to catch; add it to SECTION_KEYS in design/emit.mjs + check.mjs Part L, or delete it`);
+}
+if (SECTION_KEYS.every((k) => typeof sec[k] === "number")) {
+  const heaviestAir = Math.max(...AIR_LADDER.map((k) => air[k] || 0));
+  ok(
+    sec.beat > heaviestAir,
+    `space.section.beat is ${sec.beat}x but the heaviest evidence step opens at ${heaviestAir}x; a section boundary must out-air every block INSIDE a section, or the reader cannot tell an argument ended from a figure starting`,
+  );
+  ok(sec.rule >= 1, `space.section.rule is ${sec.rule}px; below 1 the rule is emitted, consumed and invisible — the air would be doing the whole job alone`);
+  ok(sec.gap >= sec.rule, `space.section.gap is ${sec.gap}px against a ${sec.rule}px rule; the head's words must clear the rule by more than its own thickness or it reads as underlined text`);
+}
+
 // space.evidence — the width a block that improves with width may claim when it
 // steps OUT of the prose column. Four floors, each encoding the LAW rather than
 // the number, so a band that has quietly stopped being a band reds here:

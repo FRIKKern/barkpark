@@ -141,6 +141,46 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-air-callout: var(--tok-air-callout);
   --bp-air-stats: var(--tok-air-stats);
   --bp-air-figure: var(--tok-air-figure);
+  /* ── The SECTION BOUNDARY (space.section → the emitted `--tok-section-*` block
+     below), bridged onto `--bp-section-*` exactly like the air scale above.
+
+     WHAT IT IS: the air scale spaces the blocks INSIDE an argument. This is the
+     boundary BETWEEN arguments — the two-part device the benchmark artifact
+     (tooling/paper-excellence/evidence/erasure.html) draws with
+     `section { margin-bottom: 92px }` and
+     `.sec-head { border-top: 2px solid var(--ink); padding-top: 16px }`. Air alone
+     reads as a long pause; a rule alone reads as decoration. Together they say
+     one thing ended and another began, which is the only reason to spend 92px.
+
+     WHERE IT LANDS, and why it is the `h2` element rule and not a wrapper. There
+     is no section box to hang it on: a `section` BLOCK flattens into its children
+     (render/compose.ex `compose_section_stack/2`), and a paper's real boundaries
+     are its level-2 headings — all 51 h2s across the six rig fixtures follow
+     non-heading content, so "level-2 heading" and "section opening" are the same
+     event in this corpus. The `<h2>` element ALSO happens to be the only carrier
+     both surfaces can agree on: View emits a bare `<h2>` (walk.ex `heading/3`)
+     and Edit is a FLAT ProseMirror document whose heading node admits no wrapper
+     and no sibling chrome. A `.bp-section-head` wrapper div, or a `p + h2`
+     sibling selector, would each exist on exactly one of the two — the drift the
+     parity gate exists to red. So the rule goes on the element, and BOTH surfaces
+     get it from this one declaration.
+
+     WHAT THIS DELIBERATELY DOES NOT SHIP: the artifact's `.sec-head .label`
+     eyebrow above the heading. It needs a slot INSIDE the head, and the two DOMs
+     disagree about where that is — Edit's h2 is a flat sibling of the paragraph
+     before it, the reader's is inside its own keyed stream `<div>`
+     (bulldocs_live.ex), so the "an eyebrow block directly above an h2 takes the
+     rule" law would need two different selectors and would be true in neither
+     rig nor reader at once. It wants a heading-carried eyebrow slot on both
+     engines, which is a data + editor-node change, not a stylesheet one.
+
+     `beat` is a ratio of `--tok-air-beat` and NOT an `em` of the heading: at
+     1.9em the old margin was hostage to the h2 font size, so a type-scale change
+     silently retuned section rhythm. Anchored on the beat, section air and
+     evidence air retune together — which is the whole point of storing a ratio. */
+  --bp-section-beat: var(--tok-section-beat);
+  --bp-section-rule: var(--tok-section-rule);
+  --bp-section-gap: var(--tok-section-gap);
   /* ── The EVIDENCE BAND (space.evidence → the emitted `--tok-evidence-*` block
      below), bridged onto `--bp-evidence-*` exactly like the air scale above.
 
@@ -277,6 +317,46 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
 .bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
 .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
+/* ── THE SECTION HEAD (space.section → the --bp-section-* bridge above) ───────
+   A TOP-LEVEL level-2 heading is a section boundary, and gets both halves of the
+   artifact's device on one element: `--bp-section-beat` of air above the rule
+   (the rule sits INSIDE the heading's border box, so this margin is the gap a
+   reader sees), the rule itself, and `--bp-section-gap` between the rule and the
+   words. It OVERRIDES the 1.9em prose margin on the element rule above, which
+   stays as the rhythm for every OTHER h2 on the surface.
+
+   WHY THIS IS SCOPED AND THE PROSE RULE IS NOT. `<h2>` is not exclusively a
+   section heading here: component chrome emits bare ones too — `.bp-card` titles
+   inside a grid cell, and (classed) `.bp-diff-title`, `.bp-goal-rail-title`,
+   `.bp-mail-subject`. A card title is not a boundary between arguments, and the
+   element rule cannot tell them apart. Position can: a section head is a block of
+   the DOCUMENT, and every component h2 is nested inside its component.
+
+   THREE LEGS, because the document has three shapes and the law is one:
+     1. `> #paper-body > h2` — the legacy/whole-body reader and the hermetic
+        render rig, which concatenate block HTML directly into the article.
+     2. `> #paper-body > div:not([class]) > h2` — the BLOCK-BACKED reader, where
+        every top-level block is its own keyed stream item
+        (`<div id data-block-id>`, bulldocs_live.ex `phx-update="stream"`). The
+        `:not([class])` is load-bearing: that wrapper carries id + data only,
+        while a `card` block at top level IS a classed div, so this leg reaches
+        the stream item without reaching into the component.
+   The reader's leg 2 is what ships, so the rig renders THAT shape (render.exs
+   mirrors the LiveView wrapper and asserts it) rather than measuring leg 1 and
+   calling the reader proven.
+
+   The EDIT twin — `.bp-paper-editor-body > h2`, the flat ProseMirror document
+   whose heading node is a direct child and admits no wrapper of its own — is the
+   third leg, and lives in the editor bundle beside the other `.bp-paper-editor-body`
+   heading rules (api/assets/paper-editor/src/styles.css), because this file is
+   `.bp-paper-surface`-scoped by its own header. The two are byte-mirrored the same
+   way the h1/h2/h3 margins are, and view_edit_parity_test.exs pins the pair. */
+.bp-paper-surface > #paper-body > h2,
+.bp-paper-surface > #paper-body > div:not([class]) > h2 {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  padding-top: var(--bp-section-gap);
+}
 /* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
    hyphenation earns its keep in JUSTIFIED text, where the alternative is rivers
    of white space; nothing on this surface is justified (text-align stays
@@ -554,6 +634,9 @@ html[data-theme="dark"] .bp-paper-body {
   --tok-air-callout: calc(var(--tok-air-beat) * 1.55);
   --tok-air-stats: calc(var(--tok-air-beat) * 1.64);
   --tok-air-figure: calc(var(--tok-air-beat) * 1.82);
+  --tok-section-beat: calc(var(--tok-air-beat) * 4.18);
+  --tok-section-rule: 2px;
+  --tok-section-gap: 16px;
   --tok-evidence-band: 1040px;
   --tok-evidence-band-max: 1240px;
   --tok-evidence-fill: 0.65;

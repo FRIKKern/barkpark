@@ -97,6 +97,25 @@ const CPL_CEILING = 75;
 // missing row rather than as a green run.
 const BREAKOUT_SELECTOR = ".bp-table, .bp-stats, .bp-chart, .bp-diff, .bp-filetree, figure";
 
+// ── The SECTION BOUNDARY contract (pe-w1-section-lever) ──────────────────────
+// A level-2 heading opens a section, and the boundary is drawn with AIR above a
+// RULE — the benchmark artifact's `section { margin-bottom: 92px }` plus
+// `.sec-head { border-top: 2px; padding-top: 16px }`
+// (tooling/paper-excellence/evidence/erasure.html). Both halves are asserted on
+// the RENDERED page, per boundary, for the reason the band is: the tokens can be
+// declared, bridged, consumed and still land nowhere. Before this change every
+// section opened at 51.3px with no rule at all — 1.9em of the h2's own font size,
+// which is prose rhythm wearing a section's job.
+//
+// The numbers are PINNED to the artifact rather than read back out of the CSS.
+// Reading `--bp-section-beat` and comparing the render to it would pass for any
+// value the token happened to hold; pinning 92 means shrinking the token reds
+// here, which is the only version of this assertion worth having.
+const SECTION_BEAT_PX = 92;
+// Sub-pixel layout rounding plus the ~0.04px the 4.18 ratio leaves against 92.
+const SECTION_BEAT_TOL_PX = 2;
+const SECTION_RULE_MIN_PX = 1;
+
 // Offline policy. The reader pulls mermaid + asciinema from cdn.jsdelivr.net,
 // and papers may embed remote media. We abort EVERY request that is not our
 // own loopback server, so the rig can never depend on the network — and can
@@ -327,11 +346,72 @@ async function main() {
             });
           }
 
+          // ── the SECTION BEAT, per boundary ─────────────────────────────────
+          // A level-2 heading opens a section. What separates one section from
+          // the next is AIR — measured here as the distance from the previous
+          // top-level block's border box to the heading's, which is the gap a
+          // reader actually sees. Reported per boundary rather than summarised,
+          // so a single collapsed boundary cannot hide inside an average.
+          //
+          // TWO DOMs, one measurement. The reader LiveView wraps every top-level
+          // block in a keyed `<div id=… data-block-id=…>` (bulldocs_live.ex,
+          // `phx-update="stream"`); this rig concatenates the same block HTML
+          // bare. Both are unwrapped to the same element below, so the number
+          // means the same thing on either — and a lever that only works in one
+          // of the two shapes (a sibling selector, say) cannot pass here.
+          const bodyEl = main.querySelector("#paper-body") || main;
+          const topLevel = [...bodyEl.children];
+          const unwrap = (el) => {
+            if (el.tagName === "H2") return el;
+            const only = el.children.length === 1 ? el.firstElementChild : null;
+            return only && only.tagName === "H2" ? only : null;
+          };
+          const sectionBeats = [];
+          for (let i = 1; i < topLevel.length; i++) {
+            const head = unwrap(topLevel[i]);
+            if (!head) continue;
+            // Measure against the last block that actually PAINTS. The Mechanical
+            // Spacing Doctrine authors vertical rhythm as empty paragraph blocks,
+            // and the engines emit nothing for them — so the reader's stream
+            // carries a real but ZERO-HEIGHT `<div id data-block-id></div>` for
+            // each. A zero-height box has no margins of its own, so it comes to
+            // rest somewhere INSIDE the collapsed margin run above the heading:
+            // measuring to it reports a fraction of an air gap the reader sees in
+            // full. (hobby-hardening-capstone stacks two of them before its first
+            // h2 and reported 69.6px of a 92px boundary.) The last painted block
+            // is the thing the eye actually measures from.
+            let prev = null;
+            for (let j = i - 1; j >= 0; j--) {
+              const r = topLevel[j].getBoundingClientRect();
+              if (r.height > 0) { prev = topLevel[j]; break; }
+            }
+            if (!prev) continue;
+            const hcs = getComputedStyle(head);
+            sectionBeats.push({
+              head: head.textContent.trim().slice(0, 44),
+              // Border box to border box: the heading's own top border (the
+              // section rule) is INSIDE its rect, so this is the air above the
+              // rule, not the air above the words.
+              gap: round(head.getBoundingClientRect().top - prev.getBoundingClientRect().bottom),
+              rule: round(parseFloat(hcs.borderTopWidth) || 0),
+              ruleGap: round(parseFloat(hcs.paddingTop) || 0),
+              // How many zero-height spacing blocks sat between the two, so the
+              // skip is visible in the report rather than inferred from a number.
+              skippedEmpty: i - 1 - [...topLevel].indexOf(prev),
+            });
+          }
+          // Headings nested inside a container block (a `section`'s own stack)
+          // are NOT top-level and are deliberately not measured — their air is
+          // owned by the container. Counted so the omission is visible.
+          const nestedH2s = main.querySelectorAll("h2").length - topLevel.filter((el) => unwrap(el)).length;
+
           return {
             wrapper: true,
             classes: main.className,
             // mermaid + asciicast are deliberately excluded (CDN blocked).
             paragraphs: main.querySelectorAll("p").length,
+            sectionBeats,
+            nestedH2s,
             columnWidth: Math.round(box.width),
             columnContentWidth: round(contentWidth),
             // `none` means the .bp-paper-shell rule never applied — the
@@ -419,6 +499,33 @@ async function main() {
         }
         assertions += 2 + seen.bandRows.length + (seen.captionCpl === null ? 0 : 1);
 
+        // ── the section-boundary contract, per boundary ────────────────────
+        // Every boundary is checked, not a sample: one collapsed section is the
+        // whole defect, and an average over ten good ones would hide it.
+        for (const b of seen.sectionBeats) {
+          if (Math.abs(b.gap - SECTION_BEAT_PX) > SECTION_BEAT_TOL_PX) {
+            fail(
+              `${cell}: the section opening "${b.head}" measures ${b.gap}px of air, not the ` +
+                `${SECTION_BEAT_PX}±${SECTION_BEAT_TOL_PX}px the artifact opens a section with — ` +
+                `a boundary a reader cannot see is not a boundary`,
+            );
+          }
+          if (b.rule < SECTION_RULE_MIN_PX) {
+            fail(
+              `${cell}: the section opening "${b.head}" carries a ${b.rule}px rule — air alone reads ` +
+                `as a long pause, and the rule is the half that says a NEW section began`,
+            );
+          }
+        }
+        if (seen.sectionBeats.length === 0) {
+          fail(
+            `${cell}: no top-level level-2 heading found under #paper-body — either this fixture has ` +
+              `no sections (it should not be in the panel) or the section-head selector stopped matching ` +
+              `the rendered document shape, which is the failure this assertion exists to catch`,
+          );
+        }
+        assertions += 2 * seen.sectionBeats.length + 1;
+
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a
         // full-page capture exceeds JPEG's 65,535px dimension cap — which a
@@ -464,7 +571,10 @@ async function main() {
         shots.push({ cell, file: path.basename(file), scale, bytes, ...seen, blockedRequests: blocked });
         console.log(
           `rig/shoot: ${cell} — column ${seen.columnWidth}px, band ${seen.evidenceBand ?? "n/a"}px ` +
-            `(${seen.bandRows.length} components), prose ${seen.proseCpl ?? "n/a"} CPL, ` +
+            `(${seen.bandRows.length} components), ${seen.sectionBeats.length} section beats ` +
+            `at ${seen.sectionBeats.length ? seen.sectionBeats[0].gap : "n/a"}px over a ` +
+            `${seen.sectionBeats.length ? seen.sectionBeats[0].rule : "n/a"}px rule, ` +
+            `prose ${seen.proseCpl ?? "n/a"} CPL, ` +
             `doc overflow ${seen.docOverflow}px, ${seen.paragraphs} paragraphs, ` +
             `${blocked} off-host requests blocked, ${scale}x, ${bytes} B`,
         );

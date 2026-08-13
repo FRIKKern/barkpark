@@ -207,6 +207,13 @@ export const EVIDENCE_KEYS = ["band", "bandMax", "fill", "gutter", "caption"];
 // MEASURE in characters — neither is a pixel, and emitting them as one would be
 // the drift the units exist to prevent.
 export const EVIDENCE_UNITS = { band: "px", bandMax: "px", fill: "", gutter: "px", caption: "ch" };
+// The SECTION BOUNDARY inputs (tokens.space.section), in emission order. `beat` is
+// a ratio of `--tok-air-beat` (so section rhythm and evidence rhythm retune
+// together); `rule` and `gap` are pixels — a hairline does not scale with a beat.
+// Every key has a live consumer on the `h2` rule of BOTH surfaces; check.mjs
+// Part L refuses a member with none, validate.mjs refuses a member not listed here.
+export const SECTION_KEYS = ["beat", "rule", "gap"];
+export const SECTION_UNITS = { beat: "", rule: "px", gap: "px" };
 const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
@@ -596,6 +603,17 @@ function paperBlock(themes = loadThemes()) {
   const evidenceVars = EVIDENCE_KEYS.map(
     (k) => `--tok-evidence-${kebab(k)}: ${e[k]}${EVIDENCE_UNITS[k]};`,
   );
+  // The SECTION BOUNDARY (space.section): the air that ends a section and the rule
+  // that opens the next. `beat` emits as a ratio of `--tok-air-beat` — the same
+  // anchor the evidence ladder hangs off, so retuning the beat moves section
+  // rhythm and evidence rhythm together instead of letting them drift apart.
+  // `rule`/`gap` emit as pixels: a hairline is a hairline at any beat.
+  const sc = tokens.space.section;
+  const sectionVars = SECTION_KEYS.map((k) =>
+    k === "beat"
+      ? `--tok-section-beat: calc(var(--tok-air-beat) * ${sc.beat});`
+      : `--tok-section-${k}: ${sc[k]}${SECTION_UNITS[k]};`,
+  );
 
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
@@ -605,6 +623,7 @@ function paperBlock(themes = loadThemes()) {
     ...step("h2", r.h2),
     ...step("h3", r.h3),
     ...airVars,
+    ...sectionVars,
     ...evidenceVars,
   ].map((l) => "  " + l).join("\n");
 

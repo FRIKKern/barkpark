@@ -46,6 +46,7 @@ defmodule Rig.Render do
       end
 
     assert_wrapper_matches_live_view!()
+    assert_stream_item_matches_live_view!()
     assert_theme_pin!()
 
     fixture = fixture_path |> File.read!() |> Jason.decode!()
@@ -54,9 +55,24 @@ defmodule Rig.Render do
 
     boot_phoenix!()
 
+    # THE SHIPPING SHAPE, not the convenient one. The block-backed reader does
+    # not concatenate block HTML into the article: it streams each top-level
+    # block as its OWN keyed item, `<div id={dom_id} data-block-id={block.id}>`
+    # (bulldocs_live.ex, `phx-update="stream"`). Rendering the bare concatenation
+    # here measured a DOM the reader never serves — margins collapse to the same
+    # numbers either way, so it read as harmless, but any rule that selects on
+    # document POSITION (the section head's `> div:not([class]) > h2`) is true in
+    # one shape and dead in the other. A rig that photographs the wrong one
+    # cannot tell those apart. So the wrapper is reproduced, and asserted
+    # against the LiveView below so a stream-shape change reds here.
     body =
       blocks
-      |> Enum.map(&Barkpark.PortableDoc.Render.render_block(&1, %{style: :article}))
+      |> Enum.with_index()
+      |> Enum.map(fn {block, index} ->
+        html = Barkpark.PortableDoc.Render.render_block(block, %{style: :article})
+        id = stream_block_id(block, index)
+        ~s(<div id="#{id}" data-block-id="#{Map.get(block, "id")}">) <> html <> "</div>"
+      end)
       |> Enum.join()
 
     if String.trim(body) == "" do
@@ -126,6 +142,50 @@ defmodule Rig.Render do
       wrapper drift: #{@live_view_path} now renders #{inspect(found)}
       but the rig hand-adds #{inspect(@wrapper_classes)}.
       Update @wrapper_classes (and re-baseline) — do NOT ignore this.
+      """)
+    end
+
+    :ok
+  end
+
+  # The block's own id, else a positional fallback — byte-for-byte the LiveView's
+  # `stream_block_id/2`. Duplicated rather than called because that function is
+  # private to the LiveView; the assertion below is what keeps the copy honest.
+  defp stream_block_id(block, index) do
+    case Map.get(block, "id") do
+      id when is_binary(id) and id != "" -> id
+      _ -> "block-#{index}"
+    end
+  end
+
+  # Drift tripwire for the STREAM ITEM, the sibling of the wrapper check above.
+  # The section-head rule selects `#paper-body > div:not([class]) > h2`, so the
+  # keyed item being a CLASS-LESS div carrying id + data-block-id is not
+  # incidental markup — it is the thing the rule matches on. If the LiveView ever
+  # gives that div a class, or drops the wrapper, the reader's section heads go
+  # flat and this rig would keep photographing its own hand-built shape and pass.
+  defp assert_stream_item_matches_live_view!() do
+    src = File.read!(@live_view_path)
+
+    line =
+      src
+      |> String.split("\n")
+      |> Enum.find(&(String.contains?(&1, "@streams.blocks") and String.contains?(&1, "<div")))
+      |> case do
+        nil -> die("no `<div :for={… <- @streams.blocks}>` stream item in #{@live_view_path} — reader stream drift")
+        l -> l
+      end
+
+    unless String.contains?(line, "id={dom_id}") and String.contains?(line, "data-block-id=") do
+      die("stream-item drift: #{@live_view_path} renders #{String.trim(line)}; the rig reproduces <div id=… data-block-id=…>")
+    end
+
+    if String.contains?(line, "class") do
+      die("""
+      stream-item drift: the keyed block wrapper in #{@live_view_path} now carries a CLASS.
+      The section-head rule matches `#paper-body > div:not([class]) > h2` — a class on this
+      wrapper silently kills every section head on the reader. Update BOTH (paper-surface.css
+      and this rig) deliberately, and re-baseline.
       """)
     end
 

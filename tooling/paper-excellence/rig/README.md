@@ -71,6 +71,15 @@ baselines show them un-hydrated and nothing here claims otherwise.
   bp-paper-surface bp-paper-article">` lives in `bulldocs_live.ex`. The rig
   hand-adds it and then asserts the class list against that file, so LiveView
   drift reds the rig instead of quietly re-measuring the wrong element.
+* **Neither is the per-block wrapper.** The block-backed reader does not
+  concatenate block HTML into the article: it streams each top-level block as
+  its own keyed item, `<div id data-block-id>` (`phx-update="stream"`). The rig
+  reproduces that, and asserts the item's shape against the LiveView the same
+  way. Margins collapse to identical numbers either way, which is why the bare
+  concatenation looked harmless for as long as it did — but any rule that
+  selects on document POSITION is true in one shape and dead in the other, and a
+  rig photographing the wrong one cannot tell those apart. The section head's
+  `> #paper-body > div:not([class]) > h2` leg is the first such rule.
 * **A JPEG capture can write nothing at all.** Playwright's JPEG encoder emits
   a **zero-byte file, without throwing**, when a full-page capture exceeds
   JPEG's 65,535 px dimension cap — which a ~100-block paper at 2x does
@@ -94,8 +103,17 @@ default moves, the rig reds rather than silently re-baselining every shot.
 `paper-excellence-wave-2026-08-12`, `portabledoc-showcase` — **full page**,
 light and dark, at **1280 and 1920**, `deviceScaleFactor: 2`, JPEG q72, plus a
 `*.report.json` per paper recording column width, **evidence-band width per
-component, prose characters-per-line, document horizontal overflow**, paragraph
-count, scale and blocked-request count.
+component, prose characters-per-line, document horizontal overflow, and the air
++ rule at every section boundary**, paragraph count, scale and blocked-request
+count.
+
+A section beat is measured from the last block that actually **paints**. The
+Mechanical Spacing Doctrine authors vertical rhythm as empty paragraph blocks and
+the engines emit nothing for them, so the stream carries a real but zero-height
+`<div>` per gap. A zero-height box has no margins of its own and comes to rest
+*inside* the collapsed margin run above the heading — measuring to it reported
+69.6px of a 92px boundary on `hobby-hardening-capstone` until the walk skipped
+back past it. The count skipped is recorded per boundary (`skippedEmpty`).
 
 Deliberate limits, stated rather than hidden:
 
