@@ -659,9 +659,13 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp row_cell(cur, cur2, tag, sc, at, kind, cells) do
     case {tag, kind} do
+      # Head cells parse as INLINE content and emit inline-node lists — the
+      # write chokepoint's canonical head-cell shape, so blocks fetched from
+      # the server round-trip byte-equal (the legacy %{"text" => …} map is a
+      # printer-input shape only).
       {"th", k} when k in [nil, :head] ->
-        case tag_text("th", sc, cur2) do
-          {:ok, text, cur3} -> row_cells_loop(cur3, at, :head, [%{"text" => text} | cells])
+        case tag_inline("th", sc, cur2) do
+          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :head, [nodes | cells])
           {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
         end
 

@@ -111,15 +111,24 @@
     "id": "proofs-table",
     "type": "table",
     "head": [
-     {
-      "text": "Claim"
-     },
-     {
-      "text": "Meter"
-     },
-     {
-      "text": "Result"
-     }
+     [
+      {
+       "type": "text",
+       "value": "Claim"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "Meter"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "Result"
+      }
+     ]
     ],
     "rows": [
      [

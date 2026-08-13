@@ -178,6 +178,43 @@ defmodule Barkpark.PortableDoc.BpmlTest do
     end
   end
 
+  describe "table head cells" do
+    test "canonical inline-list heads round-trip; legacy text-map heads canonicalize" do
+      canonical = [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "head" => [
+            [%{"type" => "text", "value" => "Claim"}],
+            [%{"type" => "text", "value" => "Meter"}]
+          ],
+          "rows" => [
+            [[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "b"}]]
+          ]
+        }
+      ]
+
+      {_bpml, parsed} = roundtrip!(canonical)
+      assert parsed == canonical
+
+      # the write chokepoint's pre-normalization shape: accepted as printer
+      # input, emitted identically, canonicalized by the round-trip
+      legacy = [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "head" => [%{"text" => "Claim"}, %{"text" => "Meter"}],
+          "rows" => [
+            [[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "b"}]]
+          ]
+        }
+      ]
+
+      assert Bpml.print_blocks(legacy) == Bpml.print_blocks(canonical)
+      assert {:ok, ^canonical} = Bpml.parse_blocks(Bpml.print_blocks(legacy))
+    end
+  end
+
   # ── naming law: HTML aliases canonicalize ───────────────────────────────────
 
   describe "naming law" do
