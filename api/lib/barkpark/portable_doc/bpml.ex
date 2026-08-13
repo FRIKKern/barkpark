@@ -60,4 +60,59 @@ defmodule Barkpark.PortableDoc.Bpml do
   @doc "BPML `<paper>` document → `{:ok, paper_map}` | `{:error, errors}`."
   @spec parse_paper(String.t()) :: {:ok, map()} | {:error, errors}
   defdelegate parse_paper(bpml), to: Parser
+
+  @doc """
+  The machine-readable BPML contract for `/v1/capabilities` (masterplan W0):
+  block tags with their allowed attributes, the inline alias→mark table, and a
+  DERIVED digest — sha256 over an explicitly sorted rendering, so it is stable
+  across nodes and moves exactly when the grammar moves (the same
+  derive-don't-hand-bump doctrine as the renderer's source digest). Clients
+  echo the digest to detect that their generated types have gone stale.
+  """
+  @spec vocabulary() :: map()
+  def vocabulary do
+    blocks =
+      Parser.block_attrs()
+      |> Map.take(
+        Parser.known_block_tags() ++
+          [
+            "paper",
+            "stat",
+            "step",
+            "item",
+            "li",
+            "tr",
+            "th",
+            "td",
+            "meta",
+            "description",
+            "tag",
+            "a"
+          ]
+      )
+
+    vocab = %{
+      "blocks" => blocks,
+      "inline" => Parser.inline_marks(),
+      "formats" => ["json", "bpml"]
+    }
+
+    digest =
+      :crypto.hash(:sha256, :erlang.iolist_to_binary(canonical(vocab)))
+      |> Base.encode16(case: :lower)
+
+    Map.put(vocab, "digest", "bpml-" <> binary_part(digest, 0, 16))
+  end
+
+  # Deterministic rendering for the digest: maps sort by key; lists keep their
+  # order (attribute order is part of the contract).
+  defp canonical(map) when is_map(map),
+    do: [
+      "{",
+      map |> Enum.sort() |> Enum.map(fn {k, v} -> [to_string(k), ":", canonical(v), ","] end),
+      "}"
+    ]
+
+  defp canonical(list) when is_list(list), do: ["[", Enum.map(list, &[canonical(&1), ","]), "]"]
+  defp canonical(other), do: to_string(other)
 end

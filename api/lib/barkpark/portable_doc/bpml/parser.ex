@@ -59,7 +59,26 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram stats steps callout)
 
+  @inline_marks %{
+    "b" => "strong",
+    "strong" => "strong",
+    "i" => "em",
+    "em" => "em",
+    "code" => "code",
+    "u" => "underline",
+    "s" => "strike"
+  }
+
   # ── public ──────────────────────────────────────────────────────────────────
+
+  @doc "The tag → allowed-attributes table (the grammar's attribute contract)."
+  def block_attrs, do: @block_attrs
+
+  @doc "Block tags valid at document level."
+  def known_block_tags, do: @known_block_tags
+
+  @doc "Inline tag → mark name (aliases included: strong→strong, b→strong…)."
+  def inline_marks, do: @inline_marks
 
   def parse_blocks(bpml) when is_binary(bpml) do
     {blocks, errors, _cur} = block_seq({bpml, 1}, nil)
@@ -380,16 +399,6 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   end
 
   # ── inline ──────────────────────────────────────────────────────────────────
-
-  @inline_marks %{
-    "b" => "strong",
-    "strong" => "strong",
-    "i" => "em",
-    "em" => "em",
-    "code" => "code",
-    "u" => "underline",
-    "s" => "strike"
-  }
 
   defp inline_seq(cur, marks, acc) do
     {text, cur} = raw_text(cur)
