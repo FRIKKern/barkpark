@@ -25,6 +25,7 @@
       "paragraphs": 29,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The wish",
           "gap": 92,
           "rule": 2,
@@ -32,6 +33,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What the strategist saw",
           "gap": 92,
           "rule": 2,
@@ -39,6 +41,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The direction — Twin and Close",
           "gap": 92,
           "rule": 2,
@@ -46,6 +49,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The debate",
           "gap": 92,
           "rule": 2,
@@ -53,6 +57,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The survey plan — 16 lanes",
           "gap": 92,
           "rule": 2,
@@ -60,6 +65,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Survey digest — what sixteen lanes establish",
           "gap": 92,
           "rule": 2,
@@ -67,6 +73,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Coverage map — found, and pointedly not foun",
           "gap": 92,
           "rule": 2,
@@ -74,6 +81,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verify plan — the last look before the plan ",
           "gap": 92,
           "rule": 2,
@@ -81,6 +89,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verification results — ten probes, four refu",
           "gap": 92,
           "rule": 2,
@@ -88,6 +97,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Decisions",
           "gap": 92,
           "rule": 2,
@@ -95,6 +105,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Wave plan — seven slices, two rounds",
           "gap": 92,
           "rule": 2,
@@ -103,6 +114,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -117,42 +129,54 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -169,6 +193,7 @@
       "paragraphs": 29,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The wish",
           "gap": 92,
           "rule": 2,
@@ -176,6 +201,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What the strategist saw",
           "gap": 92,
           "rule": 2,
@@ -183,6 +209,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The direction — Twin and Close",
           "gap": 92,
           "rule": 2,
@@ -190,6 +217,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The debate",
           "gap": 92,
           "rule": 2,
@@ -197,6 +225,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The survey plan — 16 lanes",
           "gap": 92,
           "rule": 2,
@@ -204,6 +233,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Survey digest — what sixteen lanes establish",
           "gap": 92,
           "rule": 2,
@@ -211,6 +241,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Coverage map — found, and pointedly not foun",
           "gap": 92,
           "rule": 2,
@@ -218,6 +249,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verify plan — the last look before the plan ",
           "gap": 92,
           "rule": 2,
@@ -225,6 +257,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verification results — ten probes, four refu",
           "gap": 92,
           "rule": 2,
@@ -232,6 +265,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Decisions",
           "gap": 92,
           "rule": 2,
@@ -239,6 +273,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Wave plan — seven slices, two rounds",
           "gap": 92,
           "rule": 2,
@@ -247,6 +282,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -261,42 +297,54 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -313,6 +361,7 @@
       "paragraphs": 29,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The wish",
           "gap": 92,
           "rule": 2,
@@ -320,6 +369,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What the strategist saw",
           "gap": 92,
           "rule": 2,
@@ -327,6 +377,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The direction — Twin and Close",
           "gap": 92,
           "rule": 2,
@@ -334,6 +385,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The debate",
           "gap": 92,
           "rule": 2,
@@ -341,6 +393,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The survey plan — 16 lanes",
           "gap": 92,
           "rule": 2,
@@ -348,6 +401,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Survey digest — what sixteen lanes establish",
           "gap": 92,
           "rule": 2,
@@ -355,6 +409,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Coverage map — found, and pointedly not foun",
           "gap": 92,
           "rule": 2,
@@ -362,6 +417,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verify plan — the last look before the plan ",
           "gap": 92,
           "rule": 2,
@@ -369,6 +425,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verification results — ten probes, four refu",
           "gap": 92,
           "rule": 2,
@@ -376,6 +433,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Decisions",
           "gap": 92,
           "rule": 2,
@@ -383,6 +441,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Wave plan — seven slices, two rounds",
           "gap": 92,
           "rule": 2,
@@ -391,6 +450,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -405,42 +465,54 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -457,6 +529,7 @@
       "paragraphs": 29,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "The wish",
           "gap": 92,
           "rule": 2,
@@ -464,6 +537,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What the strategist saw",
           "gap": 92,
           "rule": 2,
@@ -471,6 +545,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The direction — Twin and Close",
           "gap": 92,
           "rule": 2,
@@ -478,6 +553,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The debate",
           "gap": 92,
           "rule": 2,
@@ -485,6 +561,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The survey plan — 16 lanes",
           "gap": 92,
           "rule": 2,
@@ -492,6 +569,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Survey digest — what sixteen lanes establish",
           "gap": 92,
           "rule": 2,
@@ -499,6 +577,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Coverage map — found, and pointedly not foun",
           "gap": 92,
           "rule": 2,
@@ -506,6 +585,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verify plan — the last look before the plan ",
           "gap": 92,
           "rule": 2,
@@ -513,6 +593,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Verification results — ten probes, four refu",
           "gap": 92,
           "rule": 2,
@@ -520,6 +601,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Decisions",
           "gap": 92,
           "rule": 2,
@@ -527,6 +609,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "Wave plan — seven slices, two rounds",
           "gap": 92,
           "rule": 2,
@@ -535,6 +618,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -549,42 +633,54 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,

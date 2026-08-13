@@ -98,7 +98,7 @@ default moves, the rig reds rather than silently re-baselining every shot.
 
 ## Baselines
 
-`baselines/` holds the 6-paper panel: `eight-minute-erasure`,
+`baselines/` holds the 7-paper panel: `design-probe`, `eight-minute-erasure`,
 `heggemsnes-act`, `hobby-hardening-capstone`, `mechanical-spacing-doctrine`,
 `paper-excellence-wave-2026-08-12`, `portabledoc-showcase` — **full page**,
 light and dark, at **1280 and 1920**, `deviceScaleFactor: 2`, JPEG q72, plus a
@@ -106,6 +106,25 @@ light and dark, at **1280 and 1920**, `deviceScaleFactor: 2`, JPEG q72, plus a
 component, prose characters-per-line, document horizontal overflow, and the air
 + rule at every section boundary**, paragraph count, scale and blocked-request
 count.
+
+A paper opens a section in one of **two shapes**, and both are measured:
+
+* **heading** — a top-level level-2 heading. The section-head device sizes this
+  one (92px of air over a 2px rule), and it is the only shape the gate asserts.
+* **container** — a `section` BLOCK, which composes to a flex stack whose first
+  child is a leading rule (`compose_section_stack/2`). Its eyebrow and h2 live
+  *inside* the container, so no top-level selector reaches them and the device
+  does not size it. Measured at **16px over a 1px rule** on `design-probe`.
+
+The container shape is reported, never asserted — it is an open finding, and a
+gate that held a committed fixture to a target nothing implements would be a
+red with no fix behind it. Two more findings ride the same rule: `doubledRules`
+records consecutive containers stacking a trailing and a leading rule (**32px
+apart** on `design-probe`), and each band row carries `inkWidth` /
+`inkOffCentre` beside its box geometry, because a content-narrow table has a
+full-width perfectly-centred **box** whose **ink** pins to the band's left edge
+(**290.6px of ink, 374.7px off the column axis** on the same fixture) — which the
+box-centre assertion passes.
 
 A section beat is measured from the last block that actually **paints**. The
 Mechanical Spacing Doctrine authors vertical rhythm as empty paragraph blocks and

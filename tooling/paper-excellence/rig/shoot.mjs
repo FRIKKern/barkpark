@@ -335,6 +335,22 @@ async function main() {
             const r = el.getBoundingClientRect();
             if (r.width <= 0 || r.height <= 0) continue;
             const kind = el.tagName === "FIGURE" ? "figure" : (el.className.match(/bp-[a-z]+/) || ["?"])[0];
+            // THE INKED EXTENT — where the component's visible content actually
+            // sits, as opposed to where its BOX sits. These come apart when the
+            // content is narrower than the band it was given: the box is the full
+            // 1040px and perfectly centred, while the ink hugs one edge. The
+            // box-centre assertion below cannot see that (it passes at
+            // offCentre 0) — measured on the `design-probe` fixture, whose narrow
+            // table has a 1040px centred box and 290.6px of ink pinned 374.7px
+            // left of the column axis. Reported, not asserted: the band's fill
+            // behaviour for narrow content is a separate finding with its own
+            // task, and asserting it here would red a committed fixture for a
+            // defect this change does not fix.
+            const leaves = [...el.querySelectorAll("th, td, .bp-stat, li, p, img, svg, pre")]
+              .map((c) => c.getBoundingClientRect())
+              .filter((c) => c.width > 0 && c.height > 0);
+            const inkLeft = leaves.length ? Math.min(...leaves.map((c) => c.left)) : r.left;
+            const inkRight = leaves.length ? Math.max(...leaves.map((c) => c.right)) : r.right;
             bandRows.push({
               kind,
               width: round(r.width),
@@ -343,6 +359,8 @@ async function main() {
               offCentre: round(r.left + r.width / 2 - contentCentre),
               left: round(r.left),
               right: round(r.right),
+              inkWidth: round(inkRight - inkLeft),
+              inkOffCentre: round((inkLeft + inkRight) / 2 - contentCentre),
             });
           }
 
@@ -366,10 +384,45 @@ async function main() {
             const only = el.children.length === 1 ? el.firstElementChild : null;
             return only && only.tagName === "H2" ? only : null;
           };
+          // A paper opens a section in ONE of two shapes, and the rig has to be
+          // able to see both or it will report a clean page for a broken one:
+          //
+          //   "heading"   — a top-level level-2 heading. The device sizes this one:
+          //                 air + rule + gap on the h2 itself.
+          //   "container" — a `section` BLOCK, which composes to a flex stack whose
+          //                 FIRST child is a leading `<hr class="bp-hr">`
+          //                 (compose_section_stack/2). Its head is that rule, and
+          //                 the eyebrow + h2 that follow sit INSIDE the container,
+          //                 so no `> #paper-body > … > h2` leg reaches them.
+          //
+          // The container shape is measured and REPORTED but not asserted against
+          // the 92px target: it is currently unsized (the hr keeps its generic
+          // `.bp-hr` rhythm), which is a finding this rig exists to make visible
+          // with numbers rather than a claim. Asserting it here would red a
+          // committed fixture for a defect this change does not fix.
+          const sectionHead = (el) => {
+            const h = unwrap(el);
+            if (h) return { kind: "heading", el: h, label: h.textContent.trim().slice(0, 44) };
+            // The section container: a class-less stream div wrapping the flex
+            // stack whose first element child is the leading rule.
+            const stack = el.tagName === "DIV" && el.children.length === 1 ? el.firstElementChild : null;
+            const lead = stack && stack.firstElementChild;
+            if (lead && lead.tagName === "HR") {
+              const h2 = stack.querySelector("h2");
+              return {
+                kind: "container",
+                el: lead,
+                label: (h2 ? h2.textContent : stack.textContent).trim().slice(0, 44),
+              };
+            }
+            return null;
+          };
+
           const sectionBeats = [];
           for (let i = 1; i < topLevel.length; i++) {
-            const head = unwrap(topLevel[i]);
-            if (!head) continue;
+            const found = sectionHead(topLevel[i]);
+            if (!found) continue;
+            const head = found.el;
             // Measure against the last block that actually PAINTS. The Mechanical
             // Spacing Doctrine authors vertical rhythm as empty paragraph blocks,
             // and the engines emit nothing for them — so the reader's stream
@@ -388,7 +441,8 @@ async function main() {
             if (!prev) continue;
             const hcs = getComputedStyle(head);
             sectionBeats.push({
-              head: head.textContent.trim().slice(0, 44),
+              kind: found.kind,
+              head: found.label,
               // Border box to border box: the heading's own top border (the
               // section rule) is INSIDE its rect, so this is the air above the
               // rule, not the air above the words.
@@ -401,9 +455,29 @@ async function main() {
             });
           }
           // Headings nested inside a container block (a `section`'s own stack)
-          // are NOT top-level and are deliberately not measured — their air is
-          // owned by the container. Counted so the omission is visible.
+          // are NOT top-level. Their air is owned by the container's leading
+          // rule, which is measured above as a "container" beat. Counted so the
+          // omission is visible rather than inferred.
           const nestedH2s = main.querySelectorAll("h2").length - topLevel.filter((el) => unwrap(el)).length;
+
+          // THE DOUBLED BOUNDARY. `compose_section_stack/2` wraps every section
+          // in a leading AND a trailing rule, so two adjacent `section` blocks
+          // put two hairlines a few px apart where the grammar wants one. It is
+          // a THREE-engine contract (walk.ex, internal/pdrender/blocks.go and
+          // js blocks/core.ts all emit `PdHr, …, PdHr`), so it is measured and
+          // reported here rather than fixed in CSS — a stylesheet that hid one
+          // of the two would leave the TUI and the SDK still drawing both.
+          const doubledRules = [];
+          for (let i = 1; i < topLevel.length; i++) {
+            const prevStack = topLevel[i - 1].children.length === 1 ? topLevel[i - 1].firstElementChild : null;
+            const tail = prevStack && prevStack.lastElementChild;
+            const found = sectionHead(topLevel[i]);
+            if (!tail || tail.tagName !== "HR" || !found || found.kind !== "container") continue;
+            doubledRules.push({
+              between: found.label,
+              apart: round(found.el.getBoundingClientRect().top - tail.getBoundingClientRect().bottom),
+            });
+          }
 
           return {
             wrapper: true,
@@ -412,6 +486,7 @@ async function main() {
             paragraphs: main.querySelectorAll("p").length,
             sectionBeats,
             nestedH2s,
+            doubledRules,
             columnWidth: Math.round(box.width),
             columnContentWidth: round(contentWidth),
             // `none` means the .bp-paper-shell rule never applied — the
@@ -502,7 +577,12 @@ async function main() {
         // ── the section-boundary contract, per boundary ────────────────────
         // Every boundary is checked, not a sample: one collapsed section is the
         // whole defect, and an average over ten good ones would hide it.
-        for (const b of seen.sectionBeats) {
+        // Only the HEADING shape is asserted against the target — that is the one
+        // the device sizes. Container-shaped sections are reported with their
+        // measured (unsized) numbers; see the measurement comment for why holding
+        // them to 92px here would red a committed fixture for an unfixed defect.
+        const sized = seen.sectionBeats.filter((b) => b.kind === "heading");
+        for (const b of sized) {
           if (Math.abs(b.gap - SECTION_BEAT_PX) > SECTION_BEAT_TOL_PX) {
             fail(
               `${cell}: the section opening "${b.head}" measures ${b.gap}px of air, not the ` +
@@ -517,14 +597,19 @@ async function main() {
             );
           }
         }
+        // A paper with NO boundary of either shape means the selector stopped
+        // matching the rendered document, which is the vacuous green this whole
+        // measurement exists to refuse. A paper with only CONTAINER boundaries is
+        // legitimate (the probe fixture is exactly that) and must not red.
         if (seen.sectionBeats.length === 0) {
           fail(
-            `${cell}: no top-level level-2 heading found under #paper-body — either this fixture has ` +
-              `no sections (it should not be in the panel) or the section-head selector stopped matching ` +
-              `the rendered document shape, which is the failure this assertion exists to catch`,
+            `${cell}: no section boundary of EITHER shape under #paper-body — no top-level level-2 ` +
+              `heading and no \`section\` container. Either this fixture has no sections (it should not ` +
+              `be in the panel) or the rendered document shape moved out from under both, which is the ` +
+              `failure this assertion exists to catch`,
           );
         }
-        assertions += 2 * seen.sectionBeats.length + 1;
+        assertions += 2 * sized.length + 1;
 
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a
@@ -571,10 +656,16 @@ async function main() {
         shots.push({ cell, file: path.basename(file), scale, bytes, ...seen, blockedRequests: blocked });
         console.log(
           `rig/shoot: ${cell} — column ${seen.columnWidth}px, band ${seen.evidenceBand ?? "n/a"}px ` +
-            `(${seen.bandRows.length} components), ${seen.sectionBeats.length} section beats ` +
-            `at ${seen.sectionBeats.length ? seen.sectionBeats[0].gap : "n/a"}px over a ` +
-            `${seen.sectionBeats.length ? seen.sectionBeats[0].rule : "n/a"}px rule, ` +
-            `prose ${seen.proseCpl ?? "n/a"} CPL, ` +
+            `(${seen.bandRows.length} components), ` +
+            `${sized.length} sized section beats` +
+            (sized.length ? ` at ${sized[0].gap}px over a ${sized[0].rule}px rule` : "") +
+            (seen.sectionBeats.length - sized.length
+              ? `, ${seen.sectionBeats.length - sized.length} UNSIZED container heads` +
+                ` at ${seen.sectionBeats.find((b) => b.kind === "container").gap}px` +
+                ` over a ${seen.sectionBeats.find((b) => b.kind === "container").rule}px rule`
+              : "") +
+            (seen.doubledRules.length ? `, ${seen.doubledRules.length} DOUBLED rules` : "") +
+            `, prose ${seen.proseCpl ?? "n/a"} CPL, ` +
             `doc overflow ${seen.docOverflow}px, ${seen.paragraphs} paragraphs, ` +
             `${blocked} off-host requests blocked, ${scale}x, ${bytes} B`,
         );

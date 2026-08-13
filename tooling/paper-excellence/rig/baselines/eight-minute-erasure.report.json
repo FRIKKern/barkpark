@@ -25,6 +25,7 @@
       "paragraphs": 21,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "I · What the timestamps say",
           "gap": 92,
           "rule": 2,
@@ -32,6 +33,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "II · Reconstructing it from the repository",
           "gap": 92,
           "rule": 2,
@@ -39,6 +41,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "III · Three sentences that mattered",
           "gap": 92,
           "rule": 2,
@@ -46,6 +49,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "IV · Was the change even right?",
           "gap": 92,
           "rule": 2,
@@ -53,6 +57,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "V · How much is actually lost",
           "gap": 92,
           "rule": 2,
@@ -60,14 +65,24 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "VI · Right change, wrong size, wrong way",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
           "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
         }
       ],
       "nestedH2s": 1,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -82,63 +97,81 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 519.8,
+          "inkOffCentre": -260.1
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 623,
+          "inkOffCentre": -208.5
         }
       ],
       "docOverflow": 0,
@@ -155,6 +188,7 @@
       "paragraphs": 21,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "I · What the timestamps say",
           "gap": 92,
           "rule": 2,
@@ -162,6 +196,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "II · Reconstructing it from the repository",
           "gap": 92,
           "rule": 2,
@@ -169,6 +204,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "III · Three sentences that mattered",
           "gap": 92,
           "rule": 2,
@@ -176,6 +212,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "IV · Was the change even right?",
           "gap": 92,
           "rule": 2,
@@ -183,6 +220,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "V · How much is actually lost",
           "gap": 92,
           "rule": 2,
@@ -190,14 +228,24 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "VI · Right change, wrong size, wrong way",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
           "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
         }
       ],
       "nestedH2s": 1,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -212,63 +260,81 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 519.8,
+          "inkOffCentre": -360.1
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 623,
+          "inkOffCentre": -308.5
         }
       ],
       "docOverflow": 0,
@@ -285,6 +351,7 @@
       "paragraphs": 21,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "I · What the timestamps say",
           "gap": 92,
           "rule": 2,
@@ -292,6 +359,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "II · Reconstructing it from the repository",
           "gap": 92,
           "rule": 2,
@@ -299,6 +367,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "III · Three sentences that mattered",
           "gap": 92,
           "rule": 2,
@@ -306,6 +375,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "IV · Was the change even right?",
           "gap": 92,
           "rule": 2,
@@ -313,6 +383,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "V · How much is actually lost",
           "gap": 92,
           "rule": 2,
@@ -320,14 +391,24 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "VI · Right change, wrong size, wrong way",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
           "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
         }
       ],
       "nestedH2s": 1,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -342,63 +423,81 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 519.8,
+          "inkOffCentre": -260.1
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 623,
+          "inkOffCentre": -208.5
         }
       ],
       "docOverflow": 0,
@@ -415,6 +514,7 @@
       "paragraphs": 21,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "I · What the timestamps say",
           "gap": 92,
           "rule": 2,
@@ -422,6 +522,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "II · Reconstructing it from the repository",
           "gap": 92,
           "rule": 2,
@@ -429,6 +530,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "III · Three sentences that mattered",
           "gap": 92,
           "rule": 2,
@@ -436,6 +538,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "IV · Was the change even right?",
           "gap": 92,
           "rule": 2,
@@ -443,6 +546,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "V · How much is actually lost",
           "gap": 92,
           "rule": 2,
@@ -450,14 +554,24 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "VI · Right change, wrong size, wrong way",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
           "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
         }
       ],
       "nestedH2s": 1,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -472,63 +586,81 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 519.8,
+          "inkOffCentre": -360.1
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 623,
+          "inkOffCentre": -308.5
         }
       ],
       "docOverflow": 0,

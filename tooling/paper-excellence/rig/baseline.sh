@@ -22,7 +22,15 @@ if [ ${#SLUGS[@]} -eq 0 ]; then
   # is the ONE committed fixture carrying all six evidence kinds at once — table,
   # stats, figure, code, callout, asciicast — so an evidence-spacing regression
   # shows up here in a single shot instead of across five papers.
-  SLUGS=(eight-minute-erasure heggemsnes-act hobby-hardening-capstone \
+  #
+  # design-probe joined with pe-w1-section-lever and is the ONE authored fixture
+  # (BPML, no published paper behind it — see its `_source`). It carries the three
+  # shapes the six real papers do not: `section` CONTAINERS with eyebrow+h2 heads,
+  # consecutive containers stacking a doubled boundary rule, and a content-narrow
+  # table whose ink pins to the band's left edge while its box stays centred. All
+  # three are measured and none asserted, so it is the fixture an open finding
+  # gets closed against.
+  SLUGS=(design-probe eight-minute-erasure heggemsnes-act hobby-hardening-capstone \
          mechanical-spacing-doctrine paper-excellence-wave-2026-08-12 \
          portabledoc-showcase)
 fi

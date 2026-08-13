@@ -25,6 +25,7 @@
       "paragraphs": 12,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "Why the old doctrine failed",
           "gap": 92,
           "rule": 2,
@@ -32,6 +33,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The keyboard contract",
           "gap": 92,
           "rule": 2,
@@ -39,6 +41,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The invariant",
           "gap": 92,
           "rule": 2,
@@ -46,6 +49,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What proves the repair",
           "gap": 92,
           "rule": 2,
@@ -53,6 +57,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "How existing Papers migrate",
           "gap": 92,
           "rule": 2,
@@ -61,6 +66,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -75,14 +81,18 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -99,6 +109,7 @@
       "paragraphs": 12,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "Why the old doctrine failed",
           "gap": 92,
           "rule": 2,
@@ -106,6 +117,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The keyboard contract",
           "gap": 92,
           "rule": 2,
@@ -113,6 +125,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The invariant",
           "gap": 92,
           "rule": 2,
@@ -120,6 +133,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What proves the repair",
           "gap": 92,
           "rule": 2,
@@ -127,6 +141,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "How existing Papers migrate",
           "gap": 92,
           "rule": 2,
@@ -135,6 +150,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -149,14 +165,18 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1105.2,
+          "inkOffCentre": -67.4
         }
       ],
       "docOverflow": 0,
@@ -173,6 +193,7 @@
       "paragraphs": 12,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "Why the old doctrine failed",
           "gap": 92,
           "rule": 2,
@@ -180,6 +201,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The keyboard contract",
           "gap": 92,
           "rule": 2,
@@ -187,6 +209,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The invariant",
           "gap": 92,
           "rule": 2,
@@ -194,6 +217,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What proves the repair",
           "gap": 92,
           "rule": 2,
@@ -201,6 +225,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "How existing Papers migrate",
           "gap": 92,
           "rule": 2,
@@ -209,6 +234,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -223,14 +249,18 @@
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1040,
           "offCentre": 0,
           "left": 120,
-          "right": 1160
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
@@ -247,6 +277,7 @@
       "paragraphs": 12,
       "sectionBeats": [
         {
+          "kind": "heading",
           "head": "Why the old doctrine failed",
           "gap": 92,
           "rule": 2,
@@ -254,6 +285,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The keyboard contract",
           "gap": 92,
           "rule": 2,
@@ -261,6 +293,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "The invariant",
           "gap": 92,
           "rule": 2,
@@ -268,6 +301,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "What proves the repair",
           "gap": 92,
           "rule": 2,
@@ -275,6 +309,7 @@
           "skippedEmpty": 0
         },
         {
+          "kind": "heading",
           "head": "How existing Papers migrate",
           "gap": 92,
           "rule": 2,
@@ -283,6 +318,7 @@
         }
       ],
       "nestedH2s": 0,
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -297,14 +333,18 @@
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-table",
           "width": 1240,
           "offCentre": 0,
           "left": 340,
-          "right": 1580
+          "right": 1580,
+          "inkWidth": 1105.2,
+          "inkOffCentre": -67.4
         }
       ],
       "docOverflow": 0,
