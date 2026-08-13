@@ -141,6 +141,62 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-air-callout: var(--tok-air-callout);
   --bp-air-stats: var(--tok-air-stats);
   --bp-air-figure: var(--tok-air-figure);
+  /* ── The EVIDENCE BAND (space.evidence → the emitted `--tok-evidence-*` block
+     below), bridged onto `--bp-evidence-*` exactly like the air scale above.
+
+     WHAT IT IS: prose holds the 660px reading column because 66-72 characters
+     per line is what a sentence is legible at. A table, a stat strip, a chart, a
+     diagram or a terminal recording is NOT prose — it has no measure to hold,
+     and the column starves it. So a block that IMPROVES WITH WIDTH steps out of
+     the column into a wider band, centered on the same axis, while every prose
+     block stays exactly where it was. The benchmark artifact
+     tooling/paper-excellence/evidence/erasure.html ships the same split:
+     `--measure: 66ch` for `.col`, `--wide: 1040px` for `.wide`, a 1.58x ratio.
+
+     THE LAW, not the literal. `--bp-evidence-width` is ONE expression composed
+     from all five tokens, read by every breakout rule below and by the four
+     article <figure> emitters in render/figures.ex:
+
+       max( 100%,                                    never narrower than the column
+            min( max(band, 100cqw * fill),           grow with the screen, floored
+                 bandMax,                            but capped
+                 100cqw - 2 * gutter ) )             and never touching the edges
+
+     Read outward-in: the band SITS at 1040px (the artifact's number) from ~1120px
+     of available width, starts GROWING once 65% of the screen exceeds it (1600px),
+     and stops at 1240px. Below the column it collapses to `100%` — the component
+     simply fills the column again, which is what makes 360px safe.
+
+     WHY `100cqw` AND NOT `100vw`: cqw resolves against the nearest inline-size
+     container, and the Studio declares one on the editor's content pane
+     (`.editor-with-preview .editor-panel-main.bp-paper-body`, root.html.heex).
+     So inside the editor the band measures the PANE, and on the reader — where
+     no container exists and cqw falls back to the small viewport per spec — it
+     measures the screen. Both correct from one expression. `100vw` would have
+     been correct on the reader and blown out of the pane in the editor, and a
+     viewport @media beside a pane-relative width would have disagreed with
+     itself; that is also why the growth clause is arithmetic and not a
+     breakpoint. The `gutter` doubles as the scrollbar allowance: cqw/vw both
+     COUNT the classic scrollbar, so a band clamped to `100cqw - 80px` cannot
+     reach the edge that a ~15px scrollbar occupies. The page body never scrolls
+     sideways; a component wider than its own band self-scrolls instead
+     (`overflow-x: auto`, the inner boundary pe-w1-air-beat established).
+
+     `--bp-evidence-pull` is the negative margin that re-centers the wider box on
+     the column's own axis: `50%` resolves against the containing block, so the
+     band centers on the COLUMN rather than on the screen, and stays centered
+     under any left rail or pane offset the column itself sits behind.
+
+     Captions do NOT ride the band: `--bp-evidence-caption` returns a figcaption
+     to a 72-character reading measure inside a figure that may be 1240px wide,
+     because a caption is prose and inherits prose's law, not its figure's. */
+  --bp-evidence-band: var(--tok-evidence-band);
+  --bp-evidence-band-max: var(--tok-evidence-band-max);
+  --bp-evidence-fill: var(--tok-evidence-fill);
+  --bp-evidence-gutter: var(--tok-evidence-gutter);
+  --bp-evidence-caption: var(--tok-evidence-caption);
+  --bp-evidence-width: max(100%, min(max(var(--bp-evidence-band), 100cqw * var(--bp-evidence-fill)), var(--bp-evidence-band-max), 100cqw - 2 * var(--bp-evidence-gutter)));
+  --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
   --bp-code-size: 0.92em;
@@ -335,7 +391,14 @@ html[data-theme="dark"] .bp-paper-body {
    overflow-x makes a wide table scroll INSIDE its own box instead of widening
    the document — a 3-col table was the measured mobile-overflow culprit at
    390px (the reading column must never scroll horizontally). */
-.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; border-collapse: collapse; width: 100%; display: block; max-width: 100%; overflow-x: auto; }
+/* The table BREAKS OUT to the evidence band (see --bp-evidence-width above): a
+   data table gains a real column of resolution for every 150px it is given, and
+   the prose column was clipping it. `max-width: 100%` is GONE — with an explicit
+   band width it was a no-op at every width below the column and a clamp that
+   undid the breakout above it; `display: block` + `overflow-x: auto` stay, and
+   they are the inner boundary: a table too wide for even the band scrolls
+   ITSELF, never the page. */
+.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: var(--bp-evidence-width, 100%); box-sizing: border-box; display: block; overflow-x: auto; }
 .bp-paper-surface .bp-table__th {
   border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left;
   text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
@@ -491,6 +554,11 @@ html[data-theme="dark"] .bp-paper-body {
   --tok-air-callout: calc(var(--tok-air-beat) * 1.55);
   --tok-air-stats: calc(var(--tok-air-beat) * 1.64);
   --tok-air-figure: calc(var(--tok-air-beat) * 1.82);
+  --tok-evidence-band: 1040px;
+  --tok-evidence-band-max: 1240px;
+  --tok-evidence-fill: 0.65;
+  --tok-evidence-gutter: 40px;
+  --tok-evidence-caption: 50ch;
   --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -773,10 +841,31 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    Studio-only `text-xs` class can't supply here) plus the filetree
    annotation/legend hooks — no new token layer (D85); every duplicated value
    agrees byte-for-byte with the emitters' inline declarations. */
+/* Both BREAK OUT to the evidence band: a unified diff and a file tree are
+   fixed-width monospace artifacts whose line length is set by the source, not by
+   the column, and both already carry `overflow-x: auto` — so the column was
+   buying nothing but a scrollbar.
+
+   Unlike .bp-table / .bp-stats / .bp-chart, the breakout for these two is
+   PRODUCED INLINE (components.ex diff_html/filetree_html), and it has to be:
+   these emitters write the whole box as an inline `style=`, and an inline
+   declaration beats any class rule. Declaring the width here and the pull there
+   is precisely the half-breakout Part K and the rig's centre-offset assertion
+   refuse — measured, before it shipped: the diff took the 1040px band and grew
+   entirely to the RIGHT, overflowing portabledoc-showcase by 110px at 1280.
+
+   The emitters are style-BLIND (`diff_html(block)` takes no `:article`/`:email`),
+   shared with the chat-tool-diff family so the two read identically in email
+   (D76). That is why the breakout rides `var(--bp-evidence-*, <fallback>)` rather
+   than a style branch: email defines neither custom property, so the fallbacks
+   resolve to `margin: 4px 0px; width: 100%` — byte-for-byte today's email
+   geometry. The declarations below mirror the emitters' inline ones, which is
+   the invariant this rule block has always kept. */
 .bp-paper-surface .bp-diff, .bp-paper-surface .bp-filetree {
   font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
   background: var(--muted-surface); border-radius: 6px; padding: 6px 8px;
-  margin: 4px 0; overflow-x: auto;
+  margin: 4px var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%); box-sizing: border-box; overflow-x: auto;
 }
 .bp-paper-surface .bp-filetree-note { white-space: pre; }
 .bp-paper-surface .bp-filetree-legend { color: var(--fg-dim); font-size: 11px; margin-top: 4px; }
@@ -1028,7 +1117,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-stat__spark { width: 100%; height: 26px; margin-top: 4px; }
 .bp-paper-surface .bp-stat__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 
-.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: var(--bp-air-stats) 0 0; }
+/* The stat strip BREAKS OUT to the evidence band. This is the clearest case for
+   the whole device: `auto-fit` + `minmax` means the grid does not merely get
+   wider, it REFLOWS — 1040px fits 7 tiles across at the 140px floor, 1240px fits
+   8. The component gains resolution with the screen instead of stacking tiles
+   the reader then has to scroll past. */
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 .bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; }
 
 .bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
@@ -1050,7 +1144,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-ink-faint); }
 .bp-paper-surface .bp-heat__legend .bp-heat__c { width: 10px; flex: none; }
 
-.bp-paper-surface .bp-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+/* The chart BREAKS OUT to the evidence band. Its svg is `width: 100%` over a
+   640-unit viewBox with a `min-width: 640px` legibility floor (below), so band
+   width buys real horizontal resolution for the series — the plot stops
+   compressing weeks into pixels — while the tick labels stay at their authored
+   size. */
+.bp-paper-surface .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-chart__t { font-size: 0.78rem; font-weight: 600; color: var(--paper-ink); margin-bottom: 8px; }
 /* Legibility floor (probe-figure-fidelity-2026-08-12): the svg's text is sized
    in viewBox units (640 wide), so a bare width:100% scaled EVERY label with the

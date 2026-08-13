@@ -334,6 +334,42 @@ for (const k of Object.keys(air)) {
   ok(AIR_LADDER.includes(k), `space.air.${k} is not on the emitted ladder — a token with no consumer is the drift this gate exists to catch; add it to AIR_STEPS in design/emit.mjs and to AIR_LADDER here, or delete it`);
 }
 
+// space.evidence — the width a block that improves with width may claim when it
+// steps OUT of the prose column. Four floors, each encoding the LAW rather than
+// the number, so a band that has quietly stopped being a band reds here:
+//   1. `bandMax > band` — the wide step must actually be wider. A flattened pair
+//      leaves the growth clause emitted, consumed, and inert: the shape that
+//      looks single-sourced and honoured until you measure at two widths.
+//   2. `0 < fill < 1` — the band is a FRACTION of the available inline space. At
+//      1 the evidence would eat the whole viewport and the gutters would be the
+//      only thing left holding the page together.
+//   3. `band / fill > band + 2 * gutter` — the viewport at which the band starts
+//      GROWING must be wider than the one at which it first fits. Violate it and
+//      the band overshoots its own base before ever sitting at it, so the
+//      artifact-sourced `band` literal would never be observable on any screen.
+//   4. `gutter >= 16` — the band must never reach the viewport edge, and the
+//      gutter is also what keeps a classic scrollbar (~15px) out of the 100cqw
+//      the width is computed from. Below 16 the page can scroll sideways.
+const EVIDENCE_KEYS = ["band", "bandMax", "fill", "gutter", "caption"];
+const ev = (tokens.space || {}).evidence || {};
+for (const k of EVIDENCE_KEYS) {
+  ok(typeof ev[k] === "number" && ev[k] > 0, `space.evidence.${k} is required (a positive number)`);
+}
+for (const k of Object.keys(ev)) {
+  if (k === "_note") continue;
+  ok(EVIDENCE_KEYS.includes(k), `space.evidence.${k} is not emitted — a token with no consumer is the drift this gate exists to catch; add it to design/emit.mjs + check.mjs Part K, or delete it`);
+}
+if (EVIDENCE_KEYS.every((k) => typeof ev[k] === "number")) {
+  ok(ev.bandMax > ev.band, `space.evidence.bandMax (${ev.bandMax}) must exceed band (${ev.band}); an equal pair makes the wide step inert and the band stops growing with the screen`);
+  ok(ev.fill > 0 && ev.fill < 1, `space.evidence.fill is ${ev.fill}; the band is a fraction of the available inline space and must sit strictly between 0 and 1`);
+  ok(
+    ev.band / ev.fill > ev.band + 2 * ev.gutter,
+    `space.evidence: growth begins at ${Math.round(ev.band / ev.fill)}px (band/fill) but the band already fits at ${ev.band + 2 * ev.gutter}px (band + 2*gutter); the ${ev.band}px base would never be observable at any width`,
+  );
+  ok(ev.gutter >= 16, `space.evidence.gutter is ${ev.gutter}px; below 16 the band can reach the viewport edge and 100cqw's scrollbar allowance disappears — the page scrolls sideways`);
+  ok(ev.caption >= 45 && ev.caption <= 85, `space.evidence.caption is ${ev.caption}ch; a caption inside a wide figure is prose and must stay inside the editorial measure band (45-85 characters)`);
+}
+
 for (const k of ["sm", "base", "lg", "pill"]) {
   ok(typeof (tokens.radius || {})[k] === "number", `radius.${k} is required`);
 }

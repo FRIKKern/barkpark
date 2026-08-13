@@ -410,7 +410,7 @@ const diff: Emit = (b) => {
   }
 
   return (
-    `<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
+    `<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
     counts +
     body +
     `</div>`
@@ -452,7 +452,7 @@ const filetree: Emit = (b) => {
       ? ''
       : `<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">${escapeHtml(legend)}</div>`
   return (
-    `<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
+    `<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
     rows +
     legendHtml +
     `</div>`
@@ -656,7 +656,7 @@ function figcaptionInner(caption: string): string {
 
 function articleFigcaption(caption: string): string {
   if (caption === '') return ''
-  return `<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">${figcaptionInner(caption)}</figcaption>`
+  return `<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">${figcaptionInner(caption)}</figcaption>`
 }
 
 // asciicast_html/3 (:article) uses a PLAIN `#55635e` figcaption color — NOT the
@@ -664,7 +664,7 @@ function articleFigcaption(caption: string): string {
 // vs 88). Mirror that divergence exactly, or the DOM-shape style attribute diverges.
 function asciicastFigcaption(caption: string): string {
   if (caption === '') return ''
-  return `<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">${figcaptionInner(caption)}</figcaption>`
+  return `<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">${figcaptionInner(caption)}</figcaption>`
 }
 
 // Entity-encode ONLY & < > for the Mermaid source (Figures.encode_mermaid/1).
@@ -676,14 +676,14 @@ const figure: Emit = (b) => {
   const child = b.child
   const caption = str(b.caption)
   const childHtml = isMap(child) ? renderBlock(child as Block) : ''
-  return `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;overflow-x:auto">${childHtml}${articleFigcaption(caption)}</figure>`
+  return `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">${childHtml}${articleFigcaption(caption)}</figure>`
 }
 
 const diagram: Emit = (b) => {
   const source = str(b.source)
   const caption = str(b.caption)
   return (
-    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">` +
+    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">` +
     `<pre class="mermaid">${encodeMermaid(source)}</pre>` +
     articleFigcaption(caption) +
     `</figure>`
@@ -702,7 +702,7 @@ const asciicast: Emit = (b) => {
   const poster = str(b.poster).trim()
   const posterAttr = poster === '' ? '' : ` data-cast-poster="${escapeAttr(poster)}"`
   return (
-    `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;overflow-x:auto">` +
+    `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
     `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
     asciicastFigcaption(caption) +
     `</figure>`
@@ -733,7 +733,7 @@ const video: Emit = (b) => {
     .join('')
 
   return (
-    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;overflow-x:auto">` +
+    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
     `<video controls playsinline style="max-width:100%;border-radius:6px"${posterAttr}${loopAttr} src="${safeUrl(src)}">` +
     tracks +
     `</video></figure>`

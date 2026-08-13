@@ -16,27 +16,119 @@
   ],
   "shots": [
     {
-      "cell": "heggemsnes-act__light__1440",
-      "file": "heggemsnes-act__light__1440.jpeg",
+      "cell": "heggemsnes-act__light__1280",
+      "file": "heggemsnes-act__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1141470,
+      "bytes": 1116982,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
       "columnWidth": 660,
+      "columnContentWidth": 580,
       "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
       "blockedRequests": 3
     },
     {
-      "cell": "heggemsnes-act__dark__1440",
-      "file": "heggemsnes-act__dark__1440.jpeg",
+      "cell": "heggemsnes-act__light__1920",
+      "file": "heggemsnes-act__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1138450,
+      "bytes": 1199217,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
       "columnWidth": 660,
+      "columnContentWidth": 580,
       "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "blockedRequests": 3
+    },
+    {
+      "cell": "heggemsnes-act__dark__1280",
+      "file": "heggemsnes-act__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 1114501,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 16,
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "blockedRequests": 3
+    },
+    {
+      "cell": "heggemsnes-act__dark__1920",
+      "file": "heggemsnes-act__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 1196732,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 16,
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
       "blockedRequests": 3
     }
   ]

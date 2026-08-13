@@ -217,8 +217,11 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
       "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
     {:view_edit, ".bp-table", "display"} =>
       "reader-only mobile-overflow chrome (paper-surface.css §Table CHROME); Studio inherits it through `.bp-paper-surface` — the standalone bundle does NOT, filed as pe-w1-bundle-table-scroll-chrome-gap",
-    {:view_edit, ".bp-table", "max-width"} =>
-      "reader-only mobile-overflow chrome (paper-surface.css §Table CHROME); Studio inherits it through `.bp-paper-surface` — the standalone bundle does NOT, filed as pe-w1-bundle-table-scroll-chrome-gap",
+    # `max-width` is GONE from the View rule as of pe-w1-evidence-breakout, so its
+    # entry is gone too — the rot guard below fails an allowlist that outlives the
+    # asymmetry it describes. It was `100%` beside `width: 100%` (a no-op) and
+    # would have CLAMPED the evidence band the moment the table stepped out of the
+    # column; the band width supersedes it on both surfaces.
     {:view_edit, ".bp-table", "overflow-x"} =>
       "reader-only mobile-overflow chrome (paper-surface.css §Table CHROME); Studio inherits it through `.bp-paper-surface` — the standalone bundle does NOT, filed as pe-w1-bundle-table-scroll-chrome-gap"
   }

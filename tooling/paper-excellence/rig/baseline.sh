@@ -31,13 +31,21 @@ mkdir -p "$OUT_DIR" "$WORK"
 for slug in "${SLUGS[@]}"; do
   ( cd "$REPO_ROOT/api" && CC=clang MIX_ENV=test mix run --no-start \
       "$RIG_DIR/render.exs" "$RIG_DIR/fixtures/$slug.json" "$WORK/$slug.html" )
-  # Committed panel = full-page, 2x, light+dark, 1440 only, JPEG q72.
+  # Committed panel = full-page, 2x, light+dark, 1280 + 1920, JPEG q72.
   # Measured on this panel: PNG 166 MB, JPEG q82 all-widths 54 MB, this set
-  # 11 MB. The 768/360 cells still run in the gate — they are just not carried
-  # in the repo. See README §Baselines.
+  # 11 MB per width. The 768/360 cells still run in the gate — they are just not
+  # carried in the repo. See README §Baselines.
+  #
+  # 1440 was replaced by the PAIR 1280 + 1920 with pe-w1-evidence-breakout. The
+  # evidence band sits at its 1040px base anywhere from ~1120px to 1600px and
+  # only grows above that, so a single 1440 cell could never show the band
+  # moving — it is the same picture as 1280. The pair is the smallest panel that
+  # carries BOTH ends of the band's range, and each `<slug>.report.json` now
+  # records the measured band width and prose CPL per cell, so a re-baseline
+  # diffs as NUMBERS and not only as JPEGs.
   SHOT_FORMAT="${SHOT_FORMAT:-jpeg}" \
   SHOT_QUALITY="${SHOT_QUALITY:-72}" \
-  SHOT_WIDTHS="${SHOT_WIDTHS:-1440}" \
+  SHOT_WIDTHS="${SHOT_WIDTHS:-1280,1920}" \
     node "$RIG_DIR/shoot.mjs" "$WORK/$slug.html" "$OUT_DIR" "$slug"
 done
 

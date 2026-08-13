@@ -89,20 +89,34 @@ default moves, the rig reds rather than silently re-baselining every shot.
 
 ## Baselines
 
-`baselines/` holds the 5-paper panel: `heggemsnes-act`,
-`hobby-hardening-capstone`, `mechanical-spacing-doctrine`,
+`baselines/` holds the 6-paper panel: `eight-minute-erasure`,
+`heggemsnes-act`, `hobby-hardening-capstone`, `mechanical-spacing-doctrine`,
 `paper-excellence-wave-2026-08-12`, `portabledoc-showcase` — **full page**,
-light and dark, at 1440, `deviceScaleFactor: 2`, JPEG q72, plus a
-`*.report.json` per paper recording column width, paragraph count, scale and
-blocked-request count.
+light and dark, at **1280 and 1920**, `deviceScaleFactor: 2`, JPEG q72, plus a
+`*.report.json` per paper recording column width, **evidence-band width per
+component, prose characters-per-line, document horizontal overflow**, paragraph
+count, scale and blocked-request count.
 
 Deliberate limits, stated rather than hidden:
 
 * **Format and widths are a weight decision.** The same panel is **166 MB** as
-  full-page 2x PNG and **23 MB** in the committed shape. The 768 and 360 cells
+  full-page 2x PNG and **60 MB** in the committed shape. The 768 and 360 cells
   still run in the gate on every invocation; they are simply not carried in the
   repo. JPEG baselines are for human review and layout regression — quantization
   noise makes them unsuitable as an exact pixel-diff oracle.
+* **1280 + 1920 replaced 1440** with `pe-w1-evidence-breakout`. The evidence
+  band sits at its 1040px base from ~1120px of viewport up to 1600px and grows
+  above that, so 1440 was the same picture as 1280 and no committed cell
+  exercised the growth clause. The pair is the smallest panel carrying both ends
+  of the band's range. It doubles the panel's weight, which is why the
+  **numbers** moved into `report.json`: a band regression is a text diff there
+  and needs no image comparison at all.
+* **The JPEGs are carried once, the numbers are carried twice.** A new width has
+  no counterpart on `main` to diff a picture against, so a change that
+  introduces one commits the *measurements* first (captured on the unmodified
+  tree) and the pictures with the change — the `report.json` diff is then a true
+  before/after at identical paths, and the panel does not have to be stored
+  twice to get one.
 * **`hobby-hardening-capstone` is `@1x`** (the JPEG cap above), and its files
   say so in their names.
 * **The legacy shots in `../evidence/shots/` are a different capture**:
