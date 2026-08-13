@@ -32,11 +32,11 @@ defmodule BarkparkWeb.BulldocsSourceController do
         })
 
       true ->
-        show_paper(conn, slug, dataset, scope, perspective, format, params)
+        show_paper(conn, slug, dataset, scope, perspective, format)
     end
   end
 
-  defp show_paper(conn, slug, dataset, scope, perspective, format, params) do
+  defp show_paper(conn, slug, dataset, scope, perspective, format) do
     case fetch_paper(slug, dataset, scope, perspective) do
       nil ->
         send_resp(conn, 404, "not found")

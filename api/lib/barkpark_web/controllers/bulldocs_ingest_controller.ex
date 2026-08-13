@@ -716,41 +716,75 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  # An op MAY spell its payload as BPML: {"op":"replace-block","id":…,"bpml":"<callout …>"}.
-  # The fragment must parse to EXACTLY one block — one op, one block, so op
-  # receipts and counts stay truthful; multi-block edits are multiple ops.
-  defp expand_bpml_ops(ops) do
-    ops
-    |> Enum.with_index()
-    |> Enum.reduce_while({:ok, []}, fn
-      {%{"bpml" => bpml} = op, idx}, {:ok, acc} when is_binary(bpml) ->
-        case Barkpark.PortableDoc.Bpml.parse_blocks(bpml) do
-          {:ok, [block]} ->
-            {:cont, {:ok, [op |> Map.delete("bpml") |> Map.put("block", block) | acc]}}
+  def apply_op(conn, %{"slug" => slug} = params) do
+    op = Map.delete(params, "slug")
 
-          {:ok, blocks} ->
-            {:halt,
-             {:error,
-              [
-                %{
-                  code: "bpml-fragment-arity",
-                  message:
-                    "op #{idx} bpml fragment parsed to #{length(blocks)} blocks — an op carries exactly one",
-                  line: 1,
-                  hint: "split into one op per block"
-                }
-              ]}}
+    cond do
+      not valid_op_shape?(op) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
 
-          {:error, errors} ->
-            {:halt, {:error, Enum.map(errors, &Map.put(&1, :op_index, idx))}}
+      true ->
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.apply_paper_block_op(
+               slug,
+               op,
+               dataset,
+               paper_scope_opts(conn, params)
+             ) do
+          {:ok, result} ->
+            conn
+            |> put_status(:ok)
+            |> json(%{
+              ok: true,
+              slug: slug,
+              op: result.op_kind,
+              rev: result.rev,
+              block_id: result.block_id,
+              fragment_html: result.fragment_html,
+              position: result.position
+            })
+
+          {:error, :not_found} ->
+            conn
+            |> put_status(:not_found)
+            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+
+          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+          {:error, {code, target, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: to_string(code),
+                message: "#{op_kind} failed on #{inspect(target)}",
+                op: op_kind,
+                target: target
+              }
+            })
+
+          {:error, {:invalid_op, _}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+
+          {:error, {:halted, reason}} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: %{code: "halted", message: reason}})
+
+          {:error, _other} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
         end
-
-      {op, _idx}, {:ok, acc} ->
-        {:cont, {:ok, [op | acc]}}
-    end)
-    |> case do
-      {:ok, acc} -> {:ok, Enum.reverse(acc)}
-      error -> error
     end
   end
 
@@ -843,75 +877,41 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  def apply_op(conn, %{"slug" => slug} = params) do
-    op = Map.delete(params, "slug")
+  # An op MAY spell its payload as BPML: {"op":"replace-block","id":…,"bpml":"<callout …>"}.
+  # The fragment must parse to EXACTLY one block — one op, one block, so op
+  # receipts and counts stay truthful; multi-block edits are multiple ops.
+  defp expand_bpml_ops(ops) do
+    ops
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn
+      {%{"bpml" => bpml} = op, idx}, {:ok, acc} when is_binary(bpml) ->
+        case Barkpark.PortableDoc.Bpml.parse_blocks(bpml) do
+          {:ok, [block]} ->
+            {:cont, {:ok, [op |> Map.delete("bpml") |> Map.put("block", block) | acc]}}
 
-    cond do
-      not valid_op_shape?(op) ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+          {:ok, blocks} ->
+            {:halt,
+             {:error,
+              [
+                %{
+                  code: "bpml-fragment-arity",
+                  message:
+                    "op #{idx} bpml fragment parsed to #{length(blocks)} blocks — an op carries exactly one",
+                  line: 1,
+                  hint: "split into one op per block"
+                }
+              ]}}
 
-      true ->
-        dataset = params["dataset"] || Content.paper_default_dataset()
-
-        case Content.apply_paper_block_op(
-               slug,
-               op,
-               dataset,
-               paper_scope_opts(conn, params)
-             ) do
-          {:ok, result} ->
-            conn
-            |> put_status(:ok)
-            |> json(%{
-              ok: true,
-              slug: slug,
-              op: result.op_kind,
-              rev: result.rev,
-              block_id: result.block_id,
-              fragment_html: result.fragment_html,
-              position: result.position
-            })
-
-          {:error, :not_found} ->
-            conn
-            |> put_status(:not_found)
-            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
-
-          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
-          {:error, {:constraint, message, op_kind}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
-
-          {:error, {code, target, op_kind}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: to_string(code),
-                message: "#{op_kind} failed on #{inspect(target)}",
-                op: op_kind,
-                target: target
-              }
-            })
-
-          {:error, {:invalid_op, _}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
-
-          {:error, {:halted, reason}} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{error: %{code: "halted", message: reason}})
-
-          {:error, _other} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+          {:error, errors} ->
+            {:halt, {:error, Enum.map(errors, &Map.put(&1, :op_index, idx))}}
         end
+
+      {op, _idx}, {:ok, acc} ->
+        {:cont, {:ok, [op | acc]}}
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      error -> error
     end
   end
 
