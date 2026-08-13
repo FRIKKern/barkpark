@@ -72,12 +72,18 @@ func joinCamel(ws []string) string {
 func joinKebab(ws []string) string { return strings.Join(ws, "-") }
 func joinSnake(ws []string) string { return strings.Join(ws, "_") }
 
-// spellingsOf returns the four canonical joiner outputs of a word list
-// (A1): Pascal, kebab, camel, snake. Collapsed duplicates (a one-word
-// lowercase name has kebab == camel == snake) are kept — membership is
-// what matters.
+// joinScreaming is SCREAMING_SNAKE — the constant-name spelling JS,
+// Rust and Python all share (PILOT_PROBE_PROJECTION and friends). Added
+// after four-joiner era commands were already in the wild, so it rides
+// LAST in every precedence list: no existing collapse resolution moves.
+func joinScreaming(ws []string) string { return strings.ToUpper(strings.Join(ws, "_")) }
+
+// spellingsOf returns the five canonical joiner outputs of a word list
+// (A1): Pascal, kebab, camel, snake, SCREAMING. Collapsed duplicates (a
+// one-word lowercase name has kebab == camel == snake) are kept —
+// membership is what matters.
 func spellingsOf(ws []string) []string {
-	return []string{joinPascal(ws), joinKebab(ws), joinCamel(ws), joinSnake(ws)}
+	return []string{joinPascal(ws), joinKebab(ws), joinCamel(ws), joinSnake(ws), joinScreaming(ws)}
 }
 
 func isJoinerOutput(spelling string, ws []string) bool {
