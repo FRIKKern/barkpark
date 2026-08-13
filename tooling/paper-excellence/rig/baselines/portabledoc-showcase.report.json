@@ -16,27 +16,391 @@
   ],
   "shots": [
     {
-      "cell": "portabledoc-showcase__light__1440",
-      "file": "portabledoc-showcase__light__1440.jpeg",
+      "cell": "portabledoc-showcase__light__1280",
+      "file": "portabledoc-showcase__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2279161,
+      "bytes": 2224972,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
       "columnWidth": 660,
+      "columnContentWidth": 580,
       "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 14,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-diff",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-filetree",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
       "blockedRequests": 3
     },
     {
-      "cell": "portabledoc-showcase__dark__1440",
-      "file": "portabledoc-showcase__dark__1440.jpeg",
+      "cell": "portabledoc-showcase__light__1920",
+      "file": "portabledoc-showcase__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2274059,
+      "bytes": 2431304,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
       "columnWidth": 660,
+      "columnContentWidth": 580,
       "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 14,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-diff",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-filetree",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "blockedRequests": 3
+    },
+    {
+      "cell": "portabledoc-showcase__dark__1280",
+      "file": "portabledoc-showcase__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 2223261,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 32,
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 14,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-diff",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-filetree",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "blockedRequests": 3
+    },
+    {
+      "cell": "portabledoc-showcase__dark__1920",
+      "file": "portabledoc-showcase__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 2426076,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 32,
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 14,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-chart",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-diff",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-filetree",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
       "blockedRequests": 3
     }
   ]

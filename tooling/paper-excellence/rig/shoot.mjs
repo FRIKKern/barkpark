@@ -29,9 +29,16 @@ import { pathToFileURL } from "node:url";
 const RIG_DIR = path.dirname(new URL(import.meta.url).pathname);
 const REPO_ROOT = path.resolve(RIG_DIR, "../../..");
 
-// The gate shoots all three widths. SHOT_WIDTHS narrows the set for the
-// committed baseline panel (see baseline.sh / README §Baselines).
-const VIEWPORTS = (process.env.SHOT_WIDTHS ?? "1440,768,360").split(",").map((n) => Number(n.trim()));
+// The gate shoots all four widths. SHOT_WIDTHS narrows the set for the committed
+// baseline panel (see baseline.sh / README §Baselines).
+//
+// 1440 was replaced by 1280 + 1920 with pe-w1-evidence-breakout. The evidence
+// band is flat between ~1120px and 1600px and grows above it, so 1280 and 1440
+// are the SAME cell as far as layout is concerned (both land the band at its
+// 1040px base) while 1920 is the only width that exercises the growth clause at
+// all. 360 and 768 stay: they are where the band collapses back into the column,
+// which is the half of the contract that keeps narrow viewports readable.
+const VIEWPORTS = (process.env.SHOT_WIDTHS ?? "1920,1280,768,360").split(",").map((n) => Number(n.trim()));
 const SCHEMES = ["light", "dark"];
 const DEVICE_SCALE_FACTOR = 2;
 // Output format. PNG is the default (gate runs, pixel work). The COMMITTED
@@ -49,6 +56,46 @@ const MIN_SHOT_BYTES = 10_000;
 // `.bp-paper-shell { max-width: 820px }` — the widest the reader column may
 // ever measure. Anything wider means the shell rules did not apply.
 const MAX_COLUMN_PX = 820;
+
+// ── The EVIDENCE BREAKOUT contract (pe-w1-evidence-breakout) ─────────────────
+// A block that improves with width steps OUT of the prose column into a wider
+// centered band. Three things must stay true while it does, and each is asserted
+// per (scheme × width) cell rather than measured once and eyeballed:
+//
+//   1. THE PAGE NEVER SCROLLS SIDEWAYS. A band computed from `100cqw` with no
+//      gutter allowance would clear the viewport by exactly the scrollbar width
+//      and every paper would rock horizontally. The allowance below is NOT slack
+//      for the band: it is the ONE pre-existing overflow this rig has always
+//      measured — 3px at 360px from a long unbreakable token inside a `<p>`,
+//      recorded in the README and unchanged by the breakout. A band that escapes
+//      its gutters overflows by tens to hundreds of px and reds here.
+//   2. THE BAND STAYS ON THE COLUMN'S AXIS. `width` without the matching
+//      `margin-inline` pull is a half-breakout: the component is correctly WIDE
+//      and grows entirely to the right. Any width-only assertion passes it. The
+//      centre-offset assertion is what catches it.
+//   3. PROSE KEEPS ITS MEASURE. The whole device is worthless if widening the
+//      evidence also widened the sentences, so the paragraphs are measured in
+//      CHARACTERS PER LINE at every width and held inside the editorial band.
+const MAX_DOC_OVERFLOW_PX = 4;
+// Half a device pixel at 2x, plus sub-pixel layout rounding.
+const MAX_BAND_OFFCENTRE_PX = 1.5;
+// The editorial measure band. The wave TARGETS 66-72; the gate floors the wider
+// 55-75 the whole reader is designed against, so a fixture whose paragraphs are
+// unusually short does not red a change that never touched type.
+//
+// The CEILING applies at EVERY width — a measure past 75 characters is a defect
+// on any screen, and it is the one the breakout could plausibly cause. The FLOOR
+// applies only where the column reached its designed 660px: at 360 the viewport
+// is narrower than the column, so the measure is set by the phone and not by the
+// type (measured 34.7 CPL there, before this change and after it). Flooring at
+// 360 would red every narrow cell forever and teach the next author to widen the
+// band to escape it — the exact inversion of what the assertion is for.
+const CPL_FLOOR = 55;
+const CPL_CEILING = 75;
+// The components the wave decided improve with width. Kept in ONE place and
+// reported per cell, so a class that silently stops breaking out shows up as a
+// missing row rather than as a green run.
+const BREAKOUT_SELECTOR = ".bp-table, .bp-stats, .bp-chart, .bp-diff, .bp-filetree, figure";
 
 // Offline policy. The reader pulls mermaid + asciinema from cdn.jsdelivr.net,
 // and papers may embed remote media. We abort EVERY request that is not our
@@ -185,19 +232,86 @@ async function main() {
         await page.evaluate(() => document.fonts.ready);
 
         // CONTENT assertions — never the HTTP status.
-        const seen = await page.evaluate(() => {
+        const seen = await page.evaluate((sel) => {
           const main = document.querySelector("main.bp-paper-article");
+          const round = (n) => Math.round(n * 10) / 10;
+          if (!main) return { wrapper: false, classes: null, paragraphs: 0, columnWidth: 0, maxWidth: null };
+
+          // The column's CONTENT box — what a block inside the article is
+          // measured against, and the axis the evidence band centres on.
+          const cs = getComputedStyle(main);
+          const box = main.getBoundingClientRect();
+          const padL = parseFloat(cs.paddingLeft) || 0;
+          const padR = parseFloat(cs.paddingRight) || 0;
+          const contentLeft = box.left + padL;
+          const contentWidth = box.width - padL - padR;
+          const contentCentre = contentLeft + contentWidth / 2;
+
+          // ── prose measure, in CHARACTERS PER LINE ──────────────────────────
+          // A paragraph's own text is re-measured in its own resolved font on a
+          // hidden single-line span; dividing the paragraph's rendered width by
+          // the resulting per-character advance gives the characters that fit on
+          // one line. Doing it with the REAL text (rather than a canonical "n"
+          // or a 0.5em rule of thumb) means the figure tracks this reader's font,
+          // size, tracking and oldstyle-numeral feature settings, not a proxy.
+          const cplSamples = [];
+          for (const p of main.querySelectorAll("p")) {
+            const text = p.textContent.trim();
+            if (text.length < 120) continue;
+            const pcs = getComputedStyle(p);
+            const probe = document.createElement("span");
+            probe.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;white-space:pre";
+            probe.style.fontFamily = pcs.fontFamily;
+            probe.style.fontSize = pcs.fontSize;
+            probe.style.fontWeight = pcs.fontWeight;
+            probe.style.fontStyle = pcs.fontStyle;
+            probe.style.letterSpacing = pcs.letterSpacing;
+            probe.style.fontFeatureSettings = pcs.fontFeatureSettings;
+            probe.textContent = text;
+            document.body.appendChild(probe);
+            const perChar = probe.getBoundingClientRect().width / text.length;
+            probe.remove();
+            const w = p.getBoundingClientRect().width - (parseFloat(pcs.paddingLeft) || 0) - (parseFloat(pcs.paddingRight) || 0);
+            if (perChar > 0 && w > 0) cplSamples.push(w / perChar);
+          }
+          cplSamples.sort((a, b) => a - b);
+          const cpl = cplSamples.length ? cplSamples[Math.floor(cplSamples.length / 2)] : null;
+
+          // ── the evidence band, per component ───────────────────────────────
+          const bandRows = [];
+          for (const el of main.querySelectorAll(sel)) {
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            const kind = el.tagName === "FIGURE" ? "figure" : (el.className.match(/bp-[a-z]+/) || ["?"])[0];
+            bandRows.push({
+              kind,
+              width: round(r.width),
+              // How far the component's centre sits from the column's centre. A
+              // width-without-pull half-breakout shows up here and NOWHERE else.
+              offCentre: round(r.left + r.width / 2 - contentCentre),
+              left: round(r.left),
+              right: round(r.right),
+            });
+          }
+
           return {
-            wrapper: !!main,
-            classes: main ? main.className : null,
+            wrapper: true,
+            classes: main.className,
             // mermaid + asciicast are deliberately excluded (CDN blocked).
-            paragraphs: main ? main.querySelectorAll("p").length : 0,
-            columnWidth: main ? Math.round(main.getBoundingClientRect().width) : 0,
+            paragraphs: main.querySelectorAll("p").length,
+            columnWidth: Math.round(box.width),
+            columnContentWidth: round(contentWidth),
             // `none` means the .bp-paper-shell rule never applied — the
             // false-green shape where the page is measured at BODY width.
-            maxWidth: main ? getComputedStyle(main).maxWidth : null,
+            maxWidth: cs.maxWidth,
+            proseCpl: cpl === null ? null : round(cpl),
+            proseCplSamples: cplSamples.length,
+            evidenceBand: bandRows.length ? Math.max(...bandRows.map((b) => b.width)) : null,
+            bandRows,
+            docOverflow: round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
+            clientWidth: document.documentElement.clientWidth,
           };
-        });
+        }, BREAKOUT_SELECTOR);
         const cell = `${label}__${scheme}__${width}`;
         if (!seen.wrapper) fail(`${cell}: no <main class="…bp-paper-article"> in the DOM`);
         if (!seen.classes.includes("bp-paper-surface")) fail(`${cell}: wrapper lost bp-paper-surface (${seen.classes})`);
@@ -213,6 +327,53 @@ async function main() {
           fail(`${cell}: measured column ${seen.columnWidth}px exceeds the ${MAX_COLUMN_PX}px shell — rules not applied`);
         }
         assertions += 4;
+
+        // ── the evidence-breakout contract, per cell ───────────────────────
+        // 1. the page never scrolls sideways.
+        if (seen.docOverflow > MAX_DOC_OVERFLOW_PX) {
+          fail(
+            `${cell}: the document scrolls sideways by ${seen.docOverflow}px ` +
+              `(scrollWidth ${seen.clientWidth + seen.docOverflow} vs clientWidth ${seen.clientWidth}); ` +
+              `allowance is ${MAX_DOC_OVERFLOW_PX}px for the pre-existing unbreakable-token overflow at 360`,
+          );
+        }
+        // 2. every breakout component stays on the column's axis and inside the
+        //    viewport. Both halves matter: off-axis is the width-without-pull
+        //    half-breakout, and out-of-viewport is a band that escaped its
+        //    gutters — the two ways this device fails that a width number hides.
+        for (const b of seen.bandRows) {
+          if (Math.abs(b.offCentre) > MAX_BAND_OFFCENTRE_PX) {
+            fail(
+              `${cell}: ${b.kind} sits ${b.offCentre}px off the column's centre axis ` +
+                `(width ${b.width}px) — a component takes the band's width and its centring pull together`,
+            );
+          }
+          if (b.left < -MAX_DOC_OVERFLOW_PX || b.right > seen.clientWidth + MAX_DOC_OVERFLOW_PX) {
+            fail(
+              `${cell}: ${b.kind} spans ${b.left}…${b.right}px outside the ${seen.clientWidth}px viewport — ` +
+                `the evidence band crossed its gutters`,
+            );
+          }
+          if (b.width < seen.columnContentWidth - 1) {
+            fail(`${cell}: ${b.kind} measures ${b.width}px, NARROWER than the ${seen.columnContentWidth}px column it broke out of`);
+          }
+        }
+        // 3. prose keeps its measure while the evidence widens.
+        // The column is VIEWPORT-BOUND when it fills the screen rather than
+        // reaching its own max-width; there the phone sets the measure, so only
+        // the ceiling is meaningful.
+        const columnBound = seen.columnWidth >= width;
+        if (seen.proseCpl === null) {
+          fail(`${cell}: no paragraph long enough to measure characters-per-line — the prose measure went unproven`);
+        } else if (seen.proseCpl > CPL_CEILING || (!columnBound && seen.proseCpl < CPL_FLOOR)) {
+          fail(
+            `${cell}: prose measures ${seen.proseCpl} characters per line, outside the ` +
+              `${columnBound ? `≤${CPL_CEILING}` : `${CPL_FLOOR}-${CPL_CEILING}`} editorial band ` +
+              `(${seen.proseCplSamples} paragraphs sampled, column ${seen.columnWidth}px in a ${width}px viewport) — ` +
+              `widening the evidence must never widen the sentences`,
+          );
+        }
+        assertions += 2 + seen.bandRows.length;
 
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a
@@ -258,7 +419,9 @@ async function main() {
 
         shots.push({ cell, file: path.basename(file), scale, bytes, ...seen, blockedRequests: blocked });
         console.log(
-          `rig/shoot: ${cell} — column ${seen.columnWidth}px, ${seen.paragraphs} paragraphs, ` +
+          `rig/shoot: ${cell} — column ${seen.columnWidth}px, band ${seen.evidenceBand ?? "n/a"}px ` +
+            `(${seen.bandRows.length} components), prose ${seen.proseCpl ?? "n/a"} CPL, ` +
+            `doc overflow ${seen.docOverflow}px, ${seen.paragraphs} paragraphs, ` +
             `${blocked} off-host requests blocked, ${scale}x, ${bytes} B`,
         );
         await context.close();

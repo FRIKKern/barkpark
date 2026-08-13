@@ -16,27 +16,335 @@
   ],
   "shots": [
     {
-      "cell": "eight-minute-erasure__light__1440",
-      "file": "eight-minute-erasure__light__1440.jpeg",
+      "cell": "eight-minute-erasure__light__1280",
+      "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2250832,
+      "bytes": 2206432,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
       "columnWidth": 660,
+      "columnContentWidth": 580,
       "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
       "blockedRequests": 3
     },
     {
-      "cell": "eight-minute-erasure__dark__1440",
-      "file": "eight-minute-erasure__dark__1440.jpeg",
+      "cell": "eight-minute-erasure__light__1920",
+      "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2258541,
+      "bytes": 2384032,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
       "columnWidth": 660,
+      "columnContentWidth": 580,
       "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "blockedRequests": 3
+    },
+    {
+      "cell": "eight-minute-erasure__dark__1280",
+      "file": "eight-minute-erasure__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 2214141,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 21,
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        },
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 350,
+          "right": 930
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "blockedRequests": 3
+    },
+    {
+      "cell": "eight-minute-erasure__dark__1920",
+      "file": "eight-minute-erasure__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 2391741,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 21,
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "evidenceBand": 580,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "figure",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-stats",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        },
+        {
+          "kind": "bp-table",
+          "width": 580,
+          "offCentre": 0,
+          "left": 670,
+          "right": 1250
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
       "blockedRequests": 3
     }
   ]
