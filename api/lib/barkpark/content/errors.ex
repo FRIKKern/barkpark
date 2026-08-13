@@ -118,6 +118,17 @@ defmodule Barkpark.Content.Errors do
                          "invalid_text",
                          "malformed_op",
                          "invalid_op",
+                         # BPML (masterplan W0–W2) — bulldocs_ingest_controller.ex +
+                         # bulldocs_source_controller.ex. `bpml` wraps the parser's
+                         # teaching errors (parse failure on publish or an op
+                         # fragment); the others are the format=bpml read path and
+                         # the validate-all dry-run's violation codes.
+                         "bpml",
+                         "bpml_unavailable",
+                         "bpml_unprintable",
+                         "unknown_format",
+                         "hollow_paper",
+                         "structure",
                          "malformed_proposal",
                          "invalid_proposal",
                          "missing_source",
