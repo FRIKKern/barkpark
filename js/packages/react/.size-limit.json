@@ -1,25 +1,25 @@
 [
  {
-  "name": "PortableText (import { PortableText }) \u2014 shares the renderer chunk",
+  "name": "PortableText (import { PortableText }) — shares the renderer chunk (measured 19.84 KB; +100 B / +0.51% for the evidence breakout, under the 2% regression bar)",
   "path": "dist/index.mjs",
   "import": "{ PortableText }",
-  "limit": "19.75 KB",
+  "limit": "19.9 KB",
   "gzip": true
  },
  {
-  "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs) \u2014 22.5 KB + 250 B for BarkparkReference error discrimination (measured 22.7 KB, +0.98%, under the 2% regression bar)",
+  "name": "PortableDoc renderer — client entry (dist/index.mjs) — 22.5 KB + 250 B for BarkparkReference error discrimination + 150 B for the evidence breakout (measured 22.82 KB; +90 B / +0.40% over main's 22.73, under the 2% regression bar)",
   "path": "dist/index.mjs",
-  "limit": "22.75 KB",
+  "limit": "22.9 KB",
   "gzip": true
  },
  {
-  "name": "RSC server entry (dist/server.mjs \u2014 PortableDoc + toPlainText closure)",
+  "name": "RSC server entry (dist/server.mjs — PortableDoc + toPlainText closure) (measured 21.78 KB; +90 B / +0.41% for the evidence breakout, under the 2% regression bar)",
   "path": "dist/server.mjs",
-  "limit": "21.7 KB",
+  "limit": "21.85 KB",
   "gzip": true
  },
  {
-  "name": "Media hydration client (dist/client.mjs \u2014 mermaid + asciinema, both external + dynamic)",
+  "name": "Media hydration client (dist/client.mjs — mermaid + asciinema, both external + dynamic)",
   "path": "dist/client.mjs",
   "limit": "2 KB",
   "gzip": true,
