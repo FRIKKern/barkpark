@@ -277,6 +277,39 @@ async function main() {
           cplSamples.sort((a, b) => a - b);
           const cpl = cplSamples.length ? cplSamples[Math.floor(cplSamples.length / 2)] : null;
 
+          // The same measurement on figcaptions INSIDE a broken-out figure. A
+          // caption is prose and must not stretch to a 1240px figure, and
+          // "does not stretch" is not the same claim as "reads at a measure":
+          // the artifact's literal `72ch` clamps at 653px and still holds ~97
+          // characters, because `ch` is the advance of the digit zero and not
+          // the mean. So the WORST caption on the page is reported, in the same
+          // characters-per-line unit the prose is judged in.
+          let captionCpl = null;
+          let captionWidth = null;
+          for (const fc of main.querySelectorAll("figcaption")) {
+            const text = fc.textContent.trim();
+            if (text.length < 60) continue;
+            const ccs = getComputedStyle(fc);
+            const probe = document.createElement("span");
+            probe.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;white-space:pre";
+            probe.style.fontFamily = ccs.fontFamily;
+            probe.style.fontSize = ccs.fontSize;
+            probe.style.fontWeight = ccs.fontWeight;
+            probe.style.fontStyle = ccs.fontStyle;
+            probe.style.letterSpacing = ccs.letterSpacing;
+            probe.textContent = text;
+            document.body.appendChild(probe);
+            const perChar = probe.getBoundingClientRect().width / text.length;
+            probe.remove();
+            const w = fc.getBoundingClientRect().width;
+            if (perChar <= 0 || w <= 0) continue;
+            const v = w / perChar;
+            if (captionCpl === null || v > captionCpl) {
+              captionCpl = v;
+              captionWidth = w;
+            }
+          }
+
           // ── the evidence band, per component ───────────────────────────────
           const bandRows = [];
           for (const el of main.querySelectorAll(sel)) {
@@ -306,6 +339,8 @@ async function main() {
             maxWidth: cs.maxWidth,
             proseCpl: cpl === null ? null : round(cpl),
             proseCplSamples: cplSamples.length,
+            captionCpl: captionCpl === null ? null : round(captionCpl),
+            captionWidth: captionWidth === null ? null : round(captionWidth),
             evidenceBand: bandRows.length ? Math.max(...bandRows.map((b) => b.width)) : null,
             bandRows,
             docOverflow: round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
@@ -373,7 +408,16 @@ async function main() {
               `widening the evidence must never widen the sentences`,
           );
         }
-        assertions += 2 + seen.bandRows.length;
+        // 4. a caption inside a wide figure is prose too. Only the ceiling
+        //    applies: a caption is allowed to be short, never to run long.
+        if (seen.captionCpl !== null && seen.captionCpl > CPL_CEILING) {
+          fail(
+            `${cell}: the longest figcaption measures ${seen.captionCpl} characters per line ` +
+              `(${seen.captionWidth}px) — a caption inside a broken-out figure must return to the ` +
+              `reading measure, not follow the figure's width`,
+          );
+        }
+        assertions += 2 + seen.bandRows.length + (seen.captionCpl === null ? 0 : 1);
 
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a

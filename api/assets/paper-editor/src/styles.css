@@ -60,6 +60,13 @@
   --bp-air-callout: var(--tok-air-callout);
   --bp-air-stats: var(--tok-air-stats);
   --bp-air-figure: var(--tok-air-figure);
+  --bp-evidence-band: var(--tok-evidence-band);
+  --bp-evidence-band-max: var(--tok-evidence-band-max);
+  --bp-evidence-fill: var(--tok-evidence-fill);
+  --bp-evidence-gutter: var(--tok-evidence-gutter);
+  --bp-evidence-caption: var(--tok-evidence-caption);
+  --bp-evidence-width: max(100%, min(max(var(--bp-evidence-band), 100cqw * var(--bp-evidence-fill)), var(--bp-evidence-band-max), 100cqw - 2 * var(--bp-evidence-gutter)));
+  --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
   --bp-code-size: 0.92em;
@@ -115,6 +122,11 @@
   --tok-air-callout: calc(var(--tok-air-beat) * 1.55);
   --tok-air-stats: calc(var(--tok-air-beat) * 1.64);
   --tok-air-figure: calc(var(--tok-air-beat) * 1.82);
+  --tok-evidence-band: 1040px;
+  --tok-evidence-band-max: 1240px;
+  --tok-evidence-fill: 0.65;
+  --tok-evidence-gutter: 40px;
+  --tok-evidence-caption: 50ch;
   --ok-hsl: 142 72% 26%;
   --warn-hsl: 35 92% 38%;
   --danger-hsl: 0 68% 42%;
@@ -516,7 +528,7 @@
  * Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the reader binds — never
  * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
  * §2 guards drift vs the reader). */
-.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; border-collapse: collapse; width: 100%; }
+.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 .bp-paper-editor-body .bp-table__th { border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
 .bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the

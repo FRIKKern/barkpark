@@ -19,7 +19,7 @@
       "cell": "mechanical-spacing-doctrine__light__1280",
       "file": "mechanical-spacing-doctrine__light__1280.jpeg",
       "scale": 2,
-      "bytes": 794360,
+      "bytes": 795233,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -28,21 +28,23 @@
       "maxWidth": "660px",
       "proseCpl": 70,
       "proseCplSamples": 2,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -53,7 +55,7 @@
       "cell": "mechanical-spacing-doctrine__light__1920",
       "file": "mechanical-spacing-doctrine__light__1920.jpeg",
       "scale": 2,
-      "bytes": 865412,
+      "bytes": 856489,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -62,21 +64,23 @@
       "maxWidth": "660px",
       "proseCpl": 70,
       "proseCplSamples": 2,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,
@@ -87,7 +91,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1280",
       "file": "mechanical-spacing-doctrine__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 791486,
+      "bytes": 792664,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -96,21 +100,23 @@
       "maxWidth": "660px",
       "proseCpl": 70,
       "proseCplSamples": 2,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -121,7 +127,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1920",
       "file": "mechanical-spacing-doctrine__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 862500,
+      "bytes": 854004,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -130,21 +136,23 @@
       "maxWidth": "660px",
       "proseCpl": 70,
       "proseCplSamples": 2,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,

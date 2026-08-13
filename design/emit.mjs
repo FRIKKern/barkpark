@@ -197,6 +197,17 @@ export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
 // order IS the ladder order design/validate.mjs asserts monotonic, and every step
 // here has a consumer in paper-surface.css — an entry with none is a dead token.
 export const AIR_STEPS = ["code", "table", "asciicast", "callout", "stats", "figure"];
+// The EVIDENCE BAND inputs (tokens.space.evidence), in emission order. Emitted as
+// `--tok-evidence-*`; paper-surface.css composes all five into ONE width
+// expression, so what ships is the law and not a resolved pixel. Every key here
+// has a live consumer — check.mjs Part K refuses a member with none, and
+// validate.mjs refuses a member that is not on this list.
+export const EVIDENCE_KEYS = ["band", "bandMax", "fill", "gutter", "caption"];
+// `fill` is a bare RATIO (it is multiplied by 100cqw) and `caption` is a reading
+// MEASURE in characters — neither is a pixel, and emitting them as one would be
+// the drift the units exist to prevent.
+export const EVIDENCE_UNITS = { band: "px", bandMax: "px", fill: "", gutter: "px", caption: "ch" };
+const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
 // for the bulldocs reader skin (bulldocsBlock). VERBATIM (rgba/hex as-authored).
@@ -574,6 +585,17 @@ function paperBlock(themes = loadThemes()) {
     `--tok-air-beat: ${a.beat}px;`,
     ...AIR_STEPS.map((k) => `--tok-air-${k}: calc(var(--tok-air-beat) * ${a[k]});`),
   ];
+  // The EVIDENCE BAND (space.evidence): how wide a block that improves with width
+  // may grow when it steps out of the prose column. Emitted as the four inputs to
+  // one law, never as a resolved width — paper-surface.css composes them into a
+  // single `--bp-evidence-width` expression, so the band is CONTINUOUS in the
+  // available inline space and there is no breakpoint literal to drift.
+  // `caption` carries `ch`, not `px`: it is a reading measure, and a caption
+  // inside a wide figure must wrap at a character count, not at a pixel.
+  const e = tokens.space.evidence;
+  const evidenceVars = EVIDENCE_KEYS.map(
+    (k) => `--tok-evidence-${kebab(k)}: ${e[k]}${EVIDENCE_UNITS[k]};`,
+  );
 
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
@@ -583,6 +605,7 @@ function paperBlock(themes = loadThemes()) {
     ...step("h2", r.h2),
     ...step("h3", r.h3),
     ...airVars,
+    ...evidenceVars,
   ].map((l) => "  " + l).join("\n");
 
   const lifeClasses = (theme) =>

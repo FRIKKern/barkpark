@@ -19,7 +19,7 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1280",
       "file": "paper-excellence-wave-2026-08-12__light__1280.jpeg",
       "scale": 2,
-      "bytes": 5179768,
+      "bytes": 5042121,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 29,
@@ -28,49 +28,51 @@
       "maxWidth": "660px",
       "proseCpl": 71.7,
       "proseCplSamples": 26,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -81,7 +83,7 @@
       "cell": "paper-excellence-wave-2026-08-12__light__1920",
       "file": "paper-excellence-wave-2026-08-12__light__1920.jpeg",
       "scale": 2,
-      "bytes": 5551288,
+      "bytes": 5332047,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 29,
@@ -90,49 +92,51 @@
       "maxWidth": "660px",
       "proseCpl": 71.7,
       "proseCplSamples": 26,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,
@@ -143,7 +147,7 @@
       "cell": "paper-excellence-wave-2026-08-12__dark__1280",
       "file": "paper-excellence-wave-2026-08-12__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 5171416,
+      "bytes": 5050211,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 29,
@@ -152,49 +156,51 @@
       "maxWidth": "660px",
       "proseCpl": 71.7,
       "proseCplSamples": 26,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -205,7 +211,7 @@
       "cell": "paper-excellence-wave-2026-08-12__dark__1920",
       "file": "paper-excellence-wave-2026-08-12__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 5542936,
+      "bytes": 5347037,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 29,
@@ -214,49 +220,51 @@
       "maxWidth": "660px",
       "proseCpl": 71.7,
       "proseCplSamples": 26,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,

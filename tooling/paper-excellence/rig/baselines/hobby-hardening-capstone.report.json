@@ -17,9 +17,9 @@
   "shots": [
     {
       "cell": "hobby-hardening-capstone__light__1280",
-      "file": "hobby-hardening-capstone__light__1280@1x.jpeg",
-      "scale": 1,
-      "bytes": 3708639,
+      "file": "hobby-hardening-capstone__light__1280.jpeg",
+      "scale": 2,
+      "bytes": 7371543,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -28,91 +28,93 @@
       "maxWidth": "660px",
       "proseCpl": 71.6,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -121,9 +123,9 @@
     },
     {
       "cell": "hobby-hardening-capstone__light__1920",
-      "file": "hobby-hardening-capstone__light__1920@1x.jpeg",
-      "scale": 1,
-      "bytes": 3941923,
+      "file": "hobby-hardening-capstone__light__1920.jpeg",
+      "scale": 2,
+      "bytes": 9919134,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -132,91 +134,93 @@
       "maxWidth": "660px",
       "proseCpl": 71.6,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,
@@ -225,9 +229,9 @@
     },
     {
       "cell": "hobby-hardening-capstone__dark__1280",
-      "file": "hobby-hardening-capstone__dark__1280@1x.jpeg",
-      "scale": 1,
-      "bytes": 3706608,
+      "file": "hobby-hardening-capstone__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 7350041,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -236,91 +240,93 @@
       "maxWidth": "660px",
       "proseCpl": 71.6,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -329,9 +335,9 @@
     },
     {
       "cell": "hobby-hardening-capstone__dark__1920",
-      "file": "hobby-hardening-capstone__dark__1920@1x.jpeg",
-      "scale": 1,
-      "bytes": 3935255,
+      "file": "hobby-hardening-capstone__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 9790885,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -340,91 +346,93 @@
       "maxWidth": "660px",
       "proseCpl": 71.6,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,

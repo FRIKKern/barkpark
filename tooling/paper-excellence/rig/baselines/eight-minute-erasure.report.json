@@ -19,7 +19,7 @@
       "cell": "eight-minute-erasure__light__1280",
       "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2206432,
+      "bytes": 2211573,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -28,70 +28,72 @@
       "maxWidth": "660px",
       "proseCpl": 71.9,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -102,7 +104,7 @@
       "cell": "eight-minute-erasure__light__1920",
       "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2384032,
+      "bytes": 2391492,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -111,70 +113,72 @@
       "maxWidth": "660px",
       "proseCpl": 71.9,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,
@@ -185,7 +189,7 @@
       "cell": "eight-minute-erasure__dark__1280",
       "file": "eight-minute-erasure__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2214141,
+      "bytes": 2224275,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -194,70 +198,72 @@
       "maxWidth": "660px",
       "proseCpl": 71.9,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -268,7 +274,7 @@
       "cell": "eight-minute-erasure__dark__1920",
       "file": "eight-minute-erasure__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2391741,
+      "bytes": 2406019,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -277,70 +283,72 @@
       "maxWidth": "660px",
       "proseCpl": 71.9,
       "proseCplSamples": 19,
-      "evidenceBand": 580,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "figure",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         },
         {
           "kind": "bp-table",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,

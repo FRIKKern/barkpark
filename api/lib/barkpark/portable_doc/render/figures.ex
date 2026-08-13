@@ -76,6 +76,15 @@ defmodule Barkpark.PortableDoc.Render.Figures do
     end
   end
 
+  # The EVIDENCE BREAKOUT rides these inline styles rather than a stylesheet rule,
+  # for the same reason the air beat above it does: a figure has to survive a sink
+  # with no paper-surface.css, so the width and the re-centering pull are inline
+  # `var(--bp-evidence-*, <fallback>)` reads. Every fallback resolves to "stay in
+  # the column" (`100%` / `0px`), so a stylesheet-less sink loses the breakout and
+  # nothing else. ARTICLE MODE ONLY — the email/default clauses below keep their
+  # flat `margin:16px 0` and no width at all, because an email client has neither
+  # a container to measure nor a viewport worth breaking out of.
+  #
   # The canonical paper-article figure for a Mermaid diagram. Article mode: a
   # bordered, parchment, inset card mirroring doc.css `figure`; the figcaption
   # is muted/italic with the bold "Figure N." run-in. Email mode degrades to the
@@ -85,10 +94,10 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       if caption == "" do
         ""
       else
-        ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>|
+        ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
       end
 
-    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">| <>
+    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">| <>
       ~s(<pre class="mermaid">#{encode_mermaid(source)}</pre>) <>
       cap <>
       "</figure>"
@@ -132,13 +141,16 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       if caption == "" do
         ""
       else
-        ~s(<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
+        # `~s|…|`, not `~s(…)`: the caption measure is a `var(…)` read, and a
+        # paren-delimited sigil ends at the first `)` — the same reason the
+        # diagram figcaption above already uses the pipe form.
+        ~s|<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
       end
 
     poster_attr =
       if poster == "", do: "", else: ~s( data-cast-poster="#{escape_html(poster)}")
 
-    ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;overflow-x:auto">| <>
+    ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
       ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
       cap <>
       "</figure>"
@@ -180,7 +192,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
         ~s(<track kind="captions"#{lang_attr} src="#{safe_url(track_src)}">)
       end)
 
-    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;overflow-x:auto">| <>
+    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
       ~s(<video controls playsinline style="max-width:100%;border-radius:6px"#{poster_attr}#{loop_attr} src="#{safe_url(src)}">) <>
       tracks <>
       "</video></figure>"

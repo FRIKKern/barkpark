@@ -19,7 +19,7 @@
       "cell": "heggemsnes-act__light__1280",
       "file": "heggemsnes-act__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1120415,
+      "bytes": 1116982,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -28,14 +28,16 @@
       "maxWidth": "660px",
       "proseCpl": 67.7,
       "proseCplSamples": 14,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -46,7 +48,7 @@
       "cell": "heggemsnes-act__light__1920",
       "file": "heggemsnes-act__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1204735,
+      "bytes": 1199217,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -55,14 +57,16 @@
       "maxWidth": "660px",
       "proseCpl": 67.7,
       "proseCplSamples": 14,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,
@@ -73,7 +77,7 @@
       "cell": "heggemsnes-act__dark__1280",
       "file": "heggemsnes-act__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 1117340,
+      "bytes": 1114501,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -82,14 +86,16 @@
       "maxWidth": "660px",
       "proseCpl": 67.7,
       "proseCplSamples": 14,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1040,
           "offCentre": 0,
-          "left": 350,
-          "right": 930
+          "left": 120,
+          "right": 1160
         }
       ],
       "docOverflow": 0,
@@ -100,7 +106,7 @@
       "cell": "heggemsnes-act__dark__1920",
       "file": "heggemsnes-act__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 1201660,
+      "bytes": 1196732,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -109,14 +115,16 @@
       "maxWidth": "660px",
       "proseCpl": 67.7,
       "proseCplSamples": 14,
-      "evidenceBand": 580,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
       "bandRows": [
         {
           "kind": "bp-stats",
-          "width": 580,
+          "width": 1240,
           "offCentre": 0,
-          "left": 670,
-          "right": 1250
+          "left": 340,
+          "right": 1580
         }
       ],
       "docOverflow": 0,
