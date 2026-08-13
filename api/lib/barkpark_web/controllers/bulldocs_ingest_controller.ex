@@ -119,13 +119,59 @@ defmodule BarkparkWeb.BulldocsIngestController do
           invalid_text(conn)
         end
 
+      # BPML leg (masterplan W1): the body carries a whole <paper> document as
+      # readable markup. Parse (strict, teaching errors) → the parsed doc's
+      # slug/title/description/tags/blocks feed the SAME blocks path as native
+      # JSON — BPML is a spelling, never a second pipeline. Explicit top-level
+      # params win over the parsed document's fields.
+      %{"bpml" => bpml} = accepted when is_binary(bpml) ->
+        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+          {:ok, parsed} ->
+            merged =
+              parsed
+              |> Map.delete("blocks")
+              |> Map.merge(Map.delete(accepted, "bpml"))
+
+            slug = merged["slug"]
+
+            cond do
+              not (is_binary(slug) and slug != "") ->
+                conn
+                |> put_status(:bad_request)
+                |> json(%{
+                  error: %{
+                    code: "malformed",
+                    message: "no slug: pass it on <paper slug=\"…\"> or as a top-level param"
+                  }
+                })
+
+              not valid_ingest_text?(Map.put(merged, "blocks", parsed["blocks"])) ->
+                invalid_text(conn)
+
+              true ->
+                ingest_blocks(conn, slug, parsed["blocks"], merged)
+            end
+
+          {:error, errors} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: "bpml",
+                message: "the BPML document did not parse",
+                errors: errors
+              }
+            })
+        end
+
       _malformed ->
         conn
         |> put_status(:bad_request)
         |> json(%{
           error: %{
             code: "malformed",
-            message: "slug plus either blocks (list) or body_html (string) are required"
+            message:
+              "slug plus either blocks (list), body_html (string), or bpml (string) are required"
           }
         })
     end
@@ -657,6 +703,58 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # is the prior behaviour). Threaded into Content.apply_paper_block_ops/2 as the
   # `:if_rev` opt so the check happens inside the atomic load, not racily here.
   def apply_op(conn, %{"slug" => slug, "ops" => ops} = params) when is_list(ops) do
+    case expand_bpml_ops(ops) do
+      {:error, errors} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "bpml", message: "a BPML op fragment did not parse", errors: errors}
+        })
+
+      {:ok, ops} ->
+        apply_op_batch(conn, slug, ops, params)
+    end
+  end
+
+  # An op MAY spell its payload as BPML: {"op":"replace-block","id":…,"bpml":"<callout …>"}.
+  # The fragment must parse to EXACTLY one block — one op, one block, so op
+  # receipts and counts stay truthful; multi-block edits are multiple ops.
+  defp expand_bpml_ops(ops) do
+    ops
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn
+      {%{"bpml" => bpml} = op, idx}, {:ok, acc} when is_binary(bpml) ->
+        case Barkpark.PortableDoc.Bpml.parse_blocks(bpml) do
+          {:ok, [block]} ->
+            {:cont, {:ok, [op |> Map.delete("bpml") |> Map.put("block", block) | acc]}}
+
+          {:ok, blocks} ->
+            {:halt,
+             {:error,
+              [
+                %{
+                  code: "bpml-fragment-arity",
+                  message:
+                    "op #{idx} bpml fragment parsed to #{length(blocks)} blocks — an op carries exactly one",
+                  line: 1,
+                  hint: "split into one op per block"
+                }
+              ]}}
+
+          {:error, errors} ->
+            {:halt, {:error, Enum.map(errors, &Map.put(&1, :op_index, idx))}}
+        end
+
+      {op, _idx}, {:ok, acc} ->
+        {:cont, {:ok, [op | acc]}}
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      error -> error
+    end
+  end
+
+  defp apply_op_batch(conn, slug, ops, params) do
     cond do
       not Enum.all?(ops, &valid_op_shape?/1) ->
         conn
