@@ -157,8 +157,8 @@ html[data-theme="dark"] .bp-paper-body {
      (render/compose.ex `compose_section_stack/2`), and a paper's real boundaries
      are its level-2 headings — all 51 h2s across the six rig fixtures follow
      non-heading content, so "level-2 heading" and "section opening" are the same
-     event in this corpus. The `<h2>` element ALSO happens to be the only carrier
-     both surfaces can agree on: View emits a bare `<h2>` (walk.ex `heading/3`)
+     event in this corpus. The `h2` element ALSO happens to be the only carrier
+     both surfaces can agree on: View emits a bare one (walk.ex `heading/3`)
      and Edit is a FLAT ProseMirror document whose heading node admits no wrapper
      and no sibling chrome. A `.bp-section-head` wrapper div, or a `p + h2`
      sibling selector, would each exist on exactly one of the two — the drift the
@@ -168,7 +168,7 @@ html[data-theme="dark"] .bp-paper-body {
      WHAT THIS DELIBERATELY DOES NOT SHIP: the artifact's `.sec-head .label`
      eyebrow above the heading. It needs a slot INSIDE the head, and the two DOMs
      disagree about where that is — Edit's h2 is a flat sibling of the paragraph
-     before it, the reader's is inside its own keyed stream `<div>`
+     before it, the reader's is inside its own keyed stream `div`
      (bulldocs_live.ex), so the "an eyebrow block directly above an h2 takes the
      rule" law would need two different selectors and would be true in neither
      rig nor reader at once. It wants a heading-carried eyebrow slot on both
@@ -325,7 +325,7 @@ html[data-theme="dark"] .bp-paper-body {
    words. It OVERRIDES the 1.9em prose margin on the element rule above, which
    stays as the rhythm for every OTHER h2 on the surface.
 
-   WHY THIS IS SCOPED AND THE PROSE RULE IS NOT. `<h2>` is not exclusively a
+   WHY THIS IS SCOPED AND THE PROSE RULE IS NOT. `h2` is not exclusively a
    section heading here: component chrome emits bare ones too — `.bp-card` titles
    inside a grid cell, and (classed) `.bp-diff-title`, `.bp-goal-rail-title`,
    `.bp-mail-subject`. A card title is not a boundary between arguments, and the
@@ -337,7 +337,7 @@ html[data-theme="dark"] .bp-paper-body {
         render rig, which concatenate block HTML directly into the article.
      2. `> #paper-body > div:not([class]) > h2` — the BLOCK-BACKED reader, where
         every top-level block is its own keyed stream item
-        (`<div id data-block-id>`, bulldocs_live.ex `phx-update="stream"`). The
+        (a `div` carrying id + data-block-id, bulldocs_live.ex `phx-update="stream"`). The
         `:not([class])` is load-bearing: that wrapper carries id + data only,
         while a `card` block at top level IS a classed div, so this leg reaches
         the stream item without reaching into the component.
