@@ -4620,7 +4620,7 @@
        split into ONE <tbody>; the header row's cells carry `.bp-table__th` regardless,
        and NO CSS targets thead/tbody, so the delta is visually byte-identical. Keep
        byte-aligned with assets/paper-editor/src/styles.css. */
-    .bp-paper-editor-body .bp-table { border-collapse: collapse; width: 100%; }
+    .bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; border-collapse: collapse; width: 100%; }
     .bp-paper-editor-body .bp-table__th { border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
     .bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
     /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF
