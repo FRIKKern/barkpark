@@ -741,4 +741,108 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
              "#{name} stylesheet has no `#{selector}` declarations — a selector rename likely broke the divider lockstep parser"
     end
   end
+
+  # ── 9. The SECTION HEAD — one device, four hand-kept declarations ───────────
+  # A top-level level-2 heading is a section boundary and draws it with air + a
+  # rule + a gap (space.section → `--bp-section-*`; the reasoning lives on the
+  # rule in paper-surface.css). Unlike the h1/h2/h3 margins §2 and §5 already
+  # cover, this device cannot ride the shared `.bp-paper-surface h2` element
+  # rule: component chrome emits bare `<h2>`s too (a `.bp-card` title inside a
+  # grid cell), and only POSITION separates a section head from a card's title.
+  # So it is written four times against four document shapes — and four hand-kept
+  # copies of one law is precisely the drift surface §2/§5 exist for.
+  #
+  # The failure this catches is NOT a deleted token (design/check.mjs Part L
+  # already refuses that, on both surfaces). It is one copy keeping the air while
+  # another keeps the rule: every per-file census passes, the reader and the
+  # canvas disagree, and the only witness is a screenshot nobody diffs.
+  #
+  # Exhaustive over the READER's declarations, `nil` included, in §2's shape —
+  # so adding a property to the reader without the three editor twins reds here.
+  @section_head_reader "> #paper-body > h2"
+  @section_head_stream "> #paper-body > div:not([class]) > h2"
+  @section_head_edit "> h2"
+
+  test "the section head is byte-identical across the reader and all three editor copies" do
+    view = view_css()
+
+    reader = declarations_for(view, "bp-paper-surface", @section_head_reader)
+
+    copies = [
+      {"Studio inline (root.html.heex)",
+       declarations_for(edit_css(), "bp-paper-editor-body", @section_head_edit)},
+      {"embedder bundle (assets/paper-editor/src/styles.css)",
+       declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_edit)}
+    ]
+
+    mismatches =
+      for {name, decls} <- copies,
+          {prop, value} <- Enum.to_list(reader),
+          Map.get(decls, prop) != value do
+        "#{name} — #{prop}: reader=#{inspect(value)} copy=#{inspect(Map.get(decls, prop))}"
+      end
+
+    assert mismatches == [],
+           """
+           SECTION HEAD drift — the reader and an editor copy disagree about the
+           section boundary. One surface is drawing a device the other is not:
+
+           #{Enum.join(mismatches, "\n")}
+
+           The device is air + rule + gap TOGETHER. Change all four declarations
+           (paper-surface.css reader + its keyed-stream leg, root.html.heex,
+           assets/paper-editor/src/styles.css) or none, then re-run the render rig
+           — the rendered gap is asserted against the artifact's 92px there.
+           """
+  end
+
+  test "the reader's section head covers BOTH document shapes it ships in" do
+    # The block-backed reader streams every top-level block as its own class-less
+    # `<div id data-block-id>` (bulldocs_live.ex, `phx-update="stream"`), while
+    # the legacy whole-body path and the render rig put the heading directly in
+    # the article. A rule written against only one of those is dead on the page
+    # that actually ships AND green in every gate that reads declarations rather
+    # than selectors — so the two legs are pinned to carry identical values.
+    view = view_css()
+
+    flat = declarations_for(view, "bp-paper-surface", @section_head_reader)
+    streamed = declarations_for(view, "bp-paper-surface", @section_head_stream)
+
+    assert flat == streamed,
+           """
+           the section head's two reader legs disagree:
+             #{@section_head_reader} => #{inspect(flat)}
+             #{@section_head_stream} => #{inspect(streamed)}
+           The keyed-stream leg is the one the live reader matches; the flat leg is
+           the legacy body and the render rig. Both must draw the same boundary.
+           """
+  end
+
+  test "the section head declares all three halves of the device (parser sanity)" do
+    # Guards the two tests above against a vacuous pass: if a selector is renamed
+    # the declaration maps go empty, every comparison trivially holds, and the
+    # drift tripwire silently stops tripping (distrust-vacuous-green).
+    surfaces = [
+      {"reader", declarations_for(view_css(), "bp-paper-surface", @section_head_reader)},
+      {"reader keyed-stream leg",
+       declarations_for(view_css(), "bp-paper-surface", @section_head_stream)},
+      {"Studio inline", declarations_for(edit_css(), "bp-paper-editor-body", @section_head_edit)},
+      {"embedder bundle",
+       declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_edit)}
+    ]
+
+    for {name, decls} <- surfaces do
+      for {prop, token} <- [
+            {"margin-top", "--bp-section-beat"},
+            {"border-top", "--bp-section-rule"},
+            {"padding-top", "--bp-section-gap"}
+          ] do
+        value = Map.get(decls, prop)
+
+        assert value && String.contains?(value, "var(#{token})"),
+               "#{name}: the section head's #{prop} is #{inspect(value)}, expected it to read var(#{token}) — " <>
+                 "a selector rename or a half-written device would make the parity tests above vacuous"
+      end
+    end
+  end
 end

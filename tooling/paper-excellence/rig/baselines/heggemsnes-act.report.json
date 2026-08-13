@@ -19,10 +19,48 @@
       "cell": "heggemsnes-act__light__1280",
       "file": "heggemsnes-act__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1116982,
+      "bytes": 1132030,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -48,10 +86,48 @@
       "cell": "heggemsnes-act__light__1920",
       "file": "heggemsnes-act__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1199217,
+      "bytes": 1220102,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -77,10 +153,48 @@
       "cell": "heggemsnes-act__dark__1280",
       "file": "heggemsnes-act__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 1114501,
+      "bytes": 1129602,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -106,10 +220,48 @@
       "cell": "heggemsnes-act__dark__1920",
       "file": "heggemsnes-act__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 1196732,
+      "bytes": 1217647,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
