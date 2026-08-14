@@ -532,12 +532,18 @@ html[data-theme="dark"] .bp-paper-body {
 /* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
    Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
    whose cells resolve through a caller-supplied map, so without one it falls back
-   to `<table class="bp-table"><tbody></tbody></table>` — zero height, 29.9px of
-   margin, and a section boundary further down measuring 121.9px instead of 92px
-   because that margin sat inside the gap. Same rule and same reason as
-   `p:empty` above (Reader-Owned Spacing Doctrine): a block that draws nothing
-   must not reserve room. `:not(:has(tr))` rather than `:empty` — the fallback
-   emits a `tbody`, so the table is not empty, it is ROWLESS.
+   to a table element wrapping one empty tbody — zero height, 29.9px of margin,
+   and a section boundary further down measuring 121.9px instead of 92px because
+   that margin sat inside the gap. Same rule and same reason as `p:empty` above
+   (Reader-Owned Spacing Doctrine): a block that draws nothing must not reserve
+   room. `:not(:has(tr))` rather than `:empty` — the fallback emits a tbody, so
+   the table is not empty, it is ROWLESS.
+
+   NOTE, and it is the second time this has bitten: no raw tag literal may appear
+   in a comment in this file. The sheets HTML export inlines this whole stylesheet
+   into the document it returns, and sheets/html_test.exs asserts that a tabless
+   export contains no table markup — so a CSS COMMENT can satisfy a test looking
+   for a sheet's own tab heading. Name the elements without their angle brackets.
 
    Scoped to `#paper-body` (the reader and the rig; the editor canvas has no such
    id) for the reason `p:empty` is View-only: an author building a table starts
