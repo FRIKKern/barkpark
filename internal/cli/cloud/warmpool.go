@@ -789,12 +789,19 @@ func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	// grep -v strip list (idempotency) + the append block, both grown when the
 	// shared mail relay is injected. The strip removes any prior line for a key
 	// so a re-run never duplicates.
-	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' -e '^BARKPARK_RELEASE_CAPTURE_HMAC_SECRET='`
+	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' -e '^BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=' -e '^BARKPARK_SELF_UPDATE_APPLY='`
 	appends := `printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK" >> ` + envFile + `.bpnew; ` +
 		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; ` +
-		`printf 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=%s\n' "$BP_RCH" >> ` + envFile + `.bpnew; `
+		`printf 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=%s\n' "$BP_RCH" >> ` + envFile + `.bpnew; ` +
+		// Arm one-click apply (fleet-health, 2026-08-14): the control plane's
+		// autoupdate rollout relays POST /v1/admin/self-update, and without this
+		// flag the box answers feature_not_configured (503) and the rollout
+		// worker CONTAINS it — proven on the v0.2.26 wave, where every managed
+		// box shipped unarmed and zero installs landed. Non-secret; managed
+		// boxes are the exact population the autonomous rollout exists for.
+		`printf 'BARKPARK_SELF_UPDATE_APPLY=%s\n' '1' >> ` + envFile + `.bpnew; `
 
 	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret, s.ReleaseCaptureHMAC}
 	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET + BARKPARK_RELEASE_CAPTURE_HMAC_SECRET (values redacted)"

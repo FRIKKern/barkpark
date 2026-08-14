@@ -1867,3 +1867,36 @@ func TestDeprovisionByIP_SweepIsNarrowedWhenTheIPIsShared(t *testing.T) {
 		})
 	}
 }
+
+// The one-click-apply arm flag (fleet-health, 2026-08-14): every managed box
+// must ship with BARKPARK_SELF_UPDATE_APPLY=1, or the control plane's
+// autoupdate rollout gets feature_not_configured (503) from the box and
+// CONTAINS it — the v0.2.26 wave proved a fleet of unarmed boxes lands zero
+// installs. Asserted on the script itself (append + strip idempotency) so the
+// flag cannot silently fall out of the go-live chain.
+func TestSecretsInstallStepArmsSelfUpdateApply(t *testing.T) {
+	secrets := Secrets{
+		SecretKeyBase:      strings.Repeat("s", 64),
+		Kek:                strings.Repeat("k", 44),
+		CloakKey:           strings.Repeat("c", 44),
+		PreviewJWTSecret:   strings.Repeat("p", 44),
+		ReleaseCaptureHMAC: strings.Repeat("r", 44),
+	}
+
+	for name, mail := range map[string]MailRelay{
+		"without mail": {},
+		"with mail":    {Host: "smtp.example.com", Username: "mailer@example.com", Password: strings.Repeat("m", 20)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			step := secretsInstallStep(secrets, mail)
+			script := strings.Join(step.Argv, " ")
+
+			if !strings.Contains(script, `printf 'BARKPARK_SELF_UPDATE_APPLY=%s\n' '1'`) {
+				t.Fatalf("go-live script no longer arms one-click apply:\n%s", script)
+			}
+			if !strings.Contains(script, `-e '^BARKPARK_SELF_UPDATE_APPLY='`) {
+				t.Fatalf("strip list misses the arm flag — a re-run would duplicate the line:\n%s", script)
+			}
+		})
+	}
+}
