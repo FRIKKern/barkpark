@@ -16,6 +16,7 @@ bash tooling/paper-excellence/rig/fetch-fixtures.sh    # the ONE networked step:
 |---|---|
 | `render.exs` | renders a fixture through the real `PortableDoc.Render` + the real bulldocs layout |
 | `shoot.mjs` | serves the rendered page on loopback and photographs it, asserting DOM content |
+| `census.mjs` | the heavy-rule census — one measurement function, run on the artifact AND on a rendered paper |
 | `gate.sh` | render + shoot the committed `heggemsnes-act` fixture; nonzero on any content failure |
 | `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff |
 | `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json` |
@@ -103,9 +104,10 @@ default moves, the rig reds rather than silently re-baselining every shot.
 `paper-excellence-wave-2026-08-12`, `portabledoc-showcase` — **full page**,
 light and dark, at **1280 and 1920**, `deviceScaleFactor: 2`, JPEG q72, plus a
 `*.report.json` per paper recording column width, **evidence-band width per
-component, prose characters-per-line, document horizontal overflow, and the air
-+ rule at every section boundary**, paragraph count, scale and blocked-request
-count.
+component, prose characters-per-line, document horizontal overflow, the air
++ rule at every section boundary, and the full rule census** (total, heavy,
+per-weight histogram and every heavy rule with its owner), paragraph count, scale
+and blocked-request count.
 
 A paper opens a section in one of **two shapes**, and both are measured:
 
@@ -118,13 +120,48 @@ A paper opens a section in one of **two shapes**, and both are measured:
 
 The container shape is reported, never asserted — it is an open finding, and a
 gate that held a committed fixture to a target nothing implements would be a
-red with no fix behind it. Two more findings ride the same rule: `doubledRules`
-records consecutive containers stacking a trailing and a leading rule (**32px
-apart** on `design-probe`), and each band row carries `inkWidth` /
-`inkOffCentre` beside its box geometry, because a content-narrow table has a
-full-width perfectly-centred **box** whose **ink** pins to the band's left edge
-(**290.6px of ink, 374.7px off the column axis** on the same fixture) — which the
-box-centre assertion passes.
+red with no fix behind it. `doubledRules` rides the same rule: it records
+consecutive containers stacking a trailing and a leading rule (**32px apart** on
+`design-probe`), which is a three-engine contract and not a stylesheet bug.
+
+`inkOffCentre` was the third such finding and is now **asserted**. A
+content-narrow table had a full-width perfectly-centred **box** whose **ink**
+pinned to the band's left edge (290.6px of ink, 374.7px off the column axis on
+`design-probe`) — a shape the box-centre assertion passes at 0. The band is a
+ceiling now rather than an issue, so ink and box agree; the assertion exempts a
+row whose ink is WIDER than its box, because that component is self-scrolling and
+where its ink sits is a scroll position rather than a layout fact.
+
+## The heavy-rule census
+
+`census.mjs` counts the horizontal rules a reader can see, and it is the SAME
+function on both sides of the comparison — the CLI runs it on the benchmark
+artifact, `shoot.mjs` runs it on every rendered cell. A rule is a horizontal
+border edge that is visible, inked and non-zero; a row of `th` cells merges into
+the one underline a reader actually sees; vertical edges are excluded, because a
+left edge is a margin accent (the artifact's own verdict device) and not a line
+in the page's vertical rhythm.
+
+```sh
+node tooling/paper-excellence/rig/census.mjs \
+  tooling/paper-excellence/evidence/erasure.html --structural ".sec-head, .declaration"
+# → 59 rules, 8 HEAVY — 6 sec-head, 2 declaration frame
+```
+
+The artifact spends the heavy weight (2px) on 8 of 59 rules: its six section
+openings and the two edges of its closing declaration frame. **That is the
+hierarchy** — a thick line means a new argument starts here — and every heavy
+rule a component draws costs the boundary its meaning. `shoot.mjs` attributes
+every heavy rule to the element that drew it and fails on any that is not a
+section head, so this is not a count that has to be re-blessed when a fixture
+gains a section. Its twin lives in `design/check.mjs` Part M, which censuses the
+stylesheet DECLARATIONS: the rendered arm is blind to a heavy rule on a class no
+fixture happens to use, the declaration arm is blind to an inline style, and
+neither subsumes the other.
+
+`.bp-declaration` is deliberately **not** on the allowlist. No Barkpark block
+emits the framed finale yet, and an allowlist entry that can never match reads as
+coverage while gating nothing.
 
 A section beat is measured from the last block that actually **paints**. The
 Mechanical Spacing Doctrine authors vertical rhythm as empty paragraph blocks and

@@ -19,7 +19,7 @@
       "cell": "hobby-hardening-capstone__light__1280",
       "file": "hobby-hardening-capstone__light__1280.jpeg",
       "scale": 2,
-      "bytes": 7410011,
+      "bytes": 10276622,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -235,13 +235,135 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 150,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 139,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2119.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4219.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6620.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 15354.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 18879.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22022.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23906.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 25403,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 26892.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 29193.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 30712.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "hobby-hardening-capstone__light__1920",
       "file": "hobby-hardening-capstone__light__1920.jpeg",
       "scale": 2,
-      "bytes": 9782396,
+      "bytes": 10825395,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -457,13 +579,135 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 150,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 139,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2100.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4200.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6371.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 14933,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 17852.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 20506.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22247,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23570.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 24915.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 27217,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 28735.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "hobby-hardening-capstone__dark__1280",
       "file": "hobby-hardening-capstone__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 7386542,
+      "bytes": 10062146,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -679,13 +923,135 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 150,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 139,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2119.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4219.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6620.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 15354.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 18879.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22022.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23906.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 25403,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 26892.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 29193.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 30712.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "hobby-hardening-capstone__dark__1920",
       "file": "hobby-hardening-capstone__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 9745944,
+      "bytes": 10809384,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -901,6 +1267,128 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 150,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 139,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2100.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4200.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6371.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 14933,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 17852.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 20506.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22247,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23570.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 24915.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 27217,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 28735.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     }
   ]

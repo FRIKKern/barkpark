@@ -38,9 +38,20 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # The doc.css `hr.section` look: a centered "§" glyph straddling a hairline
   # rule. The glyph sits in an inline-block box with the parchment page colour
   # as its background, masking the rule that runs behind it across the column.
+  #
+  # The `bp-section-divider` class carries NO styling here — every value stays
+  # inline, and view_edit_parity_test.exs §8 still compares those inline
+  # declarations against the edit mirror. It is a HANDLE: this was the last
+  # article block emitting a class-less box, so the reader shell had no way to
+  # say anything about a divider's position, and "a divider that sits directly in
+  # front of a section head is drawing a boundary the head already draws" is
+  # exactly such a claim (paper-surface.css, §divider dedup). The name is the one
+  # the edit surface has bound its mirror to since the divider-lockstep slice
+  # (`.bp-section-divider` / `.bp-section-divider__mark`), so this closes an
+  # asymmetry rather than inventing a second vocabulary for one block.
   def section_divider_html do
-    ~s|<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
-      ~s|<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
+    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
+      ~s|<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
       ~s|background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
   end
 

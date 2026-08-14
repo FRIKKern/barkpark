@@ -8,7 +8,7 @@
 // Dependency-free (Node built-ins only). Pairs with design/validate.mjs (shape)
 // and design/emit.mjs (the single source of the emitted bytes).
 import {
-  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, glyphOf, ARTIFACTS, repoRoot,
+  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, glyphOf, ARTIFACTS, repoRoot,
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
   readManifest, attribute, lostLines, regionDigest, MANIFEST_PATH,
 } from "./emit.mjs";
@@ -1250,6 +1250,94 @@ console.log("\ndesign/check.mjs — Part L: section-boundary consumer census");
     console.log(
       `  ok   ${SECTION_KEYS.length} section tokens emitted, bridged and consumed on both the reader and the editor surface, ` +
         `each head spending all three on one declaration, and the reader carrying its keyed-stream leg`,
+    );
+}
+
+// ── Part M: the RULE LADDER — one weight for structure, one for everything ───
+// space.rule emits `--tok-rule-hairline`, each surface bridges it onto
+// `--bp-rule-hairline`, and the rules that draw chrome spend it. That is Part J's
+// shape and Part J's shape alone would be satisfied by a stylesheet where the
+// token is consumed in one place and every OTHER line still draws 2px from a
+// literal — which is precisely the state this part was written to end.
+//
+// So Part M has a second arm the other consumer censuses do not: it reads every
+// HORIZONTAL border declaration in both stylesheets and refuses any literal at or
+// above the structural weight, wherever it appears. That is the arm that can see
+// what a photograph cannot. The rig's census (tooling/paper-excellence/rig/shoot.mjs)
+// counts the rules that PAINT on the seven committed fixtures — authoritative
+// about what ships, and blind to a heavy rule on a class no fixture happens to
+// render. `.bp-board__col` was exactly that: a 3px accent across a task board, in
+// none of the seven papers. Neither arm subsumes the other; a declaration census
+// alone would miss an inline style, a rendered census alone would miss this.
+//
+// VERTICAL edges are deliberately not censused. A left edge is a margin accent —
+// the verdict colour `.bp-callout`, `.bp-card` and `.bp-board__col` all carry, and
+// the benchmark artifact's own `border-left: 3px` device — and it cannot compete
+// with a horizontal boundary because it does not draw a horizontal line.
+console.log("\ndesign/check.mjs — Part M: rule-ladder consumer census + heavy-declaration scan");
+{
+  let mFailed = 0;
+  const mFail = (m) => { console.error(m); mFailed++; failed++; };
+
+  const RULE_SURFACES = [
+    "api/assets/paper-surface/paper-surface.css",
+    "api/assets/paper-editor/src/styles.css",
+  ];
+
+  // ── arm 1: the token reaches a real consumer on both surfaces ──────────────
+  for (const path of RULE_SURFACES) {
+    const css = readFileSync(join(repoRoot, path), "utf8");
+    for (const key of RULE_KEYS) {
+      const value = `${tokens.space.rule[key]}${RULE_UNITS[key]}`;
+      if (!css.includes(`--tok-rule-${key}: ${value};`))
+        mFail(`  Part M FAIL: --tok-rule-${key} is not emitted as ${value} in ${path}`);
+      if (!css.includes(`--bp-rule-${key}: var(--tok-rule-${key});`))
+        mFail(`  Part M FAIL: --bp-rule-${key} has no bridge onto --tok-rule-${key} in ${path}`);
+      const read = css
+        .split("\n")
+        .some((l) => l.includes(`var(--bp-rule-${key}`) && !l.includes(`--bp-rule-${key}: var(`));
+      if (!read)
+        mFail(
+          `  Part M FAIL: --bp-rule-${key} is emitted and bridged in ${path} but NOTHING consumes it.\n` +
+            `    Every chrome rule on this surface is then drawing a hardcoded weight, which is the\n` +
+            `    drift the token exists to prevent. Spend it, or drop it from space.rule + RULE_KEYS.`,
+        );
+    }
+  }
+
+  // ── arm 2: no horizontal border literal at or above the structural weight ──
+  // Only the section head may declare one, and it declares it through
+  // `--bp-section-rule` rather than a literal, so the allowlist is empty by
+  // construction: there is no legitimate literal.
+  const HEAVY_PX = tokens.space.section.rule;
+  // `border`, `border-top`, `border-bottom` and their `-width` forms. NOT
+  // `border-left/right` (a margin accent is not a rule), and not `border-radius`
+  // — the `(?![a-z-])` is what keeps `radius`, `color` and `style` out.
+  const HORIZONTAL_BORDER = /border(?:-top|-bottom)?(?:-width)?(?![a-z-])\s*:\s*([^;}]*)/g;
+  for (const path of RULE_SURFACES) {
+    const css = readFileSync(join(repoRoot, path), "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+    for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const [decl, value] of body.matchAll(HORIZONTAL_BORDER)) {
+        const px = /(\d*\.?\d+)px/.exec(value);
+        if (!px || parseFloat(px[1]) < HEAVY_PX) continue;
+        mFail(
+          `  Part M FAIL: ${path} declares a ${px[1]}px HORIZONTAL rule outside the section head:\n` +
+            `      ${selector.trim().replace(/\s+/g, " ").slice(0, 110)}\n` +
+            `        ${decl.trim().slice(0, 90)}\n` +
+            `    ${HEAVY_PX}px is the STRUCTURAL weight (space.section.rule) and a section boundary is the\n` +
+            `    only thing allowed to spend it — a component drawing at that weight makes the boundary\n` +
+            `    stop meaning anything. Use var(--bp-rule-hairline) for chrome; if the line carries a\n` +
+            `    VERDICT rather than structure, put it on the left edge where .bp-callout and .bp-card\n` +
+            `    already carry theirs, and it leaves this census by being vertical.`,
+        );
+      }
+    }
+  }
+
+  if (!mFailed)
+    console.log(
+      `  ok   --tok-rule-hairline emitted, bridged and consumed on both surfaces, and neither stylesheet ` +
+        `declares a horizontal border at or above the ${HEAVY_PX}px structural weight`,
     );
 }
 

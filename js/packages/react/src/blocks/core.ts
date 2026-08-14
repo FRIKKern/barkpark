@@ -624,9 +624,14 @@ function codeBlockHtml(value: string): string {
 
 const code: Emit = (b) => codeBlockHtml(str(b.value))
 
+// The `bp-section-divider` classes carry no styling (every value is inline, the
+// same bytes figures.ex emits) — they are the handle the reader shell needs to
+// say something about a divider's POSITION, e.g. that one sitting directly in
+// front of a section head draws a boundary the head already draws. Kept here so
+// an SDK-rendered document is the same document the reader renders.
 const divider: Emit = () =>
-  `<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">` +
-  `<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
+  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">` +
+  `<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
   `background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>`
 
 const image: Emit = (b) => {

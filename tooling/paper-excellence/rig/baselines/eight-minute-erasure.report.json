@@ -19,7 +19,7 @@
       "cell": "eight-minute-erasure__light__1280",
       "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2242957,
+      "bytes": 2241783,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -94,12 +94,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 519.8,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
+          "left": 380.1,
+          "right": 899.9,
           "inkWidth": 519.8,
-          "inkOffCentre": -260.1
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
@@ -166,23 +166,95 @@
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 623,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
+          "left": 328.5,
+          "right": 951.5,
           "inkWidth": 623,
-          "inkOffCentre": -208.5
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 40,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 34,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7018.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "eight-minute-erasure__light__1920",
       "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2430340,
+      "bytes": 2429254,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -257,12 +329,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 519.8,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 700.1,
+          "right": 1219.9,
           "inkWidth": 519.8,
-          "inkOffCentre": -360.1
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
@@ -329,23 +401,95 @@
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 623,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 648.5,
+          "right": 1271.5,
           "inkWidth": 623,
-          "inkOffCentre": -308.5
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 40,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 34,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7018.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "eight-minute-erasure__dark__1280",
       "file": "eight-minute-erasure__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2255780,
+      "bytes": 2253924,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -420,12 +564,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 519.8,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
+          "left": 380.1,
+          "right": 899.9,
           "inkWidth": 519.8,
-          "inkOffCentre": -260.1
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
@@ -492,23 +636,95 @@
         },
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 623,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
+          "left": 328.5,
+          "right": 951.5,
           "inkWidth": 623,
-          "inkOffCentre": -208.5
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 40,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 34,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7018.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "eight-minute-erasure__dark__1920",
       "file": "eight-minute-erasure__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2444241,
+      "bytes": 2442769,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -583,12 +799,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 519.8,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 700.1,
+          "right": 1219.9,
           "inkWidth": 519.8,
-          "inkOffCentre": -360.1
+          "inkOffCentre": 0
         },
         {
           "kind": "figure",
@@ -655,16 +871,88 @@
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 623,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 648.5,
+          "right": 1271.5,
           "inkWidth": 623,
-          "inkOffCentre": -308.5
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 40,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 34,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7018.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     }
   ]

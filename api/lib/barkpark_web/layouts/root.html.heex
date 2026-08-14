@@ -4632,8 +4632,8 @@
        split into ONE <tbody>; the header row's cells carry `.bp-table__th` regardless,
        and NO CSS targets thead/tbody, so the delta is visually byte-identical. Keep
        byte-aligned with assets/paper-editor/src/styles.css. */
-    .bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
-    .bp-paper-editor-body .bp-table__th { border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
+    .bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; }
+    .bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
     .bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
     /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF
        the .bp-table* selectors so it never leaks into the parity comparison). The
@@ -4994,7 +4994,7 @@
       background: var(--paper-bg-deep, #f4f4ef);
     }
     .bp-canvas-action .bp-button {
-      display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+      display: inline-block; padding: 10px 20px; border: var(--bp-rule-hairline) solid var(--paper-accent);
       color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
     }
     .bp-canvas-action .bp-button--primary {

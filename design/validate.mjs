@@ -365,6 +365,29 @@ if (SECTION_KEYS.every((k) => typeof sec[k] === "number")) {
   ok(sec.gap >= sec.rule, `space.section.gap is ${sec.gap}px against a ${sec.rule}px rule; the head's words must clear the rule by more than its own thickness or it reads as underlined text`);
 }
 
+// space.rule — the OTHER rung of the same ladder: the weight every horizontal
+// line that is not a section boundary draws at. One floor, and it is the whole
+// point of naming the weight at all: a hairline that grows to meet the
+// structural rule does not make the page louder, it makes the SECTION BOUNDARY
+// mean nothing, because weight stops distinguishing structure from chrome. The
+// benchmark artifact keeps the gap at exactly 2:1 (2px sec-head over 1px
+// everything); this floors the ORDER and leaves the ratio to taste.
+const RULE_KEYS = ["hairline"];
+const rul = (tokens.space || {}).rule || {};
+for (const k of RULE_KEYS) {
+  ok(typeof rul[k] === "number" && rul[k] > 0, `space.rule.${k} is required (a positive number of pixels)`);
+}
+for (const k of Object.keys(rul)) {
+  if (k === "_note") continue;
+  ok(RULE_KEYS.includes(k), `space.rule.${k} is not emitted — a token with no consumer is the drift this gate exists to catch; add it to RULE_KEYS in design/emit.mjs + check.mjs Part M, or delete it`);
+}
+if (typeof rul.hairline === "number" && typeof sec.rule === "number") {
+  ok(
+    sec.rule > rul.hairline,
+    `space.rule.hairline is ${rul.hairline}px against a ${sec.rule}px space.section.rule; a chrome line that weighs as much as a section boundary does not make the page louder — it makes the boundary stop meaning anything, because weight is the only thing separating structure from chrome`,
+  );
+}
+
 // space.evidence — the width a block that improves with width may claim when it
 // steps OUT of the prose column. Four floors, each encoding the LAW rather than
 // the number, so a band that has quietly stopped being a band reds here:

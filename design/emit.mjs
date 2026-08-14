@@ -214,6 +214,14 @@ export const EVIDENCE_UNITS = { band: "px", bandMax: "px", fill: "", gutter: "px
 // Part L refuses a member with none, validate.mjs refuses a member not listed here.
 export const SECTION_KEYS = ["beat", "rule", "gap"];
 export const SECTION_UNITS = { beat: "", rule: "px", gap: "px" };
+// The RULE LADDER (tokens.space.rule). `space.section.rule` is the STRUCTURAL
+// weight and has its own key above; this is the OTHER rung — the weight every
+// line that is not a section boundary draws at. Kept as a token rather than a
+// literal `1px` for one reason: a census can only assert "chrome is quieter than
+// structure" if both weights are named, and check.mjs Part M reads this list to
+// find what the census is allowed to see.
+export const RULE_KEYS = ["hairline"];
+export const RULE_UNITS = { hairline: "px" };
 const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
@@ -614,6 +622,12 @@ function paperBlock(themes = loadThemes()) {
       ? `--tok-section-beat: calc(var(--tok-air-beat) * ${sc.beat});`
       : `--tok-section-${k}: ${sc[k]}${SECTION_UNITS[k]};`,
   );
+  // The RULE LADDER (space.rule): the weight of every horizontal line that is
+  // NOT a section boundary. Emitted beside the section rule on purpose — the two
+  // are one ladder, and a reader who sees them apart is reading a paper where a
+  // table header shouts as loud as a chapter break.
+  const rl = tokens.space.rule;
+  const ruleVars = RULE_KEYS.map((k) => `--tok-rule-${kebab(k)}: ${rl[k]}${RULE_UNITS[k]};`);
 
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
@@ -624,6 +638,7 @@ function paperBlock(themes = loadThemes()) {
     ...step("h3", r.h3),
     ...airVars,
     ...sectionVars,
+    ...ruleVars,
     ...evidenceVars,
   ].map((l) => "  " + l).join("\n");
 
