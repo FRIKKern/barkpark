@@ -181,13 +181,30 @@ defmodule PDS.Census do
   # exits 1 on any mismatch, so the next drift cannot ship green. THE REPAIR IS NOT "EDIT
   # THE NUMBER": re-run the command above, and amend the row here WITH the lens, the engine
   # and the run that produced it, in the SAME commit as the change that moved it.
+  # RE-DERIVED AT THE BPML W3 WAVE (4 rows) — the tree moved, same lens: the
+  # working-copy sync endpoint adds two `ok: true` receipt sites (sync_apply/6
+  # unchanged-leg, sync_persist/6 applied-leg) and one POST route.
+  #
+  #   textual   104 -> 106   two new occurrences; LENS-LOSES-NOTHING holds
+  #                          (106 == ast 97 + phantom 9).
+  #   ast        95 ->  97   the same two, as AST-literal pairs.
+  #   emitted    91 ->  93   both sites emit on the wire.
+  #   write      54 ->  56   POST /papers/:slug/sync joins the routed-write set.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 14, unrouted 23 read `==`
+  # in the same run. Lens unchanged (build-free AST, :binary.matches/2, depth 6,
+  # @write_verbs without `transaction`); engine of this re-derivation:
+  # Elixir 1.20.0 · Erlang/OTP 29 (erts 17.0.1) · aarch64-apple-darwin25 —
+  # a NEWER engine than the wave-47 baseline's, printed live by report_engine/0.
+  # command `elixir scripts/pds-elixir-receipt-census.exs` from the repo root,
+  # 2026-08-14, in the SAME commit as the sync endpoint that moved the rows.
   @rederived %{
-    textual: 104,
-    ast: 95,
+    textual: 106,
+    ast: 97,
     phantom: 9,
     consumer: 4,
-    emitted: 91,
-    write: 54,
+    emitted: 93,
+    write: 56,
     read: 14,
     unrouted: 23
   }
@@ -419,6 +436,14 @@ defmodule PDS.Census do
     # read back because nothing is stored. Exactly the class prose's case.
     {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController",
      :validate, :status_only_receipt},
+    # BPML working-copy sync (masterplan W3): renders real `ok: true` receipts, but
+    # they live in sync_apply/6 → sync_persist/6 — one and two helpers below the
+    # routed action, past the register's stated ONE-HOP relation. The class prose's
+    # literal case: the receipt exists and "does not spell the key [where] the lens
+    # greps". The sync cycle IS read back end-to-end in
+    # bulldocs_bpml_api_test.exs ("pull, edit the file, push, converge").
+    {:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
+     :sync, :status_only_receipt},
     {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
     {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
@@ -1004,6 +1029,18 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.propose/2", "78347098", "122622379"},
       verdict: "UNJUDGED", basis: :unexamined},
+    # BPML working-copy sync (masterplan W3) — the UNCHANGED receipt: `ok: true,
+    # unchanged: true` claims nothing was written, and no test re-reads the row to
+    # prove the nothing. Unjudged until one does.
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.sync_apply/6", "123013536", "126012198"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # BPML working-copy sync — the APPLIED receipt.
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.sync_persist/6", "94329464", "19447210"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "DEMOTED BY THE FALSIFIER'S OWN LENS, same shape as its apply_op siblings. The cycle test (bulldocs_bpml_api_test.exs:221) pushes, then re-PULLS the paper over the public HTTP read path and asserts the stored document byte-equals the receipt's canonical BPML — a real read-back the arm cannot see, because it keys on a `Repo.` read in the cited block. The row says what the lens can stand behind."},
     # barkpark_web/controllers/bulldocs_intents_controller.ex:50
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
             "BarkparkWeb.BulldocsIntentsController.mark_processed/2", "120960553", "126280052"},

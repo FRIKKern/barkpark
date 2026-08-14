@@ -211,6 +211,103 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
     end
   end
 
+  describe "POST papers/:slug/sync (working-copy push)" do
+    defp pull!(conn, slug) do
+      conn = get(conn, "/papers/#{slug}/source", %{"format" => "bpml"})
+      [rev] = get_resp_header(conn, "x-paper-rev")
+      {response(conn, 200), rev}
+    end
+
+    test "the full cycle: pull, edit the file, push, converge on canonical", %{conn: conn} do
+      slug = "bpml-sync-paper"
+      body = LabelFixtures.paper_attrs(%{"bpml" => bpml_doc(slug)})
+      assert authed(build_conn()) |> post(@ingest_path, body) |> json_response(200)
+
+      {bpml, rev} = pull!(build_conn(), slug)
+      edited = String.replace(bpml, "Canary at ", "Canary holding at ")
+      assert edited != bpml
+
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => edited, "baseRev" => rev})
+
+      assert %{"ok" => true, "op_count" => 1, "rev" => new_rev, "bpml" => canonical} =
+               json_response(conn, 200)
+
+      assert new_rev != rev
+      assert canonical =~ "Canary holding at "
+
+      # the working copy converges: pulling again returns exactly the canonical
+      {pulled, pulled_rev} = pull!(build_conn(), slug)
+      assert pulled == canonical
+      assert pulled_rev == to_string(new_rev)
+    end
+
+    test "a stale baseRev is a 412 that teaches pull-first", %{conn: conn} do
+      slug = "bpml-sync-stale"
+      body = LabelFixtures.paper_attrs(%{"bpml" => bpml_doc(slug)})
+      assert authed(build_conn()) |> post(@ingest_path, body) |> json_response(200)
+
+      {bpml, _rev} = pull!(build_conn(), slug)
+
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/#{slug}/sync", %{
+          "bpml" => bpml <> "<p>late edit</p>\n",
+          "baseRev" => "not-the-rev"
+        })
+
+      assert %{"error" => err} = json_response(conn, 412)
+      assert err["code"] == "precondition_failed"
+      assert err["hint"] =~ "pull"
+    end
+
+    test "an unchanged push applies nothing", %{conn: conn} do
+      slug = "bpml-sync-unchanged"
+      body = LabelFixtures.paper_attrs(%{"bpml" => bpml_doc(slug)})
+      assert authed(build_conn()) |> post(@ingest_path, body) |> json_response(200)
+
+      {bpml, rev} = pull!(build_conn(), slug)
+
+      conn =
+        authed(conn) |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
+
+      assert %{"ok" => true, "unchanged" => true, "op_count" => 0} = json_response(conn, 200)
+    end
+
+    test "a broken edit returns teaching errors, nothing applied", %{conn: conn} do
+      slug = "bpml-sync-broken"
+      body = LabelFixtures.paper_attrs(%{"bpml" => bpml_doc(slug)})
+      assert authed(build_conn()) |> post(@ingest_path, body) |> json_response(200)
+
+      {bpml, rev} = pull!(build_conn(), slug)
+      broken = String.replace(bpml, "<h1", "<div") |> String.replace("</h1>", "</div>")
+
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => broken, "baseRev" => rev})
+
+      assert %{"error" => %{"code" => "bpml", "errors" => [e | _]}} = json_response(conn, 422)
+      assert e["hint"] =~ "<section"
+
+      {after_bpml, after_rev} = pull!(build_conn(), slug)
+      assert after_bpml == bpml
+      assert after_rev == rev
+    end
+
+    test "an unknown slug teaches publish-first", %{conn: conn} do
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/nope-never/sync", %{
+          "bpml" => "<paper slug=\"x\" title=\"X\"></paper>",
+          "baseRev" => "1"
+        })
+
+      assert %{"error" => err} = json_response(conn, 404)
+      assert err["hint"] =~ "publish"
+    end
+  end
+
   describe "full circle" do
     test "BPML in → blocks stored → BPML out → identical blocks", %{conn: conn} do
       slug = "bpml-circle-paper"

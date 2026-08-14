@@ -164,6 +164,175 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
+  @doc """
+  `POST /v1/plugins/bulldocs/papers/:slug/sync` — the working-copy push (BPML
+  masterplan W3). The client sends its edited BPML document plus the rev its
+  pull anchored on; the SERVER parses strictly, derives the op batch from an
+  id-keyed diff (`Bpml.Diff.derive/2`, replay-proven before anything applies),
+  and applies it atomically under `if_rev`. Nobody hand-writes an op, and the
+  grammar keeps its single Elixir owner — the CLI never parses BPML.
+
+    * parse failure → 422 with the collected teaching errors;
+    * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
+      is silently lost);
+    * no changes → 200 `{ok, unchanged: true}`;
+    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the CANONICAL
+      print of the persisted blocks (post-normalization) — the client
+      overwrites its file with it, so working copies always converge on the
+      server's truth.
+  """
+  def sync(conn, %{"slug" => slug} = params) do
+    bpml = params["bpml"]
+    base_rev = params["baseRev"]
+    dataset = params["dataset"] || Content.paper_default_dataset()
+    scope = paper_scope_opts(conn, params)
+
+    cond do
+      not is_binary(bpml) ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: %{code: "malformed", message: "sync needs a bpml (string) body"}})
+
+      not (is_binary(base_rev) and base_rev != "") ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{
+          error: %{
+            code: "malformed",
+            message: "sync needs baseRev — the rev your pull anchored on (x-paper-rev)"
+          }
+        })
+
+      true ->
+        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+          {:error, errors} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{code: "bpml", message: "the BPML document did not parse", errors: errors}
+            })
+
+          {:ok, parsed} ->
+            sync_apply(conn, slug, parsed, base_rev, dataset, scope)
+        end
+    end
+  end
+
+  defp sync_apply(conn, slug, parsed, base_rev, dataset, scope) do
+    case Content.get_paper(slug, dataset, scope) do
+      nil ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{
+          error: %{
+            code: "not_found",
+            message: "no paper for slug #{slug}",
+            hint: "sync edits an existing paper — publish it first, then pull"
+          }
+        })
+
+      paper ->
+        # The paper-level integer rev — the same value the ops if_rev guard
+        # compares (content["rev"]), and the same one pull anchors in
+        # x-paper-rev. NEVER the row's _rev hash.
+        current_rev = to_string(get_in(paper.content || %{}, ["rev"]))
+        current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
+
+        cond do
+          current_rev != to_string(base_rev) ->
+            conn
+            |> put_status(:precondition_failed)
+            |> json(%{
+              error: %{
+                code: "precondition_failed",
+                message: "paper is at rev #{current_rev}, your copy anchored on #{base_rev}",
+                hint: "bp paper pull to absorb the drift, re-apply your edit, push again"
+              }
+            })
+
+          true ->
+            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
+              {:error, :diff_verification_failed} ->
+                conn
+                |> put_status(:unprocessable_entity)
+                |> json(%{
+                  error: %{
+                    code: "bpml",
+                    message: "the derived op batch failed its replay proof — nothing was applied",
+                    hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
+                  }
+                })
+
+              {:ok, _minted, []} ->
+                conn
+                |> put_resp_header("x-paper-rev", current_rev)
+                |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
+
+              {:ok, _minted, ops} ->
+                sync_persist(conn, slug, ops, base_rev, dataset, scope)
+            end
+        end
+    end
+  end
+
+  defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
+    case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
+      {:ok, result} ->
+        canonical =
+          case Content.get_paper(slug, dataset, scope) do
+            nil ->
+              nil
+
+            paper ->
+              Barkpark.PortableDoc.Bpml.print_paper(%{
+                "slug" => paper.doc_id,
+                "title" => paper.title,
+                "blocks" => get_in(paper.content || %{}, ["blocks"]) || []
+              })
+          end
+
+        conn
+        |> put_resp_header("x-paper-rev", to_string(result.rev))
+        |> json(%{
+          ok: true,
+          slug: result.slug,
+          # STRING on the wire, like x-paper-rev and the unchanged leg — one
+          # rev spelling for the working copy to anchor on.
+          rev: to_string(result.rev),
+          op_count: result.op_count,
+          bpml: canonical
+        })
+
+      {:error, :precondition_failed} ->
+        conn
+        |> put_status(:precondition_failed)
+        |> json(%{
+          error: %{
+            code: "precondition_failed",
+            message: "another write landed mid-sync; no ops applied",
+            hint: "bp paper pull, re-apply your edit, push again"
+          }
+        })
+
+      {:error, {:constraint, message, op_kind}} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
+      {:error, _other} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "invalid_op", message: "the derived batch could not be applied"}
+        })
+    end
+  end
+
   # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
   defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do
     case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
