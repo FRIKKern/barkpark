@@ -25,6 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { runCensus, HEAVY_PX } from "./census.mjs";
 
 const RIG_DIR = path.dirname(new URL(import.meta.url).pathname);
 const REPO_ROOT = path.resolve(RIG_DIR, "../../..");
@@ -115,6 +116,34 @@ const SECTION_BEAT_PX = 92;
 // Sub-pixel layout rounding plus the ~0.04px the 4.18 ratio leaves against 92.
 const SECTION_BEAT_TOL_PX = 2;
 const SECTION_RULE_MIN_PX = 1;
+
+// ── The HEAVY-RULE CENSUS contract (pe-quiet-rules) ──────────────────────────
+// The section head above is asserted to EXIST. This is the other half: that it is
+// the only thing on the page drawing at that weight.
+//
+// The benchmark artifact draws 59 horizontal rules and spends the heavy weight
+// (2px) on 8 — its six `.sec-head` openings and the two edges of its closing
+// `.declaration` frame. Every other line is a hairline. That is not decoration,
+// it is the hierarchy: a reader who has learned that a thick line means "a new
+// argument starts here" can navigate a long paper at scroll speed, and one
+// component drawing its own 2px underline mid-argument takes that away.
+//
+// Measured with `census.mjs` — the SAME function, on both sides — this reader had
+// drifted: table headers at 2px, card top accents at 3px, button frames at 2px.
+// 8/6/26/25 heavy rules on four of the seven committed fixtures where only
+// 6/0/10/11 section boundaries existed to justify them.
+//
+// The assertion is NOT a count. A count would pass a page that swapped a section
+// head for a table header, and would have to be re-blessed every time a fixture
+// gained a section. Every heavy rule is attributed to the element that drew it,
+// and the check is that the element IS a section head.
+//
+// `.bp-declaration` — the artifact's framed finale — is deliberately NOT on this
+// list. No Barkpark block emits it yet, and an allowlist entry that can never
+// match is a decoy: it reads as coverage and gates nothing. The device that ships
+// the framed finale extends this list, on purpose, with a fixture behind it.
+const STRUCTURAL_RULE_SELECTOR =
+  ".bp-paper-surface > #paper-body > h2, .bp-paper-surface > #paper-body > div:not([class]) > h2";
 
 // Offline policy. The reader pulls mermaid + asciinema from cdn.jsdelivr.net,
 // and papers may embed remote media. We abort EVERY request that is not our
@@ -544,8 +573,42 @@ async function main() {
                 `the evidence band crossed its gutters`,
             );
           }
-          if (b.width < seen.columnContentWidth - 1) {
-            fail(`${cell}: ${b.kind} measures ${b.width}px, NARROWER than the ${seen.columnContentWidth}px column it broke out of`);
+          // 2b. AND ITS INK IS ON THE AXIS TOO. The box being centred is not the
+          //     same claim as the reader seeing something centred: a table given
+          //     the whole 1040px band but holding 291px of data had a perfectly
+          //     centred box and cells pinned to the band's left edge, 374.7px off
+          //     the column axis, and the box assertion above passed it at 0.
+          //     Reported since #11651, asserted here.
+          //
+          //     A component whose ink is WIDER than its box is self-scrolling —
+          //     the box is the frame, the ink runs past it, and where that ink
+          //     sits is a scroll position rather than a layout fact. The box
+          //     assertion already covers the frame, so those are exempt, and the
+          //     exemption is a width comparison rather than a class list so a new
+          //     component cannot quietly inherit it.
+          if (b.inkWidth <= b.width + 1 && Math.abs(b.inkOffCentre) > MAX_BAND_OFFCENTRE_PX) {
+            fail(
+              `${cell}: ${b.kind} has a ${b.width}px box centred at ${b.offCentre}px but only ` +
+                `${b.inkWidth}px of INK, sitting ${b.inkOffCentre}px off the column's centre axis — ` +
+                `a block that does not fill the band must not claim it; the reader sees a small ` +
+                `component hanging off one edge of a wide empty box`,
+            );
+          }
+          // 2c. A component that WANTS more than the column must get at least the
+          //     column. This was "no breakout component is ever narrower than the
+          //     column", which was true while every component took the band's
+          //     width unconditionally — and became wrong the moment a
+          //     content-narrow table stopped claiming a band it does not fill (a
+          //     291px table SHOULD measure 291px). What still cannot happen is a
+          //     component whose ink needs more room than the column while its box
+          //     is smaller than the column: that is the band clause having died,
+          //     which is the regression this leg was built to catch.
+          if (b.inkWidth > seen.columnContentWidth + 1 && b.width < seen.columnContentWidth - 1) {
+            fail(
+              `${cell}: ${b.kind} holds ${b.inkWidth}px of ink but measures only ${b.width}px, ` +
+                `NARROWER than the ${seen.columnContentWidth}px column it should at minimum fill — ` +
+                `the evidence band's width clause is not reaching this component`,
+            );
           }
         }
         // 3. prose keeps its measure while the evidence widens.
@@ -611,6 +674,35 @@ async function main() {
         }
         assertions += 2 * sized.length + 1;
 
+        // ── the heavy-rule census, per cell ────────────────────────────────
+        // Same function the artifact is measured with (census.mjs), evaluated in
+        // this page. Every rule that PAINTS, attributed to the element that drew
+        // it; a stray heavy rule names itself here instead of being a count that
+        // moved.
+        const census = await runCensus(page, "main.bp-paper-article", STRUCTURAL_RULE_SELECTOR);
+        if (census.strayHeavy > 0) {
+          const worst = census.heavyRules.filter((r) => !r.structural).slice(0, 6);
+          fail(
+            `${cell}: ${census.strayHeavy} of ${census.heavy} heavy (>=${HEAVY_PX}px) horizontal rules are NOT ` +
+              `section boundaries — a component is drawing the line that means "a new argument starts here". ` +
+              `Heavy weight is reserved for structure; chrome draws at --bp-rule-hairline ` +
+              `(design/tokens.json space.rule). Offenders:\n` +
+              worst.map((r) => `      ${r.px}px at y=${r.y}, ${r.width}px wide — ${r.owners.join(" | ")}`).join("\n"),
+          );
+        }
+        // The mirror failure: a paper whose section heads have stopped drawing at
+        // all would report zero strays and be just as broken. Every boundary the
+        // beat assertion above measured must also appear in the census as a heavy
+        // rule, so the two halves cannot pass each other's absence.
+        if (census.structuralHeavy !== sized.length) {
+          fail(
+            `${cell}: the census sees ${census.structuralHeavy} heavy section rule(s) but ${sized.length} ` +
+              `section boundary/-ies were measured — a boundary is being counted whose rule does not paint ` +
+              `(or paints below ${HEAVY_PX}px)`,
+          );
+        }
+        assertions += 2;
+
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a
         // full-page capture exceeds JPEG's 65,535px dimension cap — which a
@@ -653,7 +745,22 @@ async function main() {
         if (bytes < MIN_SHOT_BYTES) fail(`${cell}: wrote ${bytes} B to ${file} — the capture did not produce an image`);
         assertions += 1;
 
-        shots.push({ cell, file: path.basename(file), scale, bytes, ...seen, blockedRequests: blocked });
+        shots.push({
+          cell,
+          file: path.basename(file),
+          scale,
+          bytes,
+          ...seen,
+          rules: {
+            total: census.total,
+            heavy: census.heavy,
+            structuralHeavy: census.structuralHeavy,
+            strayHeavy: census.strayHeavy,
+            byWeight: census.byWeight,
+            heavyRules: census.heavyRules,
+          },
+          blockedRequests: blocked,
+        });
         console.log(
           `rig/shoot: ${cell} — column ${seen.columnWidth}px, band ${seen.evidenceBand ?? "n/a"}px ` +
             `(${seen.bandRows.length} components), ` +
@@ -665,6 +772,7 @@ async function main() {
                 ` over a ${seen.sectionBeats.find((b) => b.kind === "container").rule}px rule`
               : "") +
             (seen.doubledRules.length ? `, ${seen.doubledRules.length} DOUBLED rules` : "") +
+            `, ${census.total} rules (${census.heavy} heavy, all structural)` +
             `, prose ${seen.proseCpl ?? "n/a"} CPL, ` +
             `doc overflow ${seen.docOverflow}px, ${seen.paragraphs} paragraphs, ` +
             `${blocked} off-host requests blocked, ${scale}x, ${bytes} B`,

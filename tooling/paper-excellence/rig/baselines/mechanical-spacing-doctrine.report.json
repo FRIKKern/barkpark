@@ -19,7 +19,7 @@
       "cell": "mechanical-spacing-doctrine__light__1280",
       "file": "mechanical-spacing-doctrine__light__1280.jpeg",
       "scale": 2,
-      "bytes": 818233,
+      "bytes": 816385,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -97,13 +97,75 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 17,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 12,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 854.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1390.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1869.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2470.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2952.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "mechanical-spacing-doctrine__light__1920",
       "file": "mechanical-spacing-doctrine__light__1920.jpeg",
       "scale": 2,
-      "bytes": 891827,
+      "bytes": 887482,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -171,23 +233,85 @@
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1105.2,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 407.4,
+          "right": 1512.6,
           "inkWidth": 1105.2,
-          "inkOffCentre": -67.4
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 17,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 12,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 854.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1390.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1783.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2384.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2866.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "mechanical-spacing-doctrine__dark__1280",
       "file": "mechanical-spacing-doctrine__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 815636,
+      "bytes": 813516,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -265,13 +389,75 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 17,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 12,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 854.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1390.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1869.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2470.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2952.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     },
     {
       "cell": "mechanical-spacing-doctrine__dark__1920",
       "file": "mechanical-spacing-doctrine__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 889373,
+      "bytes": 884743,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -339,16 +525,78 @@
         },
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 1105.2,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 407.4,
+          "right": 1512.6,
           "inkWidth": 1105.2,
-          "inkOffCentre": -67.4
+          "inkOffCentre": 0
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 17,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 12,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 854.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1390.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1783.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2384.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2866.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
       "blockedRequests": 3
     }
   ]

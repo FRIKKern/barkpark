@@ -19,7 +19,7 @@
       "cell": "design-probe__light__1280",
       "file": "design-probe__light__1280.jpeg",
       "scale": 2,
-      "bytes": 297464,
+      "bytes": 296482,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -71,12 +71,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 290.6,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
+          "left": 494.7,
+          "right": 785.3,
           "inkWidth": 290.6,
-          "inkOffCentre": -374.7
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
@@ -90,13 +90,23 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 17,
+        "heavy": 0,
+        "structuralHeavy": 0,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 17
+        },
+        "heavyRules": []
+      },
       "blockedRequests": 3
     },
     {
       "cell": "design-probe__light__1920",
       "file": "design-probe__light__1920.jpeg",
       "scale": 2,
-      "bytes": 325935,
+      "bytes": 324507,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -148,12 +158,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 290.6,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 814.7,
+          "right": 1105.3,
           "inkWidth": 290.6,
-          "inkOffCentre": -474.7
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
@@ -167,13 +177,23 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 17,
+        "heavy": 0,
+        "structuralHeavy": 0,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 17
+        },
+        "heavyRules": []
+      },
       "blockedRequests": 3
     },
     {
       "cell": "design-probe__dark__1280",
       "file": "design-probe__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 298044,
+      "bytes": 297420,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -225,12 +245,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1040,
+          "width": 290.6,
           "offCentre": 0,
-          "left": 120,
-          "right": 1160,
+          "left": 494.7,
+          "right": 785.3,
           "inkWidth": 290.6,
-          "inkOffCentre": -374.7
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
@@ -244,13 +264,23 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
+      "rules": {
+        "total": 17,
+        "heavy": 0,
+        "structuralHeavy": 0,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 17
+        },
+        "heavyRules": []
+      },
       "blockedRequests": 3
     },
     {
       "cell": "design-probe__dark__1920",
       "file": "design-probe__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 326350,
+      "bytes": 325757,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -302,12 +332,12 @@
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 1240,
+          "width": 290.6,
           "offCentre": 0,
-          "left": 340,
-          "right": 1580,
+          "left": 814.7,
+          "right": 1105.3,
           "inkWidth": 290.6,
-          "inkOffCentre": -474.7
+          "inkOffCentre": 0
         },
         {
           "kind": "bp-stats",
@@ -321,6 +351,16 @@
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
+      "rules": {
+        "total": 17,
+        "heavy": 0,
+        "structuralHeavy": 0,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 17
+        },
+        "heavyRules": []
+      },
       "blockedRequests": 3
     }
   ]

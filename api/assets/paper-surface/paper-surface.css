@@ -181,6 +181,32 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-section-beat: var(--tok-section-beat);
   --bp-section-rule: var(--tok-section-rule);
   --bp-section-gap: var(--tok-section-gap);
+  /* ── The RULE LADDER (space.rule → the emitted `--tok-rule-*` block below).
+
+     WHAT IT IS: `--bp-section-rule` above is the STRUCTURAL weight, and it is
+     spent on exactly one thing — the head of a section. This is the other rung:
+     the weight every horizontal line that is NOT a boundary draws at. Two
+     weights, and the difference between them IS the hierarchy — a reader learns
+     at scroll speed that a thick line means a new argument started and a thin
+     one means these rows belong together.
+
+     WHY IT IS A TOKEN AND NOT A `1px` LITERAL. Because a census cannot assert
+     "chrome is quieter than structure" unless both weights have names. The
+     benchmark artifact (tooling/paper-excellence/evidence/erasure.html) draws 59
+     horizontal rules and spends the heavy weight on 8 — its six `.sec-head`
+     openings and the two edges of its closing `.declaration` frame — with every
+     other line at `1px solid var(--rule)`. Measured with the same census, this
+     reader had drifted: a table header underline was 2px, a card's top accent
+     3px, a button's frame 2px, so a table in the middle of an argument drew a
+     line exactly as loud as the boundary between two arguments.
+
+     Both arms of that census are gates now: check.mjs Part M reads every
+     horizontal border DECLARATION in this file and its editor mirror, and
+     tooling/paper-excellence/rig/shoot.mjs counts every rule that actually
+     PAINTS on the rendered panel. A declaration-only census would miss an inline
+     style; a rendered-only census would miss a heavy rule on a class no fixture
+     happens to use. */
+  --bp-rule-hairline: var(--tok-rule-hairline);
   /* ── The EVIDENCE BAND (space.evidence → the emitted `--tok-evidence-*` block
      below), bridged onto `--bp-evidence-*` exactly like the air scale above.
 
@@ -473,14 +499,57 @@ html[data-theme="dark"] .bp-paper-body {
    390px (the reading column must never scroll horizontally). */
 /* The table BREAKS OUT to the evidence band (see --bp-evidence-width above): a
    data table gains a real column of resolution for every 150px it is given, and
-   the prose column was clipping it. `max-width: 100%` is GONE — with an explicit
-   band width it was a no-op at every width below the column and a clamp that
-   undid the breakout above it; `display: block` + `overflow-x: auto` stay, and
-   they are the inner boundary: a table too wide for even the band scrolls
-   ITSELF, never the page. */
-.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: var(--bp-evidence-width, 100%); box-sizing: border-box; display: block; overflow-x: auto; }
+   the prose column was clipping it. `display: block` + `overflow-x: auto` are
+   the inner boundary: a table too wide for even the band scrolls ITSELF, never
+   the page.
+
+   THE BAND IS A CEILING, NOT AN ISSUE. `width: var(--bp-evidence-width)` handed
+   every table the whole 1040px band whether it had 1040px of data or not, and
+   `display: block` then let the cells shrink-wrap inside that box and settle
+   against its LEFT edge. Measured on the committed panel: four tables with a
+   perfectly centred 1040px box and 291-542px of ink sitting 249-475px left of
+   the column's axis. The box assertion passed all four — the box WAS centred —
+   which is why this needed its own measurement (`inkOffCentre`, now asserted)
+   rather than a wider tolerance.
+
+   The breakout law is that a block IMPROVES WITH WIDTH. A three-column table
+   with 291px of content does not, so it does not claim the band: `fit-content`
+   takes what the data needs, `max-width` caps it at the band, and the negative
+   `margin-inline` pull is what makes the band-width space AVAILABLE to shrink
+   into (with auto margins the available space is the prose column and no table
+   could ever break out at all).
+
+   `left` + `translateX(-50%)` is the centring, and it has to be this rather than
+   `margin-inline: auto` because the two jobs collide in one property: the pull
+   is what widens the available space, and auto margins are what centre — a box
+   cannot have both. Shifting right by half the BAND (a length) and back by half
+   the ELEMENT (a percentage of its own border box) lands any used width on the
+   column's axis without CSS ever having to know what that width came out as.
+   At 360 the band expression collapses to `100%`, so the cap becomes the column
+   and a wide table returns to scrolling inside it — the doc-overflow contract is
+   unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
+.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
+/* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
+   Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
+   whose cells resolve through a caller-supplied map, so without one it falls back
+   to `<table class="bp-table"><tbody></tbody></table>` — zero height, 29.9px of
+   margin, and a section boundary further down measuring 121.9px instead of 92px
+   because that margin sat inside the gap. Same rule and same reason as
+   `p:empty` above (Reader-Owned Spacing Doctrine): a block that draws nothing
+   must not reserve room. `:not(:has(tr))` rather than `:empty` — the fallback
+   emits a `tbody`, so the table is not empty, it is ROWLESS.
+
+   Scoped to `#paper-body` (the reader and the rig; the editor canvas has no such
+   id) for the reason `p:empty` is View-only: an author building a table starts
+   with a rowless one, and a block that vanishes while you compose it cannot be
+   selected or filled. */
+.bp-paper-surface > #paper-body .bp-table:not(:has(tr)) { display: none; }
+/* A table header underline is CHROME — it groups the rows under it. At 2px it
+   was drawing the same line the head of a section draws, in the middle of an
+   argument (see the rule ladder above; the artifact's own `th` is
+   `1px solid var(--rule)`). */
 .bp-paper-surface .bp-table__th {
-  border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left;
+  border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left;
   text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
   color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
 }
@@ -491,7 +560,7 @@ html[data-theme="dark"] .bp-paper-body {
 /* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
    b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
 .bp-paper-surface .bp-sheet__th {
-  border-bottom: 2px solid var(--paper-rule); padding: 6px 10px; text-align: left;
+  border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 6px 10px; text-align: left;
   text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
   color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
 }
@@ -534,7 +603,7 @@ html[data-theme="dark"] .bp-paper-body {
 /* Buttons — `bp-button` is the secondary (outline); `--primary` overrides to
    the accent fill (no border, matching the pre-Stage-2 inline box exactly). */
 .bp-paper-surface .bp-button {
-  display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+  display: inline-block; padding: 10px 20px; border: var(--bp-rule-hairline) solid var(--paper-accent);
   color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
 }
 .bp-paper-surface .bp-button--primary {
@@ -542,7 +611,44 @@ html[data-theme="dark"] .bp-paper-body {
 }
 
 /* Divider rule — the default; author thickness overrides via inline border-top-width. */
-.bp-paper-surface .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
+.bp-paper-surface .bp-hr { border: none; border-top: var(--bp-rule-hairline) solid var(--paper-rule); margin: 16px 0; }
+/* ── A DIVIDER IN FRONT OF A SECTION HEAD DRAWS THE SAME LINE TWICE ───────────
+   Papers written before the section head existed end a section by hand: an
+   authored `divider` block, then the next level-2 heading. The head now draws
+   its own boundary, so the reader gets the divider's §-on-a-hairline, then 92px,
+   then a 2px rule — one boundary rendered as two lines, and nothing tells the
+   reader which is the real one. Measured on `portabledoc-showcase`, which does
+   this at 10 of its 11 dividers.
+
+   THIS IS A RENDER DECISION, NOT A DATA ONE, and the distinction is the whole
+   reason it is here and not in a write path. Collapsing the divider by rewriting
+   the document would delete something an author typed, in a store three other
+   engines read: the TUI, the SDK and the ONIX export would each render a
+   document the author never wrote, and moving the heading later would not bring
+   the divider back. What is true is narrower than that — *at this position, in
+   this shell, that line is already being drawn* — and a shell is exactly where a
+   claim about a position belongs. The block stays in the document, keeps
+   round-tripping through every engine, and stops painting a second boundary.
+
+   VIEW ONLY, on the precedent of `p:empty` above (Reader-Owned Spacing
+   Doctrine): in the editor an invisible block is one the author cannot select or
+   delete, so `.bp-paper-editor-body` deliberately keeps drawing it.
+
+   TWO LEGS, the same two the section head has: the flat body (legacy reader and
+   the render rig) and the block-backed reader, where every top-level block is
+   its own keyed class-less stream div.
+
+   IT CANNOT REACH A STRUCTURAL RULE, and that is by construction rather than by
+   care. An AUTHORED divider is `.bp-section-divider` (Figures.section_divider_html/0);
+   the leading and trailing rules a `section` CONTAINER draws are `hr.bp-hr` from
+   `compose_section_stack/2`, and no leg here selects an `hr`. Those two stack a
+   doubled boundary of their own across three engines — a real defect, owned by
+   task-a4d1ae76fdb2a6b0, whose stated order is to remove the TRAILING rule first
+   and only then size the container head. Hiding one of that pair from a
+   stylesheet would leave the TUI and the SDK drawing both while the page looked
+   fixed, which is why this rule stays on the shape it can honestly speak for. */
+.bp-paper-surface > #paper-body > .bp-section-divider:has(+ h2),
+.bp-paper-surface > #paper-body > div:not([class]):has(> .bp-section-divider):has(+ div:not([class]) > h2) { display: none; }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -637,6 +743,7 @@ html[data-theme="dark"] .bp-paper-body {
   --tok-section-beat: calc(var(--tok-air-beat) * 4.18);
   --tok-section-rule: 2px;
   --tok-section-gap: 16px;
+  --tok-rule-hairline: 1px;
   --tok-evidence-band: 1040px;
   --tok-evidence-band-max: 1240px;
   --tok-evidence-fill: 0.65;
@@ -1053,11 +1160,18 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1.6rem 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-top: 3px solid var(--paper-ink-faint); }
-.bp-paper-surface .bp-board__col--ready { border-top-color: var(--paper-ink); }
-.bp-paper-surface .bp-board__col--progress { border-top-color: var(--st-info); }
-.bp-paper-surface .bp-board__col--blocked { border-top-color: var(--st-warn); }
-.bp-paper-surface .bp-board__col--done { border-top-color: var(--st-ok); }
+/* Same move as `.bp-card` below, for the same reason and with the same colours:
+   a task board is a ROW of columns, so a 3px top accent drew one heavy line
+   across the whole board. On the left edge it still names each column's state
+   and can no longer be mistaken for a section boundary. No committed fixture
+   renders a task board, so this one is proven by the DECLARATION census
+   (check.mjs Part M) rather than by a photograph — which is the half of the
+   census that exists for exactly this case. */
+.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-left: 3px solid var(--paper-ink-faint); }
+.bp-paper-surface .bp-board__col--ready { border-left-color: var(--paper-ink); }
+.bp-paper-surface .bp-board__col--progress { border-left-color: var(--st-info); }
+.bp-paper-surface .bp-board__col--blocked { border-left-color: var(--st-warn); }
+.bp-paper-surface .bp-board__col--done { border-left-color: var(--st-ok); }
 .bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .bp-paper-surface .bp-board__label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
@@ -1142,11 +1256,23 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 
 /* ── cards: titled rule/feature card grid ── */
 .bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
-.bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
-.bp-paper-surface .bp-card--info { border-top-color: var(--st-info); }
-.bp-paper-surface .bp-card--ok { border-top-color: var(--st-ok); }
-.bp-paper-surface .bp-card--warn { border-top-color: var(--st-warn); }
-.bp-paper-surface .bp-card--danger { border-top-color: var(--st-danger); }
+/* The verdict accent moved from the card's TOP edge to its LEFT edge, and only
+   the edge moved — the colour, the width and the four status variants are the
+   ones that were already there. A cards grid puts three cards side by side, so a
+   3px top accent drew a heavy horizontal line straight across the page: measured
+   on the committed panel, `portabledoc-showcase` and `hobby-hardening-capstone`
+   spent 13 of their heavy rules on card tops. Weight is how a reader tells a
+   section boundary from chrome, and a component is not allowed to spend it.
+   Colour is the accent's actual signal and it is untouched — which is also how
+   `.bp-callout` (border-left: 4px) and the benchmark artifact's own verdict
+   panels (border-left: 3px) already carry it. A vertical edge cannot compete
+   with a horizontal boundary, so this both quiets the census and puts the card
+   on the same device as everything else that renders a verdict. */
+.bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-left: 3px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-card--info { border-left-color: var(--st-info); }
+.bp-paper-surface .bp-card--ok { border-left-color: var(--st-ok); }
+.bp-paper-surface .bp-card--warn { border-left-color: var(--st-warn); }
+.bp-paper-surface .bp-card--danger { border-left-color: var(--st-danger); }
 /* bp-card__t/__d stay: the LEGACY `cards` fleet grid (components.ex cards_html/1)
  * still emits them. The card WIDGET's model-A slot-chrome rules (__media/__action,
  * STEP 4) are GONE (S10, parity2-bug-card-slot-chrome): model B recurses slots to
@@ -1512,7 +1638,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    read as controls and the active tab must be visibly marked. */
 .bp-paper-surface .bp-tabs, .bp-paper-surface .bp-code-tabs { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
 .bp-paper-surface .bp-tabs__strip, .bp-paper-surface .bp-code-tabs__strip { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
-.bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.74rem; color: var(--paper-ink-soft); cursor: pointer; }
+.bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: var(--bp-rule-hairline) solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.74rem; color: var(--paper-ink-soft); cursor: pointer; }
 .bp-paper-surface .bp-tabs__tab--active, .bp-paper-surface .bp-code-tabs__tab--active { color: var(--paper-ink); border-bottom-color: var(--paper-accent); font-weight: 700; }
 .bp-paper-surface .bp-tabs__panel, .bp-paper-surface .bp-code-tabs__panel { padding: 12px 15px; }
 .bp-paper-surface .bp-tabs__panel[hidden], .bp-paper-surface .bp-code-tabs__panel[hidden] { display: none; }
@@ -1566,6 +1692,18 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 
 /* asciicast: the player mount — reserve height so the figure never jumps. */
 .bp-paper-surface .bp-asciicast { min-height: 120px; background: var(--paper-bg-deep); }
+/* The player's own control bar draws `border-top: 2px` (asciinema-player 3.8.0,
+   `div.ap-player div.ap-control-bar`), which is a vendor stylesheet loaded from
+   a CDN — so a terminal recording put a section-weight rule inside a figure, and
+   nothing in this repo declared it. Four classes beat the vendor's two-class,
+   two-type selector; only the WIDTH is overridden, so the bar keeps the colour
+   the player computes from the cast's own theme.
+
+   This is the one rule in this file the render rig cannot photograph: the rig
+   blocks every non-loopback host, so the player never hydrates and the bar does
+   not exist in a hermetic capture. It is proven against the vendor bytes
+   instead — the cascade, not the picture. */
+.bp-paper-surface .bp-asciicast .ap-player .ap-control-bar { border-top-width: var(--bp-rule-hairline); }
 
 /* chat transcript blocks (Studio-sourced): one shared quiet-card treatment —
    their inner layout is inline-styled by components.ex; this supplies the
