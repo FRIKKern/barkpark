@@ -93,12 +93,15 @@ defmodule BarkparkWeb.BulldocsSourceController do
 
   # The readable isomorphic view: a complete, self-describing <paper> document
   # as text, with the rev in a header so a working-copy pull can anchor on it.
+  # The header carries the PAPER-LEVEL integer rev (content["rev"]) — the value
+  # the ops path's if_rev guard compares against — NOT the row's _rev hash
+  # (which the JSON envelope already exposes as "_rev").
   defp send_bpml(conn, paper, blocks) do
     bpml = Bpml.print_paper(%{"slug" => paper.doc_id, "title" => paper.title, "blocks" => blocks})
 
     conn
     |> put_resp_content_type("text/bpml")
-    |> put_resp_header("x-paper-rev", to_string(paper.rev))
+    |> put_resp_header("x-paper-rev", to_string(paper_op_rev(paper)))
     |> send_resp(200, bpml)
   rescue
     e in ArgumentError ->
@@ -112,6 +115,15 @@ defmodule BarkparkWeb.BulldocsSourceController do
             "this paper uses a block type outside the BPML kernel vocabulary; fetch format=json"
         }
       })
+  end
+
+  # The op-anchor rev: the integer content["rev"] the if_rev guard reads,
+  # falling back to the row hash for legacy papers that never carried one.
+  defp paper_op_rev(paper) do
+    case get_in(paper.content || %{}, ["rev"]) do
+      rev when is_integer(rev) -> rev
+      _ -> paper.rev
+    end
   end
 
   defp paper_scope(conn, %{"workspace_slug" => _}),

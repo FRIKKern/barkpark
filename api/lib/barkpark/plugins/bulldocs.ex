@@ -215,6 +215,10 @@ defmodule Barkpark.Plugins.Bulldocs do
       # unambiguous either way — "validate" is a fixed segment, not a slug arg.
       {:post, "/bulldocs/papers/validate", BarkparkWeb.BulldocsIngestController, :validate,
        auth: :ingest},
+      # Working-copy push (BPML masterplan W3): edited BPML + baseRev in,
+      # server-derived op batch under if_rev, canonical BPML back.
+      {:post, "/bulldocs/papers/:slug/sync", BarkparkWeb.BulldocsIngestController, :sync,
+       auth: :ingest},
       {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},
       # Session-handoff (task-3): a `session` is a blocks-doc twin of a paper
