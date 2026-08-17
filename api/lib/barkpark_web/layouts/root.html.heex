@@ -4770,6 +4770,13 @@
     @media (max-width: 720px) { .bp-canvas-section > .bp-section__grid { grid-template-columns: 1fr; } }
     .bp-canvas-section .bp-section__cell { min-width: 0; }
     .bp-canvas-section .bp-section__cell > :first-child { margin-top: 0; }
+    <%!-- FRAMED-FINALE (charter D34, variant="framed"): the canvas node-view toggles
+         `bp-section--framed` on its wrapper when attrs.variant === "framed". Editor
+         mirror of the reader frame — hairline border in rule color, and the frame
+         REPLACES the section's own direct-child `bp-hr` band. Editor-only (NOT in the
+         parity gate's @parity_elements). Keep byte-aligned with styles.css:599-600. --%>
+    .bp-paper-editor-body .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+    .bp-paper-editor-body .bp-section--framed > .bp-hr { display: none; }
     <%!-- S2 layout-engine: the hover-revealed layout controls (mode toggle + tracks
          stepper) — EDIT-ONLY chrome, hidden at rest, NO reader counterpart. Keep
          BYTE-IDENTICAL with styles.css. --%>

@@ -287,6 +287,58 @@ func TestMomentumShowingNofM(t *testing.T) {
 	}
 }
 
+// TestMomentumInFlightDenominatorCollapsed — the D115/D120 denominator proof.
+// Prime's raw lifecycle_counts are twin-doubled (no collapse_twins), so a board
+// painted from them shows an inflated "N in flight" AND — because the deciding
+// predicate of the showing-N-of-M disclosure is TaskCount < summedLifecycleCounts,
+// not any >1000 threshold — discloses a clamp that never happened. The collapsed
+// path (mergeInflight + countInProgress, the exact FetchSnapshotFull seam)
+// repairs both numbers. Twin divergence is SYNTHESIZED (twin-doubled prime
+// counts + a union-only claimed row): the live prime-vs-union delta is 0 today,
+// so a live inequality assert would be vacuously green.
+func TestMomentumInFlightDenominatorCollapsed(t *testing.T) {
+	window := []Task{
+		{DocID: "w1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wA"}, UpdatedAt: fixedNow},
+		{DocID: "w2", Kind: "task", Lifecycle: "open", UpdatedAt: fixedNow},
+	}
+	inflight := []Task{
+		{DocID: "w1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wA"}, UpdatedAt: fixedNow}, // dedup case
+		{DocID: "u1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wB"}, UpdatedAt: fixedNow}, // union-only
+	}
+	// A lifecycle-divergent twin counts once per copy in prime: it says 3 in
+	// flight while the deduped union holds 2. Summed counts: 3 + 1 = 4.
+	extras := primeExtras{counts: map[string]int{"in_progress": 3, "open": 1}}
+	st := UIState{Conn: ConnLive}
+
+	// MUTATION CONTROL — compose WITHOUT the collapse: the pre-D120 board.
+	// TaskCount(2, window only) < summed(4) fires the disclosure over a corpus
+	// that was never clamped, and the in-flight count paints the doubled 3.
+	// This is the exact lie D115 live-reproduced (11-vs-10); if the collapse
+	// seam ever regresses, the assertions below are what the operator would see.
+	rawBoard := BuildBoard(composeSnapshot(window, extras, fixedNow), RepoContext{}, fixedNow)
+	rawLine := ansi.Strip(momentumLine(rawBoard, st, 120))
+	if !strings.Contains(rawLine, "3 in flight") || !strings.Contains(rawLine, "showing 2 of 4") {
+		t.Fatalf("mutation control lost its teeth — uncollapsed counts no longer reproduce the twin-doubled lie:\n%s", rawLine)
+	}
+
+	// The collapsed path, exactly as FetchSnapshotFull merges it.
+	merged, _ := mergeInflight(window, nil, inflight, nil)
+	extras.counts["in_progress"] = countInProgress(merged)
+	b := BuildBoard(composeSnapshot(merged, extras, fixedNow), RepoContext{}, fixedNow)
+	line := ansi.Strip(momentumLine(b, st, 120))
+	if !strings.Contains(line, "2 in flight") {
+		t.Errorf("collapsed momentum should count the deduped union (2), got:\n%s", line)
+	}
+	if strings.Contains(line, "showing") {
+		t.Errorf("nothing was clamped once the denominator collapsed — the disclosure must stay silent:\n%s", line)
+	}
+	// The deciding predicate directly: the union board is whole, so TaskCount
+	// must not read short of the summed lifecycle counts.
+	if b.TaskCount < summedLifecycleCounts(b) {
+		t.Errorf("TaskCount %d < summed counts %d on a whole union board — the denominator still carries a twin double-count", b.TaskCount, summedLifecycleCounts(b))
+	}
+}
+
 // TestRenderEmptyBoardIsHonest proves the never-blank promise: an empty board
 // still paints header + NOW-empty + an honest all-clear + ticker + footer.
 func TestRenderEmptyBoardIsHonest(t *testing.T) {

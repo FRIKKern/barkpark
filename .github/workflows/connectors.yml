@@ -140,6 +140,24 @@ jobs:
           shellcheck -S error scripts/connectors/preflight-vercel.sh
           bash scripts/connectors/preflight-vercel.sh --self-test
 
+      # The Wave-35 LIVE turn driver's hermetic self-test (D270/D271/D279):
+      # w35-live-turn-driver.sh is the instrument the human sitting drives to
+      # close connectors-hg-live-isolated-cloud-turn / -cloud-multiturn (w11 is
+      # 401-locked, w14 is hermetic — neither can assert a real-key SUCCESS).
+      # The self-test proves, against a fake vercel (no credentials, no real
+      # Vercel): preflight-first refusal with ZERO creates, the egress lock on
+      # the create argv when a snapshot is set (and the LOUD allow-all warning
+      # when not), the multiturn --session-id/--resume wiring incl. a MUTATION
+      # leg that goes RED when the resume flag is dropped, bake's npm-registry
+      # check BEFORE any create, full teardown lifecycle (remove + snapshots
+      # delete + both ls sweeps), and planted-key custody (the key rides ONLY
+      # the shim's single --env pair, never argv/logs). BLOCKING, one named
+      # step (this workflow hardcodes proof scripts by name).
+      - name: Live-turn driver self-test (W35, D270)
+        run: |
+          shellcheck -S error scripts/connectors/w35-live-turn-driver.sh
+          bash scripts/connectors/w35-live-turn-driver.sh --self-test
+
   test:
     name: Typecheck + tests (real Postgres, zero skips)
     runs-on: ubuntu-latest

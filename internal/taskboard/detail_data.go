@@ -2,11 +2,11 @@ package taskboard
 
 // detail_data.go — the wave-5 detail substrate (charter slice 14, D13/D25).
 //
-// Pure data on top of the ONE /v1/tasks round-trip the board already makes:
+// Pure data on top of the /v1/tasks round-trips the board already makes:
 //
 //   - FetchSnapshotFull hydrates the TaskDetail reading model in the SAME
-//     fetch+decode pass as the board rows (zero extra network — the list
-//     envelope already ships each task's full content map).
+//     fetch+decode pass as the board rows (zero extra network per row — the
+//     list envelope already ships each task's full content map).
 //   - ChildrenOf / DrivenTasks / PaperRefs are snapshot derivations: the
 //     parent_id child index, the paper→tasks inversion, and a task's paper
 //     links. No fetch, no server change — the wire already carries every edge.
@@ -16,6 +16,7 @@ package taskboard
 // derivations and the full-hydration fetch entry point.
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"sync"
@@ -26,24 +27,35 @@ import (
 
 // FetchSnapshotFull is FetchSnapshot plus detail hydration (charter D13: the
 // list envelope already ships each task's full content map, so the reading
-// view costs ZERO extra round-trips). The same two calls as ever — the
-// /v1/tasks list once, prime once — with the one list body decoded into the
-// board Task AND the TaskDetail reading model in a single pass.
+// view costs ZERO extra round-trips per row). Three calls compose one snapshot:
+// the /v1/tasks window list, prime, and the lifecycle-filtered in-flight list
+// (charter D120) — with each list body decoded into the board Task AND the
+// TaskDetail reading model in a single pass.
 //
-// The two round-trips fly CONCURRENTLY (charter D113b). Both endpoints are
+// The round-trips fly CONCURRENTLY (charter D113b). The endpoints are
 // server-TTFB-bound and guerrilla serves them independently, so a sequential
 // prime paid for the list's latency for nothing; the goroutines below overlap
-// the two GETs instead. The list body's decode rides its own goroutine (it
-// needs nothing from prime), so a live swap sees one round-trip of wall time,
-// not two. apiclient.Client wraps a shared net/http.Client — safe for
-// concurrent use — and each goroutine writes its own result variables.
+// the GETs instead. Each list body's decode rides its own goroutine (it needs
+// nothing from prime), so a live swap sees one round-trip of wall time, not
+// three. apiclient.Client wraps a shared net/http.Client — safe for concurrent
+// use — and each goroutine writes ONLY its own result variables; nothing reads
+// them before wg.Wait.
 //
-// Failure honesty is unchanged (fetch.go:33-36): both fetches are required, so
-// ANY error yields the SAME degraded outcome as the old sequential path — the
-// caller's honest degraded state, never a partial snapshot. The list error
-// takes precedence over the prime error, matching the old order (list first),
-// including when only prime succeeds. The 32MiB bound and the refuse-empty
-// envelope fence (#6033/#8604) live in getJSON/decodeTaskListFull, untouched.
+// The third GET (inflightFetchPath) exists because prime's lifecycle_counts
+// are twin-doubled (D115: prime has no collapse_twins while /v1/tasks
+// collapses, so a lifecycle-divergent twin counts twice) and the 1000-row
+// window can drop a claimed row entirely. The filtered list is the collapsed
+// truth for the in-flight population; mergeInflight + countInProgress
+// (fetch.go) fold it in between wg.Wait and composeSnapshot. It joins the
+// SAME all-required failure contract — best-effort was rejected (D120):
+// on failure it would silently repaint the proven-liar prime count.
+//
+// Failure honesty is otherwise unchanged (fetch.go:33-36): all fetches are
+// required, so ANY error yields the SAME degraded outcome as the old
+// sequential path — the caller's honest degraded state, never a partial
+// snapshot. Error precedence is list > prime > inflight, matching the old
+// order (list first). The 32MiB bound and the refuse-empty envelope fence
+// (#6033/#8604) live in getJSON/decodeTaskListFull, untouched.
 //
 // Tolerance contract (frozen wave-5): every detail field that is missing or
 // malformed on the wire decodes to its zero value — never an error, never a
@@ -52,19 +64,31 @@ import (
 //
 // The DetailIndex embeds each task's post-overlay board row (syncDetails), so
 // details[id].Task always agrees with Snapshot.Tasks about derived readiness.
+//
+// Both GETs run under ONE per-request context deadline (snapshotFetchTimeout,
+// ~30s) scoped HERE — the snapshot path's own budget, not a raise of the shared
+// apiclient Timeout. That client also serves the interactive claim/close verbs,
+// where the 5s DefaultTimeout is right; the corpus GET is the one call whose
+// honest budget is snapshot-shaped. Rationale in full at snapshotFetchTimeout
+// (fetch.go).
 func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), snapshotFetchTimeout)
+	defer cancel()
 	var (
-		tasks    []Task
-		details  DetailIndex
-		listErr  error
-		extras   primeExtras
-		primeErr error
-		wg       sync.WaitGroup
+		tasks           []Task
+		details         DetailIndex
+		listErr         error
+		extras          primeExtras
+		primeErr        error
+		inflightTasks   []Task
+		inflightDetails DetailIndex
+		inflightErr     error
+		wg              sync.WaitGroup
 	)
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		body, err := getJSON(c, "/v1/tasks?limit=1000")
+		body, err := getJSONCtx(ctx, c, "/v1/tasks?limit=1000")
 		if err != nil {
 			listErr = err
 			return
@@ -73,7 +97,20 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 	}()
 	go func() {
 		defer wg.Done()
-		extras, primeErr = fetchPrime(c)
+		extras, primeErr = fetchPrime(ctx, c)
+	}()
+	go func() {
+		defer wg.Done()
+		// The in-flight leg decodes in-goroutine through the SAME
+		// decodeTaskListFull — the filtered response is the same {ok,docs}
+		// envelope, and {"docs":[]} legitimately decodes to zero rows with a
+		// nil error (an empty in-flight population is a fact, not a failure).
+		body, err := getJSONCtx(ctx, c, inflightFetchPath)
+		if err != nil {
+			inflightErr = err
+			return
+		}
+		inflightTasks, inflightDetails, inflightErr = decodeTaskListFull(body)
 	}()
 	wg.Wait()
 	if listErr != nil {
@@ -82,6 +119,22 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 	if primeErr != nil {
 		return Snapshot{}, nil, primeErr
 	}
+	if inflightErr != nil {
+		return Snapshot{}, nil, inflightErr
+	}
+	// D120 merge point: fold the in-flight fetch into the window BEFORE the
+	// snapshot composes, so the ready overlay, board.Now and syncDetails all
+	// see one deduped corpus with zero special-casing downstream.
+	tasks, details = mergeInflight(tasks, details, inflightTasks, inflightDetails)
+	// Exactly ONE bucket collapses: in_progress derives from the deduped
+	// union (the /v1/tasks route collapses twins; prime does not). done/open/
+	// blocked/cancelled stay prime-raw — still twin-doubled — until the api
+	// twin fix lands (ttw20-bl-prime-counts-collapse-twins), so a summed-
+	// Counts denominator is only as collapsed as its in_progress term.
+	if extras.counts == nil {
+		extras.counts = make(map[string]int, 1)
+	}
+	extras.counts[lifeInProgress] = countInProgress(tasks)
 	snap := composeSnapshot(tasks, extras, time.Now().UTC())
 	syncDetails(details, snap.Tasks)
 	return snap, details, nil

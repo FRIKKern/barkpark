@@ -1,39 +1,39 @@
 
  barkpark · tasks       ⇄ guerrilla  CONN · T↔  ──────────────────────────────────────────────────────────────────────────
- ▎ The task TUI is glanceable, live, an… ··· 2/14│ │ The task TUI is glanceable, live, and never flickers                     │
- ├─ ⠿ The live tmux drive ships as a committed S…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
- │    C5/7 · P1 · 3/5                            │ │                                                                          │
- ├─ ⠿ Wide-mode footer verbs become clickable ag…│ │ criteria 4/4                                                             │
- │    C5/7 · P2 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
- ├─ ⠿ The TUI card and cheatsheet finally speak …│ │     ↳ cache_test.go includes an intra-session out-of-order rollback gua… │
- │    C5/7 · P3 · 4/5                            │ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
- ├─ ⠿ The board discloses its 1000-row horizon —…│ │     constant motion.                                                     │
- │    C5/7 · P2 · 4/5                            │ │     ↳ board/components/anim tests cover in_progress ordering, claim fre… │
- ├─ ⠿ The two snapshot fetches fly in parallel —…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
- │    C5/7 · P2 · 3/4                            │ │     ↳ compose/hitmap tests cover right-pane focus, wheel scrolling, cli… │
- ├─ ⠿ Sheet-era glyph and golden hygiene: the re…│ │   ✓ The current taskboard regression suite is green.                     │
- │    C5/7 · P3 · 4/5                            │ │     ↳ A fresh go test ./internal/taskboard/... run is recorded with thi… │
- ├─ ⠿ Task-TUI W19 native-proof paperwork: D109-…│ │                                                                          │
- │    C5/7 · P1 · 1/2 · epic-decide-ttw19 · T  │ │ purpose                                                                  │
- ├─ ✓ In-body task chips speak the full 9-status…│ │   part of   Trustworthy task operations                                  │
- └─ ✓ Narrow-mode reading-frame rail stops gain …│ │   impact    Blocks the larger goal when unresolved: operators cannot act │
-   +5 more · 1 cancelled                         │ │             confidently if snapshots rewind, active work disappears, or  │
-                                                 │ │             navigation fights the focused pane.                          │
-   Paper Excellence epic — close the a… ··· 20/58│ │   does      keep the task TUI calm, live, and glanceable.                │
- ├─ ⠿ Wave-3 decide referent: the visible wave's…│ │   why       The larger goal is Trustworthy task operations. The concrete │
- │    C5/7 · P1 · ✓✓○ 2/3 · pe-w3-decide · T    │ │             problem is that operators cannot act confidently if          │
- ├─ ⠿ Sections get a class hook on both wrappers…│ │             snapshots rewind, active work disappears, or navigation      │
- │    C5/7 · P2 · 6/7                            │ │             fights the focused pane. Shipping forward-only snapshot      │
- ├─ ⠿ The rig learns to measure the crown — four…│ │             handling, live lifecycle cues, focused scrolling, and        │
- │    C5/7 · P3 · 5/6                            │ │             regression gates is the correct intervention because         │
- ├─ ⠿ BPML's inline grammar accepts the corpus's…│ │             forward-only snapshot acceptance repairs temporal truth,     │
- │    C5/7 · P2 · 4/5                            │ │             live cues expose real state changes, and focused input       │
- ├─ ✓ pdrender stops inventing figure numbers an…│ │             routing gives each pane predictable ownership. If omitted,   │
- └─ ✓ The publish floor's outline arms see the w…│ │             the board becomes a noisy animation rather than an           │
-   +34 more · 18 done                            │ │             operational instrument.                                      │
-                                                 │ │   endgame   Trustworthy task operations is backed by one canonical       │
-   API Read-Path Security Sweep (epic) ···· 14/32│ │             owner, measurable evidence, and truthful lifecycle scope.    │
-   ↓ 34 more below                               │ │   important 92/100 — The omission cost is that the board becomes a noisy │
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │             animation rather than an operational instrument.             │
- ⠿ 20 in flight · ○ 1+ ready · ✓ 3278 done ·… 51%│ │   relevant  100/100 — The task directly addresses the observed problem   │
- jk · enter open · esc back · c claim · x close …│ │   ↓ more below                                                           │
+ ▎ The task TUI is glanceable, live, a… ··· 15/23│ │ The task TUI is glanceable, live, and never flickers                     │
+ ├─ ⠿ The drive harness goes hermetic — fixture-…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
+ │    C5/7 · P1 · 2/5                            │ │                                                                          │
+ ├─ ⠿ The wide panes overflow markers answer cli…│ │ criteria 4/4                                                             │
+ │    C5/7 · P3 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
+ ├─ ⠿ The NOW band and the in-flight count tell …│ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
+ │    C5/7 · P2 · 3/4                            │ │     constant motion.                                                     │
+ ├─ ⠿ Task-TUI wave 21 settlement paperwork: the…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
+ │    C5/7 · P1 · ✓○ 1/2 · w21-decide-fable · T│ │   ✓ The current taskboard regression suite is green.                     │
+ ├─ ✓ hitmap.go height-2 reservation — audit whe…│ │                                                                          │
+ └─ ✓ The drive harness anchors row identity on …│ │ purpose · derived                                                        │
+   +4 more · 13 done · 1 cancelled               │ │   part of   standalone task                                              │
+                                                 │ │   impact    blocks 0 · blocked by 0                                      │
+   Scaffy epic — commands as content: a… ··· 1/14│ │   does      The task TUI is glanceable, live, and never flickers         │
+ ├─ ⠿ The story stops contradicting the engine: …│ │   why       Why this task is worth doing is not recorded.                │
+ │    C5/7 · P2 · 4/5                            │ │   endgame   Meet all 4 acceptance criteria and close the task.           │
+ ├─ ⠿ pull --check answers for the server that p…│ │   important 50/100 — Default score; no priority is recorded.             │
+ │    C5/7 · P1 · 4/5                            │ │   relevant  50/100 — Default score; task is present on this board.       │
+ ├─ ⠿ bp scaffy describe: a command's contract i…│ │   proof     Recorded task intent — The task TUI is glanceable, live, and │
+ │    C5/7 · P1 · 4/5                            │ │             never flickers — document.title                              │
+ ├─ ⠿ The served-catalog drift check becomes an …│ │   proof     Acceptance contract — 4 recorded criteria —                  │
+ │    C5/7 · P1 · 5/6                            │ │             content.acceptance_criteria                                  │
+ ├─ ⠿ Assert env stops clobbering a stranger's c…│ │   derived from recorded task facts · add authored purpose to override    │
+ │    C5/7 · P1 · 3/4                            │ │                                                                          │
+ ├─ ⠿ Close the census trap at the trigger: go-t…│ │ created T ago (Jul 23, 00:34) · updated T ago (Aug 17, 17:42)        │
+ │    C5/7 · P1 · 2/3                            │ │                                                                          │
+ ├─ ⠿ Scaffy W8 second-consumer drift-truth wave…│ │ ○ created (Jul 23) → ⠿ claimed by relevance-loop (Jul 04) →              │
+ │    C4/7 · P2 · scaffy-w8-decider · T        │ │   ✓ done (Aug 17)                                                        │
+ └─ ✓ Reconcile scaffy false-done ledger rows ag…│ │                                                                          │
+   +6 more                                       │ │ labels  proj:tui · phase:goal                                            │
+                                                 │ │                                                                          │
+   Paper Excellence epic — close the a… ··· 31/73│ │ claim  relevance-loop · epoch 1 · claimed T ago (Jul 04, 07:10)        │
+ ├─ ⠿ Corpus census recheck runs the real printe…│ │                                                                          │
+   ↓ 40 more below                               │ │                                                                          │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │                                                                          │
+ ⠿ 15 in flight · ○ 2+ ready · ✓ 3328 done ·… 51%│ │                                                                          │
+ jk · enter open · esc back · c claim · x close …│ │                                                                          │
