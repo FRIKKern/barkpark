@@ -21384,16 +21384,18 @@ test("cch-w68-s5 (D834): a successful delete invalidates the sites list BY THE M
 });
 
 // ── cch-w65: the SHIPPED artifact serves the single audit verb table ──────────
-// design/audit-actions.json is the SOLE authority for the audit register's verbs:
+// cloud/priv/audit-actions.json is the SOLE authority for the audit register's
+// verbs (moved from design/ by cch-w69-s1 — the Elixir consumer compile-time-reads
+// it inside the cloud image build, which only ever sees cloud/):
 // AuditEvent derives its closed @actions allowlist from it at compile time, and
 // design/emit.mjs emits `actions[].label` into app.js's ACTION_LABELS region. The
 // design gate proves the REGION matches the table. This proves the RUNNING code
 // does — humanAction() reads that object, and the fallback charter D582 blessed
 // (`ACTION_LABELS[a] || a`) has to hold for every verb declared without a label.
 // Without this arm the generated region is only ever compared to itself.
-test("cch-w65: humanAction serves design/audit-actions.json — every label, and D582's raw-slug fallback for every null", () => {
+test("cch-w65: humanAction serves cloud/priv/audit-actions.json — every label, and D582's raw-slug fallback for every null", () => {
   const table = JSON.parse(
-    fs.readFileSync(path.join(REPO_ROOT, "design/audit-actions.json"), "utf8"),
+    fs.readFileSync(path.join(REPO_ROOT, "cloud/priv/audit-actions.json"), "utf8"),
   ).actions;
   assert.ok(table.length >= 50, `the table shrank to ${table.length} verbs — this arm has gone vacuous`);
 

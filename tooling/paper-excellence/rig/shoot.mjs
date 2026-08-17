@@ -172,6 +172,103 @@ function fail(msg) {
   process.exit(1);
 }
 
+// ── The committed measurements as an oracle ──────────────────────────────────
+//
+//   node shoot.mjs --report-diff <baseline.report.json> <fresh.report.json>
+//
+// Until 2026-08-17 NOTHING compared a fresh capture to the committed panel:
+// gate.sh shot to a temp dir and asserted, baseline.sh overwrote the repo, and
+// the README's promise that "a band regression is a text diff in report.json"
+// had no code behind it. This is that diff, and `gate.sh --check` drives it.
+//
+// IMAGE BYTE COUNTS ARE IGNORED, and only they. The reports are otherwise
+// byte-reproducible on one host (design-probe and eight-minute-erasure
+// re-shoots matched the committed baselines exactly), but a JPEG byte count
+// differed ~1.5% for `hobby-hardening-capstone` across hosts while every
+// measurement matched — encoder noise, which the README already refuses as an
+// oracle. Everything else — column width, evidence band per component, prose
+// CPL, section beats, doubled rules, the rule census, paragraph count, scale,
+// blocked requests — is a MEASUREMENT and drift in it is a red.
+const IGNORED_PATHS = /^shots\[\d+\]\.bytes$/;
+
+function flatten(value, prefix, out) {
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => flatten(v, `${prefix}[${i}]`, out));
+  } else if (value && typeof value === "object") {
+    for (const key of Object.keys(value).sort()) {
+      flatten(value[key], prefix ? `${prefix}.${key}` : key, out);
+    }
+  } else {
+    out.set(prefix, value);
+  }
+  return out;
+}
+
+function readReport(file, which) {
+  if (!fs.existsSync(file)) fail(`no ${which} report at ${file}`);
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    fail(`${which} report at ${file} is not readable JSON: ${err.message}`);
+  }
+}
+
+// Both files are named `<slug>.report.json`, so a bare basename in the verdict
+// would print the same word twice and say nothing about WHICH is which.
+const shortPath = (p) => {
+  const rel = path.relative(process.cwd(), p);
+  return rel && !rel.startsWith("..") ? rel : p;
+};
+
+function reportDiff(baselineFile, freshFile) {
+  const baseline = flatten(readReport(baselineFile, "baseline"), "", new Map());
+  const fresh = flatten(readReport(freshFile, "fresh"), "", new Map());
+
+  const paths = [...new Set([...baseline.keys(), ...fresh.keys()])].sort();
+  const diffs = [];
+  let compared = 0;
+  let ignored = 0;
+
+  for (const p of paths) {
+    if (IGNORED_PATHS.test(p)) {
+      ignored += 1;
+      continue;
+    }
+    const had = baseline.has(p);
+    const has = fresh.has(p);
+    if (!had) {
+      diffs.push(`${p}: NOT IN BASELINE → ${JSON.stringify(fresh.get(p))}`);
+      continue;
+    }
+    if (!has) {
+      diffs.push(`${p}: ${JSON.stringify(baseline.get(p))} → MISSING FROM THIS RUN`);
+      continue;
+    }
+    compared += 1;
+    if (baseline.get(p) !== fresh.get(p)) {
+      diffs.push(`${p}: ${JSON.stringify(baseline.get(p))} → ${JSON.stringify(fresh.get(p))}`);
+    }
+  }
+
+  if (diffs.length) {
+    console.error(
+      `rig/shoot: FAIL — ${diffs.length} measurement(s) drifted from ${shortPath(baselineFile)} ` +
+        `(baseline → this run; ${compared} values compared, ${ignored} image byte counts ignored)`,
+    );
+    for (const d of diffs) console.error(`  ${d}`);
+    console.error(
+      "rig/shoot:        this is a layout change, not noise. Review it, then " +
+        "re-baseline with `bash tooling/paper-excellence/rig/baseline.sh <slug>`.",
+    );
+    process.exit(1);
+  }
+
+  console.log(
+    `rig/shoot: report-check OK — ${shortPath(freshFile)} matches ${shortPath(baselineFile)}: ` +
+      `${compared} measured values compared, 0 differences (${ignored} image byte counts ignored)`,
+  );
+}
+
 function playwrightCandidates() {
   const roots = [REPO_ROOT];
   try {
@@ -813,4 +910,10 @@ async function main() {
   );
 }
 
-await main();
+if (process.argv[2] === "--report-diff") {
+  const [baselineFile, freshFile] = process.argv.slice(3);
+  if (!baselineFile || !freshFile) fail("usage: shoot.mjs --report-diff <baseline.report.json> <fresh.report.json>");
+  reportDiff(baselineFile, freshFile);
+} else {
+  await main();
+}

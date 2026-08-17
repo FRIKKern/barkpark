@@ -36,6 +36,7 @@ package cli
 // `bp cloud rollback` / `bp cloud verify`.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1142,7 +1143,7 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 	}
 	res, rberr := cfg.CloudClient().RollbackSpawnSite(cloudCtx(), id)
 	if rberr != nil {
-		return cloudFail(out, "roll site back", rberr)
+		return siteRefusalFail(out, siteRefusedRollback, ref, rberr)
 	}
 
 	if out.output == "json" {
@@ -1243,7 +1244,7 @@ func runCloudSiteDelete(out *writer, g globals, args []string) int {
 	}
 	res, derr := cfg.CloudClient().DeleteSpawnSite(cloudCtx(), id)
 	if derr != nil {
-		return cloudFail(out, "delete site", derr)
+		return siteRefusalFail(out, siteRefusedDelete, ref, derr)
 	}
 
 	if out.output == "json" {
@@ -1286,6 +1287,179 @@ func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult
 	}
 	out.outf("✓ site deregistered — %s is deleted from the control plane (status: %s).", sanitizeCell(slug), sanitizeCell(res.Status))
 	out.outf("  the box teardown ran first (the control plane refuses to deregister a site whose teardown errored), but this envelope carries no measured box state — nothing here read the route, the slots or the tree, so the teardown itself is UNVERIFIED by this receipt.")
+}
+
+// siteRefusalKind names WHICH site verb was refused. The two share the exit
+// ladder and the label, but not their sentences: a refused rollback flipped
+// nothing, while a refused teardown leaves a site that is BOTH still registered
+// and still serving — copy that blurs the two tells the reader the wrong thing
+// about what state their site is now in.
+type siteRefusalKind int
+
+const (
+	siteRefusedRollback siteRefusalKind = iota
+	siteRefusedDelete
+)
+
+// what is the cloudFail fallthrough label — byte-unchanged from the strings these
+// two verbs have always printed ("roll site back: …", "delete site: …"), so the
+// shared auth seam reads identically before and after this slice.
+func (k siteRefusalKind) what() string {
+	if k == siteRefusedDelete {
+		return "delete site"
+	}
+	return "roll site back"
+}
+
+// noun is how a sentence refers to the refused act.
+func (k siteRefusalKind) noun() string {
+	if k == siteRefusedDelete {
+		return "the deletion of"
+	}
+	return "the rollback of"
+}
+
+// verb is the bare action, for a sentence that already names the site ("not
+// allowed to delete site %q").
+func (k siteRefusalKind) verb() string {
+	if k == siteRefusedDelete {
+		return "delete"
+	}
+	return "roll back"
+}
+
+// nothingClause is the honesty tail: what did NOT happen, stated positively so a
+// deny path never reads like a partial action.
+func (k siteRefusalKind) nothingClause() string {
+	if k == siteRefusedDelete {
+		return "Nothing was torn down and the site is still registered."
+	}
+	return "Nothing was flipped."
+}
+
+// siteRefusalFail maps a refused site rollback / delete onto the unified `bp:`
+// error seam — the rollbackFail idiom (cloud_rollback_cmd.go), retargeted at the
+// TYPED refusal both site verbs already carry.
+//
+// Both verbs used to hand the error to the bare `cloudFail`, which branches only
+// on the substring "unauthorized": a 409 the box refused, a 404 that is not our
+// site and a 500 the plane crashed on all printed the label "failed" and exited 1,
+// and `-o json` named none of them. The refusal has been typed since #11711 —
+// cloudError returns *cloudclient.CloudRefusal and both DeleteSpawnSite and
+// RollbackSpawnSite route non-2xx through it — so the evidence was already on the
+// wire and only the last inch discarded it.
+//
+// TWO fallthroughs are deliberate. A refusal that is not a *CloudRefusal at all (a
+// transport error, a gateway page) and a 401 both route through cloudFail, so the
+// "session expired? run `bp login` again" sentence stays the SAME one every other
+// cloud verb prints for the one refusal that is never about the site.
+func siteRefusalFail(out *writer, kind siteRefusalKind, ref string, err error) int {
+	var re *cloudclient.CloudRefusal
+	if errors.As(err, &re) && re.HTTPStatus != 401 {
+		return useError(out, siteRefusalLabel(re.Code), siteRefusalMessage(kind, ref, re), siteRefusalExit(re.HTTPStatus, re.Reason, re.Code))
+	}
+	return cloudFail(out, kind.what(), err)
+}
+
+// siteRefusalLabel is the `bp:` error-code label — the control plane's own code
+// where present, so the machine-readable envelope names the exact refusal, with a
+// stable "failed" fallback for a codeless body.
+func siteRefusalLabel(code string) string {
+	if strings.TrimSpace(code) == "" {
+		return "failed"
+	}
+	return code
+}
+
+// siteRefusalExit maps the refusal's HTTP status onto the CLI's stable exit
+// ladder, by STATUS FAMILY (not by code) so a new refusal code the control plane
+// adds is exit-coded correctly without a CLI change.
+//
+// The ONE exception is a CAUSE the CLI RECOGNISES, and it is the same doctrine
+// `rollbackExit` carries: a teamless caller stays exitGeneric on both sides of the
+// 422 {"error":"no_team"} → 403 {"error":"forbidden","reason":"no_team"}
+// conversion. Exit 3 means "your credential is bad" — a script retries auth — and
+// that is false here: the login is fine, it simply has no active team, and the fix
+// is `bp team use <team>`. Only a recognised reason may override a status, so an
+// unknown cause can never move an exit code.
+func siteRefusalExit(status int, reason, code string) int {
+	if reason == "no_team" || code == "no_team" {
+		return exitGeneric // 1 — the cause, not the status family
+	}
+	switch {
+	case status == 404:
+		return exitNotFound // 4
+	case status == 409:
+		return exitConflict // 6 — the box refused (identity_refused)
+	case status == 401 || status == 403:
+		return exitAuth // 3
+	case status >= 500:
+		return exitServer // 8 — the plane or the box failed, not a measured refusal
+	default:
+		return exitGeneric // 1 — 422 teardown_failed / not_rollbackable
+	}
+}
+
+// siteRefusalMessage is the one human sentence per refusal, per verb. Each says
+// WHAT happened, what was NOT changed, and where the fix is. The control plane's
+// own `detail` is RELAYED, never re-worded: `identity_refused` in particular is
+// byte-frozen on the plane (deploy.ex `unreachable/2` deliberately echoes the
+// instance seam), and a CLI that paraphrased it would make the console, the CLI and
+// the plane tell three stories about one fact.
+func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudRefusal) string {
+	// The CAUSE the server named outranks the code, exactly as in the exit ladder:
+	// "forbidden" alone would send a teamless caller to re-authenticate a
+	// credential that is not the problem.
+	if re.Reason == "no_team" || re.Code == "no_team" {
+		return fmt.Sprintf("your Cloud login has no active team, so the control plane refused %s %q — run `bp team use <team>` and retry. %s",
+			kind.noun(), ref, kind.nothingClause())
+	}
+	detail := strings.TrimSpace(re.Detail)
+	switch re.Code {
+	case "identity_refused":
+		// The box answered our stored admin credential with a 401, so nothing went
+		// on the wire at all — a CONFLICT with the box's verdict about our
+		// credential, not a network fault.
+		return fmt.Sprintf("%s %q was refused before anything went on the wire: %s %s",
+			kind.noun(), ref, siteRefusalDetail(detail, "the instance rejected our access credential."), kind.nothingClause())
+	case "teardown_failed":
+		return fmt.Sprintf("the instance could not tear site %q down: %s The site is still registered and may still be serving — the control plane refuses to deregister a site whose teardown errored, so retry once the box is healthy.",
+			ref, siteRefusalDetail(detail, "the box reported no reason."))
+	case "not_found":
+		return fmt.Sprintf("no such site %q (or it is not in your team)", ref)
+	case "forbidden":
+		return fmt.Sprintf("your Cloud login is not allowed to %s site %q — %s %s",
+			kind.verb(), ref, siteRefusalDetail(detail, "it needs the `write` ability on the team that owns the site."), kind.nothingClause())
+	case "server_error":
+		// The plane crashed partway. For a delete that is the one genuinely
+		// ambiguous state (the box teardown runs FIRST), and saying so is the
+		// difference between a retry and a look.
+		if kind == siteRefusedDelete {
+			return fmt.Sprintf("the control plane errored while deleting %q: %s The box teardown runs BEFORE the row is deregistered, so the site may be torn down yet still registered — read `bp cloud site status %s` before retrying.",
+				ref, siteRefusalDetail(detail, "it gave no reason."), ref)
+		}
+		return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
+			ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+	default:
+		// Every other code — including the flat `teardown_failed`/`rollback_failed`
+		// twins' detail, `not_rollbackable`, and `registration_not_removed` when it
+		// lands — relays the plane's sentence rather than flattening it to a slug.
+		if detail != "" {
+			return fmt.Sprintf("the control plane refused %s %q (%s): %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail))
+		}
+		return fmt.Sprintf("the control plane refused %s %q (%s)", kind.noun(), ref, sanitizeCell(siteRefusalLabel(re.Code)))
+	}
+}
+
+// siteRefusalDetail relays the plane's own sentence when it sent one, and falls
+// back to a short clause when it did not — so a detail-less body still reads as a
+// sentence instead of trailing off after a colon.
+func siteRefusalDetail(detail, fallback string) string {
+	if detail == "" {
+		return fallback
+	}
+	return sanitizeCell(detail)
 }
 
 // [--doc-type <t>]` — PATCH the between-deploys-safe fields. Infrastructural
@@ -2545,6 +2719,9 @@ NOT TO BE CONFUSED WITH
 
 OUTPUT + EXIT
   a stage-aware human stream; -o json emits the deployment / site envelope.
-  0 ok · 1 build failed or cancelled · 2 usage · 3 not logged in · 4 no such site.`
+  0 ok · 1 build failed or cancelled · 2 usage · 3 not logged in · 4 no such site.
+  rollback and delete exit-code the control plane's typed refusal: 6 refused (the
+  box refused our credential) · 8 the plane or the box failed · 1 anything else,
+  each with the plane's own code in the -o json envelope.`
 	out.outf("%s", help)
 }
