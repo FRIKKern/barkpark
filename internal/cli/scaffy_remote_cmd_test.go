@@ -998,6 +998,52 @@ func TestScaffyPullCheckUnreachableProvenanceServerRedsR005(t *testing.T) {
 	}
 }
 
+// TestScaffyPullCheckEmptyProvenanceServerRedsR005: a sidecar whose server
+// field is empty cannot have axis (b) verified against ANY catalog — D104
+// demands a distinct NAMED R-005 finding (exit 5), never a silent skip and
+// never a verdict borrowed from the connected server.
+func TestScaffyPullCheckEmptyProvenanceServerRedsR005(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, srv.URL)
+
+	// Blank the sidecar's server field in place (a hand-edited or
+	// legacy-migrated sidecar) — everything else stays intact.
+	sidecar := "scaffy/commands/docs--note--default.provenance.json"
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prov map[string]any
+	if err := json.Unmarshal(raw, &prov); err != nil {
+		t.Fatal(err)
+	}
+	prov["server"] = ""
+	blanked, err := json.Marshal(prov)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, blanked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("empty-server --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "R-005") || !strings.Contains(stdout, "records no source server") {
+		t.Errorf("empty prov.Server must red a named R-005 'records no source server' finding:\n%s", stdout)
+	}
+	// The connected server still serves the doc at matching bytes — the
+	// finding must come from the EMPTY server field, never a borrowed clean.
+	if strings.Contains(stdout, "clean:") {
+		t.Errorf("an empty prov.Server must never audit clean:\n%s", stdout)
+	}
+}
+
 // TestScaffyPullCheckRejectsTarget: --check takes no positional.
 func TestScaffyPullCheckRejectsTarget(t *testing.T) {
 	withTempConfigHome(t)
