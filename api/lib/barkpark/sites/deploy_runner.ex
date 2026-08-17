@@ -1586,14 +1586,39 @@ defmodule Barkpark.Sites.DeployRunner do
   defp terminal_outcome(:teardown, _stages, log), do: teardown_outcome(log)
   defp terminal_outcome(_deploy, stages, log), do: deploy_outcome(stages, log)
 
-  # TEARDOWN: like a rollback it emits no BPSTAGE — the engine prints a
-  # `TORN_DOWN=<slug>` line to the durable log on success (the disarm/rm is
-  # idempotent, so there is no typed-failure vocabulary). Its presence is exit 0;
-  # a non-empty log without it, or an empty log, is an abnormal end (-1).
+  # TEARDOWN: like a rollback it emits no BPSTAGE, but the engine DOES speak a
+  # typed-failure vocabulary (an earlier comment here claimed it did not —
+  # refuted by `deploy/site-deploy.sh` itself): success prints `TORN_DOWN=<slug>`;
+  # `teardown_failed()` prints `TEARDOWN_FAILED=<slug> detail="…"` and exits 25;
+  # the per-site lock refusal logs `… (lock_held)` and exits 23. A terminal unit
+  # exposes no exit code (`--collect` sweeps it), so the typed exit is recovered
+  # FROM those log markers; anything else is an abnormal end (-1) — voiced as a
+  # teardown, never as a deploy.
   defp teardown_outcome(log) do
-    if Enum.any?(log, &String.contains?(&1, "TORN_DOWN=")),
-      do: {0, nil},
-      else: {-1, terminal_reason(-1, nil, log)}
+    cond do
+      Enum.any?(log, &String.contains?(&1, "TORN_DOWN=")) ->
+        {0, nil}
+
+      Enum.any?(log, &String.contains?(&1, "TEARDOWN_FAILED=")) ->
+        {25, teardown_reason(25, teardown_failed_detail(log), log)}
+
+      Enum.any?(log, &String.contains?(&1, "(lock_held)")) ->
+        {23, teardown_reason(23, nil, log)}
+
+      true ->
+        {-1, teardown_reason(-1, nil, log)}
+    end
+  end
+
+  # The engine's own words, parsed from its `TEARDOWN_FAILED=<slug> detail="…"`
+  # line — the operator reads what the script diagnosed, not a generic label.
+  defp teardown_failed_detail(log) do
+    Enum.find_value(log, fn line ->
+      case Regex.run(~r/TEARDOWN_FAILED=\S+ detail="([^"]*)"/, line) do
+        [_, detail] -> blank_to_nil(detail)
+        _ -> nil
+      end
+    end)
   end
 
   # DEPLOY: a `failed` stage names its typed exit + carries its detail; a clean run
@@ -1687,6 +1712,33 @@ defmodule Barkpark.Sites.DeployRunner do
       true -> exit_label(code)
     end
   end
+
+  # Teardown-voiced twin of `terminal_reason/3` — a failed teardown must never
+  # open by saying a DEPLOY died. `exit_label/1` stays byte-frozen (deploy-
+  # reliability's classifier starts_with-matches its -1 bytes,
+  # cloud/lib/barkpark_cloud/deploy_ledger.ex); only :teardown outcomes route here.
+  defp teardown_reason(code, detail, log) do
+    tail = log_reason_tail(log)
+
+    cond do
+      is_binary(detail) and detail != "" -> "#{teardown_exit_label(code)}: #{detail}"
+      tail != "" -> "#{teardown_exit_label(code)}: #{tail}"
+      true -> teardown_exit_label(code)
+    end
+  end
+
+  # site-deploy.sh's typed non-deploy-mode exits, in teardown voice. 23 reuses
+  # the CP's own lock_held copy (cloud/sites/deploy.ex renders the same sentence
+  # for the box's synchronous 409 refusal) so both refusal surfaces speak
+  # identically. 25 is `teardown_failed()` — no TORN_DOWN= was printed, so the
+  # site was NOT torn down (the release tree is deliberately kept on disk).
+  defp teardown_exit_label(23),
+    do: "a deploy is running on the box — try again once it finishes (exit 23)"
+
+  defp teardown_exit_label(25), do: "teardown failed — the site was not torn down (exit 25)"
+  defp teardown_exit_label(-1), do: "the teardown did not complete — its process died abnormally"
+  defp teardown_exit_label(-2), do: "the teardown exceeded its deadline and was force-closed"
+  defp teardown_exit_label(code), do: "teardown failed (exit #{code})"
 
   # The trailing meaningful lines of the child's raw log (BPSTAGE lines + blanks
   # are structure, not diagnosis). `log` is oldest-first, so take the last N.
@@ -2021,6 +2073,17 @@ defmodule Barkpark.Sites.DeployRunner do
   # ── failure reasons (Port stream) ─────────────────────────────────────────
 
   defp failure_reason(0, _run), do: nil
+
+  # The Port fallback is where the typed non-deploy exits arrive AS exit codes
+  # (a transient unit's code is swept by `--collect`; a Port delivers it). A
+  # teardown run must speak teardown here too — never `exit_label/1`'s
+  # deploy/rollback voice. Deploy and rollback runs keep the arm below verbatim.
+  defp failure_reason(code, %{mode: :teardown} = run) do
+    case reason_tail(run) do
+      "" -> teardown_exit_label(code)
+      tail -> "#{teardown_exit_label(code)}: #{tail}"
+    end
+  end
 
   defp failure_reason(code, run) do
     case reason_tail(run) do
