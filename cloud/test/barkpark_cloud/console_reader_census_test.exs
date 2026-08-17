@@ -503,33 +503,44 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "cloudflare_bind_failed",
       site: "router.ex do_bind_cloudflare (deploy path via maybe_bind_cloudflare)",
       reason:
-        "Console-reachable upstream fault: a Cloudflare API refusal while binding on " <>
-          "the deploy path; the deploy caller's server-fault copy renders (5xx honesty " <>
-          "law), which is the honest sentence. Flip: a wave rules CF-specific copy owed."
+        "Console-UNREACHABLE today: no console deploy body sets `via` (runDeploy ships " <>
+          "{git_ref}, createAndDeploy {}), so maybe_bind_cloudflare short-circuits " <>
+          "{:cont} and this arm never fires. Were it to, do_bind_cloudflare's 502 " <>
+          "returns on the SYNCHRONOUS POST /v1/sites/:id/deploy response — before any " <>
+          "deployment row is minted — so runDeploy's non-201 branch paints the deploy " <>
+          "caller's fallback (friendly), NOT the async deployRefusalCopy rail. Flip: a " <>
+          "console domain-binding UI starts sending via."
     },
     %{
       code: "cloudflare_credential_unreadable",
       site: "router.ex bind_cloudflare",
       reason:
-        "Console-reachable fail-closed arm: the stored CF provider credential cannot " <>
-          "be decrypted — an operator-data fault surfaced to the deployer through the " <>
-          "deploy caller's fallback copy. Flip: a wave rules provider-repair copy owed."
+        "Console-UNREACHABLE today: no console deploy body sets `via`, so " <>
+          "maybe_bind_cloudflare returns {:cont} and bind_cloudflare's credential " <>
+          "fail-closed 409 never fires from the console. It surfaces on the SYNCHRONOUS " <>
+          "POST /v1/sites/:id/deploy response (a plug step halting before any deployment " <>
+          "row), where the deploy caller's fallback renders — deployRefusalCopy never " <>
+          "sees it. Flip: a console provider/domain UI starts sending via."
     },
     %{
       code: "cloudflare_domain_required",
       site: "router.ex maybe_bind_cloudflare",
       reason:
-        "Console-reachable config-shape arm: a CF-bound site with no domain set fails " <>
-          "closed before any half-bind; renders the deploy caller's fallback copy. " <>
-          "Flip: a wave rules a set-your-domain-first sentence owed."
+        "Console-UNREACHABLE today: maybe_bind_cloudflare only reaches this 422 when " <>
+          "`via` == \"cloudflare\", and no console deploy body sets via (runDeploy " <>
+          "{git_ref}, createAndDeploy {}). It returns on the SYNCHRONOUS deploy response " <>
+          "before any deployment row is minted, so the deploy caller's fallback renders, " <>
+          "not the async deployRefusalCopy rail. Flip: a console UI starts sending via."
     },
     %{
       code: "cloudflare_zone_missing",
       site: "router.ex bind_cloudflare",
       reason:
-        "Console-reachable config-shape arm: the CF provider row carries no zone id " <>
-          "for the site's domain; fails closed on the deploy path with the caller's " <>
-          "fallback copy. Flip: a wave rules zone-setup copy owed."
+        "Console-UNREACHABLE today: no console deploy body sets `via`, so " <>
+          "bind_cloudflare's zone-missing 422 never fires from the console. It surfaces " <>
+          "on the SYNCHRONOUS POST /v1/sites/:id/deploy response ahead of any minted " <>
+          "deployment row — the deploy caller's fallback renders, never the async " <>
+          "deployRefusalCopy rail. Flip: a console UI starts sending via."
     },
     %{
       code: "domain_required",
@@ -558,9 +569,11 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "no_cloudflare_provider",
       site: "router.ex bind_cloudflare",
       reason:
-        "Console-reachable fail-closed arm: a CF-routed site whose team has no CF " <>
-          "provider connected; fails closed on deploy with the caller's fallback " <>
-          "copy. Flip: a wave rules connect-your-provider copy owed."
+        "Console-UNREACHABLE today: no console deploy body sets `via`, so " <>
+          "bind_cloudflare's no-provider 409 never fires from the console. It returns on " <>
+          "the SYNCHRONOUS deploy response — maybe_bind_cloudflare halts before any " <>
+          "deployment row — so the deploy caller's fallback renders, not the async " <>
+          "deployRefusalCopy rail. Flip: a console provider-connect UI starts sending via."
     },
 
     # ------------------------------------------------------------------ fleet-support arm
@@ -960,9 +973,12 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "email_mismatch",
       site: "router.ex POST /v1/invitations/accept",
       reason:
-        "Console-reachable: accepting an invite addressed to a different email is a " <>
-          "real user path; today the accept caller's fallback renders. Flip: a wave " <>
-          "rules the wrong-account sentence owed (a strong curated-copy candidate)."
+        "Console-reachable STATUS-READ: submitInviteAccept routes every non-200 through " <>
+          "inviteTerminalFrom, whose `if (status === 403) return \"wrong_account\"` arm " <>
+          "paints the dedicated wrong-email card ('This invitation is for a different " <>
+          "email… Sign in with the invited address') — 403 is the accept route's SOLE " <>
+          "403 arm, so the status is the reader, never the slug. Flip: a second 403 arm " <>
+          "joins the route."
     },
     %{
       code: "email_required",
@@ -1000,9 +1016,12 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "invalid_current_password",
       site: "router.ex PUT /v1/account/password",
       reason:
-        "Console-reachable: the change-password form's wrong-current-password arm; " <>
-          "renders the form caller's fallback copy today. Flip: a wave measures the " <>
-          "sentence and rules a curated arm owed (a strong candidate)."
+        "Console-reachable STATUS-READ: submitPasswordChange keys on `r.status === 401` " <>
+          "and renders 'Current password is wrong.' (noBounce:true), never the slug. " <>
+          "Known conflation (the flip): an expired-session 401 (Auth.require_user -> " <>
+          "unauthorized, no slug) paints that SAME false accusation — the fix + this " <>
+          "row's deletion is round-4 slice cch-w74-password-change-401-conflation; today " <>
+          "this row states only the status-read truth."
     },
     %{
       code: "invalid_or_expired",
@@ -1195,10 +1214,12 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "invalid_settings",
       site: "router.ex PATCH /v1/sites/:id",
       reason:
-        "Console-reachable: site settings changeset refusal shipping its map under " <>
-          "detail (singular), which the details ladder does not read; the settings " <>
-          "caller's fallback renders. Flip: a wave renames it details or rules a " <>
-          "fence admission — then this becomes reader-owed."
+        "Effectively guard-shielded: the only console PATCH /v1/sites/:id caller is the " <>
+          "theme select, which submits siteThemePatchBody(val) for a member of the fixed " <>
+          "SITE_THEMES list, so the changeset never fails; and were it to, the map ships " <>
+          "under SINGULAR `detail` (errors(cs)) which no friendly() rung reads — the " <>
+          "details rung is plural and the string-fence requires a string. Flip: a rename " <>
+          "to details or a fence admission — then this becomes reader-owed."
     },
     %{
       code: "invalid_url",
