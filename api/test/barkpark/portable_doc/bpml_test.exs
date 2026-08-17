@@ -453,7 +453,10 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       ]
 
       {bpml, parsed} = roundtrip!(blocks)
-      assert bpml =~ ~s(<note id="w1" label="Aside" lead="context">A standalone marginal note.</note>)
+
+      assert bpml =~
+               ~s(<note id="w1" label="Aside" lead="context">A standalone marginal note.</note>)
+
       assert parsed == blocks
     end
 
