@@ -11974,3 +11974,178 @@ STUCK SITES and cannot distinguish abandonment from stuckness, that the preview 
 construction, and that `failure_rate` is not measurable over any window wide enough to show a non-zero coverage
 number. The maintenance cadence is unchanged from wave 33 EXCEPT that the digest rail is demoted from witness to
 convenience (D589) — the exit instrument is the owner-run command, not an inbox.
+
+## WAVE 35 — 2026-08-17 — THE EXIT WAVE: FINISH, DON'T START · Paper `deploy-reliability-wave-35-2026-08-17`
+
+Two rounds of ground truth (15 surveyors, 9 verifiers, zero coverage deficit) against origin/main
+`4b5d802a1d`. The wave's mandate: one union reconcile, one instrument merge, one honest second reading, the
+ledger partitioned in writing, and the alarm's next firing reaching a human. Decisions D593–D604; the wave's
+verify recipes ride this PR under `tooling/grip/ledger/dr-w35-*` and
+`abandonment-seven-provenance-rederivation-2026-08-17.md`.
+
+### Decisions
+
+- **D593 — THE GATE CURE IS A PERMANENT CLAIM, AND THE WISH'S INSTRUMENT IS RETRACTED.** All six stranded
+  charter/wavelog PRs (#10133 #10407 #10496 #10522 #10612 #11539) now read SUCCESS on `PR references an
+  active task`, cured by ONE claim (`verify-w35`, epoch 94, 2026-08-17T07:08:36Z) on the epic Goal. Because
+  `apply_reap` stamps `expired_at` at REAP time (`ttl_sweeper.ex:372,381`), the reaped claim's `expired_at`
+  lands AFTER every one of the six PRs' `created_at` — P4 passes forever, no re-claim ever needed. **The one
+  act that destroys all six greens is `bp task release task-fb4fb869490b4213`** (released_at ≥ expired_at
+  trips `pr-task-gate.sh:429`, a red no re-fire clears) — NO phase may release it. The wish's "#11539
+  unblocks via task-close" is RETRACTED: close needs a live claim anyway and was premature; the CLAIM arm
+  alone greened all six, two of them (#10133, #10612) with zero ledger writes. Recorded hazard: `gh run
+  rerun --failed` can exit 0, create NO attempt, and permanently wedge a run (31235104900 — detector:
+  `…/attempts/2` → HTTP 404); the cure is a PR-body append (`pull_request: edited` re-fires only this
+  workflow). Recipe: `tooling/grip/ledger/dr-w35-wavelog-gate-live-cure-2026-08-17.md`.
+- **D594 — THE STRANDED SET SPLITS 3-AND-3, AND THE UNION IS PROVEN MECHANICAL WITH A SEVENTH STRAND.** The
+  CLEAN trio #10133 → #10612 → #11539 merges directly, in that order: sequential `git merge-tree` rc=0 at
+  all three steps, charter byte-additive 11976 → 12158 (+182 = 73+65+44 exactly). The lead merges them as
+  the wave's first act — no union extraction needed for these three. The union charter-reconcile PR carries
+  ONLY the rest: w16 (D256–D273 + log), w18 (D302–D321 + log), w19 (D322–D336 + log), plus **#10173's
+  61-line wave-11 REVIEWED log entry** — the seventh strand the wish omitted (its D161–D171 block is
+  byte-identical to main :3137–3391 and is DROPPED) — plus the 22 additive ledger sidecars. Assembly is
+  proven: 13,351 lines, 591 unique D-defs (the only hole left is the pre-existing D106 phantom), zero
+  duplicate definitions, all seven gained log entries exactly once, order-insensitive to whether the trio
+  merged first (`final_S` ≡ `final_A` byte-identical). **Five prose sites become false at merge** (assembled
+  coords :5436 :5438 :6307 :6559 :6940 — the "unmerged/stranded" sentences) and each gets the wave-35 union
+  rider appended; anchors are re-derived by unique context grep at build time, never by literal line number.
+  The union PR merges BEFORE #10407/#10496/#10522/#10173 close as superseded (salvage before closing,
+  :10300 — corrected: #10173 needs NO salvage beyond its log entry). #10612's branch placement (top of
+  `## Wave log`) is accepted as merged; the chronological convention note is recorded, no churn.
+- **D595 — #11534 IS A REBASE, NOT A RE-CUT, AND ITS FLOORS DO NOT MOVE.** Both reds are trivial: one stray
+  blank line (`deploy_ledger_test.exs:3035`) and an INHERITED gofmt drift (`internal/scaffy/corpus_test.go`,
+  dirty at the PR head, clean on main — the merge cures it). Recipe: `git merge origin/main` (conflict-free,
+  zero main commits touch its 7 files), `mix format` the one file, push. 999-technique on the merged tree:
+  `@emitted_floor` STAYS **149** (`box_present`'s deletion is invisible to the entry-point census — it was
+  never a censused pair) and `@go_tag_floor` STAYS **268** (= main's 264 + its 4 new package-wide tags,
+  re-derived independently). **NO re-claim is needed**: the real gate run live exits 0 on the P4 open/lapsed
+  arm (claim was live at PR-open; `PR_OPENED_AT` is stable across `synchronize`), and `dr-w34-s1` must NOT
+  be closed before merge (the done arm would then demand `closed_by`). MERGE ORDER IS LOAD-BEARING: #11534
+  merges before #10811 (+2 tags), #10129 (+5) and **#10086 (+1, CCH-owned — the PR-body hazard note omits
+  it; coordinate, never close)**; whichever lands after re-measures by RUNNING (D579), never by summing.
+- **D596 — TENANCY NOW HAS A MUTATION PIN, AND IT NAMES ITS FILES.** Deleting `|> scope_to_sites(site_ids)`
+  from `census/3` (:1135, the same `scoped` that feeds `coverage_cohorts`) leaves `deploy_ledger_test.exs` +
+  `payload_key_set_census_test.exs` GREEN (122/0 — those suites do NOT pin tenancy) while
+  `deploy_ledger_tenancy_test.exs` + `deploy_ledger_delivery_scope_test.exs` red 10/39 with the leak named
+  ("team t-994 was shown site rows it does not own"). D578's friendly ruling is now run-pinned; anyone
+  quoting it cites the TENANCY suites, never the census suites. #11534 needs no tenancy guard
+  (`site_names/1` resolves only ids harvested from scoped rows). The digest CANNOT render
+  `never_covered_sites` (`coverage_clause/1` and `cohort_clause/2` are fixed-key; envelope-level siblings
+  are unreachable) — so no cross-tenant exposure and no owed sentence, but the "ledger computes it, digest
+  throws it away" shape recurs one key later: filed, not built (D589 demoted the digest rail).
+- **D597 — CROWN QUIESCENCE: AN EMPTY WINDOW ON A VERIFIED CROWN IS A NAMED DEFERRAL, NOT A PAGE.** D570's
+  residual (3) ("the schedule arm has NEVER run the reconcile, 0/2") is REFUTED: lifetime schedule runs are
+  19 success / 13 failure, the product step produced real RECONCILED verdicts, and the D584 in-flight →
+  collect → retire loop fired live across three run boundaries. The replacement residual is WORSE for an
+  exit wave: a quiet repo empties the 24 h window and the crown reds rc 2 → SILENCE → exit 1 **every 6 h
+  forever** (8-run streak 08-15→08-17, all "population was EMPTY", each a comment on #11217 — 41 comments,
+  never closed despite reconciles). RULED: the empty-population arm becomes a benign NAMED deferral (warn,
+  exit 0, still said — the rc-4 precedent, dr-w31-s2) ONLY when the serving sha is verified recorded AND the
+  re-ask list is PRESENT-EMPTY AND zero in-window rows exist; "rows exist but no runs" STAYS rc 2. The
+  harness splits its empty-population cases and stays mutation-provable; the adjacent open gap
+  `dr-w34-fu-inflight-deferral-is-unbounded` is not absorbed or perturbed. #11217 closes AFTER the split
+  merges (closing first would mint a new wolf issue within 6 h); the artefact states the quiescent steady
+  state, including GitHub's 60-day scheduled-workflow auto-disable.
+- **D598 — THE ALARM'S COMMENT PATH ROUTES ONCE AND STOPS NAGGING, AND THE NIGHTLY TIMEOUT IS FIXED IN THE
+  SAME BREATH.** D590's "zero witnesses" is superseded: the widened guard fired EIGHT more times into #5658
+  (now 16 comments, all bot, latest 2026-08-17T06:19:50Z), every one unrouted. Fix shape RULED (the two
+  filed options are not equivalent): on the comment path, when the existing issue has NO assignee, PATCH the
+  assignee once AND @-mention in the same comment — mention-on-demand alone nags ~4×/day forever
+  (crown fires 6-hourly and the comment path never assigns); PATCH alone relies on unproven auto-subscribe.
+  The list response already carries `assignees` — no extra API call. Harness rises above 41 cases and the
+  routing can LOSE. In the same slice, `paper-readers.yml` `timeout-minutes` 30 → 75: the audit is not hung,
+  it is corpus growth against a fixed cap (651 papers in 1627 s = 2.50 s/paper; 774 today = 32.3 min > 30;
+  ~8.8 papers/day growth; 14 consecutive cancelled nights) — routing without headroom converts silence into
+  a nightly page. #5658 closes AFTER merge (next firing then mints a routed, ASSIGNED issue — FRIKKern is
+  assignable, 204). The two filed rows are the slice's ledger (dr-w33-followup-comment-path-routing builds;
+  dr-w34-bl-alarm-comment-path-reaches-nobody closes on the lead's post-merge acts) — no new row is minted.
+- **D599 — D584'S OWED MUTATION DIRECTION 2 IS PAID, AND ITS OLD TALLY IS STALE.** Run 2026-08-17 on
+  `4b5d802a1d`: baseline `crown-reconcile.test.sh` = **198 passed / 0 failed** (D584's "192" is stale — 6
+  assertions grew; never quote 192); inverting in-flight-vs-skew (epsilon left first, so the mutation
+  isolates the inversion) reds **exactly 7, all in section (r)** — the in-flight deferral collapses into
+  SERVING-CLOCK-SKEW + SERVING-UNRECORDED, rc 4 → rc 1. Restored: 198/0, tree byte-clean. The 5-red
+  direction-1 figure and this 7 are NOT a like-for-like pair (different-era harnesses). Also: the exit-run
+  harness (`deploy-reliability-exit-run.test.sh`, 96 assertions, offline) is enforced by NOTHING — no
+  workflow references it; it becomes a `shell-harnesses.yml` tenant this wave (D603).
+- **D600 — THE ABANDONMENT SEVEN ARE FULLY RE-DERIVABLE; THE "ZERO ROWS" PREMISE IS RETRACTED INSTEAD.**
+  Live table, producer's own regex (`deploy_ledger.ex:774`): exactly **7** of 33,539 rows — 1× BOX_BUSY at
+  6/6 (08-05), 6× BOX_AT_CAPACITY at 12/12 (08-07, five sites) — D195 reproduced row-for-row; the loose
+  anti-vacuity LIKE also reads 7. The "zero abandoned rows all-time under both readers" premise was
+  half-vacuous ('abandoned' was never a status value) and half a wrong-reader claim. Backfill #11426 RAN in
+  production, so: D195's parenthetical "`deferral_depth >= 12` … returns zero forever" is RETIRED (it
+  returns 6 — the RULING to key on the anchored clause/class stands); D544's "depth = bound unsatisfiable"
+  now holds only for the `deferred` population (table-wide it reads 7); and
+  `dr-w28-rv-abandonment-predicate…`'s blocker is DISCHARGED (the structured predicate reads 7). Charter
+  :1585 (D76's "all 528 are BOX_BUSY") is NOT inverted — it is window-scoped and reproduces EXACTLY
+  (528/0/528 in D76's own window; the cause column's first stamp postdates that window) — it gets a DATE,
+  not a retraction: the all-time split reversed after #9827 (text reader 2975 capacity / 698 busy; column
+  reader 1859:1, blind to 1,818 pre-08-07 rows). Any cause split the exit reading prints names its READER
+  and its WINDOW, in one query at one as_of.
+- **D601 — THE SECOND READING IS HUMAN-GATED ON ONE BROWSER CLICK, AND THE GAUGE'S OWN DIAGNOSTIC CARRIES
+  THE EPIC'S FOUNDING DEFECT.** The exit runner ran today and refused correctly: INFRA FAULT (exit 2), no
+  number, "the control plane did not recognise this session (401 unauthorized)" — the withholding doctrine
+  working live, unrehearsed. The PATH `bp` is now VOUCHED (`e7379a38b3`, ancestor of origin/main, 0
+  ahead/3 behind) — **D581's divergence story is stale**; once the session is renewed the reading is one
+  command. The gate is NARROWER than "the owner runs bp login": device-link start/poll is fully scriptable
+  (`--device-start` works while the stored session 401s; an approved poll persists the session itself) — the
+  owner's only irreducible act is approving ONE URL within 600 s. NEW DEFECT, filed: `bp whoami` prints
+  `cloud.logged_in: true` from token PRESENCE alone (`builtins.go:183-192` — no control-plane call, while
+  the same function probes the CONTENT server for `reachable`), the test suite ENSHRINES it (a fake token
+  against an unreachable server pins `logged_in == true`), and `HasCloudToken()` gates 27 authed call
+  sites — a green local reading over a dead remote, inside the epic's own diagnostic. The sibling artefact
+  is `scripts/deploy-reliability-exit-2026-08-17.md`: NEW unique slug `deploy-reliability-exit-reading-2026-08-17`,
+  its OWN line in the `check-doc-budgets.sh` CAPS heredoc, no relative .md links (D586). Construction fact
+  it must state: `as_of` is the window's `to`, PINNED (`deploy_ledger.ex:1330`) — a default-window re-run
+  re-prints 2026-08-09T00:00:00Z and the ONLY digit that can move is `never_covered` (coverage is
+  left-bounded), falling. That is the artefact's whole point — re-runnable by someone who wasn't there —
+  and the week's delta is the story. Exit code is captured WITHOUT a pipe (`cmd | tail; echo $?` printed 0
+  for an exit-2 run, again).
+- **D602 — THE PARTITION HAS THREE HEADLINE NUMBERS AND NO PRINTER; IT IS AUTHORED AS PROSE WITH ITS
+  INSTANT.** 191 open children (bp roster) / 189 (seal-predicate roster — the gap is exactly the two live
+  `drafts.*` rows) / 184 (D587's deduction arithmetic re-run: −7 zero-criteria, −0 at-100%). None is ever
+  quoted bare; each carries as_of + head sha (the predicate read orphans=189 at 07:08Z on `4b5d802a1d`;
+  D588 read 171 a week earlier — the number moves, quote the instant). `disposition_reason`-while-open = 12:
+  eleven audit notes + ONE genuine supersession (`dr-w33-bl-crown-skew-arm-has-no-epsilon` → CANCELLED
+  citing D584/D599; cruelly, the one superseded row is the only one with no machine-readable disposition).
+  `PERMANENT_HUMAN_GATES` is a hardcoded 3-entry literal with ZERO DR ids, and the DR exit runner prints no
+  gate table — "human gates stated as human gates" has NO printer; the artefact carries the epic's three
+  `-hg-` rows as prose. RUN-PROVEN CLOSES, available today: `dr-w26-s3` (#11080), `dr-w26-s6` (#11083),
+  `dr-w26-s7` (#11139) — each one reworded merge-gate criterion, command run and passing, closable for 8
+  days; `dr-w33-s4` (c6: zero "pages" in the PR body; c8: #11481 merged — cite squash `694366b62e`, NEVER
+  the row's `ded88cc82a`, which is not an ancestor). The "25 merge-gated-only rows" is a LABEL count, not a
+  closable count: ≥3 are human judgement wearing the prefix, 7 are blocked on still-OPEN PRs. D568 splits:
+  its BROKEN six were CURED by rewording (dr-w33-s5, all six commands pass today; one line drift recorded,
+  `deploy.yml:427` vs :413); its PASSING six are UNENUMERABLE (descriptor-only, reworded out from under the
+  descriptors) — downgraded from count to sentence. `bp export --type task` reads task fields at TOP level
+  with `content: {}` — the shape assertion is pinned in the recipe or the partition silently reads empty.
+  Recipes: `dr-w35-partition-cheap-cuts-2026-08-17.md`.
+- **D603 — EVERY INSTRUMENT THE EXIT CITES GETS A CI OWNER.** `crown-reconcile.test.sh` is gated twice;
+  `deploy-reliability-exit-run.test.sh` is gated NOWHERE — its 96 assertions are a document, not a gate. One
+  `shell-harnesses.yml` tenant entry this wave (offline, fixture-driven, seconds).
+- **D604 — THE FLEET WEEK STAYED BORING; THE DIRTY-PR ADJUDICATION STANDS AND GAINS ONE HANDS-OFF.** 277
+  rows / 8 sites since 08-10: 133 live, 141 deferred (all BOX_AT_CAPACITY, depths 1–5 against bound 12), 3
+  failed — one 86-second unreachability blip on 08-12, self-healed on every affected site; two genuinely
+  idle days; 0 failures in ~117 h. No fleet slice. D547 stands: #10400 and #10722 close-superseded; #10811
+  forwards on its filed re-measure row; #10129 stays parked-forwarded; **#10944 is UNTOUCHABLE — CCH wave 68
+  owns its re-land and will close it as superseded; two epics must not close the same PR.** Also: eleven
+  open PRs are CCH-owned (not six — :10291's census is stale); wave 35 touches none of them.
+
+### Wave 35 plan — 7 slices, one round
+
+| # | slice | task | files | model |
+|---|---|---|---|---|
+| S1 | Union charter-reconcile PR (4 strands + 22 sidecars + 5 riders) | `dr-w35-s1-union-charter-reconcile` | charter + tooling/grip/ledger sidecars | opus |
+| S2 | Finish #11534: merge main, one-line format, push; body gains #10086 hazard + tenancy-pin sentence | `dr-w34-s1-coverage-envelope-window-and-sites` | PR branch (7 files) | opus |
+| S3 | Crown quiescence: empty-window named deferral (D597) | `dr-w35-s3-crown-quiescence-named-deferral` | crown-reconcile.sh/.test.sh/.yml | fable |
+| S4 | Alarm comment path routes + paper-readers cap 30→75 (D598) | `dr-w33-followup-comment-path-routing` | file-ci-failure-issue.sh/.test.sh, paper-readers.yml | opus |
+| S5 | Second exit artefact, honest letters (D601) | `dr-w35-s5-second-exit-artefact` | scripts/deploy-reliability-exit-2026-08-17.md, check-doc-budgets.sh | fable |
+| S6 | Exit-run harness becomes a shell-harnesses tenant (D603) | `dr-w35-s6-exit-harness-ci-owner` | .github/workflows/shell-harnesses.yml | opus |
+| S7 | Ledger partition executed row-by-row (D602) | `dr-w35-s7-ledger-partition-execution` | tooling/grip/ledger/dr-w35-partition-execution-2026-08-17.md + bp writes | opus |
+
+Lead sequence around the slices: (1) merge the CLEAN trio #10133 → #10612 → #11539 (re-run the sequential
+merge-tree proof first — stale-green window); (2) merge this charter PR (a trivial EOF union with the w34
+log entry if the trio landed first); (3) merge S1's union PR, then close #10407/#10496/#10522/#10173 as
+superseded; (4) merge #11534 BEFORE #10811/#10129/#10086; (5) after S3 merges, close #11217; after S4
+merges, close #5658; (6) close #10400 and #10722 as superseded (D547/D604). NEVER release the epic Goal's
+claim (D593). The owner's one human act: approve the device-link URL so the 2026-08-17 reading exists —
+otherwise the artefact ships the refusal, verbatim, and that is an honest exit (D565).
