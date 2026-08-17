@@ -1334,7 +1334,7 @@ already been wrong three times in prose.
 ### Wave 70 — EVERY ARM RELAYS THE MEASURED SENTENCE (build in flight)
 
 **Paper:** `cloud-console-hardening-wave-70-2026-08-17`. **This charter PR carries D853-D860.** Ceiling was
-D852; wave 70 mints D853-D860, next wave opens at D861. Verification: 11 survey lanes + 6 deep verifiers,
+D852; wave 70 mints D853-D860, next wave opens at D861. Verification: 14 survey lanes + 7 deep verifiers,
 zero coverage deficit both rounds; premise smoke re-run at decide against tip `d21641abd8` (cloud/ and
 internal/cloudclient byte-identical to the verify anchor `d020382028`). Wave 69 is fully landed (D853);
 this wave finishes the three-wave refusal-pipeline arc: after it, no arm of the site lifecycle — console
