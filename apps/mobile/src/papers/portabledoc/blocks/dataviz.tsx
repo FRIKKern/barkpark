@@ -1394,6 +1394,122 @@ const criteriaProgress: Render = (b, ctx, key) => {
   )
 }
 
+/* ── route (sport track) ─────────────────────────────────────────────────────
+ * The mobile twin of the web/Go/TUI route renderers: `polyline` carries a
+ * Google encoded polyline; the track SHAPE draws natively through the same
+ * rotated-View polyline primitive the chart/spark family uses (D56 — zero new
+ * dependencies, no SVG). Same projection math as data_viz.ex §route
+ * (equirectangular, cos(mid-lat) x-scale); start ring in theme.success, finish
+ * dot in theme.danger — theme-owned tones, no colour invented. Meta row
+ * (sport · distance · elevation · duration) + caption beneath, all author
+ * DISPLAY strings. Fewer than two decodable points → the honest empty box. */
+
+/** Google encoded-polyline decoder — the fourth twin (data_viz.ex,
+ * pdrender/route.go, react dataviz.ts): ASCII 63–126, 5-decimal fixed point,
+ * zig-zag deltas; a malformed tail drops at the last whole pair, never
+ * inventing a point. Duplicated by the same rule chartSpan duplicates the
+ * web's span math: mobile renders from its own tree, tests pin the twins. */
+export function decodeRoutePolyline(s: string): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  let lat = 0
+  let lng = 0
+  let i = 0
+
+  const next = (): number | null => {
+    let shift = 0
+    let acc = 0
+    while (i < s.length) {
+      const c = s.charCodeAt(i)
+      if (c < 63 || c > 126) return null
+      i++
+      acc |= ((c - 63) & 0x1f) << shift
+      if (((c - 63) & 0x20) === 0) return (acc & 1) !== 0 ? -((acc >> 1) + 1) : acc >> 1
+      shift += 5
+    }
+    return null
+  }
+
+  while (i < s.length) {
+    const dlat = next()
+    if (dlat === null) break
+    const dlng = next()
+    if (dlng === null) break
+    lat += dlat
+    lng += dlng
+    out.push([lat / 1e5, lng / 1e5])
+  }
+  return out
+}
+
+const ROUTE_PLOT_W = 584 // the chart's own plot width — one shared geometry
+const ROUTE_MAX_H = 360
+const ROUTE_MIN_H = 120
+const ROUTE_MARK = 11 // marker diameter in plot units
+
+const route: Render = (b, ctx, key) => {
+  const pts = decodeRoutePolyline(displayString(b.polyline))
+  if (pts.length < 2) return emptyDataviz('route', ctx, key)
+
+  const midLat = pts.reduce((a, p) => a + p[0], 0) / pts.length
+  const k = Math.cos((midLat * Math.PI) / 180)
+  const projected = pts.map((p): [number, number] => [p[1] * k, -p[0]])
+  const minX = Math.min(...projected.map((q) => q[0]))
+  const minY = Math.min(...projected.map((q) => q[1]))
+  const spanX = Math.max(Math.max(...projected.map((q) => q[0])) - minX, 1e-9)
+  const spanY = Math.max(Math.max(...projected.map((q) => q[1])) - minY, 1e-9)
+
+  // Height follows the track's own aspect inside the caps, like the TUI twin.
+  const h = Math.min(Math.max((spanY / spanX) * ROUTE_PLOT_W, ROUTE_MIN_H), ROUTE_MAX_H)
+  const scaleF = Math.min(ROUTE_PLOT_W / spanX, h / spanY)
+
+  const points: Pt[] = projected.map(([x, y]) => ({
+    x: (x - minX) * scaleF,
+    y: (y - minY) * scaleF,
+  }))
+  const first = points[0]
+  const last = points[points.length - 1]
+  if (first === undefined || last === undefined) return emptyDataviz('route', ctx, key)
+
+  const marker = (p: Pt, style: Record<string, unknown>, mkey: string): ReactNode => (
+    <View
+      key={mkey}
+      style={{
+        position: 'absolute',
+        left: pct((p.x - ROUTE_MARK / 2) / ROUTE_PLOT_W),
+        top: pct((p.y - ROUTE_MARK / 2) / h),
+        width: pct(ROUTE_MARK / ROUTE_PLOT_W),
+        aspectRatio: 1,
+        borderRadius: 999,
+        ...style,
+      }}
+    />
+  )
+
+  const meta = ['sport', 'distance', 'elevation', 'duration']
+    .map((mk) => displayString(b[mk]))
+    .filter((v) => v !== '')
+
+  return card(
+    ctx,
+    key,
+    <View>
+      {cardTitle(displayString(b.caption), ctx)}
+      <View style={{ aspectRatio: ROUTE_PLOT_W / h }}>
+        <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}>
+          {polyline(points, ctx.theme.accent, { w: ROUTE_PLOT_W, h })}
+        </View>
+        {marker(first, { borderWidth: 2, borderColor: ctx.theme.success, backgroundColor: ctx.theme.surface }, 'start')}
+        {marker(last, { backgroundColor: ctx.theme.danger }, 'finish')}
+      </View>
+      {meta.length > 0 ? (
+        <Text style={{ ...scale.micro, fontFamily: MONO, color: ctx.theme.textMuted, marginTop: 6 }}>
+          {meta.join(' · ')}
+        </Text>
+      ) : null}
+    </View>,
+  )
+}
+
 export const datavizRenderers: Record<string, Render> = {
   stat,
   stats,
@@ -1405,4 +1521,5 @@ export const datavizRenderers: Record<string, Render> = {
   'gauge-list': gaugeList,
   'bar-chart': barChart,
   'criteria-progress': criteriaProgress,
+  route,
 }

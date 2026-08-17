@@ -21,6 +21,17 @@ export const datavizCases: BlockCase[] = [
     },
   },
   {
+    type: 'route',
+    block: {
+      type: 'route',
+      sport: 'sykling',
+      distance: '4.2 km',
+      caption: 'Testrunden',
+      // the Google reference-vector polyline — three points, valid everywhere
+      polyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+    },
+  },
+  {
     type: 'heatmap',
     block: {
       type: 'heatmap',
