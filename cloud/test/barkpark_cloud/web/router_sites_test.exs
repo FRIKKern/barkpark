@@ -1283,8 +1283,8 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     # cch-w70-bl: the 401/403 auth plugs on the scoped token route ALSO nest
     # their refusal (`{"error": {"code": "forbidden", "message": ...}}`), not just
     # TokenController's 422. The same nested-envelope unwrap must carry the plug's
-    # words through — a message-only envelope (no separate machine code beyond the
-    # slug) resolves to the human string.
+    # words through, composed `code — message` like the 422 arm (and the helper
+    # degrades to the bare human string when an envelope carries no code).
     test "a nested 403 scoped-plug mint refusal → 502 carrying the plug's message, and NO ghost row" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -1320,7 +1320,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert body["error"] == "read_token_mint_failed"
       assert body["detail"] =~ bp.slug
       assert body["detail"] =~ "(HTTP 403)"
-      assert body["detail"] =~ "admin token cannot mint public-read here"
+      assert body["detail"] =~ "forbidden — admin token cannot mint public-read here"
       # A site that cannot read its content is not a site. Nothing was written.
       assert Registry.list_sites_for_team(team) == []
     end
