@@ -135,34 +135,41 @@ defmodule BarkparkWeb.BulldocsIngestController do
           }
         }
 
-        wall =
-          Barkpark.Content.AuthoringWall.validate_all(
-            ref,
-            "paper",
-            slug,
-            Content.paper_default_dataset()
-          )
-          |> Enum.map(fn tuple ->
-            {:error, tuple} |> Errors.to_envelope(conn) |> Map.delete(:status)
-          end)
-
-        structure =
-          Barkpark.Content.Papers.Template.validate(blocks || []) ++
-            if Barkpark.Content.Papers.Hollow.hollow?(blocks) do
-              [
-                %{
-                  code: "hollow_paper",
-                  message: "the paper is a skeleton — a title with no content blocks",
-                  hint: "add body blocks before publishing"
-                }
-              ]
-            else
-              []
-            end
-
-        violations = wall ++ Enum.map(structure, &structure_violation/1)
+        violations = paper_wall_violations(conn, ref) ++ paper_structure_violations(blocks)
         json(conn, %{valid: violations == [], violations: violations})
     end
+  end
+
+  # The wall gates as ONE violation list — `AuthoringWall.validate_all/4` over a
+  # synthesized in-memory ref, each tuple routed through the shared v1 envelope
+  # (status dropped: these are data inside a reply, not the reply's transport).
+  # SHARED by the validate dry-run and the create-on-push arm below so the two
+  # doors cannot drift: what the dry-run reports IS what a create enforces.
+  defp paper_wall_violations(conn, ref) do
+    Barkpark.Content.AuthoringWall.validate_all(ref, "paper", ref.doc_id, ref.dataset)
+    |> Enum.map(fn tuple ->
+      {:error, tuple} |> Errors.to_envelope(conn) |> Map.delete(:status)
+    end)
+  end
+
+  # The paper structural gates (template declarations + the hollow-body check)
+  # as violation maps — the other shared half of the dry-run/create parity.
+  defp paper_structure_violations(blocks) do
+    structure =
+      Barkpark.Content.Papers.Template.validate(blocks || []) ++
+        if Barkpark.Content.Papers.Hollow.hollow?(blocks) do
+          [
+            %{
+              code: "hollow_paper",
+              message: "the paper is a skeleton — a title with no content blocks",
+              hint: "add body blocks before publishing"
+            }
+          ]
+        else
+          []
+        end
+
+    Enum.map(structure, &structure_violation/1)
   end
 
   @doc """
@@ -174,6 +181,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
   grammar keeps its single Elixir owner — the CLI never parses BPML.
 
     * parse failure → 422 with the collected teaching errors;
+    * the slug does not exist → CREATE-ON-PUSH (pe-w6 / charter D41): the parsed
+      document births the paper through the FULL publish wall — the same
+      `AuthoringWall.validate_all` + `Template.validate` + `Hollow` gates the
+      validate dry-run reports (shared helpers, so the doors cannot drift),
+      then `Content.upsert_paper` (which re-runs the wall as the authority
+      BEFORE any Repo write). A wall refusal is a 422 `create_wall` envelope
+      carrying EVERY violation under `errors`, and writes NOTHING — no draft,
+      no partial row. `baseRev` is not consulted on this arm (the scaffold
+      anchors at rev 0; an EXISTING slug still 412s on a stale anchor). The
+      document's own `<paper slug>` must match the pushed path slug (422
+      `slug_mismatch` otherwise — the path is the identity);
     * the paper's CURRENT blocks are unprintable → 422 `bpml_unprintable`
       BEFORE any op derives (a BPML document cannot describe them, so a sync
       would silently delete every non-kernel block behind a 200);
@@ -228,15 +246,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp sync_apply(conn, slug, parsed, base_rev, dataset, scope) do
     case Content.get_paper(slug, dataset, scope) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{
-          error: %{
-            code: "not_found",
-            message: "no paper for slug #{slug}",
-            hint: "sync edits an existing paper — publish it first, then pull"
-          }
-        })
+        sync_create(conn, slug, parsed, dataset, scope)
 
       paper ->
         # The paper-level integer rev — the same value the ops if_rev guard
@@ -355,6 +365,164 @@ defmodule BarkparkWeb.BulldocsIngestController do
           error: %{code: "invalid_op", message: "the derived batch could not be applied"}
         })
     end
+  end
+
+  # Create-on-push (pe-w6 / charter D41): the sync door's birth arm. An absent
+  # slug + a parsed document = the paper does not exist yet, so CREATE it —
+  # through the FULL publish wall, never around it, and never via the
+  # RequireIngestToken ingest route (this stays the sync route the working
+  # copy already authenticated on).
+  #
+  # Wall order, deliberately validate-first: the SAME shared helpers the
+  # validate dry-run uses (`paper_wall_violations/2` + `paper_structure_
+  # violations/1`) run over the parsed document and, on ANY violation, refuse
+  # with every violation in ONE 422 — before `upsert_paper` is even called, so
+  # a wall-refused create provably writes NOTHING. The upsert then re-runs the
+  # wall as the AUTHORITY (enforce_blocks_wall sits before the Repo insert in
+  # BlockOps — its own refusals also precede any write); its residual errors
+  # (a dedup race, a changeset) route through the same envelopes as ingest.
+  #
+  # NOTE the deliberate absence of a locked title stamp: BPML cannot spell
+  # `role`/`locked`, and `Diff.derive/2` compares blocks by FULL map equality —
+  # a locked-title paper's every future push would derive a replace-block that
+  # strips `locked`, which `Patch.check_locked_placement/3` rejects. The one
+  # door must birth papers the same door can keep editing, so the created
+  # paper keeps its plain h1 (whose text still becomes the row title via
+  # `BlockOps.paper_title/2`), and `Template.validate/1` passes it under the
+  # additive no-locked-blocks rule — exactly as the validate dry-run does.
+  defp sync_create(conn, slug, parsed, dataset, scope) do
+    doc_slug = parsed["slug"]
+
+    if is_binary(doc_slug) and doc_slug != "" and doc_slug != slug do
+      conn
+      |> put_status(:unprocessable_entity)
+      |> json(%{
+        error: %{
+          code: "slug_mismatch",
+          message:
+            "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — nothing was written",
+          hint:
+            "the pushed path is the paper's identity; rename the file or fix the <paper slug> so they agree"
+        }
+      })
+    else
+      blocks = parsed["blocks"] || []
+
+      ref = %Barkpark.Content.Document{
+        doc_id: slug,
+        type: "paper",
+        dataset: dataset,
+        title: create_title(blocks, parsed, slug),
+        content: %{
+          "blocks" => blocks,
+          "tags" => parsed["tags"],
+          "description" => parsed["description"]
+        }
+      }
+
+      case paper_wall_violations(conn, ref) ++ paper_structure_violations(blocks) do
+        [] ->
+          sync_create_persist(conn, slug, parsed, blocks, dataset, scope)
+
+        violations ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            error: %{
+              code: "create_wall",
+              message:
+                "no paper #{slug} exists yet; creating it ran the full publish wall, which refused — nothing was written",
+              hint:
+                "fix each violation below; see them before pushing with the dry-run: bp paper push #{slug} --check (POST /v1/plugins/bulldocs/papers/validate)",
+              errors: violations
+            }
+          })
+      end
+    end
+  end
+
+  defp sync_create_persist(conn, slug, parsed, blocks, dataset, scope) do
+    attrs =
+      %{
+        "slug" => slug,
+        "blocks" => blocks,
+        "style" => parsed["style"] || "article",
+        "tags" => parsed["tags"],
+        "description" => parsed["description"],
+        "dataset" => dataset
+      }
+      |> maybe_put("workspace_id", scope[:workspace_id])
+      |> maybe_put("project_id", scope[:project_id])
+
+    # Advisory channel — same reset+drain pair as the ingest legs (D36/D42),
+    # so the wall's advise band (soft-dup near-miss, off-norm tag count) rides
+    # the created receipt instead of being silently dropped.
+    Warnings.reset()
+
+    case Content.upsert_paper(attrs) do
+      {:ok, paper} ->
+        {canonical, echo_refusal} = canonical_echo(paper)
+        rev = to_string(get_in(paper.content || %{}, ["rev"]))
+
+        payload = %{
+          ok: true,
+          slug: paper.doc_id,
+          created: true,
+          rev: rev,
+          op_count: length(get_in(paper.content || %{}, ["blocks"]) || []),
+          bpml: canonical
+        }
+
+        conn
+        |> put_resp_header("x-paper-rev", rev)
+        |> json(maybe_mark_echo(with_warnings(payload), echo_refusal))
+
+      # The residual refusals AFTER the validate-first precheck (a dedup race,
+      # an encryption seal failure, a changeset) — routed exactly like the
+      # ingest legs so every wall shape keeps its one envelope. None of these
+      # arms follow a write: enforce_blocks_wall precedes the Repo insert.
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
+      {:error, {:label_spine, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:invalid_paper_structure, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:unknown_tag, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:duplicate_of, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        invalid_paper_error(conn, changeset)
+
+      {:error, _reason} = err ->
+        render_error(conn, err)
+    end
+  end
+
+  # The create precheck's title, derived the way the upsert wall will derive it
+  # (`BlockOps.paper_title/2`: first heading's text wins) so the dry-run-shaped
+  # precheck walls the SAME title the authoritative wall sees.
+  defp create_title(blocks, parsed, slug) do
+    heading_text =
+      Enum.find_value(blocks, fn b ->
+        if is_map(b) and b["type"] == "heading" and is_binary(b["text"]) and b["text"] != "",
+          do: b["text"]
+      end)
+
+    heading_text || parsed["title"] || slug
   end
 
   # The sync entry guard's probe: nil when every current block is printable,

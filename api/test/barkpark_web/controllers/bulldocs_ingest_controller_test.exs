@@ -1328,4 +1328,199 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert entry["message"] =~ "composition-doctrine-plan"
     end
   end
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Create-on-push (pe-w6 / charter D41): `POST /papers/:slug/sync` on an
+  # ABSENT slug births the paper through the FULL publish wall. The high-flip
+  # risk this pins: a wall-refused create must write NOTHING — no draft, no
+  # partial row — and the refusal must carry EVERY violation in one 422, the
+  # same set the validate dry-run reports for the same document.
+  # ───────────────────────────────────────────────────────────────────────────
+  describe "create-on-push (sync to an absent slug, D41)" do
+    defp sync_path(slug), do: "#{@path}/#{slug}/sync"
+
+    defp sync_conn(conn, slug, bpml, base_rev \\ "0") do
+      conn
+      |> put_req_header("authorization", "Bearer " <> @token)
+      |> put_req_header("content-type", "application/json")
+      |> post(sync_path(slug), %{"bpml" => bpml, "baseRev" => base_rev})
+    end
+
+    # A wall-passing BPML document for `slug` — the scaffold's shape: meta
+    # (description + registered weighted tags, distinct strengths, ≥20-char
+    # rationales), an h1 at block 0, one real paragraph. Tokens are unique per
+    # call (the E4 dedup token-bag rule — see LabelFixtures).
+    defp create_bpml(slug, tag_names) do
+      n = System.unique_integer([:positive])
+
+      tag_lines =
+        tag_names
+        |> Enum.with_index()
+        |> Enum.map_join("\n", fn {name, i} ->
+          ~s(    <tag tag="#{name}" strength="#{90 - i * 30}">Create-door fixture tag — proves the wall equivalence.</tag>)
+        end)
+
+      """
+      <paper slug="#{slug}" title="Create Door zq#{n}x">
+        <meta>
+          <description>Create-door proof zq#{n}a zq#{n}b zq#{n}c zq#{n}d zq#{n}e.</description>
+      #{tag_lines}
+        </meta>
+        <h1>Create Door zq#{n}x</h1>
+        <p>The one door creates through the full wall zq#{n}f zq#{n}g.</p>
+      </paper>
+      """
+    end
+
+    defp registered_tag_names do
+      n = System.unique_integer([:positive])
+      names = ["qz#{n}door", "qz#{n}proof"]
+      LabelFixtures.register_tags!("production", names)
+      names
+    end
+
+    test "a wall-passing document CREATES the paper (200 created), and pulls back clean",
+         %{conn: conn} do
+      slug = "create-door-#{System.unique_integer([:positive])}"
+      bpml = create_bpml(slug, registered_tag_names())
+
+      conn = sync_conn(conn, slug, bpml)
+      resp = json_response(conn, 200)
+
+      assert resp["ok"] == true
+      assert resp["created"] == true
+      assert resp["slug"] == slug
+      assert is_binary(resp["rev"]) and resp["rev"] != ""
+      assert [resp["rev"]] == get_resp_header(conn, "x-paper-rev")
+      assert is_binary(resp["bpml"]) and resp["bpml"] =~ "the full wall"
+
+      # Persisted through the same truths as any birth: blocks stored, the h1
+      # text IS the row title, the labels landed.
+      paper = Content.get_paper(slug)
+      assert paper
+      assert paper.title =~ "Create Door"
+      assert [%{"type" => "heading"} | _] = pc(paper, "blocks")
+      assert is_binary(pc(paper, "description"))
+      assert length(pc(paper, "tags")) == 2
+
+      # The working-copy loop closes: a pull returns exactly the canonical the
+      # create receipt carried, anchored on the same rev.
+      pull = build_conn() |> get("/papers/#{slug}/source", %{"format" => "bpml"})
+      assert response(pull, 200) == resp["bpml"]
+      assert [resp["rev"]] == get_resp_header(pull, "x-paper-rev")
+    end
+
+    test "an unregistered tag refuses with the 422 create_wall violations envelope and writes NOTHING",
+         %{conn: conn} do
+      slug = "create-refused-#{System.unique_integer([:positive])}"
+      # Tags NOT registered — the sharpest first-push trap (E3, never exempted).
+      bpml =
+        create_bpml(slug, [
+          "never-registered-#{System.unique_integer([:positive])}",
+          "also-missing"
+        ])
+
+      conn = sync_conn(conn, slug, bpml)
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "create_wall"
+      assert err["message"] =~ "nothing was written"
+      assert err["hint"] =~ "--check"
+      assert Enum.any?(err["errors"], &(&1["code"] == "unknown_tag"))
+
+      # ZERO server state: no published row, no draft twin.
+      refute Content.get_paper(slug)
+      refute Content.get_paper("drafts.#{slug}")
+    end
+
+    test "a hollow, label-less document collects EVERY violation in one reply, nothing written",
+         %{conn: conn} do
+      slug = "create-hollow-#{System.unique_integer([:positive])}"
+
+      bpml = """
+      <paper slug="#{slug}" title="Hollow Door">
+        <h1>Hollow Door</h1>
+      </paper>
+      """
+
+      conn = sync_conn(conn, slug, bpml)
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "create_wall"
+
+      codes = Enum.map(err["errors"], & &1["code"])
+      assert "hollow_paper" in codes
+      assert "label_spine" in codes
+
+      refute Content.get_paper(slug)
+      refute Content.get_paper("drafts.#{slug}")
+    end
+
+    test "the create wall and the validate dry-run refuse with the SAME violation codes",
+         %{conn: conn} do
+      slug = "create-parity-#{System.unique_integer([:positive])}"
+
+      bpml = """
+      <paper slug="#{slug}" title="Parity Door">
+        <h1>Parity Door</h1>
+      </paper>
+      """
+
+      dry =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> @token)
+        |> put_req_header("content-type", "application/json")
+        |> post("#{@path}/validate", %{"bpml" => bpml})
+
+      %{"valid" => false, "violations" => violations} = json_response(dry, 200)
+
+      conn = sync_conn(conn, slug, bpml)
+
+      assert %{"error" => %{"code" => "create_wall", "errors" => errors}} =
+               json_response(conn, 422)
+
+      assert Enum.map(errors, & &1["code"]) |> Enum.sort() ==
+               Enum.map(violations, & &1["code"]) |> Enum.sort()
+
+      refute Content.get_paper(slug)
+    end
+
+    test "a document whose <paper slug> disagrees with the pushed path refuses before the wall",
+         %{conn: conn} do
+      slug = "create-mismatch-#{System.unique_integer([:positive])}"
+      bpml = create_bpml("some-other-slug", registered_tag_names())
+
+      conn = sync_conn(conn, slug, bpml)
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "slug_mismatch"
+      assert err["hint"] =~ "identity"
+
+      refute Content.get_paper(slug)
+      refute Content.get_paper("some-other-slug")
+    end
+
+    test "an EXISTING slug still 412s on a scaffold's rev-0 anchor (create never clobbers)",
+         %{conn: conn} do
+      slug = "create-collision-#{System.unique_integer([:positive])}"
+
+      assert {:ok, _} =
+               Content.upsert_paper(
+                 LabelFixtures.paper_attrs(%{
+                   "slug" => slug,
+                   "blocks" => [
+                     %{
+                       "type" => "heading",
+                       "level" => 1,
+                       "text" => "Incumbent zq#{System.unique_integer([:positive])}"
+                     },
+                     %{
+                       "type" => "paragraph",
+                       "content" => [%{"type" => "text", "value" => "already here"}]
+                     }
+                   ]
+                 })
+               )
+
+      conn = sync_conn(conn, slug, create_bpml(slug, registered_tag_names()), "0")
+      assert %{"error" => %{"code" => "precondition_failed"}} = json_response(conn, 412)
+    end
+  end
 end
