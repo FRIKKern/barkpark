@@ -20325,3 +20325,370 @@ test("cch-w66-s3: THE DEPLOYMENTS ARM IS HONEST TOO — a failed read is not an 
   assert.match(hooks.deployListHtml([], "dep-9", null), /No deployments yet/,
     "the pre-slice 3-arg call site (renderDeployList) is untouched");
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// cch-w67 CROWN — THE SITE DESTROY TIER. Before this slice the console could not
+// delete a site at all: 14 `api("DELETE", …)` call sites and not one of them
+// /v1/sites/:id, and the string `teardown_failed` appeared ZERO times in 23,410
+// lines while the route's own comment said its refusal "has no console surface
+// at all yet". These pin the reader, not the wish: every arm below is driven
+// with the envelope the ROUTE produces (probe-measured on origin/main).
+// ═════════════════════════════════════════════════════════════════════════════
+
+test("cch-w67: the site DESTROY-tier helpers are exported", () => {
+  for (const name of ["siteDeleteConfirmOpts", "siteDeleteFailureCopy", "siteDeleteSettlePlan",
+    "sitePreviewsSectionHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("cch-w67: siteDeleteConfirmOpts is the DESTROY tier — typed echo of the domain, btn-danger, disabled until it matches", () => {
+  const opts = hooks.siteDeleteConfirmOpts({ id: "s1", slug: "acme" }, "acme.com");
+  assert.equal(opts.tier, "destroy");
+  assert.equal(opts.resourceName, "acme.com");
+  const html = hooks.confirmModalHtml(hooks.confirmModalInit(opts));
+  assert.match(html, /Delete acme\.com\?/);
+  assert.match(html, /id="cm-confirm" disabled/);      // armed ONLY by the typed echo
+  assert.match(html, /class="btn btn-danger"/);
+  assert.match(html, /cm-typed-field/);
+  // The consequences name only what was READ: box-first ordering, the cascade,
+  // the DNS record we never held, and irreversibility.
+  assert.match(html, /torn down on its instance FIRST/);
+  assert.match(html, /deployment history goes with it/);
+  assert.match(html, /never held it/);
+  assert.match(html, /can&#39;t be undone/);
+  // The echo really gates: the exact string arms, a near miss does not.
+  const st = hooks.confirmModalInit(opts);
+  assert.equal(hooks.confirmModalArmed({ ...st, typed: "acme.co" }), false);
+  assert.equal(hooks.confirmModalArmed({ ...st, typed: "acme.com" }), true);
+});
+
+test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT sentence, driven by the wire bodies the route emits", () => {
+  // (1) 409 — the ONLY typed refusal. {"error":"identity_refused","ok":false,"detail":"The request was never sent — …"}
+  const identity = hooks.siteDeleteFailureCopy(409, {
+    ok: false, error: "identity_refused",
+    detail: "The request was never sent — the instance rejected our access credential. Barkpark Cloud stops asking a box that refused it; the hourly update check is what notices the credential working again.",
+  });
+  assert.match(identity.title, /refused our credential/);
+  assert.match(identity.body, /teardown was never sent/);          // THIS verb, not "rollback"
+  assert.doesNotMatch(identity.body, /rollback/i);
+  assert.match(identity.body, /rejected our access credential/);   // the shared clause producer
+  assert.match(identity.body, /still registered/);
+  assert.equal(identity.recovery, "close");
+
+  // (2) 401 {"error":"unauthorized"} — NO `ok`, NO `detail`. An `ok === false`
+  // guard would have dropped this arm entirely.
+  const unauth = hooks.siteDeleteFailureCopy(401, { error: "unauthorized" });
+  assert.match(unauth.title, /signed out/);
+  assert.match(unauth.body, /nothing was deleted/);
+  assert.equal(unauth.recovery, "close");
+
+  // (3) 404 {"error":"not_found"} — FOUR causes, one of them the friendly
+  // outcome of this verb. Hedged, and it must not read as a failure.
+  const gone = hooks.siteDeleteFailureCopy(404, { error: "not_found" });
+  assert.match(gone.body, /already deleted/);
+  assert.match(gone.body, /another team/);
+  assert.doesNotMatch(gone.title, /failed|error/i);
+  assert.equal(gone.recovery, "close");
+
+  // (4) 422 teardown_failed, the BOX REFUSAL — the plane measured the cause and
+  // wrote it into `detail`; the reader renders the plane's own sentence.
+  const refused = hooks.siteDeleteFailureCopy(422, {
+    ok: false, error: "teardown_failed",
+    detail: "the instance could not tear this site down (HTTP 500)",
+  });
+  assert.match(refused.body, /could not tear this site down \(HTTP 500\)/);
+  assert.match(refused.body, /still registered/);
+  assert.equal(refused.recovery, "retry");
+
+  // (5) 422 teardown_failed, the TIMEOUT — status AND code byte-identical to
+  // (4). Only `detail` separates them, and it is the ONLY unknown-outcome arm.
+  const timeout = hooks.siteDeleteFailureCopy(422, {
+    ok: false, error: "teardown_failed",
+    detail: "the instance did not confirm the teardown in time — it may still be tearing down; check `bp cloud site status`",
+  });
+  assert.notEqual(timeout.title, refused.title, "the timeout must not wear the refusal's sentence");
+  assert.match(timeout.body, /could not confirm/);
+  assert.match(timeout.body, /STILL REGISTERED/);
+  assert.equal(timeout.recovery, "recheck");
+  // api() has no AbortController: the BROWSER never gave up, so the copy may not
+  // say it did — and a browser operator is never sent to the CLI.
+  assert.doesNotMatch(timeout.body, /stopped waiting|gave up|timed out/i);
+  assert.doesNotMatch(timeout.body, /bp cloud site status/);
+
+  // (6) 502 — SAME CODE as (4)/(5). Two of the plane's five unreachable clauses
+  // say "deploy" on a DELETE, so the opener is the CONSOLE's own and the detail
+  // is deliberately not relayed.
+  const unreachable = hooks.siteDeleteFailureCopy(502, {
+    ok: false, error: "teardown_failed",
+    detail: "instance bp-1381 is unreachable — the deploy could not be delivered; check instance health",
+  });
+  assert.match(unreachable.title, /Couldn't reach the instance/);
+  assert.doesNotMatch(unreachable.body, /deploy could not be delivered/);
+  assert.doesNotMatch(unreachable.body, /deploy/i);
+  assert.match(unreachable.body, /still registered/);
+  assert.equal(unreachable.recovery, "retry");
+
+  // (7) THE CRASH ENVELOPE {"error":"server_error","request_id":"…"} — no `ok`,
+  // no `detail`. It names the ORDER (box first, measured in the route) and
+  // refuses to name the OUTCOME: crash_slug/2 stamps this slug for every status
+  // >= 500 without reading how far the body got, so "the teardown already ran"
+  // would be a claim nothing measured. Quote the request_id, and offer the READ.
+  const boom = hooks.siteDeleteFailureCopy(500, { error: "server_error", request_id: "F9-abc123" });
+  assert.match(boom.title, /failed partway through/);
+  assert.match(boom.body, /runs FIRST/);
+  assert.match(boom.body, /doesn't say how far it got/);
+  assert.doesNotMatch(boom.body, /had already run/,
+    "the crash envelope does not measure whether the teardown happened");
+  assert.match(boom.body, /F9-abc123/);
+  assert.equal(boom.recovery, "recheck");
+  // cch-w67 review: the arm is keyed on the SLUG and on 5xx, not on 500 alone —
+  // a 503 carrying it used to fall through to the generic relay, and a 502
+  // carrying it used to take the unreachable-instance sentence.
+  assert.equal(hooks.siteDeleteFailureCopy(503, { error: "server_error" }).title, boom.title);
+  assert.equal(hooks.siteDeleteFailureCopy(502, { error: "server_error" }).title, boom.title);
+  // …while a real unreachable 502 (code teardown_failed) keeps its own arm.
+  assert.match(unreachable.title, /Couldn't reach the instance/);
+
+  // Seven DISTINCT sentences — a collapsed arm reds here.
+  const all = [identity, unauth, gone, refused, timeout, unreachable, boom]
+    .map((c) => c.title + " — " + c.body);
+  assert.equal(new Set(all).size, 7, "each arm must render its own sentence");
+
+  // And the reader does NOT go through friendly() and does NOT gate on `ok`:
+  // friendly() reads data.error + data.detailS (PLURAL), so a singular-detail
+  // envelope would come back as a bare code.
+  assert.doesNotMatch(refused.body, /teardown_failed/);
+  // 403 has no typed arm by decision (D813) — but the FALLTHROUGH must not tell
+  // an operator the plane "didn't say why" about the one refusal in this family
+  // that does: Auth.forbidden/2 sends {required, scope} and no `detail`.
+  // cch-w67 review wired the shipped reader for those two fields in.
+  const other = hooks.siteDeleteFailureCopy(403, { error: "forbidden", scope: "token", required: "write" });
+  assert.match(other.body, /still registered/);
+  assert.match(other.body, /"write" permission/);
+  assert.doesNotMatch(other.body, /didn't say why/);
+  assert.equal(other.recovery, "close", "no second click grants an authority you don't hold");
+  // A BARE forbidden carries no evidence, so it keeps the generic relay — the
+  // refinement adds a reader, never an invented reason.
+  const bare = hooks.siteDeleteFailureCopy(403, { error: "forbidden" });
+  assert.match(bare.body, /didn't say why/);
+  assert.match(bare.body, /still registered/);
+});
+
+test("cch-w67: the settle plan survives a modal dismissed mid-flight — a late FAILURE still speaks, a late SUCCESS does not navigate", () => {
+  // Modal still ours: inline beside the ONE recovery; success navigates off the
+  // dead site screen.
+  // (…deepEqual is deliberately avoided: these objects are minted inside the vm
+  // sandbox, so they are structurally equal but not reference-equal to a literal.)
+  const liveFail = hooks.siteDeleteSettlePlan(true, true, false, "retry");
+  assert.equal(liveFail.succeed, false);
+  assert.equal(liveFail.navigate, false);
+  assert.equal(liveFail.surface, "inline");
+  assert.equal(liveFail.recovery, "retry");
+  const liveOk = hooks.siteDeleteSettlePlan(true, true, true, null);
+  assert.equal(liveOk.succeed, true);
+  assert.equal(liveOk.navigate, true);
+  assert.equal(liveOk.surface, "toast");
+  assert.equal(liveOk.recovery, null);
+
+  // DISMISSED mid-flight. ctl.fail returns early on a dismissed modal, so an
+  // inline sentence would be LOST — it must become a toast.
+  const lateFail = hooks.siteDeleteSettlePlan(false, true, false, "recheck");
+  assert.equal(lateFail.surface, "toast", "a late failure must not vanish with the modal");
+  assert.equal(lateFail.recovery, null, "there is no button left to hang a recovery on");
+
+  // A late SUCCESS still gives its receipt, but must NOT yank the operator off
+  // whatever they navigated to.
+  const lateOk = hooks.siteDeleteSettlePlan(false, true, true, null);
+  assert.equal(lateOk.navigate, false, "a late success must never navigate");
+  assert.equal(lateOk.surface, "toast");
+  // Nor does a live modal navigate when the operator is already on another site.
+  assert.equal(hooks.siteDeleteSettlePlan(true, false, true, null).navigate, false);
+});
+
+test("cch-w67 (D821): the previews section stops asserting ABSENCE over FAILURE — four arms, and only one of them is empty", () => {
+  const site = { id: "s1", previews_enabled: true };
+  const rows = [{ id: "p1", branch: "feature", status: "live", url: "https://f.example/" }];
+
+  // Rows: today's section, byte-for-byte in what matters.
+  const listed = hooks.sitePreviewsSectionHtml(rows, site, null);
+  assert.match(listed, /previews-heading/);
+  assert.match(listed, /previews-count">1</);
+  assert.match(listed, /class="deploys previews"/);
+
+  // A FAILED read is not an empty list — and before this slice the whole section
+  // simply VANISHED while the rail two rows down still badged "Previews: On".
+  const fault = { ok: false, status: 500, text: '{"error":"server_error"}' };
+  const failed = hooks.sitePreviewsSectionHtml([], site, fault);
+  assert.match(failed, /Couldn't load branch previews/);
+  assert.ok(failed.indexOf("No branch previews are being served") === -1,
+    "a failed read must never be painted as a site with no previews");
+  assert.ok(failed.indexOf("previews-count") === -1, "and it must not count what it could not read");
+  assert.match(failed, /says nothing about which branches/);
+  // A 403 names the refusal rather than blaming the network.
+  assert.match(hooks.sitePreviewsSectionHtml([], site, { ok: false, status: 403, data: { error: "forbidden" } }),
+    /access|permission/i);
+
+  // The site's own switch being OFF is a SETTING, not an absence of pushes —
+  // and it reads off the same payload field the rail badge does.
+  const off = hooks.sitePreviewsSectionHtml([], { id: "s1", previews_enabled: false }, null);
+  assert.match(off, /Branch previews are off/);
+  assert.ok(off.indexOf("No branch previews are being served") === -1);
+
+  // The genuine empty. It must NOT claim nothing was pushed:
+  // list_preview_deployments also drops FAILED and torn-down branches.
+  const empty = hooks.sitePreviewsSectionHtml([], site, null);
+  assert.match(empty, /No branch previews are being served/);
+  assert.match(empty, /failed/);
+  assert.match(empty, /not a record of/);
+  assert.doesNotMatch(empty, /nothing has been pushed yet|no branch has been pushed/i);
+
+  // Threaded through the real renderer: the site card carries the fault, and the
+  // pre-slice 7-argument call site keeps rendering the section it always did.
+  const full = hooks.siteDetailHtml({ ...site, name: "acme", slug: "acme" }, null, [], "acme.com", [], "refuse", null, fault);
+  assert.match(full, /Couldn't load branch previews/);
+  const legacy = hooks.siteDetailHtml({ ...site, name: "acme", slug: "acme" }, null, [], "acme.com", rows, "refuse");
+  assert.match(legacy, /class="deploys previews"/);
+});
+
+test("cch-w67: the Delete button ships in the site head's badges row, LAST, with no authority predicate", () => {
+  const site = { id: "s1", name: "acme", slug: "acme", domains: ["acme.com"], previews_enabled: true };
+  // A plain MEMBER (authority "refuse") gets it: DELETE /v1/sites/:id is
+  // with_team_site {:ability,"write"} and a session carries ["root"], so the
+  // server honours it and withholding it would be the console's own invention.
+  for (const authority of ["grant", "refuse", "unknown", undefined]) {
+    const html = hooks.siteDetailHtml(site, null, [], "acme.com", [], authority);
+    assert.match(html, /id="site-delete"/, "authority=" + authority + " must still see Delete");
+    assert.match(html, /class="btn btn-danger btn-sm" id="site-delete"/);
+  }
+  const html = hooks.siteDetailHtml(site, null, [], "acme.com", [], "refuse");
+  // It sits in .fleet-badges (which wraps), NOT in .deploys-head (which is
+  // justify-content:space-between and would strand it 186px from its sibling).
+  const badges = html.slice(html.indexOf('<div class="fleet-badges">'), html.indexOf('<div class="detail-grid">'));
+  assert.match(badges, /id="site-delete"/);
+  assert.ok(badges.indexOf('id="site-deploy"') < badges.indexOf('id="site-delete"'),
+    "Delete is LAST in the badges row");
+  const head = html.slice(0, html.indexOf('<div class="detail-grid">'));
+  assert.ok(head.indexOf("deploys-head") === -1, "the destroy control never lands in .deploys-head");
+});
+
+// ── cch-w67 REVIEW: THE WIRE ────────────────────────────────────────────────
+// The builder's own biggest named gap: everything above pins a PURE classifier
+// or a STRING in the corpus, and none of it touches the request. The binding
+// census greps the path out of runSiteDelete's SOURCE and the member sweep
+// proves #site-delete RENDERS — neither proves the DELETE is issued, that the
+// success arm reads the envelope the route actually sends, or that a dismissed
+// modal's refusal survives as a toast instead of vanishing. This is the
+// rollbackInstance harness (cch-w61-s2) pointed at the destroy tier.
+//
+// HONEST LIMIT, stated rather than papered over: `onSite` is computed from the
+// IIFE-module variable `currentSiteId`, which only loadSite writes, so this
+// realm can never set it true — the navigation DECISION is pinned purely by
+// siteDeleteSettlePlan above, and what these drives can prove is the other half:
+// that no path here navigates when the operator is not on the deleted site.
+function siteDeleteRealm({ modalLive }) {
+  const toasts = [];
+  const stack = { appendChild: (el) => toasts.push(el) };
+  const confirmBtn = { isConnected: true };
+  const doc = {
+    querySelector: (sel) => {
+      if (sel === "#toast-stack") return stack;
+      if (sel === "#cm-confirm") return modalLive ? confirmBtn : null;
+      return null;
+    },
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    createElement: () => ({
+      ...inertEl,
+      appendChild: noop,
+      querySelector: () => ({ addEventListener: noop }),
+    }),
+  };
+  return { doc, toasts, confirmBtn };
+}
+
+async function driveSiteDelete(status, payload, { modalLive = true } = {}) {
+  const fetch = fetchStub(status, payload);
+  const { doc, toasts } = siteDeleteRealm({ modalLive });
+  const ctl = w61s2Ctl();
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, location: sandbox.location };
+  let endHash = "";
+  sandbox.fetch = fetch;
+  sandbox.document = doc;
+  sandbox.location = { hash: "#sites/s1", pathname: "/", search: "", origin: "http://localhost" };
+  try {
+    hooks.runSiteDelete({ id: "s1", slug: "acme" }, "acme.com", ctl);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally {
+    endHash = sandbox.location.hash;
+    Object.assign(sandbox, saved);
+  }
+  return {
+    ctl, toasts, hash: endHash,
+    last: () => ctl.rec.fails[ctl.rec.fails.length - 1],
+    deletes: () => fetch.calls.filter((c) => c.opts && c.opts.method === "DELETE").length,
+    path: () => (fetch.calls[0] || {}).path,
+  };
+}
+
+test("cch-w67 review: runSiteDelete actually issues DELETE /v1/sites/:id and reads the route's own 200", async () => {
+  const ok = await driveSiteDelete(200, { ok: true, status: "deleted", slug: "acme" });
+  assert.equal(ok.deletes(), 1, "the console's FIRST delete must reach the wire, exactly once");
+  assert.equal(ok.path(), "/v1/sites/s1", "…on the route the census pins, id-encoded");
+  assert.equal(ok.ctl.rec.succeeded, 1);
+  assert.equal(ok.ctl.rec.fails.length, 0);
+  assert.equal(ok.toasts.length, 1);
+  // D812: DEREGISTERED, carrying the CLI's own limit clause — the 200 is
+  // {ok,status,slug} and nothing more, so the receipt may not upgrade that into
+  // a measured box state.
+  assert.match(ok.toasts[0].innerHTML, /Site deregistered/);
+  assert.match(ok.toasts[0].innerHTML, /no measured box state/);
+
+  // The 200 is not taken on faith: a 200 that is NOT the delete receipt — the
+  // shape a proxy or a later route change could hand back — falls to the reader
+  // instead of being celebrated.
+  const impostor = await driveSiteDelete(200, { ok: true, status: "queued" });
+  assert.equal(impostor.ctl.rec.succeeded, 0, "only status:\"deleted\" is a delete");
+  assert.equal(impostor.ctl.rec.fails.length, 1);
+  assert.equal(impostor.toasts.length, 0);
+});
+
+test("cch-w67 review: a modal DISMISSED mid-flight still hears the refusal — as a toast, not as silence", async () => {
+  // ctl.fail() returns early when its button is gone, so an inline sentence
+  // would be LOST here. This is the 30s arm's own population: the people who
+  // wait half a minute are the people who close the dialog.
+  const late = await driveSiteDelete(422, {
+    ok: false, error: "teardown_failed",
+    detail: "the instance did not confirm the teardown in time — it may still be tearing down",
+  }, { modalLive: false });
+  assert.equal(late.ctl.rec.fails.length, 0, "no inline sentence: there is no modal to put it in");
+  assert.equal(late.toasts.length, 1, "…so the sentence becomes a toast rather than vanishing");
+  assert.match(late.toasts[0].innerHTML, /STILL REGISTERED/);
+  assert.match(late.toasts[0].className, /toast-error/, "and it is an ERROR toast, not a neutral note");
+  assert.equal(late.hash, "#sites/s1", "a refusal never navigates");
+
+  // A LIVE modal gets the sentence inline, beside the ONE recovery — and the
+  // unknown-outcome arm's recovery is a READ.
+  const live = await driveSiteDelete(422, {
+    ok: false, error: "teardown_failed",
+    detail: "the instance did not confirm the teardown in time",
+  });
+  assert.equal(live.ctl.rec.fails.length, 1);
+  assert.equal(live.last().label, "Re-check");
+  assert.match(live.last().msg, /didn't confirm the teardown/);
+  assert.equal(live.toasts.length, 0, "a live modal speaks in place, not in two voices");
+
+  // A box REFUSAL offers the retry instead, carrying the plane's own sentence.
+  const refused = await driveSiteDelete(422, {
+    ok: false, error: "teardown_failed", detail: "the instance could not tear this site down (HTTP 500)",
+  });
+  assert.equal(refused.last().label, "Try again");
+  assert.match(refused.last().msg, /HTTP 500/);
+});
+
+test("cch-w67 review: a LATE success still gives its receipt, and no settle navigates off a screen the operator chose", async () => {
+  const late = await driveSiteDelete(200, { ok: true, status: "deleted", slug: "acme" }, { modalLive: false });
+  assert.equal(late.toasts.length, 1, "the receipt still lands on a dismissed modal");
+  assert.match(late.toasts[0].innerHTML, /Site deregistered/);
+  assert.equal(late.hash, "#sites/s1", "…and the hash is untouched: no late navigation");
+});

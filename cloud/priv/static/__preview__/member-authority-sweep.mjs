@@ -250,6 +250,7 @@ const HOOKS = [
   { key: "button#site-deploy", route: "POST /v1/sites/:*/deploy", fence: F_MEMBER, what: "deploy the site", source: "census PIN: runDeploy / createAndDeploy, ruling (a)" },
   { key: "button#site-rollback", route: "POST /v1/sites/:*/rollback", fence: F_MEMBER, what: "roll the site back", source: "census PIN: runSiteRollback, ruling (a)" },
   { key: "button.btn.btn-ghost.btn-sm.dep-promote[data-dep-id][data-kind]", route: "POST /v1/sites/:*/deployments/:*/promote", fence: F_MEMBER, what: "promote a deployment", source: "census PIN: runPromote, ruling (a)" },
+  { key: "button#site-delete", route: "DELETE /v1/sites/:*", fence: F_MEMBER, what: "delete the site (destroy-tier confirm)", source: "census PIN: runSiteDelete — with_team_site {:ability,\"write\"} and a session carries [\"root\"], ruling (a); the INSTANCE Decommission is a different, higher band" },
   { key: "button#site-env-edit", route: "POST /v1/sites/:*/env", fence: F_MEMBER, what: "edit site env vars", source: "census PIN: openSiteEnvModal — team-scoped member action" },
   { key: "select#site-theme-select", route: "PATCH /v1/sites/:*", fence: F_MEMBER, what: "pin the deploy theme", source: "census PIN: loadSite, ruling (a)" },
   { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", fence: F_MEMBER, what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
