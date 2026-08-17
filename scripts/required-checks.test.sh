@@ -2252,6 +2252,8 @@ e1288ba46a68  B  tooling/grip/ledger/felix-w24-wave23-criteria-closes-2026-07-29
 451500fdf367  C  tooling/grip/ledger/felix-w25-sobelow-row-verdicts-2026-08-17.md:40      dated recipe ledger — git show #7557 re-grounds Sobelow topology on S4, NOT the dead premise
 af83a4d184e8  D  tooling/grip/ledger/jarl-gates-live-status-2026-07-31.md:45           OTHER REPO, still true of it
 e9afea44318b  C  tooling/grip/ledger/second-review-and-credential-2026-07-26.md:17     dated recipe ledger
+25db097ed62f  C  tooling/grip/ledger/felix-w25-sobelow-row-verdicts-2026-08-17.md:39  names the dead "no branch protection" premise, dated recipe ledger
+451500fdf367  C  tooling/grip/ledger/felix-w25-sobelow-row-verdicts-2026-08-17.md:40  git show recipe quoting #7557's dated subject, dated recipe ledger
 PINS
 
 protection_census_report() { # [extra path…] — emits UNPINNED/STALE lines, or nothing
