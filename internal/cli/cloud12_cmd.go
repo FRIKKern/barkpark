@@ -517,7 +517,7 @@ func runSignupCloud(out *writer, args []string) int {
 		// status); a transport error is not, which is exactly the seam we key on.
 		var refusal *cloudclient.CloudRefusal
 		if !errors.As(rerr, &refusal) {
-			return useError(out, "failed", signupTransportRecoveryMessage(email, msg), exitGeneric)
+			return useError(out, "failed", signupTransportRecoveryMessage(email, base, msg), exitGeneric)
 		}
 		return useError(out, "failed", "signup failed: "+msg, exitGeneric)
 	}
@@ -554,10 +554,20 @@ func runSignupCloud(out *writer, args []string) int {
 // the email is known it is threaded into the login hint so the user can act
 // without retyping it; the underlying transport error stays appended so the
 // cause is never hidden.
-func signupTransportRecoveryMessage(email, transportErr string) string {
+//
+// The base URL is threaded in too, and appended as --url whenever it is NOT the
+// baked default: this path never persists CloudURL, so on a FIRST signup against
+// a non-default control plane a bare `bp login --email X` would resolve back to
+// the default host and fail — and the copy's next clause ("if that reports
+// invalid credentials, the account was not created") would then draw exactly the
+// false conclusion this receipt exists to prevent.
+func signupTransportRecoveryMessage(email, base, transportErr string) string {
 	loginHint := "bp login"
 	if e := strings.TrimSpace(email); e != "" {
 		loginHint = "bp login --email " + e
+	}
+	if b := strings.TrimSpace(base); b != "" && b != cloudclient.DefaultBaseURL {
+		loginHint += " --url " + b
 	}
 	return "signup could not be confirmed — the connection dropped before the " +
 		"control plane replied, so your account may already have been created. " +

@@ -666,6 +666,62 @@ func TestSignupPostCommitTransportDropRecoversHonestly(t *testing.T) {
 	}
 }
 
+// A server REFUSAL (a CloudRefusal — it carries an HTTP status) must NEVER take the
+// ambiguous post-commit recovery path: the server said no, so nothing was committed,
+// and "your account may already have been created" is the transport-drop copy's own
+// failure mode in reverse. Pins the errors.As seam in the WIDENING direction.
+func TestSignupRefusalNeverClaimsAmbiguity(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"422 validation", `{"error":"password_invalid"}`, http.StatusUnprocessableEntity},
+		{"401 unauthorized", `{"error":"nope"}`, http.StatusUnauthorized},
+		{"500 server error", `{"error":"boom"}`, http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withTempConfigHome(t)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			_, stderr, _ := runCloudCapture(t, false, func(out *writer) int {
+				out.output = "table"
+				return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "weak", "--url", srv.URL})
+			})
+			if bytes.Contains([]byte(stderr), []byte("may already have been created")) {
+				t.Fatalf("a %d REFUSAL must not claim the account may exist:\n%s", tc.status, stderr)
+			}
+		})
+	}
+}
+
+// TestSignupTransportRecoveryKeepsNonDefaultURL: the recovery receipt is only
+// actionable if the login hint reaches the SAME control plane. This path never
+// persists CloudURL, so a first signup against a non-default host must carry the
+// --url through — otherwise `bp login` resolves to the baked default, fails, and
+// the copy's own next clause tells the user their account was not created when it
+// may well have been. Against the default host the flag is redundant and omitted.
+func TestSignupTransportRecoveryKeepsNonDefaultURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := srv.URL
+	srv.Close() // dialing deadURL now fails in transport — no HTTP status is ever returned
+
+	withTempConfigHome(t)
+	_, stderr, _ := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "hunter2pw!", "--url", deadURL})
+	})
+	if !bytes.Contains([]byte(stderr), []byte("bp login --email ada@x.com --url "+deadURL)) {
+		t.Fatalf("recovery receipt must send the user back to the SAME control plane %s:\n%s", deadURL, stderr)
+	}
+
+	if got := signupTransportRecoveryMessage("ada@x.com", cloudclient.DefaultBaseURL, "EOF"); strings.Contains(got, "--url") {
+		t.Fatalf("the default control plane needs no --url in the login hint:\n%s", got)
+	}
+}
+
 // TestSignupConfirmMismatchNeverCallsServer: the prompted password is typed twice
 // and the two differ → signup errors BEFORE any network call. We stand up a
 // counting server and assert it received ZERO requests.
