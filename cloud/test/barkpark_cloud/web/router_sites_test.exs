@@ -1906,6 +1906,44 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert body["detail"] =~ "no previous build"
     end
 
+    ## W70 (D847/D854) — THE FLAT-DETAIL LAW, mutation-proven at the route. The
+    ## box's REAL pre-poll refusal is NESTED (`%{error: %{code, message}}`,
+    ## relayed verbatim by BoxRelay.HTTP), and the CLI's site arms
+    ## (RollbackSpawnSite → cloudError) decode FLAT strings only: a map left
+    ## under "error" degrades the receipt to a 200-rune raw clamp. So the wire
+    ## keeps `error` = the route's own STRING code and the box's words land in
+    ## flat top-level `detail`, composed "code — message" server-side.
+    test "a NESTED box refusal keeps error a STRING code and lands the box's words in flat detail" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "already_running",
+               "message" => "deploy already running for blog"
+             }
+           }}
+      )
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 409
+
+      body = json_body(conn)
+      assert body["ok"] == false
+      # The route code, a STRING — never the box's nested map.
+      assert body["error"] == "rollback_failed"
+      # The box's own words, FLAT where cloudError can read them — never left
+      # only inside a nested error.message.
+      assert is_binary(body["detail"])
+      assert body["detail"] =~ "already_running"
+      assert body["detail"] =~ "deploy already running for blog"
+    end
+
     test "a container site is not rollbackable this way → 422 (the two verbs stay unblurred)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -2350,6 +2388,41 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 422
       assert json_body(conn)["detail"] == "the instance could not tear this site down (HTTP 500)"
 
+      refute Registry.get_site(site.id) == nil
+    end
+
+    ## W70 (D847/D854) — the teardown twin of the rollback flat-detail proof:
+    ## the nested pre-poll refusal keeps `error` = "teardown_failed" (STRING,
+    ## what DeleteSpawnSite → cloudError decodes) and the box's words land in
+    ## flat top-level `detail`, composed "code — message".
+    test "a NESTED box refusal keeps error=teardown_failed and the box's words in flat detail" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        teardown:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "already_running",
+               "message" => "deploy already running for blog"
+             }
+           }}
+      )
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] == "teardown_failed"
+      assert is_binary(body["detail"])
+      assert body["detail"] =~ "already_running"
+      assert body["detail"] =~ "deploy already running for blog"
+
+      # A refused teardown never deregisters the site.
       refute Registry.get_site(site.id) == nil
     end
 
