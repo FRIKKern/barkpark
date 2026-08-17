@@ -19,7 +19,7 @@
       "cell": "design-probe__light__1280",
       "file": "design-probe__light__1280.jpeg",
       "scale": 2,
-      "bytes": 296482,
+      "bytes": 291937,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -130,12 +130,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 17,
+        "total": 9,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 17
+          "1": 9
         },
         "heavyRules": []
       },
@@ -145,7 +145,7 @@
       "cell": "design-probe__light__1920",
       "file": "design-probe__light__1920.jpeg",
       "scale": 2,
-      "bytes": 324507,
+      "bytes": 319391,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -256,12 +256,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 17,
+        "total": 9,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 17
+          "1": 9
         },
         "heavyRules": []
       },
@@ -271,7 +271,7 @@
       "cell": "design-probe__dark__1280",
       "file": "design-probe__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 297420,
+      "bytes": 293484,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -382,12 +382,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 17,
+        "total": 9,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 17
+          "1": 9
         },
         "heavyRules": []
       },
@@ -397,7 +397,7 @@
       "cell": "design-probe__dark__1920",
       "file": "design-probe__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 325757,
+      "bytes": 320780,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -508,12 +508,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 17,
+        "total": 9,
         "heavy": 0,
         "structuralHeavy": 0,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 17
+          "1": 9
         },
         "heavyRules": []
       },

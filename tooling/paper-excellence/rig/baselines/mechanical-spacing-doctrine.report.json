@@ -19,7 +19,7 @@
       "cell": "mechanical-spacing-doctrine__light__1280",
       "file": "mechanical-spacing-doctrine__light__1280.jpeg",
       "scale": 2,
-      "bytes": 816385,
+      "bytes": 812237,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -139,18 +139,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 17,
+        "total": 11,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 12,
+          "1": 6,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 854.7,
+            "y": 852.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -160,7 +160,7 @@
           },
           {
             "px": 2,
-            "y": 1390.7,
+            "y": 1388.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -170,7 +170,7 @@
           },
           {
             "px": 2,
-            "y": 1869.5,
+            "y": 1867.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -180,7 +180,7 @@
           },
           {
             "px": 2,
-            "y": 2470.9,
+            "y": 2468.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -190,7 +190,7 @@
           },
           {
             "px": 2,
-            "y": 2952.6,
+            "y": 2950.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -206,7 +206,7 @@
       "cell": "mechanical-spacing-doctrine__light__1920",
       "file": "mechanical-spacing-doctrine__light__1920.jpeg",
       "scale": 2,
-      "bytes": 887482,
+      "bytes": 879509,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -326,18 +326,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 17,
+        "total": 11,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 12,
+          "1": 6,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 854.7,
+            "y": 852.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -347,7 +347,7 @@
           },
           {
             "px": 2,
-            "y": 1390.7,
+            "y": 1388.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -357,7 +357,7 @@
           },
           {
             "px": 2,
-            "y": 1783.1,
+            "y": 1781.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -367,7 +367,7 @@
           },
           {
             "px": 2,
-            "y": 2384.5,
+            "y": 2382.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -377,7 +377,7 @@
           },
           {
             "px": 2,
-            "y": 2866.2,
+            "y": 2864.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -393,7 +393,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1280",
       "file": "mechanical-spacing-doctrine__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 813516,
+      "bytes": 809215,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -513,18 +513,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 17,
+        "total": 11,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 12,
+          "1": 6,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 854.7,
+            "y": 852.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -534,7 +534,7 @@
           },
           {
             "px": 2,
-            "y": 1390.7,
+            "y": 1388.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -544,7 +544,7 @@
           },
           {
             "px": 2,
-            "y": 1869.5,
+            "y": 1867.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -554,7 +554,7 @@
           },
           {
             "px": 2,
-            "y": 2470.9,
+            "y": 2468.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -564,7 +564,7 @@
           },
           {
             "px": 2,
-            "y": 2952.6,
+            "y": 2950.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -580,7 +580,7 @@
       "cell": "mechanical-spacing-doctrine__dark__1920",
       "file": "mechanical-spacing-doctrine__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 884743,
+      "bytes": 876891,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 12,
@@ -700,18 +700,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 17,
+        "total": 11,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 12,
+          "1": 6,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 854.7,
+            "y": 852.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -721,7 +721,7 @@
           },
           {
             "px": 2,
-            "y": 1390.7,
+            "y": 1388.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -731,7 +731,7 @@
           },
           {
             "px": 2,
-            "y": 1783.1,
+            "y": 1781.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -741,7 +741,7 @@
           },
           {
             "px": 2,
-            "y": 2384.5,
+            "y": 2382.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -751,7 +751,7 @@
           },
           {
             "px": 2,
-            "y": 2866.2,
+            "y": 2864.2,
             "width": 580,
             "parts": 1,
             "structural": true,
