@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/charmbracelet/lipgloss"
@@ -1106,6 +1107,46 @@ func TestBarkparksFleetTableGolden(t *testing.T) {
 	assertGolden(t, "barkparks_fleet_table", stdout.String())
 }
 
+// TestBarkparksFleetTableLastSeen proves the LAST-SEEN column renders a real
+// past stamp as a relative "ago" age (via relativeAge) while a never-seen row
+// (empty LastSeenAt) falls back to the house em-dash (relativeAge("") → "" →
+// hzCell → "—"). This is the NON-golden pin: the golden fixtures deliberately
+// carry no LastSeenAt (so their regenerated cells stay clock-independent), so
+// the wall-clock path itself needs its own deterministic-by-suffix assertion.
+func TestBarkparksFleetTableLastSeen(t *testing.T) {
+	stamp := time.Now().Add(-3 * time.Hour).Format(time.RFC3339)
+	list := []cloudclient.Barkpark{
+		{Name: "seen", Provider: "hetzner", Host: "seen.example.com", Mode: "managed", HealthStatus: "up", AgentStatus: "online", LastSeenAt: stamp},
+		{Name: "never", Provider: "hetzner", Host: "never.example.com", Mode: "managed", HealthStatus: "unknown", AgentStatus: "offline"},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderCloudBarkparksTable(w, list, false)
+	got := stdout.String()
+
+	if !bytes.Contains([]byte(got), []byte("LAST-SEEN")) {
+		t.Fatalf("fleet table missing the LAST-SEEN header:\n%s", got)
+	}
+	if !bytes.Contains([]byte(got), []byte("3h ago")) {
+		t.Fatalf("a 3-hour-old stamp should render %q via relativeAge:\n%s", "3h ago", got)
+	}
+	// The never-seen row must carry the em-dash for the empty LastSeenAt.
+	var neverLine string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "never") {
+			neverLine = line
+			break
+		}
+	}
+	if neverLine == "" {
+		t.Fatalf("never-seen row not found in output:\n%s", got)
+	}
+	if !strings.Contains(neverLine, "—") {
+		t.Fatalf("never-seen row should render the em-dash for an empty LastSeenAt:\n%q", neverLine)
+	}
+}
+
 // TestBarkparksFleetTableSanitizes proves fleet cells ride through hzCell: a
 // control-plane value carrying a raw ESC (a would-be terminal-injection) is
 // stripped before it reaches the terminal, and a newline flattens to a space —
@@ -1176,7 +1217,7 @@ func TestBarkparksYAMLParity(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"barkparks":[
-			{"id":"bp-1","name":"prod","slug":"prod","url":"https://prod.example.com","mode":"managed","health_status":"up","agent_status":"online","team_id":"team-1"}
+			{"id":"bp-1","name":"prod","slug":"prod","url":"https://prod.example.com","mode":"managed","health_status":"up","agent_status":"online","last_seen_at":"2026-08-18T10:00:00Z","team_id":"team-1"}
 		]}`)
 	}))
 	defer srv.Close()
@@ -1190,7 +1231,7 @@ func TestBarkparksYAMLParity(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
 	}
 	// YAML keys (lowercase) present …
-	for _, want := range []string{"barkparks:", "source:", "name: prod"} {
+	for _, want := range []string{"barkparks:", "source:", "name: prod", "last_seen_at:"} {
 		if !bytes.Contains([]byte(stdout), []byte(want)) {
 			t.Fatalf("yaml output missing %q:\n%s", want, stdout)
 		}
