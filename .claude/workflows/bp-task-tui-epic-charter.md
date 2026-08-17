@@ -2523,3 +2523,214 @@ rightPaneStopAt/scrollPreview. (3) **ttw19-bl-wide-focus-oneway** is the highest
 board defect (keyboard route back from preview focus — the one feels-native miss). (4)
 ttw19-bl-conn-state-flap needs a live-channel diagnosis. (5) ttw19-bl-find-jump stays
 considering pending a user taste signal.
+
+### Wave 20 2026-08-17 (DECIDED: the trust wave — every glyph true, every input path leads home)
+
+**Premise-smoke verdicts (run, not assumed):** (1) The digest's "go-tests.yml lacks an
+internal/taskboard/testdata/** trigger" candidate is REFUTED against origin/main — #11823
+(b6bc98e4dd) landed the trigger on BOTH push and pull_request path lists (go-tests.yml:41/:64);
+the surveyor read a stale tree. No CI slice is owed. (2) The wish's NoColor-vs-ANSI256 hue-split
+item is STALE — D113c is stamped in source (detailProfile=NoColor detail_render.go:65,
+paperRailProfile=ANSI256 paper.go:36); coverage confirmed, no decision owed. (3) The ANSI256
+fenced-code line-collapse candidate is REFUTED by execution: a 5-line fenced block renders 6
+lines at BOTH profiles through the full paper-rail path — the collapse detail_render.go:60-63
+cites was fixed by #1592 (92d7879362, 2026-07-08); only the COMMENT is stale (rider on D117).
+(4) Anchor drift corrected for builders (task briefs carry the fresh set, verified on
+origin/main a9d29985d6): reader-focus set is program.go:1248 not :1228; the only board-focus
+assignment is compose.go:670 not :658; rightPaneStopAt avail is compose.go:926 not :905;
+scrollPreview clamp is :959 not :938; the board client Config is program.go:1774 not :1753.
+
+**D114 — The conn flap is a FIX, not a ratify: a client-side timeout is not "offline".** The
+board's one apiclient omits Timeout (program.go:1774-1780) and inherits the 5s DefaultTimeout
+(client.go:25); the heavy /v1/tasks?limit=1000 GET (detail_data.go:67) plus the
+prime GET (live TTFB 2.0-2.4s — the SLOWER endpoint despite a 10x smaller body) leave ~2x
+margin, and on breach snapshotErrorLabel's DEFAULT bucket labels the timeout with the literal
+"offline" (live.go:339-340) while handlePulse refuses to lift ConnOffline even as SSE pulses
+prove the pipe (live.go:126-128). Both halves executable-proven (throwaway test, plain and
+-race). The fix: (a) classify via errors.As + uerr.Timeout() mirroring actions.go:189 — never
+string-match deadline text; distinct degraded label, dial-tcp stays offline; (b) pulse may lift
+ONLY the timeout class — the live.go:120-125 honesty guard stands for genuine unreachability;
+(c) the snapshot path gets a per-request ~30s context deadline in FetchSnapshotFull — never a
+blanket client raise (the same client serves interactive claim/close where 5s is right).
+Tests that pin today and must move: live_test.go:122 (add timeout row, keep dial-tcp), :487
+(rewrite — the rewrite IS the design act), :78. No test covers the timeout path today.
+
+**D115 — The drafts-drop premise is DEAD on both sides; the counts denominator was the liar.**
+/v1/tasks has no perspective filter (drafts/raw/none byte-identical); claiming a drafts.* task
+DOES write in_progress unconditionally (claim.ex:315, both claim paths converge, drafts. is
+only doc_id resolution); the Go NOW predicate has no drafts filter (board.go:356-360); W19's
+"7 of 9" does not reproduce. The REAL, source-proven, live-reproduced defect (11 vs 10): prime
+lifecycle_counts (prime.ex:81) counts ALL type=task rows with NO collapse_twins while /v1/tasks
+collapses (query.ex:132) — a lifecycle-divergent twin counts twice, so "N in flight" and the
+showing-N-of-M denominator ride a doubled population (summed 6777 vs ~6669 collapsed). The
+slice reshapes IN-FENCE: FetchSnapshotFull adds GET /v1/tasks?lifecycle_status=in_progress&
+limit=1000 as a third concurrent fetch (server-side WHERE before LIMIT, twin-collapsed, ~74KB
+live) under the D113b both-required contract; board.Now feeds from the union (dedup by doc_id)
+so a live claim outside the 1000-recency window still shows; the operator-visible in-flight
+number derives from the collapsed population, never raw prime counts. The api/ half is FILED
+cross-fence (ttw20-bl-prime-counts-collapse-twins), never smuggled.
+
+**D116 — Geometry re-derived fresh: the seam scope SHRANK to two sites plus the re-floor.**
+Fresh mutations on a9d29985d6: compose.go:211 (renderDocPane paneH-1) and program.go:1734
+(readingViewportHeight h-1) are ALREADY PINNED (-2 reds the suite) — no new tests owed there.
+Still unguarded: rightPaneStopAt avail := inner-1 (compose.go:926) and scrollPreview's
+inner-1 clamp (:959) — -2 at either survives green today. readingWidth (program.go:1692) still
+omits composeAt's re-floor at 20 (compose.go:234-237); the gap is now EMPIRICAL, not derived:
+widths 19-24 under-measure by 3/3/2/1/0/0 columns vs the true paint. The slice: mutation-proof
+tests at both unguarded sites + the re-floor pinning measure==paint at 19-24. hitmap.go:208
+(height-2, footer+edge) is a DIFFERENT reservation — excluded, filed as
+ttw20-bl-hitmap-height2-audit rather than folded blind.
+
+**D117 — Focus grammar: esc-at-depth-0 restores the board — one line, no new vocabulary.**
+enterTask sets reader focus (program.go:1248); the ONLY route back is the mouse board-pane
+press (compose.go:670). Fix: in the esc/backspace case after popFrame (program.go:548-549),
+`if m.wide && len(m.stack) == 1 { m.wideFocus = wideFocusBoard }` — closes BOTH strand paths
+(Enter→Esc and mouse-preview-focus-at-depth-0) with the lazygit/k9s invariant: esc always
+returns you to list navigation. NO pane key, NO mode — survey proved esc alone covers every
+path. (b) o-verb rider: TestWideFooterVerbClickOpensStudio must WIDEN the fixture to width
+100 — the 80-col default SHEDS 'o' (boardW=49 keeps only c,x; 'o' needs boardW≥~57) — the
+digest's "ok at the default split" wording is WRONG and a literal copy would Fatal without
+testing anything; stub the openURL var, assert StudioTaskURL, mutation-prove via skip-'o' in
+handleWideMouse. (c) detail_render.go:60-63's stale collapse claim is corrected — NoColor
+stands on the color=state law alone (D113c intact).
+
+**D118 — Drive-harness identity anchors on the SLUG; there is no safe title width.** Live
+census: the 12-char truncation at drive.sh:302 aliases 244/1000 rows (80 groups); collisions
+decay but never vanish — the FULL title still collides in 3 groups; doc_id is 1000/1000
+unique. Row selection and same-row asserts key on the slug token the script already strips;
+the reading-pane confirmation greps the FULL title (reader heading renders Title only,
+detail_render.go:141); G3 locates the root by the epic root's slug/title, never the first
+"··· n/m" badge via head -1 (order-dependent). ~6 of 25 asserts are the churn-coupled class
+(:294, :302-310, :349-352, :445-459, :471); the harness self-documents the flake at :48-51.
+
+**D119 — Wide overflow markers become clickable: the last mouse asymmetry closes.** Both wide
+panes PAINT the ↑/↓ markers (board pane with a count via windowSpine render.go:663/:666;
+preview without via windowFrame compose.go:498/:501 — two DISTINCT strings); narrow scrolls on
+marker click via the hit map (program.go:850-853); wide is click-dead — and the depth-0
+preview marker is WORSE than dead: any press there enterTasks (compose.go:878-880). Fix by
+router special-casing at the three call sites (boardPaneMouse → moveCursor; depth-0
+rightPaneMouse → scrollPreview instead of enterTask — an explicit behavior change; depth>0 →
+freeScroll), hoisting the resolver's marker predicates into shared helpers. The resolvers'
+-1 contracts are UNCHANGED — wideMouseMotion (compose.go:709/:715) is a second consumer and
+a contract change would ripple into the hover painter.
+
+**Declined / held at Decide:** latency perf slice DECLINED — the swap is prime-TTFB-bound
+api/-side (decode is ~150-200ms, not ~1s; the ~66ms double-decode dedup is beneath the noise
+floor). find-jump stays CONSIDERING — the taste-signal gate stands (zero user signal).
+-race baseline certified clean on a9d29985d6 (30 packages, 0 races): any wave -race red
+belongs to the slice that introduced it. Ledger recipe rows from W20 verify ride this PR:
+ttw20-fetch-path-map-and-now-denominator-drift, ttw20-drafts-claim-lifecycle,
+ttw20-anchor-currency-rederive (all 2026-08-17).
+
+**Wave plan (6 slices; rounds are law; wave paper task-tui-wave-2026-08-17b):**
+1. **ttw19-bl-conn-state-flap** (medium, FABLE, round 1) — D114. live.go + live_test.go +
+   detail_data.go + fetch.go. The honesty-contract rewrite is the design act.
+2. **ttw18-bl-narrow-reading-width-skew** (medium, opus, round 1) — D116. compose.go +
+   program.go + NEW geometry_seam_test.go (new file dodges compose_test.go collisions).
+3. **ttw19-bl-wide-focus-oneway** (small, opus, round 1) — D117 + riders. program.go +
+   detail_render.go + NEW focus_return_test.go / overb_test.go.
+4. **ttw20-drive-slug-anchor** (small, opus, round 1) — D118. scripts/taskboard-drive/drive.sh
+   only, pure bash; gate = bash -n + a full live 25-assert run.
+5. **ttw19-bl-drafts-now-drop** (medium, opus, ROUND 2 after slice 1 merges — detail_data.go
+   collision) — D115 reshape: third concurrent fetch + NOW union + collapsed in-flight.
+6. **ttw20-wide-overflow-marker-clicks** (medium, opus, ROUND 2 after slice 2 merges —
+   adjacent compose.go regions) — D119.
+Gates from the builder's OWN worktree (the primary checkout false-reds the pdrender
+whole-root grep test over 568 nested worktree copies); spineRows stays the ONE producer.
+
+### Wave 21 2026-08-17 (DECIDED: the settlement wave — settle every account, make the proof machine hermetic)
+
+**Reconciliation:** Wave 20's four round-1 slices are FULLY merged and sealed (#11875 conn
+honesty, #11876 geometry pins, #11877 focus-return, #11878 drive slug anchors) — grade A-.
+The W20 charter append (D114-D119) had been STRANDED as an uncommitted local edit (origin/main
+charter ended at wave 19, 2525 lines); THIS wave's charter PR carries it, so D114-D119 reach
+origin/main together with the W21 entries below. The wish's stale candidates stay refuted per
+the W20 premise-smoke verdicts (go-tests.yml trigger landed in #11823; ANSI256 line-collapse
+fixed by #1592, comment corrected in #11877). Fence re-swept fresh: 31 open PRs, zero touch
+internal/taskboard, internal/apiclient, or scripts/taskboard-drive.
+
+**D120 — The D115 third fetch is REQUIRED, and the union — not prime, not the fetch length —
+is the number.** The feared 400-on-new-params server does not exist: lifecycle_status is read
+optionally (tasks_controller.ex:295; maybe_filter_lifecycle(nil) is the identity, query.ex:44)
+and live probes prove the route NEVER 400s — bogus/empty/wrong-case/trailing-space values all
+answer HTTP 200 {"ok":true,"docs":[]}; malformed limit is tolerated. So a REQUIRED third GET
+(D113b all-three-required, fetch.go:33-38 rationale verbatim) cannot repaint the false-offline
+seam #11875 closed: its timeout rides the shared 30s ctx (detail_data.go:64) through
+isSnapshotTimeout (live.go:361-367) and degrades to ◐/●, never ✗ — ZERO new live.go code.
+Best-effort was REJECTED: on failure it would silently repaint the proven-liar prime count,
+the exact defect class the slice kills. The residual risk is the OPPOSITE — param drift
+returns 200-empty, a silent undercount — and the union answers it: merge point is INSIDE
+FetchSnapshotFull, strictly between wg.Wait and composeSnapshot, as pure fetch.go helpers
+(dedup by doc_id, LIST copy wins; extras.counts["in_progress"] ← lifecycle==in_progress count
+over the DEDUPED UNION), so an old/drifted server degrades to window-truth, never garbage.
+composeSnapshot's signature stays FROZEN (board_test.go's three call sites untouched);
+program.go stays UNTOUCHED — the slice-A/slice-B parallel-flight condition. Error precedence
+list > prime > inflight; decodeTaskListFull reused unchanged ({"docs":[]} is a legit empty).
+Only the in_progress bucket collapses — done/open/etc. stay prime-raw until the api/-fenced
+twin fix lands; graders must not read M as fully collapsed. Live delta TODAY is 0 (prime 15 ==
+union 15; all 15 inside the recency window) — the twin divergence is EPISODIC, so tests
+SYNTHESIZE it (twin-doubled prime counts + a union-only claimed row); a live inequality assert
+would be vacuous. No new conn tests are owed (all five #11875 cases pass on 94b12757a0); the
+denominator mutation test lives in render_test.go beside TestMomentumShowingNofM, whose
+deciding predicate is TaskCount < summedLifecycleCounts — NOT a >1000 threshold.
+
+**D121 — D119 confirmed the LAST gesture asymmetry; conditional slice E dissolves.** The full
+narrow/wide matrix is symmetric in every other comparable cell — including c/x/o footer-verb
+clicks, which ARE at wide parity on origin/main (D111; the contrary reading was the stale
+66-behind worktree). Reading-frame act verbs are keyboard-complete BY DESIGN (D30/D96): the
+reading footer honestly omits c/x/o, so nothing lies — mouse verb-parity there would be a
+feature, not a defect, and is not cut. Probe-proven: BOTH wide panes paint ↑/↓ markers at
+realistic geometry (board counted via windowSpine, reading countless via windowFrame).
+TestHitMapWideNoOp stays GREEN — its wheel-at-origin maps to cx=-1/cy=-1 and dies at the
+cx<0||cy<0 guard (compose.go:650) before any router; a builder who flips it has broken
+something. The resolvers' -1 marker contracts stay BYTE-IDENTICAL at their true lines:
+wideBoardRowIndex compose.go:825/:828, rightPaneStopAt :932/:935 (the surveyed "804/807" was
+boardPaneMouse's no-op, a different function). The depth-0 booby-trap is compose.go:878-880.
+
+**D122 — The hermetic drive mode is COMMITTED, in the LIVE-pinned shape.** Proven end-to-end:
+`bp tasks` boots against a ~90-line fixture and pins a deterministic conn glyph. The shape:
+the fixture STREAMS `event: welcome` + keepalives on /v1/data/listen/<dataset> so the board
+pins ● live — 3 endpoints total (/v1/tasks?limit=1000, /v1/tasks/prime?limit=100, listen),
+ONE fetch each, zero churn. The polling-pinned alternative was REJECTED as default: it drags
+in a 4th endpoint (/v1/data/export/<dataset>, the NDJSON poll fallback — 9 hits in 15s) and
+refetch churn. The ~12/24 churn-independent asserts (geometry/grammar/file-state per the D118
+classification) run hermetic and byte-deterministic; the ~12 selection-identity asserts stay
+live-mode. drive.sh:141's CONN mask is STALE SCAFFOLDING hiding the fixed ttw19 flap —
+hermetic mode asserts the ● glyph outright instead of masking. Builder facts: the main
+package is ./cmd/barkpark (not repo root); race/cgo builds need CC=/usr/bin/clang
+CGO_ENABLED=1; the fixture matches scoped paths by SUFFIX (/v1/data/listen/), never
+hardcoding /w/default/p/default; every body is a non-empty well-formed envelope
+(decodeTaskListFull's refuse-empty fence treats a blank body as ConnOffline). The demotion
+path (corpus-pinning inside live mode) was NOT needed — feasibility is proven, not assumed.
+
+**D123 — The hitmap height-2 audit closes RATIFIED, at Decide, with fresh receipts.** On
+94b12757a0: height-1 mutation reds TestNarrowRailHoverParityUnderScroll (hitmap_test.go:416,
+"ComposeHitMap (15) and Compose (14) lengths diverge"); height-3 reds the same test 13-vs-14 —
+a bidirectional pin, then byte-identical restore. geometry_seam_test.go (all 158 lines read)
+pins DIFFERENT seams — wide-pane inner-1 (rightPaneStopAt :926, scrollPreview :959) and a
+narrow WIDTH floor — never the narrow ComposeHitMap height-2 top edge. There is no shared
+seam to join; #11876 landed no production helper. No builder dispatched; closed by the lead
+phase with the receipts as evidence.
+
+**Declined / held at Decide:** find-jump stays CONSIDERING (taste-signal gate; zero user
+signal — the wish itself reaffirms the hold). ttw20-bl-prime-counts-collapse-twins stays
+FILED cross-fence (api/), open and unclaimed — never smuggled. NEW backlog:
+ttw21-bl-cache-key-dataset (cacheKey omits Config.Dataset — two datasets under one
+server/ws/proj share a cache file; honest-staleness-bounded, low severity) and
+ttw21-bl-spec-s0-glyph-prose (spec §0's ◐/▶ narrative contradicts its own §1 table's ⠋/○;
+cosmetic docs edit, out of the internal/ fence). Ledger recipe rows from W21 verify ride
+this PR: ttw21-d115-union-seam-contract, ttw21-vf-prime-route-and-failure-modes (2026-08-17).
+
+**Wave plan (3 build slices, ALL round 1 — file-disjoint by construction; wave paper
+task-tui-wave-21-settlement):**
+1. **ttw19-bl-drafts-now-drop** (medium, FABLE, round 1) — D115/D120. detail_data.go +
+   fetch.go + fetch_test.go + render_test.go. The W20 detail_data.go collision is gone
+   (#11875 merged). Concurrency + the honesty seam = fable.
+2. **ttw20-wide-overflow-marker-clicks** (medium, opus, round 1) — D119/D121. compose.go +
+   compose_test.go + hitmap_test.go. The W20 compose.go collision is gone (#11876 merged).
+3. **ttw21-hermetic-drive** (large, FABLE, round 1) — D122. scripts/taskboard-drive/** only
+   (drive.sh + new fixture + README). The wave's structural bet.
+Gates from the builder's OWN worktree; spineRows stays the ONE producer; the -race baseline
+is certified clean on 94b12757a0 given CC=/usr/bin/clang — any red belongs to the slice.
+
+Next D-number: D120.
