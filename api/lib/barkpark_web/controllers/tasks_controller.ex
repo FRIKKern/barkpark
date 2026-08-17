@@ -50,6 +50,7 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
+  alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.TasksController.Params
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -1395,6 +1396,17 @@ defmodule BarkparkWeb.TasksController do
   # published-before-draft ordering, but WITHOUT the type filter. When a doc_id
   # collides across types in one scope, the published-preferred first row wins
   # (v1 graph roots on the published-preferred row — documented contract).
+  #
+  # PERSPECTIVE GATE (task-d223068f55efbf47, SECURITY): resolution honours the
+  # REQUESTED perspective. The old unconditional `pub OR draft` match meant a
+  # draft-only id (no published twin) fell back to its `drafts.<id>` row at the
+  # DEFAULT (published) perspective — any plain read token got a 200 confirming
+  # the draft's existence and echoing its real title through the traversal
+  # (live-proven). Now a default/published-perspective request resolves ONLY a
+  # published root (draft-only id -> not_found); the draft fallback survives
+  # solely for an explicit drafts/raw perspective from a non-anon-pinned tier.
+  # Both callers (graph_show, graph_tasks) route through here, so both are
+  # covered. Mutation proof: graph_draft_leak_test.exs.
   defp resolve_graph_root(id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
@@ -1402,13 +1414,20 @@ defmodule BarkparkWeb.TasksController do
     dataset = conn.params["dataset"]
 
     pub_id = Content.published_id(id)
-    draft = Content.draft_id(pub_id)
 
     query =
-      from(d in Document,
-        where: d.doc_id == ^pub_id or d.doc_id == ^draft,
-        order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
-      )
+      case graph_perspective(conn, conn.params) do
+        :published ->
+          from(d in Document, where: d.doc_id == ^pub_id)
+
+        _drafts_or_raw ->
+          draft = Content.draft_id(pub_id)
+
+          from(d in Document,
+            where: d.doc_id == ^pub_id or d.doc_id == ^draft,
+            order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
+          )
+      end
       |> Params.maybe_filter_workspace(workspace_id)
       |> Params.maybe_filter_project(project_id)
       |> Params.maybe_filter_dataset(dataset)
@@ -1419,10 +1438,26 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # The graph read perspective, clamped through the AnonPerspective chokepoint.
+  # Params.parse_perspective keeps this surface's `?drafts=true` alias, but an
+  # anon-pinned caller (tokenless, or the browser-shipped public-read
+  # credential — charter D60/D61) is pinned to :published regardless of the
+  # param. DEFENSE-IN-DEPTH ONLY on this route today: public-read is already
+  # 403 at /v1/graph/* (route-level), so this clamp's observable delta is ~zero
+  # — the LOAD-BEARING gate is resolve_graph_root honouring the perspective.
+  defp graph_perspective(conn, params) do
+    if AnonPerspective.anon_pinned?(conn) do
+      :published
+    else
+      Params.parse_perspective(params)
+    end
+  end
+
   # Build the keyword opts for Content.Graph.traverse/2 from query params + the
-  # resolved root (for dataset/scope). perspective=drafts (alias ?drafts=true)
-  # is token-gated — this whole controller is already behind :require_token, so
-  # honouring the param here IS the gate.
+  # resolved root (for dataset/scope). perspective rides graph_perspective/2 —
+  # the AnonPerspective-clamped resolver — NOT the conn-blind param parse alone
+  # (the old comment's ":require_token IS the gate" assumption was invalidated
+  # by the browser-shipped public-read token, #6270 / SR-2).
   defp graph_traverse_opts(%Document{} = root, params, conn) do
     scope_opts(conn)
     |> Keyword.put(:dataset, root.dataset)
@@ -1433,7 +1468,7 @@ defmodule BarkparkWeb.TasksController do
     |> Keyword.put(:direction, Params.parse_direction(params["direction"]))
     |> Keyword.put(:kinds, Params.csv_list(params["kinds"]))
     |> Keyword.put(:sources, Params.csv_list(params["sources"]))
-    |> Keyword.put(:perspective, Params.parse_perspective(params))
+    |> Keyword.put(:perspective, graph_perspective(conn, params))
   end
 
   # The dataset string a graph read scopes to. The graph endpoints have no
