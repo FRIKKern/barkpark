@@ -38,8 +38,12 @@ defmodule BarkparkWeb.GraphDraftLeakTest do
     # A PLAIN read token — the attacker tier from the live repro: any shipped
     # or leaked read credential, no draft permissions implied.
     {:ok, _} = Auth.create_token(@read_token, "graph-leak-read", @dataset, ["read"])
-    {:ok, _} = Auth.create_token(@admin_token, "graph-leak-admin", @dataset, ["read", "write", "admin"])
-    {:ok, _} = Auth.create_token(@public_read_token, "graph-leak-public", @dataset, ["public-read"])
+
+    {:ok, _} =
+      Auth.create_token(@admin_token, "graph-leak-admin", @dataset, ["read", "write", "admin"])
+
+    {:ok, _} =
+      Auth.create_token(@public_read_token, "graph-leak-public", @dataset, ["public-read"])
 
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
@@ -160,7 +164,10 @@ defmodule BarkparkWeb.GraphDraftLeakTest do
   end
 
   describe "public-read tier (defense-in-depth context, NOT the seal)" do
-    test "public-read stays 403 at /v1/graph/:id — even asking for drafts", %{conn: conn, scope: scope} do
+    test "public-read stays 403 at /v1/graph/:id — even asking for drafts", %{
+      conn: conn,
+      scope: scope
+    } do
       doc_id = uniq("leak-public")
       mk_draft_only!(doc_id, "DRAFT-SECRET-#{doc_id}", scope)
 
