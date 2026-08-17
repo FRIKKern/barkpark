@@ -1,9 +1,9 @@
-   The task TUI is glanceable, live, an… ··· 2/14 ││ The live tmux drive ships as a committed SGR harness and the feels-      │
- ├─▎⠦ The live tmux drive ships as a committed S… ││ native bar is finally judged                                             │
- │    C5/7 · P1 · 3/5                             ││ ⠋ in_progress · P1 · C5/7 · task · epic-builder-the-live-tmux-drive-shi… │
- ├─ ⠦ Wide-mode footer verbs become clickable ag… ││                                                                          │
- │    C5/7 · P2 · 4/5                             ││ criteria 3/5                                                             │
- ├─ ⠦ The TUI card and cheatsheet finally speak … ││   ✓ A committed re-runnable harness exists under scripts/taskboard-      │
- │    C5/7 · P3 · 4/5                             ││     drive/ that builds the real binary from ./cmd/barkpark, launches it  │
- ├─ ⠦ The board discloses its 1000-row horizon —… ││     in detached tmux 3.4 sessions at 130x40 and 70x24 against the        │
- │    C5/7 · P2 · 4/5                             ││     configured server, injects raw SGR bytes per gesture, captures       │
+   The task TUI is glanceable, live, an… ··· 9/19 ││ The conn dot never calls a slow fetch offline — timeouts classify        │
+ ├─▎⠸ The conn dot never calls a slow fetch offl… ││ distinctly and SSE proof-of-life lifts them                              │
+ │    C5/7 · P1 · 4/5                             ││ ⠋ in_progress · P1 · C5/7 · task · epic-builder-the-conn-dot-never-call… │
+ ├─ ⠸ The drive harness anchors row identity on … ││                                                                          │
+ │    C5/7 · P2 · 0/4                             ││ criteria 4/5                                                             │
+ ├─ ⠸ The reading geometry stops taking a -2 mut… ││   ✓ A typed client-timeout error (errors.As to *url.Error with           │
+ │    C5/7 · P2 · 4/5                             ││     uerr.Timeout()==true — no string matching of deadline text)          │
+ ├─ ⠸ Esc at depth 0 hands j/k back to the board… ││     classifies to a distinct non-offline label in snapshotErrorLabel;    │
+ │    C5/7 · P2 · 4/5                             ││     TestSnapshotErrorLabelsAreTruthful gains the timeout row and KEEPS   │
