@@ -947,10 +947,71 @@ const EXPECTATIONS = {
   },
   // Rollback/redeploy (charter D7): the current live row offers Redeploy + the
   // Current chip, the prior live row offers rollback, the failed row neither.
+  //
+  // cch-w67-followup (wave 68): CONVERTED from an `includes` list to a `check`,
+  // because the one line that joins every control on this screen to its code —
+  // `var sdel = $("#site-delete"); if (sdel) sdel.addEventListener("click", …)`
+  // in loadSite — was driven by NOTHING. The W67 destroy tier shipped behind
+  // five green gates and not one of them could fail on a dead button: the
+  // binding census greps the fetch path out of runSiteDelete's SOURCE, the
+  // member-authority sweep proves #site-delete RENDERS, the review pass enters
+  // AT runSiteDelete with a hand-built ctl. A typo in the attach line ships a
+  // Delete that does nothing, and every gate stays green — the epic's own
+  // vacuous-green shape. The hole belongs to the ROW, not to Delete: the same
+  // one line wires Deploy, Roll back, the retries, GitHub, Edit env and the
+  // theme select.
+  //
+  // WHY HERE AND NOT IN A NEW SCENARIO. This scenario already boots loadSite's
+  // SUCCESS branch, so every attach has already run by the time the check
+  // reads. Dispatching a real event and counting the handlers that ran is the
+  // whole proof, and it costs no fixture and no scenario (PIN_TOTAL_SCENARIOS
+  // is untouched — D817 refused that bump for the crown itself).
+  //
+  // THE RUNNER RETURNS EARLY ON `check` (runScenario, below) — an `includes`
+  // list beside one is SILENTLY DROPPED, not merged. The five needles this
+  // expectation has always shipped are therefore re-asserted VERBATIM first,
+  // before any dispatch, so the conversion adds a proof and subtracts none.
+  //
+  // `> 0`, NEVER `=== 1`: the #id registry is IMMORTAL and handlers ACCUMULATE
+  // across re-renders (this scenario measures 2 per control today, because
+  // loadSite paints twice). The count that means DEAD is 0 — which is exactly
+  // what deleting an addEventListener line produces here, measured.
   rollback: {
-    what: "deployment rows with Redeploy / Roll-back actions + the Current chip",
-    container: "site-body",
-    includes: ['data-kind="redeploy"', ">Redeploy<", ">Roll back to this<", "dep-current", "live since "],
+    what: "deployment rows with Redeploy / Roll-back actions + the Current chip — and every control loadSite wires DISPATCHES",
+    check(reg) {
+      const body = reg.get("site-body").innerHTML || "";
+      for (const needle of ['data-kind="redeploy"', ">Redeploy<", ">Roll back to this<", "dep-current", "live since "]) {
+        assert.ok(body.includes(needle), "#site-body missing " + JSON.stringify(needle));
+      }
+
+      // Every listener loadSite attaches on the success branch, with the event
+      // type it was registered for — the shim dispatches PER TYPE, so a control
+      // wired for "change" and clicked reports 0 (site-theme-select, measured).
+      const WIRED = [
+        ["site-delete", "click"],       // confirmSiteDelete — the W67 destroy tier
+        ["site-deploy", "click"],       // confirmDeploy
+        ["site-rollback", "click"],     // confirmSiteRollback
+        ["site-deploys-retry", "click"], // loadSite(id, { quiet: true })
+        ["site-github", "click"],       // openSiteGithub
+        ["site-env-edit", "click"],     // openSiteEnvModal
+        ["site-theme-select", "change"], // the PATCH …/sites/:id theme write
+      ];
+      for (const [id, type] of WIRED) {
+        const el = reg.get(id);
+        assert.ok(el, "#" + id + " was never even looked up — loadSite's attach line for it is gone");
+        assert.ok(el.dispatchEvent({ type }) > 0,
+          "#" + id + " renders but no \"" + type + "\" handler ran — the control is DEAD " +
+          "(loadSite's addEventListener for it never attached)");
+      }
+
+      // NEGATIVE CONTROL, so the seven greens above mean something: #site-load-retry
+      // belongs to the DEGRADE path (siteLoadFailureHtml), which this successful
+      // read never paints — loadSite never looks it up, so it is absent from the
+      // registry entirely. If this ever resolves, the success and failure branches
+      // have merged and the assertions above are reading the wrong screen.
+      assert.equal(reg.get("site-load-retry"), undefined,
+        "#site-load-retry must NOT exist on a successful site read — it is the failure branch's control");
+    },
   },
   // The 409-failure twin boots to the same skeleton; the inline-failure morph
   // itself is click-driven (covered by the vm unit tests + live browser).
