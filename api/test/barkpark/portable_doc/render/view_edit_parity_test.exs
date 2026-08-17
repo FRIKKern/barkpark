@@ -421,7 +421,11 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # `.bp-table` rides here too (pe-w2-parity-widening): its scroll chrome
   # (`display: block; overflow-x: auto`) now lives in BOTH editor copies, so the
   # root↔bundle pair is gated the same way the prose elements are.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code .bp-table)
+  # `.bp-stats` / `.bp-chart` complete the trio here as well (wave-2 review):
+  # §2 gates them reader↔root only, so WITHOUT these entries a bundle-side
+  # drift on either breakout class would ship green — the exact rot §5 exists
+  # to catch.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart)
 
   test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do
     studio = edit_css()
