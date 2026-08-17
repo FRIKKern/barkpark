@@ -256,9 +256,11 @@ defmodule Barkpark.Content.Schema do
   The visibility invariant applied to a schema ROW (struct or map) instead of a
   `(type, dataset)` pair — `schema_public?/3` with the read already done.
 
-  ONE predicate, three enforcement points: the query route's `schema_public?/3`,
-  the anonymous search allowlist (`DocumentsRetriever.public_type_names/2`) and
-  the corpus graph's per-caller type list (`TasksController.graph_corpus/2`).
+  ONE predicate, four enforcement points: the query route's `schema_public?/3`,
+  the anonymous search allowlist (`DocumentsRetriever.public_type_names/2`), the
+  corpus graph's per-caller type list (`TasksController.graph_corpus/2`) and the
+  ungated legacy schema index (`LegacyController.schemas/2`, which serves
+  `fields` to anonymous readers and must show public types only).
   EXPLICITLY `"public"` only — `nil`, `"private"` and any future value are NOT
   public, so a new visibility value fails CLOSED on every surface at once.
   """
