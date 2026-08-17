@@ -906,8 +906,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 4b5d802a1d): the 999-technique printed "149 emitted key(s) collected, floor
   # is EXACTLY 999" and "268 json tag(s) found in internal/cloudclient, floor is
   # EXACTLY 999" — both floors HOLD across the merge, measured, not derived.
+  #
+  # #10086's re-land (the typed CloudRefusal decoder) is the PR the merge hazard
+  # above named, and it landed second: the go-tag floor moves 268 -> 269 and the
+  # emitted floor HOLDS at 149. Re-measured on this branch merged with main, with
+  # the scanner this file defines run against internal/cloudclient — 269 tags,
+  # and the set difference against origin/main's own package is exactly ONE name,
+  # `details`. Not summed, not predicted: the comment above forecast one tag and
+  # the measurement agreed, which is a check on the forecast and not a substitute
+  # for it. The delta is one and not four because `CloudRefusal` decodes
+  # `reason`, `required` and `scope` under names already declared elsewhere in
+  # internal/cloudclient, so only `details` is new PACKAGE-WIDE. The emitted
+  # floor does not move because this slice writes no Elixir serializer — it reads
+  # a refusal `cloud/` already emits, which is the whole point of the pair.
   @emitted_floor 149
-  @go_tag_floor 268
+  @go_tag_floor 269
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
