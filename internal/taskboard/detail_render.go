@@ -58,10 +58,12 @@ var detailRegistry = pdrender.DefaultRegistry(pdrender.DarkTheme())
 // two reasons: (1) it upholds the epic's "color = state, never decoration" law
 // (prose carries no state, so it wears no hue; block headings/body still take
 // the DarkTheme lipgloss styling, which rides the global lipgloss profile, not
-// this one); (2) pdrender's COLORED chroma path collapses a multi-line fenced
-// code block onto a single line (verified: only the NoColor path re-splits the
-// source correctly), and charter law forbids editing pdrender to fix it here.
-// NoColor keeps fenced code honestly multi-line and readable.
+// this one). The color=state law is the WHOLE reason: an earlier note here
+// claimed pdrender's colored chroma path collapsed a multi-line fenced code
+// block onto one line, but that defect was fixed by #1592 (92d7879362) and W20
+// verify proved ANSI256 splits fenced code identically to NoColor — so NoColor
+// no longer rests on a rendering bug, it rests on "prose carries no state, so
+// it wears no hue" alone.
 const detailProfile = pdrender.NoColor
 
 // measure is the SINGLE pure reading-measure helper (charter D24) both the

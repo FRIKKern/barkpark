@@ -547,6 +547,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc", "backspace":
 		(&m).popFrame()
+		// Wide mode: esc back to the depth-0 board hands j/k to the board cursor
+		// again. enterTask (and any mouse preview-pane press) sets wideFocus=reader,
+		// but popFrame never touched it — so before this, Enter→Esc stranded j/k in
+		// the preview scroll with only a mouse board-pane click to recover. esc
+		// always returning you to list navigation is the invariant lazygit and k9s
+		// share; no new pane key, no new mode (charter D117).
+		if m.wide && len(m.stack) == 1 {
+			m.wideFocus = wideFocusBoard
+		}
 		return m, nil
 	case "M":
 		return m.toggleMouse()
