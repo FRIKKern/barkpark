@@ -21739,3 +21739,144 @@ test("cch-w72-s2: the fence's three original slugs still relay, and an unfenced 
   // …and a detail-bearing slug OUTSIDE the allowlist still drops to the fallback.
   assert.equal(hooks.friendly({ error: "some_other_slug", detail: "a raw upstream string" }, "fb"), "fb");
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w72-bl — THE NINE NO-FALLBACK friendly() SITES STOP HUMANIZING SLUGS.
+//
+// A one-arg friendly(data) with an UNREAD typed slug renders key.replace(/_/g," ")
+// — gibberish like "write once" at a human. Nine live sites did this: four loader
+// empty-state cards (loadFleet/loadOverview/loadSites/loadActivity, each an
+// esc(friendly(r.data)) inside a Could-not-load card) and five action sites (the
+// session-revoke paint toast, confirmRevokeToken, confirmRevokeInvite,
+// confirmDeleteEnvVar, and the pure roleChangeFailureCopy). The loaders now speak
+// readFailureCopy(r, forbiddenCopy, fallback) — the existing loader dialect; the
+// action sites gained a truthy honest fallback. The fix is entirely at the CALL
+// SITES: friendly()'s humanizer tail is untouched (still pinned by 735/1009/1095),
+// which the negative control below re-proves. UNREAD_SLUG is unregistered in
+// ERRORS and outside the detail fence, so its humanized form is the exact string
+// the honest copy must displace.
+const CCHW72_UNREAD_SLUG = "unread_typed_slug";
+const CCHW72_HUMANIZED = "unread typed slug"; // what a bare one-arg friendly() would emit
+
+// ── the four loader cards, DRIVEN through the driveLoader/recordingDom rig ──
+// Each proves: an unread typed slug now reads the honest per-loader fallback (not
+// the humanized slug), a 403 read reads the read-scoped forbidden sentence, and
+// the "Couldn't load …" headline still stands.
+
+test("cch-w72-bl: loadFleet/loadSites/loadActivity are now hookable (RED on origin/main, where they are unexported)", () => {
+  assert.equal(typeof hooks.loadFleet, "function", "loadFleet must be drivable");
+  assert.equal(typeof hooks.loadSites, "function", "loadSites must be drivable");
+  assert.equal(typeof hooks.loadActivity, "function", "loadActivity must be drivable");
+  assert.equal(typeof hooks.loadOverview, "function", "loadOverview must be drivable");
+});
+
+test("cch-w72-bl: loadFleet — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadFleet(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["fleet-body"] });
+  assert.match(html(), /Couldn't load fleet/, "the failure headline stands"); // the h2 title is not esc()-wrapped
+  assert.match(html(), /Your fleet couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadFleet — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadFleet(), { status: 403, payload: { error: "forbidden" }, ids: ["fleet-body"] });
+  assert.match(html(), /access to this fleet/, "a refused read names WHICH read, not a screen the person isn't on");
+});
+
+test("cch-w72-bl: loadOverview — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadOverview(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["overview-body"] });
+  assert.match(html(), /Couldn't load your fleet/);
+  assert.match(html(), /Your fleet couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadOverview — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadOverview(), { status: 403, payload: { error: "forbidden" }, ids: ["overview-body"] });
+  assert.match(html(), /access to this fleet/);
+});
+
+test("cch-w72-bl: loadSites — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadSites(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["sites-body"] });
+  assert.match(html(), /Couldn't load sites/);
+  assert.match(html(), /Your sites couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadSites — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadSites(), { status: 403, payload: { error: "forbidden" }, ids: ["sites-body"] });
+  assert.match(html(), /access to these sites/);
+});
+
+test("cch-w72-bl: loadActivity — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadActivity(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["activity-body"] });
+  assert.match(html(), /Couldn't load activity/);
+  assert.match(html(), /activity feed couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadActivity — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadActivity(), { status: 403, payload: { error: "forbidden" }, ids: ["activity-body"] });
+  assert.match(html(), /access to this activity/);
+});
+
+// ── the five action sites ──
+// roleChangeFailureCopy is a pure exported function — driven directly. The 409
+// last_owner arm is untouched; the fallthrough now names a truthy honest sentence
+// for an unread typed slug rather than humanizing it.
+
+test("cch-w72-bl: roleChangeFailureCopy — an unread typed slug reads the honest fallback, never the humanized slug", () => {
+  assert.equal(hooks.roleChangeFailureCopy(422, { error: CCHW72_UNREAD_SLUG }),
+    "That role change didn't go through — please try again.");
+  assert.notEqual(hooks.roleChangeFailureCopy(422, { error: CCHW72_UNREAD_SLUG }), CCHW72_HUMANIZED);
+  // the reachable 409 last_owner arm is unchanged
+  assert.equal(hooks.roleChangeFailureCopy(409, { error: "last_owner" }),
+    "You're the last owner — promote another member to owner first.");
+});
+
+// The four toast handlers (session-revoke paint, confirmRevokeToken,
+// confirmRevokeInvite, confirmDeleteEnvVar) are click-driven modal callbacks that
+// emit friendly(r.data, "<honest>") inline. Each is proven the same way: locate
+// the exact call site by its toast title, PARSE its two argument texts (callArgs
+// throws if the site is gone or reformatted), then DRIVE the real exported
+// friendly() with that site's own literal against an unread slug. Reverting a site
+// to a one-arg friendly(r.data) drops args to length 1 → the length assertion reds
+// THAT site's test by name. The honest sentence must not be the humanized slug.
+const CCHW72_APP_SRC = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+function cchw72ActionSite(needle) {
+  const args = callArgs(CCHW72_APP_SRC, needle);
+  assert.equal(args.length, 2,
+    `friendly() at "${needle}" must pass a fallback second arg — a one-arg revert humanizes the slug`);
+  assert.equal(args[0], "r.data", `first arg is the server payload at "${needle}"`);
+  const fallback = JSON.parse(args[1]);
+  assert.ok(typeof fallback === "string" && fallback.length > 0, `the fallback is a truthy string at "${needle}"`);
+  // drive the SHIPPED friendly() with this site's own literal: an unread slug now
+  // reads the honest copy, never its humanized form.
+  assert.equal(hooks.friendly({ error: CCHW72_UNREAD_SLUG }, fallback), fallback);
+  assert.notEqual(hooks.friendly({ error: CCHW72_UNREAD_SLUG }, fallback), CCHW72_HUMANIZED);
+  return fallback;
+}
+
+test("cch-w72-bl: session-revoke paint — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t revoke", body: friendly');
+});
+
+test("cch-w72-bl: confirmRevokeToken — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t revoke token", body: friendly');
+});
+
+test("cch-w72-bl: confirmRevokeInvite — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t revoke invitation", body: friendly');
+});
+
+test("cch-w72-bl: confirmDeleteEnvVar — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t delete variable", body: friendly');
+});
+
+// ── the negative control: the humanizer tail is UNTOUCHED ──
+// The fix lives at the call sites, never in friendly(). A DIRECT one-arg
+// friendly() on an unknown slug still humanizes — proving the tail (735/1009/1095)
+// is byte-identical and only the missing fallbacks were the defect.
+test("cch-w72-bl: NEGATIVE CONTROL — a direct one-arg friendly() on an unknown slug still humanizes", () => {
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }), "totally unknown slug");
+  assert.equal(hooks.friendly({ error: CCHW72_UNREAD_SLUG }), CCHW72_HUMANIZED);
+});
