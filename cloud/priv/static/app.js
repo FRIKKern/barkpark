@@ -7898,6 +7898,56 @@
     if (form) form.addEventListener("submit", function (e) { e.preventDefault(); attachDomain(bp); });
   }
 
+  // cch-w40-bl (D870): the domain-attach failure arm, extracted PURE so its copy
+  // is node-pinned via __bpTestHook instead of living inline in a DOM handler —
+  // where a mutation to a total fiction left the suite byte-identical (zero
+  // detection). POST /v1/barkparks/:id/domain emits, on failure:
+  //   409 taken / 409 already_attaching       — the attach conflicts on the wire
+  //   422 domain_not_pointed {expected_ip, observed}  — the ONE slug carrying a remedy
+  //   422 invalid_domain                       — bad domain syntax
+  //   422 instance_no_origin {detail}          — box has no origin yet; relay the sentence
+  //   422 no_team                              — teamless caller (w38 carve-out → friendly)
+  //   422 invalid / anything else              — friendly() generic
+  //   422 domain_required                      — MODAL-UNREACHABLE: attachDomain's empty
+  //        guard returns before the POST, so the server never emits this to this arm;
+  //        classified here, deliberately no copy written.
+  // The pre-fix code answered EVERY 422 except no_team with "Only
+  // <name>.barkpark.cloud domains are supported for now." — flatly false: external
+  // FQDNs ARE supported (DomainOwnership.pointed_at?, router.ex:4237), and the
+  // console discarded the whole domain_not_pointed remedy payload (the IP to point
+  // at, the IP it observed) to tell the user the feature doesn't exist. Peers:
+  // siteCreateFailureCopy, siteDeleteFailureCopy — same *FailureCopy + hook shape.
+  function attachDomainFailureCopy(status, data) {
+    data = data || {};
+    var code = data.error;
+    if (code && typeof code === "object") code = code.code;
+
+    if (code === "taken") return "That domain is already in use.";
+    if (code === "already_attaching") return "An attach is already running.";
+
+    if (status === 422) {
+      if (code === "domain_not_pointed") {
+        // Relay the MEASURED remediation — the A-record target the plane wants and,
+        // when the resolver returned any answer, the address it actually observed.
+        // Both are server-derived strings; the caller renders via textContent only.
+        var msg = "That domain isn't pointed at this instance yet. Point an A record at " +
+          data.expected_ip;
+        var observed = data.observed;
+        if (Array.isArray(observed)) observed = observed.join(", ");
+        if (observed) msg += " — right now it resolves to " + observed + ".";
+        else msg += ".";
+        return msg;
+      }
+      if (code === "invalid_domain") return "That doesn't look like a valid domain name.";
+      if (code === "instance_no_origin" && typeof data.detail === "string" && data.detail) {
+        return data.detail;
+      }
+      // no_team (w38 carve-out), invalid, and any unseen slug fall through to
+      // friendly() — the teamless answer owns the sentence that repairs it.
+    }
+    return friendly(data, "Something went wrong — please try again.");
+  }
+
   function attachDomain(bp) {
     var value = (($("#domain-input") || {}).value || "").trim();
     var errEl = $("#domain-error");
@@ -7921,20 +7971,9 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Attach domain"; }
-      var code = r.data && r.data.error;
-      var msg = code === "taken"
-        ? "That domain is already in use."
-        : code === "already_attaching"
-          ? "An attach is already running."
-          // cch-w38-s1: the 422 arm is about the DOMAIN, and `no_team` is not —
-          // require_primary_team_admin answers a teamless caller 422 {no_team},
-          // which used to be reported as bad domain syntax. It falls through to
-          // friendly(), which owns the sentence that actually repairs it.
-          : (r.status === 422 && code !== "no_team")
-            ? "Only <name>.barkpark.cloud domains are supported for now."
-            : friendly(r.data, "Something went wrong — please try again.");
-      // textContent, not innerHTML — the literal "<name>" (and any echoed input)
-      // must render as text, never as markup.
+      var msg = attachDomainFailureCopy(r.status, r.data);
+      // textContent, not innerHTML — server-derived strings (expected_ip, observed,
+      // instance_no_origin's detail) and any echoed input render as text, never markup.
       if (errEl) { errEl.hidden = false; errEl.textContent = msg; }
       else toast({ kind: "error", title: "Couldn't attach the domain", body: msg });
     });
@@ -23697,6 +23736,10 @@
       // Impure (it fetches and paints its inline error), driven the same way
       // loadMembers/loadEnvVars are.
       attachDomain: attachDomain,
+      // cch-w40-bl (D870): the domain-attach failure copy, pure now — the inline
+      // 422 ternary answered every slug "Only <name>.barkpark.cloud …", discarding
+      // the domain_not_pointed remedy the plane measured. Pinned per-slug below.
+      attachDomainFailureCopy: attachDomainFailureCopy,
       // cch-w46-s2: the decommission post-click arm had ZERO hook reach, so its
       // unconditional "Try again" into a permanent 403 could not be seen from the
       // harness at all. The terminality predicate is pure; runDecommission is the
