@@ -1,0 +1,39 @@
+
+ barkpark · tasks       ⇄ guerrilla  CONN · T↔  ──────────────────────────────────────────────────────────────────────────
+ ▎ The task TUI is glanceable, live, an… ··· 2/14│ │ The task TUI is glanceable, live, and never flickers                     │
+ ├─ ⠿ The live tmux drive ships as a committed S…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
+ │    C5/7 · P1 · 3/5                            │ │                                                                          │
+ ├─ ⠿ Wide-mode footer verbs become clickable ag…│ │ criteria 4/4                                                             │
+ │    C5/7 · P2 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
+ ├─ ⠿ The TUI card and cheatsheet finally speak …│ │     ↳ cache_test.go includes an intra-session out-of-order rollback gua… │
+ │    C5/7 · P3 · 4/5                            │ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
+ ├─ ⠿ The board discloses its 1000-row horizon —…│ │     constant motion.                                                     │
+ │    C5/7 · P2 · 4/5                            │ │     ↳ board/components/anim tests cover in_progress ordering, claim fre… │
+ ├─ ⠿ The two snapshot fetches fly in parallel —…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
+ │    C5/7 · P2 · 3/4                            │ │     ↳ compose/hitmap tests cover right-pane focus, wheel scrolling, cli… │
+ ├─ ⠿ Sheet-era glyph and golden hygiene: the re…│ │   ✓ The current taskboard regression suite is green.                     │
+ │    C5/7 · P3 · 4/5                            │ │     ↳ A fresh go test ./internal/taskboard/... run is recorded with thi… │
+ ├─ ⠿ Task-TUI W19 native-proof paperwork: D109-…│ │                                                                          │
+ │    C5/7 · P1 · 1/2 · epic-decide-ttw19 · T  │ │ purpose                                                                  │
+ ├─ ✓ In-body task chips speak the full 9-status…│ │   part of   Trustworthy task operations                                  │
+ └─ ✓ Narrow-mode reading-frame rail stops gain …│ │   impact    Blocks the larger goal when unresolved: operators cannot act │
+   +5 more · 1 cancelled                         │ │             confidently if snapshots rewind, active work disappears, or  │
+                                                 │ │             navigation fights the focused pane.                          │
+   Paper Excellence epic — close the a… ··· 20/58│ │   does      keep the task TUI calm, live, and glanceable.                │
+ ├─ ⠿ Wave-3 decide referent: the visible wave's…│ │   why       The larger goal is Trustworthy task operations. The concrete │
+ │    C5/7 · P1 · ✓✓○ 2/3 · pe-w3-decide · T    │ │             problem is that operators cannot act confidently if          │
+ ├─ ⠿ Sections get a class hook on both wrappers…│ │             snapshots rewind, active work disappears, or navigation      │
+ │    C5/7 · P2 · 6/7                            │ │             fights the focused pane. Shipping forward-only snapshot      │
+ ├─ ⠿ The rig learns to measure the crown — four…│ │             handling, live lifecycle cues, focused scrolling, and        │
+ │    C5/7 · P3 · 5/6                            │ │             regression gates is the correct intervention because         │
+ ├─ ⠿ BPML's inline grammar accepts the corpus's…│ │             forward-only snapshot acceptance repairs temporal truth,     │
+ │    C5/7 · P2 · 4/5                            │ │             live cues expose real state changes, and focused input       │
+ ├─ ✓ pdrender stops inventing figure numbers an…│ │             routing gives each pane predictable ownership. If omitted,   │
+ └─ ✓ The publish floor's outline arms see the w…│ │             the board becomes a noisy animation rather than an           │
+   +34 more · 18 done                            │ │             operational instrument.                                      │
+                                                 │ │   endgame   Trustworthy task operations is backed by one canonical       │
+   API Read-Path Security Sweep (epic) ···· 14/32│ │             owner, measurable evidence, and truthful lifecycle scope.    │
+   ↓ 34 more below                               │ │   important 92/100 — The omission cost is that the board becomes a noisy │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │             animation rather than an operational instrument.             │
+ ⠿ 20 in flight · ○ 1+ ready · ✓ 3278 done ·… 51%│ │   relevant  100/100 — The task directly addresses the observed problem   │
+ jk · enter open · esc back · c claim · x close …│ │   ↓ more below                                                           │
