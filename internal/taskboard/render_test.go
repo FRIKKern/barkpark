@@ -221,8 +221,8 @@ func TestReadyCountIncludesEpicRoots(t *testing.T) {
 
 func TestBottomChromeIsExactlyThreeUsefulLines(t *testing.T) {
 	b := Board{
-		TaskCount: 1000,
-		Counts:    map[string]int{"open": 900, "done": 600}, // total 1500 > 1000 fetched
+		TaskCount: 1500,
+		Counts:    map[string]int{"open": 900, "done": 600}, // fetch == corpus: not clamped
 	}
 	chrome := bottomChrome(b, UIState{Conn: ConnPolling}, 80, fixedNow)
 	if len(chrome) != 3 {
@@ -242,6 +242,48 @@ func TestBottomChromeIsExactlyThreeUsefulLines(t *testing.T) {
 		if strings.Contains(plain, noise) {
 			t.Errorf("three-line chrome retained %q noise:\n%s", noise, plain)
 		}
+	}
+}
+
+// TestMomentumShowingNofM proves the 1000-row horizon disclosure (charter D40):
+// when the fetch (TaskCount) is short of the true corpus (summed Counts) the
+// momentum line owns a dim "showing N of M" note. It renders at a comfortable
+// width, sheds WHOLE (never a mid-token fragment) when the pane is tight, and
+// stays silent when nothing was clamped.
+func TestMomentumShowingNofM(t *testing.T) {
+	truncated := Board{
+		TaskCount: 1000,
+		Counts:    map[string]int{"in_progress": 2, "open": 4731, "done": 2000}, // 6733 corpus
+	}
+	st := UIState{Conn: ConnPolling}
+
+	wide := ansi.Strip(momentumLine(truncated, st, 120))
+	if !strings.Contains(wide, "showing 1000 of 6733") {
+		t.Errorf("wide momentum should disclose the clamp:\n%s", wide)
+	}
+
+	// Narrow enough to clip the note but hold the base: it sheds WHOLE — no
+	// partial "showing"/" of " — while the primary counts stay untruncated.
+	narrow := ansi.Strip(momentumLine(truncated, st, 50))
+	if strings.Contains(narrow, "showing") || strings.Contains(narrow, " of ") {
+		t.Errorf("a tight pane must shed the note whole, never fragment it:\n%q", narrow)
+	}
+	// The primary instruments survive the shed.
+	for _, want := range []string{"in flight", "done"} {
+		if !strings.Contains(narrow, want) {
+			t.Errorf("primary instrument %q lost to the shed:\n%q", want, narrow)
+		}
+	}
+
+	// A full fetch (TaskCount == corpus) discloses nothing — nothing was clamped.
+	full := Board{TaskCount: 6733, Counts: truncated.Counts}
+	if got := ansi.Strip(momentumLine(full, st, 120)); strings.Contains(got, "showing") {
+		t.Errorf("an un-clamped board must stay silent:\n%s", got)
+	}
+	// A zero fetch (no snapshot yet) is not a clamp either.
+	zero := Board{Counts: truncated.Counts}
+	if got := ansi.Strip(momentumLine(zero, st, 120)); strings.Contains(got, "showing") {
+		t.Errorf("a zero-fetch board must stay silent:\n%s", got)
 	}
 }
 
