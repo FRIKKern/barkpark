@@ -64,8 +64,14 @@ class H(BaseHTTPRequestHandler):
         m = mode()
         if m == "list-500":
             return self._send(500, {"message": "Internal Server Error"})
-        if m == "issue-already-open":
-            return self._send(200, [{"number": 42, "title": TITLE}])
+        if m in ("issue-already-open", "assign-patch-rejected"):
+            # The shape #5658 has: open, labelled, and nobody assigned. The
+            # list response is where the comment path learns that.
+            return self._send(200, [{"number": 42, "title": TITLE,
+                                     "assignees": []}])
+        if m == "issue-already-open-assigned":
+            return self._send(200, [{"number": 42, "title": TITLE,
+                                     "assignees": [{"login": "acme"}]}])
         if m == "only-a-pull-request":
             # A PR whose title collides must NOT be mistaken for the issue.
             return self._send(200, [
@@ -75,9 +81,7 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, [{"number": 9, "title": "CI failure: other"}])
         return self._send(200, [])
 
-    def do_POST(self):
-        self._record()
-        m = mode()
+    def _read_body(self):
         body = {}
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -89,6 +93,23 @@ class H(BaseHTTPRequestHandler):
                         {"path": self.path.split("?")[0], "body": body}) + "\n")
         except Exception:
             pass
+        return body
+
+    def do_PATCH(self):
+        # The comment path's route-once assignment. GitHub answers a successful
+        # issue edit with 200 and the updated issue.
+        self._record()
+        body = self._read_body()
+        if mode() == "assign-patch-rejected":
+            return self._send(422, {"message": "Validation Failed",
+                                    "errors": [{"field": "assignees"}]})
+        return self._send(200, {"number": 42, "assignees": [
+            {"login": a} for a in (body.get("assignees") or [])]})
+
+    def do_POST(self):
+        self._record()
+        m = mode()
+        body = self._read_body()
         assignees = body.get("assignees") or []
         if m == "create-422":
             return self._send(422, {"message": "Validation Failed"})
@@ -181,6 +202,15 @@ want_create_field() { # want_create_field <label> <first|last> <jq filter> <expe
   if [ "$got" = "$4" ]; then ok "$1 ($2 create: $3 = $got)"
   else bad "$1 — want $2 create '$3' = '$4' got '$got'"; fi
 }
+# The same assertion for any other request that carries a body — the comment
+# path's comment and its route-once assignment PATCH.
+want_body_field() { # want_body_field <label> <path suffix> <first|last> <jq> <expected>
+  local got
+  got="$(jq -r --arg suf "$2" 'select(.path | endswith($suf)) | .body' "$BODY_FILE" 2>/dev/null \
+        | jq -sr "$3 | $4" 2>/dev/null)"
+  if [ "$got" = "$5" ]; then ok "$1 ($2 $3: $4 = $got)"
+  else bad "$1 — want $2 $3 '$4' = '$5' got '$got'"; fi
+}
 
 echo "--- happy path: a new failure files an issue"
 run no-existing-issues
@@ -238,6 +268,51 @@ run issue-already-open
 want_exit      "recurring failure exits 0" 0
 want_requests  "recurring failure POSTs NO new issue" 0 "POST /repos/acme/widgets/issues$"
 want_requests  "recurring failure comments instead" 1 "POST /repos/acme/widgets/issues/42/comments"
+
+echo
+echo "--- ROUTING on the COMMENT path: an UNASSIGNED open issue gets routed once"
+# The path a chronic red actually takes. #5658 proves the defect it closes:
+# open since 2026-07-22, 8 comments, every one from github-actions, nobody
+# assigned — so the alarm kept firing at nobody. Assign AND @mention, both
+# gated on the same zero-assignee test, so the assignment silences the mention.
+run issue-already-open
+want_exit        "unassigned existing issue exits 0" 0
+want_not_loud    "routing an existing issue is not a degrade"
+want_not_warn    "an accepted assignment warns about nothing"
+want_requests    "the unassigned issue is assigned exactly once" 1 "PATCH /repos/acme/widgets/issues/42$"
+want_body_field  "the PATCH assigns the derived owner" "/issues/42" last '.assignees | join(",")' "acme"
+want_requests    "the comment is still posted" 1 "POST /repos/acme/widgets/issues/42/comments"
+want_body_field  "the comment @mentions them too" "/comments" last '.body | test("@acme")' "true"
+want_body_field  "the comment still reports the ongoing failure" "/comments" last '.body | test("Still failing")' "true"
+want_requests    "routing an existing issue mints no duplicate" 0 "POST /repos/acme/widgets/issues$"
+
+echo
+echo "--- ROUTING on the COMMENT path: an ALREADY-ASSIGNED issue is left alone"
+# Route ONCE. The crown fires 6-hourly; mentioning on every comment would be
+# ~4 notifications a day forever, which is how an alarm gets muted by a human.
+run issue-already-open-assigned
+want_exit      "assigned existing issue exits 0" 0
+want_not_warn  "no routing was attempted, so nothing warns"
+want_requests  "an assigned issue is NOT re-assigned" 0 "PATCH"
+want_requests  "an assigned issue still gets its comment" 1 "POST /repos/acme/widgets/issues/42/comments"
+want_body_field "the comment does NOT nag with a mention" "/comments" last '.body | test("@acme")' "false"
+
+echo
+echo "--- ROUTING on the COMMENT path: CI_FAILURE_ASSIGNEE= opts out of it"
+run issue-already-open 'CI_FAILURE_ASSIGNEE='
+want_exit      "comment-path opt-out exits 0" 0
+want_requests  "opt-out assigns nobody" 0 "PATCH"
+want_not_warn  "an opt-out is not a degrade on the comment path either"
+
+echo
+echo "--- DEGRADE: a REJECTED assignment on the comment path warns, comment stands"
+run assign-patch-rejected
+want_exit        "rejected assignment on the comment path exits 0" 0
+want_not_loud    "rejected assignment is NOT a hard failure"
+want_warn        "rejected assignment warns that nobody is assigned"
+want_requests    "the comment is posted anyway" 1 "POST /repos/acme/widgets/issues/42/comments"
+want_body_field  "the mention survives the rejection" "/comments" last '.body | test("@acme")' "true"
+want_body_field  "the comment names the HTTP status that rejected it" "/comments" last '.body | test("HTTP 422")' "true"
 
 echo
 echo "--- an unrelated open ci-failure issue must not suppress this one"

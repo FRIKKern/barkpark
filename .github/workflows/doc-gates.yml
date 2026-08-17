@@ -77,6 +77,18 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # the attribution ledger itself (cch wave 68). A manifest-only edit — a
+      # hand-tampered digest, a dropped slot — matched NO glob here, so the one
+      # file the fence's memory lives in could change without the gate that
+      # reads it ever running.
+      - "design/emit-manifest.json"
+      # the audit verb table (cch-w65) — the SOLE authority for BOTH the closed
+      # Elixir @actions vocabulary and the console's ACTION_LABELS region. Its two
+      # consumers ride globs above (audit_event.ex on **/*.ex, app.js on its own
+      # line below), but a JSON-ONLY edit — a new verb, a label reworded, a null's
+      # rationale deleted — matched nothing here, so the one file both vocabularies
+      # now read could change without design/check.mjs Part 0 ever running.
+      - "design/audit-actions.json"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"
@@ -212,6 +224,18 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # the attribution ledger itself (cch wave 68). A manifest-only edit — a
+      # hand-tampered digest, a dropped slot — matched NO glob here, so the one
+      # file the fence's memory lives in could change without the gate that
+      # reads it ever running.
+      - "design/emit-manifest.json"
+      # the audit verb table (cch-w65) — the SOLE authority for BOTH the closed
+      # Elixir @actions vocabulary and the console's ACTION_LABELS region. Its two
+      # consumers ride globs above (audit_event.ex on **/*.ex, app.js on its own
+      # line below), but a JSON-ONLY edit — a new verb, a label reworded, a null's
+      # rationale deleted — matched nothing here, so the one file both vocabularies
+      # now read could change without design/check.mjs Part 0 ever running.
+      - "design/audit-actions.json"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"

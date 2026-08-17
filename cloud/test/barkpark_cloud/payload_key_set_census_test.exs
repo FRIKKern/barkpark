@@ -574,6 +574,23 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       entry: {:site_row, 2},
       go: "DeployCensusSite"
     },
+    # dr-w34-s1, and the D260 blind spot is at its structural MAXIMUM here: every
+    # name on this row — `site_id`, `name`, `slug`, `environment`,
+    # `never_covered` — ALREADY exists as a json tag somewhere in
+    # internal/cloudclient. So the file-global UNREAD arm and the exact
+    # `@go_tag_floor` would BOTH stay green with `DeployCoverageSite` declared
+    # carrying no fields at all: the control plane would emit the full named
+    # tail, `encoding/json` would drop every name on the floor, and nothing in
+    # this file could say so. The pair is what makes the PHANTOM arm bite the
+    # struct itself; `coverage_site_row/1` is a named single-clause producer for
+    # the same reason `site_row/2` is one — an inline fn in the fold above it is
+    # a wire shape this census cannot walk.
+    %{
+      name: "DeployLedger.coverage_site_row/1",
+      file: @ledger,
+      entry: {:coverage_site_row, 1},
+      go: "DeployCoverageSite"
+    },
     # dr-w27-s2. The CROWN's own wire, and the pair that was missing while this
     # epic's flagship record drifted: `to_json/1` emitted FIFTEEN keys and
     # `cloudclient.PlatformDelivery` pinned THIRTEEN, so `previous_sha` and
@@ -860,8 +877,37 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `p95`, `max`, `deferred`) ride free on the delivery census's union. The
   # decoder is the POINT and not an afterthought: a wait number no reader decodes
   # is a number nobody reads, which is the disease this epic exists to cure.
-  @emitted_floor 144
-  @go_tag_floor 264
+  #
+  # dr-w34-s1 (the coverage envelope names its sites, and states its covering
+  # bound): the emitted floor moves 144 -> 149 and the go-tag floor 264 -> 268,
+  # BOTH re-measured by the 999-technique ON THIS BRANCH — floors set to 999, the
+  # two refusals printed "149 emitted key(s) collected, floor is EXACTLY 999" and
+  # "268 json tag(s) found in internal/cloudclient, floor is EXACTLY 999".
+  # NEITHER was computed by adding a delta to 144 or to 264, and the two deltas
+  # are different numbers for structural reasons: the emitted floor gains the
+  # NEW PAIR'S WHOLE ROW WIDTH (five keys — `site_id`, `name`, `slug`,
+  # `environment`, `never_covered`) because `total_emitted/1` is a SUM of
+  # per-pair set sizes and not a union, while the go-tag union gains only the
+  # FOUR names that are new package-wide (`covering_bound`,
+  # `never_covered_sites`, `never_covered_sites_total`,
+  # `never_covered_sites_truncated`) — every field on `DeployCoverageSite`
+  # itself already existed as a tag elsewhere, which is precisely why that
+  # struct needed the pair and its own per-struct assertions in
+  # internal/cli/cloud_deploy_census_cmd_test.go. `census/3`'s own top-level key
+  # set is UNCHANGED: the new keys are inside `coverage_cohorts/2`, which is not
+  # a censused entry point.
+  #
+  # MERGE HAZARD, restated because three open PRs (#10811, #10129 and #10086 —
+  # the last adds one tag, `details`, and is CCH-owned) also touch
+  # internal/cloudclient: whichever of them lands second must RE-MEASURE both
+  # floors by this same technique. Summing deltas is how an `==` pin ships wrong.
+  #
+  # RE-MEASURED on the wave-35 rebase (this branch merged with main at
+  # 4b5d802a1d): the 999-technique printed "149 emitted key(s) collected, floor
+  # is EXACTLY 999" and "268 json tag(s) found in internal/cloudclient, floor is
+  # EXACTLY 999" — both floors HOLD across the merge, measured, not derived.
+  @emitted_floor 149
+  @go_tag_floor 268
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is

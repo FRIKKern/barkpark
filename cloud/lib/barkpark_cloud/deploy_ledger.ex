@@ -427,6 +427,27 @@ defmodule BarkparkCloud.DeployLedger do
   # (`too_young`) and never folded into either side.
   @coverage_maturity_seconds 86_400
 
+  # THE COVERING QUERY'S BOUND, AS A MACHINE-READABLE WORD (dr-w34-s1).
+  #
+  # `@coverage_basis` says this in prose and prose is not a key: a reader that
+  # wants to know whether the number in front of it was computed against a
+  # right-bounded window has to parse an English paragraph to find out. This is
+  # the same fact, as one token a decoder can branch on.
+  #
+  # It lives HERE, on `coverage_cohorts`, and deliberately NOT on `census/3`'s
+  # `window` map: THAT map is genuinely half-open `[from, to)` and bounded on
+  # BOTH sides, so a bound key there would be a machine-readable falsehood. The
+  # open-right property belongs to the covering query alone (`live_marks/1`).
+  @coverage_covering_bound "left_only"
+
+  # HOW MANY NAMED SITES THE NEVER-COVERED LIST CARRIES. The list is a tail, and
+  # a tail has no natural size — so it is bounded, and the bound is reported
+  # beside it (`never_covered_sites_total` / `never_covered_sites_truncated`)
+  # exactly as `census/3` reports `total_sites`/`truncated` over its own cut. A
+  # list that truncates silently is the anonymity this key exists to end,
+  # reproduced one level down.
+  @never_covered_site_limit 20
+
   @coverage_clock "the SAME clock as `deferral_wait` — a row's `inserted_at` → the FIRST later `inserted_at` of a live row on the same site and environment — applied to BOTH the deferred and the failed-terminating cohorts. Never keyed on `content_rev` (D170(a)/D162) and never on `became_live_at`"
 
   @coverage_basis "COVERAGE, and only coverage: a row counts as COVERED when THE SITE has since rebuilt (a later live build was minted for it). It is never a claim about this row's own payload. NEVER COVERED counts only PENDING rows older than the maturity fence; younger ones are reported separately as too_young, and UNREADABLE rows are reported beside both, never inside either. TWO THINGS THE WINDOW DOES TO THIS NUMBER, said out loud. (1) The covering query is bounded on the LEFT only — a later live build minted AFTER the window's `to` still counts, because refusing to see it would manufacture PENDING at the reader's own boundary. So a reading over a window whose `to` is in the past answers 'is this site stuck NOW', never 'was it stuck back then': it is not a retrospective. (2) too_young is decided against the maturity fence measured from the PINNED as_of (the window's `to`), so shifting `to` by one day can move a row across the too_young/NEVER COVERED line without one row of the population changing"
@@ -1524,20 +1545,116 @@ defmodule BarkparkCloud.DeployLedger do
       Enum.map(rows, fn row ->
         row
         |> deferral_outcome(marks, as_of)
-        |> Map.merge(%{status: row.status, environment: row.environment})
+        # `site_id` rides through the merge (dr-w34-s1). It was ALREADY selected
+        # above and then thrown away here — `deferral_outcome/3` answers only
+        # `%{outcome:, seconds:}` — and that single omission is the whole reason
+        # the never-covered split could be built by ENVIRONMENT and never by
+        # SITE. Carrying it costs no query: it is a key on a row already read.
+        |> Map.merge(%{
+          status: row.status,
+          environment: row.environment,
+          site_id: row.site_id
+        })
       end)
 
     by_status = Enum.group_by(observations, & &1.status)
+    {sites, total_sites} = never_covered_sites(Enum.filter(observations, &never_covered?/1))
 
     %{
       clock: @coverage_clock,
       basis: @coverage_basis,
       as_of: as_of,
       maturity_seconds: @coverage_maturity_seconds,
+      # The covering query's bound, as a token rather than as a paragraph.
+      covering_bound: @coverage_covering_bound,
       cohorts:
         Enum.map(@coverage_cohort_statuses, fn status ->
           coverage_cohort(status, Map.get(by_status, status, []))
-        end)
+        end),
+      # WHICH SITES. A never-covered COUNT tells an operator that something is
+      # sitting dark and refuses to say what — the anonymity this epic's exit
+      # instrument exists to end. Pooled across BOTH cohorts on purpose: a site
+      # is stuck or it is not, and whether the row that stranded it terminated
+      # `deferred` or `failed` is the cohorts' question, not this list's.
+      never_covered_sites: sites,
+      # …and the list's own population, so the top-20 of a longer tail can never
+      # be read as the whole tail (the `total_sites`/`truncated` law, one level
+      # down).
+      never_covered_sites_total: total_sites,
+      never_covered_sites_truncated: total_sites > @never_covered_site_limit
+    }
+  end
+
+  # THE MATURITY FENCE AS ONE PREDICATE, so the cohort split and the site list
+  # can never disagree about what "never covered" means. `seconds` on a PENDING
+  # observation is the time it HAS ALREADY WAITED, so the fence is a test on
+  # that lower bound and needs no second clock.
+  defp never_covered?(%{outcome: "PENDING", seconds: seconds}),
+    do: seconds >= @coverage_maturity_seconds
+
+  defp never_covered?(_observation), do: false
+
+  # The never-covered tail, by `{site_id, environment}`, BOUNDED — and the
+  # unbounded total beside it.
+  #
+  # ONE query resolves the names, over AT MOST `@never_covered_site_limit` ids
+  # no matter how long the tail is, and those ids are harvested from rows that
+  # came out of `scoped` — the source query the caller already narrowed with
+  # `scope_to_sites/2`. A site that can be named here is a site that was already
+  # in scope. The id list must never be built from request params: that, and
+  # only that, is how this join could widen a team's read.
+  defp never_covered_sites([]), do: {[], 0}
+
+  defp never_covered_sites(observations) do
+    grouped =
+      observations
+      |> Enum.group_by(&{&1.site_id, &1.environment})
+      |> Enum.map(fn {{site_id, environment}, rows} ->
+        %{site_id: site_id, environment: environment, never_covered: length(rows)}
+      end)
+      |> Enum.sort_by(&{-&1.never_covered, &1.environment, &1.site_id})
+
+    shown = Enum.take(grouped, @never_covered_site_limit)
+    names = site_names(shown |> Enum.map(& &1.site_id) |> Enum.uniq())
+
+    rows =
+      Enum.map(shown, fn row ->
+        row
+        |> Map.merge(Map.get(names, row.site_id, %{name: nil, slug: nil}))
+        |> coverage_site_row()
+      end)
+
+    {rows, length(grouped)}
+  end
+
+  defp site_names([]), do: %{}
+
+  defp site_names(site_ids) do
+    Repo.all(
+      from(s in Site,
+        where: s.id in ^site_ids,
+        select: %{id: s.id, name: s.name, slug: s.slug}
+      )
+    )
+    |> Map.new(fn s -> {s.id, %{name: s.name, slug: s.slug}} end)
+  end
+
+  # ONE never-covered site's row, as a NAMED single-clause producer — the same
+  # reason `site_row/2` is one (dr-w18-s2): the payload census can only walk a
+  # named `def`/`defp`, so an inline map literal inside the fold above would be
+  # a wire shape NOTHING checks against its Go decoder. `{:coverage_site_row, 1}`
+  # is a censused pair; a key added here without a matching `DeployCoverageSite`
+  # tag now reds.
+  defp coverage_site_row(row) do
+    %{
+      site_id: row.site_id,
+      # NULLABLE ON PURPOSE. A site row that has been deleted since the
+      # deployment was written resolves to no name at all, and `nil` is the
+      # honest answer — an empty string would read as a site called "".
+      name: row.name,
+      slug: row.slug,
+      environment: row.environment,
+      never_covered: row.never_covered
     }
   end
 
@@ -1554,7 +1671,7 @@ defmodule BarkparkCloud.DeployLedger do
     # the maturity fence is a predicate on that lower bound and needs no second
     # clock.
     {never_covered, too_young} =
-      Enum.split_with(pending, &(&1.seconds >= @coverage_maturity_seconds))
+      Enum.split_with(pending, &never_covered?/1)
 
     %{
       cohort: status,
@@ -1914,14 +2031,35 @@ defmodule BarkparkCloud.DeployLedger do
   a `binary_id` column, so the caller must hand this an intersection it computed
   itself — never a client-supplied list.
 
-  Options: `:as_of` (the still-waiting clock, default now), `:site_limit`
+  Options: `:as_of` (the still-waiting clock, default `to` — the window's own
+  pinned right edge, so one envelope carries ONE `as_of`), `:site_limit`
   (default 50), `:site_ids` (default `nil` — the whole fleet).
   """
   @spec delivery(DateTime.t(), DateTime.t(), keyword()) :: map()
   def delivery(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
     site_limit = Keyword.get(opts, :site_limit, 50)
     site_ids = Keyword.get(opts, :site_ids)
-    as_of = opts |> Keyword.get(:as_of, DateTime.utc_now()) |> DateTime.truncate(:microsecond)
+    # ONE `as_of` PER ENVELOPE (dr-w34-s1). The default was `DateTime.utc_now()`,
+    # and the operator route builds its body as
+    # `census(from, to) |> Map.put(:delivery, delivery(from, to))` — two calls,
+    # two clocks. On the live control plane at `--days 23` the two stamps came
+    # out 15.7s apart (22:41:03Z vs 22:41:18.671493Z), so one envelope carried
+    # two different answers to "as of when". `to` is the window's own pinned
+    # edge, which is what `deferral_wait/2` and `coverage_cohorts/2` have always
+    # used, and pinning it here is the same argument they make: a floating clock
+    # makes the same pinned window answer differently on every read.
+    #
+    # The default is taken UNTRUNCATED. `DateTime.truncate/2` exists here to
+    # tame `utc_now()`'s stray precision, and applying it to `to` would widen a
+    # pinned second-precision edge to microseconds — so the SAME instant would
+    # ship as "…T00:00:00Z" under `window.to` and "…T00:00:00.000000Z" under
+    # `as_of`, and a reader comparing the two stamps would still see two
+    # different strings. One envelope, one instant, one rendering of it.
+    as_of =
+      case Keyword.fetch(opts, :as_of) do
+        {:ok, given} -> DateTime.truncate(given, :microsecond)
+        :error -> to
+      end
 
     scoped =
       from(d in Deployment,

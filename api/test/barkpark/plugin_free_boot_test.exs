@@ -499,6 +499,12 @@ defmodule Barkpark.PluginFreeBootTest do
           scope
         )
 
+      # The root MUST be published: resolve_graph_root only matches published
+      # rows at the default perspective (draft-only id => 404, the sealed graph
+      # draft-title leak). A draft fixture here would 404 and misread as "route
+      # not core-mounted".
+      {:ok, _pub} = Barkpark.Content.publish_document(doc_id, "post", "production", scope)
+
       raw_token = "barkpark-plugin-free-graph-#{System.unique_integer([:positive])}"
 
       {:ok, _} =

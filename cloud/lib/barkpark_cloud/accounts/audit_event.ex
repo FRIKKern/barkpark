@@ -33,7 +33,8 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
 
   # The closed verb vocabulary. Dotted `<noun>.<verb>` so the UI can group by
   # noun and a typo is a changeset error (validate_inclusion), not a silent new
-  # category. Extend here as new audited call-sites land — the routes wired today
+  # category. Extend it in design/audit-actions.json as new audited call-sites
+  # land (the derivation is below) — the routes wired today
   # are the member / invitation / token / subscription / site / barkpark seams
   # (including the OC24 instance-lifecycle triggers: retry / verify /
   # studio-link / site-url / self-update / rollback / autoupdate / domain /
@@ -61,32 +62,67 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # the two vocabularies is the open row
   # `cch-w58-bl-two-unavailable-vocabularies-name-one-fact`; this comment is the
   # MAP, not the merge.
-  @actions ~w(
-    member.invited member.role_changed member.removed
-    invitation.revoked invitation.accepted
-    subscription.activated subscription.canceled
-    token.minted token.revoked
-    site.created site.deleted
-    site.deploy_requested site.artifact_uploaded site.env_changed
-    site.domain_added site.github_connected site.github_disconnected
-    site.cloudflare_bound site.rolled_back
-    deployment.promoted
-    webhook.created webhook.updated webhook.deleted webhook.rotated webhook.replayed
-    webhook.test_sent
-    barkpark.go_live barkpark.deleted
-    barkpark.retry_requested barkpark.verify_requested barkpark.studio_link_minted
-    barkpark.app_token_minted barkpark.app_token_revoked
-    barkpark.site_url_set barkpark.self_update_triggered barkpark.rollback_triggered
-    barkpark.autoupdate_changed barkpark.domain_attached
-    barkpark.vercel_deploy_triggered barkpark.resurrected
-    barkpark.push_relay_provisioned barkpark.credentials_refused
-    env_var.created env_var.deleted
-    provider.connected provider.disconnected
-    github.installation_connected github.installation_disconnected github.repo_pushed
-    notifications.settings_changed notifications.channels_changed notifications.events_changed
-    twofa.enabled twofa.disabled
-    oauth.linked email.verified
-  )
+  # THE VOCABULARY IS NO LONGER A HAND-LIST HERE (cch-w65). It is DERIVED, at
+  # compile time, from design/audit-actions.json — the SOLE authority for the
+  # audit register's verbs. That same table also carries each verb's console
+  # sentence fragment, and design/emit.mjs emits those into the ACTION_LABELS
+  # region of cloud/priv/static/app.js. So the closed server vocabulary and the
+  # console's labels are two OUTPUTS of one file rather than two hand-kept lists:
+  # neither side greps the other's syntax, and a label for a verb this allowlist
+  # does not declare has nowhere to live — a row IS the declaration and its label
+  # rides on that row. Adding a verb: append a row to the JSON, run
+  # `node design/emit.mjs --write`, commit app.js + design/emit-manifest.json.
+  #
+  # @external_resource makes a table edit recompile this module, so the
+  # `validate_inclusion(:action, @actions)` below cannot go stale against it.
+  # (Compile-time-read precedent in this app: the router's
+  # @providers_capabilities_fixture.) The read is compile-time ONLY — nothing here
+  # touches the filesystem at runtime, and `design/` is not a release artifact.
+  @audit_actions_manifest Path.expand("../../../../design/audit-actions.json", __DIR__)
+  @external_resource @audit_actions_manifest
+  @audit_actions_table @audit_actions_manifest
+                       |> File.read!()
+                       |> Jason.decode!()
+                       |> Map.fetch!("actions")
+
+  # The shape gate, at COMPILE time, so a malformed table is a build failure and
+  # never a silently-shrunk vocabulary. design/check.mjs Part 0 asserts the SAME
+  # invariants on the JS side (`auditActions()` in design/emit.mjs); this arm is
+  # the one that matters for the server, because the value it guards is the closed
+  # set `changeset/2` enforces. The keys this raises over are exactly the three
+  # states a row can be in: a verb, a label, and — when the label is null — the
+  # machine-checked rationale that makes "unlabelled on purpose" (charter D582) a
+  # declaration rather than a discipline.
+  Enum.each(@audit_actions_table, fn row ->
+    verb = row["verb"]
+
+    unless is_binary(verb) and Regex.match?(~r/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/, verb) do
+      raise "design/audit-actions.json: #{inspect(row)} has no dotted <noun>.<verb> `verb` slug."
+    end
+
+    unless Map.has_key?(row, "label") do
+      raise "design/audit-actions.json: #{verb} states no `label` key at all. Every declared " <>
+              "verb declares its console label explicitly — a string, or null WITH a " <>
+              "`reason_code` and a `reason`. An absent key is the silent third state the " <>
+              "single-table shape exists to remove."
+    end
+
+    if is_nil(row["label"]) and
+         not (is_binary(row["reason_code"]) and is_binary(row["reason"]) and
+                String.length(row["reason"]) >= 60) do
+      raise "design/audit-actions.json: #{verb} has `label: null` and no substantive " <>
+              "`reason_code` + `reason`. Charter D582 blessed the raw dotted slug as HONEST, " <>
+              "not as unexplained: an unlabelled verb has to say why in the table."
+    end
+  end)
+
+  @actions Enum.map(@audit_actions_table, & &1["verb"])
+
+  if length(Enum.uniq(@actions)) != length(@actions) do
+    raise "design/audit-actions.json declares a verb twice: " <>
+            inspect(@actions -- Enum.uniq(@actions)) <>
+            ". The vocabulary is a set; a duplicate row means one of the two labels is dead."
+  end
 
   # Append-only stream: stamp inserted_at, never updated_at (mirrors AgentEvent).
   @timestamps_opts [type: :utc_datetime_usec, updated_at: false]

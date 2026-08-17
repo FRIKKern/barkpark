@@ -69,6 +69,7 @@ docs/setup/AGENT-ONRAMPS.md 11000
 docs/decisions/success-claim-census.md 19307
 
 scripts/deploy-reliability-exit-2026-08-10.md 11200
+scripts/deploy-reliability-exit-2026-08-17.md 9800
 CAPS
 
 # --- cards: each <= 2400 B, count must equal exactly 7 (G2, A6) -------------
