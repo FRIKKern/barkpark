@@ -18616,6 +18616,13 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     no_subscription: "This team doesn't have a subscription yet — start one from the Billing panel.",
     live_twin: "A live instance with that name already exists — decommission it first.",
     role_too_high: "You can't grant a role higher than your own.",
+    // cch-w72-bl (D878/D879) — the deploy arm's two curated cures, pinned in the
+    // same commit that registered them. instance_not_live is deliberately ABSENT
+    // from this sweep: it is the singular-detail fence's fifth slug and has NO
+    // ERRORS entry (the shadow law) — pinning it here would demand the entry
+    // that would break its relay.
+    deploy_not_started: "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.",
+    no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.",
   };
   for (const [slug, copy] of Object.entries(PINNED)) {
     assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
@@ -18649,6 +18656,11 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     // cch-w72-s2 (D871) — the five new curated readers join the ban sweep in the
     // same commit that registered them; each must stay free of a support-channel.
     "checkout_failed", "portal_failed", "no_subscription", "live_twin", "role_too_high",
+    // cch-w72-bl (D878/D879) — the deploy arm's two curated cures join the ban
+    // sweep in the same commit. instance_not_live stays OUT: no ERRORS entry
+    // exists for it (the fence's shadow law), so listing it here would red the
+    // registered-slug assertion by design.
+    "deploy_not_started", "no_content_binding",
   ];
 
   // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
@@ -21710,6 +21722,9 @@ test("cch-w72-s2: the billing refusals NEVER relay the server's raw reason (cch-
 // (2) THE FENCE'S FOURTH SLUG. provisioning_in_progress relays its measured 409
 // detail verbatim — and gets NO ERRORS entry (THE SHADOW LAW): a curated entry
 // would win the earlier rung and silently disable this relay.
+// cch-w72-bl (D874) later admitted a FIFTH slug, instance_not_live — the fence
+// now carries five; its pair of tests is tail-appended in the cch-w72-bl deploy-
+// arm section below.
 test("cch-w72-s2: provisioning_in_progress is the fence's fourth slug — its detail relays verbatim", () => {
   const detail = "This instance is still provisioning. Try removing it once it's up or has failed.";
   assert.equal(hooks.friendly({ error: "provisioning_in_progress", detail: detail }, "Please try again."),
@@ -21733,6 +21748,9 @@ test("cch-w72-s2: THE SHADOW LAW — provisioning_in_progress has NO ERRORS entr
 
 test("cch-w72-s2: the fence's three original slugs still relay, and an unfenced detail-bearing slug drops to the fallback", () => {
   // Fence semantics otherwise unchanged: the pre-existing three still relay…
+  // (cch-w72-bl: the fence's full disjunction is FIVE slugs — the fourth,
+  // provisioning_in_progress, is proven above; the fifth, instance_not_live,
+  // in the deploy-arm section below.)
   assert.equal(hooks.friendly({ error: "barkpark_required", detail: "name the instance" }, "fb"), "name the instance");
   assert.equal(hooks.friendly({ error: "deploy_ability_required", detail: "mint a deploy token" }, "fb"), "mint a deploy token");
   assert.equal(hooks.friendly({ error: "nothing_to_update", detail: "nothing to update" }, "fb"), "nothing to update");
@@ -21879,4 +21897,100 @@ test("cch-w72-bl: confirmDeleteEnvVar — friendly() carries a truthy honest fal
 test("cch-w72-bl: NEGATIVE CONTROL — a direct one-arg friendly() on an unknown slug still humanizes", () => {
   assert.equal(hooks.friendly({ error: "totally_unknown_slug" }), "totally unknown slug");
   assert.equal(hooks.friendly({ error: CCHW72_UNREAD_SLUG }), CCHW72_HUMANIZED);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w72-bl (wave 74, charter D874/D878/D879) — THE DEPLOY ARM STOPS
+// SWALLOWING WHAT THE PLANE PROVED. Three deploy_static_site refusals that a
+// member can reach through the Deploy button (runDeploy) or the create chain
+// (createAndDeploy) — both of which already hand the whole body to
+// friendly(r.data, …), so every cure lands in the copy layer with ZERO handler
+// edits:
+//
+//   instance_not_live  — the singular-detail fence's FIFTH slug (D874). Its 422
+//                        detail is static surface-neutral product copy; the
+//                        relay carries it verbatim. Shadow law: NO ERRORS entry.
+//   deploy_not_started — curated ERRORS entry (D879), because the 503 body's
+//                        own strings are unrelayable: `reason` is inspect()
+//                        noise and `detail`'s console spelling says "Retry the
+//                        deploy", a lie at the CLI prebuilt twin.
+//   no_content_binding — curated ERRORS entry (D878): the old fallback "Please
+//                        try again." was a measured transience lie for a
+//                        permanent-until-bound state, and the wire detail is
+//                        CLI-voiced ("--dataset …"), barred from relay.
+
+// (1) THE FIFTH SLUG RELAYS. The exact detail deploy_static_site mints (422,
+// single emit site) reaches the person verbatim through runDeploy's own
+// friendly(r.data, "Please try again.") shape.
+test("cch-w72-bl: instance_not_live is the fence's fifth slug — its measured detail relays verbatim", () => {
+  const detail = "the instance hosting this site has no URL yet — wait for it to finish provisioning";
+  assert.equal(hooks.friendly({ error: "instance_not_live", detail: detail }, "Please try again."),
+    detail);
+  // The two rungs compose: the NESTED envelope spelling still relays.
+  assert.equal(hooks.friendly({ error: { code: "instance_not_live" }, detail: "no URL yet" }, "fb"),
+    "no URL yet");
+});
+
+test("cch-w72-bl: THE SHADOW LAW — instance_not_live has NO ERRORS entry, and its near-twin not_live keeps its own", () => {
+  // A bare slug (no detail) MUST drop to the caller's fallback: if a curated
+  // ERRORS sentence existed, friendly() would return it here instead — the
+  // earlier curated rung would win and silently disable the fence relay above.
+  assert.equal(hooks.friendly({ error: "instance_not_live" }, "the caller's fallback"),
+    "the caller's fallback");
+  // THE NEAR-TWIN GUARD: `not_live` is a DIFFERENT code (the instance panel's
+  // 409) and is legitimately curated. It must keep its sentence — and
+  // instance_not_live must never inherit it "for symmetry": the bare-slug
+  // fallback above already proves it did not.
+  assert.equal(hooks.friendly({ error: "not_live" }, "fb"),
+    "The instance isn't live yet — wait for provisioning to finish.");
+});
+
+// (2) deploy_not_started — the D879 curated cure. The curated rung wins FIRST
+// in friendly(), so neither of the 503 body's unrelayable strings can reach
+// the person.
+test("cch-w72-bl: deploy_not_started renders the D879 sentence — no bare retry verb", () => {
+  const copy = hooks.friendly({ error: "deploy_not_started" }, "Please try again.");
+  assert.equal(copy,
+    "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.");
+  // D879: no bare retry verb. "Retry the deploy" / "try again" would be a lie
+  // at the CLI prebuilt twin, where a same-sha re-POST answers already_uploaded
+  // and builds nothing; "start a fresh deploy" is true at both emit sites.
+  assert.ok(!/\bretry\b|try again/i.test(copy), "the D879 copy must not carry a bare retry verb: " + copy);
+});
+
+test("cch-w72-bl: deploy_not_started NEVER relays the 503 body's reason or detail (cch-w48-s2 class)", () => {
+  // The real 503 body: `reason` is inspect() noise, `detail` is the router's
+  // console spelling whose "Retry the deploy" D879 refused. The curated rung
+  // wins before the details ladder and the fence, so neither string renders.
+  const body = {
+    error: "deploy_not_started",
+    detail: "the deployment row was created but the build driver could not be started" +
+      " — nothing is building. Retry the deploy; if it keeps failing the control" +
+      " plane is out of build capacity.",
+    reason: "{:error, {:already_started, #PID<0.123.0>}}",
+  };
+  const copy = hooks.friendly(body, "Please try again.");
+  assert.equal(copy,
+    "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.");
+  assert.equal(copy.indexOf("PID"), -1, "inspect() noise must never reach the person");
+  assert.equal(copy.indexOf("Retry the deploy"), -1, "the wire detail's retry spelling must never reach the person");
+});
+
+// (3) no_content_binding — the D878 curated cure for a measured transience lie.
+test("cch-w72-bl: no_content_binding renders the permanent-until-bound truth — no transience verb, no CLI incantation", () => {
+  const copy = hooks.friendly({ error: "no_content_binding" }, "Please try again.");
+  assert.equal(copy,
+    "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.");
+  // The state is permanent until content is bound: a transience verb would be
+  // the exact lie this cure deletes.
+  assert.ok(!/try again|\bretry\b/i.test(copy), "no transience verb: " + copy);
+  // …and the wire detail is CLI-voiced (`--dataset <workspace>/<project>/<dataset>`).
+  // The curated rung wins first, so the incantation never renders — even when
+  // the real body carries it.
+  const wired = hooks.friendly({
+    error: "no_content_binding",
+    detail: "this site isn't bound to any content — create it with `--dataset <workspace>/<project>/<dataset>`",
+  }, "Please try again.");
+  assert.equal(wired, copy, "the CLI-voiced wire detail must never displace the curated sentence");
+  assert.equal(copy.indexOf("--dataset"), -1, "no CLI flag in console copy");
 });
