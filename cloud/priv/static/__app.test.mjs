@@ -18098,6 +18098,13 @@ test("cch-w40-bl: domain_not_pointed RELAYS the measured remedy — expected_ip 
     f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: [] }),
     "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7.",
     "no observed answer → just the target, no empty 'resolves to' clause");
+  // expected_ip is NULLABLE on the wire: pointed_at?(_host, nil, _opts) answers
+  // {:error, []} for a host-less instance and the route relays expected_ip:
+  // bp.host verbatim — the remedy clause must not render "at null".
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: null, observed: [] }),
+    "That domain isn't pointed at this instance yet.",
+    "a null expected_ip drops the remedy clause instead of pointing at 'null'");
   // The false sentence is gone entirely from this arm.
   const all = [
     f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"] }),

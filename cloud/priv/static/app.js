@@ -7930,12 +7930,18 @@
         // Relay the MEASURED remediation — the A-record target the plane wants and,
         // when the resolver returned any answer, the address it actually observed.
         // Both are server-derived strings; the caller renders via textContent only.
-        var msg = "That domain isn't pointed at this instance yet. Point an A record at " +
-          data.expected_ip;
-        var observed = data.observed;
-        if (Array.isArray(observed)) observed = observed.join(", ");
-        if (observed) msg += " — right now it resolves to " + observed + ".";
-        else msg += ".";
+        // expected_ip CAN be null on the wire: pointed_at?(_host, nil, _opts)
+        // answers {:error, []} for a host-less instance, and the route relays
+        // expected_ip: bp.host verbatim — so the remedy clause renders only when
+        // there is a real target ("Point an A record at null." is a lie).
+        var msg = "That domain isn't pointed at this instance yet.";
+        if (typeof data.expected_ip === "string" && data.expected_ip) {
+          msg += " Point an A record at " + data.expected_ip;
+          var observed = data.observed;
+          if (Array.isArray(observed)) observed = observed.join(", ");
+          if (observed) msg += " — right now it resolves to " + observed;
+          msg += ".";
+        }
         return msg;
       }
       if (code === "invalid_domain") return "That doesn't look like a valid domain name.";
