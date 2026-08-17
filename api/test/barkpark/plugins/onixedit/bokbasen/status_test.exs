@@ -151,5 +151,37 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.StatusTest do
       assert_receive {:bokbasen_status_update, %{"state" => "staging"} = status}, 1_000
       assert is_binary(status["updated_at"])
     end
+
+    # felix-w25-s4: the write/2 raw Repo.update bypassed the Content event path,
+    # so SSE /v1/data/listen, webhooks, and cache revalidation never saw a
+    # bp_export_status write. Assert BOTH emissions: (i) a canonical
+    # mutation_events row + broadcast on documents:<dataset>, and (ii) the
+    # PRESERVED plugin-private bokbasen:document:<id> topic. Mutation proof:
+    # delete either emission in status.ex and the matching assert_receive reds.
+    test "write/2 emits a canonical mutation_events row + broadcast AND preserves the private topic" do
+      doc = seed_doc(%{})
+
+      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:production")
+      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{doc.doc_id}")
+
+      _ = Status.write(doc, %{"state" => "staging"})
+
+      # (i) canonical spine — a real event row + broadcast the SSE controller keeps.
+      assert_receive {:document_changed,
+                      %{event_id: event_id, mutation: "update", doc_id: broadcast_doc_id}},
+                     1_000
+
+      assert broadcast_doc_id == doc.doc_id
+      refute is_nil(event_id)
+
+      row = Repo.get(Barkpark.Content.MutationEvent, event_id)
+      assert row.doc_id == doc.doc_id
+      assert row.type == "book"
+      assert row.dataset == "production"
+      assert row.mutation == "update"
+
+      # (ii) preserved plugin-private topic the Bokbasen consoles depend on.
+      assert_receive {:bokbasen_status_update, %{"state" => "staging"}}, 1_000
+    end
   end
 end
