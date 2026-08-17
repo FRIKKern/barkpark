@@ -2526,7 +2526,13 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
     setup do
       current = Application.get_env(:barkpark, :claude_chat, [])
-      Application.put_env(:barkpark, :claude_chat, Keyword.put(current, :max_runtime_text_bytes, @cap_bytes))
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(current, :max_runtime_text_bytes, @cap_bytes)
+      )
+
       on_exit(fn -> Application.put_env(:barkpark, :claude_chat, current) end)
       :ok
     end
@@ -2591,7 +2597,12 @@ defmodule Barkpark.StudioChat.RecorderTest do
     test "raising the cap lets the full turn persist (config is truly overridable)",
          %{sid: sid, recorder: recorder} do
       current = Application.get_env(:barkpark, :claude_chat, [])
-      Application.put_env(:barkpark, :claude_chat, Keyword.put(current, :max_runtime_text_bytes, 100_000))
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(current, :max_runtime_text_bytes, 100_000)
+      )
 
       frame(recorder, runtime_kind(sid, :turn_started))
       frame(recorder, text_delta(sid, String.duplicate("c", 4096)))

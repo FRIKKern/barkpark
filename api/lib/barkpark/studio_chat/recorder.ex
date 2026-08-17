@@ -1372,7 +1372,12 @@ defmodule Barkpark.StudioChat.Recorder do
     # here). Accumulation already caps in-flight, but this makes the durable size
     # provable at the one write, independent of how `runtime_text` was built.
     source_markdown = cap_runtime_text(text)
-    persist(session_id, %{role: "assistant", source_markdown: source_markdown, metadata: %{}}, "assistant")
+
+    persist(
+      session_id,
+      %{role: "assistant", source_markdown: source_markdown, metadata: %{}},
+      "assistant"
+    )
   end
 
   defp persist_runtime_text(_state), do: :ok
