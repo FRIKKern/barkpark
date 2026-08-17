@@ -336,7 +336,6 @@ func TestPopAtRootIsNoOp(t *testing.T) {
 	}
 }
 
-
 // ── Hysteresis (charter D12/D27) ─────────────────────────────────────────────
 
 // Two-pane engages at >=110 and reverts below 106; the deadband [106,110) holds
