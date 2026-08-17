@@ -1,39 +1,39 @@
 
  barkpark · tasks       ⇄ guerrilla  CONN · T↔  ──────────────────────────────────────────────────────────────────────────
- ▎ The task TUI is glanceable, live, an… ··· 2/14│ │ The task TUI is glanceable, live, and never flickers                     │
- ├─ ⠿ The live tmux drive ships as a committed S…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
- │    C5/7 · P1 · 3/5                            │ │                                                                          │
- ├─ ⠿ Wide-mode footer verbs become clickable ag…│ │ criteria 4/4                                                             │
- │    C5/7 · P2 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
- ├─ ⠿ The TUI card and cheatsheet finally speak …│ │     ↳ cache_test.go includes an intra-session out-of-order rollback gua… │
- │    C5/7 · P3 · 4/5                            │ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
- ├─ ⠿ The board discloses its 1000-row horizon —…│ │     constant motion.                                                     │
- │    C5/7 · P2 · 4/5                            │ │     ↳ board/components/anim tests cover in_progress ordering, claim fre… │
- ├─ ⠿ The two snapshot fetches fly in parallel —…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
- │    C5/7 · P2 · 3/4                            │ │     ↳ compose/hitmap tests cover right-pane focus, wheel scrolling, cli… │
- ├─ ⠿ Sheet-era glyph and golden hygiene: the re…│ │   ✓ The current taskboard regression suite is green.                     │
- │    C5/7 · P3 · 4/5                            │ │     ↳ A fresh go test ./internal/taskboard/... run is recorded with thi… │
- ├─ ⠿ Task-TUI W19 native-proof paperwork: D109-…│ │                                                                          │
- │    C5/7 · P1 · 1/2 · epic-decide-ttw19 · T  │ │ purpose                                                                  │
- ├─ ✓ In-body task chips speak the full 9-status…│ │   part of   Trustworthy task operations                                  │
- └─ ✓ Narrow-mode reading-frame rail stops gain …│ │   impact    Blocks the larger goal when unresolved: operators cannot act │
-   +5 more · 1 cancelled                         │ │             confidently if snapshots rewind, active work disappears, or  │
-                                                 │ │             navigation fights the focused pane.                          │
-   Paper Excellence epic — close the a… ··· 20/58│ │   does      keep the task TUI calm, live, and glanceable.                │
- ├─ ⠿ Wave-3 decide referent: the visible wave's…│ │   why       The larger goal is Trustworthy task operations. The concrete │
- │    C5/7 · P1 · ✓✓○ 2/3 · pe-w3-decide · T    │ │             problem is that operators cannot act confidently if          │
- ├─ ⠿ Sections get a class hook on both wrappers…│ │             snapshots rewind, active work disappears, or navigation      │
- │    C5/7 · P2 · 6/7                            │ │             fights the focused pane. Shipping forward-only snapshot      │
- ├─ ⠿ The rig learns to measure the crown — four…│ │             handling, live lifecycle cues, focused scrolling, and        │
- │    C5/7 · P3 · 5/6                            │ │             regression gates is the correct intervention because         │
- ├─ ⠿ BPML's inline grammar accepts the corpus's…│ │             forward-only snapshot acceptance repairs temporal truth,     │
- │    C5/7 · P2 · 4/5                            │ │             live cues expose real state changes, and focused input       │
- ├─ ✓ pdrender stops inventing figure numbers an…│ │             routing gives each pane predictable ownership. If omitted,   │
- └─ ✓ The publish floor's outline arms see the w…│ │             the board becomes a noisy animation rather than an           │
-   +34 more · 18 done                            │ │             operational instrument.                                      │
-                                                 │ │   endgame   Trustworthy task operations is backed by one canonical       │
-   API Read-Path Security Sweep (epic) ···· 14/32│ │             owner, measurable evidence, and truthful lifecycle scope.    │
-   ↓ 34 more below                               │ │   important 92/100 — The omission cost is that the board becomes a noisy │
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │             animation rather than an operational instrument.             │
- ⠿ 20 in flight · ○ 1+ ready · ✓ 3278 done ·… 51%│ │   relevant  100/100 — The task directly addresses the observed problem   │
+ ▎ Cloud Console hardening — the Clou… ··· 87/220│ │ Cloud Console hardening — the Cloud GUI Remake's chartered successor     │
+ ├─ ⠿ Wave 71 paperwork: charter PR (D861-D866) …│ │ ○ open · P1 · C4/7 · task · epic-decide-w67                              │
+ │    C4/7 · P1 · w71-decide-fable · T          │ │                                                                          │
+ ├─ ✓ friendly() THROWS a TypeError on the neste…│ │ criteria 0/4                                                             │
+ └─ ✓ Wave 70 paperwork — the measured-sentence …│ │   ○ BAND 2 is routed: gr-blk-studio-presence-perf-flake is re-parented   │
+   +132 more · 85 done · 27 cancelled            │ │     to Felix pristine (task-96a908af98698118), and for repo-git hygiene, │
+                                                 │ │     CI/merge-gate governance and Cloud test-infra either an owning epic  │
+   The task TUI is glanceable, live, an… ··· 9/19│ │     is filed or the absence is recorded as a standing finding with task- │
+ ├─ ⠿ The drive harness anchors row identity on …│ │     openapi-drift-chronic named as the same class.                       │
+ │    C5/7 · P2 · 3/4                            │ │     ↳ HALF (a) VERIFIED TRUE, HALF (b) OUTSTANDING — recorded by cch-w1- │
+ ├─ ⠿ The conn dot never calls a slow fetch offl…│ │       census-disposition (wave 1) without flipping met, because only one │
+ │    C5/7 · P1 · 4/5                            │ │       of the two clauses is satisfied. (a) ROUTING: gr-blk-studio-       │
+ ├─ ⠿ The reading geometry stops taking a -2 mut…│ │       presence-perf-flake needs NO action — bp task get gr-blk-studio-   │
+ │    C5/7 · P2 · 4/5                            │ │       presence-perf-flake read back parent_id = task-96a908af98698118    │
+ ├─ ⠿ Esc at depth 0 hands j/k back to the board…│ │       (Felix pristine initiative), lifecycle open, title 'A second wall- │
+ │    C5/7 · P2 · 4/5                            │ │       clock-fragile perf test exists in the Studio/Sheets fami…'. It is  │
+ ├─ ⠿ Task-TUI wave 20 trust-wave paperwork: the…│ │       ALREADY where this criterion sends it and is correctly absent from │
+ │    C5/7 · P2 · ✓○ 1/2 · fable-decide-w20 · T│ │       this epic .children roster. Per charter D24 the row was NOT re-    │
+ ├─ ✓ The TUI card and cheatsheet finally speak …│ │       parented — re-parenting an already-correct row would emit a        │
+ └─ ✓ Sheet-era glyph and golden hygiene: the re…│ │       spurious task.reparented event and read as churn. (b) STILL OPEN:  │
+   +5 more · 7 done · 1 cancelled                │ │       the second clause — for repo-git hygiene, CI/merge-gate governance │
+                                                 │ │       and Cloud test-infra, file an owning epic OR record the absence as │
+   Felix pristine initiative — Phoenix … ··· 1/10│ │       a standing finding naming task-openapi-drift-chronic as the same   │
+ └─ ✓ Wave 25 paperwork: charter PR + wave log   │ │       class — was NOT addressed by this slice and is out of its fence.   │
+   +9 more                                       │ │       Whoever takes clause (b) should know clause (a) needs no work. ·   │
+                                                 │ │       T ago (Jul 21, 05:30) · epic-builder-census-truth-pass-evidence- │
+   Paper Excellence epic — close the a… ··· 24/64│ │       close-the-ver                                                      │
+ ├─ ✓ BPML's inline grammar accepts the corpus's…│ │   ○ gr-blk-cssom-parity-ci-wiring is claimed and landed as this epic     │
+ └─ ✓ Wave 4 paperwork: the landing wave's chart…│ │     first task, with the CSSOM parity instrument wired to a gate that is │
+   +40 more · 22 done                            │ │     mutation-proven able to fail.                                        │
+                                                 │ │   ○ The BAND 1 security gradient is preserved in any onward reporting: 2 │
+   API Read-Path Security Sweep (epic) ···· 19/32│ │     live-and-real, 1 real-but-narrow, 1 ruled-clean, 1 prospective. A    │
+ ├─ ○ RULING (owner gate): task+paper anon read …│ │     report that calls all five security gaps is rejected.                │
+   ↓ 20 more below                               │ │   ○ The three permanent human gates are still disclosed by name and      │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │     still resolve; cloud-console-billing-live-gate is still parented     │
+ ⠿ 7 in flight · ○ 2+ ready · ✓ 3301 done · … 51%│ │     under cloud-console-goal, not absorbed here.                         │
  jk · enter open · esc back · c claim · x close …│ │   ↓ more below                                                           │

@@ -355,7 +355,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           "type" => "paragraph",
           "content" => [
             %{"type" => "text", "value" => "run "},
-            %{"type" => "code", "value" => "mix test"}
+            %{"type" => "valueref", "ref" => "stats.total"}
           ]
         }
       ])
@@ -366,7 +366,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
                |> json_response(422)
 
       assert err["code"] == "bpml_unprintable"
-      assert err["message"] =~ ~s(inline node type "code")
+      assert err["message"] =~ ~s(inline node type "valueref")
       assert err["message"] =~ "kind: inline"
       assert err["hint"] =~ "format=json"
 
@@ -407,7 +407,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           "type" => "paragraph",
           "content" => [%{"type" => "text", "value" => "Kept."}]
         },
-        %{"id" => "d1", "type" => "divider"}
+        %{"id" => "i1", "type" => "image"}
       ]
 
       paper = with_blocks!(slug, blocks)
@@ -426,7 +426,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
 
       assert %{"error" => err} = json_response(conn, 422)
       assert err["code"] == "bpml_unprintable"
-      assert err["message"] =~ ~s(block type "divider")
+      assert err["message"] =~ ~s(block type "image")
       assert err["hint"] =~ "block ops"
 
       # THE POINT: nothing was derived and nothing was applied — before the
@@ -444,7 +444,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           %{
             "id" => "p1",
             "type" => "paragraph",
-            "content" => [%{"type" => "code", "value" => "unprintable"}]
+            "content" => [%{"type" => "valueref", "ref" => "stats.total"}]
           }
         ])
 

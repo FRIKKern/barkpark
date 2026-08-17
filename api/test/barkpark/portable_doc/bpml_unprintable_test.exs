@@ -4,14 +4,16 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
   the ONE typed refusal, `Bpml.UnprintableError`, tagged with the position that
   could not be spelled (`:block` | `:inline` | `:mark` | `:head_cell`).
 
-  These are the verify-round probes made permanent. Before them the printer had
-  exactly one honest refusal (unknown block type → `ArgumentError`) and three
-  crash shapes that escaped every caller's rescue as a raw HTTP 500 — 141 of 776
-  published papers on the 2026-08-17 full-corpus census
-  (`tooling/grip/ledger/bpml-full-corpus-census-2026-08-17.md`: 113 unknown
-  inline node type, 18 raw-string inline child, 16 `inline/1` on a non-list,
-  6 bare-string head cell) — plus one SILENT LOSS: a head-cell map without a
-  binary `"text"` printed `""`, dropping the cell with a 200.
+  Wave-3 inline-vocabulary update: the four shapes #11758 refused as a honest
+  stopgap are now SPELLED, not refused — node-spelled `code`/`strong`/`em`
+  inline marks, raw-string inline runs, non-list inline content, and bare-string
+  head cells all print (their positive round-trips live in `BpmlTest`). What
+  STAYS refused is the honest-refusal core: `valueref` (12 papers — resolves
+  against live data the printer cannot reach) and a `paragraph` inline node
+  (20 papers — a BLOCK, unspellable inline) both raise kind `:inline`; a
+  head-cell map without a binary `"text"` still raises kind `:head_cell` rather
+  than dropping the cell with a 200; and every genuinely-unknown block/mark/
+  inline type still raises rather than crashing to a 500.
   """
   use ExUnit.Case, async: true
 
@@ -26,11 +28,11 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
 
   describe "kind: :block" do
     test "a block type outside the kernel names the type" do
-      e = refusal([%{"id" => "d1", "type" => "divider"}])
+      e = refusal([%{"id" => "i1", "type" => "image"}])
 
       assert e.kind == :block
-      assert e.type == "divider"
-      assert Exception.message(e) =~ ~s(block type "divider")
+      assert e.type == "image"
+      assert Exception.message(e) =~ ~s(block type "image")
       assert Exception.message(e) =~ "kind: block"
     end
 
@@ -43,35 +45,50 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
     end
   end
 
-  describe "kind: :inline" do
-    test "an inline node type with no clause names the type — the whole 500 class" do
-      e = refusal([p([%{"type" => "code", "value" => "mix test"}])])
+  describe "kind: :inline (the honest-refusal core that STAYS refused)" do
+    test "a valueref inline node stays refused — it resolves against live data" do
+      e = refusal([p([%{"type" => "valueref", "ref" => "stats.total"}])])
+
+      assert e.kind == :inline
+      assert e.type == "valueref"
+      assert Exception.message(e) =~ ~s(inline node type "valueref")
+    end
+
+    test "a paragraph inline node stays refused — a block is unspellable inline" do
+      e = refusal([p([%{"type" => "paragraph", "content" => []}])])
+
+      assert e.kind == :inline
+      assert e.type == "paragraph"
+      assert Exception.message(e) =~ ~s(inline node type "paragraph")
+    end
+
+    test "a code node smuggling children refuses — printing the value alone would drop them" do
+      e = refusal([p([%{"type" => "code", "children" => [%{"type" => "text", "value" => "x"}]}])])
 
       assert e.kind == :inline
       assert e.type == "code"
-      assert Exception.message(e) =~ ~s(inline node type "code")
     end
 
-    test "a raw string where an inline NODE belongs refuses" do
-      e = refusal([p(["just a string"])])
-
-      assert e.kind == :inline
-      assert e.type == nil
+    test "a strong/em node smuggling its text in value refuses — <b></b> would drop it" do
+      for type <- ["strong", "em"] do
+        e = refusal([p([%{"type" => type, "value" => "smuggled"}])])
+        assert e.kind == :inline
+        assert e.type == type
+      end
     end
 
-    test "inline content that is not a list at all (a string table cell) refuses" do
+    test "genuinely untyped inline content (a number cell) still refuses" do
       e =
         refusal([
           %{
             "id" => "t1",
             "type" => "table",
-            "rows" => [["a string cell"]]
+            "rows" => [[42]]
           }
         ])
 
       assert e.kind == :inline
       assert e.type == nil
-      assert Exception.message(e) =~ "not a typed inline node"
     end
   end
 
@@ -102,19 +119,6 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
       assert Exception.message(e) =~ "inline-node list"
     end
 
-    test "a bare-string head cell refuses (census: 6 papers, formerly a 500)" do
-      blocks = [
-        %{
-          "id" => "t1",
-          "type" => "table",
-          "head" => ["Claim"],
-          "rows" => [[[%{"type" => "text", "value" => "a"}]]]
-        }
-      ]
-
-      assert refusal(blocks).kind == :head_cell
-    end
-
     test "the LEGACY %{\"text\" => binary} head cell still prints — no regression" do
       blocks = [
         %{
@@ -131,7 +135,7 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
 
   describe "the refusal is a 422, never a 500" do
     test "Plug.Exception status is 422 as an unrescued backstop" do
-      assert Plug.Exception.status(UnprintableError.new(:block, "divider")) == 422
+      assert Plug.Exception.status(UnprintableError.new(:block, "image")) == 422
     end
 
     test "every kind is one of the four declared positions" do
