@@ -69,8 +69,10 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	}
 
 	// Prod write-guard parity with the manifest write path: a write against a
-	// prod-looking target needs confirmation unless --yes.
-	if isProdServer(ctx.Server) && !g.yes {
+	// prod-looking target needs confirmation unless --yes, or unless the server
+	// itself advertises production:false on /v1/meta (absence stays fail-closed).
+	// Deliberately NOT confirmProdWrite: this path hard-aborts non-interactively.
+	if isProdServer(ctx.Server) && !g.yes && !serverDeclaredNonProd(ctx.Server) {
 		out.userErr("prod write to %s needs confirmation — re-run with --yes", ctx.Server)
 		return exitGeneric
 	}
@@ -560,14 +562,18 @@ func taskCreateDryRun(out *writer, ctx manifest.Context, mutations []map[string]
 }
 
 // isProdServer mirrors run.go's isProd URL heuristic for the builtin write path
-// (which has no manifest to read m.Server.Name from): a prod-looking host needs
-// --yes. localhost is never prod.
+// (which has no manifest to read m.Server.Name from). FAIL CLOSED, matching
+// isProd's flip (onb-backlog-isprod-custom-host-write-confirm): any host that
+// is not provably local IS prod — a custom production hostname must not skip
+// the write guard just because it matches no substring allowlist. localhost is
+// never prod; --yes and a server-advertised production:false (/v1/meta) are
+// the only ways past the guard.
 func isProdServer(server string) bool {
 	s := strings.ToLower(server)
 	if strings.Contains(s, "localhost") || strings.Contains(s, "127.0.0.1") || strings.Contains(s, "0.0.0.0") {
 		return false
 	}
-	return strings.Contains(s, "api.barkpark.cloud") || strings.Contains(s, "prod")
+	return true
 }
 
 func printTaskCreateHelp(out *writer) {
