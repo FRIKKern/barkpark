@@ -5584,11 +5584,12 @@ defmodule BarkparkCloud.Registry do
   leg refused so that cost is visible before anyone does.
 
   The stored `url` is matched NORMALISED, never string-equal to
-  `"https://" <> host`: scheme stripped, everything from the first character
-  outside the hostname alphabet cut (port, path, query, fragment), trailing dot
-  dropped, case folded. Matching one exact spelling of the origin reads only one
-  of the ways the column is written and lets every other spelling of the SAME
-  hostname through — that is the hole this walk closes.
+  `"https://" <> host`: surrounding whitespace trimmed, scheme stripped,
+  everything from the first character outside the hostname alphabet cut (port,
+  path, query, fragment), trailing dot dropped, case folded. Matching one exact
+  spelling of the origin reads only one of the ways the column is written and
+  lets every other spelling of the SAME hostname through — that is the hole this
+  walk closes.
 
   `self_id` (the /2 head; `/1` passes `nil` and excludes nobody) drops the
   asking row from the walk, so a row may attach the host it already answers on.
@@ -5615,8 +5616,29 @@ defmodule BarkparkCloud.Registry do
     Barkpark
     |> where(
       [b],
+      # The `btrim` is load-bearing, not cosmetic: without it this fragment and
+      # its Elixir twin `normalize_claim_host/1` DISAGREED on every
+      # leading-whitespace spelling. The scheme regex is anchored, so ` https://h`
+      # missed it, and the next step (`[^a-z0-9.-].*$`) then ate the string from
+      # its first character — the whole stored url normalised to `""`, matched
+      # nothing, and `provisioning_fqdn_claim/2` answered `:free` for a hostname
+      # a LIVE box serves. The character set is exactly the 25 codepoints
+      # `String.trim/1` strips (Unicode `White_Space`).
+      #
+      # Every C0 control in that set is spelled `\uXXXX`, never `\t`/`\v`/`\f`:
+      # PostgreSQL 15 has no `\v` case in its escape-string lexer, so there
+      # `E'\v'` is the LETTER v ("any other character following a backslash is
+      # taken literally"), while 16+ reads it as U+000B. That one-character
+      # difference broke the twins BOTH ways on 15 — U+000B was not trimmed (a
+      # VT-led url normalised to `""` again), and the letter `v` WAS, so a
+      # stored `https://host.tv` normalised to `host.t` and the claim answered
+      # `:free` for a live `.tv` box. `\uXXXX` is documented and reads the same
+      # on every supported server. The set's LENGTH is 25 under either
+      # spelling, so only membership testing catches this;
+      # `registry_claim_host_normaliser_test.exs` drives all 25 codepoints
+      # through both twins for exactly that reason.
       fragment(
-        "regexp_replace(regexp_replace(regexp_replace(lower(?), '^[a-z][a-z0-9+.-]*://', ''), '[^a-z0-9.-].*$', ''), '\\.+$', '') = ?",
+        "regexp_replace(regexp_replace(regexp_replace(btrim(lower(?), E'\\u0009\\u000a\\u000b\\u000c\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'), '^[a-z][a-z0-9+.-]*://', ''), '[^a-z0-9.-].*$', ''), '\\.+$', '') = ?",
         b.url,
         ^norm
       )
@@ -5652,8 +5674,15 @@ defmodule BarkparkCloud.Registry do
   defp exclude_self_claim(query, self_id), do: where(query, [b], b.id != ^self_id)
 
   # The url side of the comparison, in Elixir: the same shape the SQL fragment
-  # above produces for `b.url`. `normalize_domain/1` is NOT a drop-in — it only
-  # case-folds and trims a trailing dot, so a caller passing an origin
+  # above produces for `b.url` — case-folded, surrounding whitespace stripped
+  # (`String.trim/1`, whose 25-codepoint Unicode `White_Space` set the
+  # fragment's `btrim` mirrors character-for-character), scheme dropped,
+  # everything from the first character outside the hostname alphabet cut,
+  # trailing dots dropped. These two are TWINS: a step added to one and not the
+  # other re-opens the `:free`-for-a-live-host hole by spelling, which is why
+  # `registry_claim_host_normaliser_test.exs` drives both through one corpus
+  # instead of trusting this comment. `normalize_domain/1` is NOT a drop-in — it
+  # only case-folds and trims a trailing dot, so a caller passing an origin
   # (`https://host:4000/studio`) would compare a scheme-and-port-bearing string
   # against a bare hostname and match nothing.
   defp normalize_claim_host(host) when is_binary(host) do
