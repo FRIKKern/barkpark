@@ -2978,7 +2978,27 @@
     roster.innerHTML = '<div class="set-section"><h2 class="set-h">Connected providers</h2>' +
       '<div class="loading">Loading providers&hellip;</div></div>';
     api("GET", "/v1/providers").then(function (r) {
-      var list = (r.ok && r.data && r.data.providers) || [];
+      // cch-w67-s4 (charter D821) — A FAILED READ IS NOT AN EMPTY ROSTER. This
+      // fold used to hand renderProviderPage an [] for a 500/403/offline alike,
+      // so providerRosterHtml's "No providers connected yet." asserted a fact
+      // the console never received. The !ok arm speaks and offers the retry;
+      // only a list the server actually sent may render as a roster.
+      if (!r.ok) {
+        var box = $("#provider-roster");
+        if (!box) return;
+        box.innerHTML = '<div class="set-section"><h2 class="set-h">Connected providers</h2>' +
+          '<div class="empty-state"><h2>Couldn\'t load providers</h2><p>' +
+          esc(readFailureCopy(
+            r,
+            "You don't have access to this team's providers.",
+            "We couldn't read this team's providers just now — try again in a moment."
+          )) + "</p>" +
+          '<p><button class="btn btn-primary btn-sm" type="button" data-providers-retry>Retry</button></p></div></div>';
+        var rb = box.querySelector("[data-providers-retry]");
+        if (rb) rb.addEventListener("click", loadProviders);
+        return;
+      }
+      var list = (r.data && r.data.providers) || [];
       renderProviderPage(list, providerCanWrite());
     });
   }
@@ -3270,7 +3290,24 @@
     box.innerHTML = '<div class="loading">Loading GitHub&hellip;</div>';
     api("GET", "/v1/github/installation").then(function (r) {
       if (!box.isConnected) return;
-      renderGithub((r.ok && r.data) || {});
+      // cch-w67-s4 (charter D821) — a failed read used to render githubCardHtml({})
+      // — the "Not configured" badge plus "GitHub deploys aren't configured on
+      // this Barkpark yet." — a determinate claim about configuration derived
+      // from a 500. Only a 200 body may claim a configuration state.
+      if (!r.ok) {
+        box.innerHTML = '<div class="set-section"><h2 class="set-h">GitHub</h2>' +
+          '<div class="empty-state"><h2>Couldn\'t load GitHub</h2><p>' +
+          esc(readFailureCopy(
+            r,
+            "You don't have access to this team's GitHub connection.",
+            "We couldn't read the GitHub connection just now — try again in a moment."
+          )) + "</p>" +
+          '<p><button class="btn btn-primary btn-sm" type="button" data-github-retry>Retry</button></p></div></div>';
+        var rb = box.querySelector("[data-github-retry]");
+        if (rb) rb.addEventListener("click", loadGithub);
+        return;
+      }
+      renderGithub(r.data || {});
     });
   }
 
@@ -6140,10 +6177,15 @@
   // connection and retry." — a lie about a 500. Shape: {status, data, transport},
   // i.e. exactly what faultCopy() needs. Widening the resolved value instead
   // would have rewritten six call sites (4742/5725/9898/10074/11952/18327) for a
-  // fault only one of them reads. Staleness is not reachable: the only reader
-  // runs inside ensureFleet()'s own .then on the !list branch, and that branch
-  // is only taken on the network path, which writes fleetFault every time (null
-  // on success). A cache hit resolves truthy and never reads it.
+  // fault only one of them reads. Staleness is not reachable, and the argument
+  // now covers every reader (cch-w67-s4 widened it from one to three): each
+  // reader runs in the .then that consumed THIS resolution and reads fleetFault
+  // ONLY when that resolution was null — loadInstance under `!list`, loadSites
+  // under `res[1] === null`, loadSite under `res[2] === null`, never bare. A
+  // null resolution is produced only by the network path, which wrote
+  // fleetFault on that same tick (null on success); a cache hit resolves
+  // truthy, so a reader guarded on null can never see a fault older than the
+  // resolution it arrived with.
   var fleetFault = null;
   function ensureFleet() {
     if (fleetCache) return Promise.resolve(fleetCache);
@@ -11492,7 +11534,22 @@
       if (seq !== verifySeq) return; // a newer mount owns the slot
       box = $("#instance-verify");
       if (!box) return;
-      if (!r.ok) { box.innerHTML = ""; return; }
+      // cch-w67-s4 (charter D821) — the card used to VANISH on a failed events
+      // read (`box.innerHTML = ""`), indistinguishable from "no verify run
+      // exists" (which renders the card in its never-checked state). A failure
+      // says so and keeps a way back.
+      if (!r.ok) {
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load verification</h2><p>' +
+          esc(readFailureCopy(
+            r,
+            "You don't have access to this instance's events.",
+            "The verification history couldn't be loaded, and the answer didn't say why."
+          )) + "</p>" +
+          '<p><button class="btn btn-ghost btn-sm" type="button" data-verify-retry>Retry</button></p></div>';
+        var vb = box.querySelector("[data-verify-retry]");
+        if (vb) vb.addEventListener("click", function () { loadInstanceVerify(bp); });
+        return;
+      }
       var latest = latestVerifyOf((r.data && r.data.events) || []);
       renderVerifyCard(box, bp, probeChipsModel(latest ? latest.payload : null));
     });
@@ -11901,9 +11958,33 @@
           "<p>Sites you host on your instances will appear here.</p></div>";
         return;
       }
+      // cch-w67-s4 (charter D821) — the fleet leg. ensureFleet() resolves null
+      // ONLY on its network path, which wrote fleetFault on the same tick, so
+      // fleetFault is read solely under `res[1] === null` (a cache hit resolves
+      // truthy and never reaches this arm — see the staleness note at
+      // fleetFault's declaration). byId = {} used to make every row read
+      // "on —" (asserting NO instance for sites that all have one) while the
+      // Visit door silently VANISHED (the LIST payload carries no s.url, and
+      // siteLiveUrl needs the instance for the fallback) — two lies from one
+      // failed read. The rows still render (the sites read succeeded); the
+      // banner names the failure, states what is missing, and offers the retry.
+      var fleetDown = res[1] === null;
+      var fleetNote = "";
+      if (fleetDown) {
+        var ff = fleetFault || {};
+        fleetNote = '<div class="empty-state"><h2>Couldn\'t load your instances</h2>' +
+          "<p>" + esc(faultCopy(ff.status, ff.data,
+            "The instance list couldn't be loaded, and the answer didn't say why.", ff.transport)) + "</p>" +
+          '<p class="muted">The sites below are real — what\'s missing is which instance each runs on, ' +
+            "and the Visit links that need an instance URL.</p>" +
+          '<p><button class="btn btn-primary btn-sm" type="button" data-sites-fleet-retry>Retry</button></p></div>';
+      }
       var byId = {};
       (res[1] || []).forEach(function (bp) { byId[String(bp.id)] = bp; });
-      body.innerHTML = sites.map(function (s) { return globalSiteRow(s, byId[String(s.barkpark_id)]); }).join("");
+      body.innerHTML = fleetNote +
+        sites.map(function (s) { return globalSiteRow(s, byId[String(s.barkpark_id)], fleetDown); }).join("");
+      var fr = body.querySelector("[data-sites-fleet-retry]");
+      if (fr) fr.addEventListener("click", loadSites);
       wireSiteRows(body);
     });
   }
@@ -12030,7 +12111,12 @@
   // its click swallow-bubbled in wireSiteRows so it never also drills into the
   // site. Recency reads the last deploy's stamp when deployed, the site's own
   // updated_at otherwise.
-  function globalSiteRow(s, bp) {
+  // cch-w67-s4: the optional third argument is the CALLER-side third state — a
+  // truthy `fleetDown` says the instance LIST read failed, so "unknown because
+  // we couldn't ask" stops rendering as the same em-dash that means "no
+  // instance resolved". A bare (s, bp) call keeps the two-state contract
+  // byte-exact: null bp still reads "on —", never a fabricated instance.
+  function globalSiteRow(s, bp, fleetDown) {
     var host = (s.domains && s.domains[0]) || s.slug || s.name || "—";
     var name = s.name || s.slug || host;
     var fw = s.framework ? esc(s.framework) : "site";
@@ -12039,7 +12125,9 @@
     var updated = m ? m.when : relTime(s.updated_at);
     var instSeg = bp
       ? 'on <a class="site-inst-link" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>"
-      : "on —";
+      : fleetDown
+        ? 'on <span class="dim" title="We couldn\'t load your instances just now, so this row can\'t name the instance it runs on.">(unavailable)</span>'
+        : "on —";
     return '<div class="site-row site-row--global" data-id="' + esc(s.id) + '" role="button" tabindex="0">' +
       '<div class="site-status">' + siteStatusPill(s) + "</div>" +
       '<div class="site-main">' +
@@ -12123,6 +12211,13 @@
       // Without it the section simply disappeared while the rail badged "On".
       var previewFault = res[3] && res[3].ok ? null : res[3] || {};
       var bp = (res[2] || []).filter(function (x) { return String(x.id) === String(site.barkpark_id); })[0];
+      // cch-w67-s4 (charter D821) — loadSites' fleet leg, shared: ensureFleet
+      // resolved null (its network path, which wrote fleetFault on this same
+      // tick — the guard on `res[2] === null` is what keeps a cache hit from
+      // ever serving a stale fault; see the note at fleetFault's declaration).
+      // Without it the header's "on <instance>" segment and the breadcrumb rung
+      // silently vanished, indistinguishable from a site with no instance.
+      var instFault = res[2] === null ? fleetFault || {} : null;
       var domain = (site.domains && site.domains[0]) || site.slug || site.name || "site";
       setBreadcrumb([
         { label: "Sites", href: "#sites" },
@@ -12133,7 +12228,7 @@
       setScopeLabel(parseHash(), shellNavLayer(parseHash()));
       // cch-w48-s2 (D539): the ONE authority read this screen takes, taken HERE
       // and threaded in — #site-github is the only admin-gated control on it.
-      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority(), deployFault, previewFault);
+      box.innerHTML = siteDetailHtml(site, bp, deployments, domain, previews, instanceAdminAuthority(), deployFault, previewFault, instFault);
       var dlr = $("#site-deploys-retry");
       if (dlr) dlr.addEventListener("click", function () { loadSite(id, { quiet: true }); });
       var d = $("#site-deploy");
@@ -12341,7 +12436,11 @@
     return head + '<div class="deploys previews">' + previews.map(previewRow).join("") + "</div>";
   }
 
-  function siteDetailHtml(site, bp, deployments, domain, previews, authority, deployFault, previewFault) {
+  // cch-w67-s4: the optional 9th argument is the FAILED fleet read (the
+  // deployFault/previewFault shape) — with it set and no bp resolved, the head's
+  // instance segment says the list couldn't be loaded instead of silently
+  // rendering as a site with no instance. 8-arg callers are unchanged.
+  function siteDetailHtml(site, bp, deployments, domain, previews, authority, deployFault, previewFault, instFault) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
     // ssw8 (D82): the content binding, derived once for the rail rows below.
@@ -12350,7 +12449,14 @@
       ? '<span class="mono">' + esc(site.github_repo) + (site.github_branch ? "@" + esc(site.github_branch) : "") + "</span>"
       : "—";
     var sub = (site.framework ? esc(site.framework) : "site") +
-      (bp ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" : "");
+      (bp
+        ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>"
+        : instFault
+          ? ' &middot; <span class="dim" title="' +
+            esc("We couldn't load your instances — " + faultCopy(instFault.status, instFault.data,
+              "the read failed without saying why.", instFault.transport)) +
+            '">instance unavailable</span>'
+          : "");
     // stw5 (D25): resolve the stored rollback flash against server truth + the clock
     // ONCE, then thread it through the list (restored-row marker) and the banner
     // (deployment_id:null "previous release" note). Stale/expired flashes resolve to
@@ -14285,12 +14391,22 @@
   }
 
   // Pure: what the landing shows BEFORE any accept POST.
-  //   preview 404 / absent        → "invalid"        (revoked / used / garbage)
+  //   preview 404 / empty 200     → "invalid"        (revoked / used / garbage)
+  //   preview read FAILED         → "check_failed"   (5xx/offline — nothing decided)
   //   preview past its expiry     → "expired"        (landed after the clock ran out)
   //   already on the invited team → "already_member" (nothing to accept)
   //   otherwise                   → "confirm"        (the Join screen)
+  // cch-w67-s4 (charter D821): the 404 arm is the server's own determinate
+  // answer and keeps the hedged "invalid" copy; a 200 whose body carries no
+  // team is the same claim arriving by another route. But a 500 or an offline
+  // read is NOT an answer about the link — it used to render "This invitation
+  // isn't valid any more" on the UNAUTHENTICATED landing AND consume the parked
+  // token, so a wifi blip destroyed a working invitation.
   function inviteLandingState(previewStatus, preview, me, nowMs) {
-    if (previewStatus === 404 || !preview || !preview.team) return "invalid";
+    if (previewStatus === 404) return "invalid";
+    if (!preview || !preview.team) {
+      return previewStatus >= 200 && previewStatus < 300 ? "invalid" : "check_failed";
+    }
     if (preview.expires_at && Date.parse(preview.expires_at) <= nowMs) return "expired";
     if (me && me.team && me.team.slug && preview.team.slug === me.team.slug) return "already_member";
     return "confirm";
@@ -14373,6 +14489,14 @@
         "We couldn't accept the invitation just now — nothing has changed. Give it another try.",
         act("retry", "Try again"));
     }
+    // cch-w67-s4: the PREVIEW read failed — recoverable, so warn "!" (the link
+    // is not dead, we just couldn't ask about it), and the action re-checks.
+    if (state === "check_failed") {
+      return card(ICO_WARN, "We couldn't check this invitation",
+        "The link itself hasn't been judged — we just couldn't reach the server to check it. " +
+          "Nothing has changed. Give it another try.",
+        act("recheck", "Try again"));
+    }
     if (state === "confirm") {
       return card(ICO_MAIL, "Join " + team + "?",
         "You've been invited to join " + teamB +
@@ -14453,7 +14577,8 @@
   function renderInviteState(box, state, token, preview, me) {
     // A settled outcome consumes the parked token (a reload must not replay
     // it); wrong_account keeps it — it IS the resume across the account
-    // switch — and error keeps it so a retry/reload can try again.
+    // switch — and error/check_failed keep it so a retry/reload can try again
+    // (cch-w67-s4: a failed PREVIEW read must never destroy the token).
     if (state === "joined" || state === "already_member" || state === "expired" || state === "invalid") {
       clearParkedInvite();
     }
@@ -14476,6 +14601,7 @@
         render();
         return;
       }
+      if (act === "recheck") { loadInvite(null); return; } // cch-w67-s4: re-run the preview read
       if (act === "join" || act === "retry") submitInviteAccept(box, btn, token, preview, me);
     });
   }
@@ -14523,9 +14649,20 @@
         slot.innerHTML = '<span class="auth-invite-title">You\'ve been invited to join ' +
           esc(r.data.team.name) + ".</span> Log in — or create an account — with " +
           '<span class="auth-invite-email">' + esc(r.data.email) + "</span> to accept.";
-      } else {
+      } else if (r.status === 404 || r.ok) {
+        // The server's own determinate answer (404, or a 200 with no team —
+        // the same claim by another route): the link is dead. Consuming the
+        // parked token here is correct — a reload must not replay a dead link.
         clearParkedInvite();
         slot.innerHTML = "That invitation link isn't valid any more — it may have expired or been revoked. You can still log in.";
+      } else {
+        // cch-w67-s4 (charter D821) — a 500/offline is NOT an answer about the
+        // link. The bare else used to assert "isn't valid any more" AND call
+        // clearParkedInvite(), so a transient failure DESTROYED a working
+        // invitation before the person even logged in. Keep the park: the
+        // first authed render resumes the accept and re-checks for real.
+        slot.innerHTML = "We couldn't check your invitation just now — nothing has been decided about it. " +
+          "Log in and we'll try again.";
       }
     });
   }
@@ -17553,7 +17690,19 @@
     if (!container) return;
 
     api("GET", "/v1/auth/oauth/providers", null, { noAuth: true }).then(function (r) {
-      var providers = (r.ok && r.data && r.data.providers) || [];
+      // cch-w67-s4 (charter D821) — hiding the whole block on a FAILED read
+      // asserted "this deployment has no SSO" on the sign-in screen. Only a 200
+      // may claim that; a failure says so and keeps a way back.
+      if (!r.ok) {
+        hide(divider);
+        container.innerHTML = '<p class="dim">We couldn\'t check whether single sign-on is available here. ' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-oauth-retry>Try again</button></p>';
+        show(container);
+        var rt = container.querySelector("[data-oauth-retry]");
+        if (rt) rt.addEventListener("click", renderOAuthButtons);
+        return;
+      }
+      var providers = (r.data && r.data.providers) || [];
       if (!providers.length) {
         hide(container);
         hide(divider);
@@ -18543,15 +18692,39 @@
   function loadNewTemplates() {
     if (newTemplatesCache) return Promise.resolve(newTemplatesCache);
     return api("GET", "/v1/templates", null, { noAuth: true }).then(function (r) {
-      newTemplatesCache = (r.ok && r.data && r.data.templates) || [];
+      // cch-w67-s4 (charter D821) — a FAILED read used to be written into
+      // newTemplatesCache as [] and CACHED FOREVER: the Deploy-with-Barkpark
+      // flow showed "No templates available." permanently, with no retry path.
+      // A failure is returned as a {fault} marker and never cached, so the next
+      // call re-asks; only a 200 list may become the cache.
+      if (!(r.ok && r.data && r.data.templates)) return { fault: r };
+      newTemplatesCache = r.data.templates;
       return newTemplatesCache;
     });
+  }
+
+  // cch-w67-s4 — the honest state for a template list that never arrived: the
+  // failure is named (faultCopy classifies 5xx/transport/4xx) and the one next
+  // action is a retry, instead of the picker asserting "No templates available."
+  function renderNewTemplatesFailed(r) {
+    newSetBody(newPanel(
+      '<span class="new-eyebrow">Deploy with Barkpark</span>' +
+      '<h1 class="new-title">Couldn\'t load templates</h1>' +
+      '<p class="new-desc">' +
+        esc(faultCopy(r ? r.status : 0, r && r.data,
+          "The template list couldn't be loaded, and the answer didn't say why.",
+          r && r.transport)) + "</p>" +
+      '<button class="btn btn-primary" id="new-templates-retry" type="button">Try again</button>'
+    ));
+    var b = $("#new-templates-retry");
+    if (b) b.addEventListener("click", renderNewFlow);
   }
 
   function renderNewFlow() {
     showNewScreen();
     var slug = newTemplateSlug();
     loadNewTemplates().then(function (templates) {
+      if (templates && templates.fault) { renderNewTemplatesFailed(templates.fault); return; }
       var tpl = templates.filter(function (t) { return t.slug === slug; })[0];
       if (!tpl) { renderNewPicker(templates); return; }
       newState = newState || {};
@@ -18657,7 +18830,18 @@
     var divider = $("#new-oauth-divider");
     if (!container) return;
     api("GET", "/v1/auth/oauth/providers", null, { noAuth: true }).then(function (r) {
-      var providers = (r.ok && r.data && r.data.providers) || [];
+      // cch-w67-s4 (charter D821) — the /new twin of renderOAuthButtons' arm:
+      // a failed read must not assert "no SSO" on the sign-up step.
+      if (!r.ok) {
+        hide(divider);
+        container.innerHTML = '<p class="dim">We couldn\'t check whether single sign-on is available here. ' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-oauth-retry>Try again</button></p>';
+        show(container);
+        var rt = container.querySelector("[data-oauth-retry]");
+        if (rt) rt.addEventListener("click", function () { newRenderOAuth(tpl); });
+        return;
+      }
+      var providers = (r.data && r.data.providers) || [];
       if (!providers.length) { hide(container); hide(divider); return; }
       container.innerHTML = providers.map(function (p) {
         return '<button type="button" class="btn btn-block btn-oauth" data-provider="' + esc(p) + '">Continue with ' + esc(providerLabel(p)) + "</button>";
@@ -19378,11 +19562,18 @@
     newState.bp = bp;
     // Bootstrap outputs power the env copy-block + the Vercel env prefill; the
     // GitHub connection state decides the "Create GitHub repo" affordance (gh-3).
+    // cch-w67-s4 (charter D821): BOTH faults ride beside the values they
+    // degraded to (the loadSite deployFault shape) — a failed bootstrap read
+    // used to render the ready screen with NO env block (asserting "this
+    // template has no env keys"), and a failed installation read hid the GitHub
+    // affordance (asserting "no GitHub here") inside the ready screen.
     api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/bootstrap", null, {}).then(function (r) {
       var boot = (r.ok && r.data) || null;
+      var bootFault = r.ok ? null : r || {};
       api("GET", "/v1/github/installation").then(function (gr) {
         var gh = (gr.ok && gr.data) || {};
-        newSetBody(newPanel(newReadyHtml(bp, boot, gh)));
+        var ghFault = gr.ok ? null : gr || {};
+        newSetBody(newPanel(newReadyHtml(bp, boot, gh, bootFault, ghFault)));
         newWireReady(bp, boot, gh);
       });
     });
@@ -19544,19 +19735,41 @@
     return '<div id="new-vercel-area">' + inner + "</div>";
   }
 
-  function newReadyHtml(bp, boot, gh) {
+  // cch-w67-s4: the two optional fault arguments are the FAILED reads kept
+  // beside the values they degraded to. With bootFault set, the env/Vercel tail
+  // names the failure and offers a retry instead of silently rendering a ready
+  // screen with "no env keys"; with ghFault set, the GitHub affordance's
+  // ABSENCE is explained rather than passed off as "not connected here".
+  // Existing 3-arg callers are unchanged (undefined → no fault).
+  function newReadyHtml(bp, boot, gh, bootFault, ghFault) {
     var tpl = newState.template;
     var clone = vercelCloneUrl(tpl, boot);
     var dotenv = envDotenv(tpl, boot);
     var oneClick = vercelClaimHtml((boot && boot.vercel) || null, bp);
+
+    var ghBlock = ghFault
+      ? '<p class="new-fineprint dim">We couldn\'t check your GitHub connection just now, so creating a ' +
+        "GitHub repo isn't offered here — that says nothing about whether it's connected.</p>"
+      : newGithubHtml(tpl, gh);
 
     // extra sits in the hero's action row; tail below it. With the platform token
     // (oneClick) the deploy is a single button + the env block is a keep-these
     // reference. WITHOUT it, the guided fallback carries the Deploy button AFTER
     // the values, so people copy first and the empty Vercel form is expected.
     var extra, vercelBlock;
-    if (oneClick) {
-      extra = newGithubHtml(tpl, gh) + oneClick;
+    if (bootFault) {
+      // The bootstrap never arrived: every env-derived block below would be a
+      // lie ("no keys"), and a clone link without its env params is a door to a
+      // broken form. Name the failure once and offer the one honest exit.
+      extra = ghBlock;
+      vercelBlock = '<div class="new-env"><div class="new-env-head"><span>Environment variables</span></div>' +
+        '<p class="new-fineprint dim">We couldn\'t load this instance\'s setup values &mdash; ' +
+          esc(faultCopy(bootFault.status, bootFault.data,
+            "the answer didn't say why.", bootFault.transport)) +
+          " The env copy-blocks and the Vercel deploy handoff need them, so they're not shown.</p>" +
+        '<button class="btn btn-ghost btn-sm" id="new-ready-retry" type="button">Try again</button></div>';
+    } else if (oneClick) {
+      extra = ghBlock + oneClick;
       vercelBlock = dotenv
         ? '<div class="new-env"><div class="new-env-head"><span>Environment variables</span>' +
             '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(dotenv) + '">Copy all</button></div>' +
@@ -19564,7 +19777,7 @@
             '<p class="new-fineprint dim">Your Vercel deployment already has these set — keep them for local development. Treat them as secret.</p></div>'
         : "";
     } else {
-      extra = newGithubHtml(tpl, gh);
+      extra = ghBlock;
       vercelBlock = dotenv
         ? vercelFallbackHtml(tpl, boot, clone, dotenv)
         : '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>';
@@ -19587,6 +19800,14 @@
   function newWireReady(bp, boot, gh) {
     var os = $("#new-open-studio");
     if (os) os.addEventListener("click", function () { openStudio(bp.id, os); });
+    // cch-w67-s4: the bootFault retry — re-enter the ready render (the step
+    // latch is cleared so newRenderReady's `step === "ready"` guard lets the
+    // re-read happen).
+    var rr = $("#new-ready-retry");
+    if (rr) rr.addEventListener("click", function () {
+      if (newState) newState.step = null;
+      newRenderReady(bp);
+    });
     var sb = $("#new-site-url-btn");
     if (sb) sb.addEventListener("click", function () { newSubmitSiteUrl(bp.id, sb); });
     var gc = $("#new-gh-create");
@@ -20572,7 +20793,11 @@
   // member); the invitations block collapses to a quiet empty line. A plain member
   // sees only the read-only roster — no invitations card, no affordances (GR33
   // plain-member law).
-  function membersPanelHtml(members, invitations, ctx) {
+  // cch-w67-s4: the optional 4th argument is the FAILED invitations read
+  // ({status, data, transport} or null) — with it set, the invitations section
+  // names the failure instead of asserting "No pending invitations." over it.
+  // Existing 3-arg callers are unchanged (undefined → no fault).
+  function membersPanelHtml(members, invitations, ctx, invFault) {
     var canManage = assignableRoles(ctx.role).length > 0;
     // The roster rides along in the row ctx so memberRowHtml can answer the
     // last-owner STATE question without a second request — the list it needs is
@@ -20594,11 +20819,18 @@
       out += '<section class="set-section">' +
         '<h2 class="set-h">Pending invitations</h2>' +
         '<p class="set-purpose">Invitation links are emailed, work once, and expire after 7 days.</p>' +
-        (invitations.length
-          ? '<div class="set-list">' +
-              invitations.map(function (inv) { return invitationRowHtml(inv, ctx); }).join("") +
-            "</div>"
-          : '<p class="set-empty">No pending invitations.</p>') +
+        (invFault
+          // A failed read is not an empty queue: name it, and offer the retry.
+          ? '<p class="set-empty">Couldn\'t load pending invitations &mdash; ' +
+              esc(faultCopy(invFault.status, invFault.data,
+                "the list couldn't be loaded, and the answer didn't say why.",
+                invFault.transport)) +
+              ' <button class="btn btn-ghost btn-sm" type="button" data-invites-retry>Retry</button></p>'
+          : invitations.length
+            ? '<div class="set-list">' +
+                invitations.map(function (inv) { return invitationRowHtml(inv, ctx); }).join("") +
+              "</div>"
+            : '<p class="set-empty">No pending invitations.</p>') +
         "</section>";
     }
     return out;
@@ -20681,9 +20913,17 @@
       }
       var members = (mr.data && mr.data.members) || [];
       var invitations = (ir.ok && ir.data && ir.data.invitations) || [];
+      // cch-w67-s4 (charter D821) — the invitations read that FAILED, kept
+      // beside the [] it degraded to (the loadSite deployFault shape). The
+      // non-manage path resolves a SYNTHETIC {ok:true} above, so a real ir
+      // fault here is always a manager's read that genuinely failed — without
+      // this, "No pending invitations." asserted an empty queue over a 500.
+      var invFault = ir && ir.ok ? null : ir || {};
       var invite = $("#members-invite");
       if (invite) invite.hidden = !canManage;
-      box.innerHTML = membersPanelHtml(members, invitations, ctx);
+      box.innerHTML = membersPanelHtml(members, invitations, ctx, invFault);
+      var ivr = box.querySelector("[data-invites-retry]");
+      if (ivr) ivr.addEventListener("click", loadMembers);
       wireMembersPanel(box, ctx);
     });
   }
@@ -23592,6 +23832,14 @@
         };
       },
       loadMembers: loadMembers, loadEnvVars: loadEnvVars,
+      // cch-w67-s4: the formerly-collapsing loaders, exported so the harness can
+      // DRIVE their failure arms (the cch-w34-s1 precedent — the collapse lives
+      // in the fetch callback, which no pure-helper pin can reach).
+      loadProviders: loadProviders, loadGithub: loadGithub,
+      loadInstanceVerify: loadInstanceVerify,
+      renderOAuthButtons: renderOAuthButtons,
+      showAuthInviteBanner: showAuthInviteBanner,
+      loadNewTemplates: loadNewTemplates,
       tokenRevealHtml: tokenRevealHtml, openTokenModal: openTokenModal,
       revealToken: revealToken, tokenRow: tokenRow,
       // gr-w3 v4 shell: the reset-route extractor (GR13 — was unexported), the
