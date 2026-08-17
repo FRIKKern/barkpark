@@ -19,7 +19,7 @@
       "cell": "eight-minute-erasure__light__1280",
       "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2241783,
+      "bytes": 2228772,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -220,12 +220,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 40,
+        "total": 34,
         "heavy": 6,
         "structuralHeavy": 6,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 34,
+          "1": 28,
           "2": 6
         },
         "heavyRules": [
@@ -281,7 +281,7 @@
           },
           {
             "px": 2,
-            "y": 7018.1,
+            "y": 7016.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -297,7 +297,7 @@
       "cell": "eight-minute-erasure__light__1920",
       "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2429254,
+      "bytes": 2415331,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -498,12 +498,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 40,
+        "total": 34,
         "heavy": 6,
         "structuralHeavy": 6,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 34,
+          "1": 28,
           "2": 6
         },
         "heavyRules": [
@@ -559,7 +559,7 @@
           },
           {
             "px": 2,
-            "y": 7018.1,
+            "y": 7016.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -575,7 +575,7 @@
       "cell": "eight-minute-erasure__dark__1280",
       "file": "eight-minute-erasure__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2253924,
+      "bytes": 2240631,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -776,12 +776,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 40,
+        "total": 34,
         "heavy": 6,
         "structuralHeavy": 6,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 34,
+          "1": 28,
           "2": 6
         },
         "heavyRules": [
@@ -837,7 +837,7 @@
           },
           {
             "px": 2,
-            "y": 7018.1,
+            "y": 7016.1,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -853,7 +853,7 @@
       "cell": "eight-minute-erasure__dark__1920",
       "file": "eight-minute-erasure__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2442769,
+      "bytes": 2429258,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -1054,12 +1054,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 40,
+        "total": 34,
         "heavy": 6,
         "structuralHeavy": 6,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 34,
+          "1": 28,
           "2": 6
         },
         "heavyRules": [
@@ -1115,7 +1115,7 @@
           },
           {
             "px": 2,
-            "y": 7018.1,
+            "y": 7016.1,
             "width": 580,
             "parts": 1,
             "structural": true,

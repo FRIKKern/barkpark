@@ -180,6 +180,53 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLiveTest do
       assert html =~ "bg-gray-100"
     end
 
+    # felix-w25-s4: the acknowledge raw Repo.update bypassed the Content event
+    # path, so SSE /v1/data/listen, webhooks, and cache revalidation never saw
+    # the edit. Assert the write now emits a canonical mutation_events row + a
+    # broadcast on documents:<dataset>, WITHOUT changing which row is written
+    # (doc_id + status unchanged — no draft twin, no published→draft coercion).
+    # Mutation proof: delete emit_canonical_mutation/2's call in staleness_live.ex
+    # and this test reds on the missing assert_receive.
+    test "acknowledge emits a canonical mutation_events row + broadcast, row unchanged",
+         %{conn: conn} do
+      seed_book("ack-canon", %{
+        "notificationType" => %{
+          "codelistId" => "onixedit:notification_type",
+          "issue_version" => "73"
+        }
+      })
+
+      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:production")
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @url)
+
+      view
+      |> element(~s|tr[data-test-doc-id="ack-canon"] button[data-test-action="acknowledge"]|)
+      |> render_click()
+
+      assert_receive {:document_changed,
+                      %{event_id: event_id, mutation: "update", doc_id: "ack-canon"}},
+                     1_000
+
+      refute is_nil(event_id)
+
+      row = Repo.get(Barkpark.Content.MutationEvent, event_id)
+      assert row.doc_id == "ack-canon"
+      assert row.type == "book"
+      assert row.dataset == "production"
+      assert row.mutation == "update"
+
+      # WHICH row is written is unchanged: same doc_id, status exactly as the
+      # seed carried it (the seed is draft, so this pins "no upsert_document
+      # draft twin, status untouched"; the published→draft coercion case is
+      # excluded structurally by the raw Repo.update on the same row, not here).
+      doc = Repo.get_by!(Document, doc_id: "ack-canon", type: "book", dataset: "production")
+      assert doc.doc_id == "ack-canon"
+      assert doc.status == "draft"
+      assert doc.content["staleness_acknowledged"] == true
+    end
+
     test "is disabled once the doc has already been acknowledged", %{conn: conn} do
       seed_book("ack-disabled", %{
         "notificationType" => %{

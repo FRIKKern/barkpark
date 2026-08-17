@@ -71,22 +71,35 @@ defmodule Barkpark.Accounts.UserNotifier do
       |> subject(subject)
       |> text_body(body)
 
-    # Fail-soft: callers (auth_controller request-reset/register) intentionally
-    # ignore this result and still return 200 for anti-enumeration. We do NOT
-    # change that — a down relay must not leak account existence. We only add
-    # OBSERVABILITY so a dropped auth email leaves a diagnostic trail instead of
-    # vanishing silently. Log the email *type* (subject) + reason only; never the
-    # recipient address (PII).
-    case Mailer.deliver(email) do
-      {:ok, _meta} ->
-        {:ok, email}
+    # NAMED FAILURE MODE: synchronous external I/O in a request path. In prod
+    # `Mailer.deliver` opens an SMTP conversation via gen_smtp; a slow or
+    # unreachable relay would stall the CALLING request (login / registration /
+    # reset) up to gen_smtp's own timeout, because the round-trip rode the
+    # request's scheduler slot. We offload delivery to the shared
+    # `Barkpark.TaskSupervisor` so the request returns immediately and the SMTP
+    # round-trip never blocks it.
+    #
+    # Fail-soft is UNCHANGED and in fact strengthened: callers (auth_controller
+    # request-reset / register / magic-link) intentionally ignore this result and
+    # still return 200 for anti-enumeration — a down relay must not leak account
+    # existence. Off-loading means the request can no longer observe the outcome
+    # at all. The diagnostic log (email *type* / subject + reason, NEVER the
+    # recipient address — PII) moves INSIDE the task so a dropped auth email still
+    # leaves a trail instead of vanishing silently. `start_child` is deliberate:
+    # the result is never retrieved and one caller is a long-lived LiveView, so
+    # fire-and-forget avoids leaking a reply/DOWN into its mailbox.
+    Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+      case Mailer.deliver(email) do
+        {:ok, _meta} ->
+          :ok
 
-      {:error, reason} ->
-        Logger.error(
-          "transactional email delivery failed: subject=#{inspect(subject)} reason=#{inspect(reason)}"
-        )
+        {:error, reason} ->
+          Logger.error(
+            "transactional email delivery failed: subject=#{inspect(subject)} reason=#{inspect(reason)}"
+          )
+      end
+    end)
 
-        {:error, reason}
-    end
+    {:ok, email}
   end
 end

@@ -1902,8 +1902,18 @@ defmodule BarkparkCloud.Sites.Deploy do
      }}
   end
 
+  # W70 (D847/D854) — MIGRATED onto `refusal_detail/1`, the extractor the deploy
+  # path already trusts. The box's REAL pre-poll refusal transport is NESTED —
+  # `SiteDeployController` answers every refusal `%{error: %{code, message}}`
+  # and `BoxRelay.HTTP` relays a non-2xx verbatim before it ever polls — so the
+  # old flat `body["error"] || body["detail"] || body["reason"]` chain bound a
+  # MAP, failed the `is_binary` guard below, and the box's own sentence died
+  # into the generic fallback. `refusal_detail/1` tries the nested arm first and
+  # composes "code — message"; its flat arm is a strict superset of the old
+  # chain (it also reads `failure_reason`), so every settle_* sentence and
+  # await-timeout body still passes through unchanged.
   defp rollback_refusal(body, fallback) when is_map(body) do
-    case body["error"] || body["detail"] || body["reason"] do
+    case refusal_detail(body) do
       d when is_binary(d) and d != "" -> rollback_copy(d, fallback)
       _ -> fallback
     end
@@ -1920,8 +1930,15 @@ defmodule BarkparkCloud.Sites.Deploy do
   # other detail — a box token like `not_supported`, or the transport's own
   # await-teardown timeout sentence — travels VERBATIM rather than being dressed
   # in another verb's prose.
+  # W70 (D847/D854) — same migration as `rollback_refusal/2` above: the nested
+  # envelope is the box's real pre-poll refusal transport, and `refusal_detail/1`
+  # is the one extractor that reads it. The one verb-neutral typed sentence
+  # (`lock_held`, an EXACT flat token) keeps its plain words; every other detail
+  # — a nested "code — message" composite, a box token, or the transport's own
+  # await-teardown timeout sentence — travels VERBATIM rather than being dressed
+  # in another verb's prose (the W68 rollback-copy leak stays fixed).
   defp teardown_refusal(body, fallback) when is_map(body) do
-    case body["error"] || body["detail"] || body["reason"] do
+    case refusal_detail(body) do
       "lock_held" -> "a deploy is running on the box — try again once it finishes"
       d when is_binary(d) and d != "" -> d
       _ -> fallback
@@ -1931,6 +1948,16 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp teardown_refusal(_body, fallback), do: fallback
 
   # site-deploy.sh's typed rollback exits, in plain words.
+  #
+  # TYPED-TOKEN FATE (W70, decided): these clauses match EXACT bare tokens, which
+  # today's transports mint only as FLAT `%{"error" => token}` bodies — a shape
+  # that is fixture-only on the current wire (settle_* mints failure_reason
+  # sentences; pre-poll refusals are nested). They are KEPT as the friendly
+  # rendering for that flat shape, and they deliberately do NOT fire on a nested
+  # composite ("already_running — deploy already running for blog"): the box's
+  # own message travels verbatim instead of being replaced by canned prose. If a
+  # friendly sentence for a nested 409 is ever wanted, match `refusal_code/1` in
+  # the caller's 409 arm — never widen these token clauses.
   defp rollback_copy("no_previous", _fallback),
     do: "there is no previous build to roll back to — this site has only ever had one release"
 

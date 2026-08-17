@@ -268,12 +268,12 @@ const BP_THEMES_MARKER_END = "/* END GENERATED: bp-theme ids */";
 // closed Elixir @actions vocabulary and the console's human sentence fragments, so
 // the two can no longer drift apart by hand (charter cch-w65). Same splice
 // machinery, its own marker, its own ledger slot (the `<path>#<name>` key, charter
-// D835). The marker string below still SAYS design/audit-actions.json: it is
-// BYTE-PINNED to the marker line shipped inside app.js's generated region, and
-// this slice (cch-w69-s1) may not touch app.js — repointing the marker text is an
-// `emit --write` over app.js, which belongs to the slice that owns that file.
+// D835). The marker string below is the emitter's LOOKUP KEY and is BYTE-PINNED to
+// the marker line shipped inside app.js's generated region — cch-w53 repoints both
+// to cloud/priv/audit-actions.json (the table moved there in #11781) in one commit:
+// the marker text here and the matching hand-edited marker line in app.js.
 const ACTION_LABELS_MARKER_BEGIN =
-  "/* BEGIN GENERATED: audit action labels (design/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+  "/* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
 const ACTION_LABELS_MARKER_END = "/* END GENERATED: audit action labels */";
 
 // ── color helpers ───────────────────────────────────────────────────────────
@@ -2290,11 +2290,10 @@ export function auditActionLabels(rows = auditActions()) {
   const lines = [
     `    // ${rows.length - labelled.length} of the ${rows.length} declared verbs have no entry here: they render`,
     `    // as their raw dotted slug through humanAction's fallback below, each one`,
-    // BYTE-PINNED literal, not ${AUDIT_ACTIONS_PATH}: this line is part of the
-    // generated region already shipped in app.js, and cch-w69-s1 (which moved
-    // the table to cloud/priv/) may not touch app.js — the slice that owns
-    // app.js repoints it with the next `emit --write` + marker/manifest update.
-    `    // declared unlabelled ON PURPOSE with a reason in design/audit-actions.json`,
+    // This line is part of the generated region shipped in app.js; it is now
+    // repointed to cloud/priv/audit-actions.json (the table moved there in
+    // #11781) by cch-w53 in the same commit that hand-edits the marker line.
+    `    // declared unlabelled ON PURPOSE with a reason in ${AUDIT_ACTIONS_PATH}`,
     `    // (charter D582 — ugly, not false).`,
   ];
   labelled.forEach((r, i) => {

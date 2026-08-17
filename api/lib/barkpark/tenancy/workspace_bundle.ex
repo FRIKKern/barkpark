@@ -367,7 +367,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp run_import(manifest, dumps, mode) do
     Repo.transaction(
       fn ->
-        # FIRST: drain the deferred-trigger queue, or the DDL below cannot run.
+        # FIRST OF ALL: refuse any manifest table the export could never have
+        # written, before ANY write — the shell-adopt delete, the FK/trigger
+        # DDL and every COPY/INSERT run only over membership-checked names.
+        assert_member_tables!(manifest)
+
+        # THEN: drain the deferred-trigger queue, or the DDL below cannot run.
         # The epic-ledger FKs into `documents` are DEFERRABLE INITIALLY
         # DEFERRED (20260715001200/1300), so any earlier delete of documents in
         # THIS transaction (the ExUnit sandbox wraps a whole test in one — its
@@ -508,6 +513,50 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         "WHERE n.nspname = 'public' AND cl.relname = $1 AND cl.relkind = 'r'",
       [table]
     ).rows != []
+  end
+
+  # ── Catalog-membership guard (felix-w25-s3, charter D165) ────────────────────
+  #
+  # NAMED FAILURE MODE: a manifest-named table reaches the interpolated
+  # COPY/INSERT path with no membership check — `qi/1` quotes the identifier
+  # but never restricts WHICH table, and `table_exists?/1` gates existence,
+  # not membership. The export builds member specs PURELY from
+  # `[root_table] ++ live_e1/e2/e3 ++ allowlist keys` (do_export/2), so a
+  # table outside that enumeration (`users`, `oban_jobs`, `schema_migrations`)
+  # cannot come out of a legit export — a manifest naming one is
+  # crafted/foreign, and it is refused HERE, before the shell-adopt delete,
+  # the FK/trigger DDL and any COPY/INSERT.
+  #
+  # The allow-set is DERIVED from the same live enumeration export reads —
+  # never the pinned lists — so a new tenant table is a member on both sides
+  # the moment it exists. Two filters, two jobs: a manifest table ABSENT on
+  # this schema version has unknowable membership here and keeps today's
+  # cross-version tolerance (`table_exists?/1` 0-row skip; a row-carrying one
+  # fails on its own COPY exactly as before) — only a table that EXISTS on
+  # the target AND is not a member is refused.
+  defp assert_member_tables!(manifest) do
+    members =
+      MapSet.new(
+        [Catalog.root_table()] ++
+          Catalog.live_e1(Repo) ++
+          Catalog.live_e2(Repo) ++
+          Catalog.live_e3(Repo) ++
+          Map.keys(Catalog.allowlist())
+      )
+
+    foreign =
+      (manifest["tables"] || [])
+      |> Enum.map(& &1["name"])
+      |> Enum.reject(&MapSet.member?(members, &1))
+      |> Enum.filter(&table_exists?/1)
+
+    if foreign != [] do
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message:
+          "manifest names table(s) a #{Archive.format()} export could never have written: " <>
+            Enum.join(Enum.sort(foreign), ", ")
+    end
   end
 
   # ── Export ───────────────────────────────────────────────────────────────────
@@ -1220,16 +1269,22 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   #   * export: names come from the live catalog (`table_exists?/1`-filtered),
   #     so nothing attacker-shaped reaches this function.
   #   * import: `import_member/3` reads `entry["name"]` and `entry["columns"]`
-  #     straight off the uploaded tar manifest. The DDL passes filter members
-  #     through `table_exists?/1`, but the COPY / INSERT path does NOT — so
-  #     seven of the interpolated statements below carry manifest strings.
+  #     straight off the uploaded tar manifest. `assert_member_tables!/1`
+  #     (felix-w25-s3) now refuses, before any write, any manifest TABLE that
+  #     exists on the target but is outside the export-side catalog
+  #     enumeration — but that is a membership gate, NOT input laundering:
+  #     member COLUMN names, and the name of a table ABSENT on this schema
+  #     version (tolerated for cross-version bundles), still reach the
+  #     interpolated statements below as manifest strings.
   #
-  # Those sites are defended by quoting plus an ADMIN GATE (the router's
-  # `:require_admin` pipeline), with `:merge` additionally fail-closed behind
-  # the `:allow_bundle_import` config. That is the honest waiver: request-derived
-  # identifiers behind correct quoting plus an admin gate. Calling them
-  # catalog-derived would be a FALSE annotation on the one bucket where a real
-  # injection could hide — so do not weaken the quoting, and do not extend this
-  # helper's callers on the import path without a `table_exists?/1` check.
+  # Those sites are defended by quoting plus the membership guard plus an
+  # ADMIN GATE (the router's `:require_admin` pipeline), with `:merge`
+  # additionally fail-closed behind the `:allow_bundle_import` config. That is
+  # the honest waiver: request-derived identifiers behind correct quoting, a
+  # membership refusal for existing non-member tables, and an admin gate.
+  # Calling them catalog-derived would still be a FALSE annotation on the one
+  # bucket where a real injection could hide — so do not weaken the quoting,
+  # and do not extend this helper's callers on the import path without a
+  # `table_exists?/1` check.
   defp qi(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 end

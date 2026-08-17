@@ -559,7 +559,7 @@
  * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
  * §2 guards drift — pe-w2-parity-widening). Keep BYTE-IDENTICAL with the root.html.heex
  * copy. */
-.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads

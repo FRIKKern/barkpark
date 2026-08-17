@@ -16487,11 +16487,17 @@ test("cch-w30-s5: the router's own 500 envelope renders server-fault copy", () =
   const envelope = { error: "server_error", request_id: "0a1b2c3d4e5f6071" };
   assert.match(hooks.friendly(envelope, "Check the form and try again."),
     /broke on our side/i);
-  // The nested api/-style shape would read as NO slug at all and fall straight
-  // back to the blaming copy — this is why the envelope must stay flat.
+  // cch-w62 (D740) — THIS PIN IS INVERTED. It used to assert the nested
+  // api/-style shape fell back to the blaming copy, "because the envelope must
+  // stay flat" (router.ex:8627-8630's premise). That premise is false by 31
+  // nested emitters in the same router file — five route families (self-update,
+  // rollback, the webhook proxy, PATCH /autoupdate, PATCH /admin channel) send
+  // {error:{code}} today. friendly() now unwraps the object and resolves the
+  // slug through the normal ladder, so a nested server_error renders the
+  // server-fault sentence instead of blaming input nobody judged.
   const nested = { error: { code: "server_error" } };
-  assert.equal(hooks.friendly(nested, "Check the form and try again."),
-    "Check the form and try again.");
+  assert.match(hooks.friendly(nested, "Check the form and try again."),
+    /broke on our side/i);
 });
 
 test("cch-w30-s5: faultCopy swaps the validation fallback out on a 5xx only", () => {
@@ -18276,11 +18282,12 @@ test("cch-w66-bl: the other four create refusals get console voice, and only the
   assert.ok(f(mint).indexOf("internal_error") === -1, "no mint goo in the modal");
   // barkpark_required (422) has NO arm on purpose: siteCreateBody() always
   // sends barkpark_id (grep -n 'function siteCreateBody' cloud/priv/static/app.js),
-  // so the slug is structurally unreachable
-  // from this modal. It keeps the caller's fallback, and this assertion is the
-  // record of that decision rather than an aspiration.
+  // so the slug is structurally unreachable from this modal. cch-w62 (D855)
+  // updated the record: friendly()'s fenced singular-detail rung now relays the
+  // server's own sentence for this slug, so if the unreachable ever arms the
+  // person reads the server's instruction instead of "create failed (422)".
   assert.equal(f({ ok: false, status: 422, data: { error: "barkpark_required", detail: "name the instance to host this site (barkpark_id)" } }),
-    "create failed (422)");
+    "name the instance to host this site (barkpark_id)");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20842,6 +20849,34 @@ test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT 
   assert.match(bare.body, /still registered/);
 });
 
+test("cch-w70-s2: siteDeleteFailureCopy — the typed 500 registration_not_removed relays the plane's two-halves detail ABOVE the generic 5xx crash arm", () => {
+  // The route now answers a foreign-key-blocked delete with a TYPED 500:
+  // {"ok":false,"error":"registration_not_removed","detail":"the instance was
+  // torn down, but the registration could not be removed: … constraint …"}.
+  // This is a 5xx, so WITHOUT its own arm it would fall to the crash-envelope
+  // (arm 4), which refuses to state the outcome — but here the plane MEASURED
+  // both halves and named the constraint, so the reader must relay that detail.
+  const inverse = hooks.siteDeleteFailureCopy(500, {
+    ok: false,
+    error: "registration_not_removed",
+    detail:
+      "the instance was torn down, but the registration could not be removed: deleting the site row " +
+      "was refused by the foreign-key constraint site_artifacts_site_id_fkey. The site is no longer " +
+      "serving, yet it is still registered here — support must remove the row by hand.",
+  });
+  // The plane's own sentence — including the constraint name — is relayed verbatim.
+  assert.match(inverse.body, /site_artifacts_site_id_fkey/);
+  assert.match(inverse.body, /torn down/);
+  assert.match(inverse.body, /still registered/);
+  // It is NOT the crash-envelope arm: that one refuses to name the outcome and
+  // offers a re-check. This one states the outcome and sends the operator to
+  // support, because a retry cannot clear a constraint-held row.
+  const boom = hooks.siteDeleteFailureCopy(500, { error: "server_error", request_id: "F9-abc123" });
+  assert.notEqual(inverse.title, boom.title, "the typed inverse orphan must not wear the crash-envelope sentence");
+  assert.doesNotMatch(inverse.body, /doesn't say how far it got/);
+  assert.equal(inverse.recovery, "close");
+});
+
 test("cch-w67 + cch-w68-s5: the settle plan survives a modal dismissed mid-flight — a late FAILURE still speaks, and a late SUCCESS on this site's screen NOW navigates (D834)", () => {
   // Modal still ours: inline beside the ONE recovery; success navigates off the
   // dead site screen.
@@ -21416,4 +21451,96 @@ test("cch-w65: humanAction serves cloud/priv/audit-actions.json — every label,
   // The fallback is the whole reason a null row is honest rather than a hole: an
   // action the SPA has never heard of still renders instead of disappearing.
   assert.equal(hooks.humanAction("site.invented_by_a_future_slice"), "site.invented_by_a_future_slice");
+});
+
+// ── cch-w62: friendly() unwraps the nested envelope + the fenced detail rung ──
+// D740: five route families (31 emitters in router.ex — self-update, rollback,
+// the webhook proxy, PATCH /autoupdate, PATCH /admin channel) send
+// {error:{code}}, and friendly()'s humanized-slug return called key.replace on
+// that OBJECT — a TypeError in the one function whose job is to never crash.
+// D855: the server's singular `detail` STRING (the ladder reads only the
+// per-field `details` MAP) is relayed for EXACTLY three measured slugs whose
+// sentences are surface-neutral product copy; everything else keeps its
+// pre-existing rendering, because the fence is an enumerated allowlist keyed on
+// the slug by NAME — friendly() takes no status, and faultCopy passes
+// ERRORS.server_error AS the fallback on a 5xx, so an unfenced rung would
+// outrank the 5xx honesty law by construction.
+test("cch-w62: the shipped nested shapes render a sentence, never a TypeError", () => {
+  // Registered slug → curated copy, exactly as if the envelope were flat.
+  assert.match(hooks.friendly({ error: { code: "server_error" } }, "fb"), /broke on our side/i);
+  assert.equal(hooks.friendly({ error: { code: "suspended" } }, "fb"),
+    hooks.friendly({ error: "suspended" }, "fb"),
+    "a nested slug resolves through the SAME ladder as its flat twin");
+  // Unregistered slug → humanized, the flat shape's exact behavior.
+  assert.equal(hooks.friendly({ error: { code: "update_in_flight" } }),
+    hooks.friendly({ error: "update_in_flight" }));
+  // No code at all → the fallback, exactly like a missing slug.
+  assert.equal(hooks.friendly({ error: {} }, "fb"), "fb");
+  assert.equal(hooks.friendly({ error: { code: "" } }, "fb"), "fb");
+  // The arity pin's twin: the unwrap added no parameter.
+  assert.equal(hooks.friendly.length, 2, "friendly() still takes (data, fallback)");
+});
+
+test("cch-w62 (D855): barkpark_required relays the server's own sentence", () => {
+  const detail = "name the instance to host this site (barkpark_id)";
+  assert.equal(hooks.friendly({ error: "barkpark_required", detail: detail }, "create failed (422)"),
+    detail);
+  // Without the detail the slug keeps its pre-rung rendering: the fallback.
+  assert.equal(hooks.friendly({ error: "barkpark_required" }, "create failed (422)"),
+    "create failed (422)");
+});
+
+test("cch-w62 (D855): deploy_ability_required relays the server's own sentence", () => {
+  const detail = "this token can read sites but not deploy them — mint one with the deploy ability";
+  assert.equal(hooks.friendly({ error: "deploy_ability_required", detail: detail }, "Update failed."),
+    detail);
+  assert.equal(hooks.friendly({ error: "deploy_ability_required" }, "Update failed."),
+    "Update failed.");
+});
+
+test("cch-w62 (D855): nothing_to_update relays the server's own sentence", () => {
+  const detail = "the request named no settable field — nothing to update";
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: detail }, "Update failed."),
+    detail);
+  assert.equal(hooks.friendly({ error: "nothing_to_update" }, "Update failed."),
+    "Update failed.");
+});
+
+test("cch-w62 (D855): the fence holds — excluded slugs render EXACTLY as before, detail attached or not", () => {
+  // Each excluded slug is fed a real detail string and must render as if the
+  // rung did not exist: the caller's fallback when one is given, the humanized
+  // slug bare. CLI-voiced details embed bp flags/re-runs; the 5xx-borne pair
+  // rides under faultCopy's ERRORS.server_error fallback, where a relay would
+  // beat the honesty law.
+  const excluded = {
+    content_binding_required: "a static site builds FROM your content — bind it with `--dataset <workspace>/<project>/<dataset>` (missing: dataset)",
+    content_binding_empty: "this site would build from nothing — re-run naming a type this site can read: `bp cloud site create …`",
+    no_build_source: "nothing to build from — re-run with `--framework <name>` or bind content",
+    node_ports_exhausted: "this instance has no free node-slot port left — retire a node site or move to a larger box",
+    read_token_mint_failed: "acme-box-7 answered the token mint HTTP 500: internal_error",
+  };
+  for (const slug of Object.keys(excluded)) {
+    const withDetail = { error: slug, detail: excluded[slug] };
+    assert.equal(hooks.friendly(withDetail, "the caller's designed copy"),
+      hooks.friendly({ error: slug }, "the caller's designed copy"),
+      slug + ": a detail string must not change the rendering — the fallback stands");
+    assert.equal(hooks.friendly(withDetail),
+      slug.replace(/_/g, " "),
+      slug + ": bare, the humanized slug stands — the detail is never relayed");
+  }
+  // The 5xx path in one piece: faultCopy hands ERRORS.server_error down as the
+  // fallback, and the fence keeps the detail from outranking it.
+  assert.match(hooks.faultCopy(502, { error: "read_token_mint_failed", detail: excluded.read_token_mint_failed }, "fb"),
+    /broke on our side/i);
+  assert.ok(hooks.faultCopy(502, { error: "read_token_mint_failed", detail: excluded.read_token_mint_failed }, "fb")
+    .indexOf("acme-box-7") === -1, "no upstream goo leaks through the 5xx arm");
+});
+
+test("cch-w62 (D855): the rung relays only a non-empty STRING detail", () => {
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: "" }, "fb"), "fb");
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: 7 }, "fb"), "fb");
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: { text: "x" } }, "fb"), "fb");
+  // And the two rungs compose: a NESTED allowlisted slug still relays.
+  assert.equal(hooks.friendly({ error: { code: "nothing_to_update" }, detail: "nothing to update" }, "fb"),
+    "nothing to update");
 });
