@@ -11,6 +11,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
 
   alias Barkpark.Content
   alias Barkpark.PortableDoc.Bpml
+  alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   def show(conn, %{"slug" => slug} = params) do
     dataset = Map.get(params, "dataset") || Content.paper_default_dataset()
@@ -104,7 +105,13 @@ defmodule BarkparkWeb.BulldocsSourceController do
     |> put_resp_header("x-paper-rev", to_string(paper_op_rev(paper)))
     |> send_resp(200, bpml)
   rescue
-    e in ArgumentError ->
+    # The printer's ONE typed refusal, for ALL FOUR unprintable positions
+    # (block, inline node, mark, table head cell). It used to rescue only
+    # ArgumentError, so the three FunctionClauseError shapes escaped as raw HTTP
+    # 500s with an HTML error page — 141 of 776 published papers on the
+    # 2026-08-17 census. The message carries kind+type, so the census keeps
+    # bucketing what still needs kernel coverage.
+    e in UnprintableError ->
       conn
       |> put_status(:unprocessable_entity)
       |> json(%{
@@ -112,7 +119,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
           "code" => "bpml_unprintable",
           "message" => Exception.message(e),
           "hint" =>
-            "this paper uses a block type outside the BPML kernel vocabulary; fetch format=json"
+            "this paper uses a #{e.kind} shape outside the BPML kernel vocabulary; fetch format=json"
         }
       })
   end
