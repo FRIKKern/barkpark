@@ -83,13 +83,14 @@ var readingGlyphExtras = map[rune]string{
 	'▍': "pdrender quote/callout bar (thin)",
 	'▸': "detail section marker",
 	'⧉': "twin-task marker",
-	'›': "breadcrumb separator (navigation-shell trail, charter D11/D18)",
 }
 
 func allowedGlyphs(golden string) map[rune]string {
 	base := filepath.Base(golden)
-	// compose_* goldens composite the reading frames (detail/paper body) under a
-	// breadcrumb — so they carry the reading vocabulary, not just the board grid.
+	// compose_* goldens composite the reading frames (detail/paper body) into the
+	// pane — so they carry the reading vocabulary, not just the board grid. (The
+	// breadcrumb row that once topped them was retired #11564; its chevron
+	// separator left the reading set with it — no golden paints it anymore.)
 	reading := strings.HasPrefix(base, "detail_") ||
 		strings.HasPrefix(base, "paper_") ||
 		strings.HasPrefix(base, "compose_")
