@@ -2340,7 +2340,9 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       FakeBoxRelay.program(teardown: {:ok, 409, %{"error" => "lock_held"}})
       conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
       assert conn.status == 422
-      assert json_body(conn)["detail"] == "a deploy is running on the box — try again once it finishes"
+
+      assert json_body(conn)["detail"] ==
+               "a deploy is running on the box — try again once it finishes"
 
       # A body with no typed word at all still gets the honest fallback.
       FakeBoxRelay.program(teardown: {:ok, 500, %{}})

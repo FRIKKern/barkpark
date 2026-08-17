@@ -149,7 +149,10 @@ defmodule BarkparkCloud.Web.RouterSitesDestroyFailuresTest do
 
     try do
       Router.call(conn, @opts)
-      flunk("expected the FK regression to raise through Plug.ErrorHandler, but the call returned")
+
+      flunk(
+        "expected the FK regression to raise through Plug.ErrorHandler, but the call returned"
+      )
     rescue
       e ->
         # Verified by running the mutation before pinning (W68 brief): the
