@@ -3456,6 +3456,95 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-17 — wave 69 REVIEW — grade A, six round-1 slices, all pushed with PRs open, ZERO reviewer fixes; the deploy seam reopens and the five-strand debt is paid
+
+**Paper:** `cloud-console-hardening-wave-69-2026-08-17` (debrief appended). **Decisions:** D841–D852
+(this PR, #11776). Entry written on the charter PR branch per the wave-67/68 precedent — the local
+main copy was the previous wave's file. Everything below re-verified by the single wave reviewer on
+`-r` branches off `origin/main` `4583102737`: both path-escape ratchets + selftests (169 + 269),
+node `__app.test.mjs` 1085/1085, `design/check.mjs` PASS, Go build/vet/test (cli + cloudclient),
+cloud targeted suite 50/0 REBUILT FROM SCRATCH in the reviewer's own worktree (deps fetched, compiled,
+run — not a replay of the builder's transcript), api `deploy_runner_test.exs` 84/0, charter census
+`838 840 [(95,95),(312,312)]`, `docs-anchors-check` PASS. Zero reviewer commits — first zero-fix
+six-slice wave of the epic.
+
+**LANDED (six branches, PRs open, gates re-run green on each):**
+
+- S1 `cch-w69-s1-audit-manifest-moves-into-the-image` — D841/D842 p0. The audit verb table moves
+  byte-identically (sha1-pinned) to `cloud/priv/audit-actions.json`; `audit_event.ex` compile-time-reads
+  `../../../priv/` (resolves to `/app/priv/audit-actions.json` in-image); six reader sites repointed.
+  NEW ratchet arm: any repo-root read whose READER is under `cloud/lib/` is FATAL even when
+  covered/declared — the reviewer independently re-derived the in-image path from the real Dockerfile
+  (context `cloud/`, `WORKDIR /app`, `COPY lib lib` + `COPY priv priv`, `mix compile` after) and
+  re-ran the mutation both directions live. HIGH-FLIP-RISK second review re-derived here; an
+  independent SECOND reviewer before merge is still owed — manual lead dispatch. **Lead: after merge,
+  confirm this sha's deploy.yml run isn't coalesced away — this PR is what un-bricks cp deploys.**
+  Byte-pin residue (emit.mjs marker + one emitted comment line still say `design/`) is deliberate,
+  documented in place, owned by `cch-w69-bl-audit-table-prose-repoint-after-app-js`.
+- S2 `cch-w47-bl-rebase-10256-union-insert-with-proven-resolution` — D844 p0. The five stranded charter
+  PRs (#10256/#10404/#10523/#10766/#10054) land as ONE hole-targeted union: D499–D510, D535–D546 (+the
+  wave-48-stamped D524/D532 rewrites), D562–D574, D618–D628 with the strand's D617 moved to D645;
+  #10054 contributes zero charter bytes and 6 sidecars; 28 sidecars total, blob-sha1-asserted. The
+  wave-48 review-log entry is MINTED (8 lines, names itself union-minted, pure pointer to #10404's
+  embedded review) — single removable block if ruled otherwise. Census: 838 unique rows, holes exactly
+  [95, 312] with D312 present as D312-CCH; dup-inject mutation reds it. **MERGE ORDER LAW: this PR
+  (#11776, carrying this very entry) merges FIRST, then the union PR is rebased (disjoint anchors;
+  post-rebase census must read 850 with the same holes and the gate re-run), then the lead closes the
+  five strands as superseded. The union PR body honestly claims only 4/15 stale-verdict rows clear.**
+- S3 `cch-w66-bl-site-create-renders-the-raw-slug-and-drops-the-servers-menu` — D846. The create modal
+  renders the server's own refusal: RELAY (node_ports_exhausted verbatim; content_binding_empty's
+  verdict sentence + a menu composed from `readable_types` {type,count} MAPS — no `[object Object]`,
+  no fabricated counts, CLI re-run clause stripped), AUTHOR (content_binding_required,
+  barkpark_not_found), WITHHOLD (read_token_mint_failed). Dead `known_templates` suffix retired with
+  its pin rewritten in the same commit. friendly() byte-untouched, arity pin holds. 1082→1085 tests.
+  Honest blind spot (CLI-clause strip is a string match on server copy) filed as
+  `cch-w69-bl-site-create-detail-is-cli-voiced-console-string-matches-to-strip-it`.
+- S4 `cch-w67-bl-the-cli-site-delete-receipt-flattens-every-typed-refusal` — D837/D843. `bp cloud site
+  delete`/`rollback` render the plane's typed refusal via `errors.As` at `*cloudclient.CloudRefusal`
+  (NOT the `*RollbackError` decoy): label = the plane's code, exit by STATUS FAMILY with the `no_team`
+  cause-override, detail RELAYED verbatim (identity_refused stays byte-shared with the plane), verb-kind
+  copy keeps rollback ("Nothing was flipped") and teardown ("still registered and may still be serving")
+  honest and apart. 401 + non-refusal errors keep the cloudFail `bp login` seam byte-identical. The
+  default arm relays Detail, so `registration_not_removed` lands pre-labelled when w67-followup ships.
+  8 new tests, 7 measured red-before; gofmt clean.
+- S5 `cch-w68-bl-claim-host-normaliser-twins-unguarded` — D852 p1, HIGH-FLIP-RISK TENANCY. The SQL
+  fragment in `provisioning_fqdn_claim/2` gains `btrim(lower(?), E'<25 codepoints>')` — the reviewer
+  independently MEASURED that `String.trim/1` strips exactly those 25 codepoints (probe over
+  0..0x3010, zero over- or under-coverage), re-derived the worker-route write hole (`:url` cast with
+  NO validate_format on POST /v1/internal/barkparks) and the pre-fix `:free` flip mechanics. 12-test
+  census: twin equality over a 21-class corpus (AST-extracted Elixir side, source-extracted SQL side),
+  behavioural {:held,…} arms, mutations BOTH directions performed on source so CI re-runs the proof.
+  Unicode İ-row pinned as DOCUMENTED protective divergence, not flipped green. An independent SECOND
+  reviewer before merge is still owed — manual lead dispatch. WRITE side stays open, filed as
+  `cch-w69-bl-worker-route-stores-url-unnormalised` (arguably the deeper fix — next wave should price it).
+- S6 `cch-w67-bl-every-teardown-422-opens-by-saying-a-deploy-died` — D849, HIGH-FLIP-RISK cross-epic
+  strings. `teardown_outcome/1` recovers the engine's typed exits from the log (TEARDOWN_FAILED=→25
+  with the script's own detail, lock_held→23 with the CP's byte-matching lock sentence, default→-1 in
+  teardown voice); Port fallback gains a `%{mode: :teardown}` head. `exit_label(-1)` BYTE-FROZEN — the
+  reviewer re-verified deploy_ledger.ex:676 classifies by starts_with on "deploy process died
+  abnormally" and the new opener ("the teardown did not complete — …") can never prefix-match it.
+  Cross-epic notice to deploy-reliability rides the PR body. The systemd unit-deadline arm stays
+  mode-blind (out of brief) — a small sink asymmetry the next teardown slice can absorb.
+
+**STALLED:** nothing. **DEFERRED BY THE ROUNDS LAW (not failures):**
+`cch-w67-bl-rollback-refusal-discards-the-box-s-own-words` (round 2 — dispatch AFTER the S3 create-copy
+PR merges; same-file app.js law; its deploy.ex dep #11706 is already MERGED 10:00Z), then
+`cch-w67-followup-delete-site-typed-fk-failure` (round 3 — after the round-2 slice merges).
+
+**LEDGER:** all six slice tasks `in_progress`, every non-merge-gated criterion stamped with evidence
+mid-build, merge-gated rows left open for the lead — zero ledger fixes needed, first fully-clean audit
+of the epic. Referent `cloud-console-hardening-epic-wave-69-log` closed by Review (paperwork done).
+Backlog filed and published: audit-table prose repoint, in-image-arm selftest case, CLI-voiced detail
+string-match, worker-route unnormalised writes, dns-label-from-raw-url.
+
+**NEXT WAVE:** (1) the lead merges round 1 — #11776 FIRST, then the union PR rebased + re-gated, then
+the five strands closed as superseded; deploy.yml watched on S1's sha. (2) Dispatch the two deferred
+rounds as their deps merge. (3) Price `cch-w69-bl-worker-route-stores-url-unnormalised` — closing the
+write side retires a whole class the read-side btrim only patches. (4) The stale-verdict watch: the
+union clears 4/15 rows; the remaining stranded-PR reds (#10054/#10085 verdict rows among them) need
+the close-as-superseded pass the merge-order law ends with. (5) w68 residuals still open:
+`cch-w68-bl-smoke-rollback-fixture-shape-pin`, `cch-w68-s4a-followup-manifest-prunes-orphan-slots`.
+
 ### 2026-08-17 — wave 68 REVIEW — grade A, BOTH STRANDED PRs FOLDED IN: six round-1 slices, all pushed with PRs open, one review fix
 
 **Paper:** `cloud-console-hardening-wave-68-2026-08-17` (debrief appended). **Decisions:** D828–D840
