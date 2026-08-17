@@ -17064,10 +17064,11 @@ test("cch-w34-s1/cch-w67-s4: the per-GET-call-site census runs clean against the
   assert.match(r.stdout, /controls present : presenceChip lifecyclePill catalogViewState metricsAgeText freshnessModel/);
   assert.match(r.stdout, /controls w\/ GETs : \(none\)/);
   assert.match(r.stdout, /controls missing : \(none\)/);
-  // The wave-68 dozen may never slide back into the degrades column.
+  // The wave-68 dozen may never slide back into the degrades column —
+  // recheckSiteDeleted joins them in cch-w68-s5 (charter D834).
   for (const fixed of ["loadProviders", "loadGithub", "renderOAuthButtons", "newRenderOAuth",
     "loadNewTemplates", "loadInstanceVerify", "fetchMembers", "loadInvite",
-    "showAuthInviteBanner", "newRenderReady", "loadSites"]) {
+    "showAuthInviteBanner", "newRenderReady", "loadSites", "recheckSiteDeleted"]) {
     assert.ok(!new RegExp("degrades\\s+" + fixed + "\\b").test(r.stdout),
       fixed + " must not be pinned 'degrades' after cch-w67-s4");
   }
@@ -17075,10 +17076,11 @@ test("cch-w34-s1/cch-w67-s4: the per-GET-call-site census runs clean against the
   // sanctioned-silent, and pinning it 'guarded' would itself be the lie.
   assert.match(r.stdout, /sanctioned loadSiteDomains/);
   assert.doesNotMatch(r.stdout, /guarded\s+loadSiteDomains/);
-  // The two honest residues stay visible, each owned: recheckSiteDeleted's
-  // degrade-to-DONE belongs to cch-w68-s5, the palette's silent omit to
+  // cch-w68-s5 (D834) PAID recheckSiteDeleted's degrade-to-DONE, so the row it
+  // was pinned into is now `guarded` and this assertion is flipped with it. ONE
+  // honest residue is left, owned: the palette's silent omit belongs to
   // cch-w34-bl-five-remaining-absence-collapses.
-  assert.match(r.stdout, /degrades\s+recheckSiteDeleted/);
+  assert.match(r.stdout, /guarded\s+recheckSiteDeleted/);
   assert.match(r.stdout, /degrades\s+openCommandPalette/);
 });
 
@@ -20690,7 +20692,7 @@ test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT 
   assert.match(bare.body, /still registered/);
 });
 
-test("cch-w67: the settle plan survives a modal dismissed mid-flight — a late FAILURE still speaks, a late SUCCESS does not navigate", () => {
+test("cch-w67 + cch-w68-s5: the settle plan survives a modal dismissed mid-flight — a late FAILURE still speaks, and a late SUCCESS on this site's screen NOW navigates (D834)", () => {
   // Modal still ours: inline beside the ONE recovery; success navigates off the
   // dead site screen.
   // (…deepEqual is deliberately avoided: these objects are minted inside the vm
@@ -20712,13 +20714,25 @@ test("cch-w67: the settle plan survives a modal dismissed mid-flight — a late 
   assert.equal(lateFail.surface, "toast", "a late failure must not vanish with the modal");
   assert.equal(lateFail.recovery, null, "there is no button left to hang a recovery on");
 
-  // A late SUCCESS still gives its receipt, but must NOT yank the operator off
-  // whatever they navigated to.
+  // A late SUCCESS still gives its receipt — and THIS PIN IS DELIBERATELY
+  // FLIPPED by charter D834. It asserted `navigate:false` for the case
+  // `live=false && onSite=true`, which is not "the operator went somewhere else"
+  // (D818's concern) but "the operator closed the dialog and went NOWHERE". The
+  // old predicate therefore read a dismissed modal as consent to be stranded on
+  // a deleted site's screen, still holding live Deploy / Rollback / Delete
+  // controls over a site the plane no longer has. `navigate` is now `!!onSite`.
   const lateOk = hooks.siteDeleteSettlePlan(false, true, true, null);
-  assert.equal(lateOk.navigate, false, "a late success must never navigate");
+  assert.equal(lateOk.navigate, true,
+    "D834: a late success must not strand the operator on the deleted site's screen");
   assert.equal(lateOk.surface, "toast");
-  // Nor does a live modal navigate when the operator is already on another site.
+  // D818 SURVIVES, and this is the assertion that carries it: the operator who
+  // genuinely went elsewhere is never yanked back, modal live or not.
   assert.equal(hooks.siteDeleteSettlePlan(true, false, true, null).navigate, false);
+  assert.equal(hooks.siteDeleteSettlePlan(false, false, true, null).navigate, false,
+    "a settle that lands while the operator is on another screen still may not navigate");
+  // And `live` keeps its ONE remaining job: which surface a FAILURE speaks on.
+  assert.equal(hooks.siteDeleteSettlePlan(true, true, false, "retry").surface, "inline");
+  assert.equal(hooks.siteDeleteSettlePlan(false, true, false, "retry").surface, "toast");
 });
 
 test("cch-w67 (D821): the previews section stops asserting ABSENCE over FAILURE — four arms, and only one of them is empty", () => {
@@ -20906,4 +20920,316 @@ test("cch-w67 review: a LATE success still gives its receipt, and no settle navi
   assert.equal(late.toasts.length, 1, "the receipt still lands on a dismissed modal");
   assert.match(late.toasts[0].innerHTML, /Site deregistered/);
   assert.equal(late.hash, "#sites/s1", "…and the hash is untouched: no late navigation");
+});
+
+// ── cch-w68-s5 · THE RE-CHECK AND SETTLE TIER (charter D834) ─────────────────
+// The defect this group exists to make un-shippable: recheckSiteDeleted's old
+// `gone` predicate was `r.status === 404 || (r.ok && !(r.data && r.data.site))`
+// and every `true` toasted "…the teardown completed after all." FIVE distinct
+// answers took that arm, and none of the five measured a teardown:
+//
+//   1. a route 404 from the control plane        (the ONE honest absence)
+//   2. a 200 text/html interstitial             (a login wall, a CDN page)
+//   3. a 200 JSON {}                            (a shape this route never sends)
+//   4. a PROXY 404 — the route never ran        (not an answer about this site)
+//   5. a 204 No Content                         (no body at all)
+//
+// EVERY FIXTURE BELOW IS BUILT BY DRIVING THE SHIPPED api(), not hand-written:
+// the whole fix rests on api()'s own `text` field (null for every JSON body,
+// the bytes for every other), so a fixture that asserted that field by hand
+// would be pinning the test author's belief about the envelope instead of the
+// envelope. proxyFaultFetch is the rig cch-w31-s4 already built for exactly
+// this: a stub with a real content-type switch and no json method at all.
+
+// A JSON-speaking stub — the shape the control plane's own `json/2` produces
+// (put_resp_content_type("application/json") + an encoded body), so a route 404
+// and a proxy 404 differ in the test the same way they differ on the wire.
+function planeJsonFetch(status, payload) {
+  const calls = [];
+  const fn = (path, opts) => {
+    calls.push({ path, opts });
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? "application/json" : null) },
+      json: () => Promise.resolve(payload),
+    });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+// Method+path aware, so a DELETE settle and the list refresh it triggers land on
+// the same recorder. Unrouted requests answer 500 rather than silently passing.
+function routedFetch(routes) {
+  const calls = [];
+  const fn = (path, opts) => {
+    const method = (opts && opts.method) || "GET";
+    calls.push({ path, method, opts });
+    const hit = routes.find((r) => r.method === method) || { status: 500, payload: { error: "unrouted" } };
+    return Promise.resolve({
+      ok: hit.status >= 200 && hit.status < 300,
+      status: hit.status,
+      headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? "application/json" : null) },
+      json: () => Promise.resolve(hit.payload),
+    });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+const RECHECK_HTML_200 =
+  "<!doctype html>\n<html><head><title>Sign in</title></head><body>\n" +
+  "<h1>Sign in to continue</h1><p>Your session expired.</p>\n</body></html>\n";
+const RECHECK_HTML_404 =
+  "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\n" +
+  "<center><h1>404 Not Found</h1></center>\n<hr><center>nginx/1.24.0</center>\n</body>\r\n</html>\r\n";
+
+// The five, each an api() envelope produced by a real drive.
+async function recheckEnvelopes() {
+  return {
+    routeGone: await driveApi(planeJsonFetch(404, { error: "not_found" }), "GET", "/v1/sites/s1"),
+    html200: await driveApi(proxyFaultFetch(200, "text/html", RECHECK_HTML_200), "GET", "/v1/sites/s1"),
+    empty200: await driveApi(planeJsonFetch(200, {}), "GET", "/v1/sites/s1"),
+    proxy404: await driveApi(proxyFaultFetch(404, "text/html", RECHECK_HTML_404), "GET", "/v1/sites/s1"),
+    noContent: await driveApi(proxyFaultFetch(204, "", ""), "GET", "/v1/sites/s1"),
+    // The two honest controls the wave-68 verify round measured as already
+    // behaving. They must keep behaving.
+    present: await driveApi(planeJsonFetch(200, { site: { id: "s1", slug: "acme" } }), "GET", "/v1/sites/s1"),
+    boom: await driveApi(planeJsonFetch(500, { error: "server_error" }), "GET", "/v1/sites/s1"),
+  };
+}
+
+// Drive recheckSiteDeleted itself. `attempt` is threaded so the bound is
+// reachable without six awaits of button-clicking.
+async function driveRecheck(fetchFn, { modalLive = true, hash = "#site/s1", attempt } = {}) {
+  const { doc, toasts } = siteDeleteRealm({ modalLive });
+  const ctl = w61s2Ctl();
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, location: sandbox.location };
+  let endHash = "";
+  sandbox.fetch = fetchFn;
+  sandbox.document = doc;
+  sandbox.location = { hash, pathname: "/", search: "", origin: "http://localhost" };
+  try {
+    hooks.recheckSiteDeleted({ id: "s1", slug: "acme" }, "acme.com", ctl, attempt);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally {
+    endHash = sandbox.location.hash;
+    Object.assign(sandbox, saved);
+  }
+  return {
+    ctl, toasts, hash: endHash,
+    last: () => ctl.rec.fails[ctl.rec.fails.length - 1],
+    gets: () => fetchFn.calls.length,
+    sentence: () => {
+      const f = ctl.rec.fails[ctl.rec.fails.length - 1];
+      return (f ? f.msg : "") + toasts.map((t) => t.innerHTML).join(" ");
+    },
+  };
+}
+
+test("cch-w68-s5 (D834): the FIVE answers that used to read as a completed teardown are classified apart — and only the plane's own 404 is 'gone'", async () => {
+  const e = await recheckEnvelopes();
+  const v = hooks.siteRecheckVerdict;
+
+  // FIRST: the envelopes are what the fix reasons about. api() carries the bytes
+  // of every non-JSON body and null for every JSON one — that is the whole
+  // discriminator, so it is asserted on the DRIVEN envelope before anything is
+  // classified. If this pair ever drifts, the classifier below is guessing.
+  assert.equal(e.routeGone.text, null, "a JSON 404 is the PLANE speaking — no bytes ride along");
+  assert.equal(typeof e.proxy404.text, "string", "a proxy 404 keeps its bytes: the route never ran");
+  assert.equal(e.empty200.text, null);
+  assert.equal(typeof e.html200.text, "string");
+  assert.equal(typeof e.noContent.text, "string", "a 204 has no content-type, so it takes the text arm");
+
+  // The old predicate — verbatim, as a LOCAL function so the contrast is a
+  // measurement rather than a claim in a comment. Five of seven wrongly true.
+  const oldGone = (r) => r.status === 404 || (r.ok && !(r.data && r.data.site));
+  const five = ["routeGone", "html200", "empty200", "proxy404", "noContent"];
+  for (const k of five) {
+    assert.equal(oldGone(e[k]), true, k + " took the old success arm — that is the defect");
+  }
+  assert.equal(oldGone(e.present), false);
+  assert.equal(oldGone(e.boom), false);
+
+  // AND THE FIX: exactly ONE of the five is still a deletion.
+  assert.equal(v(e.routeGone), "gone");
+  assert.equal(v(e.html200), "unknown");
+  assert.equal(v(e.empty200), "unknown");
+  assert.equal(v(e.proxy404), "unknown");
+  assert.equal(v(e.noContent), "unknown");
+  // The two honest controls are UNMOVED — the fix is a split, not a new refusal.
+  assert.equal(v(e.present), "registered");
+  assert.equal(v(e.boom), "failed");
+  // api()'s transport envelope (a wifi blip) was never 'gone' and still is not.
+  assert.equal(v({ ok: false, status: 0, data: { error: "network_error" }, text: null }), "failed");
+  // Total over junk: the classifier is called on whatever api() resolved with.
+  assert.equal(v(undefined), "failed");
+  assert.equal(v({}), "failed");
+});
+
+test("cch-w68-s5 (D834): DRIVEN — a 200 text/html, a 200 JSON {}, a proxy 404 and a 204 each render the unknown sentence and NEVER the success toast", async () => {
+  const cases = [
+    ["200 text/html interstitial", proxyFaultFetch(200, "text/html", RECHECK_HTML_200)],
+    ["200 JSON {}", planeJsonFetch(200, {})],
+    ["proxy 404 (route never ran)", proxyFaultFetch(404, "text/html", RECHECK_HTML_404)],
+    ["204 No Content", proxyFaultFetch(204, "", "")],
+  ];
+  for (const [label, fetchFn] of cases) {
+    const d = await driveRecheck(fetchFn);
+    assert.equal(d.ctl.rec.succeeded, 0, label + " must NEVER settle this dialog as a success");
+    assert.equal(d.toasts.length, 0, label + " must not toast: a live modal speaks in place");
+    assert.equal(d.ctl.rec.fails.length, 1, label + " must say something");
+    // THE SENTENCE THE OLD BYTES PRODUCED, forbidden on all four.
+    assert.ok(d.sentence().indexOf("the teardown completed after all") === -1,
+      label + " must not claim the teardown completed");
+    assert.ok(d.sentence().indexOf("is no longer registered") === -1,
+      label + " must not claim a deregistration it did not read");
+    // …and the D332 sentence in its place: what happened, what it does not
+    // resolve, and NO prescription.
+    assert.match(d.last().msg, /Something answered, but not with this site's state/, label);
+    assert.match(d.last().msg, /says nothing about whether acme\.com is still registered/, label);
+    assert.equal(d.hash, "#site/s1", label + " never navigates off the screen");
+  }
+
+  // The recovered bytes are EVIDENCE, which is the only thing D332 allows an
+  // unknown arm to add — and they are bounded and de-tagged by faultDetail, so
+  // an upstream error page never rides into a surface as markup.
+  const proxied = await driveRecheck(proxyFaultFetch(404, "text/html", RECHECK_HTML_404));
+  assert.match(proxied.last().msg, /The server replied: 404 Not Found/);
+  assert.ok(proxied.last().msg.indexOf("<center>") === -1, "the proxy's tags are stripped, not relayed");
+  // A JSON-bodied answer has no bytes to show, so no evidence clause is invented.
+  const jsonEmpty = await driveRecheck(planeJsonFetch(200, {}));
+  assert.ok(jsonEmpty.last().msg.indexOf("The server replied") === -1,
+    "an empty detail must never promise a detail it does not have");
+});
+
+test("cch-w68-s5 (D834): the plane's OWN 404 still settles the dialog — with the causal teardown claim removed", async () => {
+  const d = await driveRecheck(planeJsonFetch(404, { error: "not_found" }));
+  assert.equal(d.ctl.rec.succeeded, 1, "a genuine deregistration is still speakable (D805's inverse lie)");
+  assert.equal(d.ctl.rec.fails.length, 0, "…and is NEVER routed into a fault card");
+  assert.equal(d.toasts.length, 1);
+  const body = d.toasts[0].innerHTML;
+  assert.match(body, /Site deregistered/);
+  assert.match(body, /is no longer registered/);
+  // THE CLAUSE THIS SLICE EXISTS TO DELETE. The read touched the control plane;
+  // it never touched the instance, so it cannot certify the teardown.
+  assert.ok(body.indexOf("the teardown completed after all") === -1,
+    "the 404 arm may not state a cause it did not measure");
+  // Instead it carries runSiteDelete's own D812 limit clause — one fact, one
+  // vocabulary, across both of this verb's receipts.
+  assert.match(body, /no measured box state/);
+  assert.match(body, /teardown on the instance is still unverified/);
+  // And the hedge the sibling reader already applies to this exact status.
+  assert.match(body, /has no site with this id for your team/);
+});
+
+test("cch-w68-s5 (D834): the four re-check sentences are DISTINCT, and the unknown arm prescribes nothing", () => {
+  const copy = hooks.siteRecheckCopy;
+  const arms = ["gone", "registered", "unknown", "failed"].map((v) => copy(v, "acme.com", ""));
+  assert.equal(new Set(arms.map((c) => c.title + " — " + c.body)).size, 4,
+    "a collapsed arm reds here");
+  assert.equal(arms[0].kind, "success", "only 'gone' is a success");
+  for (const c of arms.slice(1)) assert.equal(c.kind, "error");
+
+  // D332(d)/D386: an unknown arm names EVIDENCE, never advice. The vocabulary
+  // list is the one __app.test.mjs already forbids on the console's other
+  // unmeasured rung (classifyBp's `unreported`).
+  const unknown = copy("unknown", "acme.com", "");
+  for (const advice of [/\bretry\b/i, /\bcontact\b/i, /\bverify\b/i, /\brestart\b/i, /\bshould\b/i,
+    /try again/i, /give it a moment/i, /check your connection/i, /\bwait\b/i]) {
+    assert.doesNotMatch(unknown.body, advice, "an unknown arm may not prescribe a next step");
+  }
+  // Nor may it assert either outcome.
+  assert.ok(unknown.body.indexOf("teardown completed") === -1);
+  assert.ok(unknown.body.indexOf("STILL REGISTERED") === -1);
+  // Total over junk: a nameless site never renders "undefined".
+  assert.match(copy("unknown", null, "").body, /The site/);
+  assert.match(copy("gone", undefined, "").body, /The site is no longer registered/);
+});
+
+test("cch-w68-s5 (D834e): the Re-check is BOUNDED — three reads, then the dialog stops offering it", async () => {
+  const plan = hooks.siteRecheckPlan;
+  assert.equal(hooks.SITE_RECHECK_MAX_ATTEMPTS, 3);
+  // A settled verdict is never retryable, whatever the counter says.
+  assert.equal(plan("gone", 1).settled, true);
+  assert.equal(plan("gone", 1).retryable, false);
+  assert.equal(plan("gone", 9).next, null);
+  // An unsettled one is, until the bound.
+  assert.equal(plan("unknown", 1).retryable, true);
+  assert.equal(plan("unknown", 1).next, 2);
+  assert.equal(plan("unknown", 2).next, 3);
+  assert.equal(plan("unknown", 3).retryable, false, "the third read is the last one offered");
+  assert.equal(plan("unknown", 3).next, null);
+  assert.equal(plan("failed", 3).retryable, false);
+  // A missing/garbage counter is attempt ONE, never an unbounded one.
+  assert.equal(plan("unknown", undefined).attempt, 1);
+  assert.equal(plan("unknown", 0).attempt, 1);
+
+  // DRIVEN through the button the recovery actually wires: click Re-check until
+  // it stops being offered, against a route that keeps answering the same way.
+  const fetchFn = planeJsonFetch(200, {});
+  const { doc } = siteDeleteRealm({ modalLive: true });
+  const ctl = w61s2Ctl();
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, location: sandbox.location };
+  sandbox.fetch = fetchFn;
+  sandbox.document = doc;
+  sandbox.location = { hash: "#site/s1", pathname: "/", search: "", origin: "http://localhost" };
+  const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+  try {
+    hooks.recheckSiteDeleted({ id: "s1", slug: "acme" }, "acme.com", ctl);
+    await settle();
+    // Six clicks offered; the bound must stop them long before that.
+    for (let k = 0; k < 6; k++) {
+      const last = ctl.rec.fails[ctl.rec.fails.length - 1];
+      if (!last || last.label !== "Re-check") break;
+      last.handler(ctl);
+      await settle();
+    }
+  } finally { Object.assign(sandbox, saved); }
+
+  assert.equal(fetchFn.calls.length, 3, "the re-check reaches the wire at most three times");
+  assert.deepEqual(ctl.rec.fails.map((f) => f.label), ["Re-check", "Re-check", "Close"],
+    "the third answer offers a terminal Close, not a fourth identical button");
+  const terminal = ctl.rec.fails[2];
+  assert.match(terminal.msg, /re-checked 3 times and stops offering it here/,
+    "the bound is STATED — a control that silently stops is its own lie");
+  // The count is a fact about what this console did, not advice.
+  assert.doesNotMatch(terminal.msg, /\bshould\b|contact|support/i);
+});
+
+test("cch-w68-s5 (D834): a successful delete invalidates the sites list BY THE MUTATION — no hash change required", async () => {
+  // The operator is on the Sites tab (currentSiteId does not match, so nothing
+  // navigates — the pre-fix code's ONLY invalidation was `location.hash =
+  // "#sites"`, which cannot fire here). The row for the deleted site must still
+  // stop being on screen.
+  const fetchFn = routedFetch([
+    { method: "DELETE", status: 200, payload: { ok: true, status: "deleted", slug: "acme" } },
+    { method: "GET", status: 500, payload: { error: "server_error" } },
+  ]);
+  const { doc, toasts } = siteDeleteRealm({ modalLive: true });
+  const listBody = { ...inertEl, innerHTML: "" };
+  const withList = {
+    ...doc,
+    querySelector: (sel) => (sel === "#sites-body" ? listBody : doc.querySelector(sel)),
+  };
+  const ctl = w61s2Ctl();
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, location: sandbox.location };
+  sandbox.fetch = fetchFn;
+  sandbox.document = withList;
+  sandbox.location = { hash: "#sites", pathname: "/", search: "", origin: "http://localhost" };
+  let endHash = "";
+  try {
+    hooks.runSiteDelete({ id: "s1", slug: "acme" }, "acme.com", ctl);
+    for (let i = 0; i < 16; i++) await Promise.resolve();
+  } finally {
+    endHash = sandbox.location.hash;
+    Object.assign(sandbox, saved);
+  }
+  assert.equal(ctl.rec.succeeded, 1);
+  assert.equal(toasts.length, 1);
+  assert.match(toasts[0].innerHTML, /Site deregistered/);
+  assert.equal(endHash, "#sites", "the hash is UNTOUCHED — this is not a routing side effect");
+  const refetch = fetchFn.calls.filter((c) => c.method === "GET" && c.path === "/v1/sites");
+  assert.equal(refetch.length, 1, "the mutation itself re-read the list the deleted site was in");
 });
