@@ -61,8 +61,8 @@ candidates — and **`go run ./scaffy/seed --check`**, which syncs the corpus to
 catalog and is its drift tripwire.
 
 **The merged-is-served law.** A `.scaffy` edit changes the source's `sha256`, so the served
-copy must be re-seeded or it silently falls behind `main`. `seed --check` (and the
-advisory `scaffy-catalog-drift` workflow that runs it on every corpus PR) reds the moment a
+copy must be re-seeded or it silently falls behind `main`. `seed --check` (and the ACTING
+`scaffy-catalog-drift` gate that runs it post-merge on main and daily) reds the moment a
 touched command drifts — served bytes must equal merged bytes.
 
 ## The command corpus
