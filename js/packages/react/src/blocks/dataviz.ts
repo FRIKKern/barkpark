@@ -856,25 +856,28 @@ const route: Emit = (block) => {
 
   const midLat = points.reduce((a, p) => a + p[0], 0) / points.length
   const k = Math.cos((midLat * Math.PI) / 180)
-  const xs = points.map((p) => p[1] * k)
-  const ys = points.map((p) => -p[0])
-  const minX = Math.min(...xs)
-  const minY = Math.min(...ys)
-  const spanX = Math.max(Math.max(...xs) - minX, 1e-9)
-  const spanY = Math.max(Math.max(...ys) - minY, 1e-9)
+  const projected = points.map((p): [number, number] => [p[1] * k, -p[0]])
+  const minX = Math.min(...projected.map((q) => q[0]))
+  const minY = Math.min(...projected.map((q) => q[1]))
+  const spanX = Math.max(Math.max(...projected.map((q) => q[0])) - minX, 1e-9)
+  const spanY = Math.max(Math.max(...projected.map((q) => q[1])) - minY, 1e-9)
 
   const innerW = ROUTE_W - 2 * ROUTE_PAD
   const scale = Math.min(innerW / spanX, (ROUTE_MAX_H - 2 * ROUTE_PAD) / spanY)
   const h = Math.round(spanY * scale) + 2 * ROUTE_PAD
 
-  const coords = xs.map((x, i2): [string, string] => [
+  const coords = projected.map(([x, y]): [string, string] => [
     fmt2((x - minX) * scale + ROUTE_PAD),
-    fmt2((ys[i2] - minY) * scale + ROUTE_PAD),
+    fmt2((y - minY) * scale + ROUTE_PAD),
   ])
 
+  const first = coords[0]
+  const last = coords[coords.length - 1]
+  if (first === undefined || last === undefined) return empty('route')
+
   const d = coords.map(([x, y], i2) => `${i2 === 0 ? 'M' : 'L'}${x},${y}`).join(' ')
-  const [sx, sy] = coords[0]
-  const [fx, fy] = coords[coords.length - 1]
+  const [sx, sy] = first
+  const [fx, fy] = last
 
   const svg =
     `<svg class="bp-route__map" viewBox="0 0 ${ROUTE_W} ${h}" role="img" aria-label="route track" style="display:block;width:100%;max-width:${ROUTE_W}px;height:auto;">` +
