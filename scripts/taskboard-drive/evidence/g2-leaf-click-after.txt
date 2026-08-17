@@ -1,39 +1,39 @@
 
  barkpark · tasks       ⇄ guerrilla  CONN · T ↔ ──────────────────────────────────────────────────────────────────────────
-   The task TUI is glanceable, live, an… ··· 2/14 ││ The live tmux drive ships as a committed SGR harness and the feels-      │
- ├─▎◆ The live tmux drive ships as a committed S… ││ native bar is finally judged                                             │
- │    C5/7 · P1 · 3/5                             ││ ⠿ in_progress · P1 · C5/7 · task · epic-builder-the-live-tmux-drive-shi… │
- ├─ ⠿ Wide-mode footer verbs become clickable ag… ││                                                                          │
- │    C5/7 · P2 · 4/5                             ││ criteria 3/5                                                             │
- ├─ ⠿ The TUI card and cheatsheet finally speak … ││   ✓ A committed re-runnable harness exists under scripts/taskboard-      │
- │    C5/7 · P3 · 4/5                             ││     drive/ that builds the real binary from ./cmd/barkpark, launches it  │
- ├─ ⠿ The board discloses its 1000-row horizon —… ││     in detached tmux 3.4 sessions at 130x40 and 70x24 against the        │
- │    C5/7 · P2 · 4/5                             ││     configured server, injects raw SGR bytes per gesture, captures       │
- ├─ ⠿ The two snapshot fetches fly in parallel —… ││     styled frames (-e) and normalizes churn (spinners/elapsed/SSE)       │
- │    C5/7 · P2 · 3/4                             ││     before diffing; a full run exits 0 on this host.                     │
- ├─ ⠿ Sheet-era glyph and golden hygiene: the re… ││     ↳ scripts/taskboard-drive/drive.sh: builds via CC=/usr/bin/clang go… │
- │    C5/7 · P3 · 4/5                             ││   ✓ Every D110 matrix gesture (wheel, click select+activate, epic-root   │
- ├─ ⠿ Task-TUI W19 native-proof paperwork: D109-… ││     fold toggle, leaf first-click descend, hover motion accent paint,    │
- │    C5/7 · P1 · 1/2 · epic-decide-ttw19 · T   ││     divider drag with prefs persistence across kill+relaunch, divider    │
- ├─ ✓ In-body task chips speak the full 9-status… ││     hover 2-col bounds, M toggle off/on) has captured before/after frame │
- └─ ✓ Narrow-mode reading-frame rail stops gain … ││     evidence with the visible delta named, recorded in a durable venue   │
-   +5 more · 1 cancelled                          ││     the merge carries — harness-committed evidence files, a ledger row,  │
-                                                  ││     or this task evidence — and the evidence NAMES WHICH venue.          │
-   Paper Excellence epic — close the a… ··· 20/58 ││     ↳ VENUE: harness-committed evidence files scripts/taskboard-drive/e… │
- ├─ ⠿ Wave-3 decide referent: the visible wave's… ││   ✓ The feels-native verdict is judged per gesture against the lazygit-  │
- │    C5/7 · P1 · ✓✓○ 2/3 · pe-w3-decide · T     ││     grade bar (pass/fail plus a one-line why each) and recorded in a     │
- ├─ ⠿ Sections get a class hook on both wrappers… ││     durable venue the merge carries; every defect found is filed as a    │
- │    C5/7 · P2 · 6/7                             ││     published bp task under task-tui-goal and named in the verdict.      │
- ├─ ⠿ The rig learns to measure the crown — four… ││     ↳ VENUE: tooling/grip/ledger/task-tui-w19-feels-native-verdict-2026… │
- │    C5/7 · P3 · 5/6                             ││   ○ The diff touches only scripts/taskboard-drive/ and                   │
- ├─ ⠿ BPML's inline grammar accepts the corpus's… ││     tooling/grip/ledger/ (git diff --stat proves it), and                │
- │    C5/7 · P2 · 4/5                             ││     CC=/usr/bin/clang go build ./cmd/barkpark still exits 0.             │
- ├─ ✓ pdrender stops inventing figure numbers an… ││   ○ Branch pushed, PR opened with the Task trailer on its own line, and  │
- └─ ✓ The publish floor's outline arms see the w… ││     MERGED into main — the LEAD closes this criterion on merge.          │
-   +34 more · 18 done                             ││                                                                          │
-                                                  ││ purpose                                                                  │
-   API Read-Path Security Sweep (epic) ···· 14/32 ││   part of   task-tui-goal                                                │
-   ↓ 34 more below                                ││   impact    Blocks the larger goal when unresolved: synthetic Bubble Tea │
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ ││             mouse messages prove reducer branches but cannot prove tmux  │
- ⠿ 20 in flight · ○ 1+ ready · ✓ 3278 done ·… 51% ││             forwarding, terminal selection modifiers, hover timing,      │
- jk · enter open · esc back · c claim · x close … ││   ↓ more below                                                           │
+   Cloud Console hardening — the Clou… ··· 87/220 ││ Wave 71 paperwork: charter PR (D861-D866) + wave log                     │
+ ├─▎◆ Wave 71 paperwork: charter PR (D861-D866) … ││ ⠿ in_progress · P1 · C4/7 · task · w71-decide-fable                      │
+ │    C4/7 · P1 · w71-decide-fable · T           ││                                                                          │
+ ├─ ✓ friendly() THROWS a TypeError on the neste… ││ criteria · missing                                                       │
+ └─ ✓ Wave 70 paperwork — the measured-sentence … ││   ! No acceptance criteria recorded — completion cannot be verified.     │
+   +132 more · 85 done · 27 cancelled             ││                                                                          │
+                                                  ││ purpose · derived                                                        │
+   The task TUI is glanceable, live, an… ··· 9/19 ││   part of   cloud-console-hardening-epic                                 │
+ ├─ ⠿ The drive harness anchors row identity on … ││   impact    blocks 0 · blocked by 0                                      │
+ │    C5/7 · P2 · 3/4                             ││   does      Wave 71 paperwork: charter PR (D861-D866) + wave log         │
+ ├─ ⠿ The conn dot never calls a slow fetch offl… ││   why       Why this task is necessary within cloud-console-hardening-   │
+ │    C5/7 · P1 · 4/5                             ││             epic is not recorded.                                        │
+ ├─ ⠿ The reading geometry stops taking a -2 mut… ││   endgame   Advance cloud-console-hardening-epic by completing this      │
+ │    C5/7 · P2 · 4/5                             ││             task.                                                        │
+ ├─ ⠿ Esc at depth 0 hands j/k back to the board… ││   important 90/100 — Derived from P1 queue priority.                     │
+ │    C5/7 · P2 · 4/5                             ││   relevant  90/100 — Derived from active in-progress status.             │
+ ├─ ⠿ Task-TUI wave 20 trust-wave paperwork: the… ││   proof     Recorded task intent — Wave 71 paperwork: charter PR (D861-  │
+ │    C5/7 · P2 · ✓○ 1/2 · fable-decide-w20 · T ││             D866) + wave log — document.title                            │
+ ├─ ✓ The TUI card and cheatsheet finally speak … ││   proof     Mission placement — cloud-console-hardening-epic —           │
+ └─ ✓ Sheet-era glyph and golden hygiene: the re… ││             content.parent_id                                            │
+   +5 more · 7 done · 1 cancelled                 ││   derived from recorded task facts · add authored purpose to override    │
+                                                  ││                                                                          │
+   Felix pristine initiative — Phoenix … ··· 1/10 ││ created T ago (Aug 17, 15:13) · updated T ago (Aug 17, 15:15)          │
+ └─ ✓ Wave 25 paperwork: charter PR + wave log    ││                                                                          │
+   +9 more                                        ││ ○ created (Aug 17) → ⠿ claimed by w71-decide-fable (Aug 17)              │
+                                                  ││                                                                          │
+   Paper Excellence epic — close the a… ··· 24/64 ││   Purpose                                                                │
+ ├─ ✓ BPML's inline grammar accepts the corpus's… ││                                                                          │
+ └─ ✓ Wave 4 paperwork: the landing wave's chart… ││   Per-wave referent for wave 71 of cloud-console-hardening: carries      │
+   +40 more · 22 done                             ││   the docs-only charter PR minting D861-D866 and the wave-71 ledger      │
+                                                  ││   rows. Claimed by the decide phase; the PR body's Task: line names      │
+   API Read-Path Security Sweep (epic) ···· 19/32 ││   this row.                                                              │
+ ├─ ○ RULING (owner gate): task+paper anon read … ││                                                                          │
+   ↓ 20 more below                                ││ claim  w71-decide-fable · epoch 3 · claimed T ago (Aug 17, 15:14)       │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ ││        ⠿ w71-decide-fable · charter PR #11870 open (D861-D866 + 4 ledge… │
+ ⠿ 7 in flight · ○ 2+ ready · ✓ 3301 done · … 51% ││                                                                          │
+ jk · enter open · esc back · c claim · x close … ││                                                                          │
