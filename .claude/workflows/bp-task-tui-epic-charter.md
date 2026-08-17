@@ -2471,3 +2471,55 @@ briefs, dry-run at Decide; wave paper task-tui-wave-2026-08-17):**
    worktree (the primary checkout false-reds docs-anchors-check via mainbase/ pollution).
 
 Next D-number: D114.
+
+### Wave 19 2026-08-17 (REVIEWED: all 6 round-1 slices green, one review fix, pushed + PRs open)
+
+**Review facts:** the reviewer re-ran every gate on the final heads — including the FULL live
+tmux drive (25/25 asserts pass, exit 0, on tmux 3.4 against guerrilla — an independent fourth
+consecutive all-pass run) and slice 3's suite under `-race` — plus an octopus integration merge
+of all six branches onto origin/main with `go build ./cmd/barkpark` + `go test ./internal/...`
+fully green (30 packages). ONE review fix: the cheatsheet's mouse row said "click again
+activates", contradicting the drive-proven one-gesture grammar (single click = select+activate)
+and the card's own prose — fixed on the `-5-r` branch, both doc gates re-run green (2397B/2400B).
+
+**Landed (review-verified, gates re-run green on final heads):**
+- **ttw17-bl-live-tmux-drive** → `loop-epic/the-live-tmux-drive-ships-as-a-committed-0`.
+  D110 closed: committed harness `scripts/taskboard-drive/drive.sh` (build → detached tmux
+  130x40 + 70x24 → SGR bytes per gesture → located/normalized asserts → evidence + report),
+  feels-native verdict in `tooling/grip/ledger/task-tui-w19-feels-native-verdict-2026-08-17.md`:
+  all 9 scored gestures PASS vs the lazygit bar; shift-click NOT SCORED per D110. Two defects
+  are owned open tasks: ttw19-bl-conn-state-flap (re-observed), ttw19-bl-wide-focus-oneway
+  (NEW: Enter→Esc strands keyboard j/k in the preview; the one feels-native miss).
+- **ttw18-bl-wide-footer-verb-clicks** → `loop-epic/wide-mode-footer-verbs-become-clickable--1`.
+  D111 exactly as chartered: footerVerbAt wide branch against live boardPaneCols, verb-first
+  early-out above the pendingClose clear (two-step x survives, chrome clicks still disarm),
+  D96 hover tint via HoverFooterVerb; 5 new wide tests all deriving coords from
+  buildBoardFooter's real spans.
+- **ttw19-showing-n-of-m** → `loop-epic/the-board-discloses-its-1000-row-horizon-2`. D113a:
+  momentum line gains a dim `showing N of M` on its own shed rung (criteria tally sheds first,
+  note drops WHOLE); summedLifecycleCounts matches TaskCount's population; zero golden churn.
+- **ttw19-concurrent-snapshot-fetch** → `loop-epic/the-two-snapshot-fetches-fly-in-parallel-3`.
+  D113b: list + prime GETs overlap under a WaitGroup; two-arrival-barrier stub proves overlap
+  (builder negatively proved it trips a sequential fetch); either-error → same degraded outcome,
+  list-error precedence keeps old semantics; `-race` clean.
+- **ttw19-golden-and-gating-hygiene** → `loop-epic/sheet-era-glyph-and-golden-hygiene-retir-4`.
+  D109 residue: '›' pruned from readingGlyphExtras (zero goldens carry it), dragged-divider
+  golden compose_wide_dragged_120 + divider-column assert, go-tests.yml now whitelists
+  internal/taskboard/testdata/** (both triggers), cli-release.yml comment corrected.
+- **ttw19-docs-tui-currency** → `loop-epic/the-tui-card-and-cheatsheet-finally-spea-5-r`
+  (the one -r final branch). Card + cheatsheet speak mouse/divider/sheet under the 2400B caps;
+  spineRows Code anchor CI-pins the one-producer law; reviewer's click-grammar fix on top.
+
+**Ledger:** all six slice tasks honestly in_progress, criteria evidence-stamped mid-claim, only
+the lead-owned merge criterion open. Zero ledger fixes needed — first wave in memory where the
+board needed no correction. Grade: A- (commentary in wave paper task-tui-wave-2026-08-17).
+
+**Next wave (dispatch order):** (1) LEAD merges the six round-1 PRs (file-disjoint by
+construction; slice 5's final branch is `-5-r`) and closes each merge criterion; drive-harness
+PR's evidence dir churns on re-runs by design. (2) THEN dispatch **ttw18-bl-narrow-reading-width-skew**
+(round 2 — waits ONLY on the compose.go/compose_test.go collision fence with slices 2+5, both
+now merged): D112 floor alignment + the shared top-edge avail seam + mutation-proofs at
+rightPaneStopAt/scrollPreview. (3) **ttw19-bl-wide-focus-oneway** is the highest-value NEW
+board defect (keyboard route back from preview focus — the one feels-native miss). (4)
+ttw19-bl-conn-state-flap needs a live-channel diagnosis. (5) ttw19-bl-find-jump stays
+considering pending a user taste signal.
