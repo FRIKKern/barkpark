@@ -13558,6 +13558,23 @@
         recovery: "close",
       };
     }
+    // (3b) 500 registration_not_removed — the INVERSE ORPHAN, made typed (W70
+    // S2). Unlike the crash envelope below, this 500 MEASURED both halves: the
+    // instance IS torn down, and the registration was NOT removed because a
+    // foreign-key constraint refused the row delete. The plane wrote the whole
+    // sentence — including the constraint name — into `detail`, so relay it
+    // verbatim rather than re-guessing an outcome this console did not observe.
+    // A retry cannot fix a surviving row a constraint is holding, so the
+    // recovery is "close", not "recheck": this needs support, not another click.
+    if (code === "registration_not_removed") {
+      return {
+        title: "The site is torn down but still registered",
+        body: (detail ||
+          "The instance was torn down, but the control plane could not remove the registration.") +
+          " Contact support to have the leftover registration removed.",
+        recovery: "close",
+      };
+    }
     // (4) THE CRASH ENVELOPE — no `ok`, no `detail`, just a slug and a
     // request_id. The route is BOX FIRST, so a crash can land on either side of
     // the teardown and the envelope does not say which: `crash_slug/2` stamps
