@@ -1,9 +1,9 @@
-   Cloud Console hardening — the Clou… ··· 87/220 ││ Wave 71 paperwork: charter PR (D861-D866) + wave log                     │
- ├─▎⠧ Wave 71 paperwork: charter PR (D861-D866) … ││ ⠋ in_progress · P1 · C4/7 · task · w71-decide-fable                      │
- │    C4/7 · P1 · w71-decide-fable · 2m           ││                                                                          │
- ├─ ✓ friendly() THROWS a TypeError on the neste… ││ criteria · missing                                                       │
- └─ ✓ Wave 70 paperwork — the measured-sentence … ││   ! No acceptance criteria recorded — completion cannot be verified.     │
-   +132 more · 85 done · 27 cancelled             ││                                                                          │
-                                                  ││ purpose · derived                                                        │
-   The task TUI is glanceable, live, an… ··· 9/19 ││   part of   cloud-console-hardening-epic                                 │
- ├─ ⠧ The drive harness anchors row identity on … ││   impact    blocks 0 · blocked by 0                                      │
+   The task TUI is glanceable, live, a… ··· 15/23│ │ The drive harness goes hermetic — fixture-served, byte-deterministic     │
+ ├─▎⠋ The drive harness goes hermetic — fixture-…│ │ geometry proofs                                                          │
+ │    C5/7 · P1 · 2/5                            │ │ ⠋ in_progress · P1 · C5/7 · task · epic-builder-the-drive-harness-goes-… │
+ ├─ ⠋ The wide panes overflow markers answer cli…│ │                                                                          │
+ │    C5/7 · P3 · 4/5                            │ │ criteria 2/5                                                             │
+ ├─ ⠋ The NOW band and the in-flight count tell …│ │   ✓ A dependency-free fixture server under scripts/taskboard-drive/      │
+ │    C5/7 · P2 · 3/4                            │ │     serves the three-endpoint LIVE-pinned surface (list, prime,          │
+ ├─ ⠋ Task-TUI wave 21 settlement paperwork: the…│ │     streaming listen with a welcome frame) plus the D115 in_progress     │
+ │    C5/7 · P1 · ✓○ 1/2 · w21-decide-fable · 13m│ │     filter route, and bp tasks pointed at it via BARKPARK_SERVER boots   │

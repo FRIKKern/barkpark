@@ -83,8 +83,9 @@ func detailFixtureServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-// TestFetchSnapshotFull proves detail hydration rides the SAME two calls as the
-// board fetch (zero extra network) and that syncDetails re-embeds the ready
+// TestFetchSnapshotFull proves detail hydration rides the SAME snapshot calls
+// as the board fetch (zero extra network per row — since D120 the snapshot is
+// three concurrent GETs) and that syncDetails re-embeds the ready
 // overlay so a detail can never contradict the board row it was opened from.
 func TestFetchSnapshotFull(t *testing.T) {
 	srv := detailFixtureServer(t)
