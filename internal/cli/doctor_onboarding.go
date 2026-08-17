@@ -396,10 +396,12 @@ func onboardingCLIFreshness() onbCLICheck {
 		c.Detail = "freshness UNREPORTED — could not resolve the latest release: " + err.Error()
 		return c
 	}
-	// Refresh the on-disk cache whoami reads. The doctor is the ONLY surface that
-	// pays the network cost of this resolve, so it is where the network-free
-	// whoami leg gets its truth. Best-effort: a cache-write failure never sinks
-	// the receipt's own live reading below.
+	// Refresh the on-disk cache whoami reads. This is `bp doctor --onboarding`,
+	// one of several network-bearing surfaces that keep the cache warm — bp
+	// upgrade (runUpgrade) and the update-notice background resolve write it too;
+	// only plain `bp doctor` (doctor_cmd.go) stays offline and refreshes nothing.
+	// Best-effort: a cache-write failure never sinks the receipt's own live
+	// reading below.
 	_ = writeReleaseCache(latest)
 	c.Latest = latest
 	if compareVersions(cliVersion, latest) < 0 {

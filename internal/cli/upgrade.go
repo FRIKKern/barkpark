@@ -560,6 +560,11 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		out.errf("bp upgrade: %v", err)
 		return exitGeneric
 	}
+	// This resolve is network-bearing, so refresh the on-disk cache a later
+	// network-free whoami reads its freshness verdict from — covers both bare
+	// `bp upgrade` and `bp upgrade --check`. A failed resolve returns above and
+	// writes nothing. Best-effort: a cache-write failure never sinks the upgrade.
+	_ = writeReleaseCache(latest)
 	behind := compareVersions(cliVersion, latest) < 0
 
 	if check {
