@@ -30,11 +30,18 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
       the merged result — Bokbasen acceptance is the canonical sign-off
       signal; deriving here keeps the rule out of every caller.
     * Persists via `Document.changeset/2` + `Repo.update/1`.
+    * Rejoins the canonical Content event spine after commit: writes a
+      `mutation_events` row and fires `Content.broadcast_document_mutation/3`
+      (action `"update"`, with `:event_id`) so the SSE `/v1/data/listen`
+      endpoint, webhooks, and cache revalidation see the write — a raw
+      `Repo.update` alone is invisible to all three (felix-w25-s4).
     * Broadcasts `{:bokbasen_status_update, merged_status}` on
       `bokbasen:document:<doc_id>` so subscribed LiveViews refresh
-      without a re-fetch.
+      without a re-fetch. PRESERVED alongside the canonical emission.
   """
 
+  alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -56,8 +63,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
 
   @doc """
   Merge `patch` into the current `bp_export_status` composite, persist via
-  `Document.changeset/2`, and broadcast the merged map on
-  `bokbasen:document:<doc_id>`.
+  `Document.changeset/2`, emit a canonical `mutation_events` row + broadcast so
+  the write is visible to SSE/webhooks/cache-revalidation, and broadcast the
+  merged map on the plugin-private `bokbasen:document:<doc_id>` topic.
 
   Atom-keyed patches are converted to string keys. When the merged status
   contains `accepted_at`, `signed_off` is derived to `true`.
@@ -85,6 +93,26 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
       |> Document.changeset(%{"content" => new_content})
       |> Repo.update()
 
+    # NAMED FAILURE MODE (cross-context write bypassing the Content event path):
+    # the raw Repo.update above is the sanctioned state-preserving write (charter
+    # D170 keeps it — Content.upsert_document would force a draft twin and coerce
+    # a published book row published→draft), but on its own the SSE
+    # /v1/data/listen endpoint, webhooks, and cache revalidation never saw a
+    # bp_export_status write. Rejoin the canonical event spine AFTER commit: a
+    # self-written mutation_events row (the listen controller drops frames whose
+    # msg has no :event_id) + the canonical fan-out on documents:<dataset> +
+    # per-doc + workspace topics. `fresh.rev` is the rev observed before the write.
+    ev = Broadcast.save_event(updated, updated.type, updated.dataset, "update", fresh.rev, :onixedit)
+
+    Content.broadcast_document_mutation(updated, "update",
+      event_id: ev.id,
+      previous_rev: fresh.rev
+    )
+
+    # PRESERVED plugin-private broadcast: the Bokbasen AdminLive / StudioLive
+    # native-editor consumers subscribe to bokbasen:document:<id> and refresh
+    # off {:bokbasen_status_update, merged} without a re-fetch. The canonical
+    # emission above is ADDITIVE — it does not replace this topic.
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
       "bokbasen:document:#{doc.doc_id}",
