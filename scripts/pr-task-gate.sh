@@ -196,7 +196,7 @@ fi
 # runs the gate, reads this reference back out of the message and asserts that
 # the cited line really is the released_ge_expired comparison — so an edit that
 # shifts the clause reds the harness instead of quietly misdirecting a reader.
-ORDERING_CLAUSE_REF="pr-task-gate.sh:429"
+ORDERING_CLAUSE_REF="pr-task-gate.sh:462"
 
 # The whole cure, in the order it must be performed. Every refusal that a
 # re-claim actually fixes carries this, verbatim.
@@ -215,11 +215,28 @@ trap 'rm -f "$tmp" "$tmp.err"' EXIT
 # verdict a function of the wall clock — the exact contamination this epic
 # exists to remove. `last_reason` carries the final attempt's reason so the
 # UNCHECKED message names what actually happened, not a generic outage.
+# Authenticated read (wave-3 token plumbing). The ledger serves task documents
+# unauthenticated TODAY, but the day tasks flip to private every unauthenticated
+# read of a REAL task answers 404, and the 404 branch below would then red every
+# PR with "task does not exist" — a private-flip would make main unmergeable with
+# no code change. Sending a Bearer keeps authenticated reads seeing the task.
+# The header is added ONLY when LEDGER_TOKEN is non-empty: an EMPTY `Authorization:
+# Bearer ` is a malformed-but-present credential, worse than sending none. The
+# secret is UNPROVISIONED today and fork PRs never receive secrets, so the
+# empty-token path is the common runtime case, not an error — the 404 branch
+# below treats a token-absent 404 as an outage (exit 2), not a PR accusation.
+# `${auth_args[@]+...}` guards the expansion for empty arrays under `set -u` on
+# bash 3.2 (macOS), where a bare `"${auth_args[@]}"` on an empty array aborts.
+auth_args=()
+if [ -n "${LEDGER_TOKEN:-}" ]; then
+  auth_args=(-H "Authorization: Bearer ${LEDGER_TOKEN}")
+fi
+
 last_reason=""
 fetch_doc() {
   local attempt=1
   while : ; do
-    if http_code="$(curl -sS -m 20 -o "$tmp" -w '%{http_code}' "$url" 2>"$tmp.err")"; then
+    if http_code="$(curl -sS -m 20 ${auth_args[@]+"${auth_args[@]}"} -o "$tmp" -w '%{http_code}' "$url" 2>"$tmp.err")"; then
       case "$http_code" in
         404|2??) return 0 ;;
       esac
@@ -237,12 +254,28 @@ fetch_doc() {
 
 fetch_doc || unchecked "${last_reason} after ${RETRIES} attempts — the task backing of this PR could not be checked at all. This is not a finding about your PR: re-run this check once the ledger is up (ledger: ${LEDGER_BASE})"
 
-# Status handling, decided by code not body:
-#   404   → the task genuinely does not exist → DEFINITIVE fail.
-#   2xx   → parse the body (below).
+# Status handling, decided by code not body. A 404 is an ANSWER, never retried
+# (fetch_doc returns it at once), but what it MEANS depends on whether we could
+# read the ledger authenticated:
+#   404 + token PRESENT → we asked as ourselves and the task is not there →
+#                         DEFINITIVE fail (exit 1). The accusation is TRUE.
+#   404 + token ABSENT  → an unauthenticated read cannot tell a missing task from
+#                         a PRIVATE one it is not allowed to see, so this is an
+#                         OUTAGE about the gate's credentials, not a finding about
+#                         the PR → UNCHECKED (exit 2), naming BARKPARK_TASK_TOKEN.
+#                         This is the private-flip safety valve: fork PRs and the
+#                         (currently unprovisioned) secret both land here, and
+#                         neither deserves a false "your task does not exist" red.
+#   2xx                 → parse the body (below).
 # Everything else is already handled by fetch_doc (retry, then UNCHECKED).
 case "$http_code" in
-  404)     fail "task '${TASK_ID}' does not exist on the ledger (${LEDGER_BASE}) — reference a real task (HTTP 404)" ;;
+  404)
+    if [ -n "${LEDGER_TOKEN:-}" ]; then
+      fail "task '${TASK_ID}' does not exist on the ledger (${LEDGER_BASE}) — reference a real task (HTTP 404)"
+    else
+      unchecked "the ledger answered 404 for '${TASK_ID}' and no LEDGER_TOKEN was supplied, so an unauthenticated read cannot tell a missing task from a private one it may not see — the task backing of this PR could not be checked. This is not a finding about your PR: provision BARKPARK_TASK_TOKEN (see .github/workflows/pr-task-gate.yml and docs/ops/merge-gates.md) and re-run, or — on a fork PR, which never receives secrets — merge from a branch in this repo (ledger: ${LEDGER_BASE})"
+    fi
+    ;;
   2??)     : ;;  # parse below
 esac
 

@@ -320,6 +320,14 @@ jobs:
           # re-fire cannot decay a verdict. The gate REFUSES rather than falls
           # open if this is ever empty or unreadable.
           PR_OPENED_AT: ${{ github.event.pull_request.created_at }}
+          # Authenticated ledger read (wave-3 token plumbing). Same secret the
+          # hotfix_record step uses. It is UNPROVISIONED today, and fork PRs never
+          # receive secrets, so this is normally empty — the gate adds the Bearer
+          # header ONLY when it is set, and treats a token-absent 404 as an outage
+          # (exit 2, "provision BARKPARK_TASK_TOKEN"), never a PR accusation. Once
+          # the secret exists, a future private-task flip on the ledger cannot make
+          # main unmergeable: authenticated reads still see the task.
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
         run: |
           # `set -uo pipefail` does NOT clear the -e in GitHub's `bash -e {0}`,
           # so a bare `bash scripts/pr-task-gate.sh` on a non-zero exit aborts
