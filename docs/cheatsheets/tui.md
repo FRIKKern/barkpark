@@ -18,7 +18,7 @@ Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` s
 | Input | Does |
 |---|---|
 | wheel | scroll the list / detail |
-| click | select row · click again activates |
+| click | select + activate in one gesture |
 | drag divider | resize the two panes (ratio persists) |
 | `M` | toggle mouse reporting on/off |
 
