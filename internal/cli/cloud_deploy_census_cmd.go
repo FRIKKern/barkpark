@@ -124,8 +124,18 @@ func runCloudDeployments(out *writer, g globals, args []string) int {
 		emitDeployCensusRaw(out, census)
 		return exitOK
 	}
-	renderDeployCensus(out, from, to, census, sites)
+	renderDeployCensus(out, from, to, census, sites, deployCensusWindowPinned(a))
 	return exitOK
+}
+
+// deployCensusWindowPinned reports whether the caller pinned BOTH edges with
+// --from/--to. A --days window (and the 7-day default) pins only its width: its
+// right edge is now and its left edge slides with the clock, which is exactly
+// the property the coverage reading has to disclose — the same fleet answers a
+// different never-covered count at --days 7 and --days 27 with no row changing.
+func deployCensusWindowPinned(a *hzArgs) bool {
+	_, hasFrom := lastVal(a, "from")
+	return hasFrom
 }
 
 // deployCensusWindow resolves the PINNED window: --from/--to together, or a
@@ -362,7 +372,7 @@ func deployCensusScopeLine(scope *cloudclient.DeployCensusScope) string {
 // renderDeployCensus is the human view: the window, the headline rate line (rate
 // + volume + denominator, on ONE line, always), then the failure classes, the
 // deferrals and the worst sites.
-func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.DeployCensus, siteLimit int) {
+func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.DeployCensus, siteLimit int, pinnedWindow bool) {
 	out.outf("deploy census · %s", deployCensusWindowPhrase(from, to))
 	out.outf("  the window is pinned by this command, not defaulted by the server — every number below is about THIS population.")
 	out.outf("%s", deployCensusScopeLine(census.Scope))
@@ -398,7 +408,7 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		out.outf("")
 	}
 	renderDeployDeferralWait(out, census.DeferralWait)
-	renderDeployCoverageCohorts(out, census.CoverageCohorts)
+	renderDeployCoverageCohorts(out, census.CoverageCohorts, pinnedWindow)
 
 	if len(census.NotAttempted) > 0 {
 		out.outf("never attempted (outside every denominator)")
@@ -1143,7 +1153,7 @@ func deployDeferralWaitBound(w *cloudclient.DeployDeferralWait) string {
 //
 // COVERED is the control plane's word, rendered with the control plane's meaning
 // attached: the SITE has since rebuilt. Not "your edit shipped".
-func renderDeployCoverageCohorts(out *writer, c *cloudclient.DeployCoverageCohorts) {
+func renderDeployCoverageCohorts(out *writer, c *cloudclient.DeployCoverageCohorts, pinnedWindow bool) {
 	out.outf("coverage — did the site ever rebuild after a row that never went live")
 	if c == nil {
 		out.outf("  NOT MEASURED — this control plane sends no coverage census. Nothing was read: the rows that never reached live are UNCOUNTED here, and that is NOT the same as none.")
@@ -1167,6 +1177,8 @@ func renderDeployCoverageCohorts(out *writer, c *cloudclient.DeployCoverageCohor
 	out.outf("  and NOT: a COVERED row in the failed cohort means the site is not stuck — never that the failure was repaired or its content shipped")
 	out.outf("  fence: a row is only counted NEVER COVERED once it is older than %s %s",
 		deployDeliveryDuration(float64(c.MaturitySeconds)), deployDeliveryAsOf(c.AsOf))
+	out.outf("%s", deployCoverageBoundLine(c.CoveringBound))
+	out.outf("%s", deployCoverageWindowLine(pinnedWindow))
 
 	if len(c.Cohorts) == 0 {
 		out.outf("  NOT MEASURED — the control plane named no cohorts at all, which is not the same as no uncovered rows.")
@@ -1180,7 +1192,82 @@ func renderDeployCoverageCohorts(out *writer, c *cloudclient.DeployCoverageCohor
 			out.outf("             never covered in %s: %d", sanitizeCell(env.Environment), env.NeverCovered)
 		}
 	}
+	renderDeployCoverageSites(out, c)
 	out.outf("")
+}
+
+// deployCoverageBoundLine states the covering query's bound. The control plane
+// sends it as one token; an absent token is NOT a claim that both edges were
+// bounded, so it says which it is.
+func deployCoverageBoundLine(bound string) string {
+	switch strings.TrimSpace(bound) {
+	case "left_only":
+		return "  covering bound: LEFT ONLY — a live build minted AFTER this window's end still counts as coverage, so this reading answers \"is the site stuck NOW\" and is never a retrospective of the window."
+	case "":
+		return "  covering bound: NOT STATED — this control plane does not say whether the covering query was bounded on the right. Which of the two questions the counts below answer is UNKNOWN, and that is not the same as both edges being pinned."
+	default:
+		return "  covering bound: " + sanitizeCell(bound) + " — a bound this reader does not know; read it as stated, not as \"left only\"."
+	}
+}
+
+// deployCoverageWindowLine discloses what the WINDOW does to these counts. It
+// is not a refusal — the numbers are real — it is the sentence that stops the
+// same fleet's 0 at --days 7 and 5 at --days 27 from reading as a change.
+func deployCoverageWindowLine(pinned bool) string {
+	if pinned {
+		return "  window: BOTH edges pinned by --from/--to, so this population does not move when you run it again."
+	}
+	return "  window: LEFT-TRUNCATED — a --days window (7 by default) has its right edge at NOW and its left edge sliding with the clock, so rows older than the width are not in this population AT ALL. A wider --days finds more never-covered rows without one row of the fleet changing; only --from/--to pins both edges."
+}
+
+// renderDeployCoverageSites NAMES the never-covered tail. A count that cannot
+// say which site is dark sends an operator looking through the whole fleet, and
+// that anonymity is the defect this whole section exists to end.
+//
+// Three states, kept apart: no key at all (an older control plane MEASURED
+// nothing), an empty list with a zero total (nothing is dark — a real answer),
+// and a list that was CUT, which prints its own unbounded total so a top-20 can
+// never be read as the whole tail.
+func renderDeployCoverageSites(out *writer, c *cloudclient.DeployCoverageCohorts) {
+	if c.NeverCoveredSites == nil && c.NeverCoveredSitesTotal == 0 && !c.NeverCoveredSitesTruncated {
+		out.outf("  sites: NOT NAMED — this control plane sends no per-site breakdown. The counts above are real; WHICH sites they belong to was not read, and that is not the same as none.")
+		return
+	}
+	if len(c.NeverCoveredSites) == 0 {
+		out.outf("  sites: none — no {site, environment} pair is never-covered in this window.")
+		return
+	}
+
+	// The header counts {site, environment} PAIRS, not distinct sites, because
+	// that is what the total beside it counts — one site dark in both production
+	// and preview is TWO rows here and TWO in the total. Saying "sites" would
+	// make "7" mean one thing in the header and another in the cut marker below,
+	// which is the exact ambiguity this section exists to end.
+	out.outf("  never-covered {site, environment} pairs (%d of %d)", len(c.NeverCoveredSites), c.NeverCoveredSitesTotal)
+	for _, s := range c.NeverCoveredSites {
+		out.outf("    %-28s %-12s %d row(s) never covered", deployCoverageSiteName(s), sanitizeCell(s.Environment), s.NeverCovered)
+	}
+	if c.NeverCoveredSitesTruncated {
+		out.outf("    … the list is CUT: %d {site, environment} pair(s) are never-covered and %d are printed. The counts above are over ALL of them.",
+			c.NeverCoveredSitesTotal, len(c.NeverCoveredSites))
+	}
+}
+
+// deployCoverageSiteName is the site's most useful identifier that actually
+// arrived. A deleted site row resolves to no name and no slug, and the id is
+// then the only true thing there is to print — never a blank cell, which reads
+// as a site with no name rather than as a site that is gone.
+func deployCoverageSiteName(s cloudclient.DeployCoverageSite) string {
+	if slug := strings.TrimSpace(s.Slug); slug != "" {
+		return sanitizeCell(slug)
+	}
+	if name := strings.TrimSpace(s.Name); name != "" {
+		return sanitizeCell(name)
+	}
+	if id := strings.TrimSpace(s.SiteID); id != "" {
+		return sanitizeCell(id) + " (no site row)"
+	}
+	return "(unidentified)"
 }
 
 // deployCoverageCohortLine renders ONE cohort INSEPARABLY: the covered count
