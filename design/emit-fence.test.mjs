@@ -31,7 +31,7 @@ import {
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { ARTIFACTS } from "./emit.mjs";
+import { ARTIFACTS, AUDIT_ACTIONS_PATH } from "./emit.mjs";
 import { SURFACE_PATH, BUNDLE_PATH } from "./paper-editor-mirror.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -59,7 +59,7 @@ function makeTree() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-")));
   tempRoots.push(root);
   cpSync(join(repoRoot, "design"), join(root, "design"), { recursive: true });
-  const files = new Set([...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH]);
+  const files = new Set([...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH, AUDIT_ACTIONS_PATH]);
   for (const rel of files) {
     const dst = join(root, rel);
     mkdirSync(dirname(dst), { recursive: true });
