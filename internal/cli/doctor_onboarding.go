@@ -275,6 +275,7 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context) onboardingReceipt {
 func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *manifest.Manifest) map[string]any {
 	return map[string]any{
 		"instance": localInstance(cfg, ctx),
+		"cli":      whoamiCLIFreshness(),
 		"mcp": map[string]any{
 			"version": cliVersion,
 			"count":   len(mcpTaskToolNames),
@@ -283,6 +284,47 @@ func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *mani
 		"tool_call":          onboardingToolCallProof(g, ctx, m),
 		"reload_instruction": onboardingReloadInstruction,
 	}
+}
+
+// whoamiCLIFreshness is the whoami half of the CLI-freshness leg (charter D28):
+// the SAME tri-state verdict the doctor receipt renders (onboardingCLIFreshness),
+// but resolved ONLY from the on-disk release cache — it NEVER makes an HTTP call,
+// so whoami keeps its local-first, always-exit-0 contract on the always-run hot
+// path. The split of labour is deliberate: the doctor (already network-bearing)
+// pays for the resolve and refreshes the cache; whoami reads it for free.
+//
+// The tri-state stays honest end to end:
+//   - a dev build short-circuits to UNREPORTED — it cannot be compared against
+//     the cli-v* channel at all, exactly as the doctor leg and `bp upgrade` hold;
+//   - a cold or stale cache (never refreshed, or older than the TTL) is honest
+//     UNREPORTED that names the ONE command which refreshes it: `bp doctor`;
+//   - only a FRESH cache yields a reading — up-to-date or behind — and even then
+//     it is transparently marked as cache-sourced.
+//
+// It never launders an absence into a green (up-to-date) or a false alarm
+// (behind): an unknown is reported as unknown.
+func whoamiCLIFreshness() onbCLICheck {
+	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
+	if cliVersion == "dev" {
+		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
+		return c
+	}
+	cache, fresh := readReleaseCache()
+	if !fresh {
+		c.Detail = "freshness UNREPORTED — no fresh release reading cached; run `bp doctor --onboarding` to refresh it"
+		return c
+	}
+	c.Latest = cache.Latest
+	if compareVersions(cliVersion, cache.Latest) < 0 {
+		c.Status = onbCLIBehind
+		c.UpToDate = onbBool(false)
+		c.Detail = "a newer CLI is available (cached — run `bp doctor --onboarding` to re-check) — run `bp upgrade`"
+		return c
+	}
+	c.Status = onbCLIUpToDate
+	c.UpToDate = onbBool(true)
+	c.Detail = "up to date (cached — run `bp doctor --onboarding` to re-check)"
+	return c
 }
 
 // localInstance is whoami's NETWORK-FREE instance identity: the active saved
@@ -344,6 +386,11 @@ func onboardingCLIFreshness() onbCLICheck {
 		c.Detail = "freshness UNREPORTED — could not resolve the latest release: " + err.Error()
 		return c
 	}
+	// Refresh the on-disk cache whoami reads. The doctor is the ONLY surface that
+	// pays the network cost of this resolve, so it is where the network-free
+	// whoami leg gets its truth. Best-effort: a cache-write failure never sinks
+	// the receipt's own live reading below.
+	_ = writeReleaseCache(latest)
 	c.Latest = latest
 	if compareVersions(cliVersion, latest) < 0 {
 		c.Status = onbCLIBehind
