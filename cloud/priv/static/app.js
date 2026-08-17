@@ -13550,15 +13550,43 @@
   // (`live`) and whether the operator is still on this site's screen (`onSite`).
   // Extracted so both late-settle paths are LOSABLE in node — the DOM call sites
   // below make no decision of their own.
-  //   ok    → always a toast receipt; navigate ONLY from a live modal on this
-  //           screen (a late success must not yank a person off wherever they
-  //           went, D818).
+  //   ok    → always a toast receipt; navigate whenever the operator is still on
+  //           THIS site's screen, whether or not the modal survived.
   //   fail  → inline beside the ONE recovery while the modal is ours; on a
   //           dismissed modal ctl.fail returns early, so the sentence would be
   //           LOST — it becomes a toast, with no recovery to offer.
+  //
+  // D834 RE-RULES THE OK PREDICATE from `!!live && !!onSite` to `!!onSite`, and
+  // the pin that asserted `navigate:false` for a late success is deliberately
+  // FLIPPED with it. D818's rule — a late success must not yank a person off
+  // wherever they went — is about where they WENT, and `live=false &&
+  // onSite=true` is precisely the case where they went NOWHERE: they closed the
+  // dialog and stayed. The old predicate read a dismissed modal as consent to be
+  // left on a deleted site's screen, still holding live Deploy, Rollback and
+  // Delete controls over a site the plane no longer has. `onSite` is the whole
+  // question; `live` only ever decided which SURFACE speaks, which is what it
+  // still decides on the failure arm.
   function siteDeleteSettlePlan(live, onSite, ok, recovery) {
-    if (ok) return { succeed: true, navigate: !!live && !!onSite, surface: "toast", recovery: null };
+    if (ok) return { succeed: true, navigate: !!onSite, surface: "toast", recovery: null };
     return { succeed: false, navigate: false, surface: live ? "inline" : "toast", recovery: live ? recovery : null };
+  }
+
+  // D834 — THE MUTATION OWNS THE INVALIDATION, NOT THE ROUTER. Until now the
+  // only thing that dropped a deleted site out of this console's state was
+  // `location.hash = "#sites"` re-running loadSites as a routing side effect, so
+  // every settle that did NOT navigate left the console holding state about a
+  // site the plane had just destroyed: `currentSiteId` still pointing at it (the
+  // fleet SSE subscriber re-reads exactly that id on every push), its rollback
+  // flash still parked under its key, and a mounted Sites tab still listing the
+  // row. invalidateFleet is the shipped precedent for this shape — a mutation
+  // drops the stale state and repaints whichever view is actually on screen.
+  //
+  // Ordering matters at both call sites: `onSite` is computed BEFORE this runs,
+  // because clearing currentSiteId is what makes the id stale.
+  function invalidateDeletedSite(id) {
+    if (String(currentSiteId) === String(id)) currentSiteId = null;
+    delete siteRollbackFlash[String(id)];
+    if (currentView() === "sites") loadSites();
   }
 
   function confirmSiteDelete(site, domain) {
@@ -13574,8 +13602,9 @@
   // the request so both settle paths can ask whether this modal is still mounted.
   //   late FAILURE  → ctl.fail returns early on a dismissed modal, so the
   //                   sentence would be lost; it is routed to a toast instead.
-  //   late SUCCESS  → the toast still lands, but the console does NOT navigate:
-  //                   the operator moved somewhere on purpose.
+  //   late SUCCESS  → the toast still lands, and (D834) the console navigates
+  //                   whenever the operator is still on this site's screen — a
+  //                   dismissed dialog is not consent to be left there.
   function runSiteDelete(site, domain, ctl) {
     var name = String(domain || site.slug || site.name || "The site");
     var btn = $("#cm-confirm");
@@ -13595,6 +13624,7 @@
           body: name + " is deleted from the control plane. The teardown ran on the instance first — " +
             "this receipt carries no measured box state, so the teardown itself is unverified here.",
         });
+        invalidateDeletedSite(site.id);
         if (okPlan.navigate) location.hash = "#sites";
         return;
       }
@@ -13623,38 +13653,144 @@
     });
   }
 
+  // ── D834: THE RE-CHECK STOPS INVENTING A COMPLETED TEARDOWN ────────────────
+  // The predicate this replaces was `r.status === 404 || (r.ok && !(r.data &&
+  // r.data.site))`, and every `true` toasted "<name> is no longer registered —
+  // the teardown completed after all." Driven through the shipped api(), FIVE
+  // distinct answers took that arm: a route 404, a 200 text/html interstitial, a
+  // 200 JSON `{}`, a PROXY 404 whose route never ran, and a 204. Two of the five
+  // are not answers about this site at all, and none of the five measured the
+  // teardown — the gravest single read in the console, certifying a destroy it
+  // could not observe. Its sibling runSiteDelete is STRICT on the same wire, and
+  // siteDeleteFailureCopy's own 404 arm hedges this exact status as
+  // four-cause-ambiguous: the file contradicted itself.
+  //
+  // THE DISCRIMINATOR IS `r.text`, and it is exact rather than heuristic. api()
+  // sets `text: null` for every `application/json` body (parsed OR unparseable)
+  // and carries the bytes for every other body. The control plane answers this
+  // route only through router.ex's `json/2`, which sets
+  // `put_resp_content_type("application/json")`, and its miss is
+  // `json(conn, 404, %{error: "not_found"})` — so on THIS path `text == null`
+  // means the plane itself spoke, and a non-null `text` means something in front
+  // of it answered instead and the route never ran.
+  //
+  //   gone       — a 404 from the plane. The one honest absence.
+  //   registered — a 2xx from the plane carrying the site envelope.
+  //   unknown    — the plane's own 2xx WITHOUT a site (a shape this route does
+  //                not produce, so what it means is unmeasured), plus every 2xx
+  //                and every 404 that never came from the plane. D332: never a
+  //                success, and no remediation invented for it.
+  //   failed     — an answered non-2xx, or api()'s status-0 transport envelope.
+  //
+  // SCOPE FENCE: siteLoadFailureHtml carries the identical OLD predicate one
+  // screen away and keeps it byte for byte. "A 200 with no site is an absence"
+  // is a shipped cch-w66-s3 decision about a READ the operator asked for, where
+  // the hedged "may have been removed" is the honest sentence and routing a
+  // genuine 404 into a fault card would silence a real deletion (D805's inverse
+  // lie). This verdict exists only here, where the console is being asked to
+  // certify a WRITE it never saw confirmed.
+  function siteRecheckVerdict(r) {
+    r = r || {};
+    var planeSpoke = r.text == null;
+    if (r.status === 404) return planeSpoke ? "gone" : "unknown";
+    if (r.ok) return r.data && r.data.site ? "registered" : "unknown";
+    return "failed";
+  }
+
+  // D834(e) — THE RE-CHECK IS BOUNDED. The old recovery re-wired ITSELF with no
+  // counter, so a route that keeps answering the same way keeps offering a
+  // button that keeps answering the same way: an infinite identical control, and
+  // on the `unknown` arm a button that cannot even fail loudly. Three attempts,
+  // then the dialog stops offering the read. The COUNT is a measured fact about
+  // what this console did, not advice about what the operator should do next
+  // (D438 — a consequence sentence is allowed; an authored next step is not).
+  var SITE_RECHECK_MAX_ATTEMPTS = 3;
+
+  function siteRecheckPlan(verdict, attempt) {
+    var n = typeof attempt === "number" && attempt > 0 ? attempt : 1;
+    var settled = verdict === "gone";
+    return {
+      settled: settled,
+      attempt: n,
+      retryable: !settled && n < SITE_RECHECK_MAX_ATTEMPTS,
+      next: !settled && n < SITE_RECHECK_MAX_ATTEMPTS ? n + 1 : null,
+    };
+  }
+
+  // Pure: the four sentences, one per verdict. `detail` is faultDetail()'s
+  // recovered bytes and is rendered only when there are some — an empty detail
+  // never promises a detail it does not have.
+  function siteRecheckCopy(verdict, name, detail) {
+    name = String(name || "The site");
+    var evidence = detail ? " The server replied: " + detail : "";
+    // GONE — speakable, and the causal clause is GONE with it. The read shows
+    // DEREGISTRATION; it never touched the instance. The limit clause is
+    // runSiteDelete's own D812 vocabulary verbatim, so one fact has one wording
+    // on both of this verb's receipts.
+    if (verdict === "gone") {
+      return {
+        kind: "success", title: "Site deregistered",
+        body: name + " is no longer registered — the control plane has no site with this id for your " +
+          "team, which is what it answers once a site is deleted. This read carries no measured box " +
+          "state, so the teardown on the instance is still unverified here.",
+      };
+    }
+    if (verdict === "registered") {
+      return {
+        kind: "error", title: "Teardown still unconfirmed",
+        body: name + " is STILL REGISTERED — the control plane still has it, so the teardown has not been " +
+          "confirmed. Delete it again to retry the teardown.",
+      };
+    }
+    // UNKNOWN — the D332 sentence. It states what the read did and does not
+    // resolve, names the bytes when there are any, and prescribes nothing. The
+    // vocabulary is restoreDomainRecheck's, the charter's own honest exemplar
+    // for a re-check that produced no answer.
+    if (verdict === "unknown") {
+      return {
+        kind: "error", title: "That re-check didn't answer",
+        body: "Something answered, but not with this site's state — so this says nothing about whether " +
+          name + " is still registered or whether the teardown finished." + evidence,
+      };
+    }
+    return {
+      kind: "error", title: "Teardown still unconfirmed",
+      body: "The re-check itself failed, so this still doesn't say whether the teardown finished — " +
+        name + " was registered a moment ago and nothing here has seen it change.",
+    };
+  }
+
   // The re-check the unknown-outcome arm authors: re-READ the site the console
-  // already knows how to read. Gone (404, or a 200 with no site) is the delete
-  // having landed after all; anything else is still registered and says so
-  // rather than inventing a verdict from a read that itself failed.
-  function recheckSiteDeleted(site, name, ctl) {
+  // already knows how to read, and say only what the answer supports.
+  function recheckSiteDeleted(site, name, ctl, attempt) {
     var btn = $("#cm-confirm");
     api("GET", "/v1/sites/" + encodeURIComponent(site.id)).then(function (r) {
       var live = !!btn && btn.isConnected !== false;
       var onSite = String(currentSiteId) === String(site.id);
-      var gone = r.status === 404 || (r.ok && !(r.data && r.data.site));
-      var plan = siteDeleteSettlePlan(live, onSite, gone, "recheck");
-      if (gone) {
+      var verdict = siteRecheckVerdict(r);
+      var bound = siteRecheckPlan(verdict, attempt);
+      var plan = siteDeleteSettlePlan(live, onSite, bound.settled, "recheck");
+      var copy = siteRecheckCopy(verdict, name, faultDetail(r.text));
+      if (bound.settled) {
         ctl.succeed();
-        toast({
-          kind: "success", title: "Site deregistered",
-          body: name + " is no longer registered — the teardown completed after all.",
-        });
+        toast({ kind: copy.kind, title: copy.title, body: copy.body });
+        invalidateDeletedSite(site.id);
         if (plan.navigate) location.hash = "#sites";
         return;
       }
-      var msg = r.ok
-        ? name + " is STILL REGISTERED — the control plane still has it, so the teardown has not been " +
-          "confirmed. Delete it again to retry the teardown."
-        : "The re-check itself failed, so this still doesn't say whether the teardown finished — " +
-          name + " was registered a moment ago and nothing here has seen it change.";
+      var msg = copy.body + (bound.retryable ? "" :
+        " This dialog has re-checked " + bound.attempt + " times and stops offering it here.");
       if (plan.surface === "toast") {
-        toast({ kind: "error", title: "Teardown still unconfirmed", body: msg });
+        toast({ kind: copy.kind, title: copy.title, body: msg });
+        return;
+      }
+      if (!bound.retryable) {
+        ctl.fail(msg, "Close", function () { closeModal(); });
         return;
       }
       ctl.fail(msg, "Re-check", function (c) {
         c.busy("Re-checking…");
-        recheckSiteDeleted(site, name, c);
+        recheckSiteDeleted(site, name, c, bound.next);
       });
     });
   }
@@ -23541,6 +23677,10 @@
       siteDeleteConfirmOpts: siteDeleteConfirmOpts, siteDeleteFailureCopy: siteDeleteFailureCopy,
       siteDeleteSettlePlan: siteDeleteSettlePlan,
       runSiteDelete: runSiteDelete, recheckSiteDeleted: recheckSiteDeleted,
+      // cch-w68-s5 (D834): the re-check's three pure halves — WHICH answer this
+      // was, WHAT it may say, and WHETHER the read may be offered again.
+      siteRecheckVerdict: siteRecheckVerdict, siteRecheckCopy: siteRecheckCopy,
+      siteRecheckPlan: siteRecheckPlan, SITE_RECHECK_MAX_ATTEMPTS: SITE_RECHECK_MAX_ATTEMPTS,
       sitePreviewsSectionHtml: sitePreviewsSectionHtml,
       // W4 (charter D15-D17/D18): the SSE-driven deploy stage rail + one-motion
       // create-and-deploy. Only the PURE fold/signature/status/markup helpers are
