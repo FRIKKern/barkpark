@@ -35,14 +35,16 @@ The fast path *is* the standard path — standards become executable.
 
 - **Masterplan** — the full design case: [`/papers/scaffy-commands-as-content`](/papers/scaffy-commands-as-content)
 - **Showcase** — every W1 command shown in full, with file trees, run mocks and a remove demo: [`/papers/scaffy-command-showcase`](/papers/scaffy-command-showcase)
+- **Benchmark** — the measured case: byte-identical to the agent at $0 wherever the catalog covers the chore, with the boundary where it does not: [`/papers/scaffy-benchmark`](/papers/scaffy-benchmark)
 
-## Status — corpus first, no engine yet
+## Status — engine shipped, catalog served
 
-Wave 1 ships the **command corpus + showcase**, deliberately **without an engine**. These
-are full-text, copy-ready `.scaffy` documents — never sketches, never elided `…` bodies —
-that a human can hand-apply *today* (see [Hand-applying a command today](#hand-applying-a-command-today)).
-They also *are* the specification: the corpus defines the hardened v2 grammar by example,
-and it becomes the parser's test fixtures in the next wave.
+The **engine is live** — `bp scaffy validate` / `fmt` / `run` / `remove` (W2–W3) apply,
+receipt, and reverse commands from marks, and the corpus is **served from the connected
+Barkpark** (W4). The `.scaffy` documents are still full-text, copy-ready and hand-applicable
+*today* (see [Hand-applying a command today](#hand-applying-a-command-today)); they also *are*
+the specification — the corpus defines the hardened v2 grammar by example and is the parser's
+own test fixtures.
 
 | Wave | Ships | State |
 |---|---|---|
@@ -51,6 +53,17 @@ and it becomes the parser's test fixtures in the next wave.
 | **W3** — engine | `bp scaffy run` / `bp scaffy remove`: apply with marks + receipts (`.scaffy/receipts/`), dry-run diff, idempotent re-run, symmetric remove | **shipped** |
 | **W4** — commands as content | a `command` document type, the corpus served from the connected Barkpark, `bp scaffy pull <concept>/<variant>` + `bp scaffy ls --remote` (validate-first + consent gate) | **shipped** |
 | **W5** — ONEOF + the frequency-mined seven | the `ONEOF` enum primitive (D56, lint `E-021`), 7 new commands (add-error-shape, add-canonical-marker, ensure-import, ensure-cli-noun, add-backfill-task, add-schema-type, classify-block-type), the flagship's pd-parity leg, corpus reconciled at 14 and seeded | **shipped** |
+
+The CLI surface is **eight verbs**: `validate` / `fmt` (W2), `run` / `remove` (W3),
+`pull` / `ls --remote` (W4), plus **`bp scaffy discover`** — a deterministic, read-only,
+zero-token git-mining pass that ranks the tree's accretion hotspots into new command
+candidates — and **`go run ./scaffy/seed --check`**, which syncs the corpus to the served
+catalog and is its drift tripwire.
+
+**The merged-is-served law.** A `.scaffy` edit changes the source's `sha256`, so the served
+copy must be re-seeded or it silently falls behind `main`. `seed --check` (and the
+advisory `scaffy-catalog-drift` workflow that runs it on every corpus PR) reds the moment a
+touched command drifts — served bytes must equal merged bytes.
 
 ## The command corpus
 
@@ -344,7 +357,7 @@ VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count aft
 ```
 
 Non-opaque (transform) variables resolve through **one shared word-list** — `_`, `-` and
-case boundaries are equivalent — and the four deterministic joiners of A1. Not all four
+case boundaries are equivalent — and the five deterministic joiners of A1. Not all five
 spellings must appear in a file, but every spelling that *does* appear must be a joiner
 output of the declared name.
 
@@ -400,7 +413,7 @@ Motivating command: **`add-schema-type`** — pick a visibility (`public`|`priva
 composition tier (`element`|`widget`|`section`); free text there is a class of error the
 grammar can now refuse rather than a mistake caught only at review. `ONEOF` composes with
 every other annotation: `OPAQUE ONEOF` (verbatim member, path-casing exempt) and transform
-`ONEOF` (the member still resolves through the four A1 joiners — `widget` → `Widget` /
+`ONEOF` (the member still resolves through the five A1 joiners — `widget` → `Widget` /
 `widget` / …) are both legal.
 
 The constraint is enforced on **both halves of the D37 split**, exactly like `SHAPE`:
@@ -495,8 +508,8 @@ Before the W3 engine shipped, a Scaffy command was applied **by hand** — and t
 designed so that's unambiguous (D7). To apply `scaffy/commands/<name>.scaffy`:
 
 1. **Bind the variables.** Read the `VARIABLE` declarations at the top and pick your values
-   (`--var BlockName=timeline`). Expand every `{{.…}}` token through its four spellings (A1):
-   Pascal / kebab / camel / snake.
+   (`--var BlockName=timeline`). Expand every `{{.…}}` token through its five spellings (A1):
+   Pascal / kebab / camel / snake / SCREAMING.
 2. **Do the CREATEs (`●`).** For each `CREATE FILE`, write the file with tokens expanded. These
    are the new-file half — the part a plain generator could also do.
 3. **Do the INJECTs (`○`) in order.** For each mutating op, open the `IN` file, find the
