@@ -1821,20 +1821,41 @@ defmodule BarkparkCloud.Sites.Deploy do
 
       {:ok, status, body} when status in 400..599 ->
         {:error, 422,
-         rollback_refusal(body, "the instance could not tear this site down (HTTP #{status})")}
+         teardown_refusal(body, "the instance could not tear this site down (HTTP #{status})")}
 
       {:ok, _status, body} ->
-        {:error, 422, rollback_refusal(body, "the instance could not tear this site down")}
+        {:error, 422, teardown_refusal(body, "the instance could not tear this site down")}
 
       # Same fence, same typed conflict (D741/D763): the teardown was refused by
       # the control plane before the wire, not lost on it.
       {:error, :identity_refused} ->
-        {:error, 409, unreachable(bp, :identity_refused), "identity_refused"}
+        {:error, 409, teardown_unreachable(bp, :identity_refused), "identity_refused"}
 
       {:error, reason} ->
-        {:error, 502, unreachable(bp, reason)}
+        {:error, 502, teardown_unreachable(bp, reason)}
     end
   end
+
+  # W68 (D814, Option A) — the DELETE receipt's OWN reachability copy. Two of
+  # `unreachable/2`'s sentences narrate a DEPLOY ("cannot drive a deploy on it",
+  # "the deploy could not be delivered"), and until this variant existed they
+  # reached a user who pressed DELETE byte-unchanged. The shared mint stays
+  # byte-frozen — `start_on_box/6`, `poll/4` and `rollback/2` still feed it, and
+  # `DeployLedger.classify/2` keys on its "is unreachable" substring (preserved
+  # here too) — so this variant is teardown-LOCAL: only `teardown/2`'s two
+  # `{:error, _}` arms call it. The verb-free sentences delegate rather than
+  # fork; `:identity_refused` in particular must stay byte-identical to the
+  # instance-seam copy `unreachable/2` deliberately echoes (D741).
+  defp teardown_unreachable(%Barkpark{slug: slug}, :no_admin_token),
+    do:
+      "instance #{slug} has no stored admin token — the control plane cannot drive a teardown on it"
+
+  defp teardown_unreachable(%Barkpark{slug: slug}, reason)
+       when reason not in [:not_live, :decrypt_failed, :identity_refused],
+       do:
+         "instance #{slug} is unreachable — the teardown could not be delivered; check instance health"
+
+  defp teardown_unreachable(%Barkpark{} = bp, reason), do: unreachable(bp, reason)
 
   # The box has flipped. Point the site at the deployment that owns the now-live
   # build so `bp cloud site status` tells the truth immediately (no polling
@@ -1889,6 +1910,25 @@ defmodule BarkparkCloud.Sites.Deploy do
   end
 
   defp rollback_refusal(_body, fallback), do: fallback
+
+  # W68 — a teardown refusal must never render ROLLBACK prose. The teardown 422
+  # arms used to launder the box's body through `rollback_refusal/2`, whose typed
+  # sentences narrate a rollback: a box answering `not_supported` to a teardown
+  # told the user who pressed DELETE "this site has no live release yet — there
+  # is nothing to roll back". Same extraction, teardown-safe rendering: the one
+  # verb-neutral typed sentence (`lock_held`) keeps its plain words, and every
+  # other detail — a box token like `not_supported`, or the transport's own
+  # await-teardown timeout sentence — travels VERBATIM rather than being dressed
+  # in another verb's prose.
+  defp teardown_refusal(body, fallback) when is_map(body) do
+    case body["error"] || body["detail"] || body["reason"] do
+      "lock_held" -> "a deploy is running on the box — try again once it finishes"
+      d when is_binary(d) and d != "" -> d
+      _ -> fallback
+    end
+  end
+
+  defp teardown_refusal(_body, fallback), do: fallback
 
   # site-deploy.sh's typed rollback exits, in plain words.
   defp rollback_copy("no_previous", _fallback),
