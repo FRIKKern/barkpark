@@ -170,15 +170,18 @@ defmodule Barkpark.Content.Papers do
   #                      that is no longer ours (or its resolved externals have
   #                      since moved). Blocks are canonical, so serve them and
   #                      rewrite the derived cache. No 422.
-  #   :divergent       — the current renderer, fed these blocks, cannot produce
-  #                      the stored bytes, and nothing external can explain the
-  #                      gap. The cache carries content the blocks do not. This
-  #                      is the population the 422 was built for; it keeps it.
+  #   :divergent       — the stamp IS the current renderer's digest, so the row
+  #                      claims this renderer emitted these bytes from these
+  #                      blocks; the byte compare says otherwise and nothing
+  #                      external can explain the gap. The cache carries content
+  #                      the blocks do not. This is the population the 422 was
+  #                      built for; it keeps it, and ONLY it.
   #
   # Provenance comes from `content["body_html_sv"]` — a sha256 digest of the
   # renderer's own source, stamped at every fresh block→HTML render. Compare it
   # with `==` ONLY: a content hash has no total order, so "older/newer" is not a
-  # question it can answer.
+  # question it can answer. Anything that is not that digest — an old digest,
+  # the honest pre-digest integer, or nothing — is a LAGGING stamp, i.e. stale.
   defp cache_provenance(_paper, _blocks, html, _dataset)
        when not is_binary(html) or html == "",
        do: :coherent
@@ -212,15 +215,40 @@ defmodule Barkpark.Content.Papers do
         {:stale, rendered}
 
       true ->
-        case Map.get(content, "body_html_sv") do
-          sv when is_binary(sv) and sv != "" ->
-            if sv == Render.body_html_render_version(), do: :divergent, else: {:stale, rendered}
-
-          # No stamp: the legacy class. Drift and divergence are genuinely
-          # indistinguishable here, so hold today's behaviour and fail closed.
-          _ ->
-            :divergent
-        end
+        # DIVERGENCE IS THE NARROW CASE: only a stamp that IS the current
+        # renderer's digest can carry the claim "this renderer, fed these
+        # blocks, emitted these bytes" — and only that claim, contradicted by
+        # the byte compare, is divergence. Every other stamp state is a LAGGING
+        # stamp: an old hex digest, the renderer's own honest pre-digest integer
+        # (`@body_html_render_version 1..3`, before it became a sha256 hex), or
+        # no stamp at all. None of them claims this renderer, so none of them
+        # can contradict it, and blocks stay canonical: re-render, serve,
+        # restamp.
+        #
+        # Measured (guerrilla, 2026-08-17 — recipe in
+        # tooling/grip/ledger/pe-w2-guerrilla-live-writes-2026-08-17.md): the
+        # old `_ -> :divergent` catch-all sent 119 papers stamped with the
+        # integer 3 into this branch, and 59 of them answered 422 to every
+        # reader for ~4 weeks. The remaining 60 served only via the
+        # `rendered == html` short-circuit above, so any renderer change would
+        # have gone dark too; 42 null-stamped papers carried the same hazard.
+        # Fail-closed on an unverifiable stamp is not a safety property — it is
+        # a reader outage with no upper bound.
+        #
+        # PROD REPAIR (ops, after this merges — the reader self-heals each row on
+        # first read via `refresh_html_cache/3`, this just does it in bulk):
+        #
+        #     mix barkpark.rehydrate_body_html --type paper --published-only
+        #     mix barkpark.rehydrate_body_html --type paper --published-only --write
+        #
+        # The first line is the DRY-RUN TALLY (dry run is that task's default —
+        # it reports and writes nothing). An integer stamp reads as "stamp
+        # foreign" there, so it lands on the rewrite arm; only `is_nil(sv)` rows
+        # with drifted bytes are report-only, and those are exactly the ones the
+        # reader now heals itself.
+        if Map.get(content, "body_html_sv") == Render.body_html_render_version(),
+          do: :divergent,
+          else: {:stale, rendered}
     end
   end
 
