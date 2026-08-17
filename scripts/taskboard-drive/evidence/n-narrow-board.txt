@@ -1,23 +1,23 @@
 
  barkpark · tasks                         ⇄ guerrilla  CONN · T
- ▎ The task TUI is glanceable, live, and never flickers ······ 2/14
- ├─ ⠿ The live tmux drive ships as a committed SGR harness and the…
- │    C5/7 · P1 · 3/5
- ├─ ⠿ Wide-mode footer verbs become clickable against the live dra…
- │    C5/7 · P2 · 4/5
- ├─ ⠿ The TUI card and cheatsheet finally speak mouse — net-neutra…
- │    C5/7 · P3 · 4/5
- ├─ ⠿ The board discloses its 1000-row horizon — the D40 showing-N…
- │    C5/7 · P2 · 4/5
- ├─ ⠿ The two snapshot fetches fly in parallel — live-swap latency…
+ ▎ Cloud Console hardening — the Cloud GUI Remake's cha… ··· 87/220
+ ├─ ⠿ Wave 71 paperwork: charter PR (D861-D866) + wave log
+ │    C4/7 · P1 · w71-decide-fable · T
+ ├─ ✓ friendly() THROWS a TypeError on the ne…  C5/7 ✓✓✓✓✓✓ 6/6 T
+ └─ ✓ Wave 70 paperwork — the measured-sentence ch…  C5/7 ✓✓ 2/2 T
+   +132 more · 85 done · 27 cancelled
+
+   The task TUI is glanceable, live, and never flickers ······ 9/19
+ ├─ ⠿ The drive harness anchors row identity on the slug — 12-char…
  │    C5/7 · P2 · 3/4
- ├─ ⠿ Sheet-era glyph and golden hygiene: the retired breadcrumb g…
- │    C5/7 · P3 · 4/5
- ├─ ⠿ Task-TUI W19 native-proof paperwork: D109-D113 charter PR + …
- │    C5/7 · P1 · ✓○ 1/2 · epic-decide-ttw19 · T
- ├─ ✓ In-body task chips speak the full 9-stat…  C5/7 ✓✓✓✓✓ 5/5 T
- └─ ✓ Narrow-mode reading-frame rail stops ga…  C5/7 ✓✓✓✓✓✓ 6/6 T
-   ↓ 50 more below
+ ├─ ⠿ The conn dot never calls a slow fetch offline — timeouts cla…
+ │    C5/7 · P1 · 4/5
+ ├─ ⠿ The reading geometry stops taking a -2 mutation silently — t…
+ │    C5/7 · P2 · 4/5
+ ├─ ⠿ Esc at depth 0 hands j/k back to the board — plus the wide o…
+ │    C5/7 · P2 · 4/5
+ ├─ ⠿ Task-TUI wave 20 trust-wave paperwork: the D114-D119 charter…
+   ↓ 36 more below
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
- ⠿ 20 in flight · ○ 1+ ready · ✓ 3278 done · 671 stale          51%
+ ⠿ 7 in flight · ○ 2+ ready · ✓ 3301 done · 639 stale           51%
  jk move · enter open · esc back · c claim · x close · o studio
