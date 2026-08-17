@@ -1568,6 +1568,99 @@ func TestRunCloudSiteCreateInvalidBindingExitsGeneric(t *testing.T) {
 	}
 }
 
+// --- readable-types menu on an empty-binding create refusal (cch-w70, D863) --
+//
+// content_binding_empty ships a STRUCTURED `readable_types` array (the site's own
+// token can see these types) alongside a `detail` that carries a PROSE copy of the
+// same menu + the CLI re-run line. The console renders the array (siteReadableTypesMenu)
+// and drops the CLI line; the CLI used to relay `detail` whole and never touched
+// the array, so a script got the sentence but no list to parse.
+//
+// The fixture ships THREE rows — two with counts, one WITHOUT (bare type) — so the
+// grammar `type (count)` / bare `type` is exercised on one payload, plus a JUNK
+// row (empty type) the render must drop.
+const emptyBindingBody = `{"error":"content_binding_empty",` +
+	`"detail":"this site would build from nothing — its token sees nothing at acme/blog/production. ` +
+	`This site CAN read: task (12), paper (40), note. ` +
+	"Re-run naming a type this site can read: `bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>`\"," +
+	`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"},{"type":""}]}`
+
+// The HUMAN receipt renders the menu FROM THE ARRAY in the console grammar and
+// keeps the bp re-run line. ANTI-VACUITY: it asserts the CLI-COMPOSED line
+// (`It can read: task (12), paper (40), note`) which is NOT a substring of the
+// server prose (`This site CAN read: …`), and asserts the server prose menu
+// sentence is GONE — both red on pre-fix, where the whole detail is relayed
+// verbatim (the prose sentence is present and the composed line absent).
+func TestRunCloudSiteCreateEmptyBindingRendersReadableTypesMenu(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{422, emptyBindingBody})
+	if code != exitGeneric {
+		t.Fatalf("a 422 content_binding_empty must exit %d (generic), got %d\n%s", exitGeneric, code, stderr)
+	}
+	// The array-derived menu, in the console grammar: counts in parens, the
+	// count-less row bare, the empty-type junk row dropped.
+	if !strings.Contains(stderr, "It can read: task (12), paper (40), note") {
+		t.Fatalf("the receipt must render the menu FROM THE ARRAY in console grammar:\n%s", stderr)
+	}
+	// The server's PROSE menu sentence is replaced, not echoed — proving the CLI
+	// composed from the array rather than relaying detail whole (reds pre-fix).
+	if strings.Contains(stderr, "This site CAN read:") {
+		t.Fatalf("the CLI must compose from the array, not echo the server prose menu:\n%s", stderr)
+	}
+	// The bp re-run line is the CLI's home — kept, unlike the console which strips it.
+	if !strings.Contains(stderr, "--doc-type <type>") {
+		t.Fatalf("the CLI must KEEP the bp re-run line:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "No site was created") {
+		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
+	}
+}
+
+// The MACHINE envelope carries the menu at error.details.readable_types with the
+// server's row ORDER and `type`-before-`count` key order preserved (re-serialized
+// from the decoded rows via struct tags — junk rows dropped, never a Go map that
+// would alphabetize). ANTI-VACUITY:
+// error.details did not exist for this refusal pre-fix, so a decode of
+// error.details.readable_types reds outright on pre-fix bytes.
+func TestRunCloudSiteCreateEmptyBindingJSONCarriesReadableTypes(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{422, emptyBindingBody}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("a 422 content_binding_empty must exit %d, got %d\n%s", exitGeneric, code, stdout)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				ReadableTypes []struct {
+					Type  string `json:"type"`
+					Count *int   `json:"count"`
+				} `json:"readable_types"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json envelope: %v\n%s", err, stdout)
+	}
+	if env.OK || env.Error.Code != "content_binding_empty" {
+		t.Fatalf("want ok:false code:content_binding_empty:\n%s", stdout)
+	}
+	got := env.Error.Details.ReadableTypes
+	// Server row ORDER preserved, junk row (empty type) dropped upstream.
+	if len(got) != 3 || got[0].Type != "task" || got[1].Type != "paper" || got[2].Type != "note" {
+		t.Fatalf("error.details.readable_types must carry task,paper,note in order:\n%s", stdout)
+	}
+	if got[0].Count == nil || *got[0].Count != 12 || got[2].Count != nil {
+		t.Fatalf("counts must survive (task=12) and the count-less row stay bare (note):\n%s", stdout)
+	}
+	// KEY order preserved too — struct-tag order, not a Go map that would alphabetize.
+	if !strings.Contains(stdout, `"readable_types":[{"type":"task","count":12}`) {
+		t.Fatalf("the raw array bytes must carry the server's key order:\n%s", stdout)
+	}
+}
+
 // node_ports_exhausted is a 503 → exitServer: the box, not the caller, is out of
 // room. RED BEFORE: cloudFail exited 1. A script must be able to tell this
 // retry-elsewhere state from a user-fixable 422.

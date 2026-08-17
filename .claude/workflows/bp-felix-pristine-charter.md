@@ -2436,7 +2436,114 @@ All six are file-disjoint and dispatch in parallel. S2 and S3 both sit under the
 condition — if a tenancy file appears in any open PR before dispatch, BOTH stop. The ledger batch-closes (D164)
 belong to the LEAD at Review, batched, with each close naming its paying commit.
 
+## Wave 26 Decisions (2026-08-17) — THE SEAL IS EXECUTED, NOT DECLARED
+
+- **D173 — THE D164 CLOSES ARE EXECUTED AT DECIDE, NOT STAGED FOR THE LEAD.** Wave 25's "honest-ledger
+  reconciliation" was ratified but never landed: every D164 PAID row was still `lifecycle=open` because each carried
+  a LAPSED null-worker claim and `bp task close` CAS-requires the CURRENT claim. Root cause of the wave-25 miss:
+  the closes either never ran or 409'd silently (the bp-writes-silently-don't-land class). Wave 26 executed all of
+  them live via **re-claim → stamp (STORED verbatim criterion text) → close → read-back**, proven on the first row
+  (`felix-w23-s1-drift-migration`, epoch 7→8, life open→done, read back). Twenty rows closed: 17 PAID `done` (each
+  naming its paying commit from the D164 table), 1 no-op `cancelled` (`felix-w24-s7-continue-on-error-flip`, D143),
+  plus two stranded strays — `task-felix-w22-bl-recorder-bounds` `cancelled` superseded by #11858 (D169) and
+  `task-e98797b38ca3b51e` `cancelled` as a duplicate of the merged #5914 realtime seal. The merge-gated rows
+  closed with `--merge-gated` (Decide holding lead authority for the ledger reconciliation); the multi-unmet rows
+  closed with `criteria_override` citing the paying commit rather than fabricating criterion flips. The stranded W18
+  lock proof (`task-felix-w18-authority-lock-mutation-proof`, merged #5916) was also closed `done`. **Two D164
+  sub-rows are PHANTOM and were struck, not closed: `census-floor` and `transfer-needs-detector-map` were never
+  filed as tasks** (only `config-hash-line-consistency` and `multiclause-annotation-review` of the "four binding
+  sub-rows" exist).
+
+- **D174 — #11853 IS A FIXTURE DEFECT, NOT A BEHAVIOR CHANGE — LAND IT WITH AN UNDERSCORE-SAFE REGEX (S1).** The
+  open red straggler adds `validate_format(:slug, ~r/^[a-z0-9][a-z0-9-]*$/)`, whose char class excludes underscore;
+  all 16 reds are ONE mechanism (an underscore dataset slug on the CREATE path → `get_or_create_dataset` refuses →
+  `write_scope.ex:146` swallows to `dataset_id=nil` → partial-index collision / nil-authoritative assertions).
+  Two ground-truth proofs settle the fork: the **guerrilla prod census** (`barkpark_prod`: 21 datasets, 0 with
+  underscore, 0 violators — no real slug is refused), and the **probe** (both loosen-A and rename-B green all 16;
+  `dataset_test.exs` stays 37/0; underscore is not a SQL-injection vector, so loosening loses no security value).
+  Verdict: ship `@slug_format ~r/^[a-z0-9][a-z0-9_-]*$/` — the improvement-only-correct guard. Keeping strict would
+  gratuitously refuse the de-facto underscore-slug convention for zero security gain; that would be the behavior
+  change. S1 supersedes #11853 on a fresh branch; the lead closes #11853 on merge. The `write_scope.ex` swallow-to-nil
+  is a real, orthogonal isolation defect filed as backlog (`felix-w26-bl-write-scope-swallow-nil`), NOT this slice.
+
+- **D175 — THE pg_catalog BROADENING IS RELKIND-PRESERVING `pg_table_is_visible` (S2), SEQUENCED AFTER S1.** The
+  bundle-member guard (`assert_member_tables!/1`) is public-schema-only: `table_exists?/1` filters `nspname='public'`
+  while `copy_into/2` resolves the unqualified COPY via `search_path` (pg_catalog implicit-first), so a one-member
+  manifest naming `pg_authid` imports — proven end-to-end by review2-11855 (landed a LOGIN SUPERUSER row). The fix is
+  a 3-line SQL swap on `workspace_bundle.ex:510`: `SELECT 1 FROM pg_class cl WHERE cl.relname=$1 AND cl.relkind='r'
+  AND pg_catalog.pg_table_is_visible(cl.oid)` — **KEEPING `relkind='r'`** (the reviewer's bare one-liner dropped it
+  and would match views/indexes). Verify proved red-before/green-after: the probe manifest raises `InvalidBundleError`
+  after the swap, and `workspace_bundle_test.exs` 40/0 + three sibling suites 41/0 confirm zero legit-bundle change.
+  Draft `task-966de76b9dd92783` was AMENDED from its allow-set wording to this measured shape and published. **HIGH-FLIP-RISK:
+  tenancy privilege boundary.** SEQUENCING (D165(iv) auto-re-fence): #11853 holds tenancy files in an open PR, so S2
+  is **round 2** — it dispatches only after S1 merges AND #11853 is closed. The fix file (`workspace_bundle.ex`) is
+  itself collision-free (no open PR touches it); the fence is the dir-level tenancy-in-open-PR condition, cleared by S1.
+
+- **D176 — THE FRESH LANE FOUND A REAL SECURITY SLICE, NOT A PROVE-CLEAN (S3).** The least-swept unfenced stable-core
+  file (`net/safe_outbound.ex`, one commit ever) carries a genuine **DNS-rebinding TOCTOU**: `check_url/1` resolves
+  and classifies the target IP then DISCARDS it, and `post/2` hands the raw URL to Req, whose Finch pool re-resolves
+  at connect time — nothing pins the checked IP. The sole runtime caller is the fence-hot webhook dispatcher, so the
+  fix is confined ENTIRELY to `net/safe_outbound.ex` (pin the validated IP into the connection, preserve hostname for
+  SNI/Host/verification). This IS a behavior change (closing a hole) framed as a security slice with a rebinding
+  mutation fixture — not cleanup, not churn. The rival "prove-clean the whole core" outcome was refuted here; the rest
+  of the least-swept core (pulse, sync, media internals) is honestly already-good. **HIGH-FLIP-RISK: security.**
+
+- **D177 — THE ROSTER: 7 slices, all round 1 except S2 (round 2 after S1).** S1 straggler-rescue (opus),
+  S2 pg_catalog broadening (fable, r2), S3 SSRF rebind-pin (fable), S4 blobstore read-path guard (opus),
+  S5 chatlive two-seam honesty (opus — the codex dead-branch + buffer_overflow banner FOLDED into one slice because
+  both live in `chat_live.ex` handle_info; `task-felix-w22-bl-chatlive-overflow-banner` cancelled as folded),
+  S6 authority-lock remaining sites (fable — the FK-masked false-green trap is subtle per-site judgment; harness
+  de-risked by merged W18 #5916), S7 release_capture 124/125 branch coverage (opus, test-only, adopts the existing
+  `task-felix-w21-bl-releasecapture-bound-tests`). All file-disjoint. Fresh backlog filed: write-scope swallow,
+  codex protocol_error swallow, s3 blob receive_timeout.
+
+- **D178 — GUARDRAILS.** Builder models: **fable** for S2 (search_path semantics at the privilege boundary),
+  S3 (TOCTOU + rebinding harness), S6 (false-green trap); **opus** for S1/S4/S5/S7. Fences re-derived from the live
+  open-PR set at origin/main: content/ + portable_doc/ (#11934/#11770/#8465), capabilities (#11766), settings_live
+  (#11978), auth_controller + router (#9530), search_controller (#9600), `.sobelow-skips` (#6057), and everything D82
+  still covers outside the D165 lift; `application.ex` is soft-fenced by the conflicting zombie #2907 and the OTP lane
+  simply avoids it. **D167 HOLDS: zero builders in the Sobelow instrument vein** — `readiness-sobelow-inline` stays
+  backlog (its `.sobelow-skips:42` fingerprint currently matches the code, so it is not even a live line-drift). Note:
+  main itself carries pre-existing non-required reds (spec-gate, compose-smoke, Sobelow) inherited by every PR — the
+  four required contexts (Elixir/Cloud/Console gate + active-task) are what gate a merge.
+
 ## Wave log
+
+### Wave 2026-08-17 — Wave 26 BUILT + REVIEWED, grade A. "Six Green, One Caught."
+
+All six round-1 slices built, gates re-run green on the reviewer's final state, pushed with PRs: S1
+dataset-slug guard, underscore-safe, supersedes #11853 (#12037, 60/0); S3 SSRF DNS-rebinding TOCTOU pin
+with the Mint `:hostname` contract independently re-derived from deps (#12038, 19/0 + webhooks 111/0);
+blobstore read-seam traversal guard (#12039, 41/0, **reviewer fixed** the builder-flagged leading-dash
+regression on the `-r` branch — `unique_filename/1` genuinely emits `-<hex>.ext` for empty-slug
+basenames, so `@blob_segment`'s leading class is now `[A-Za-z0-9-]`; leading `.`/`_` stay refused);
+chatlive two-seam honesty (#12040, 295/0 — 3 local failures proved ENVIRONMENTAL: a stale committed
+chat_sessions row in the shared barkpark_test DB, clean partition green, row deleted); authority-lock
+lock-wait proofs for the two remaining sites (#12041, 77/0, test-only); release_capture 124/125 bounds
+(#12042, 3/0, test-only — pins branch EFFECT via wide wall-clock separation since the exit codes are
+private; the 126 rescue branch stays uncovered). Ledger spotless: every slice `in_progress` with
+evidence stamped mid-claim, merge-gated criteria left for the lead, S2 (task-966de76b9dd92783,
+pg_catalog broadening) honestly open for round 2 AFTER S1 merges and #11853 closes (D165(iv)
+auto-re-fence). HIGH-FLIP-RISK second reviews owed before merging S1 and S3 (named in both PR bodies).
+Next wave: lead merges the six (S1 first), closes #11853, dispatches S2, then considers the
+never-swept core (access/, telemetry/, connectors/ interior) and the Session-GenServer
+sandbox-escape leak the chatlive gate exposed. Grade: A.
+
+### Wave 2026-08-17 — Wave 26 DECIDED (building). "The Seal Is Executed, Not Declared."
+
+Ratified D173–D178. Premise smoke refuted the wish's core claim — wave 25 was NOT fully landed: #11853 was OPEN
+and red, and all 19 D164 PAID rows were still `open` (lapsed null-worker claims defeating the close CAS). Wave 26's
+first product is EXECUTION: 20 ledger rows closed live at Decide (re-claim → stamp verbatim → close → read-back),
+the pg_catalog draft amended to the proven `pg_table_is_visible` shape and published, two phantom D164 sub-rows
+struck. The second product is the build: 7 slices — land the straggler with the census-proven underscore-safe regex
+(S1), broaden the guard to refuse pg_catalog members (S2, round 2 after S1 clears the tenancy fence), pin the SSRF
+rebinding TOCTOU in the least-swept core (S3), plus blobstore read-guard, chatlive two-seam, authority-lock
+remaining sites, and release_capture branch coverage. Three direction/digest premises corrected by ground truth: no
+prod slug violates the regex (loosen, don't force), the guard file is collision-free (only the dir-level fence
+sequences it), and the fresh lane is a real security slice (not prove-clean). 6 slices dispatch round 1
+(S2 round 2); S3/S6 fable, S2 fable, rest opus. Grade: pending build+review.
+
+
 
 ### Wave 2026-08-17 — Wave 25 BUILT + REVIEWED, grade A. "Six for Six, Pushed."
 

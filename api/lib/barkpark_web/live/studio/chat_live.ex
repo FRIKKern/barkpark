@@ -1243,8 +1243,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       ) do
     socket =
       case socket.assigns.streaming do
-        text when is_binary(text) and text != "" -> append_message(socket, :assistant, text)
-        _ -> socket
+        %{text: text} when is_binary(text) and text != "" ->
+          append_message(socket, :assistant, text)
+
+        _ ->
+          socket
       end
 
     line =
@@ -1824,6 +1827,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
        :system,
        "Couldn't publish the approved plan as a Paper — the plan is still approved."
      )}
+  end
+
+  # The Session hit its stdout buffer cap (claude_chat.ex D126): the CLI streamed
+  # bytes without a newline past the reassembly cap, so the Session force-closed
+  # the port and stopped itself. It sends this NAMED reason before the DOWN
+  # follows; without a clause it fell through to the catch-all no-op and the user
+  # saw only the generic "ended unexpectedly" DOWN banner. Surface the captured
+  # reason honestly, mirroring the :claude_chat_exit path (the stderr tail is
+  # appended when the CLI wrote one). Ordered before the DOWN handler so the
+  # named message wins the race against the bare process-down that follows.
+  def handle_info({:claude_chat_error, :buffer_overflow, stderr_tail}, socket) do
+    reason = stderr_reason(stderr_tail)
+
+    base =
+      "Claude sent more data than this session can buffer, so it was stopped. " <>
+        "Send a message to resume it."
+
+    message = if reason != "", do: base <> "\n" <> reason, else: base
+
+    {:noreply, teardown_session(socket, message)}
   end
 
   # A bare process DOWN with no prior exit frame (an unexpected Session crash, or

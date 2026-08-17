@@ -15,6 +15,18 @@ defmodule BarkparkWeb.MetaController do
   @min_api_version "2026-04-01"
   @max_api_version "2026-04-17"
 
+  # Server-authoritative production signal for the CLI's destructive-write
+  # guard (onb-backlog-isprod-custom-host-write-confirm): the client's
+  # isProd/isProdServer heuristics fail CLOSED on any non-local host, and
+  # `production: false` here is the one server-side signal that lets a genuine
+  # non-prod instance (LAN dev box, staging on a dev build) skip the confirm.
+  # Compile-time on purpose — only the deployment knows its role, and a prod
+  # build can never talk itself out of the guard at runtime. Rides /v1/meta
+  # (tolerant plain-map JSON both directions) and must NEVER move into the
+  # capabilities manifest: CLI manifest decoding is strict
+  # (DisallowUnknownFields), so an unknown manifest key bricks older CLIs.
+  @production Mix.env() == :prod
+
   def index(conn, params) do
     hash =
       case Map.get(params, "dataset") do
@@ -26,7 +38,8 @@ defmodule BarkparkWeb.MetaController do
       minApiVersion: @min_api_version,
       maxApiVersion: @max_api_version,
       serverTime: DateTime.utc_now() |> DateTime.to_iso8601(),
-      currentDatasetSchemaHash: hash
+      currentDatasetSchemaHash: hash,
+      production: @production
     })
   end
 end

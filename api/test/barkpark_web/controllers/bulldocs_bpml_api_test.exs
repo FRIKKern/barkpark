@@ -296,7 +296,13 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
       assert after_rev == rev
     end
 
-    test "an unknown slug teaches publish-first", %{conn: conn} do
+    # Create-on-push (pe-w6 / charter D41): an absent slug is no longer a 404 —
+    # sync CREATES it through the full publish wall. What this pins instead:
+    # the two honest refusals of that arm — a path/document identity mismatch,
+    # and a wall refusal that names every violation and writes NOTHING (the
+    # deep create tests live in bulldocs_ingest_controller_test.exs).
+    test "an unknown slug whose document names a DIFFERENT slug refuses the identity mismatch",
+         %{conn: conn} do
       conn =
         authed(conn)
         |> post("#{@ingest_path}/nope-never/sync", %{
@@ -304,8 +310,25 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           "baseRev" => "1"
         })
 
-      assert %{"error" => err} = json_response(conn, 404)
-      assert err["hint"] =~ "publish"
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "slug_mismatch"
+      refute Content.get_paper("nope-never")
+      refute Content.get_paper("x")
+    end
+
+    test "an unknown slug with a wall-failing document is a create refusal that writes nothing",
+         %{conn: conn} do
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/nope-never/sync", %{
+          "bpml" => "<paper slug=\"nope-never\" title=\"X\"><h1>X</h1></paper>",
+          "baseRev" => "1"
+        })
+
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "create_wall"
+      assert is_list(err["errors"]) and err["errors"] != []
+      refute Content.get_paper("nope-never")
     end
   end
 

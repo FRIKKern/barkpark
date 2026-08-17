@@ -241,12 +241,20 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
       ------------------------------------|--------|-------------|-------------------|--------------
       normalize_claim_host/1 (twin)       | yes    | yes         | yes               | stripped
       the SQL fragment (twin)             | yes    | yes         | yes               | stripped
-      Barkpark.subdomain_from_url/1       | NO     | NO          | NO                | kept
+      Barkpark.subdomain_from_url/1       | yes    | yes         | NO                | kept
       DomainStatus.platform_host/1        | yes    | NO          | yes               | kept
 
-  `subdomain_from_url/1` mints the DNS label AND the Hetzner box name from the
-  raw url, so its divergence is a provisioning-side seam, not a claim-side one —
-  owned by the backlog row `cch-w69-bl-dns-label-minted-from-raw-url`.
+  `subdomain_from_url/1`'s first two columns FLIPPED in D865: it now folds
+  `trim |> downcase` before stripping, matching the write-side `normalize_url`
+  fold. Its remaining two columns are unchanged, and the trailing-dot column is
+  what still splits it from the twins — a stored `"…barkpark.cloud."` misses the
+  case-sensitive zone `replace_suffix`, so the "DNS label" is the whole host
+  rather than the subdomain. That residue keeps
+  `cch-w69-bl-dns-label-minted-from-raw-url` OPEN, narrowed from "normalises
+  nothing" to "does not strip a root dot or a port/path".
+
+  It mints the DNS label AND the Hetzner box name from the stored url, so the
+  residue is a provisioning-side seam, not a claim-side one.
   `platform_host/1` only decides which hostname a status panel checks. Neither
   is unified here: this slice's contract is that the two normalisers the CLAIM
   compares agree, and quietly rewriting a DNS-label derivation under that
@@ -682,26 +690,37 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
   ## ─────────────────────────────────────────────────────────────────────────
 
   describe "the third and fourth copies" do
-    test "subdomain_from_url/1 does NOT normalise like the claim twins (backlog row)" do
+    test "subdomain_from_url/1 folds like the twins but still keeps a root dot (backlog row)" do
       # Owned by cch-w69-bl-dns-label-minted-from-raw-url: this label becomes a
       # DNS record AND a Hetzner box name, so a hostile url spelling lands in
-      # provisioning, not in the claim walk. Pinned, not fixed, here.
+      # provisioning, not in the claim walk. D865 closed HALF of it — the
+      # `trim |> downcase` fold — so this row is now narrowed, not retired.
       raw = " https://Gyldendal.barkpark.cloud."
       bp = %Barkpark{url: raw}
 
       label = Barkpark.subdomain_from_url(bp)
       claim_twin = Extract.elixir_twin(source())
 
-      refute label == "gyldendal",
-             "subdomain_from_url/1 now normalises like the claim twins — if that is " <>
-               "intended, close cch-w69-bl-dns-label-minted-from-raw-url and update the " <>
-               "divergence table in this file's moduledoc"
+      # The half that LANDED (D865): whitespace and case no longer survive, so
+      # the scheme prefix strips where it previously missed. Pinned as a value,
+      # not as an inequality — a regression that dropped the fold would return
+      # the raw url here.
+      refute label == raw
+      assert label == "gyldendal.barkpark.cloud."
 
-      # Measured: not one of its three `String.replace_*` steps fires. The scheme
-      # prefix misses on the leading space and the zone suffix misses on the
-      # trailing dot, so the "DNS label" is the whole raw url, verbatim.
-      assert label == raw
-      assert claim_twin.(" https://Gyldendal.barkpark.cloud.") == "gyldendal.barkpark.cloud"
+      # The half still OPEN: the zone `replace_suffix` is spelled without a root
+      # dot, so an FQDN stored with one keeps the whole host as its "DNS label".
+      # Port/path are unstripped for the same reason (separate spellings, same
+      # row). If this starts passing, close
+      # cch-w69-bl-dns-label-minted-from-raw-url and update the divergence table
+      # in this file's moduledoc.
+      refute label == "gyldendal",
+             "subdomain_from_url/1 now strips the root dot too — the backlog row is " <>
+               "fully closed; retire it and update the divergence table"
+
+      # The twins, by contrast, strip the root dot — which is exactly the one
+      # column of the table that still separates the third copy from them.
+      assert claim_twin.(raw) == "gyldendal.barkpark.cloud"
     end
   end
 end

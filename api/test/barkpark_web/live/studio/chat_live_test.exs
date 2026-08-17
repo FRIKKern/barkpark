@@ -773,6 +773,48 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view) =~ "Hello!"
     end
 
+    # The codex turn_completed path (studio_chat_runtime_event) commits the
+    # streamed answer to a durable :assistant message so it survives turn
+    # completion (which always resets `streaming: nil`). The `streaming` assign
+    # is a StreamTail BARE MAP (%{text: ...}) — the old `text when is_binary(text)`
+    # clause never matched a map, so the just-streamed answer vanished from the
+    # open transcript at turn completion. MUTATION-PROOF: reverting the clause to
+    # `text when is_binary(text)` reds this — streaming resets to nil and the
+    # sentinel disappears because it was never appended.
+    test "turn_completed commits the streamed codex answer to a durable assistant message",
+         %{view: view} do
+      # populate the shared `streaming` StreamTail via the delta path
+      send(view.pid, {:claude_chat_event, stream_delta("ZZ_STREAMED_ANSWER_ZZ")})
+      assert render(view) =~ "ZZ_STREAMED_ANSWER_ZZ"
+
+      # codex end-of-turn — after this, streaming is nil no matter what
+      send(view.pid, {:studio_chat_runtime_event, codex_turn_completed()})
+
+      assert lv_assigns(view)[:streaming] == nil
+      # the streamed answer is still visible — now a durable :assistant message
+      assert render(view) =~ "ZZ_STREAMED_ANSWER_ZZ"
+    end
+
+    # A stdout buffer overflow (claude_chat.ex D126) sends a NAMED reason before
+    # the DOWN follows. Without a {:claude_chat_error, ...} clause it fell to the
+    # catch-all no-op and the user saw only the generic DOWN banner, losing the
+    # captured stderr tail. MUTATION-PROOF: removing the clause reds this — the
+    # render no longer carries the overflow copy or the captured reason.
+    test "a buffer_overflow error surfaces the captured reason, not the generic DOWN banner",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      send(
+        view.pid,
+        {:claude_chat_error, :buffer_overflow, "codex: runaway stdout ZZ_OVERFLOW_TAIL_ZZ"}
+      )
+
+      html = render(view)
+      assert html =~ "more data than this session can buffer"
+      assert html =~ "ZZ_OVERFLOW_TAIL_ZZ"
+      refute html =~ "ended unexpectedly"
+    end
+
     # charter D41 — the wire carries no thinking text, so the pulse is a live
     # counter off `system/thinking_tokens` (cumulative `estimated_tokens`).
     test "thinking_tokens frames render a live ✻ pulse with the cumulative count",
@@ -6256,6 +6298,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   defp turn_active_status?(view), do: lv_assigns(view)[:status] in [:thinking, :interrupting]
 
   defp count_substring(haystack, needle), do: length(String.split(haystack, needle)) - 1
+
+  # A codex end-of-turn runtime event (the studio_chat_runtime_event path). The
+  # terminal_state drives the closing line; `:completed` yields no extra line, so
+  # the durable-append assertion is the only thing under test.
+  defp codex_turn_completed do
+    %Barkpark.StudioChat.Runtime.Event{kind: :turn_completed, terminal_state: :completed}
+  end
 
   defp stream_delta(text) do
     %{
