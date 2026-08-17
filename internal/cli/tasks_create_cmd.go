@@ -564,16 +564,14 @@ func taskCreateDryRun(out *writer, ctx manifest.Context, mutations []map[string]
 // isProdServer mirrors run.go's isProd URL heuristic for the builtin write path
 // (which has no manifest to read m.Server.Name from). FAIL CLOSED, matching
 // isProd's flip (onb-backlog-isprod-custom-host-write-confirm): any host that
-// is not provably local IS prod — a custom production hostname must not skip
-// the write guard just because it matches no substring allowlist. localhost is
-// never prod; --yes and a server-advertised production:false (/v1/meta) are
-// the only ways past the guard.
+// is not provably local IS prod. Both twins now collapse onto the ONE pinned
+// exact-host classifier (isLocalHost, run.go) — the former hand-copied
+// substring body left this builtin write path fail-open on hosts like
+// localhost.evil.com even after run.go was fixed. --yes and a
+// server-advertised production:false (/v1/meta) are the only ways past the
+// guard.
 func isProdServer(server string) bool {
-	s := strings.ToLower(server)
-	if strings.Contains(s, "localhost") || strings.Contains(s, "127.0.0.1") || strings.Contains(s, "0.0.0.0") {
-		return false
-	}
-	return true
+	return !isLocalHost(server)
 }
 
 func printTaskCreateHelp(out *writer) {

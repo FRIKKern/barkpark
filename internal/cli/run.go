@@ -1833,8 +1833,45 @@ func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) b
 	return line == "y" || line == "yes"
 }
 
+// isLocalHost is THE pinned classifier for the prod write-guard: true only
+// when server dials a provably-loopback target, decided by EXACT host (hostOf)
+// — never substring. Both guard twins (isProd here, isProdServer in
+// tasks_create_cmd.go) collapse onto it; there must never be a second copy.
+//
+// EXACT-HOST (onb-backlog-isprod-localhost-substring-corner): the previous
+// shape substring-matched "localhost"/"127.0.0.1"/"0.0.0.0" anywhere in the
+// URL, so a hostile hostname that merely EMBEDS a local token
+// (localhost.evil.com, my-127.0.0.1.attacker.net) classified local and
+// skipped the destructive-write confirm — the last fail-open escape after the
+// #12033 fail-closed flip. Now the host is parsed out, lowercased, ONE
+// trailing dot stripped (DNS root form), and matched exactly:
+// {localhost, 0.0.0.0, ::1, [::1]} ∪ IPv4 127.0.0.0/8 (covers Debian's
+// 127.0.1.1). Empty/unparseable → NOT local (the guard fails closed).
+//
+// Deliberately NARROWER than ServerKind (config.go), which is a UX classifier:
+// RFC1918 LAN ranges, *.local mDNS names, and *.localhost stay PROD here —
+// those dial OTHER machines (or resolver-dependent names), and a false prompt
+// is the safe failure; --yes and /v1/meta production:false are the sanctioned
+// exits. Do NOT "unify" the two — the divergence pin test in
+// isprod_localhost_test.go reds if someone tries.
+func isLocalHost(server string) bool {
+	host := strings.ToLower(hostOf(server))
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false // fail closed: no provable host means PROD
+	}
+	switch host {
+	case "localhost", "0.0.0.0", "::1", "[::1]":
+		return true
+	}
+	if isIPv4(host) {
+		return atoiByte(strings.Split(host, ".")[0]) == 127 // loopback 127.0.0.0/8
+	}
+	return false
+}
+
 // isProd decides whether the target is production via a name/url heuristic on
-// the manifest's server identity and the resolved server URL.
+// the manifest's server identity and the dialed server URL.
 //
 // FAIL CLOSED (onb-backlog-isprod-custom-host-write-confirm): the old shape
 // defaulted to non-prod unless the host matched a substring allowlist
@@ -1847,16 +1884,19 @@ func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) b
 // the server itself advertising production:false on /v1/meta
 // (serverDeclaredNonProd — consulted by the write-guard call sites, not here,
 // so this stays a pure offline heuristic that whoami can always evaluate).
+//
+// Classification reads ctx.Server ALONE (D35): m.Server.BaseURL is the
+// server's own echo of the dialed host — display-only elsewhere — and letting
+// it into the classifier handed the server a guard-suppression channel (a
+// manifest base_url containing "localhost" masked a non-local ctx.Server).
+// The name leg below only ever ADDS prod, so a server can tighten the guard
+// on itself but never loosen it.
 func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 	name := strings.ToLower(m.Server.Name)
 	if name == "prod" || name == "production" {
 		return true
 	}
-	s := strings.ToLower(ctx.Server + " " + m.Server.BaseURL)
-	if strings.Contains(s, "localhost") || strings.Contains(s, "127.0.0.1") || strings.Contains(s, "0.0.0.0") {
-		return false
-	}
-	return true
+	return !isLocalHost(ctx.Server)
 }
 
 // dryRun prints the resolved method/path/headers(redacted)/body and exits 0
