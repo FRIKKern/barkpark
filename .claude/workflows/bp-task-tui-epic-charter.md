@@ -2639,3 +2639,65 @@ Gates from the builder's OWN worktree (the primary checkout false-reds the pdren
 whole-root grep test over 568 nested worktree copies); spineRows stays the ONE producer.
 
 Next D-number: D120.
+
+### Wave 20 2026-08-17 (REVIEWED: all 4 round-1 slices green, zero code fixes, pushed + PRs open; rounds 2 deferred by law)
+
+**Review facts:** the reviewer re-ran every gate on the final heads from an isolated worktree —
+build + vet + full `go test ./internal/...` per slice, `-race` on taskboard for slice 1, an
+independent live-mutation re-proof of the rightPaneStopAt -2 guard (red under -2, green
+reverted), and a FULL independent live tmux drive run: 25/25 asserts pass against guerrilla,
+including the G5/G7 hover-accent class the builder flagged as the pre-existing header-churn
+flake. A 4-way integration merge of all final branches onto origin/main compiled, vetted and
+tested green including `-race`. ZERO code fixes needed — the one review commit is the
+drive harness's regenerated evidence (its own law: committed copy = last judged run).
+
+**Landed (review-verified, gates re-run green on final heads):**
+- **ttw19-bl-conn-state-flap** → `loop-epic/the-conn-dot-never-calls-a-slow-fetch-of-0`.
+  D114 exactly: isSnapshotTimeout is TYPED (errors.As *url.Error+Timeout(), errors.Is
+  DeadlineExceeded — the test rows' text carries no timeout word, so only the typed path can
+  pass); "server timeout" shares humanizeReason's phrase; the timeout class degrades under the
+  SAME liveIsFresh truth as success (never ConnOffline), so handlePulse's untouched honesty
+  guard lifts exactly that class; FetchSnapshotFull rides a 30s per-request context deadline on
+  a dedicated transport — the shared apiclient keeps its interactive 5s, mutation-proven by a
+  test whose 20ms interactive client dies on the very server the snapshot path completes
+  against. Honest residue: a black-holed network (dropped packets, no RST) has Timeout()==true
+  and reads ◐ "server timeout", never ✗ — client-indistinguishable from slow-but-alive, label
+  still literally true; and post-pulse the header pairs ● with the standing "server timeout"
+  word until a snapshot lands (deliberate: stream proven, data path not).
+- **ttw18-bl-narrow-reading-width-skew** → `loop-epic/the-reading-geometry-stops-taking-a-2-mu-1`.
+  D116: geometry_seam_test.go recomputes avail=inner-1 hand-side at rightPaneStopAt AND
+  scrollPreview (reviewer re-proved the first mutation live); readingWidth re-floors at 20
+  mirroring composeAt's order, measure==paint pinned at m.width 19..24 via docLayout — the
+  3/3/2/1/0/0 gap table is zeros. Overflow preconditions Fatalf so fixture shrink fails loud.
+- **ttw19-bl-wide-focus-oneway** → `loop-epic/esc-at-depth-0-hands-j-k-back-to-the-boa-2`.
+  D117: one guarded line (m.wide && len(stack)==1 → wideFocusBoard) closes BOTH strand paths;
+  the wheel-focus test covers the depth-0 strand popFrame can never fix (stronger than the
+  brief's literal "press"). Riders landed: TestWideFooterVerbClickOpensStudio at width 100
+  (80-col default sheds o), mutation-proven via skip-o; detail_render.go's stale #1592
+  collapse claim corrected — NoColor now stands on the color=state law alone.
+- **ttw20-drive-slug-anchor** → `loop-epic/the-drive-harness-anchors-row-identity-o-3-r`
+  (the one -r final branch: reviewer's judged-run evidence). D118's premise was WRONG and the
+  builder proved it: no slug is ever painted (components.go:89 renders Title only; the `\S+`
+  drive.sh stripped was the STATUS GLYPH) — so identity anchors on the full rendered title
+  (12-char cut aliased 244/1000; full prefix ≤3 groups, none co-viewport). row_ident()/
+  line_of_ident() rewire all six churn-coupled asserts; roots re-locate by title before every
+  G3 click. Deviation stamped honestly on criterion 0. Residual: first-matching-line identity
+  could mis-locate twin titles in one viewport (census says negligible); G4's reader grep
+  could miss a heading that wraps mid-title (unobserved in 2 consecutive 25/25 runs).
+
+**Ledger:** all four built tasks honestly in_progress, criteria evidence-stamped mid-claim,
+only the lead-owned merge row open; both round-2 tasks untouched open; the wave referent
+task-tui-wave-20-log closed by review. Zero ledger fixes needed — second consecutive wave
+with a clean board. Grade: A- (commentary in wave paper task-tui-wave-2026-08-17b).
+
+**Next wave (dispatch order):** (1) LEAD merges the four round-1 PRs (file-disjoint,
+integration-merge pre-verified green) and closes each merge criterion. (2) THEN dispatch
+**ttw19-bl-drafts-now-drop** (round 2 — waits ONLY on ttw19-bl-conn-state-flap's merge,
+shared detail_data.go): D115 reshape — third concurrent in_progress fetch, NOW union,
+collapsed in-flight denominator; its api/ half stays cross-fence as
+ttw20-bl-prime-counts-collapse-twins. (3) THEN **ttw20-wide-overflow-marker-clicks**
+(round 2 — waits ONLY on ttw18-bl-narrow-reading-width-skew's merge, adjacent compose.go):
+D119 router special-casing, resolvers keep -1. (4) Candidates beyond the rounds:
+ttw20-bl-hitmap-height2-audit (the excluded 4th height-2 reservation),
+a possible relabel-on-pulse refinement if the lead dislikes ●+"server timeout" pairing
+(two lines in handlePulse), and ttw19-bl-find-jump stays considering pending taste signal.
