@@ -585,6 +585,39 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     end
   end
 
+  # The singleton arm above only pins `permissions == ["public-read"]`. A token
+  # minted `["public-read", "read"]` is the SAME tier but missed the old
+  # list-equality clause in `authorize_cycle/3` and read the flat ledger, because
+  # `:cycle_api` mounts `DeriveWorkspaceFromToken` and not `Plugs.PublicRead`.
+  # Mutation-checked: reverting `authorize_cycle/3` to the singleton pattern
+  # makes the two mixed-shape 403 assertions below fail with a 200.
+  test "a mixed-shape [public-read, read] token is refused exactly like the singleton", %{
+    workspace: workspace,
+    project: project,
+    token: write_token
+  } do
+    epic_id = "cycle-public-read-mixed-#{System.unique_integer([:positive])}"
+    flat = "/v1/cycles/#{epic_id}/wave-1"
+    scoped = "/w/#{workspace.slug}/p/#{project.slug}" <> flat
+    open_epic(flat, write_token, ["flat-unit"])
+    open_epic(scoped, write_token, ["scoped-unit"])
+
+    mixed = scoped_token!(workspace, ["public-read", "read"], "cycle-public-read-mixed")
+    read = scoped_token!(workspace, ["read"], "cycle-mixed-control-read")
+
+    for path <- [flat, scoped] do
+      denied = build_conn() |> bearer(mixed) |> get(path)
+      assert json_response(denied, 403)["error"]["code"] == "forbidden"
+
+      # Positive controls: the seal is a tier test, not a blanket denial.
+      allowed = build_conn() |> bearer(read) |> get(path) |> json_response(200)
+      assert allowed["cycle_ledger"]["profile"] == "epic"
+
+      admin = build_conn() |> bearer(write_token) |> get(path) |> json_response(200)
+      assert admin["cycle_ledger"]["profile"] == "epic"
+    end
+  end
+
   test "immutable replay conflicts map the actual context atoms to 409", %{
     workspace: workspace,
     project: project,
