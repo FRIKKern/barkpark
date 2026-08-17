@@ -18041,12 +18041,132 @@ test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (it
     "a teamless caller's DOMAIN was never judged — do not tell them its syntax is wrong");
   assert.match(teamless.textContent, /team/i, "the sentence names the real obstacle");
 
-  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps its sentence.
+  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps a TRUE sentence.
+  // cch-w40-bl (D870) retired the false "Only <name>.barkpark.cloud …" claim —
+  // invalid_domain now reads as the honest syntax verdict.
   const badSyntax = await drive(422, { error: "invalid_domain" });
-  assert.equal(badSyntax.textContent, "Only <name>.barkpark.cloud domains are supported for now.",
-    "a real syntax refusal is unchanged — the fence is one code wide");
+  assert.equal(badSyntax.textContent, "That doesn't look like a valid domain name.",
+    "a real syntax refusal reads as a syntax refusal");
   const taken = await drive(409, { error: "taken" });
   assert.equal(taken.textContent, "That domain is already in use.");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w40-bl (D870): attachDomain STOPS LYING — the pure copy arm relays the
+// measured DNS evidence.
+//
+// THE DEFECT: attachDomain()'s inline 422 ternary answered EVERY 422 except
+// no_team with "Only <name>.barkpark.cloud domains are supported for now." That
+// sentence is FLATLY FALSE — external FQDNs ARE supported (router.ex:4237,
+// DomainOwnership.pointed_at?) — and on domain_not_pointed the console threw
+// away the whole remedy payload (expected_ip + observed) to tell the user the
+// feature does not exist.
+//
+// THE FIX: a pure attachDomainFailureCopy(status, data) in the *FailureCopy +
+// __bpTestHook pattern (peers siteCreateFailureCopy, siteDeleteFailureCopy),
+// node-pinned so a copy mutation can no longer sit undetected in a DOM handler.
+//
+// PRE-FIX RED (recorded here as the durable venue): the "domain_not_pointed
+// relays the measured IP" test below REDS on unmodified main — the pure function
+// did not exist there (hooks.attachDomainFailureCopy was undefined) and the
+// inline path rendered the false barkpark.cloud-only sentence, which carries no
+// expected_ip. Its own describe block, disjoint from cch-w72-s2's ERRORS/fence
+// edits.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("cch-w40-bl: attachDomainFailureCopy is exported (the extraction that made the copy pinnable)", () => {
+  assert.equal(typeof hooks.attachDomainFailureCopy, "function",
+    "attachDomainFailureCopy must be exported — without it the 422 copy is unpinnable inline");
+});
+
+test("cch-w40-bl: domain_not_pointed RELAYS the measured remedy — expected_ip always, observed when present", () => {
+  const f = hooks.attachDomainFailureCopy;
+  // The exact wire shape router.ex:4242 emits: expected_ip = the box IP, observed
+  // = the list the resolver actually returned (fail-closed empty on no answer).
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7 — right now it resolves to 198.51.100.9.",
+    "the measured target AND the observed answer both reach the user");
+  // Multiple observed answers join with ', '.
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9", "198.51.100.10"] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7 — right now it resolves to 198.51.100.9, 198.51.100.10.",
+    "an array of observed answers is joined, not stringified as [object]");
+  // Empty observed (the fail-closed no-answer case) → the target sentence, closed
+  // with a period, no dangling "resolves to".
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: [] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7.",
+    "no observed answer → just the target, no empty 'resolves to' clause");
+  // expected_ip is NULLABLE on the wire: pointed_at?(_host, nil, _opts) answers
+  // {:error, []} for a host-less instance and the route relays expected_ip:
+  // bp.host verbatim — the remedy clause must not render "at null".
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: null, observed: [] }),
+    "That domain isn't pointed at this instance yet.",
+    "a null expected_ip drops the remedy clause instead of pointing at 'null'");
+  // The false sentence is gone entirely from this arm.
+  const all = [
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"] }),
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: [] }),
+    f(422, { error: "invalid_domain" }),
+  ].join(" | ");
+  assert.equal(all.indexOf("barkpark.cloud domains are supported"), -1,
+    "the false 'Only <name>.barkpark.cloud …' sentence must not survive anywhere in the attach arm");
+});
+
+test("cch-w40-bl: the per-slug truth table — every arm relays what the plane measured, nothing invents a cause", () => {
+  const f = hooks.attachDomainFailureCopy;
+  // 409s — the conflict sentences, unchanged.
+  assert.equal(f(409, { error: "taken" }), "That domain is already in use.");
+  assert.equal(f(409, { error: "already_attaching" }), "An attach is already running.");
+  // 422 invalid_domain — a TRUE syntax verdict now (the false claim died).
+  assert.equal(f(422, { error: "invalid_domain" }), "That doesn't look like a valid domain name.");
+  // 422 instance_no_origin — relay the server's own detail sentence verbatim
+  // (D870 routes it to THIS arm; one screen, one dialect).
+  assert.equal(
+    f(422, { error: "instance_no_origin", detail: "This instance has no origin yet, so DNS can't be pointed." }),
+    "This instance has no origin yet, so DNS can't be pointed.",
+    "instance_no_origin relays data.detail verbatim");
+  // 422 no_team — the w38 carve-out is untouched: it falls to friendly(), which
+  // owns the sentence that repairs a teamless caller. Never a domain-syntax verdict.
+  const noTeam = f(422, { error: "no_team" });
+  assert.equal(noTeam.indexOf("valid domain name"), -1, "a teamless caller's DOMAIN was never judged");
+  assert.equal(noTeam.indexOf("barkpark.cloud domains are supported"), -1, "…nor sold the false claim");
+  // 422 invalid (the enqueue changeset slug) and any unseen slug → friendly()
+  // generic. friendly({error:"invalid"}) resolves ERRORS.invalid.
+  assert.equal(f(422, { error: "invalid" }), "That didn't work — check your input.");
+  assert.equal(f(500, {}), "Something went wrong — please try again.",
+    "an unslugged/unknown failure falls to the curated generic");
+  // domain_required is MODAL-UNREACHABLE: attachDomain's empty-value guard returns
+  // before the POST, so the server never emits domain_required to this arm. It is
+  // classified in the source comment above attachDomainFailureCopy and given NO
+  // copy of its own — asserting a sentence for it would pin an unreachable path.
+});
+
+test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
+  // The impure drive proves the wire → DOM path: the measured IP reaches the
+  // inline error through textContent, not the false sentence. This is the leg that
+  // REDS on pre-fix bytes (the old ternary rendered the barkpark.cloud claim).
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+  dom.els["domain-input"].value = "shop.example.com";
+  sandbox.fetch = fetchStub(422, {
+    error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"],
+  });
+  sandbox.document = dom.document;
+  try {
+    hooks.attachDomain({ id: "bp1", name: "Production" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { Object.assign(sandbox, saved); }
+  const errEl = dom.els["domain-error"];
+  assert.equal(errEl.hidden, false, "the inline error shows");
+  assert.match(errEl.textContent, /Point an A record at 203\.0\.113\.7/,
+    "the measured target IP reaches the user through the DOM");
+  assert.match(errEl.textContent, /resolves to 198\.51\.100\.9/,
+    "the observed answer reaches the user too");
+  assert.equal(errEl.textContent.indexOf("barkpark.cloud domains are supported"), -1,
+    "the false sentence is gone from the rendered arm");
 });
 
 // cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
@@ -18488,6 +18608,14 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     malformed_request: "We couldn't read that request — reload the page and try again.",
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",
     request_too_large: "That's too large for us to accept. Try a smaller value or file.",
+    // cch-w72-s2 (D871) — the five new curated readers, pinned in the same commit
+    // that added them to the ERRORS map. Deleting any one from app.js reds this
+    // sweep BY NAME (the slug falls through to "a caller fallback").
+    checkout_failed: "Couldn't start checkout — the payment provider didn't accept the request. Please try again.",
+    portal_failed: "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.",
+    no_subscription: "This team doesn't have a subscription yet — start one from the Billing panel.",
+    live_twin: "A live instance with that name already exists — decommission it first.",
+    role_too_high: "You can't grant a role higher than your own.",
   };
   for (const [slug, copy] of Object.entries(PINNED)) {
     assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
@@ -18518,6 +18646,9 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     "no_admin_token", "instance_unreachable", "network_error", "limit_reached",
     "billing_not_configured", "forbidden", "server_error", "malformed_body",
     "malformed_request", "unsupported_media_type", "request_too_large",
+    // cch-w72-s2 (D871) — the five new curated readers join the ban sweep in the
+    // same commit that registered them; each must stay free of a support-channel.
+    "checkout_failed", "portal_failed", "no_subscription", "live_twin", "role_too_high",
   ];
 
   // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
@@ -21543,4 +21674,68 @@ test("cch-w62 (D855): the rung relays only a non-empty STRING detail", () => {
   // And the two rungs compose: a NESTED allowlisted slug still relays.
   assert.equal(hooks.friendly({ error: { code: "nothing_to_update" }, detail: "nothing to update" }, "fb"),
     "nothing to update");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w72-s2 (charter D871) — FIVE UNREAD REFUSALS GAIN CURATED CONSOLE SENTENCES,
+// AND THE SINGULAR-DETAIL FENCE ADMITS ITS FOURTH SLUG.
+//
+// (1) The billing trio + live_twin + role_too_high are typed wire codes the plane
+// measures that had no console reader (bl-124 census). Each now names its state,
+// and none relays the server's own reason string (the billing arms ship
+// `reason: inspect(...)` — a raw Elixir term, cch-w48-s2 class).
+test("cch-w72-s2: the five new refusals render their curated sentences through friendly()", () => {
+  assert.equal(hooks.friendly({ error: "checkout_failed" }, "fb"),
+    "Couldn't start checkout — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "portal_failed" }, "fb"),
+    "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "no_subscription" }, "fb"),
+    "This team doesn't have a subscription yet — start one from the Billing panel.");
+  assert.equal(hooks.friendly({ error: "live_twin" }, "fb"),
+    "A live instance with that name already exists — decommission it first.");
+  assert.equal(hooks.friendly({ error: "role_too_high" }, "fb"),
+    "You can't grant a role higher than your own.");
+});
+
+test("cch-w72-s2: the billing refusals NEVER relay the server's raw reason (cch-w48-s2 class)", () => {
+  // The server ships `reason: inspect(...)` — a raw Elixir term. The curated rung
+  // wins first in friendly(), so the term is structurally unreachable in copy.
+  const raw = '%Stripe.Error{code: :card_declined, message: "your card was declined"}';
+  assert.equal(hooks.friendly({ error: "checkout_failed", reason: raw }, "fb"),
+    "Couldn't start checkout — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "portal_failed", reason: raw }, "fb"),
+    "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.");
+});
+
+// (2) THE FENCE'S FOURTH SLUG. provisioning_in_progress relays its measured 409
+// detail verbatim — and gets NO ERRORS entry (THE SHADOW LAW): a curated entry
+// would win the earlier rung and silently disable this relay.
+test("cch-w72-s2: provisioning_in_progress is the fence's fourth slug — its detail relays verbatim", () => {
+  const detail = "This instance is still provisioning. Try removing it once it's up or has failed.";
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress", detail: detail }, "Please try again."),
+    detail);
+  // Without a detail, the slug keeps its pre-rung rendering: the caller's fallback.
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress" }, "Please try again."),
+    "Please try again.");
+});
+
+test("cch-w72-s2: THE SHADOW LAW — provisioning_in_progress has NO ERRORS entry", () => {
+  // If it had a curated ERRORS sentence, friendly() with no detail would return
+  // that sentence, not the caller's fallback — and the earlier curated rung would
+  // shadow the fence relay above. A bare slug returning the fallback proves the
+  // key is unregistered, so the fence is the ONLY thing that renders its state.
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress" }, "the caller's fallback"),
+    "the caller's fallback");
+  // The two rungs compose: a NESTED provisioning_in_progress still relays.
+  assert.equal(hooks.friendly({ error: { code: "provisioning_in_progress" }, detail: "still provisioning" }, "fb"),
+    "still provisioning");
+});
+
+test("cch-w72-s2: the fence's three original slugs still relay, and an unfenced detail-bearing slug drops to the fallback", () => {
+  // Fence semantics otherwise unchanged: the pre-existing three still relay…
+  assert.equal(hooks.friendly({ error: "barkpark_required", detail: "name the instance" }, "fb"), "name the instance");
+  assert.equal(hooks.friendly({ error: "deploy_ability_required", detail: "mint a deploy token" }, "fb"), "mint a deploy token");
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: "nothing to update" }, "fb"), "nothing to update");
+  // …and a detail-bearing slug OUTSIDE the allowlist still drops to the fallback.
+  assert.equal(hooks.friendly({ error: "some_other_slug", detail: "a raw upstream string" }, "fb"), "fb");
 });

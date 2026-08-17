@@ -1,1 +1,1 @@
- ▎ Cloud Console hardening — the Clou… ··· 87/220│ │ Cloud Console hardening — the Cloud GUI Remake's chartered successor     │
+ ▎ The task TUI is glanceable, live, a… ··· 15/23│ │ The task TUI is glanceable, live, and never flickers                     │

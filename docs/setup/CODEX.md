@@ -164,6 +164,26 @@ This is the ONE canonical teach text — the same body `.cursor/rules/barkpark-t
 and `.claude/CLAUDE-BARKPARK.md` carry in each tool's native framing. See
 `docs/setup/AGENTS-MD.md` for the emitter and the merge semantics.
 
+## 5. Author papers — the BPML working-copy door
+
+The teach block above names the raw JSON door (`bp bulldocs publish`); for
+anything an agent iterates on, teach the working-copy door instead — a local
+`.bpml` file is the draft, the server is the truth:
+
+```bash
+bp paper new my-report                    # local scaffold: .barkpark/papers/my-report.bpml
+$EDITOR .barkpark/papers/my-report.bpml   # edit the BPML working copy
+bp paper push my-report                   # validate + publish (creates the paper if absent)
+```
+
+`bp paper new` runs locally — no server call — and emits a starter that already
+passes the publish wall: a title heading, a real opening paragraph, a ≥20-char
+description, weighted tags. Tags must be **registered** on the server (`bp doc
+ls tag`); the scaffold never invents them — an unregistered tag is the classic
+first-push 422. `bp paper pull <slug>` fetches an existing paper into the same
+working copy. The grammar, the width law, and every publish-wall error with its
+remedy: `/papers/paper-authoring-excellence`.
+
 ## The tools
 
 Eight curated task tools ship by default (`--tools tasks`), each carrying the

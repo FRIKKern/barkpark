@@ -800,10 +800,44 @@ func (m Model) boardPaneMouse(ev tea.MouseMsg, pl, inner int, now time.Time) (Mo
 	idTop, avail := m.wideBoardPaneAvail(inner, now)
 	idx := m.wideBoardRowIndex(pl, idTop, avail, now)
 	if idx < 0 {
-		return m, nil // chrome, an overflow marker, or a display-only line
+		// A press on an ↑/↓ overflow marker steps the cursor one row toward the
+		// hidden spine (moveCursor ∓1) — the SAME gesture the wheel and the narrow
+		// board's LineScrollUp/Down affordances reach (program.go mouseLeftPress),
+		// so the wide board's markers stop being click-dead (D119). Genuine chrome
+		// and display-only lines still no-op.
+		if d := m.wideBoardMarkerAt(pl, idTop, avail, now); d != 0 {
+			(&m).moveCursor(d)
+		}
+		return m, nil // chrome, a stepped overflow marker, or a display-only line
 	}
 	nm, cmd := m.boardClickActivate(idx)
 	return nm.(Model), cmd
+}
+
+// wideBoardMarkerAt reports whether wide left-pane row `pl` is an ↑/↓ overflow
+// marker, returning the cursor delta a click on it should apply: -1 for the ↑
+// more-above marker, +1 for the ↓ more-below marker, and 0 for a spine row,
+// chrome, or a display-only line. It re-derives the SAME window offset
+// wideBoardRowIndex resolves the row index through (flattenSpine + slideTop), so
+// a marker click and the resolver's -1 marker contract can never disagree about
+// which two rows are markers. These are the COUNTED board markers (a spine of N
+// rows windowed to `avail`); the countless reading/preview markers live in
+// rightPaneMarkerAt.
+func (m Model) wideBoardMarkerAt(pl, idTop, avail int, now time.Time) int {
+	if pl < idTop || pl >= idTop+avail {
+		return 0 // identity / status chrome, not a spine row
+	}
+	winIdx := pl - idTop
+	boardW := m.boardPaneCols(m.wideInnerWidth())
+	spineLines, _, cursorLine := flattenSpine(m.board, m.ui, boardW, now)
+	top := slideTop(m.ui.SpineScroll, cursorLine, avail, len(spineLines))
+	if top > 0 && winIdx == 0 {
+		return -1 // ↑ more-above marker
+	}
+	if len(spineLines)-(top+avail) > 0 && winIdx == avail-1 {
+		return 1 // ↓ more-below marker
+	}
+	return 0
 }
 
 // wideBoardRowIndex resolves a wide left-pane row (pl, in pane coordinates, with
@@ -876,6 +910,14 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 			return m, nil
 		}
 		if ev.Button == tea.MouseButtonLeft && ev.Action == tea.MouseActionPress {
+			// Defuse the depth-0 booby-trap: a press on the preview's ↑/↓ overflow
+			// marker scrolls the preview one notch (scrollPreview, mouse == wheel)
+			// instead of ENTERING the previewed task (D121) — clicking the affordance
+			// that means "there is more" must reveal the more, never descend.
+			if d := m.rightPaneMarkerAt(pl, innerW, inner, now); d != 0 {
+				(&m).scrollPreview(t, d, innerW, inner, now)
+				return m, nil
+			}
 			return m.enterTask(t.DocID), nil
 		}
 		return m, nil
@@ -895,7 +937,70 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 		nm, cmd := m.readingClickActivate(idx)
 		return nm.(Model), cmd
 	}
-	return m, nil // prose / empty line / overflow marker — nothing to select
+	// A press on the reading frame's ↑/↓ overflow marker free-scrolls ±1 (mouse ==
+	// space/u/d) — the last mouse asymmetry with the narrow board, now closed
+	// (D119). Prose and empty lines below still no-op.
+	if d := m.rightPaneMarkerAt(pl, innerW, inner, now); d != 0 {
+		(&m).freeScroll(d)
+		return m, nil
+	}
+	return m, nil // prose / empty line — nothing to select
+}
+
+// rightPaneMarkerAt reports whether wide right-pane row `pl` is an ↑/↓ overflow
+// marker, returning the scroll delta a click on it applies: -1 for ↑ more-above,
+// +1 for ↓ more-below, and 0 for a body/chrome/empty line. It re-derives the SAME
+// window offset the paint uses at BOTH depths — the depth-0 preview (previewLines,
+// windowed at previewScroll with no stops) and the depth>0 reading frame
+// (renderDocPane over frameContent) — so a marker click can never disagree with
+// the painted affordance. It is the countless-marker twin of the counted
+// wideBoardMarkerAt, and the deliberate complement of rightPaneStopAt: a stop row
+// under the window edge is HIDDEN beneath the marker glyph, so the click router
+// asks rightPaneStopAt first (a real stop wins) and only then this helper.
+func (m Model) rightPaneMarkerAt(pl, innerW, inner int, now time.Time) int {
+	row := docBodyRow(pl)
+	if row < 0 {
+		return 0 // the ─ top edge — chrome, never a marker
+	}
+	avail := inner - 1 // renderDocPane's window height under the top edge
+	if avail < 1 {
+		avail = 1
+	}
+	rightW := innerW - m.boardPaneCols(innerW) - paneGutter2
+	if rightW < minReadingWidth {
+		rightW = minReadingWidth
+	}
+	docW, _ := docLayout(rightW)
+	top := m.topFrame()
+	var body []string
+	var stops []Stop
+	cursor, scroll := -1, 0
+	if top.Kind == FrameBoard {
+		t, ok := m.taskUnderCursor()
+		if !ok {
+			return 0 // empty board — the preview is a single dim line, no markers
+		}
+		// Mirror previewLines: cursor -1, and previewScroll only when the offset
+		// still belongs to THIS previewed task (else the window is at the top).
+		body, _ = RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, docW, now)
+		if m.previewRef == t.DocID {
+			scroll = m.previewScroll
+		}
+	} else {
+		body, stops = m.frameContent(top, docW, now)
+		cursor, scroll = top.Cursor, top.Scroll
+	}
+	if len(body) <= avail {
+		return 0 // fits the window — no overflow, no markers
+	}
+	wtop := readingWindowTop(len(body), stops, cursor, scroll, avail)
+	if wtop > 0 && row == 0 {
+		return -1 // ↑ more-above marker
+	}
+	if len(body)-(wtop+avail) > 0 && row == avail-1 {
+		return 1 // ↓ more-below marker
+	}
+	return 0
 }
 
 // rightPaneStopAt is the ONE reading-frame stop resolver both the click router
