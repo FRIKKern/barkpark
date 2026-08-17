@@ -897,9 +897,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # set is UNCHANGED: the new keys are inside `coverage_cohorts/2`, which is not
   # a censused entry point.
   #
-  # MERGE HAZARD, restated because two open PRs (#10811, #10129) also touch
+  # MERGE HAZARD, restated because three open PRs (#10811, #10129 and #10086 —
+  # the last adds one tag, `details`, and is CCH-owned) also touch
   # internal/cloudclient: whichever of them lands second must RE-MEASURE both
   # floors by this same technique. Summing deltas is how an `==` pin ships wrong.
+  #
+  # RE-MEASURED on the wave-35 rebase (this branch merged with main at
+  # 4b5d802a1d): the 999-technique printed "149 emitted key(s) collected, floor
+  # is EXACTLY 999" and "268 json tag(s) found in internal/cloudclient, floor is
+  # EXACTLY 999" — both floors HOLD across the merge, measured, not derived.
   @emitted_floor 149
   @go_tag_floor 268
 

@@ -3032,7 +3032,6 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert failed.never_covered == 0
       assert failed.never_covered_by_environment == []
       assert failed.oldest_pending_seconds == nil
-
     end
 
     # THE NON-ZERO NAMES ITS SITES (dr-w34-s1). A never-covered COUNT tells an
