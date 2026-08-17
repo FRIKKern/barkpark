@@ -1,0 +1,567 @@
+{
+  "label": "heggemsnes-act",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "heggemsnes-act__light__1280",
+      "file": "heggemsnes-act__light__1280.jpeg",
+      "scale": 2,
+      "bytes": 1132030,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 14,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 9,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 928,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1694.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2214.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3607.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3850.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "heggemsnes-act__light__1920",
+      "file": "heggemsnes-act__light__1920.jpeg",
+      "scale": 2,
+      "bytes": 1220102,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 14,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 9,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 928,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1694.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2214.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3607.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3850.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "heggemsnes-act__dark__1280",
+      "file": "heggemsnes-act__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 1129602,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 14,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 9,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 928,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1694.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2214.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3607.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3850.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "heggemsnes-act__dark__1920",
+      "file": "heggemsnes-act__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 1217647,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 16,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The case, in full",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What we hold",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The Articles",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Remedies executed under this Act",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Scope and force",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 67.7,
+      "proseCplSamples": 14,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 14,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 9,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 928,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1694.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2214.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3607.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3850.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    }
+  ]
+}

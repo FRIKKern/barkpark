@@ -1,0 +1,1179 @@
+{
+  "label": "paper-excellence-wave-2026-08-12",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "paper-excellence-wave-2026-08-12__light__1280",
+      "file": "paper-excellence-wave-2026-08-12__light__1280.jpeg",
+      "scale": 2,
+      "bytes": 5100227,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 29,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The wish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What the strategist saw",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The direction — Twin and Close",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The debate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The survey plan — 16 lanes",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Survey digest — what sixteen lanes establish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Coverage map — found, and pointedly not foun",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verify plan — the last look before the plan ",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verification results — ten probes, four refu",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Wave plan — seven slices, two rounds",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 26,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 77,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 66,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 792.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1267.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2091,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3169.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4021.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5453.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7842.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 9064.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 10998,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 12729.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 14033.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "paper-excellence-wave-2026-08-12__light__1920",
+      "file": "paper-excellence-wave-2026-08-12__light__1920.jpeg",
+      "scale": 2,
+      "bytes": 5394601,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 29,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The wish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What the strategist saw",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The direction — Twin and Close",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The debate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The survey plan — 16 lanes",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Survey digest — what sixteen lanes establish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Coverage map — found, and pointedly not foun",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verify plan — the last look before the plan ",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verification results — ten probes, four refu",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Wave plan — seven slices, two rounds",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 26,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 77,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 66,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 773.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1248.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2072.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3150.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4003.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5406.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7795.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8959.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 10691.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 12250.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 13553.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "paper-excellence-wave-2026-08-12__dark__1280",
+      "file": "paper-excellence-wave-2026-08-12__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 5107972,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 29,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The wish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What the strategist saw",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The direction — Twin and Close",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The debate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The survey plan — 16 lanes",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Survey digest — what sixteen lanes establish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Coverage map — found, and pointedly not foun",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verify plan — the last look before the plan ",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verification results — ten probes, four refu",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Wave plan — seven slices, two rounds",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 26,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 77,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 66,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 792.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1267.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2091,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3169.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4021.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5453.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7842.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 9064.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 10998,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 12729.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 14033.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "paper-excellence-wave-2026-08-12__dark__1920",
+      "file": "paper-excellence-wave-2026-08-12__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 5406620,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 29,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The wish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What the strategist saw",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The direction — Twin and Close",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The debate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The survey plan — 16 lanes",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Survey digest — what sixteen lanes establish",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Coverage map — found, and pointedly not foun",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verify plan — the last look before the plan ",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Verification results — ten probes, four refu",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Decisions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "Wave plan — seven slices, two rounds",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.7,
+      "proseCplSamples": 26,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        }
+      ],
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 77,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 66,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 773.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1248.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2072.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 3150.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4003.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5406.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7795.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8959.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 10691.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 12250.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 13553.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    }
+  ]
+}

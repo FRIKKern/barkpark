@@ -74,7 +74,12 @@ const src = fs.readFileSync(FILE, "utf8");
 // ── not fix, with the bp task that owns it. Adding a row is a decision; it is
 // ── never a way to quiet the gate.
 const ALLOWLIST = [
-  "loadSite",           // cch-w34-bl-five-remaining-absence-collapses — deployments read
+  // cch-w66-s3 DELETED the `loadSite` row, on this instrument's own REMOVE-arm
+  // instruction: loadSite's deployments read now carries a distinct not-ok arm
+  // (`res[1] && res[1].ok ? null : res[1] || {}`), threaded into deployListHtml,
+  // so a failed read renders "Couldn't load deployments" instead of "No
+  // deployments yet". Four of the five sites cch-w34-bl-five-remaining-absence-
+  // collapses owns remain, so that task stays OPEN.
   "renderOAuthButtons", // cch-w34-bl-five-remaining-absence-collapses — providers read
   "newRenderOAuth",     // cch-w34-bl-five-remaining-absence-collapses — providers read (/new)
   "fetchMembers",       // cch-w34-bl-five-remaining-absence-collapses — the `ir` invitations read (`mr` has an arm)

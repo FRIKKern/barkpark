@@ -2142,6 +2142,111 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.list_deployments(site, 10) == []
     end
 
+    ## W67 S2 (charter D820) — THE TWO CASCADES NOTHING ASSERTED.
+    ##
+    ## Three FKs reference `sites`; until this wave only `deployments` had
+    ## behavioural cover. Each test below drives the REAL route, so a regression
+    ## fails the way production fails: `Repo.delete` raises `Ecto.ConstraintError`
+    ## under a non-cascade FK, the router's `{:ok, _} = Registry.delete_site(site)`
+    ## hard match turns that into `500 {"error":"server_error"}` with no `ok` and
+    ## no `detail` — AFTER the box teardown already disarmed the Caddy route. The
+    ## inverse orphan: a dead site that is still registered.
+    ##
+    ## Measured 2026-08-10: with `site_artifacts.site_id` flipped to ON DELETE
+    ## RESTRICT, this whole file was 104 tests / 0 failures and
+    ## `fk_census_test.exs` was 5/0. The structural half of the guard lives in
+    ## `site_cascade_census_test.exs`; these are the behavioural half.
+
+    test "an uploaded artifact BOUND TO A DEPLOYMENT cascades on delete" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+      {:ok, dep} = Registry.create_deployment(site, %{build_id: "artifactbuild001"})
+
+      Repo.insert!(%Registry.SiteArtifact{
+        site_id: site.id,
+        deployment_id: dep.id,
+        sha256: String.duplicate("a", 64),
+        byte_size: 3,
+        bytes: <<1, 2, 3>>
+      })
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      # A 500 here is the regression: the artifact FK refused, and it refused
+      # AFTER the teardown call above already succeeded.
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert json_body(conn)["ok"] == true
+      assert Registry.get_site(site.id) == nil
+
+      # Postgres checks RESTRICT IMMEDIATELY, not at end of statement, so the
+      # deployments cascade does NOT rescue an artifact bound to a deployment —
+      # this row's own FK has to be `on_delete: :delete_all` in its own right.
+      assert Repo.aggregate(
+               from(a in Registry.SiteArtifact, where: a.site_id == ^site.id),
+               :count
+             ) == 0
+    end
+
+    test "an uploaded artifact with NO deployment (deployment_id nil) cascades on delete" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # The site-scoped upload route's shape: bytes at rest before any build
+      # claims them. Nothing else in the delete path touches this row.
+      Repo.insert!(%Registry.SiteArtifact{
+        site_id: site.id,
+        deployment_id: nil,
+        sha256: String.duplicate("b", 64),
+        byte_size: 2,
+        bytes: <<9, 9>>
+      })
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert Registry.get_site(site.id) == nil
+
+      assert Repo.aggregate(
+               from(a in Registry.SiteArtifact, where: a.site_id == ^site.id),
+               :count
+             ) == 0
+    end
+
+    test "content-publish rows cascade on delete (the table that landed unasserted)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, _publish} =
+        Registry.ContentPublish.record(site.id, DateTime.utc_now(), %{doc_type: "paper"})
+
+      assert Repo.aggregate(
+               from(p in Registry.ContentPublish, where: p.site_id == ^site.id),
+               :count
+             ) == 1
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert Registry.get_site(site.id) == nil
+
+      assert Repo.aggregate(
+               from(p in Registry.ContentPublish, where: p.site_id == ^site.id),
+               :count
+             ) == 0
+    end
+
     test "a box that could NOT tear down leaves the row in place (no orphaned registration)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)

@@ -97,6 +97,261 @@ defmodule BarkparkWeb.BulldocsIngestController do
   @body_html_learn_code "legacy_body_html"
   @body_html_learn_message "This paper was ingested as opaque body_html; the preferred path is a native `blocks` list (in-canvas editing, ~50 block types). Learn the block vocabulary and composition grammar in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan, then re-ingest with `blocks`."
 
+  @doc """
+  `POST /v1/plugins/bulldocs/papers/validate` — the validate-all dry-run (BPML
+  masterplan W0). Accepts the SAME body shapes as ingest (`blocks` or `bpml`,
+  plus `slug`/`title`/`tags`/`description`) and returns EVERY violation in one
+  reply, nothing persisted:
+
+    * BPML parse errors (strict grammar, teaching hints, line numbers) — when
+      the document doesn't parse, wall gates can't run and the parse errors ARE
+      the reply;
+    * every failing publish-wall gate at once (`AuthoringWall.validate_all/5`:
+      label spine, tag registry, dedup, epic quality) instead of one 4xx at a
+      time;
+    * the paper structural gates: template declarations and the hollow-body
+      check.
+
+  Always 200 with `{valid, violations}` — the VALIDATION ran successfully; the
+  paper's shortcomings are data, not transport errors. Advisory by design: the
+  real write's wall stays authoritative.
+  """
+  def validate(conn, params) do
+    case validate_normalize(params) do
+      {:error, bpml_errors} ->
+        json(conn, %{valid: false, violations: Enum.map(bpml_errors, &bpml_violation/1)})
+
+      {:ok, slug, blocks, merged} ->
+        ref = %Barkpark.Content.Document{
+          doc_id: slug,
+          type: "paper",
+          dataset: Content.paper_default_dataset(),
+          title: merged["title"],
+          content: %{
+            "blocks" => blocks,
+            "tags" => merged["tags"],
+            "description" => merged["description"]
+          }
+        }
+
+        wall =
+          Barkpark.Content.AuthoringWall.validate_all(
+            ref,
+            "paper",
+            slug,
+            Content.paper_default_dataset()
+          )
+          |> Enum.map(fn tuple ->
+            {:error, tuple} |> Errors.to_envelope(conn) |> Map.delete(:status)
+          end)
+
+        structure =
+          Barkpark.Content.Papers.Template.validate(blocks || []) ++
+            if Barkpark.Content.Papers.Hollow.hollow?(blocks) do
+              [
+                %{
+                  code: "hollow_paper",
+                  message: "the paper is a skeleton — a title with no content blocks",
+                  hint: "add body blocks before publishing"
+                }
+              ]
+            else
+              []
+            end
+
+        violations = wall ++ Enum.map(structure, &structure_violation/1)
+        json(conn, %{valid: violations == [], violations: violations})
+    end
+  end
+
+  @doc """
+  `POST /v1/plugins/bulldocs/papers/:slug/sync` — the working-copy push (BPML
+  masterplan W3). The client sends its edited BPML document plus the rev its
+  pull anchored on; the SERVER parses strictly, derives the op batch from an
+  id-keyed diff (`Bpml.Diff.derive/2`, replay-proven before anything applies),
+  and applies it atomically under `if_rev`. Nobody hand-writes an op, and the
+  grammar keeps its single Elixir owner — the CLI never parses BPML.
+
+    * parse failure → 422 with the collected teaching errors;
+    * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
+      is silently lost);
+    * no changes → 200 `{ok, unchanged: true}`;
+    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the CANONICAL
+      print of the persisted blocks (post-normalization) — the client
+      overwrites its file with it, so working copies always converge on the
+      server's truth.
+  """
+  def sync(conn, %{"slug" => slug} = params) do
+    bpml = params["bpml"]
+    base_rev = params["baseRev"]
+    dataset = params["dataset"] || Content.paper_default_dataset()
+    scope = paper_scope_opts(conn, params)
+
+    cond do
+      not is_binary(bpml) ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: %{code: "malformed", message: "sync needs a bpml (string) body"}})
+
+      not (is_binary(base_rev) and base_rev != "") ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{
+          error: %{
+            code: "malformed",
+            message: "sync needs baseRev — the rev your pull anchored on (x-paper-rev)"
+          }
+        })
+
+      true ->
+        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+          {:error, errors} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{code: "bpml", message: "the BPML document did not parse", errors: errors}
+            })
+
+          {:ok, parsed} ->
+            sync_apply(conn, slug, parsed, base_rev, dataset, scope)
+        end
+    end
+  end
+
+  defp sync_apply(conn, slug, parsed, base_rev, dataset, scope) do
+    case Content.get_paper(slug, dataset, scope) do
+      nil ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{
+          error: %{
+            code: "not_found",
+            message: "no paper for slug #{slug}",
+            hint: "sync edits an existing paper — publish it first, then pull"
+          }
+        })
+
+      paper ->
+        # The paper-level integer rev — the same value the ops if_rev guard
+        # compares (content["rev"]), and the same one pull anchors in
+        # x-paper-rev. NEVER the row's _rev hash.
+        current_rev = to_string(get_in(paper.content || %{}, ["rev"]))
+        current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
+
+        cond do
+          current_rev != to_string(base_rev) ->
+            conn
+            |> put_status(:precondition_failed)
+            |> json(%{
+              error: %{
+                code: "precondition_failed",
+                message: "paper is at rev #{current_rev}, your copy anchored on #{base_rev}",
+                hint: "bp paper pull to absorb the drift, re-apply your edit, push again"
+              }
+            })
+
+          true ->
+            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
+              {:error, :diff_verification_failed} ->
+                conn
+                |> put_status(:unprocessable_entity)
+                |> json(%{
+                  error: %{
+                    code: "bpml",
+                    message: "the derived op batch failed its replay proof — nothing was applied",
+                    hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
+                  }
+                })
+
+              {:ok, _minted, []} ->
+                conn
+                |> put_resp_header("x-paper-rev", current_rev)
+                |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
+
+              {:ok, _minted, ops} ->
+                sync_persist(conn, slug, ops, base_rev, dataset, scope)
+            end
+        end
+    end
+  end
+
+  defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
+    case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
+      {:ok, result} ->
+        canonical =
+          case Content.get_paper(slug, dataset, scope) do
+            nil ->
+              nil
+
+            paper ->
+              Barkpark.PortableDoc.Bpml.print_paper(%{
+                "slug" => paper.doc_id,
+                "title" => paper.title,
+                "blocks" => get_in(paper.content || %{}, ["blocks"]) || []
+              })
+          end
+
+        conn
+        |> put_resp_header("x-paper-rev", to_string(result.rev))
+        |> json(%{
+          ok: true,
+          slug: result.slug,
+          # STRING on the wire, like x-paper-rev and the unchanged leg — one
+          # rev spelling for the working copy to anchor on.
+          rev: to_string(result.rev),
+          op_count: result.op_count,
+          bpml: canonical
+        })
+
+      {:error, :precondition_failed} ->
+        conn
+        |> put_status(:precondition_failed)
+        |> json(%{
+          error: %{
+            code: "precondition_failed",
+            message: "another write landed mid-sync; no ops applied",
+            hint: "bp paper pull, re-apply your edit, push again"
+          }
+        })
+
+      {:error, {:constraint, message, op_kind}} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
+      {:error, _other} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "invalid_op", message: "the derived batch could not be applied"}
+        })
+    end
+  end
+
+  # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
+  defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do
+    case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+      {:ok, parsed} -> {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
+      {:error, errors} -> {:error, errors}
+    end
+  end
+
+  defp validate_normalize(%{} = params) do
+    {:ok, params["slug"] || "unvalidated-paper", params["blocks"], params}
+  end
+
+  defp bpml_violation(e),
+    do: %{code: "bpml-" <> e.code, message: e.message, line: e.line, hint: e.hint}
+
+  defp structure_violation(%{code: _} = v), do: v
+  defp structure_violation(other) when is_binary(other), do: %{code: "structure", message: other}
+  defp structure_violation(other), do: %{code: "structure", message: inspect(other)}
+
   # Native portable-doc blocks path (preferred). Renders in article mode so
   # the doc shows native typography at /papers/:slug. `style` defaults to
   # "article" since this endpoint only ingests article-grammar docs;
@@ -119,13 +374,59 @@ defmodule BarkparkWeb.BulldocsIngestController do
           invalid_text(conn)
         end
 
+      # BPML leg (masterplan W1): the body carries a whole <paper> document as
+      # readable markup. Parse (strict, teaching errors) → the parsed doc's
+      # slug/title/description/tags/blocks feed the SAME blocks path as native
+      # JSON — BPML is a spelling, never a second pipeline. Explicit top-level
+      # params win over the parsed document's fields.
+      %{"bpml" => bpml} = accepted when is_binary(bpml) ->
+        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+          {:ok, parsed} ->
+            merged =
+              parsed
+              |> Map.delete("blocks")
+              |> Map.merge(Map.delete(accepted, "bpml"))
+
+            slug = merged["slug"]
+
+            cond do
+              not (is_binary(slug) and slug != "") ->
+                conn
+                |> put_status(:bad_request)
+                |> json(%{
+                  error: %{
+                    code: "malformed",
+                    message: "no slug: pass it on <paper slug=\"…\"> or as a top-level param"
+                  }
+                })
+
+              not valid_ingest_text?(Map.put(merged, "blocks", parsed["blocks"])) ->
+                invalid_text(conn)
+
+              true ->
+                ingest_blocks(conn, slug, parsed["blocks"], merged)
+            end
+
+          {:error, errors} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: "bpml",
+                message: "the BPML document did not parse",
+                errors: errors
+              }
+            })
+        end
+
       _malformed ->
         conn
         |> put_status(:bad_request)
         |> json(%{
           error: %{
             code: "malformed",
-            message: "slug plus either blocks (list) or body_html (string) are required"
+            message:
+              "slug plus either blocks (list), body_html (string), or bpml (string) are required"
           }
         })
     end
@@ -657,6 +958,92 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # is the prior behaviour). Threaded into Content.apply_paper_block_ops/2 as the
   # `:if_rev` opt so the check happens inside the atomic load, not racily here.
   def apply_op(conn, %{"slug" => slug, "ops" => ops} = params) when is_list(ops) do
+    case expand_bpml_ops(ops) do
+      {:error, errors} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "bpml", message: "a BPML op fragment did not parse", errors: errors}
+        })
+
+      {:ok, ops} ->
+        apply_op_batch(conn, slug, ops, params)
+    end
+  end
+
+  def apply_op(conn, %{"slug" => slug} = params) do
+    op = Map.delete(params, "slug")
+
+    cond do
+      not valid_op_shape?(op) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+
+      true ->
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.apply_paper_block_op(
+               slug,
+               op,
+               dataset,
+               paper_scope_opts(conn, params)
+             ) do
+          {:ok, result} ->
+            conn
+            |> put_status(:ok)
+            |> json(%{
+              ok: true,
+              slug: slug,
+              op: result.op_kind,
+              rev: result.rev,
+              block_id: result.block_id,
+              fragment_html: result.fragment_html,
+              position: result.position
+            })
+
+          {:error, :not_found} ->
+            conn
+            |> put_status(:not_found)
+            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+
+          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+          {:error, {code, target, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: to_string(code),
+                message: "#{op_kind} failed on #{inspect(target)}",
+                op: op_kind,
+                target: target
+              }
+            })
+
+          {:error, {:invalid_op, _}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+
+          {:error, {:halted, reason}} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: %{code: "halted", message: reason}})
+
+          {:error, _other} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+        end
+    end
+  end
+
+  defp apply_op_batch(conn, slug, ops, params) do
     cond do
       not Enum.all?(ops, &valid_op_shape?/1) ->
         conn
@@ -745,75 +1132,41 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  def apply_op(conn, %{"slug" => slug} = params) do
-    op = Map.delete(params, "slug")
+  # An op MAY spell its payload as BPML: {"op":"replace-block","id":…,"bpml":"<callout …>"}.
+  # The fragment must parse to EXACTLY one block — one op, one block, so op
+  # receipts and counts stay truthful; multi-block edits are multiple ops.
+  defp expand_bpml_ops(ops) do
+    ops
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn
+      {%{"bpml" => bpml} = op, idx}, {:ok, acc} when is_binary(bpml) ->
+        case Barkpark.PortableDoc.Bpml.parse_blocks(bpml) do
+          {:ok, [block]} ->
+            {:cont, {:ok, [op |> Map.delete("bpml") |> Map.put("block", block) | acc]}}
 
-    cond do
-      not valid_op_shape?(op) ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+          {:ok, blocks} ->
+            {:halt,
+             {:error,
+              [
+                %{
+                  code: "bpml-fragment-arity",
+                  message:
+                    "op #{idx} bpml fragment parsed to #{length(blocks)} blocks — an op carries exactly one",
+                  line: 1,
+                  hint: "split into one op per block"
+                }
+              ]}}
 
-      true ->
-        dataset = params["dataset"] || Content.paper_default_dataset()
-
-        case Content.apply_paper_block_op(
-               slug,
-               op,
-               dataset,
-               paper_scope_opts(conn, params)
-             ) do
-          {:ok, result} ->
-            conn
-            |> put_status(:ok)
-            |> json(%{
-              ok: true,
-              slug: slug,
-              op: result.op_kind,
-              rev: result.rev,
-              block_id: result.block_id,
-              fragment_html: result.fragment_html,
-              position: result.position
-            })
-
-          {:error, :not_found} ->
-            conn
-            |> put_status(:not_found)
-            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
-
-          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
-          {:error, {:constraint, message, op_kind}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
-
-          {:error, {code, target, op_kind}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: to_string(code),
-                message: "#{op_kind} failed on #{inspect(target)}",
-                op: op_kind,
-                target: target
-              }
-            })
-
-          {:error, {:invalid_op, _}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
-
-          {:error, {:halted, reason}} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{error: %{code: "halted", message: reason}})
-
-          {:error, _other} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+          {:error, errors} ->
+            {:halt, {:error, Enum.map(errors, &Map.put(&1, :op_index, idx))}}
         end
+
+      {op, _idx}, {:ok, acc} ->
+        {:cont, {:ok, [op | acc]}}
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      error -> error
     end
   end
 

@@ -2,6 +2,7 @@ package apiclient
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,9 @@ import (
 
 // WHY THIS FILE EXISTS — DO NOT DELETE AS REDUNDANT COVERAGE.
 //
-// The server's autostamp_merge_gate/6 (api/lib/barkpark/tasks/close.ex:344-370)
+// The server's autostamp_merge_gate/6 (grep the SYMBOL in
+// api/lib/barkpark/tasks/close.ex — never a line number; the previous citation
+// here said :344-370 for a function that had drifted ~340 lines away)
 // synthesises met:true stamps for every unmet merge_gate criterion on a task.
 // Its ONLY entry condition is the close payload's "landed" key:
 //
@@ -37,6 +40,18 @@ import (
 // a blacklist only ever catches the two keys someone already thought of. If you
 // are adding a key here on purpose, prove first that it cannot reach
 // autostamp_merge_gate from hookStopClose.
+//
+// EVERY exported closer on Client is pinned — TaskCloseN, TaskCloseRevN, and the
+// error-only TaskClose wrapper — because "the hook only calls two of them" is a
+// fact about today's call graph, not about the payloads. A future caller
+// switching hookStopClose to the third one must not be able to widen the body on
+// the way. The pin is only ever EXTENDED; relaxing it hands every automated hook
+// close the power to stamp its own merge gate.
+//
+// A guard that cannot fail is not a guard, so closePayloadKeyMismatch (the pure
+// comparison assertExactKeys is built on) is itself exercised in BOTH failing
+// directions — an extra key AND a missing one — by
+// TestClosePayloadWhitelistFailsInBothDirections below.
 
 // captureCloseBody stands up an httptest server that records the decoded JSON
 // body of the single /close POST it serves, and replies with a minimal ok
@@ -72,29 +87,76 @@ func captureCloseBody(t *testing.T, call func(c *Client) error) map[string]inter
 	return got
 }
 
-// assertExactKeys fails when the body's key set differs from want in EITHER
-// direction — an extra key (the autostamp hazard) or a missing one (a payload
-// regression the server would reject).
-func assertExactKeys(t *testing.T, body map[string]interface{}, want ...string) {
-	t.Helper()
-
+// closePayloadKeyMismatch is the whitelist itself, as a PURE function: it
+// returns "" when the body's key set equals want, and the failure message
+// otherwise. It differs in EITHER direction — an extra key (the autostamp
+// hazard) or a missing one (a payload regression the server would reject).
+// Pure so the guard can be proven able to FAIL (see the both-directions test);
+// a whitelist nobody has watched refuse is a whitelist nobody knows is wired.
+func closePayloadKeyMismatch(body map[string]interface{}, want []string) string {
 	got := make([]string, 0, len(body))
 	for k := range body {
 		got = append(got, k)
 	}
 	sort.Strings(got)
-	sort.Strings(want)
 
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("close payload keys = %v, want exactly %v\n"+
-			"an EXTRA key here can reach autostamp_merge_gate "+
-			"(api/lib/barkpark/tasks/close.ex:344-370) from an automated Stop close",
-			got, want)
+	wantSorted := append([]string(nil), want...)
+	sort.Strings(wantSorted)
+
+	if strings.Join(got, ",") == strings.Join(wantSorted, ",") {
+		return ""
+	}
+	return fmt.Sprintf("close payload keys = %v, want exactly %v\n"+
+		"an EXTRA key here can reach autostamp_merge_gate "+
+		"(grep the SYMBOL in api/lib/barkpark/tasks/close.ex) from an automated Stop close",
+		got, wantSorted)
+}
+
+// assertExactKeys fails when the body's key set differs from want in EITHER
+// direction.
+func assertExactKeys(t *testing.T, body map[string]interface{}, want ...string) {
+	t.Helper()
+
+	if msg := closePayloadKeyMismatch(body, want); msg != "" {
+		t.Error(msg)
+	}
+}
+
+// The guard proven able to lose. An extra key and a missing key must BOTH be
+// reported — a whitelist that only catches additions is a blacklist wearing a
+// whitelist's name.
+func TestClosePayloadWhitelistFailsInBothDirections(t *testing.T) {
+	want := []string{"worker_id", "observed_epoch", "lifecycle_status"}
+
+	exact := map[string]interface{}{
+		"worker_id": "w", "observed_epoch": 1, "lifecycle_status": "done",
+	}
+	if msg := closePayloadKeyMismatch(exact, want); msg != "" {
+		t.Fatalf("exact key set must pass, got mismatch: %s", msg)
+	}
+
+	// EXTRA — the autostamp hazard itself.
+	extra := map[string]interface{}{
+		"worker_id": "w", "observed_epoch": 1, "lifecycle_status": "done",
+		"landed": map[string]interface{}{"prs": []interface{}{11435}},
+	}
+	msg := closePayloadKeyMismatch(extra, want)
+	if msg == "" {
+		t.Error("an EXTRA \"landed\" key must be refused — that key alone reaches autostamp_merge_gate")
+	}
+	if !strings.Contains(msg, "landed") {
+		t.Errorf("the failure must NAME the offending key, got: %s", msg)
+	}
+
+	// MISSING — a payload regression the server would reject.
+	missing := map[string]interface{}{"worker_id": "w", "observed_epoch": 1}
+	if closePayloadKeyMismatch(missing, want) == "" {
+		t.Error("a MISSING key must be refused too — the pin is a whitelist, not a blacklist")
 	}
 }
 
 // TaskCloseN is the payload the cmux Stop hook sends. Exactly three keys.
-func TestTaskCloseNSendsExactKeySet(t *testing.T) {
+func TestClosePayloadTaskCloseNExactKeySet(t *testing.T) {
 	body := captureCloseBody(t, func(c *Client) error {
 		_, _, err := c.TaskCloseN("task-7", "worker-a", 3)
 		return err
@@ -114,7 +176,7 @@ func TestTaskCloseNSendsExactKeySet(t *testing.T) {
 }
 
 // TaskCloseRevN adds the observed_rev strict-CAS guard and NOTHING else.
-func TestTaskCloseRevNSendsExactKeySet(t *testing.T) {
+func TestClosePayloadTaskCloseRevNExactKeySet(t *testing.T) {
 	body := captureCloseBody(t, func(c *Client) error {
 		_, _, err := c.TaskCloseRevN("task-7", "worker-a", 3, "rev-abc")
 		return err
@@ -127,5 +189,27 @@ func TestTaskCloseRevNSendsExactKeySet(t *testing.T) {
 	}
 	if body["lifecycle_status"] != "done" {
 		t.Errorf("lifecycle_status = %v, want done", body["lifecycle_status"])
+	}
+}
+
+// THE THIRD PINNED KEY-SET. TaskClose is the error-only wrapper — today it
+// delegates to TaskCloseN, so its body is that body, and this test says so in a
+// way a delegation change cannot quietly outlive. It is pinned for the same
+// reason the other two are: the safety is TRUE BY CONSTRUCTION, and the
+// construction here is "the third exported closer sends no landed key either".
+// A future hook that reaches for the simplest closer must find it already
+// fenced.
+func TestClosePayloadTaskCloseExactKeySet(t *testing.T) {
+	body := captureCloseBody(t, func(c *Client) error {
+		return c.TaskClose("task-7", "worker-a", 3)
+	})
+
+	assertExactKeys(t, body, "worker_id", "observed_epoch", "lifecycle_status")
+
+	if _, hasLanded := body["landed"]; hasLanded {
+		t.Error("TaskClose sent a \"landed\" key — that key alone reaches autostamp_merge_gate")
+	}
+	if _, hasCriteria := body["criteria"]; hasCriteria {
+		t.Error("TaskClose sent a \"criteria\" key — an automated close must not stamp criteria")
 	}
 }

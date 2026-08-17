@@ -105,6 +105,9 @@
               "code": {
                 "enum": [
                   "batch_too_large",
+                  "bpml",
+                  "bpml_unavailable",
+                  "bpml_unprintable",
                   "build_id_mismatch",
                   "bundle_import_disabled",
                   "chat_create_failed",
@@ -122,6 +125,7 @@
                   "forbidden",
                   "forbidden_field",
                   "halted",
+                  "hollow_paper",
                   "idempotency_key_in_use",
                   "import_body_read_failed",
                   "import_body_too_large",
@@ -167,7 +171,9 @@
                   "share_expired",
                   "source_not_found",
                   "storage_unavailable",
+                  "structure",
                   "unauthorized",
+                  "unknown_format",
                   "unknown_tag",
                   "unprocessable",
                   "unsupported_if_match_for_batch",
@@ -9811,7 +9817,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Publish (upsert) a paper from a portable-doc or HTML payload. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
+        "summary": "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: 56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) with value-keyed inline leaves — items and cells are objects carrying a value key, never bare strings (a bare string publishes clean and renders blank). Guide: /papers/paper-authoring-excellence. body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables in the terminal reader. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
         "tags": [
           "bulldocs"
         ],

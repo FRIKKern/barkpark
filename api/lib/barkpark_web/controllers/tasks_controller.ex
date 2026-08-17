@@ -268,12 +268,22 @@ defmodule BarkparkWeb.TasksController do
     # touched first" ordering for the un-parent-filtered list.
     parent = params["parent"]
 
+    # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
+    # published twin exists in the same scope is suppressed, so a twinned task
+    # is ONE row here exactly as it is one row in `child_tasks/2` and in the
+    # ready queue. An UNPAIRED `drafts.<id>` row (the whole mutate-created
+    # population) has no distinct twin and survives — see
+    # `Tasks.Query.collapse_twins/1` for why this is NOT a blanket `drafts.`
+    # exclusion. NOTE the pagination consequence: `limit`/`offset` live in this
+    # BASE, so removing shadow rows shifts which rows land on which page and
+    # moves `bp task ls --all` totals.
     base =
       from(d in Document,
         where: d.type == "task",
         limit: ^limit,
         offset: ^offset
       )
+      |> Tasks.Query.collapse_twins()
 
     query =
       base
@@ -401,6 +411,14 @@ defmodule BarkparkWeb.TasksController do
       where: d.type == "task",
       order_by: [asc: d.inserted_at]
     )
+    # dr-w34-s4: child_count = length(children), and this is its ONLY producer.
+    # `maybe_filter_parent_id/2` strips `drafts.` from BOTH sides, so a shadow
+    # child is GUARANTEED to match its published parent and used to contribute
+    # +2. Twin collapse counts it once — while an unpaired `drafts.<id>` child
+    # (no published twin) still counts, so the epic's live number cannot drop
+    # by deleting real tasks. SAME predicate the index applies, so
+    # `bp task get <epic>` and `bp task ls --parent <epic>` agree.
+    |> Tasks.Query.collapse_twins()
     |> Params.maybe_filter_workspace(workspace_id)
     |> Params.maybe_filter_project(project_id)
     |> Params.maybe_filter_parent_id(doc_id)

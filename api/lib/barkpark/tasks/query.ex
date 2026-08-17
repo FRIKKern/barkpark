@@ -99,6 +99,60 @@ defmodule Barkpark.Tasks.Query do
   def maybe_filter_dataset(query, ""), do: query
   def maybe_filter_dataset(query, dataset), do: from(d in query, where: d.dataset == ^dataset)
 
+  @doc """
+  Twin collapse (published-wins) — the ONE owner of the "count a twinned task
+  once" law for every task READ path.
+
+  A task can exist twice: `t1` (the canonical/published row) and `drafts.t1`
+  (its shadow — every `/v1/data/mutate` write lands there). `maybe_filter_parent_id/2`
+  strips a leading `drafts.` from BOTH sides, so a shadow whose `parent_id` is
+  `drafts.<epic>` is GUARANTEED to match the published epic: without this
+  predicate a twinned child contributes TWO rows and `+2` to `child_count`.
+
+  The suppressed row is the one whose `drafts.`-stripped doc_id names a
+  DISTINCT same-scope task. Only a `drafts.<id>` shadow can match: a
+  non-prefixed row's stripped id equals its own doc_id, and the `<>` guard
+  excludes itself, so a published row never suppresses itself. Mirrors
+  `Barkpark.Tasks.Queue`'s ready-queue predicate (queue.ex ~146-173) and
+  `Barkpark.Tasks.Board.load_task_docs`'s `hd(twins)` default.
+
+  NOT a blanket `not like(doc_id, "drafts.%")` (the form `StudioChat` uses,
+  correctly, for CLAIM lookups — the claim lives on the published row). A
+  blanket exclusion would delete the whole population of mutate-created tasks
+  that legitimately live at `drafts.<id>` with NO published twin — the very
+  rows `Barkpark.Tasks.Claim` resolves by `drafts.`-fallback. Under twin
+  collapse an UNPAIRED shadow has no distinct twin, so the `NOT EXISTS` is
+  vacuously true and the row SURVIVES: an over-count is fixed without trading
+  it for an under-count.
+
+  Written as a raw correlated subquery rather than lifting queue.ex's
+  `parent_as(:doc)` form verbatim — the bases here do not bind `as: :doc`, and
+  a named-binding reference would not compile.
+  """
+  def collapse_twins(query) do
+    from(d in query,
+      where:
+        fragment(
+          """
+          NOT EXISTS (
+            SELECT 1 FROM documents AS twin
+            WHERE twin.type = 'task'
+              AND twin.doc_id = regexp_replace(?, '^drafts\\.', '')
+              AND twin.doc_id <> ?
+              AND twin.dataset = ?
+              AND twin.workspace_id IS NOT DISTINCT FROM ?
+              AND twin.project_id IS NOT DISTINCT FROM ?
+          )
+          """,
+          d.doc_id,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id
+        )
+    )
+  end
+
   def maybe_filter_claim_worker(query, nil), do: query
 
   def maybe_filter_claim_worker(query, worker) when is_binary(worker),
@@ -188,6 +242,7 @@ defmodule Barkpark.Tasks.Query do
     parent = Map.get(query, "parent_id")
 
     from(d in Document, where: d.type == "task", limit: ^limit)
+    |> collapse_twins()
     |> Scope.scope_to_workspace(ws_id, project_id)
     |> maybe_filter_dataset(Map.get(query, "dataset"))
     |> maybe_filter_kind(Map.get(query, "kind"))
@@ -418,6 +473,7 @@ defmodule Barkpark.Tasks.Query do
     project_id = Keyword.get(scope, :project_id)
 
     from(d in Document, where: d.type == "task", limit: @agg_scan_cap)
+    |> collapse_twins()
     |> Scope.scope_to_workspace(ws_id, project_id)
     |> maybe_filter_dataset(Map.get(filter, "dataset"))
     |> maybe_filter_kind(Map.get(filter, "kind"))

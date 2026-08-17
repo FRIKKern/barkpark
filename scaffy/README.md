@@ -207,7 +207,7 @@ generated slice never has a path/identifier mismatch.
 
 ### Amendments — D12 (A1–A5), binding on every W1 command
 
-**A1 — snake_case is a first-class spelling.** Four canonical spellings-as-transforms of one
+**A1 — snake_case is a first-class spelling.** Five canonical spellings-as-transforms of one
 variable:
 
 | Token | Case | Example (`WorkerName=SmokeReaper`) |
@@ -216,6 +216,13 @@ variable:
 | `{{.worker-name}}` | kebab | `smoke-reaper` |
 | `{{.workerName}}` | camel | `smokeReaper` |
 | `{{.worker_name}}` | snake | `smoke_reaper` |
+| `{{.WORKER_NAME}}` | SCREAMING | `SMOKE_REAPER` |
+
+SCREAMING_SNAKE is the constant-name spelling JS, Rust and Python share
+(`SMOKE_REAPER_PROJECTION` and friends); it joined the set after the four-joiner era
+(first external consumer: gyldendal.no's create-widget const stems), rides **last** in the
+collapse-precedence order so no pre-existing one-word resolution moves, and is **not** a
+path-legal spelling (E-009 still admits only kebab and snake in path positions).
 
 Elixir and Go **file paths derive via snake** (`lib/barkpark/workers/{{.worker_name}}.ex`).
 Without a snake spelling, no Elixir or Go command could derive its own paths.

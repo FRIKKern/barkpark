@@ -94,13 +94,15 @@ func newSubstituter(cmd *Command, vars map[string]string) (*substituter, error) 
 		vws := splitWords(value)
 		// Deterministic joiner precedence for collapsed duplicates (a
 		// one-word lowercase name has kebab == camel == snake): the
-		// spellingsOf order — Pascal, kebab, camel, snake — first wins.
+		// spellingsOf order — Pascal, kebab, camel, snake, SCREAMING —
+		// first wins.
 		type pair struct{ spelling, out string }
 		for _, p := range []pair{
 			{joinPascal(ws), joinPascal(vws)},
 			{joinKebab(ws), joinKebab(vws)},
 			{joinCamel(ws), joinCamel(vws)},
 			{joinSnake(ws), joinSnake(vws)},
+			{joinScreaming(ws), joinScreaming(vws)},
 		} {
 			if _, dup := s.repl[p.spelling]; !dup {
 				s.repl[p.spelling] = p.out

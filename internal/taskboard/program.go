@@ -1664,9 +1664,11 @@ func (m *Model) freeScroll(delta int) {
 	top.Scroll = nt
 }
 
-// readingWidth is the width a pushed frame renders at: full width in narrow
-// push mode, the right-pane width in wide two-pane mode (charter D24: the
-// renderers cap the reading measure at 72 internally, so extra width is margin).
+// readingWidth is the width a pushed frame renders at: the pane width capped by
+// docLayout at the paper-standard 100-col document column (charter D24: the
+// renderers additionally cap the prose measure at 72 internally). It MUST
+// mirror the width composeAt paints at, or scroll clamps and paint disagree
+// about how lines wrap.
 func (m Model) readingWidth() int {
 	w := m.width
 	if w < 20 {
@@ -1686,6 +1688,7 @@ func (m Model) readingWidth() int {
 			w = minReadingWidth
 		}
 	}
+	w, _ = docLayout(w)
 	return w
 }
 
@@ -1708,9 +1711,9 @@ func (m Model) readingViewportHeight() int {
 		h = 8 // composeAt re-floors, so short panes never over-report
 	}
 	if m.wide {
-		return h - 1
+		return h - 1 // the sheet's ─ top edge (renderDocPane)
 	}
-	return h - 2
+	return h - 2 // the reading footer + the sheet's ─ top edge
 }
 
 // readingSubjectTask resolves the task the act verbs (c/x/o) target in a pushed

@@ -193,6 +193,36 @@ export const instRoleChannels = (role) =>
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
 // ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
 export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
+// The reader AIR ladder (tokens.space.air), lightest opening → heaviest. Emission
+// order IS the ladder order design/validate.mjs asserts monotonic, and every step
+// here has a consumer in paper-surface.css — an entry with none is a dead token.
+export const AIR_STEPS = ["code", "table", "asciicast", "callout", "stats", "figure"];
+// The EVIDENCE BAND inputs (tokens.space.evidence), in emission order. Emitted as
+// `--tok-evidence-*`; paper-surface.css composes all five into ONE width
+// expression, so what ships is the law and not a resolved pixel. Every key here
+// has a live consumer — check.mjs Part K refuses a member with none, and
+// validate.mjs refuses a member that is not on this list.
+export const EVIDENCE_KEYS = ["band", "bandMax", "fill", "gutter", "caption"];
+// `fill` is a bare RATIO (it is multiplied by 100cqw) and `caption` is a reading
+// MEASURE in characters — neither is a pixel, and emitting them as one would be
+// the drift the units exist to prevent.
+export const EVIDENCE_UNITS = { band: "px", bandMax: "px", fill: "", gutter: "px", caption: "ch" };
+// The SECTION BOUNDARY inputs (tokens.space.section), in emission order. `beat` is
+// a ratio of `--tok-air-beat` (so section rhythm and evidence rhythm retune
+// together); `rule` and `gap` are pixels — a hairline does not scale with a beat.
+// Every key has a live consumer on the `h2` rule of BOTH surfaces; check.mjs
+// Part L refuses a member with none, validate.mjs refuses a member not listed here.
+export const SECTION_KEYS = ["beat", "rule", "gap"];
+export const SECTION_UNITS = { beat: "", rule: "px", gap: "px" };
+// The RULE LADDER (tokens.space.rule). `space.section.rule` is the STRUCTURAL
+// weight and has its own key above; this is the OTHER rung — the weight every
+// line that is not a section boundary draws at. Kept as a token rather than a
+// literal `1px` for one reason: a census can only assert "chrome is quieter than
+// structure" if both weights are named, and check.mjs Part M reads this list to
+// find what the census is allowed to see.
+export const RULE_KEYS = ["hairline"];
+export const RULE_UNITS = { hairline: "px" };
+const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
 // for the bulldocs reader skin (bulldocsBlock). VERBATIM (rgba/hex as-authored).
@@ -551,17 +581,65 @@ const paperThemeBlock = (name, t) => [
 
 function paperBlock(themes = loadThemes()) {
   const r = tokens.type.reading;
+  // Each reading step emits size + line-height, and a tracking var ONLY where
+  // tokens.json declares a letterSpacing. The tracking leaves were declared in
+  // the source and emitted NOWHERE until pe-w1-reader-editorial-typography — the
+  // `--bp-*-tracking` vars were hand-authored beside a token that claimed to own
+  // them, so the single source was single in name only.
+  const step = (name, s) => [
+    `--tok-reading-${name}-size: ${s.size}px;`,
+    `--tok-reading-${name}-lh: ${s.lineHeight};`,
+    ...(s.letterSpacing == null ? [] : [`--tok-reading-${name}-tracking: ${s.letterSpacing}em;`]),
+  ];
+  // The AIR scale (space.air): the beat an EVIDENCE block opens with. Emitted as
+  // a ratio of `--tok-air-beat` rather than a resolved pixel, so the LAW ("evidence
+  // opens at 1.1-1.85x the paragraph beat") is what ships — retune the beat and the
+  // whole scale moves together instead of eight literals drifting apart.
+  const a = tokens.space.air;
+  const airVars = [
+    `--tok-air-beat: ${a.beat}px;`,
+    ...AIR_STEPS.map((k) => `--tok-air-${k}: calc(var(--tok-air-beat) * ${a[k]});`),
+  ];
+  // The EVIDENCE BAND (space.evidence): how wide a block that improves with width
+  // may grow when it steps out of the prose column. Emitted as the four inputs to
+  // one law, never as a resolved width — paper-surface.css composes them into a
+  // single `--bp-evidence-width` expression, so the band is CONTINUOUS in the
+  // available inline space and there is no breakpoint literal to drift.
+  // `caption` carries `ch`, not `px`: it is a reading measure, and a caption
+  // inside a wide figure must wrap at a character count, not at a pixel.
+  const e = tokens.space.evidence;
+  const evidenceVars = EVIDENCE_KEYS.map(
+    (k) => `--tok-evidence-${kebab(k)}: ${e[k]}${EVIDENCE_UNITS[k]};`,
+  );
+  // The SECTION BOUNDARY (space.section): the air that ends a section and the rule
+  // that opens the next. `beat` emits as a ratio of `--tok-air-beat` — the same
+  // anchor the evidence ladder hangs off, so retuning the beat moves section
+  // rhythm and evidence rhythm together instead of letting them drift apart.
+  // `rule`/`gap` emit as pixels: a hairline is a hairline at any beat.
+  const sc = tokens.space.section;
+  const sectionVars = SECTION_KEYS.map((k) =>
+    k === "beat"
+      ? `--tok-section-beat: calc(var(--tok-air-beat) * ${sc.beat});`
+      : `--tok-section-${k}: ${sc[k]}${SECTION_UNITS[k]};`,
+  );
+  // The RULE LADDER (space.rule): the weight of every horizontal line that is
+  // NOT a section boundary. Emitted beside the section rule on purpose — the two
+  // are one ladder, and a reader who sees them apart is reading a paper where a
+  // table header shouts as loud as a chapter break.
+  const rl = tokens.space.rule;
+  const ruleVars = RULE_KEYS.map((k) => `--tok-rule-${kebab(k)}: ${rl[k]}${RULE_UNITS[k]};`);
+
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
     `--tok-reading-heading-weight: ${r.headingWeight};`,
-    `--tok-reading-body-size: ${r.body.size}px;`,
-    `--tok-reading-body-lh: ${r.body.lineHeight};`,
-    `--tok-reading-h1-size: ${r.h1.size}px;`,
-    `--tok-reading-h1-lh: ${r.h1.lineHeight};`,
-    `--tok-reading-h2-size: ${r.h2.size}px;`,
-    `--tok-reading-h2-lh: ${r.h2.lineHeight};`,
-    `--tok-reading-h3-size: ${r.h3.size}px;`,
-    `--tok-reading-h3-lh: ${r.h3.lineHeight};`,
+    ...step("body", r.body),
+    ...step("h1", r.h1),
+    ...step("h2", r.h2),
+    ...step("h3", r.h3),
+    ...airVars,
+    ...sectionVars,
+    ...ruleVars,
+    ...evidenceVars,
   ].map((l) => "  " + l).join("\n");
 
   const lifeClasses = (theme) =>

@@ -1,13 +1,15 @@
 package taskboard
 
-// compose.go — the adaptive compositor (charter D12/D26). View() calls Compose;
-// Compose builds the breadcrumb, picks the mode from Model.wide (hysteresis is
-// Model state, D27), and composites the navigation stack from the SAME pure
-// frame renderers — a wide two-pane (board pinned left + stack-top right) or a
-// narrow full-frame push. Render STAYS the board-frame painter (D26): in wide
-// mode it is called at the 46-col left-pane width, in narrow mode at full width
-// when the board is the stack top. This file adds the only new top-level seams:
-// Compose, Breadcrumb, and the reading-frame windowing.
+// compose.go — the adaptive compositor (charter D12/D26). View() picks the mode
+// from Model.wide (hysteresis is Model state, D27) and composites the
+// navigation stack from the SAME pure frame renderers — a wide two-pane (board
+// pinned left + stack-top right) or a narrow full-frame push. Render STAYS the
+// board-frame painter (D26): in wide mode it is called at the left-pane width,
+// in narrow mode at full width when the board is the stack top. This file adds
+// the only new top-level seams: Compose, docLayout, and the reading-frame
+// windowing. The breadcrumb row was retired (2026-08-12): the document's own
+// title orients the reader, and the row returned to the panes; Breadcrumb
+// itself survives for the frames that still need a trail string.
 
 import (
 	"math"
@@ -32,6 +34,19 @@ const (
 	// minReadingWidth is the pathological floor for the wide right pane.
 	minReadingWidth = 24
 	minBoardWidth   = 24
+	// maxDocWidth caps the reading/preview document column at the 72-cell
+	// prose measure the renderers already use internally (charter D24,
+	// detailMeasure) — the document column and its prose now share one
+	// measure. A wider pane centers the capped column and the surplus becomes
+	// symmetric margin; a left-pinned document on an ultrawide pane reads
+	// lopsided.
+	maxDocWidth = 72
+	// docEdgePad is the inner breathing space between a sheet edge (│) and the
+	// document text; docFrameExtra is what the whole sheet adds to the content
+	// column: two edge cells + two inner pads. docLayout subtracts it BEFORE
+	// capping, so the text measure stays maxDocWidth even inside the frame.
+	docEdgePad    = 1
+	docFrameExtra = 2 + 2*docEdgePad
 	// scrollFollow is the Frame.Scroll sentinel for "follow the cursor stop"
 	// (charter D18). A frame's zero-value Scroll is 0 — a real absolute offset
 	// (the top of the frame), so a freshly opened frame shows its title, never a
@@ -162,10 +177,59 @@ func (m Model) boardGeometry() (int, int) {
 		height = 8
 	}
 	if m.wide {
-		return m.boardPaneCols(width), height - 1 // left pane, under the breadcrumb
+		return m.boardPaneCols(width), height // left pane, full height (crumb retired)
 	}
 	return width, height
 }
+
+// docLayout is the ONE reading-column seam: given a pane width it returns the
+// text measure the document renders at (capped at maxDocWidth, after the sheet
+// frame's docFrameExtra is spent) and the left margin the SHEET starts at,
+// centered. Paint (composeAt, previewLines), the scroll clamp (scrollPreview),
+// and the mouse stop resolvers (rightPaneStopAt, ComposeHitMap) all derive the
+// pair here, so line wrapping and the click hit-map can never disagree about
+// where a body line falls.
+func docLayout(paneW int) (contentW, leftPad int) {
+	contentW = paneW - docFrameExtra
+	if contentW > maxDocWidth {
+		contentW = maxDocWidth
+	}
+	if contentW < 1 {
+		contentW = 1
+	}
+	return contentW, (paneW - contentW - docFrameExtra) / 2
+}
+
+// renderDocPane windows a document body into a pane and dresses it as a sheet:
+// a ─ top edge, │ left/right edges the full pane height, the text at the
+// docLayout measure between them (both glyphs already in the structure
+// allowlist). It spends ONE pane row on the top edge, so the mouse resolvers
+// subtract the same row through docBodyRow — the twin they must never drift
+// from. body must be rendered at docLayout's contentW.
+func renderDocPane(body []string, stops []Stop, cursor, scroll, hoverStop, paneW, paneH int) []string {
+	docW, pad := docLayout(paneW)
+	avail := paneH - 1 // the top edge row
+	if avail < 1 {
+		avail = 1
+	}
+	win := windowFrame(body, stops, cursor, scroll, hoverStop, avail, docW)
+	for len(win) < avail {
+		win = append(win, "")
+	}
+	margin := strings.Repeat(" ", pad)
+	edge := dimStyle.Render("│")
+	innerPad := strings.Repeat(" ", docEdgePad)
+	out := make([]string, 0, avail+1)
+	out = append(out, margin+innerPad+dimStyle.Render(strings.Repeat("─", docW+docFrameExtra-2*docEdgePad)))
+	for _, l := range win {
+		out = append(out, margin+edge+innerPad+padTo(l, docW)+innerPad+edge)
+	}
+	return out
+}
+
+// docBodyRow maps a pane row to its document body-window row: the ─ top edge is
+// pane row 0, content starts one below. Negative means edge chrome, not body.
+func docBodyRow(pl int) int { return pl - 1 }
 
 func composeAt(m Model, width, height int) string {
 	if width < 20 {
@@ -184,40 +248,37 @@ func composeAt(m Model, width, height int) string {
 
 	if !m.wide {
 		// NARROW — full-frame push. The board at depth 0 is oriented by its own
-		// header, so it renders whole (no redundant "tasks" breadcrumb); a pushed
-		// reading frame gets the breadcrumb as its top line + a per-kind footer.
+		// header, so it renders whole; a pushed reading frame gets the windowed
+		// document + a per-kind footer (no breadcrumb row — the document's own
+		// title is the orientation).
 		if top.Kind == FrameBoard {
 			return Render(m.board, ui, width, height, now)
 		}
-		crumb := Breadcrumb(m.stack, width)
 		footer := readingFooter(m.ui, width)
-		avail := height - 2 // breadcrumb + footer
-		if avail < 1 {
-			avail = 1
+		paneH := height - 1 // footer; renderDocPane spends one more row on the top edge
+		if paneH < 2 {
+			paneH = 2
 		}
-		body, stops := m.frameContent(top, width, now)
+		docW, _ := docLayout(width)
+		body, stops := m.frameContent(top, docW, now)
 		// The narrow reading frame paints the hovered rail stop (charter D99 /
-		// D105, the wide right pane's twin at line 191): mouseMotion resolves the
+		// D105, the wide right pane's twin below): mouseMotion resolves the
 		// pointer through ComposeHitMap into m.ui.HoverStop, and windowFrame tints
 		// that stop's body line in the accent foreground. HoverStop defaults to -1
 		// (newModel; keyboard input clears it), so a pointer-free frame paints
 		// nothing and the goldens stay byte-frozen.
-		win := windowFrame(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, avail, width)
-		for len(win) < avail {
-			win = append(win, "")
-		}
-		out := make([]string, 0, avail+2)
-		out = append(out, crumb)
+		win := renderDocPane(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, width, paneH)
+		out := make([]string, 0, paneH+1)
 		out = append(out, win...)
 		out = append(out, footer)
 		return strings.Join(out, "\n")
 	}
 
-	// WIDE — two-pane: board pinned left (46 cols), the stack-top frame right,
-	// the breadcrumb spanning the top. At depth 0 the right pane PREVIEWS the
-	// board cursor-target's detail from the in-hand index (zero fetch, D12).
-	crumb := Breadcrumb(m.stack, width)
-	inner := height - 1
+	// WIDE — two-pane: board pinned left, the stack-top frame right, panes at
+	// full height (the breadcrumb row was retired). At depth 0 the right pane
+	// PREVIEWS the board cursor-target's detail from the in-hand index (zero
+	// fetch, D12).
+	inner := height
 	if inner < 1 {
 		inner = 1
 	}
@@ -242,15 +303,15 @@ func composeAt(m Model, width, height int) string {
 			rightLines = []string{dimStyle.Render(truncate("no task selected", rightW))}
 		}
 	} else {
-		body, stops := m.frameContent(top, rightW, now)
+		docW, _ := docLayout(rightW)
+		body, stops := m.frameContent(top, docW, now)
 		// The wide reading pane paints the hovered rail stop (charter D99): a
 		// board-row hover would have taken the preview branch above and cleared
 		// HoverStop, so a non-negative HoverStop here always belongs to THIS frame.
-		rightLines = windowFrame(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, inner, rightW)
+		rightLines = renderDocPane(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, rightW, inner)
 	}
 
-	rows := make([]string, 0, inner+1)
-	rows = append(rows, crumb)
+	rows := make([]string, 0, inner)
 	for i := 0; i < inner; i++ {
 		var l, r string
 		if i < len(leftLines) {
@@ -299,10 +360,11 @@ func (m Model) previewLines(t Task, width, avail int, now time.Time) []string {
 	if m.previewRef == t.DocID {
 		scroll = m.previewScroll
 	}
-	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, width, now)
+	docW, _ := docLayout(width)
+	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, docW, now)
 	// The depth-0 preview has NO stops (stops=nil, cursor=-1) — nothing to select,
 	// nothing to hover-paint (hoverStop=-1); #4240 owns depth-0 hover.
-	return windowFrame(body, nil, -1, scroll, -1, avail, width)
+	return renderDocPane(body, nil, -1, scroll, -1, width, avail)
 }
 
 // previewDetail is a task's preview-pane detail: the reading index's entry, or
@@ -525,8 +587,8 @@ func padTo(s string, n int) string {
 // sees, and mouse mode never desyncs from the frame:
 //
 //   - the Compose gutter is stripped first (one blank top row, gl left pad), then
-//   - the breadcrumb spans the top composeAt row (a dead target — the +1 crumb
-//     Y offset lives here, once), then
+//   - every remaining composeAt row is a pane row (the breadcrumb row was
+//     retired — no dead chrome row, no Y offset), then
 //   - X thresholds the pane: x<46 board, 46≤x<48 the dead gutter, x≥48 right
 //     (shifted by 48). The board pane's semantics are identical to narrow — a
 //     click SELECTS the row (same effect as arrowing to it), wheel steps the
@@ -565,7 +627,7 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	if ev.Action == tea.MouseActionRelease {
 		wasDragging := m.wideDragging
 		m.wideDragging = false
-		m.wideDividerHover = cx >= boardW && cx < boardW+paneGutter2 && cy >= 1 && cy <= inner
+		m.wideDividerHover = cx >= boardW && cx < boardW+paneGutter2 && cy >= 0 && cy < inner
 		if wasDragging && m.wideDetailsRatio > 0 {
 			saveTaskboardPreferences(m.cacheDir, taskboardPreferences{
 				DetailsPaneRatio: m.wideDetailsRatio,
@@ -576,13 +638,13 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	if cx < 0 || cy < 0 {
 		return m, nil
 	}
-	// Y: the breadcrumb is composeAt row 0 (rowCrumb); pane rows start one below.
+	// Y: every composeAt row is a pane row (crumb retired); bound-check only.
 	rowmap := m.wideRowMap()
 	if cy >= len(rowmap) || rowmap[cy] != rowPanes {
 		return m, nil
 	}
-	pl := cy - 1
-	if pl < 0 || pl >= inner {
+	pl := cy
+	if pl >= inner {
 		return m, nil
 	}
 	// Every press/wheel that reaches a pane is non-x input — exactly like the
@@ -628,17 +690,17 @@ func (m Model) wideMouseMotion(cx, cy, innerW, inner int, now time.Time) (Model,
 	target := ""
 	stop := -1
 	boardW := m.boardPaneCols(innerW)
-	m.wideDividerHover = cx >= boardW && cx < boardW+paneGutter2 && cy >= 1 && cy <= inner
+	m.wideDividerHover = cx >= boardW && cx < boardW+paneGutter2 && cy >= 0 && cy < inner
 	switch {
-	case cx >= 0 && cx < boardW && cy >= 1 && cy-1 < inner:
+	case cx >= 0 && cx < boardW && cy >= 0 && cy < inner:
 		idTop, avail := m.wideBoardPaneAvail(inner, now)
-		if idx := m.wideBoardRowIndex(cy-1, idTop, avail, now); idx >= 0 {
+		if idx := m.wideBoardRowIndex(cy, idTop, avail, now); idx >= 0 {
 			if rows := m.visibleRows(); idx < len(rows) {
 				target = rows[idx].docID
 			}
 		}
-	case cx >= boardW+paneGutter2 && cy >= 1 && cy-1 < inner:
-		stop = m.rightPaneStopAt(cy-1, innerW, inner, now)
+	case cx >= boardW+paneGutter2 && cy >= 0 && cy < inner:
+		stop = m.rightPaneStopAt(cy, innerW, inner, now)
 	}
 	m.ui, _ = setHoverStop(m.ui, stop)
 	return m.queueHover(target, 0)
@@ -647,23 +709,18 @@ func (m Model) wideMouseMotion(cx, cy, innerW, inner int, now time.Time) (Model,
 // paneRow is a composeAt row's vertical class in wide mode, keyed on Y alone (the
 // X threshold picks the pane within a rowPanes row). wideRowMap materializes one
 // entry per composeAt line so a click router addresses exactly the painted rows —
-// the crumb plus `inner` pane rows — no more, no fewer.
+// `inner` pane rows since the breadcrumb row was retired — no more, no fewer.
 type paneRow int
 
 const (
-	rowCrumb paneRow = iota // the breadcrumb (composeAt row 0) — never a click target
-	rowPanes                // a two-pane content row (board | gutter | right by X)
+	rowPanes paneRow = iota // a two-pane content row (board | gutter | right by X)
 )
 
-// wideRowMap is the Y hit-map: rowCrumb at 0, then `inner` rowPanes. Its length
-// equals composeAt's wide line count, the hit-map length parity the router keeps.
+// wideRowMap is the Y hit-map: `inner` rowPanes. Its length equals composeAt's
+// wide line count, the hit-map length parity the router keeps.
 func (m Model) wideRowMap() []paneRow {
 	_, _, inner := m.wideGeom()
-	rows := make([]paneRow, 1+inner)
-	for i := 1; i < len(rows); i++ {
-		rows[i] = rowPanes
-	}
-	return rows
+	return make([]paneRow, inner) // zero value IS rowPanes
 }
 
 // wideGeom re-derives composeAt's wide geometry (the left gl gutter, the inner
@@ -691,7 +748,7 @@ func (m Model) wideGeom() (gl, innerW, inner int) {
 	if height < 8 {
 		height = 8 // composeAt re-floors
 	}
-	inner = height - 1 // the breadcrumb row
+	inner = height // panes span the full inner height (crumb retired)
 	if inner < 1 {
 		inner = 1
 	}
@@ -839,15 +896,24 @@ func (m Model) rightPaneStopAt(pl, innerW, inner int, now time.Time) int {
 	if rightW < minReadingWidth {
 		rightW = minReadingWidth
 	}
-	body, stops := m.frameContent(top, rightW, now)
-	wtop := readingWindowTop(len(body), stops, top.Cursor, top.Scroll, inner)
-	if wtop > 0 && pl == 0 {
+	docW, _ := docLayout(rightW)
+	body, stops := m.frameContent(top, docW, now)
+	row := docBodyRow(pl)
+	if row < 0 {
+		return -1 // the ─ top edge — chrome, never a stop
+	}
+	avail := inner - 1 // renderDocPane's window height under the top edge
+	if avail < 1 {
+		avail = 1
+	}
+	wtop := readingWindowTop(len(body), stops, top.Cursor, top.Scroll, avail)
+	if wtop > 0 && row == 0 {
 		return -1 // ↑ more-above marker
 	}
-	if len(body)-(wtop+inner) > 0 && pl == inner-1 {
+	if len(body)-(wtop+avail) > 0 && row == avail-1 {
 		return -1 // ↓ more-below marker
 	}
-	bodyLine := wtop + pl
+	bodyLine := wtop + row
 	for i, s := range stops {
 		if s.Line == bodyLine {
 			return i
@@ -867,8 +933,9 @@ func (m *Model) scrollPreview(t Task, delta, innerW, inner int, now time.Time) {
 	if rightW < minReadingWidth {
 		rightW = minReadingWidth
 	}
-	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, rightW, now)
-	maxTop := len(body) - inner
+	docW, _ := docLayout(rightW)
+	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, docW, now)
+	maxTop := len(body) - (inner - 1) // renderDocPane spends one row on the top edge
 	if maxTop < 0 {
 		maxTop = 0
 	}

@@ -127,6 +127,17 @@ on:
       - "scripts/audit-paper-readers-test.sh"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
+      # WORKFLOW PORTABILITY (epic-cycle distribution w1-s6). The two scripts are
+      # per-file per D26; the third entry is a GLOB, and deliberately so.
+      # `.claude/workflows/*.workflow.js` is not a convenience — it IS the corpus
+      # definition the tripwire enumerates. Pinning the four engines by name would
+      # make this lane go dark on the one PR that matters most: the PR adding a
+      # FIFTH engine, which is precisely when a hardcoded /Users path or an
+      # untracked charter reference gets introduced. The glob is cheap by
+      # construction: it can only ever match files this lane already checks.
+      - "scripts/workflow-portability-check.sh"
+      - "scripts/workflow-portability-check.test.sh"
+      - ".claude/workflows/*.workflow.js"
       - ".github/workflows/shell-harnesses.yml"
   push:
     branches: [main]
@@ -176,6 +187,11 @@ on:
       - "scripts/audit-paper-readers-test.sh"
       - "bin/barkpark"
       - "scripts/barkpark-boot-selftest.sh"
+      # WORKFLOW PORTABILITY — mirrors the pull_request list above, glob included.
+      # A lane wired on PRs only goes dark the moment a merge lands.
+      - "scripts/workflow-portability-check.sh"
+      - "scripts/workflow-portability-check.test.sh"
+      - ".claude/workflows/*.workflow.js"
       - ".github/workflows/shell-harnesses.yml"
 
 permissions:
@@ -476,3 +492,43 @@ jobs:
         # Hermetic: temp BARKPARK_HOME, a probed-free port, curl/mix stubs, and
         # only pids the harness itself spawned are ever signalled.
         run: bash scripts/barkpark-boot-selftest.sh
+
+  workflow-portability:
+    name: .claude/workflows engines load on a machine that is not this one
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # The DEFAULT depth is correct here. Clause G asks `git cat-file -e
+        # HEAD:<path>`, which needs HEAD's tree and nothing older, and the
+        # harness builds its own fixture repos from mktemp. No history required.
+      - name: node is present (clauses P/M1/M2/C/W are node-parsed)
+        # The tripwire turns a missing node into a RED by design (clause N: a
+        # blind check must never skip). That is correct but illegible; fail by
+        # NAME here instead, matching the python3/jq name-checks above.
+        run: |
+          command -v node >/dev/null || {
+            echo "node missing on the runner image — the workflow engines are parsed with it" >&2
+            exit 1
+          }
+          node --version
+      - name: workflow-portability-check.sh syntax check
+        run: bash -n scripts/workflow-portability-check.sh
+      - name: workflow-portability-check.test.sh syntax check
+        run: bash -n scripts/workflow-portability-check.test.sh
+      - name: the tripwire can still LOSE (19 mutation cases, hermetic git fixtures)
+        # THE FAIL-BEFORE PROOF, and it lives here rather than in a chartered
+        # before/after because a guard and its fixes cannot co-merge and still
+        # demonstrate the red. Case 2 mutates an engine into a syntax error that
+        # `node --check` reports GREEN; case 6 plants a reference that exists on
+        # disk and is untracked — the vacuous pass a working-tree oracle gives.
+        # No `continue-on-error` anywhere in this file: it launders a red into a
+        # green JOB conclusion, which is the only thing the fleet reads.
+        run: bash scripts/workflow-portability-check.test.sh
+      - name: the live corpus is portable
+        # The ratchet proper. ADVISORY by decision D4 — this workflow is not one
+        # of main's required contexts (those are exactly: Elixir gate, PR
+        # references an active task, Cloud gate, Console gate), so wiring makes
+        # this RUN, not BLOCK. Promotion is a separate evidence-gated decision,
+        # filed as ecd-bl-tripwire-promotion.
+        run: bash scripts/workflow-portability-check.sh .claude/workflows

@@ -218,21 +218,39 @@ defmodule Barkpark.Tasks.Close do
           # stamp them. Never faked through the hole.
           {:ok, :no_guardable_marker}
         else
-          write_reconcile(doc, synthetic, worker_id)
+          write_reconcile(doc, synthetic, worker_id, landed, ts_iso)
         end
     end
   end
 
   # The stamp write: fold the synthetic met-flips through the SHARED
   # `merge_criteria` rev-CAS (the same D56-guarded merge close uses) and update
-  # ONLY the criteria + rev — `lifecycle_status` is deliberately never touched.
-  # A durable `task.criterion` mutation_event records the reconciliation.
-  defp write_reconcile(%Document{} = doc, synthetic, worker_id) do
+  # ONLY the criteria + rev + the autostamp provenance record —
+  # `lifecycle_status` is deliberately never touched. A durable `task.criterion`
+  # mutation_event records the reconciliation.
+  #
+  # The provenance record rides this write for the SAME reason it rides the
+  # close write (see `@autostamp_key`): a reader must be able to tell an
+  # autostamped criterion from a hand-proven one WITHOUT parsing evidence prose.
+  # This is the VERIFIED half — a real merge event was observed — so it lands
+  # under "merge_event" with `verified: true`, next to (never on top of) any
+  # earlier unverified close-time assertion.
+  defp write_reconcile(%Document{} = doc, synthetic, worker_id, landed, ts_iso) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     indices = Enum.map(synthetic, &Map.get(&1, "index"))
 
     with {:ok, new_content} <- merge_criteria(doc.content, synthetic) do
+      new_content =
+        merge_autostamp_record(new_content, "merge_event", %{
+          "verified" => true,
+          "source" => "github_merge_event",
+          "indices" => indices,
+          "asserted_worker" => worker_id,
+          "landed" => landed_summary(landed),
+          "ts" => ts_iso
+        })
+
       case fenced_content_write(doc, observed_rev, new_content, new_rev) do
         {:ok, updated} ->
           ev =
@@ -326,7 +344,8 @@ defmodule Barkpark.Tasks.Close do
                          reason,
                          criteria,
                          landed,
-                         compose_override_record(holder_record, criteria_record, worker_id)
+                         compose_override_record(holder_record, criteria_record, worker_id),
+                         caller_token_id
                        ) do
                   ev =
                     insert_mutation_event!(
@@ -524,7 +543,8 @@ defmodule Barkpark.Tasks.Close do
          reason,
          criteria,
          landed,
-         override_record
+         override_record,
+         caller_token_id
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -585,7 +605,22 @@ defmodule Barkpark.Tasks.Close do
     # terminal `done` close that carries a land digest, and never touches an
     # index the caller already targeted, so a builder's pre-merge close (no
     # landed) is untouched. Runs through the SAME merge_criteria rev-CAS write.
-    criteria = autostamp_merge_gate(criteria, doc, worker_id, new_status, landed, ts_iso)
+    #
+    # NOTHING HERE OBSERVES A MERGE (cch-w66-s2). The whole trigger is the
+    # caller's own `landed` bytes, so the synthetics are computed ONCE and used
+    # twice: once as criteria updates, and once as the provenance record that
+    # names them as caller-asserted rather than verified. Both ride this single
+    # rev-CAS write, so an autostamp and its confession land together or not at
+    # all — the same discipline `close_override` already follows.
+    autostamps = autostamp_merge_gate(doc, criteria, worker_id, new_status, landed, ts_iso)
+    criteria = if is_list(criteria), do: criteria ++ autostamps, else: criteria
+
+    new_content =
+      merge_autostamp_record(
+        new_content,
+        "close",
+        close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso)
+      )
 
     with {:ok, new_content} <- merge_criteria(new_content, criteria) do
       case fenced_content_write(doc, observed_rev, new_content, new_rev) do
@@ -672,14 +707,70 @@ defmodule Barkpark.Tasks.Close do
   # no text is UNGUARDABLE, so it is skipped rather than stamped through a hole —
   # authoring a merge-gate criterion with no wording is degenerate, and the close
   # still succeeds (that criterion is simply left for a human to stamp).
-  defp autostamp_merge_gate(criteria, %Document{} = doc, worker_id, "done", landed, ts_iso)
+  #
+  # cch-w66-s2: it returns the SYNTHETICS ONLY (the caller appends them), because
+  # the same list is also what the provenance record names. Two readers, one
+  # computation — a second traversal could disagree with the one that wrote.
+  defp autostamp_merge_gate(%Document{} = doc, criteria, worker_id, "done", landed, ts_iso)
        when is_map(landed) and map_size(landed) > 0 and is_list(criteria) do
     targeted = MapSet.new(criteria, &Map.get(&1, "index"))
     evidence = compose_merge_gate_evidence(doc, worker_id, landed, ts_iso)
-    criteria ++ merge_gate_synthetics(doc.content, evidence, targeted)
+    merge_gate_synthetics(doc.content, evidence, targeted)
   end
 
-  defp autostamp_merge_gate(criteria, _doc, _worker, _status, _landed, _ts_iso), do: criteria
+  defp autostamp_merge_gate(_doc, _criteria, _worker, _status, _landed, _ts_iso), do: []
+
+  # THE TRACE (cch-w66-s2). An autostamped criterion used to be indistinguishable
+  # from a hand-proven one: `unmet_after_autostamp/2` deducts the gate from the
+  # D289 unmet set, so `check_criteria_proven/4` returns `{:ok, nil}` and NO
+  # `close_override` is minted — the deduction erased itself. This key is that
+  # deduction's receipt, in `close_override`'s shape and by its precedent: ONE
+  # content key a re-read answers "was this criterion PROVEN, or merely asserted?"
+  # from, without parsing evidence prose.
+  #
+  # Two sub-keys, never overwriting each other, because they are two different
+  # claims about the world:
+  #   * "close"       — a close carried a `landed` map. NOTHING was observed;
+  #     `verified: false`. The actor is recorded twice on purpose:
+  #     `asserted_worker` is the client-supplied `worker_id` (close.ex:26-31 —
+  #     not authorization, a caller can claim to be anyone) and
+  #     `authenticated_token_id` is the api_token the server actually
+  #     authenticated (nil for internal callers). A record that named only the
+  #     first would carry the fabricator's chosen name and nothing else.
+  #   * "merge_event" — `reconcile_merge_gate/3` saw a real merge webhook;
+  #     `verified: true`.
+  @autostamp_key "merge_gate_autostamp"
+
+  defp close_autostamp_record([], _worker_id, _caller_token_id, _landed, _ts_iso), do: nil
+
+  defp close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso) do
+    %{
+      "verified" => false,
+      "source" => "close_landed_digest",
+      "indices" => Enum.map(autostamps, &Map.get(&1, "index")),
+      "asserted_worker" => worker_id,
+      "authenticated_token_id" => caller_token_id,
+      "landed" => landed_summary(landed),
+      "ts" => ts_iso
+    }
+  end
+
+  # A close that autostamped nothing writes nothing (mirrors
+  # `merge_override_record/2`: an honest close leaves no receipt to explain
+  # away). A prior record is merged over per sub-key, never erased — an
+  # unverified close-time assertion stays readable after a later merge event
+  # verifies the same criterion.
+  defp merge_autostamp_record(content, _key, nil), do: content
+
+  defp merge_autostamp_record(content, key, record) when is_map(record) do
+    existing =
+      case Map.get(content, @autostamp_key) do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    Map.put(content, @autostamp_key, Map.put(existing, key, record))
+  end
 
   # Shared merge-gate synthetic builder (used by the lead-close autostamp above
   # AND by `reconcile_merge_gate/3`, the merge-event bridge). Given the stored
@@ -721,10 +812,27 @@ defmodule Barkpark.Tasks.Close do
     end
   end
 
-  # "auto: lead-closed on merge by <worker> (epoch <n>) — landed <what> at <ts>".
+  # The close-time autostamp's evidence sentence (cch-w66-s2).
+  #
+  # It used to read "auto: lead-closed on merge by <worker> (epoch <n>) — landed
+  # <what>", which asserted TWO things nothing on this path observed: that the
+  # closer is a LEAD (`worker_id` is a client-supplied body param — close.ex:26-31)
+  # and that a MERGE happened (no GitHub call runs here, and none may: this
+  # executes under `pg_advisory_xact_lock`, where a network round-trip converts a
+  # fabrication bug into an availability bug). A scratch worker paid a gate citing
+  # a foreign epic's PR and the ledger recorded it as a lead-closed merge.
+  #
+  # So the sentence now names exactly what was supplied — a caller-asserted land
+  # digest, by a claimed worker, at a time — and says plainly that no merge was
+  # observed. It must stay DISTINGUISHABLE from `compose_reconcile_evidence/3`,
+  # which is written only after a real merge webhook:
+  #
+  #   this   : "auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest from worker "lead-w" (epoch 5) naming PR #456 at <ts>"
+  #   webhook: "auto: merge-reconciled by github-merge — landed PR #456 (commit abc123) at <ts>"
+  #
   # The claim epoch is read from the doc's own claim lease (nil for an unclaimed
   # container close → rendered "?"); the landed summary prefers PR numbers, then a
-  # commit sha, then file paths, so the evidence names a concrete merge artifact.
+  # commit sha, then file paths, so the evidence names the artifact it was HANDED.
   defp compose_merge_gate_evidence(%Document{content: content}, worker_id, landed, ts_iso) do
     epoch =
       case get_in(content, ["claim", "epoch"]) do
@@ -732,7 +840,8 @@ defmodule Barkpark.Tasks.Close do
         e -> to_string(e)
       end
 
-    "auto: lead-closed on merge by #{worker_id} (epoch #{epoch}) — landed #{landed_summary(landed)} at #{ts_iso}"
+    "auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest " <>
+      "from worker #{inspect(worker_id)} (epoch #{epoch}) naming #{landed_summary(landed)} at #{ts_iso}"
   end
 
   defp landed_summary(landed) do

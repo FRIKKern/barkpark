@@ -43,13 +43,30 @@ func wantVarError(t *testing.T, cmd *Command, vars map[string]string, fragment s
 func TestTransformSpellings(t *testing.T) {
 	cmd := varCmd(&VariableDecl{Name: "BlockName"})
 	s := mustSubst(t, cmd, map[string]string{"BlockName": "FancyQuote"})
-	got, err := s.text("{{.BlockName}} {{.block-name}} {{.blockName}} {{.block_name}}", "test.scaffy", 1)
+	got, err := s.text("{{.BlockName}} {{.block-name}} {{.blockName}} {{.block_name}} {{.BLOCK_NAME}}", "test.scaffy", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "FancyQuote fancy-quote fancyQuote fancy_quote"
+	want := "FancyQuote fancy-quote fancyQuote fancy_quote FANCY_QUOTE"
 	if got != want {
 		t.Fatalf("transform spellings: got %q, want %q", got, want)
+	}
+}
+
+func TestScreamingCollapsePrecedence(t *testing.T) {
+	// A one-word variable named in caps: the SCREAMING spelling of the
+	// NAME ("NAME") must not shadow Pascal ("Name"), and a one-word
+	// value keeps kebab==camel==snake collapsed to the kebab output —
+	// SCREAMING rides last, so no pre-existing collapse resolution moves.
+	cmd := varCmd(&VariableDecl{Name: "Name"})
+	s := mustSubst(t, cmd, map[string]string{"Name": "probe"})
+	got, err := s.text("{{.Name}} {{.name}} {{.NAME}}", "test.scaffy", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Probe probe PROBE"
+	if got != want {
+		t.Fatalf("screaming precedence: got %q, want %q", got, want)
 	}
 }
 

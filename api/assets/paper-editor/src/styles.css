@@ -43,16 +43,34 @@
   --bp-tone-neutral-fg: #4a544f;
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
-  --bp-body-tracking: 0.005em;
+  --bp-body-tracking: var(--tok-reading-body-tracking);
   --bp-h1-size: var(--tok-reading-h1-size);
   --bp-h1-lh: var(--tok-reading-h1-lh);
-  --bp-h1-tracking: -0.02em;
+  --bp-h1-tracking: var(--tok-reading-h1-tracking);
   --bp-h2-size: var(--tok-reading-h2-size);
   --bp-h2-lh: var(--tok-reading-h2-lh);
+  --bp-h2-tracking: var(--tok-reading-h2-tracking);
   --bp-h3-size: var(--tok-reading-h3-size);
   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
+  --bp-air-code: var(--tok-air-code);
+  --bp-air-table: var(--tok-air-table);
+  --bp-air-asciicast: var(--tok-air-asciicast);
+  --bp-air-callout: var(--tok-air-callout);
+  --bp-air-stats: var(--tok-air-stats);
+  --bp-air-figure: var(--tok-air-figure);
+  --bp-section-beat: var(--tok-section-beat);
+  --bp-section-rule: var(--tok-section-rule);
+  --bp-section-gap: var(--tok-section-gap);
+  --bp-rule-hairline: var(--tok-rule-hairline);
+  --bp-evidence-band: var(--tok-evidence-band);
+  --bp-evidence-band-max: var(--tok-evidence-band-max);
+  --bp-evidence-fill: var(--tok-evidence-fill);
+  --bp-evidence-gutter: var(--tok-evidence-gutter);
+  --bp-evidence-caption: var(--tok-evidence-caption);
+  --bp-evidence-width: max(100%, min(max(var(--bp-evidence-band), 100cqw * var(--bp-evidence-fill)), var(--bp-evidence-band-max), 100cqw - 2 * var(--bp-evidence-gutter)));
+  --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
   --bp-code-size: 0.92em;
@@ -66,7 +84,7 @@
   --bp-codeblock-size: 0.9rem;
   --bp-codeblock-lh: 1.5;
   --bp-codeblock-pad: 0.9rem 1.1rem;
-  --bp-codeblock-margin: 1.2rem 0;
+  --bp-codeblock-margin: var(--bp-air-code) 0 0;
   --bp-codeblock-radius: 0;
   --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
@@ -91,13 +109,32 @@
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
   --tok-reading-heading-weight: 600;
   --tok-reading-body-size: 18px;
-  --tok-reading-body-lh: 1.65;
-  --tok-reading-h1-size: 32px;
-  --tok-reading-h1-lh: 1.1;
-  --tok-reading-h2-size: 24px;
+  --tok-reading-body-lh: 1.6;
+  --tok-reading-body-tracking: 0.005em;
+  --tok-reading-h1-size: 40px;
+  --tok-reading-h1-lh: 1.05;
+  --tok-reading-h1-tracking: -0.02em;
+  --tok-reading-h2-size: 27px;
   --tok-reading-h2-lh: 1.2;
-  --tok-reading-h3-size: 20px;
-  --tok-reading-h3-lh: 1.25;
+  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h3-size: 21px;
+  --tok-reading-h3-lh: 1.3;
+  --tok-air-beat: 22px;
+  --tok-air-code: calc(var(--tok-air-beat) * 1.1);
+  --tok-air-table: calc(var(--tok-air-beat) * 1.36);
+  --tok-air-asciicast: calc(var(--tok-air-beat) * 1.45);
+  --tok-air-callout: calc(var(--tok-air-beat) * 1.55);
+  --tok-air-stats: calc(var(--tok-air-beat) * 1.64);
+  --tok-air-figure: calc(var(--tok-air-beat) * 1.82);
+  --tok-section-beat: calc(var(--tok-air-beat) * 4.18);
+  --tok-section-rule: 2px;
+  --tok-section-gap: 16px;
+  --tok-rule-hairline: 1px;
+  --tok-evidence-band: 1040px;
+  --tok-evidence-band-max: 1240px;
+  --tok-evidence-fill: 0.65;
+  --tok-evidence-gutter: 40px;
+  --tok-evidence-caption: 50ch;
   --ok-hsl: 142 72% 26%;
   --warn-hsl: 35 92% 38%;
   --danger-hsl: 0 68% 42%;
@@ -470,9 +507,24 @@
  * returns. Heading margins are TOP-only vertical rhythm (h1 1.2em, h2 1.9em,
  * h3 1.5em), byte-mirrored with the reader's .bp-paper-surface hN rules. */
 .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
 .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
-.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+/* THE SECTION HEAD — the EDIT twin of the reader's
+ * `.bp-paper-surface > #paper-body > h2` (+ its keyed-stream leg) in
+ * paper-surface.css, which carries the full reasoning. A TOP-LEVEL level-2
+ * heading is a section boundary and takes both halves of the device: the
+ * `--bp-section-beat` air above the rule, the rule, and `--bp-section-gap`
+ * between the rule and the words. Scoped to a DIRECT child so a component's own
+ * h2 (a `.bp-card` title in a grid cell) is untouched — the same exclusion the
+ * reader's legs make, expressed in the flat ProseMirror document where a heading
+ * node has no wrapper. Byte-mirrored with the reader declaration; the pair is
+ * pinned by view_edit_parity_test.exs, and drift here IS View<->Edit drift. */
+.bp-paper-editor-body > h2 {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  padding-top: var(--bp-section-gap);
+}
+.bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
 .bp-paper-editor-body a  {
   color: var(--paper-accent); text-decoration: none;
   border-bottom: 1px solid var(--paper-accent-soft);
@@ -489,18 +541,18 @@
  * node emits `<p class="bp-role-*">` matching the reader; pullquote's italic rides
  * INLINE off the node (font-style:italic), not the class. Keep byte-aligned with
  * root.html.heex + paper-surface.css (view_edit_parity_test enforces it). */
-.bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem; }
-.bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
-.bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
-.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
+.bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; }
+.bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
+.bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; }
+.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
 /* editable-table: the three reader table class rules, mirrored byte-for-byte from
  * paper-surface.css `.bp-paper-surface .bp-table*` (the embedder sink — the standalone
  * bundle has no `.bp-paper-surface` ancestor, so it carries the hand-copied mirror).
  * Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the reader binds — never
  * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
  * §2 guards drift vs the reader). */
-.bp-paper-editor-body .bp-table { border-collapse: collapse; width: 100%; }
-.bp-paper-editor-body .bp-table__th { border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
+.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
 .bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
@@ -779,7 +831,7 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * the reader rules via the surface cascade) — this is the blessed standalone-
  * host extra pattern. view_edit_parity_test.exs §"callout tone mirror" locks it
  * byte-for-byte to the reader. Tokens `--bp-tone-*` are defined above. */
-.bp-paper-editor-body .bp-callout { padding: 16px; border-left: 4px solid transparent; }
+.bp-paper-editor-body .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 16px; border-left: 4px solid transparent; }
 .bp-paper-editor-body .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
 .bp-paper-editor-body .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
 .bp-paper-editor-body .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
@@ -796,15 +848,15 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * typography + the bp-button mirror below paint them), so ONLY the container +
  * tone rules are mirrored; the model-A slot-chrome rules are GONE (S10,
  * parity2-bug-card-slot-chrome). bp-canvas-card* is the thin edit-only hook. */
-.bp-paper-editor-body .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
-.bp-paper-editor-body .bp-card--info { border-top-color: var(--st-info); }
-.bp-paper-editor-body .bp-card--ok { border-top-color: var(--st-ok); }
-.bp-paper-editor-body .bp-card--warn { border-top-color: var(--st-warn); }
-.bp-paper-editor-body .bp-card--danger { border-top-color: var(--st-danger); }
+.bp-paper-editor-body .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-left: 3px solid var(--paper-chrome-border); }
+.bp-paper-editor-body .bp-card--info { border-left-color: var(--st-info); }
+.bp-paper-editor-body .bp-card--ok { border-left-color: var(--st-ok); }
+.bp-paper-editor-body .bp-card--warn { border-left-color: var(--st-warn); }
+.bp-paper-editor-body .bp-card--danger { border-left-color: var(--st-danger); }
 /* The card's action slot is the reader's PdButton anchor; mirror the
  * `.bp-paper-surface .bp-button` rules byte-for-byte (the .bp-canvas-action
  * precedent above) so the embedder paints it identically to /papers. */
-.bp-paper-editor-body .bp-card .bp-button { display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent); color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0; }
+.bp-paper-editor-body .bp-card .bp-button { display: inline-block; padding: 10px 20px; border: var(--bp-rule-hairline) solid var(--paper-accent); color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0; }
 .bp-canvas-card { position: relative; }
 .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
 .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
@@ -1111,7 +1163,7 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   background: var(--paper-bg-deep, #f4f4ef);
 }
 .bp-canvas-action .bp-button {
-  display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+  display: inline-block; padding: 10px 20px; border: var(--bp-rule-hairline) solid var(--paper-accent);
   color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
 }
 /* Shared with the card slot's primary button (folded here so the one

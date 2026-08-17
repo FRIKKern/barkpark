@@ -95,6 +95,17 @@ func runPaper(out *writer, g globals, args []string) int {
 			return exitOK
 		}
 		return runPaperCapture(out, g, args[1:])
+	// The BPML working copy (masterplan W3, paper_wc_cmd.go): read verbs above
+	// render papers; these edit them as files under .barkpark/papers/. They
+	// resolve the target context exactly like every other built-in.
+	case "pull":
+		return runPaperPull(out, g, resolveContext(g), args[1:])
+	case "status":
+		return runPaperStatus(out, g, resolveContext(g), args[1:])
+	case "diff":
+		return runPaperWCDiff(out, g, args[1:])
+	case "push":
+		return runPaperPush(out, g, resolveContext(g), args[1:])
 	case "help":
 		usagePaper(out, true)
 		return exitOK
@@ -1546,6 +1557,18 @@ func usagePaper(out *writer, toStdout bool) {
 	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
 	p("                   to opening it in the browser)")
 	p("  capture <url>    capture immutable CLI, task-board, and TUI readers")
+	p("")
+	p("working copy (BPML — papers as files under .barkpark/papers/):")
+	p("  pull <slug>      fetch the paper as BPML + a pristine snapshot + rev anchor")
+	p("  status [<slug>]  edited? (vs pristine) and behind? (anchor vs server)")
+	p("  diff <slug>      line diff of your edits")
+	p("  push <slug>      send the edited file; the SERVER derives and applies the")
+	p("                   op batch under your anchor, then the file converges on")
+	p("                   the returned canonical BPML")
+	p("")
+	p("to WRITE a paper: bp bulldocs publish <slug> --file payload.json")
+	p("  (blocks payload — never hand-rolled HTML; the slug also goes INSIDE the")
+	p("   JSON). Guide: /papers/paper-authoring-excellence")
 }
 
 // usagePaperView prints the `bp paper view` command signature. An explicit
