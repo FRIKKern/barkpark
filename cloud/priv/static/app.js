@@ -16780,17 +16780,17 @@
   // unknown action (a newly-added verb the SPA hasn't learned) falls back to the
   // raw action so it still renders rather than disappearing.
   //
-  // GENERATED from design/audit-actions.json — the SOLE authority for the audit
+  // GENERATED from cloud/priv/audit-actions.json — the SOLE authority for the audit
   // register's verbs. That one table also feeds the server's closed @actions
   // allowlist (AuditEvent reads it at compile time), so this object and the
   // vocabulary it labels can no longer drift apart: they are two OUTPUTS of one
   // file, and neither side greps the other's syntax. A hand edit inside the
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
-    /* BEGIN GENERATED: audit action labels (design/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 36 of the 56 declared verbs have no entry here: they render
+    /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+    // 34 of the 56 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
-    // declared unlabelled ON PURPOSE with a reason in design/audit-actions.json
+    // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
     "member.invited": "invited a member",
     "member.role_changed": "changed a member's role",
@@ -16815,7 +16815,9 @@
     // instance write because the box answered our stored admin credential 401.
     // The actor tried; the request never left. The expanded detail carries the
     // wire word (reason: "identity_refused") and which write it was.
-    "barkpark.credentials_refused": "was refused — the instance rejected our access credential"
+    "barkpark.credentials_refused": "was refused — the instance rejected our access credential",
+    "twofa.enabled": "enabled two-factor authentication",
+    "twofa.disabled": "disabled two-factor authentication"
     /* END GENERATED: audit action labels */
   };
 
@@ -24180,7 +24182,7 @@
       // email and the system's own verb share ONE text run.
       activityRow: activityRow,
       // cch-w65: the audit verb → sentence-fragment lookup, so the harness can
-      // pin the SHIPPED artifact against design/audit-actions.json — every
+      // pin the SHIPPED artifact against cloud/priv/audit-actions.json — every
       // labelled verb serves its label, every unlabelled one falls back to its
       // raw dotted slug (D582). Without this the generated region is proven only
       // against itself by the design gate.

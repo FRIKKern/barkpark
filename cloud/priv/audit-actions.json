@@ -226,18 +226,8 @@
       "reason_code": "d582-copy-not-written",
       "reason": "Which events raise a notification was changed — a subscription edit that quietly decides what the team hears about. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
     },
-    {
-      "verb": "twofa.enabled",
-      "label": null,
-      "reason_code": "d582-copy-not-written",
-      "reason": "Two-factor authentication was enabled on an account. PRODUCED since cch-w53-s3 (audit_account_security/2), and its missing label has TWO open rows of its own: cch-w53-bl-action-labels-has-no-twofa-entry and cch-w53-bl-twofa-rows-render-as-raw-slugs. This slice couples the vocabularies and must not absorb them (D835 — the lead dedupes)."
-    },
-    {
-      "verb": "twofa.disabled",
-      "label": null,
-      "reason_code": "d582-copy-not-written",
-      "reason": "Two-factor authentication was disabled — a security DOWNGRADE reading as a machine token. Owned by cch-w53-bl-twofa-rows-render-as-raw-slugs and cch-w53-bl-action-labels-has-no-twofa-entry; this slice must not absorb them (D835 — the lead dedupes)."
-    },
+    { "verb": "twofa.enabled", "label": "enabled two-factor authentication" },
+    { "verb": "twofa.disabled", "label": "disabled two-factor authentication" },
     {
       "verb": "oauth.linked",
       "label": null,
