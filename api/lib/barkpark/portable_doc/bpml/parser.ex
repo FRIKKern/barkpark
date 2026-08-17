@@ -36,7 +36,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "td" => [],
     "meta" => [],
     "description" => [],
-    "a" => ~w(href)
+    "a" => ~w(href),
+    "hr" => ~w(id),
+    "expandable" => ~w(id summary)
   }
 
   @unknown_tag_hints %{
@@ -46,7 +48,6 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "aside" => "use <callout tone=\"info\"> for side notes",
     "span" => "plain text needs no wrapper; use <b>/<i>/<code> for emphasis",
     "br" => "line breaks are separate <p> blocks",
-    "hr" => "the divider block is not in the BPML kernel yet",
     "img" => "the image block is not in the BPML kernel yet",
     "h4" => "headings stop at <h3>",
     "h5" => "headings stop at <h3>",
@@ -57,7 +58,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram stats steps callout)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram stats steps callout hr expandable)
 
   @inline_marks %{
     "b" => "strong",
@@ -289,6 +290,34 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
     with {:ok, steps, cur} <- child_seq("steps", "step", sc, cur, builder) do
       {:ok, %{"type" => "steps", "steps" => steps} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # The divider is a self-closing leaf (<hr/>) — no content, id-only. It always
+  # round-trips through the printer's self-close, so `sc` carries no block body.
+  defp build_block("hr", attrs, _sc, cur),
+    do: {:ok, put_attr(%{"type" => "divider"}, "id", attrs), cur}
+
+  # A disclosure container — the `section` template with a `summary` attr and a
+  # body of blocks. Empty (self-closed) and populated forms both round-trip.
+  defp build_block("expandable", attrs, sc, cur) do
+    if sc do
+      {:ok,
+       %{"type" => "expandable", "blocks" => []}
+       |> put_attr("id", attrs)
+       |> put_attr("summary", attrs), cur}
+    else
+      {blocks, errors, cur} = block_seq(cur, "expandable")
+      {errors, cur} = expect_close("expandable", cur, errors)
+
+      if errors == [] do
+        {:ok,
+         %{"type" => "expandable", "blocks" => blocks}
+         |> put_attr("id", attrs)
+         |> put_attr("summary", attrs), cur}
+      else
+        {:skip, errors, cur}
+      end
     end
   end
 
