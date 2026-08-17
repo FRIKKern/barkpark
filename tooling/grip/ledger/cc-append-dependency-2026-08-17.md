@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 900tok -->
+<!-- doc-tier: cold | canonical-for: cc-append-dependency-2026-08-17 | budget: 900tok -->
 # CC-append dependency — re-derivation recipe (scaffy wave verify, 2026-08-17)
 
 Question: which house ASSERT CMDs depend on the engine's unconditional
