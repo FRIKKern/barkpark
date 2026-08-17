@@ -1,4 +1,4 @@
-<!-- doc-tier: human | canonical-for: pe cold-agent run rubric pre-registration | budget: 5000tok -->
+<!-- doc-tier: human | canonical-for: pe-cold-agent-run-rubric | budget: 5000tok -->
 
 # The Cold-Agent Authoring Run — Pre-Registered Rubric
 
