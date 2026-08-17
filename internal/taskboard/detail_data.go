@@ -16,6 +16,7 @@ package taskboard
 // derivations and the full-hydration fetch entry point.
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"sync"
@@ -52,7 +53,16 @@ import (
 //
 // The DetailIndex embeds each task's post-overlay board row (syncDetails), so
 // details[id].Task always agrees with Snapshot.Tasks about derived readiness.
+//
+// Both GETs run under ONE per-request context deadline (snapshotFetchTimeout,
+// ~30s) scoped HERE — the snapshot path's own budget, not a raise of the shared
+// apiclient Timeout. That client also serves the interactive claim/close verbs,
+// where the 5s DefaultTimeout is right; the corpus GET is the one call whose
+// honest budget is snapshot-shaped. Rationale in full at snapshotFetchTimeout
+// (fetch.go).
 func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), snapshotFetchTimeout)
+	defer cancel()
 	var (
 		tasks    []Task
 		details  DetailIndex
@@ -64,7 +74,7 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		body, err := getJSON(c, "/v1/tasks?limit=1000")
+		body, err := getJSONCtx(ctx, c, "/v1/tasks?limit=1000")
 		if err != nil {
 			listErr = err
 			return
@@ -73,7 +83,7 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 	}()
 	go func() {
 		defer wg.Done()
-		extras, primeErr = fetchPrime(c)
+		extras, primeErr = fetchPrime(ctx, c)
 	}()
 	wg.Wait()
 	if listErr != nil {
