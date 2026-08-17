@@ -201,6 +201,16 @@ set -euo pipefail
 #       match. Before this line a deploy.yml-only PR dispatched NOTHING in this
 #       set: the recorder could land, or vanish, with no code gate at all.
 #
+# cloud/priv/audit-actions.json — cch-w69-s1. The audit verb table, REDUNDANT
+# under `cloud/**` and declared anyway, by name, because it used to live at
+# design/audit-actions.json as a declared cross-tree read: audit_event.ex
+# compile-time-read it from cloud/lib, which this ratchet COVERED (dispatch-wise)
+# while the control-plane image — built from cloud/ alone — could never contain
+# it, and every cp deploy failed at `mix compile` (D841/D842). The move into
+# cloud/priv is what fixed that, this line keeps the table's dispatch story
+# explicit, and the cloud/lib-reader arm below is what makes the design/-era
+# shape FATAL rather than covered.
+#
 # RESIDUE, named rather than left to be found: `scripts/` is represented here by
 # three EXACT files, not `scripts/**`, because the harness pins exact-entry
 # semantics through `scripts/async_env_seam_scan.exs.orig` and a directory glob
@@ -213,8 +223,8 @@ CLOUD_PATHS='cloud/**
 cloud/lib/**
 .github/workflows/cloud.yml
 .github/workflows/deploy.yml
+cloud/priv/audit-actions.json
 deploy/**
-design/audit-actions.json
 deploy/site-deploy.sh
 deploy/site-deploy-node.sh
 internal/**
@@ -478,6 +488,55 @@ if [ "$count" -lt "$CLOUD_ESCAPE_MIN" ]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# the cloud/lib reader arm (cch-w69-s1) — a DISTINCT failing arm, not coverage
+# ---------------------------------------------------------------------------
+# The coverage arm below answers "does cloud.yml dispatch on this read?" — and
+# that question is the WRONG one for a reader under cloud/lib/, which is why
+# this arm runs FIRST: a covered-and-declared read must still die here, and an
+# undeclared one must red as THIS failure, not as a missing-declaration red that
+# invites declaring it. cloud/lib is compiled
+# INTO the control-plane image, and that image builds from cloud/ alone
+# (cloud/docker-compose.yml `build: .`; the Dockerfile COPYs only mix.exs
+# mix.lock config lib priv). A repo-root read from cloud/lib therefore compiles
+# clean locally and in CI, can be fully DECLARED here — and still detonates at
+# image-build `mix compile`, where the file does not exist. Exactly that shipped
+# in #11723: audit_event.ex compile-time-read design/audit-actions.json, the
+# path was in CLOUD_PATHS, everything was green, and every cp deploy failed with
+# `could not read file "/design/audit-actions.json"` (D841/D842).
+#
+# So: any census row whose READER is under cloud/lib/ is FATAL, covered or not,
+# exempt or not. There is no legitimate instance of this shape — the fix is
+# always to move the file under cloud/ (cloud/priv rides the image's `COPY priv`
+# layer) or to stop reading it from compiled code. cloud/test readers stay the
+# coverage ratchet's business: tests never run inside the image.
+in_image_violations=0
+while IFS='	' read -r p src; do
+  [ -n "$p" ] || continue
+  case "$src" in
+    cloud/lib/*)
+      in_image_violations=$((in_image_violations + 1))
+      echo "::error::cloud-path-escape-check: IN-IMAGE READER ESCAPES THE BUILD CONTEXT: $src reads $p" >&2
+      ;;
+  esac
+done <<<"$census"
+
+if [ "$in_image_violations" -gt 0 ]; then
+  cat >&2 <<'MSG'
+
+A file under cloud/lib/ reads outside cloud/. cloud/lib is COMPILED INTO the
+control-plane image, and the image is built from cloud/ alone — the file above
+cannot exist in-container, so this compiles green everywhere except the deploy,
+where `mix compile` dies (the #11723 / D841 failure class). Declaring the path
+in CLOUD_PATHS does not help: dispatch coverage cannot put a file inside a
+docker build context.
+
+Fix: move the file under cloud/ (cloud/priv/ rides the Dockerfile's `COPY priv`
+layer), or stop reading it from compiled code.
+MSG
+  exit 1
+fi
+
 cloud_ere="$(set_ere cloud)"
 uncovered=0
 while IFS= read -r p; do
@@ -508,3 +567,4 @@ MSG
 fi
 
 echo "OK: every repo-root read from cloud/lib + cloud/test is dispatched on."
+echo "OK: no cloud/lib reader escapes the image build context."

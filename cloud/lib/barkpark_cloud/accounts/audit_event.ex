@@ -33,8 +33,8 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
 
   # The closed verb vocabulary. Dotted `<noun>.<verb>` so the UI can group by
   # noun and a typo is a changeset error (validate_inclusion), not a silent new
-  # category. Extend it in design/audit-actions.json as new audited call-sites
-  # land (the derivation is below) — the routes wired today
+  # category. Extend it in cloud/priv/audit-actions.json as new audited
+  # call-sites land (the derivation is below) — the routes wired today
   # are the member / invitation / token / subscription / site / barkpark seams
   # (including the OC24 instance-lifecycle triggers: retry / verify /
   # studio-link / site-url / self-update / rollback / autoupdate / domain /
@@ -63,7 +63,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # `cch-w58-bl-two-unavailable-vocabularies-name-one-fact`; this comment is the
   # MAP, not the merge.
   # THE VOCABULARY IS NO LONGER A HAND-LIST HERE (cch-w65). It is DERIVED, at
-  # compile time, from design/audit-actions.json — the SOLE authority for the
+  # compile time, from cloud/priv/audit-actions.json — the SOLE authority for the
   # audit register's verbs. That same table also carries each verb's console
   # sentence fragment, and design/emit.mjs emits those into the ACTION_LABELS
   # region of cloud/priv/static/app.js. So the closed server vocabulary and the
@@ -76,9 +76,18 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # @external_resource makes a table edit recompile this module, so the
   # `validate_inclusion(:action, @actions)` below cannot go stale against it.
   # (Compile-time-read precedent in this app: the router's
-  # @providers_capabilities_fixture.) The read is compile-time ONLY — nothing here
-  # touches the filesystem at runtime, and `design/` is not a release artifact.
-  @audit_actions_manifest Path.expand("../../../../design/audit-actions.json", __DIR__)
+  # @providers_capabilities_fixture.) The read is compile-time ONLY — but a
+  # compile-time read still happens INSIDE the image build: the control-plane
+  # image builds from cloud/ alone (cloud/docker-compose.yml `build: .`; the
+  # Dockerfile COPYs mix.exs mix.lock config lib priv into /app), so this module
+  # can only ever read files that live UNDER cloud/. The table lived in design/
+  # once (cch-w65) and that broke every cp deploy — /design/audit-actions.json
+  # does not exist in-container (cch-w69-s1, D841/D842). Hence cloud/priv/: it
+  # rides the existing `COPY priv priv` layer and expands to
+  # /app/priv/audit-actions.json at image-build compile time.
+  # scripts/cloud-path-escape-check.sh now makes any repo-root read from a
+  # cloud/lib reader FATAL, so this cannot silently recur.
+  @audit_actions_manifest Path.expand("../../../priv/audit-actions.json", __DIR__)
   @external_resource @audit_actions_manifest
   @audit_actions_table @audit_actions_manifest
                        |> File.read!()
@@ -97,11 +106,11 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     verb = row["verb"]
 
     unless is_binary(verb) and Regex.match?(~r/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/, verb) do
-      raise "design/audit-actions.json: #{inspect(row)} has no dotted <noun>.<verb> `verb` slug."
+      raise "cloud/priv/audit-actions.json: #{inspect(row)} has no dotted <noun>.<verb> `verb` slug."
     end
 
     unless Map.has_key?(row, "label") do
-      raise "design/audit-actions.json: #{verb} states no `label` key at all. Every declared " <>
+      raise "cloud/priv/audit-actions.json: #{verb} states no `label` key at all. Every declared " <>
               "verb declares its console label explicitly — a string, or null WITH a " <>
               "`reason_code` and a `reason`. An absent key is the silent third state the " <>
               "single-table shape exists to remove."
@@ -110,7 +119,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     if is_nil(row["label"]) and
          not (is_binary(row["reason_code"]) and is_binary(row["reason"]) and
                 String.length(row["reason"]) >= 60) do
-      raise "design/audit-actions.json: #{verb} has `label: null` and no substantive " <>
+      raise "cloud/priv/audit-actions.json: #{verb} has `label: null` and no substantive " <>
               "`reason_code` + `reason`. Charter D582 blessed the raw dotted slug as HONEST, " <>
               "not as unexplained: an unlabelled verb has to say why in the table."
     end
@@ -119,7 +128,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   @actions Enum.map(@audit_actions_table, & &1["verb"])
 
   if length(Enum.uniq(@actions)) != length(@actions) do
-    raise "design/audit-actions.json declares a verb twice: " <>
+    raise "cloud/priv/audit-actions.json declares a verb twice: " <>
             inspect(@actions -- Enum.uniq(@actions)) <>
             ". The vocabulary is a set; a duplicate row means one of the two labels is dead."
   end

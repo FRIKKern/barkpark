@@ -264,10 +264,14 @@ const BP_THEMES_MARKER_BEGIN =
 const BP_THEMES_MARKER_END = "/* END GENERATED: bp-theme ids */";
 
 // The cloud SPA's ACTION_LABELS object (app.js) is the SECOND generated region in
-// that file — the audit verb table design/audit-actions.json owns BOTH the closed
-// Elixir @actions vocabulary and the console's human sentence fragments, so the
-// two can no longer drift apart by hand (charter cch-w65). Same splice machinery,
-// its own marker, its own ledger slot (the `<path>#<name>` key, charter D835).
+// that file — the audit verb table cloud/priv/audit-actions.json owns BOTH the
+// closed Elixir @actions vocabulary and the console's human sentence fragments, so
+// the two can no longer drift apart by hand (charter cch-w65). Same splice
+// machinery, its own marker, its own ledger slot (the `<path>#<name>` key, charter
+// D835). The marker string below still SAYS design/audit-actions.json: it is
+// BYTE-PINNED to the marker line shipped inside app.js's generated region, and
+// this slice (cch-w69-s1) may not touch app.js — repointing the marker text is an
+// `emit --write` over app.js, which belongs to the slice that owns that file.
 const ACTION_LABELS_MARKER_BEGIN =
   "/* BEGIN GENERATED: audit action labels (design/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
 const ACTION_LABELS_MARKER_END = "/* END GENERATED: audit action labels */";
@@ -2185,9 +2189,12 @@ export function bpThemesList(themes = loadThemes()) {
   return "    " + themes.map(({ name }) => JSON.stringify(name)).join(", ");
 }
 
-// ── the audit verb table (charter cch-w65) ───────────────────────────────────
-// design/audit-actions.json is the SOLE authority for the audit register's verb
-// vocabulary. Two artifacts read it and NEITHER reads the other:
+// ── the audit verb table (charter cch-w65; moved into the image cch-w69-s1) ──
+// cloud/priv/audit-actions.json is the SOLE authority for the audit register's
+// verb vocabulary. It lives under cloud/priv — NOT design/ — because its Elixir
+// consumer compile-time-reads it inside the control-plane image build, and that
+// image is built from cloud/ alone (D841/D842: the design/ home broke every cp
+// deploy). Two artifacts read it and NEITHER reads the other:
 //
 //   • cloud/lib/barkpark_cloud/accounts/audit_event.ex derives @actions from
 //     `actions[].verb` at COMPILE time (@external_resource + Jason.decode!), so
@@ -2203,7 +2210,7 @@ export function bpThemesList(themes = loadThemes()) {
 // the manifest itself declares, plus a `reason` that names the open row owning
 // the copy (or, for a producerless verb, the census allowlist excusing it). That
 // turns "unlabelled on purpose" from a discipline into a gate.
-export const AUDIT_ACTIONS_PATH = "design/audit-actions.json";
+export const AUDIT_ACTIONS_PATH = "cloud/priv/audit-actions.json";
 const VERB_RE = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
 const REASON_MIN = 60;
 // Per-code predicates the `reason` prose must satisfy. A minimum length alone
@@ -2283,7 +2290,11 @@ export function auditActionLabels(rows = auditActions()) {
   const lines = [
     `    // ${rows.length - labelled.length} of the ${rows.length} declared verbs have no entry here: they render`,
     `    // as their raw dotted slug through humanAction's fallback below, each one`,
-    `    // declared unlabelled ON PURPOSE with a reason in ${AUDIT_ACTIONS_PATH}`,
+    // BYTE-PINNED literal, not ${AUDIT_ACTIONS_PATH}: this line is part of the
+    // generated region already shipped in app.js, and cch-w69-s1 (which moved
+    // the table to cloud/priv/) may not touch app.js — the slice that owns
+    // app.js repoints it with the next `emit --write` + marker/manifest update.
+    `    // declared unlabelled ON PURPOSE with a reason in design/audit-actions.json`,
     `    // (charter D582 — ugly, not false).`,
   ];
   labelled.forEach((r, i) => {
