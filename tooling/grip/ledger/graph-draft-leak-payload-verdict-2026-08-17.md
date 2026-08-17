@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 2000tok -->
+<!-- doc-tier: cold | canonical-for: graph-draft-leak-payload-verdict-recipes | budget: 2000tok -->
 # Graph draft-leak payload verdict — re-derivation recipes (2026-08-17)
 
 Verifier assignment [graph-draft-leak-payload], API Read-Path Security Sweep wave.
