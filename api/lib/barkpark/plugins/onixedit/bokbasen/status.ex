@@ -102,7 +102,8 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
     # self-written mutation_events row (the listen controller drops frames whose
     # msg has no :event_id) + the canonical fan-out on documents:<dataset> +
     # per-doc + workspace topics. `fresh.rev` is the rev observed before the write.
-    ev = Broadcast.save_event(updated, updated.type, updated.dataset, "update", fresh.rev, :onixedit)
+    ev =
+      Broadcast.save_event(updated, updated.type, updated.dataset, "update", fresh.rev, :onixedit)
 
     Content.broadcast_document_mutation(updated, "update",
       event_id: ev.id,

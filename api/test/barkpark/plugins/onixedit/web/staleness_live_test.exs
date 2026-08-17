@@ -217,8 +217,10 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLiveTest do
       assert row.dataset == "production"
       assert row.mutation == "update"
 
-      # WHICH row is written is unchanged: same doc_id, still the published-side
-      # status the seed carried (no upsert_document draft-twin / published→draft).
+      # WHICH row is written is unchanged: same doc_id, status exactly as the
+      # seed carried it (the seed is draft, so this pins "no upsert_document
+      # draft twin, status untouched"; the published→draft coercion case is
+      # excluded structurally by the raw Repo.update on the same row, not here).
       doc = Repo.get_by!(Document, doc_id: "ack-canon", type: "book", dataset: "production")
       assert doc.doc_id == "ack-canon"
       assert doc.status == "draft"
