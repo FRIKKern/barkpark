@@ -3643,6 +3643,61 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-17 — wave 70 REVIEW — grade A, five code slices + one ruling packet, all pushed with PRs open, ZERO reviewer fixes for the second consecutive wave; the refusal-pipeline arc closes except its round-2 mint chain
+
+**Paper:** `cloud-console-hardening-wave-70-2026-08-17` (debrief appended). **Decisions:** D853–D860
+(this PR, #11831). Entry written on the charter PR branch per the wave-67/68/69 precedent. Everything
+below re-verified by the single wave reviewer on `-r` branches off `origin/main` `0ff6fae4a6`: S1
+Elixir 199/0, S2 Elixir 9/0 + JS 1086/0, S3 JS 1091/0, S4 `design/check.mjs` PASS + emit-fence 9/9 +
+JS 1085/0, S5 Elixir 7/0 (NBSP fixtures byte-verified as real `\xc2\xa0`), S6 paper 200 + sentinel.
+Zero reviewer commits — every final branch is the builder's own.
+
+**LANDED (five branches with PRs open, one papers-only deliverable):**
+
+- S1 `cch-w67-bl-rollback-refusal-discards-the-box-s-own-words` → **#11846**. `rollback_refusal/2` +
+  `teardown_refusal/2` migrate onto `refusal_detail/1`; nested pre-poll refusals compose
+  "code — message" instead of dying into the fallback. HIGH-FLIP-RISK re-derived at review from
+  `cloudError`'s bytes: `error` unmarshals into a Go STRING (a nested object fails the decode →
+  raw clamp), `detail` decodes separately flat — S1's wire (error = route code string, detail = flat
+  composed sentence) keeps both site arms fed. Typed-token fate stated above `rollback_copy/2`.
+- S2 `cch-w67-followup-delete-site-typed-fk-failure` → **#11847**. Both D856 halves: registry rescue
+  (`{:error, :foreign_key_constraint, c}`, only the constraint NAME crosses) + router nested case
+  answering typed `500 registration_not_removed` stating both outcome halves; console arm above the
+  crash arm; destroy-failures test flipped to plain conn reads; census prose rewritten.
+- S3 `cch-w62-bl-friendly-throws-on-the-nested-envelope-it-is-handed` → **#11848**. The D740 unwrap +
+  the D855 three-slug fenced singular-detail rung, one commit; two pins inverted with citing comments
+  (w30-s5 nested, absorbed w66-bl barkpark_required — the relay is exactly D855's designation);
+  exclusions mutation-proven (fence-drop reds the new guard AND the w48-s2 raw-detail guard).
+- S4 `cch-w53-bl-twofa-rows-render-as-raw-slugs` → **#11849**. D857 labels land; every stale
+  `design/audit-actions.json` literal repointed (emit.mjs lookup key + hand-edited app.js marker +
+  check.mjs Part-0 comment — a one-word scope addition the repo-wide-grep criterion required); one
+  `--write` regenerated region + manifest digest. Sole surviving ref is historical prose in
+  `audit_event.ex`.
+- S5 `cch-w69-bl-worker-route-stores-url-unnormalised` → **#11850**. `update_change(:url,
+  &normalize_url/1)` at the chokepoint; HIGH-FLIP-RISK re-derived at review: register (:241), upsert
+  (:262), adopt (:304 via register_barkpark) ALL funnel through `Barkpark.changeset/2`. Honesty
+  clause (new-writes-only, raw index unstrengthened, dup-scan SQL quoted) in two durable venues.
+- S6 `cch-w70-d836-site-delete-tier-ruling-packet` — papers-only, NO branch/PR by design. Ruling
+  Paper `/papers/cch-w70-site-delete-tier-ruling-2026-08-17` published (21 blocks, band-framed,
+  function-name trace, priced raise, standing keep-member-tier recommendation); finding task carries
+  the slug as evidence and stays OPEN for the owner's ruling.
+
+**LEDGER:** one omission fixed at review — S2's console-arm criterion (index 3) was shipped but
+unstamped; stamped with reviewer evidence. All six tasks `in_progress` with merge/lead-gated criteria
+open. Wave referent closed by review.
+
+**NEXT WAVE MUST KNOW:** (1) Merge order is free among S1–S5 (regions disjoint; S3/S4 share app.js
+~16k lines apart — either order). (2) S7 `cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal`
+is round 2 — dispatch ONLY after #11846 (router_sites_test.exs) and #11847 (router.ex) both merge; its
+nested fixture must RUN red on pre-fix bytes (transport is trace-proven only). (3) Second reviews owed
+per D850 for S1 (#11846) and S5 (#11850) via `gh pr review --comment`. (4) Lead duties standing: close
+`cch-w67-bl-the-cli-site-delete-receipt-flattens-every-typed-refusal` (#11784 MERGED, D860e); annotate
+#11547 with the ruling Paper URL (D859e); confirm each cp-touching merge's deploy SUCCESS + serving_sha
+advance. (5) The worker-url backfill row stays gated on the prod dup-scan (D858) — note the quoted
+scan's `btrim()` under-reports NBSP-led dups; refine before running. (6) S3's fence tests pin
+relay-verbatim semantics with plausible synthetic detail sentences for deploy_ability_required /
+nothing_to_update — if the real server sentences prove CLI-voiced, that is a D855 census question.
+
 ### 2026-08-17 — wave 69 REVIEW — grade A, six round-1 slices, all pushed with PRs open, ZERO reviewer fixes; the deploy seam reopens and the five-strand debt is paid
 
 **Paper:** `cloud-console-hardening-wave-69-2026-08-17` (debrief appended). **Decisions:** D841–D852
