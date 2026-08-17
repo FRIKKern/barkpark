@@ -53,6 +53,15 @@ on:
       # Same #963->#969-class gap as the carve-outs above; amends charter D57,
       # which prescribed a manual workaround instead.
       - "cloud/priv/static/__fixtures__/**"
+      # Onramp teach-block parity (docs/setup/CODEX.md, docs/setup/AGENTS-MD.md).
+      # TestOnrampAgentsMdWrapperParity reads CODEX.md from DISK and asserts it
+      # embeds the canonical AGENTS.md body verbatim — but an md-only edit
+      # carries NO .go diff, so before this carve-out no md-triggered workflow
+      # ran the Go suite and the parity gate was vacuously green on the exact
+      # PRs it exists to catch (paper-excellence charter D42). Same
+      # #963->#969-class gap as above.
+      - "docs/setup/CODEX.md"
+      - "docs/setup/AGENTS-MD.md"
   pull_request:
     paths:
       - "**/*.go"
@@ -64,6 +73,8 @@ on:
       - "internal/taskboard/testdata/**"
       - "docs/cli/fixtures/**"
       - "cloud/priv/static/__fixtures__/**"
+      - "docs/setup/CODEX.md"
+      - "docs/setup/AGENTS-MD.md"
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
