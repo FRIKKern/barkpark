@@ -81,7 +81,7 @@ name: Shell harnesses
 # .github/` returned NOTHING before this: 96 assertions that neutralise each
 # refusal guard by its `# MUT:` anchor and watch the refusal disappear were a
 # document, not a gate, so an edit to the runner broke them in silence.
-# crown-reconcile.test.sh, the comparable instrument, is gated twice. The harness
+# The comparable crown instrument is gated twice in its OWN workflow (its harness must never be named here — the crown suite greps this file to prove it is not double-run). The harness
 # is fixture-driven and offline — `git init` repos in mktemp, a stub producer, a
 # `--depth 1` file:// clone for the shallow case, git identity passed with
 # `git -c` so a runner without a configured user still commits — so no secret and
