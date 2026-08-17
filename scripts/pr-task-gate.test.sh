@@ -181,6 +181,14 @@ done
 if [ -z "$port" ]; then echo "TEST HARNESS FAIL: the fixture server never announced a port" >&2; exit 99; fi
 BASE="http://127.0.0.1:$port"
 
+# Hermeticity: the token-matrix rows below distinguish token-PRESENT from
+# token-ABSENT, and check()'s subshell INHERITS the caller's environment — a
+# developer running this harness with LEDGER_TOKEN exported (say, after poking
+# the gate by hand) would red every token-absent row for a reason that has
+# nothing to do with the gate. CI never sets it on the self-test step; make the
+# local run match.
+unset LEDGER_TOKEN
+
 pass=0 fail=0
 check() { # check <label> <expected_exit> <env...>
   local label="$1" want="$2"; shift 2
