@@ -18041,12 +18041,132 @@ test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (it
     "a teamless caller's DOMAIN was never judged — do not tell them its syntax is wrong");
   assert.match(teamless.textContent, /team/i, "the sentence names the real obstacle");
 
-  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps its sentence.
+  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps a TRUE sentence.
+  // cch-w40-bl (D870) retired the false "Only <name>.barkpark.cloud …" claim —
+  // invalid_domain now reads as the honest syntax verdict.
   const badSyntax = await drive(422, { error: "invalid_domain" });
-  assert.equal(badSyntax.textContent, "Only <name>.barkpark.cloud domains are supported for now.",
-    "a real syntax refusal is unchanged — the fence is one code wide");
+  assert.equal(badSyntax.textContent, "That doesn't look like a valid domain name.",
+    "a real syntax refusal reads as a syntax refusal");
   const taken = await drive(409, { error: "taken" });
   assert.equal(taken.textContent, "That domain is already in use.");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w40-bl (D870): attachDomain STOPS LYING — the pure copy arm relays the
+// measured DNS evidence.
+//
+// THE DEFECT: attachDomain()'s inline 422 ternary answered EVERY 422 except
+// no_team with "Only <name>.barkpark.cloud domains are supported for now." That
+// sentence is FLATLY FALSE — external FQDNs ARE supported (router.ex:4237,
+// DomainOwnership.pointed_at?) — and on domain_not_pointed the console threw
+// away the whole remedy payload (expected_ip + observed) to tell the user the
+// feature does not exist.
+//
+// THE FIX: a pure attachDomainFailureCopy(status, data) in the *FailureCopy +
+// __bpTestHook pattern (peers siteCreateFailureCopy, siteDeleteFailureCopy),
+// node-pinned so a copy mutation can no longer sit undetected in a DOM handler.
+//
+// PRE-FIX RED (recorded here as the durable venue): the "domain_not_pointed
+// relays the measured IP" test below REDS on unmodified main — the pure function
+// did not exist there (hooks.attachDomainFailureCopy was undefined) and the
+// inline path rendered the false barkpark.cloud-only sentence, which carries no
+// expected_ip. Its own describe block, disjoint from cch-w72-s2's ERRORS/fence
+// edits.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("cch-w40-bl: attachDomainFailureCopy is exported (the extraction that made the copy pinnable)", () => {
+  assert.equal(typeof hooks.attachDomainFailureCopy, "function",
+    "attachDomainFailureCopy must be exported — without it the 422 copy is unpinnable inline");
+});
+
+test("cch-w40-bl: domain_not_pointed RELAYS the measured remedy — expected_ip always, observed when present", () => {
+  const f = hooks.attachDomainFailureCopy;
+  // The exact wire shape router.ex:4242 emits: expected_ip = the box IP, observed
+  // = the list the resolver actually returned (fail-closed empty on no answer).
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7 — right now it resolves to 198.51.100.9.",
+    "the measured target AND the observed answer both reach the user");
+  // Multiple observed answers join with ', '.
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9", "198.51.100.10"] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7 — right now it resolves to 198.51.100.9, 198.51.100.10.",
+    "an array of observed answers is joined, not stringified as [object]");
+  // Empty observed (the fail-closed no-answer case) → the target sentence, closed
+  // with a period, no dangling "resolves to".
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: [] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7.",
+    "no observed answer → just the target, no empty 'resolves to' clause");
+  // expected_ip is NULLABLE on the wire: pointed_at?(_host, nil, _opts) answers
+  // {:error, []} for a host-less instance and the route relays expected_ip:
+  // bp.host verbatim — the remedy clause must not render "at null".
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: null, observed: [] }),
+    "That domain isn't pointed at this instance yet.",
+    "a null expected_ip drops the remedy clause instead of pointing at 'null'");
+  // The false sentence is gone entirely from this arm.
+  const all = [
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"] }),
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: [] }),
+    f(422, { error: "invalid_domain" }),
+  ].join(" | ");
+  assert.equal(all.indexOf("barkpark.cloud domains are supported"), -1,
+    "the false 'Only <name>.barkpark.cloud …' sentence must not survive anywhere in the attach arm");
+});
+
+test("cch-w40-bl: the per-slug truth table — every arm relays what the plane measured, nothing invents a cause", () => {
+  const f = hooks.attachDomainFailureCopy;
+  // 409s — the conflict sentences, unchanged.
+  assert.equal(f(409, { error: "taken" }), "That domain is already in use.");
+  assert.equal(f(409, { error: "already_attaching" }), "An attach is already running.");
+  // 422 invalid_domain — a TRUE syntax verdict now (the false claim died).
+  assert.equal(f(422, { error: "invalid_domain" }), "That doesn't look like a valid domain name.");
+  // 422 instance_no_origin — relay the server's own detail sentence verbatim
+  // (D870 routes it to THIS arm; one screen, one dialect).
+  assert.equal(
+    f(422, { error: "instance_no_origin", detail: "This instance has no origin yet, so DNS can't be pointed." }),
+    "This instance has no origin yet, so DNS can't be pointed.",
+    "instance_no_origin relays data.detail verbatim");
+  // 422 no_team — the w38 carve-out is untouched: it falls to friendly(), which
+  // owns the sentence that repairs a teamless caller. Never a domain-syntax verdict.
+  const noTeam = f(422, { error: "no_team" });
+  assert.equal(noTeam.indexOf("valid domain name"), -1, "a teamless caller's DOMAIN was never judged");
+  assert.equal(noTeam.indexOf("barkpark.cloud domains are supported"), -1, "…nor sold the false claim");
+  // 422 invalid (the enqueue changeset slug) and any unseen slug → friendly()
+  // generic. friendly({error:"invalid"}) resolves ERRORS.invalid.
+  assert.equal(f(422, { error: "invalid" }), "That didn't work — check your input.");
+  assert.equal(f(500, {}), "Something went wrong — please try again.",
+    "an unslugged/unknown failure falls to the curated generic");
+  // domain_required is MODAL-UNREACHABLE: attachDomain's empty-value guard returns
+  // before the POST, so the server never emits domain_required to this arm. It is
+  // classified in the source comment above attachDomainFailureCopy and given NO
+  // copy of its own — asserting a sentence for it would pin an unreachable path.
+});
+
+test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
+  // The impure drive proves the wire → DOM path: the measured IP reaches the
+  // inline error through textContent, not the false sentence. This is the leg that
+  // REDS on pre-fix bytes (the old ternary rendered the barkpark.cloud claim).
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+  dom.els["domain-input"].value = "shop.example.com";
+  sandbox.fetch = fetchStub(422, {
+    error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"],
+  });
+  sandbox.document = dom.document;
+  try {
+    hooks.attachDomain({ id: "bp1", name: "Production" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { Object.assign(sandbox, saved); }
+  const errEl = dom.els["domain-error"];
+  assert.equal(errEl.hidden, false, "the inline error shows");
+  assert.match(errEl.textContent, /Point an A record at 203\.0\.113\.7/,
+    "the measured target IP reaches the user through the DOM");
+  assert.match(errEl.textContent, /resolves to 198\.51\.100\.9/,
+    "the observed answer reaches the user too");
+  assert.equal(errEl.textContent.indexOf("barkpark.cloud domains are supported"), -1,
+    "the false sentence is gone from the rendered arm");
 });
 
 // cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
