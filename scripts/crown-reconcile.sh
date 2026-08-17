@@ -252,7 +252,7 @@
 # The empty-population arm used to exit 2 unconditionally, and rc 2 pages. A
 # repo that simply stops merging for a day empties the 24h window BY
 # CONSTRUCTION, so the reconciler reds every 6 hours forever: measured
-# 2026-08-15T18:28Z..08-17, EIGHT consecutive scheduled runs, every one "COULD
+# 2026-08-15T18:28Z..08-17, SIX consecutive scheduled runs, every one "COULD
 # NOT VERIFY: the population was EMPTY", #11217 at 41 comments. An alarm that
 # pages on quiescence is the rc-4 lesson again — paging here is what mutes the
 # alarm for the one case that is not.
@@ -1195,7 +1195,7 @@ fi
 if [ "$DELIVERING" -eq 0 ]; then
   # ── QUIET WINDOW (charter D597): an empty window on a VERIFIED crown ───────
   # A repo that stops merging empties this window BY CONSTRUCTION, and rc 2
-  # here paged every 6 hours forever (8-run streak 2026-08-15..17, #11217 at 41
+  # here paged every 6 hours forever (6-run streak 2026-08-15..17, #11217 at 41
   # comments). Quiescence reads green ONLY when all three hold: (1) the serving
   # check verified the served sha has its cp row, (2) the re-ask list was
   # PRESENT-EMPTY, (3) zero ledger rows sit inside the window. Any OTHER

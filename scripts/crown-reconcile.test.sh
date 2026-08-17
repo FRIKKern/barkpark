@@ -417,7 +417,7 @@ not_saw "RECONCILED:" "it never claims reconciliation over zero runs"
 
 section "(u) QUIET WINDOW: an empty window on a VERIFIED crown is a NAMED deferral"
 # The live streak, in fixture form. A quiet repo empties the 24h window BY
-# CONSTRUCTION, and the empty-population rc 2 paged EIGHT consecutive scheduled
+# CONSTRUCTION, and the empty-population rc 2 paged SIX consecutive scheduled
 # runs 2026-08-15T18:28Z..08-17 (#11217 at 41 comments) — all saying only that
 # nothing happened. Quiescence may read green ONLY when all three conditions
 # hold, and each condition is pinned below by the ONE fixture that fails it
