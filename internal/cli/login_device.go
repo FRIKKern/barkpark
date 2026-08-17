@@ -127,7 +127,25 @@ func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName string) error
 	for i := 0; i < devicePollMax; i++ {
 		status, perr := devicePollStep(out, cfg, client, base, ds.DeviceCode)
 		if perr != nil {
-			return perr
+			// Only a TRUE refusal aborts. classifyDevicePollError (inside the step)
+			// already draws the terminal line: a *deviceAuthError is the user's
+			// decision — they denied it or the code expired — and there is nothing to
+			// wait for, so we return immediately with zero further polls. Anything
+			// else is a TRANSIENT transport blip (a 500, a dropped connection); the
+			// human is still at the browser and their approval has not been consulted,
+			// so we back off and keep waiting — identical to how the one-shot
+			// --device-poll maps the same error to a retryable exitGeneric. The
+			// devicePollMax cap bounds the retries: an all-error server still
+			// terminates via the timeout below, never spinning forever.
+			if asDeviceAuthError(perr) {
+				return perr
+			}
+			interval += devicePoll // widen the cadence on a transient failure
+			if out.isTTY {
+				fmt.Fprint(out.stderr, ".") // keep the heartbeat alive while we retry
+			}
+			deviceSleep(interval)
+			continue
 		}
 		switch status {
 		case cloudclient.DevicePollApproved:
