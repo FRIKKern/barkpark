@@ -88,13 +88,35 @@ with open(transcript, encoding="utf-8", errors="replace") as fh:
 
 failures = []
 bp_reads = []
+
+# A bp invocation may be bare (`bp …`, PATH) or path-prefixed (`/x/.bin/bp …`,
+# `./bp …`) — the cold prompt hands the agent the binary's ABSOLUTE path, so an
+# audit gated on bare `bp ` alone would miss every call and pass vacuously.
+BP_CALL = re.compile(r"(?:^|[^\w.-])(?:\S*/)?bp\s+([a-z-]+)(?:\s+([a-z-]+))?(.*)$")
+
+def split_parts(cmd):
+    for part in re.split(r"&&|\|\||;|\|", cmd):
+        yield part.strip()
+
+# D50 sanctions "the agent's OWN created slug(s)" — the M3 read-back is a rubric
+# REQUIREMENT, so a slug this transcript itself creates/pushes is sanctioned for
+# reads. (Pushing onto a foreign existing slug is refused by the rev guard and
+# the wall; it cannot launder a warm slug into the allowlist in practice, and
+# any such write would be visible in the transcript regardless.)
+own_slugs = set()
+for cmd in cmds:
+    for part in split_parts(cmd):
+        m = BP_CALL.search(part)
+        if m and m.group(1) == "paper" and (m.group(2) or "") in ("new", "push"):
+            sm = re.search(SLUG, m.group(3) or "")
+            if sm:
+                own_slugs.add(sm.group(0))
+allow |= own_slugs
+
 # split compound commands so `x && bp search y` is still caught.
 for cmd in cmds:
-    for part in re.split(r"&&|\|\||;|\|", cmd):
-        part = part.strip()
-        if not re.match(r"(^|.*\s)bp\s", " " + part):
-            continue
-        m = re.search(r"\bbp\s+([a-z-]+)(?:\s+([a-z-]+))?(.*)$", part)
+    for part in split_parts(cmd):
+        m = BP_CALL.search(part)
         if not m:
             continue
         verb, sub, rest = m.group(1), (m.group(2) or ""), (m.group(3) or "")
@@ -117,6 +139,8 @@ for cmd in cmds:
                 failures.append("LEAK — read of un-sanctioned slug `%s`: %s" % (slug, part))
 
 print("leakage-audit: guide-derived allowlist (%d): %s" % (len(allow), ", ".join(sorted(allow))))
+print("leakage-audit: own created/pushed slug(s) sanctioned (%d): %s"
+      % (len(own_slugs), ", ".join(sorted(own_slugs)) or "(none)"))
 print("leakage-audit: slug-bearing reads seen (%d): %s"
       % (len(bp_reads), ", ".join(sorted({s for s, _ in bp_reads})) or "(none)"))
 if failures:
@@ -142,20 +166,36 @@ EOF
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp paper view paper-authoring-excellence"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp doc ls tag && bp paper view eight-minute-erasure"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp paper push my-paper"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp paper pull my-paper"}}]}}
 EOF
-  # LEAKY: a bp search and a read of an un-sanctioned slug.
+  # LEAKY: a bp search, a read of an un-sanctioned slug, and the same two
+  # smuggled through the binary's ABSOLUTE path (the cold prompt hands the
+  # agent that path, so path-prefixed calls are the likely spelling).
   cat > "$TMP/leaky.jsonl" <<'EOF'
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp search wave 6 grade"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp doc get paper heggemsnes-act -o json"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"/tmp/harness/.bin/bp task ready"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"/tmp/harness/.bin/bp paper view paper-excellence-wave-7-2026-08-17"}}]}}
 EOF
   echo "== selftest: CLEAN transcript should PASS =="
   audit "$TMP/clean.jsonl" "$TMP/guide.txt"; CLEAN_RC=0
-  echo "== selftest: LEAKY transcript should FAIL =="
-  if audit "$TMP/leaky.jsonl" "$TMP/guide.txt"; then
+  echo "== selftest: LEAKY transcript should FAIL with all 4 findings =="
+  set +e
+  LEAKY_OUT="$(audit "$TMP/leaky.jsonl" "$TMP/guide.txt")"
+  LEAKY_RC=$?
+  set -e
+  echo "$LEAKY_OUT"
+  if [ "$LEAKY_RC" -eq 0 ]; then
     echo "leakage-audit: SELFTEST FAIL — the leaky transcript was not caught" >&2
     exit 1
   fi
-  echo "leakage-audit: SELFTEST PASS — clean passes, leaky fails"
+  # All four must be caught INDIVIDUALLY — two bare, two path-prefixed — or a
+  # spelling class is invisible and the audit passes vacuously on it.
+  if ! printf '%s' "$LEAKY_OUT" | grep -q "FAIL — 4 finding"; then
+    echo "leakage-audit: SELFTEST FAIL — expected exactly 4 findings (2 bare + 2 path-prefixed); a spelling class slipped" >&2
+    exit 1
+  fi
+  echo "leakage-audit: SELFTEST PASS — clean passes (incl. own-slug read-back), leaky fails on all 4 (incl. path-prefixed bp)"
   exit 0
 fi
 
