@@ -2287,7 +2287,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     inner = Enum.map(Map.get(b, "blocks", []), &compose_block(&1, style))
 
     children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
-    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+    box = %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+
+    # Section-frame hook (charter D19): variant=="framed" stamps a top-level
+    # "class" on the PdBox — a FIXED literal, never interpolated author data.
+    # Emission is the walker's call (box_class_attr): :article only + whitelist,
+    # so the email leg stays byte-identical and an unknown variant fail-softs
+    # to the exact unclassed bytes above.
+    case Map.get(b, "variant") do
+      "framed" -> Map.put(box, "class", "bp-section--framed")
+      _ -> box
+    end
   end
 
   # EMAIL-DEGRADE helper — stable-sort a grid section's `blocks` by their CSS
@@ -2369,7 +2379,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     hr = ~s(<hr class="bp-hr">)
 
-    ~s(<div style="display:flex;flex-direction:column">) <>
+    ~s(<div#{section_frame_class_attr(b, style)} style="display:flex;flex-direction:column">) <>
       hr <>
       title_html <>
       ~s(<div class="bp-section__grid" style="--bp-tracks:#{tracks};--bp-grid-gap:#{gap}">) <>
@@ -2378,6 +2388,18 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       hr <>
       "</div>"
   end
+
+  # GRID leg of the section-frame hook (charter D19): the same FIXED-literal
+  # class inline on the grid wrapper — this `_raw` HTML never passes the
+  # walker's box/3, so the class is stamped here. `section_grid_html` is only
+  # reached in :article mode today (the email leg degrades to the ordered
+  # stack above), but the explicit :article gate keeps the email suppression
+  # a stated invariant rather than a positional accident. Unknown variants
+  # fall to "" — byte-identical to the pre-hook wrapper.
+  defp section_frame_class_attr(%{"variant" => "framed"}, :article),
+    do: ~s( class="bp-section--framed")
+
+  defp section_frame_class_attr(_b, _style), do: ""
 
   # tracks → a positive integer column count (structural, NOT a pixel). Default 2
   # (matches the CSS `repeat(var(--bp-tracks,2),…)` fallback). Accepts an int or a

@@ -1260,6 +1260,18 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-section__cell { min-width: 0; }
 .bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
 
+/* ── section frame — the framed-finale device (charter D19). A `section` with
+   variant="framed" carries `.bp-section--framed` on its OWN box div (stamped by
+   compose/walk: fixed literal, :article-gated, whitelisted), one level INSIDE
+   the classless stream wrapper — NEVER on the wrapper itself, which would kill
+   the `div:not([class])` section-head beat above (probed: borderTop 0px vs 2px).
+   The hairline frame REPLACES the section's own two-rule band (the direct-child
+   `.bp-hr` pair), matching the TUI's square border; breathing room is CSS
+   padding — NEVER spacer paragraphs (the publish floor walks the subtree).
+   Mirror: paper-editor/src/styles.css. */
+.bp-paper-surface .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+.bp-paper-surface .bp-section--framed > .bp-hr { display: none; }
+
 /* ── cards: titled rule/feature card grid ── */
 .bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
 /* The verdict accent moved from the card's TOP edge to its LEFT edge, and only
