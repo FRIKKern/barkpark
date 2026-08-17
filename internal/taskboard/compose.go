@@ -8,8 +8,8 @@ package taskboard
 // in narrow mode at full width when the board is the stack top. This file adds
 // the only new top-level seams: Compose, docLayout, and the reading-frame
 // windowing. The breadcrumb row was retired (2026-08-12): the document's own
-// title orients the reader, and the row returned to the panes; Breadcrumb
-// itself survives for the frames that still need a trail string.
+// title orients the reader, and the row returned to the panes; the Breadcrumb
+// builder itself was removed (2026-08-17, D127) once no frame drew a trail.
 
 import (
 	"math"
@@ -53,9 +53,6 @@ const (
 	// mid-body jump onto stop 0; j/k switch the frame INTO follow mode (-1), and
 	// free-scrolling all the way to the top settles on 0 instead of snapping back.
 	scrollFollow = -1
-	// crumbSep is the breadcrumb separator (a chevron — the reading vocabulary,
-	// allowlisted in glyph_budget_test.go's reading set).
-	crumbSep = " › "
 )
 
 type widePaneFocus uint8
@@ -387,38 +384,6 @@ func (m Model) hoverPreviewTask() (Task, bool) {
 	return m.taskByID(m.ui.HoverTarget)
 }
 
-// Breadcrumb renders the navigation trail (charter D11/D18: always shows where
-// you are), middle-truncating so the FIRST and LAST segments always survive —
-// the root ("tasks") and the frame you are IN are the two you must never lose.
-func Breadcrumb(stack []Frame, width int) string {
-	if width < 1 {
-		width = 1
-	}
-	segs := make([]string, 0, len(stack))
-	for _, f := range stack {
-		segs = append(segs, crumbSeg(f))
-	}
-	if len(segs) == 0 {
-		return ""
-	}
-	full := strings.Join(segs, crumbSep)
-	if disp(full) <= width {
-		return dimStyle.Render(full)
-	}
-	// Collapse the middle to a single ellipsis, keeping first + last.
-	if len(segs) > 2 {
-		collapsed := []string{segs[0], "…", segs[len(segs)-1]}
-		if c := strings.Join(collapsed, crumbSep); disp(c) <= width {
-			return dimStyle.Render(c)
-		}
-		segs = collapsed
-		full = strings.Join(segs, crumbSep)
-	}
-	// Still too wide: middle-clip, honoring the last segment (where you ARE).
-	tail := disp(segs[len(segs)-1]) + disp(crumbSep)
-	return dimStyle.Render(truncateMiddle(full, width, tail))
-}
-
 // openTaskRefs marks the ONE task the user is currently inside: the DEEPEST
 // FrameTask on the navigation stack. The board wears the ◆ reader-open marker on
 // exactly this row (UIState.OpenTasks) — never more than one at a time, even on
@@ -432,21 +397,6 @@ func openTaskRefs(stack []Frame) map[string]bool {
 		}
 	}
 	return nil
-}
-
-// crumbSeg is a frame's breadcrumb label: its Title, else "tasks" for the board,
-// else its Ref, else a placeholder — never blank.
-func crumbSeg(f Frame) string {
-	if f.Title != "" {
-		return f.Title
-	}
-	if f.Kind == FrameBoard {
-		return "tasks"
-	}
-	if f.Ref != "" {
-		return f.Ref
-	}
-	return "?"
 }
 
 // readingFooter is the pushed frames' one hint line (charter D18: one line per
