@@ -696,6 +696,7 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 		"mode":          b.Mode,
 		"health_status": b.HealthStatus,
 		"agent_status":  b.AgentStatus,
+		"last_seen_at":  b.LastSeenAt,
 		"version":       b.Version,
 		"git_commit":    b.GitCommit,
 		"team_id":       b.TeamID,
@@ -713,7 +714,9 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // on every row: PROVIDER (identity → GenProviderMark) + STATUS (the folded
 // GenInstanceLifecycle state → its role hue), alongside NAME · URL · MODE ·
 // HEALTH · AGENT (Decision 34 activates the merged-but-dormant #1739 chrome on the
-// registry leg). renderHzTable measures widths on bare strings and only tints when
+// registry leg) — plus LAST-SEEN, the age of the control plane's last observation
+// rendered through relativeAge(b.LastSeenAt) (a never-seen row → hzCell's em-dash).
+// renderHzTable measures widths on bare strings and only tints when
 // out.color is on, so color-off output stays byte-stable. URL falls back to the
 // host when the server has no URL yet (still provisioning). Every cell rides
 // through hzCell like every other renderHzTable call site: control chars from a
@@ -722,7 +725,7 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // house em-dash rather than a bare gap — the tinters key on exact vocabulary
 // values, so a dashed cell stays honestly unpainted.
 func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTeam bool) {
-	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT"}
+	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT", "LAST-SEEN"}
 	if showTeam {
 		headers = append([]string{"TEAM"}, headers...)
 	}
@@ -735,6 +738,7 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTea
 		row := []string{
 			hzCell(b.Name), hzCell(b.Provider), hzCell(u), hzCell(registryLifecycleToken(b)),
 			hzCell(b.Mode), hzCell(b.HealthStatus), hzCell(b.AgentStatus),
+			hzCell(relativeAge(b.LastSeenAt)),
 		}
 		if showTeam {
 			team := ""
