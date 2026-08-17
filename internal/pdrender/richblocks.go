@@ -419,7 +419,6 @@ func figureCaption(caption string, ctx RenderCtx) string {
 	return ctx.Theme.Caption.Render(caption)
 }
 
-
 // ── action (CTA) ───────────────────────────────────────────────────────────
 // Mirrors compose_block(action) + the walk button/2: a button-styled run. A
 // `priority: "primary"` tone fills the accent background with a contrasting
