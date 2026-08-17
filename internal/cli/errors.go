@@ -363,6 +363,21 @@ func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string,
 	return false
 }
 
+// useErrorDetailed is useError plus the envelope `details` payload — the same
+// two-channel contract (machine envelope on stdout for -o json/yaml, human line
+// on stderr otherwise) with a per-error `details` object routed through
+// renderErrorEnvelopeDetailed. A nil/empty details reproduces useError's bytes
+// exactly, so it is a safe superset. The human line NEVER carries the raw
+// details — the caller folds whatever a human needs into `msg`; details is the
+// machine-only channel a script parses.
+func useErrorDetailed(out *writer, code, msg string, exit int, details json.RawMessage) int {
+	if renderErrorEnvelopeDetailed(out, code, msg, "", "", details) {
+		return exit
+	}
+	out.userErr("%s", msg)
+	return exit
+}
+
 // normalizeDetails reduces a raw `details` value to either nil (nothing worth
 // showing) or its COMPACT bytes. Nothing-worth-showing is: absent, JSON null,
 // the empty object, the empty array, or bytes that are not valid JSON at all —

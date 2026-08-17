@@ -36,6 +36,7 @@ package cli
 // `bp cloud rollback` / `bp cloud verify`.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1384,9 +1385,47 @@ func (k siteRefusalKind) nothingClause() string {
 func siteRefusalFail(out *writer, kind siteRefusalKind, ref string, err error) int {
 	var re *cloudclient.CloudRefusal
 	if errors.As(err, &re) && re.HTTPStatus != 401 {
-		return useError(out, siteRefusalLabel(re.Code), siteRefusalMessage(kind, ref, re), siteRefusalExit(re.HTTPStatus, re.Reason, re.Code))
+		return useErrorDetailed(out, siteRefusalLabel(re.Code), siteRefusalMessage(kind, ref, re),
+			siteRefusalExit(re.HTTPStatus, re.Reason, re.Code), siteRefusalDetails(re))
 	}
 	return cloudFail(out, kind.what(), err)
+}
+
+// siteRefusalDetails builds the machine-only `error.details` payload for a refused
+// site verb. Today its sole member is the readable-types menu a
+// `content_binding_empty` create refusal carries: the server's raw array is nested
+// under `readable_types` so a script reading `bp cloud site create -o json` gets
+// `error.details.readable_types` — the SAME list the console renders — with the
+// server's row and key ORDER intact (raw bytes, never re-marshalled). Returns nil
+// when the refusal carried no menu, so every other refusal emits a detail-less
+// envelope byte-identical to the pre-menu shape.
+func siteRefusalDetails(re *cloudclient.CloudRefusal) json.RawMessage {
+	if len(re.ReadableTypesRaw) == 0 {
+		return nil
+	}
+	return json.RawMessage(`{"readable_types":` + string(re.ReadableTypesRaw) + `}`)
+}
+
+// siteReadableTypesMenu renders the readable-types menu in the console's grammar
+// (cloud/priv/static/app.js siteReadableTypesMenu): `type (count)` when the row
+// carries a magnitude, the bare `type` when it does not, joined with ", ". A row
+// with an empty type is skipped (cloudError already drops those, so this is a
+// belt-and-braces guard). Empty when nothing usable survives — the caller's signal
+// to relay the server's own sentence rather than promise a menu it cannot fill.
+func siteReadableTypesMenu(types []cloudclient.ReadableType) string {
+	parts := make([]string, 0, len(types))
+	for _, t := range types {
+		name := strings.TrimSpace(t.Type)
+		if name == "" {
+			continue
+		}
+		if t.Count != nil {
+			parts = append(parts, fmt.Sprintf("%s (%d)", name, *t.Count))
+		} else {
+			parts = append(parts, name)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // siteRefusalLabel is the `bp:` error-code label — the control plane's own code
@@ -1444,6 +1483,38 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 	}
 	detail := strings.TrimSpace(re.Detail)
 	switch re.Code {
+	case "content_binding_empty":
+		// The create door refused because the site's read token sees nothing at the
+		// bound dataset, and it shipped the STRUCTURED menu of types it CAN read.
+		// The console renders that menu from the array and STRIPS the CLI re-run
+		// line (it is CLI-voiced); the CLI is that line's home, so it keeps it.
+		// When the array survived, compose the receipt from the parts the CLI
+		// controls — the verdict, the menu rendered in the console grammar, and the
+		// re-run incantation the server built with the real dataset triple — so the
+		// menu the user reads is the machine-readable list, not a prose copy that a
+		// terser server might not send. With no usable array, the server's own
+		// sentence is the most specific true thing, so relay it whole.
+		if menu := siteReadableTypesMenu(re.ReadableTypes); menu != "" {
+			verdict := detail
+			if i := strings.Index(detail, ". "); i != -1 {
+				verdict = detail[:i+1]
+			}
+			reRun := ""
+			if i := strings.Index(detail, "Re-run naming a type"); i != -1 {
+				reRun = strings.TrimSpace(detail[i:])
+			}
+			msg := fmt.Sprintf("%s It can read: %s.", siteRefusalDetail(verdict, "this site would build from nothing."), menu)
+			if reRun != "" {
+				msg += " " + reRun
+			}
+			return msg + " " + kind.nothingClause()
+		}
+		if detail != "" {
+			return fmt.Sprintf("the control plane refused %s %q (%s): %s %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail), kind.nothingClause())
+		}
+		return fmt.Sprintf("the control plane refused %s %q (%s) — nothing there is readable by this site's token. %s",
+			kind.noun(), ref, sanitizeCell(re.Code), kind.nothingClause())
 	case "identity_refused":
 		// The box answered our stored admin credential with a 401, so nothing went
 		// on the wire at all — a CONFLICT with the box's verdict about our
