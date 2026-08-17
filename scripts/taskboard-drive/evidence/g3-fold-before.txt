@@ -1,9 +1,9 @@
-   The task TUI is glanceable, live, an… ··· 9/19 ││ The conn dot never calls a slow fetch offline — timeouts classify        │
- ├─▎⠸ The conn dot never calls a slow fetch offl… ││ distinctly and SSE proof-of-life lifts them                              │
- │    C5/7 · P1 · 4/5                             ││ ⠋ in_progress · P1 · C5/7 · task · epic-builder-the-conn-dot-never-call… │
- ├─ ⠸ The drive harness anchors row identity on … ││                                                                          │
- │    C5/7 · P2 · 0/4                             ││ criteria 4/5                                                             │
- ├─ ⠸ The reading geometry stops taking a -2 mut… ││   ✓ A typed client-timeout error (errors.As to *url.Error with           │
- │    C5/7 · P2 · 4/5                             ││     uerr.Timeout()==true — no string matching of deadline text)          │
- ├─ ⠸ Esc at depth 0 hands j/k back to the board… ││     classifies to a distinct non-offline label in snapshotErrorLabel;    │
- │    C5/7 · P2 · 4/5                             ││     TestSnapshotErrorLabelsAreTruthful gains the timeout row and KEEPS   │
+   Cloud Console hardening — the Clou… ··· 87/220 ││ Wave 71 paperwork: charter PR (D861-D866) + wave log                     │
+ ├─▎⠧ Wave 71 paperwork: charter PR (D861-D866) … ││ ⠋ in_progress · P1 · C4/7 · task · w71-decide-fable                      │
+ │    C4/7 · P1 · w71-decide-fable · 2m           ││                                                                          │
+ ├─ ✓ friendly() THROWS a TypeError on the neste… ││ criteria · missing                                                       │
+ └─ ✓ Wave 70 paperwork — the measured-sentence … ││   ! No acceptance criteria recorded — completion cannot be verified.     │
+   +132 more · 85 done · 27 cancelled             ││                                                                          │
+                                                  ││ purpose · derived                                                        │
+   The task TUI is glanceable, live, an… ··· 9/19 ││   part of   cloud-console-hardening-epic                                 │
+ ├─ ⠧ The drive harness anchors row identity on … ││   impact    blocks 0 · blocked by 0                                      │

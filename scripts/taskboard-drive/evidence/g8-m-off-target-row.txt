@@ -1,1 +1,1 @@
- ├─ ⠋ The conn dot never calls a slow …│      │ ✓ done · C3/7 · task · relevance-loop                                    │
+ ├─ ⠋ Wave 71 paperwork: charter PR (D…│      │ ○ open · P1 · C4/7 · task                                                │

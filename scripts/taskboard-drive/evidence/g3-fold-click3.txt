@@ -1,9 +1,9 @@
- ▎ The task TUI is glanceable, live, an… ··· 9/19│ │ The task TUI is glanceable, live, and never flickers                     │
- ├─ ⠹ The conn dot never calls a slow fetch offl…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
- │    C5/7 · P1 · 4/5                            │ │                                                                          │
- ├─ ⠹ The drive harness anchors row identity on …│ │ criteria 4/4                                                             │
- │    C5/7 · P2 · 0/4                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
- ├─ ⠹ The reading geometry stops taking a -2 mut…│ │     ↳ cache_test.go includes an intra-session out-of-order rollback gua… │
- │    C5/7 · P2 · 4/5                            │ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
- ├─ ⠹ Esc at depth 0 hands j/k back to the board…│ │     constant motion.                                                     │
- │    C5/7 · P2 · 4/5                            │ │     ↳ board/components/anim tests cover in_progress ordering, claim fre… │
+ ▎ Cloud Console hardening — the Clou… ··· 87/220│ │ Cloud Console hardening — the Cloud GUI Remake's chartered successor     │
+ ├─ ⠧ Wave 71 paperwork: charter PR (D861-D866) …│ │ ○ open · P1 · C4/7 · task · epic-decide-w67                              │
+ │    C4/7 · P1 · w71-decide-fable · 2m          │ │                                                                          │
+ ├─ ○ bp cloud site create exits the same code f…│ │ criteria 0/4                                                             │
+ ├─ ○ The create-site mint chain stops discardin…│ │   ○ BAND 2 is routed: gr-blk-studio-presence-perf-flake is re-parented   │
+ ├─ ○ The site-delete tier question becomes a ro…│ │     to Felix pristine (task-96a908af98698118), and for repo-git hygiene, │
+ ├─ ○ The worker route stores a barkpark url ver…│ │     CI/merge-gate governance and Cloud test-infra either an owning epic  │
+ ├─ ○ Any team member can permanently destroy a …│ │     is filed or the absence is recorded as a standing finding with task- │
+ ├─ ○ The barkparks.url backfill normalises stor…│ │     openapi-drift-chronic named as the same class.                       │

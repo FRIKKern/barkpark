@@ -1,39 +1,39 @@
 
  barkpark · tasks       ⇄ guerrilla  CONN · T ↔ ──────────────────────────────────────────────────────────────────────────
-   The task TUI is glanceable, live, an… ··· 9/19 ││ The conn dot never calls a slow fetch offline — timeouts classify        │
- ├─▎◆ The conn dot never calls a slow fetch offl… ││ distinctly and SSE proof-of-life lifts them                              │
- │    C5/7 · P1 · 4/5                             ││ ⠿ in_progress · P1 · C5/7 · task · epic-builder-the-conn-dot-never-call… │
- ├─ ⠿ The drive harness anchors row identity on … ││                                                                          │
- │    C5/7 · P2 · 0/4                             ││ criteria 4/5                                                             │
- ├─ ⠿ The reading geometry stops taking a -2 mut… ││   ✓ A typed client-timeout error (errors.As to *url.Error with           │
- │    C5/7 · P2 · 4/5                             ││     uerr.Timeout()==true — no string matching of deadline text)          │
- ├─ ⠿ Esc at depth 0 hands j/k back to the board… ││     classifies to a distinct non-offline label in snapshotErrorLabel;    │
- │    C5/7 · P2 · 4/5                             ││     TestSnapshotErrorLabelsAreTruthful gains the timeout row and KEEPS   │
- ├─ ⠿ Task-TUI wave 20 trust-wave paperwork: the… ││     the dial-tcp connection-refused row mapping to offline.              │
- │    C5/7 · P2 · ✓○ 1/2 · fable-decide-w20 · T ││     ↳ snapshotErrorLabel (internal/taskboard/live.go) checks isSnapshot… │
- ├─ ✓ The TUI card and cheatsheet finally speak … ││   ✓ handlePulse lifts or relabels ONLY the timeout-class degraded state  │
- └─ ✓ Sheet-era glyph and golden hygiene: the re… ││     on SSE proof-of-life; genuine unreachable (dial-tcp) offline stays   │
-   +5 more · 7 done · 1 cancelled                 ││     sticky until a successful refetch; the rewritten                     │
-                                                  ││     TestPulsePreservesOfflineUntilRefetchSucceeds pins the sticky half   │
-   Paper Excellence epic — close the a… ··· 24/64 ││     and a new test pins the timeout-class lift.                          │
- ├─ ⠿ Device 4 ships: stat strips paint as a hai… ││     ↳ applySnapshot classifies the timeout class to ConnPolling/ConnLiv… │
- │    C5/7 · P2 · 4/5                             ││   ✓ The snapshot fetch path carries its own budget (per-request context  │
- ├─ ⠿ PR #11814 unblocks: the three stale fail-h… ││     deadline in FetchSnapshotFull, ~T) while the shared client keeps   │
- │    C5/7 · P1 · 2/3                             ││     the T DefaultTimeout for interactive actions; the scoping rationale │
- ├─ ✓ BPML's inline grammar accepts the corpus's… ││     is recorded in a durable venue the merge carries and the evidence    │
- └─ ✓ Wave 4 paperwork: the landing wave's chart… ││     NAMES WHICH venue.                                                   │
-   +38 more · 22 done                             ││     ↳ FetchSnapshotFull (internal/taskboard/detail_data.go) wraps BOTH … │
-                                                  ││   ✓ go build ./internal/... plus go vet ./internal/... plus go test      │
-   Felix pristine initiative — Phoenix … ··· 1/10 ││     ./internal/... green from the builder worktree, and go test -race    │
- ├─ ⠿ The Recorder's durable accumulator gets a … ││     ./internal/taskboard/ green — decisive output lines quoted in        │
- │    C5/7 · P3 · 3/4                             ││     evidence.                                                            │
- ├─ ⠿ Auth and grant emails stop riding the requ… ││     ↳ From the builder worktree wf_d569645d-621-26 (CC=/usr/bin/clang f… │
- │    C5/7 · P2 · 3/4                             ││   ○ PR merged (lead closes this on merge).                               │
- ├─ ⠿ OnixEdit Content writes stop being invisib… ││                                                                          │
- │    C5/7 · P2 · 4/5                             ││ purpose · derived                                                        │
- ├─ ⠿ import_member refuses tables the export co… ││   part of   task-tui-goal                                                │
- │    C5/7 · P3 · 4/5                             ││   impact    blocks 0 · blocked by 0                                      │
-   ↓ 34 more below                                ││   does      The conn dot never calls a slow fetch offline — timeouts     │
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ ││             classify distinctly and SSE proof-of-life lifts them         │
- ⠿ 14 in flight · ○ 2+ ready · ✓ 3301 done ·… 51% ││   why       Why this task is necessary within task-tui-goal is not       │
- jk · enter open · esc back · c claim · x close … ││   ↓ more below                                                           │
+   Cloud Console hardening — the Clou… ··· 87/220 ││ Wave 71 paperwork: charter PR (D861-D866) + wave log                     │
+ ├─▎◆ Wave 71 paperwork: charter PR (D861-D866) … ││ ⠿ in_progress · P1 · C4/7 · task · w71-decide-fable                      │
+ │    C4/7 · P1 · w71-decide-fable · T           ││                                                                          │
+ ├─ ✓ friendly() THROWS a TypeError on the neste… ││ criteria · missing                                                       │
+ └─ ✓ Wave 70 paperwork — the measured-sentence … ││   ! No acceptance criteria recorded — completion cannot be verified.     │
+   +132 more · 85 done · 27 cancelled             ││                                                                          │
+                                                  ││ purpose · derived                                                        │
+   The task TUI is glanceable, live, an… ··· 9/19 ││   part of   cloud-console-hardening-epic                                 │
+ ├─ ⠿ The drive harness anchors row identity on … ││   impact    blocks 0 · blocked by 0                                      │
+ │    C5/7 · P2 · 3/4                             ││   does      Wave 71 paperwork: charter PR (D861-D866) + wave log         │
+ ├─ ⠿ The conn dot never calls a slow fetch offl… ││   why       Why this task is necessary within cloud-console-hardening-   │
+ │    C5/7 · P1 · 4/5                             ││             epic is not recorded.                                        │
+ ├─ ⠿ The reading geometry stops taking a -2 mut… ││   endgame   Advance cloud-console-hardening-epic by completing this      │
+ │    C5/7 · P2 · 4/5                             ││             task.                                                        │
+ ├─ ⠿ Esc at depth 0 hands j/k back to the board… ││   important 90/100 — Derived from P1 queue priority.                     │
+ │    C5/7 · P2 · 4/5                             ││   relevant  90/100 — Derived from active in-progress status.             │
+ ├─ ⠿ Task-TUI wave 20 trust-wave paperwork: the… ││   proof     Recorded task intent — Wave 71 paperwork: charter PR (D861-  │
+ │    C5/7 · P2 · ✓○ 1/2 · fable-decide-w20 · T ││             D866) + wave log — document.title                            │
+ ├─ ✓ The TUI card and cheatsheet finally speak … ││   proof     Mission placement — cloud-console-hardening-epic —           │
+ └─ ✓ Sheet-era glyph and golden hygiene: the re… ││             content.parent_id                                            │
+   +5 more · 7 done · 1 cancelled                 ││   derived from recorded task facts · add authored purpose to override    │
+                                                  ││                                                                          │
+   Felix pristine initiative — Phoenix … ··· 1/10 ││ created T ago (Aug 17, 15:13) · updated T ago (Aug 17, 15:15)          │
+ └─ ✓ Wave 25 paperwork: charter PR + wave log    ││                                                                          │
+   +9 more                                        ││ ○ created (Aug 17) → ⠿ claimed by w71-decide-fable (Aug 17)              │
+                                                  ││                                                                          │
+   Paper Excellence epic — close the a… ··· 24/64 ││   Purpose                                                                │
+ ├─ ✓ BPML's inline grammar accepts the corpus's… ││                                                                          │
+ └─ ✓ Wave 4 paperwork: the landing wave's chart… ││   Per-wave referent for wave 71 of cloud-console-hardening: carries      │
+   +40 more · 22 done                             ││   the docs-only charter PR minting D861-D866 and the wave-71 ledger      │
+                                                  ││   rows. Claimed by the decide phase; the PR body's Task: line names      │
+   API Read-Path Security Sweep (epic) ···· 19/32 ││   this row.                                                              │
+ ├─ ○ RULING (owner gate): task+paper anon read … ││                                                                          │
+   ↓ 20 more below                                ││ claim  w71-decide-fable · epoch 3 · claimed T ago (Aug 17, 15:14)       │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ ││        ⠿ w71-decide-fable · charter PR #11870 open (D861-D866 + 4 ledge… │
+ ⠿ 7 in flight · ○ 2+ ready · ✓ 3301 done · … 51% ││                                                                          │
+ jk · enter open · esc back · c claim · x close … ││                                                                          │
