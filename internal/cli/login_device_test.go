@@ -463,6 +463,227 @@ func TestDeviceLoginPersistFailureAbortsHonestly(t *testing.T) {
 	}
 }
 
+// meDeviceServer stands up a fake control plane that approves the FIRST poll with
+// the given token/team, then answers /v1/me with meBody at whatever HTTP status
+// meStatus names (200 for a healthy identity, a 5xx to exercise the honest
+// degrade). It records the Authorization header /v1/me saw so a test can prove the
+// minted bearer — and only the minted bearer — rode the identity probe.
+func newMeDeviceServer(t *testing.T, token, team string, meStatus int, meBody string, gotMeAuth *string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/device/start":
+			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
+		case "/v1/auth/device/poll":
+			_, _ = io.WriteString(w, `{"token":"`+token+`","team_id":"`+team+`"}`)
+		case "/v1/me":
+			if gotMeAuth != nil {
+				*gotMeAuth = r.Header.Get("Authorization")
+			}
+			if meStatus != 0 && meStatus != http.StatusOK {
+				w.WriteHeader(meStatus)
+			}
+			_, _ = io.WriteString(w, meBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestDeviceLoginReceiptNamesBoundAccount is the charter-D37 proof: after a
+// successful device login the receipt names WHICH account the browser approval
+// bound — the account email (human + json) and the team by its human Name (not
+// just the raw team id) — resolved best-effort via a client-side /v1/me carrying
+// the just-minted bearer. A wrong-account approval is now visible in the receipt.
+func TestDeviceLoginReceiptNamesBoundAccount(t *testing.T) {
+	const meBody = `{"user":{"id":"u-1","email":"ada@example.com","confirmed":true},` +
+		`"team":{"id":"team-uuid","name":"Primary","slug":"primary","role":"owner"},"role":"owner"}`
+
+	t.Run("human receipt names account + team by name", func(t *testing.T) {
+		withTempConfigHome(t)
+		withInstantDevicePolls(t, 10)
+		var meAuth string
+		srv := newMeDeviceServer(t, "sess-me", "team-uuid", http.StatusOK, meBody, &meAuth)
+
+		cfg := &Config{}
+		var stdout, stderr bytes.Buffer
+		w := newWriter(&stdout, &stderr)
+		w.output = "table"
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+			t.Fatalf("runDeviceLoginFlow: %v\nstderr:\n%s", err, stderr.String())
+		}
+		// The minted bearer — and only it — rode the /v1/me identity probe.
+		if meAuth != "Bearer sess-me" {
+			t.Fatalf("/v1/me must carry the just-minted bearer; got %q", meAuth)
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "account: ada@example.com") {
+			t.Fatalf("receipt must name the bound account email:\n%s", out)
+		}
+		// The team is named by its human Name, not the raw uuid.
+		if !strings.Contains(out, "team: Primary") {
+			t.Fatalf("receipt must name the team by Name:\n%s", out)
+		}
+	})
+
+	t.Run("json receipt carries account + identity:verified", func(t *testing.T) {
+		withTempConfigHome(t)
+		withInstantDevicePolls(t, 10)
+		srv := newMeDeviceServer(t, "sess-me", "team-uuid", http.StatusOK, meBody, nil)
+
+		cfg := &Config{}
+		var stdout, stderr bytes.Buffer
+		w := newWriter(&stdout, &stderr)
+		w.output = "json"
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+			t.Fatalf("runDeviceLoginFlow: %v", err)
+		}
+		var env map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+			t.Fatalf("stdout is not a single clean JSON envelope: %v\n%s", err, stdout.String())
+		}
+		if env["ok"] != true || env["cloud_url"] != srv.URL || env["team_id"] != "team-uuid" {
+			t.Fatalf("base envelope changed: %v", env)
+		}
+		if env["account"] != "ada@example.com" || env["identity"] != "verified" {
+			t.Fatalf("json must carry the bound account + identity:verified; got %v", env)
+		}
+	})
+
+	t.Run("teamless identity does not panic", func(t *testing.T) {
+		withTempConfigHome(t)
+		withInstantDevicePolls(t, 10)
+		// Team omitted → MeResult.Team is nil (a teamless first login). The receipt
+		// must still name the account and fall back to the raw team id for the team
+		// line — never dereference the nil *Team.
+		const teamlessMe = `{"user":{"id":"u-2","email":"solo@example.com"},"role":"member"}`
+		srv := newMeDeviceServer(t, "sess-solo", "team-raw", http.StatusOK, teamlessMe, nil)
+
+		cfg := &Config{}
+		var stdout, stderr bytes.Buffer
+		w := newWriter(&stdout, &stderr)
+		w.output = "table"
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+			t.Fatalf("teamless login must not fail: %v", err)
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "account: solo@example.com") {
+			t.Fatalf("teamless receipt must still name the account:\n%s", out)
+		}
+		if !strings.Contains(out, "team: team-raw") {
+			t.Fatalf("teamless receipt should fall back to the raw team id:\n%s", out)
+		}
+	})
+}
+
+// TestDeviceLoginReceiptDegradesOnMeFailure is the honesty proof: an unreachable
+// /v1/me after the token mints must NOT turn a stored session into a failed login.
+// The login still exits ok; the human receipt says the account is unverified and
+// names bp whoami; the json envelope carries account:null + identity:"unverified"
+// with ok:true intact. Proven with a 500-serving /v1/me fixture.
+func TestDeviceLoginReceiptDegradesOnMeFailure(t *testing.T) {
+	t.Run("human receipt says unverified", func(t *testing.T) {
+		withTempConfigHome(t)
+		withInstantDevicePolls(t, 10)
+		srv := newMeDeviceServer(t, "sess-x", "team-x", http.StatusInternalServerError, `{"error":"boom"}`, nil)
+
+		cfg := &Config{}
+		var stdout, stderr bytes.Buffer
+		w := newWriter(&stdout, &stderr)
+		w.output = "table"
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+			t.Fatalf("a failed /v1/me must NOT fail the login: %v", err)
+		}
+		// The session still persisted — the login succeeded end to end.
+		if loaded, _ := LoadConfig(); loaded.CloudToken != "sess-x" {
+			t.Fatalf("the token must still persist despite a failed /v1/me; got %q", loaded.CloudToken)
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "logged in") {
+			t.Fatalf("the login still succeeded — the success line must print:\n%s", out)
+		}
+		if !strings.Contains(out, "account: unverified (run 'bp whoami')") {
+			t.Fatalf("the honest degrade must name bp whoami:\n%s", out)
+		}
+	})
+
+	t.Run("json carries account:null + identity:unverified, ok stays true", func(t *testing.T) {
+		withTempConfigHome(t)
+		withInstantDevicePolls(t, 10)
+		srv := newMeDeviceServer(t, "sess-x", "team-x", http.StatusInternalServerError, `{"error":"boom"}`, nil)
+
+		cfg := &Config{}
+		var stdout, stderr bytes.Buffer
+		w := newWriter(&stdout, &stderr)
+		w.output = "json"
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+			t.Fatalf("runDeviceLoginFlow: %v", err)
+		}
+		var env map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+			t.Fatalf("stdout is not a single clean JSON envelope: %v\n%s", err, stdout.String())
+		}
+		if env["ok"] != true {
+			t.Fatalf("ok must never drop on the degrade; got %v", env["ok"])
+		}
+		if got, ok := env["account"]; !ok || got != nil {
+			t.Fatalf("account must be present and null on the degrade; got %v (present=%v)", got, ok)
+		}
+		if env["identity"] != "unverified" {
+			t.Fatalf("identity must be unverified on the degrade; got %v", env["identity"])
+		}
+	})
+}
+
+// TestDeviceLoginReceiptNeverPrintsBearer is the seeded-secret assertion: the
+// session token rides the /v1/me request as a Bearer header, but the raw bearer
+// value must appear NOWHERE in the emitted receipt bytes (stdout OR stderr) on
+// either render. The token is a distinctive sentinel so a stray leak is
+// unmistakable.
+//
+// Env-token edge (documented, not a failure): BARKPARK_CLOUD_TOKEN shadows the
+// minted token in ResolveCloudToken, so on a machine where that env var is set the
+// bearer that rides /v1/me — and the identity it names — would be the ENV token's,
+// not the freshly-minted one. This test leaves that env unset so the assertion is
+// about the minted token; the shadowing is acceptable because the receipt still
+// names a real bound account.
+func TestDeviceLoginReceiptNeverPrintsBearer(t *testing.T) {
+	t.Setenv("BARKPARK_CLOUD_TOKEN", "") // pin the minted token as the sole bearer source
+	const secret = "sess-SUPER-SECRET-bearer-do-not-print"
+	const meBody = `{"user":{"id":"u-1","email":"ada@example.com"},` +
+		`"team":{"id":"team-uuid","name":"Primary","slug":"primary"},"role":"owner"}`
+
+	for _, output := range []string{"table", "json"} {
+		t.Run(output, func(t *testing.T) {
+			withTempConfigHome(t)
+			withInstantDevicePolls(t, 10)
+			var meAuth string
+			srv := newMeDeviceServer(t, secret, "team-uuid", http.StatusOK, meBody, &meAuth)
+
+			cfg := &Config{}
+			var stdout, stderr bytes.Buffer
+			w := newWriter(&stdout, &stderr)
+			w.output = output
+			if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+				t.Fatalf("runDeviceLoginFlow: %v", err)
+			}
+			// The bearer DID ride the identity probe…
+			if meAuth != "Bearer "+secret {
+				t.Fatalf("/v1/me must carry the minted bearer; got %q", meAuth)
+			}
+			// …and it leaked into NEITHER stream of the receipt.
+			if strings.Contains(stdout.String(), secret) {
+				t.Fatalf("the bearer must never print on stdout:\n%s", stdout.String())
+			}
+			if strings.Contains(stderr.String(), secret) {
+				t.Fatalf("the bearer must never print on stderr:\n%s", stderr.String())
+			}
+		})
+	}
+}
+
 // TestOfferOpenDeskEnterReturnsSentinel: on a terminal, a bare Enter at the
 // "open the desk" offer returns the ExitOpenDesk sentinel main() reads to launch
 // the TUI in-process. The prompt is written to stderr (chrome), never stdout.

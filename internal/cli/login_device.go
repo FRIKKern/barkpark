@@ -16,6 +16,7 @@ package cli
 // out.errf, so `-o json` still emits nothing but the final envelope on stdout.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -218,7 +219,12 @@ func devicePollStep(out *writer, cfg *Config, client *cloudclient.Client, base, 
 			// → still exitGeneric).
 			return 0, &devicePersistError{err: fmt.Errorf("save config: %w", serr)}
 		}
-		emitDeviceLoginSuccess(out, base, res.Login.TeamID)
+		// Config is saved, so cfg.CloudClient() now carries the just-minted token
+		// (config.go ResolveCloudToken picks it up): best-effort name WHICH account
+		// the approval actually bound. Never fatal — a wrong-account browser approval
+		// must be VISIBLE in the receipt, but an unreachable /v1/me must not turn a
+		// stored session into a failed login.
+		emitDeviceLoginSuccess(out, base, res.Login.TeamID, deviceLoginAccount(cfg))
 	}
 	return res.Status, nil
 }
@@ -299,29 +305,97 @@ func emitDeviceEnvelope(out *writer, payload map[string]any) {
 	}
 }
 
+// deviceAccount is the best-effort identity the success receipt names after a
+// device login: WHICH account the browser approval actually bound. account is
+// the bound account email (empty when /v1/me could not be reached or answered no
+// email); team is the human team label (Name, else Slug) when the control plane
+// named a current team; verified is false whenever the Me() probe failed, which
+// drives the honest "unverified" degrade in the receipt.
+type deviceAccount struct {
+	account  string
+	team     string
+	verified bool
+}
+
+// deviceLoginAccount best-effort resolves who the just-minted token belongs to
+// via a client-side GET /v1/me. It MUST be called AFTER SaveConfig so
+// cfg.CloudClient() carries the fresh token (config.go ResolveCloudToken reads
+// the persisted CloudToken). ANY failure — transport, 401, decode, timeout, or a
+// success with no email — degrades to an unverified receipt; login never fails on
+// it. The 10s ceiling bounds a hung control plane: cloudCtx() is context.Background
+// with no deadline (the 30s http floor only applies when the client's http.Client
+// is nil), so the receipt path pins its own bound here.
+//
+// Edge: BARKPARK_CLOUD_TOKEN shadows the minted token in ResolveCloudToken, so on
+// a machine where that env var is set Me() answers whatever identity the env token
+// belongs to, not the freshly-minted one. That is acceptable — the receipt still
+// names a real bound account — and is asserted in the test suite.
+func deviceLoginAccount(cfg *Config) deviceAccount {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	me, err := cfg.CloudClient().Me(ctx)
+	if err != nil || strings.TrimSpace(me.User.Email) == "" {
+		return deviceAccount{} // honest degrade — unverified, no panic on a nil Team
+	}
+	team := ""
+	if me.Team != nil { // nil when the account is teamless — must not panic
+		team = strings.TrimSpace(me.Team.Name)
+		if team == "" {
+			team = strings.TrimSpace(me.Team.Slug)
+		}
+	}
+	return deviceAccount{account: strings.TrimSpace(me.User.Email), team: team, verified: true}
+}
+
 // emitDeviceLoginSuccess writes the SAME success surface a password login does:
 // the {ok, cloud_url, team_id} envelope for machine consumers, else the human
-// confirmation lines on stdout (runLoginCloud's tail, verbatim).
+// confirmation lines on stdout (runLoginCloud's tail, verbatim) — now widened to
+// name WHICH account the approval bound (charter D37: a wrong-account browser
+// approval must be visible). On a verified acct the receipt names the account
+// email and the team by Name/Slug; on the honest degrade it prints
+// "account: unverified (run 'bp whoami')" and json carries account:null +
+// identity:"unverified" — ok:true and the exit code never change either way.
 //
 // It stops at the "logged in" confirmation and NO LONGER prints a next-step hint:
 // the caller (runLoginCloud) drives finishLoginConnect right after, which
 // auto-registers the fleet and lands the user in a working surface — the former
 // dead-end "run 'bp barkparks'" line is gone (bp-login-ux W2). The wizard's
 // cloudSetupDeviceLogin reuse is unaffected: it continues into cloudFleetPick.
-func emitDeviceLoginSuccess(out *writer, base, teamID string) {
+func emitDeviceLoginSuccess(out *writer, base, teamID string, acct deviceAccount) {
 	if out.isTTY {
 		out.errf("") // close the heartbeat dots line before the confirmation
 	}
-	if out.emitStructured(map[string]any{
+	// Widen the machine envelope with the account identity BEFORE the structured
+	// early-return so json/yaml consumers see it too.
+	payload := map[string]any{
 		"ok":        true,
 		"cloud_url": base,
 		"team_id":   teamID,
-	}) {
+	}
+	if acct.verified {
+		payload["account"] = acct.account
+		payload["identity"] = "verified"
+	} else {
+		payload["account"] = nil
+		payload["identity"] = "unverified"
+	}
+	if out.emitStructured(payload) {
 		return
 	}
 	out.outf("✓ logged in to %s", base)
-	if teamID != "" {
-		out.outf("  team: %s", teamID)
+	if acct.verified {
+		out.outf("  account: %s", acct.account)
+	} else {
+		out.outf("  account: unverified (run 'bp whoami')")
+	}
+	// Prefer the human team label when Me() named one; fall back to the raw id the
+	// token exchange returned so the team line never disappears.
+	teamLabel := teamID
+	if acct.team != "" {
+		teamLabel = acct.team
+	}
+	if teamLabel != "" {
+		out.outf("  team: %s", teamLabel)
 	}
 }
 
