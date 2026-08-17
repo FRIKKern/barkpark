@@ -63,7 +63,15 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # `.bp-table__td` classes, and `declarations_for/3` accepts a class selector as the
   # `element` (targeting ".bp-paper-surface .bp-table__th" vs ".bp-paper-editor-body
   # .bp-table__th"), so a drift between the reader rule and the edit mirror trips §2.
-  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td)
+  # `.bp-stats` / `.bp-chart` complete the reader's EVIDENCE-BAND BREAKOUT trio
+  # (.bp-table is the third): all three step out of the prose column via
+  # `margin-inline: var(--bp-evidence-pull)` + `width: var(--bp-evidence-width)`,
+  # so an unmirrored change to their geometry desyncs canvas from reader.
+  # Red-before (mutation-proven 2026-08-17, pe-w2-parity-widening): with the gate
+  # widened, `padding: 4px` added to `.bp-paper-surface .bp-stats` with no editor
+  # twin reds §2 (".bp-stats.padding: View=\"4px\" Edit=nil"); before the widening
+  # the same mutation shipped GREEN through the whole portable_doc tree.
+  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
@@ -214,16 +222,17 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     {:view_edit, "h2", "font-family"} =>
       "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
     {:view_edit, "h3", "font-family"} =>
-      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
-    {:view_edit, ".bp-table", "display"} =>
-      "reader-only mobile-overflow chrome (paper-surface.css §Table CHROME); Studio inherits it through `.bp-paper-surface` — the standalone bundle does NOT, filed as pe-w1-bundle-table-scroll-chrome-gap",
+      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy"
     # `max-width` is GONE from the View rule as of pe-w1-evidence-breakout, so its
     # entry is gone too — the rot guard below fails an allowlist that outlives the
     # asymmetry it describes. It was `100%` beside `width: 100%` (a no-op) and
     # would have CLAMPED the evidence band the moment the table stepped out of the
     # column; the band width supersedes it on both surfaces.
-    {:view_edit, ".bp-table", "overflow-x"} =>
-      "reader-only mobile-overflow chrome (paper-surface.css §Table CHROME); Studio inherits it through `.bp-paper-surface` — the standalone bundle does NOT, filed as pe-w1-bundle-table-scroll-chrome-gap"
+    #
+    # Both `.bp-table` entries (`display` / `overflow-x`, the reader's mobile
+    # scroll chrome) are GONE too (pe-w2-parity-widening, closing
+    # pe-w1-bundle-table-scroll-chrome-gap): the chrome now lives in BOTH editor
+    # copies, so the mirrors match and the rot guard would red the entries.
   }
 
   defp divergence(section, element, prop),
@@ -409,7 +418,14 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # reds. Bundle-ONLY properties stay allowed — the bundle base rule carries
   # standalone-host extras (background/font on the wrapper, a plain `pre` rule)
   # that Studio inherits from `.bp-paper-surface` instead.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code)
+  # `.bp-table` rides here too (pe-w2-parity-widening): its scroll chrome
+  # (`display: block; overflow-x: auto`) now lives in BOTH editor copies, so the
+  # root↔bundle pair is gated the same way the prose elements are.
+  # `.bp-stats` / `.bp-chart` complete the trio here as well (wave-2 review):
+  # §2 gates them reader↔root only, so WITHOUT these entries a bundle-side
+  # drift on either breakout class would ship green — the exact rot §5 exists
+  # to catch.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart)
 
   test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do
     studio = edit_css()
