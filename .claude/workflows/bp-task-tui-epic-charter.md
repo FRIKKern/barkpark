@@ -3072,4 +3072,50 @@ referent: task-tui-goal-wave-22-log. Fence: internal/ + scripts/taskboard-drive/
 (+ the CI/README files D129 authorizes under the ttw19 go-tests precedent); spineRows
 stays the ONE producer; gates from each builder's OWN worktree.
 
+### Wave 22 2026-08-17 (REVIEWED: both round-1 slices green, two comment/format review fixes, pushed + PRs open; rounds 2 deferred by law)
+
+**Landed (review-passed, on -r branches; lead merges):**
+- ttw22-cache-first-paint-truth → loop-epic/cache-primed-first-paint-tells-the-colla-0-r:
+  D124 recomputeInProgress in board.go — BuildBoard copy-on-write rewrites ONLY the
+  in_progress bucket from s.Tasks (fresh map, Snapshot.Counts never mutated, every other
+  bucket stays the server corpus total), so a stale cache prime ("42 in flight" over 2
+  real rows) paints the collapsed truth on the first frame. Regression test pins the
+  momentum line ("2 in flight · showing 2 of 20 · 40%", never "42"/"of 60") AND
+  non-mutation of the source map. D125 rider: cacheKey grows the dataset arm
+  (NUL-separated, project↔dataset boundary tested), production caller passes
+  cfg.Dataset. Review fix: the helper had been wedged between BuildBoard's godoc and
+  func BuildBoard with no blank line — the two comment blocks merged and BuildBoard
+  lost its doc; moved the helper above the godoc. Gate re-run green.
+- ttw22-spine-window-pins → loop-epic/the-spine-windowing-twins-get-pins-that--1-r:
+  D128 TestSpineWindowPinsBothSurfaces pins windowSpine (render.go) AND windowTargets
+  (hitmap.go) at the same len=20/avail=10 boundary — middle window (both numbered
+  markers + both scroll targets) and bottom-clamp (last content line "L19" / last
+  target reached). Review independently re-ran 2 of the 6 seam mutations (render clamp
+  +1 → panic-RED; hitmap bottom-marker suppressed → assert-RED); both reverted, suite
+  green. D127: Breadcrumb, crumbSeg, crumbSep + their self-certifying test deleted;
+  openTaskRefs and truncateMiddle (live at render.go:637) survive. Review fix: gofmt
+  (double blank line left by the test deletion). Note: the builder pinned the seam
+  functions directly rather than through Render/HitMapFor — sound, since Render:62 and
+  HitMapFor:80 call them unchanged; flagged, not changed.
+
+**Deferred by the rounds law (lead dispatches):** ttw22-hermetic-ci-gate (D129) AFTER
+#11941 merges; ttw22-fixture-overflow-enrichment (D130) AFTER #11940 AND #11941 merge.
+Both tasks verified open + unclaimed at review time.
+
+**Ledger:** both slice tasks in_progress, criteria 0..N-1 stamped with mechanism
+evidence, "PR merged" left open for the lead; deferred tasks untouched; zero fixes
+needed — the cleanest ledger audit of the epic so far.
+
+**Merge order the lead should honor:** #11939/#11940/#11941 (any order, file-disjoint)
+→ this charter PR #11963 (close #11867/#11924 as superseded-by-union) → the two wave-22
+round-1 -r PRs (no file overlap with the wave-21 three: board/cache/program vs
+detail_data/fetch, compose hunks disjoint from #11940's mouse-handler hunks — verified
+by hunk ranges at review) → dispatch round 2 → close the wave-21 tasks on epochs 6/6/7.
+
+**Next wave:** run the D132 close contract, not a feature wave. After round 2 merges
+green (advisory taskboard-drive.yml + fixture overflow), re-run the four bar items on
+merged main; if all green, PROPOSE CLOSE per D132 — a null further-finding result is a
+SUCCESS. Taste-gated rows (find-jump, wide-footer click parity) stay CONSIDERING until
+the user's taste signal arrives.
+
 Next D-number: D133.
