@@ -65,6 +65,13 @@ defmodule Barkpark.Media.Blobstore.S3 do
 
   require Logger
 
+  # The per-receive HTTP timeout, in ms, threaded onto every blob request in
+  # req/1. Matches the sync/worker precedent (60s) — generous headroom for a
+  # multi-MB original crossing a saturated link, but a hard ceiling so a bucket
+  # that goes silent mid-transfer cannot pin a request forever. See the failure
+  # note at req/1 for why this is a spurious-503 guard, never a truncation guard.
+  @receive_timeout 60_000
+
   # ── PATH PROVENANCE ────────────────────────────────────────────────────────
   #
   # The TWO-CLAUSE reachability verdict behind every
@@ -305,11 +312,33 @@ defmodule Barkpark.Media.Blobstore.S3 do
     end
   end
 
+  @doc """
+  The per-receive HTTP timeout, in ms, that req/1 threads onto every blob
+  request. Public so a test can pin the assembled opts against a single source
+  of truth instead of a duplicated literal (self_update/client/github.ex).
+  """
+  @spec receive_timeout_ms() :: pos_integer()
+  def receive_timeout_ms, do: @receive_timeout
+
   defp req(method, url, req_opts) do
     # `retry: false` — the callers own their failure semantics (upload answers
     # a typed 503; delete is best-effort). `req_options` is the test seam:
     # `[plug: {Req.Test, stub}]` routes requests to an in-process stub.
-    opts = [method: method, url: url, retry: false] ++ req_opts ++ req_options()
+    #
+    # `receive_timeout: @receive_timeout` — CORRECTED FAILURE MODE: without an
+    # explicit timeout every verb inherited Req's 15s default, and a bucket that
+    # goes SILENT mid-transfer (an idle socket, not a slow one — receive_timeout
+    # is per-receive) would stall the request. The read path is BUFFERED: with
+    # download/2 matching the whole body on status 200, writing a `.part` tmp
+    # file, and an ATOMIC rename, a stall yields an error tuple that falls to the
+    # `other ->` clause -> {:error, :storage_unavailable} — a spurious 503 on a
+    # HEALTHY transfer, NEVER a truncated or torn cache write. The 60s ceiling is
+    # the guard: a genuinely-hung bucket fails LOUD and bounded instead of
+    # pinning the request on the silent default.
+    opts =
+      [method: method, url: url, retry: false, receive_timeout: @receive_timeout] ++
+        req_opts ++ req_options()
+
     Req.request(opts)
   end
 
