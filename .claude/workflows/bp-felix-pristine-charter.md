@@ -2309,7 +2309,148 @@ All five round-1 slices are file-disjoint and dispatch in parallel. S6 waits on 
 is what makes a displacement loud instead of silent, and S6 is precisely the case that springs the trap. S7
 waits on the arithmetic reaching zero — and if it has not, S7 publishes the remainder rather than faking green.
 
+## Wave 25 Decisions (2026-08-17) — THE LEDGER PAYS FOR THE LENS
+
+- **D164 — THE HONEST-LEDGER VERDICT TABLE (per-row, dated, commit-evidenced; the LEAD executes the closes at
+  Review — reconciliation is never builder-time).** 19 days and ~4,000 PRs rotted most open-row premises; every
+  verdict below was re-derived against origin/main on 2026-08-17 with rerun recipes committed under
+  `tooling/grip/ledger/felix-w25-*.md` (this PR).
+  **PAID — close with the paying commit:** `felix-w23-s1-drift-migration` → #6616 (`27352d8c13`);
+  `felix-w23-s5-blobstore-migration` + `felix-w24-s1-blobstore-fifteen` → #7553 (`5a0f4abfa4`);
+  `felix-w23-bl-fenced-sixteen` + `felix-w24-s6-fenced-sixteen` → #9411 (`92f91f0433`, semantic crossing dated
+  2026-08-03, AFTER the #6551 fence died); `felix-w23-s2-staleness-ratchet` + `felix-w23-bl-staleness-blocking-flip`
+  + `felix-w24-s3-baseline-prune-and-flip` + `felix-w24-bl-staleness-script-header-stale` +
+  `felix-w24-bl-staleness-line-anchor` → #7555 (`c66008ae2b`) + #11427 (`4ca033f502`);
+  `felix-w23-bl-overlap-unbound-annotation` → #6412 (`c69cc0b1ee`) + #7556; `felix-w24-s4-annotation-binding-ratchet`
+  + the four binding sub-rows (transfer-needs-detector-map, census-floor, config-hash-line-consistency,
+  multiclause-annotation-review) → #7556 (`2f9f25dd93`, commit body names the task);
+  `felix-w23-s4-fresh-guard-selftest` → `--selftest` shipped on main; `felix-w23-s3-amend-d75` +
+  `felix-w24-s5-merge-gates-dead-premise` → #7557 (`f91bf276b9`); `felix-w24-s2-router-csp-fix` → #7554
+  (`458ce20113`) — **CAVEAT: read the row's verbatim text before closing (Headers vs CSRF; 5 router.ex Config.CSRF
+  rows remain baselined)**; `task-felix-w20-fk-census-tripwire` → #5920 (`851e06703c`; the deliverable rides the
+  cloud `mix test` suite, NOT a yml step); D7 phantom-media → #2955 (`38c68c81fd`, both `-S` probes collapse to it).
+  **NO-OP — close superseded, zero builders:** `felix-w23-bl-continue-on-error-flip` +
+  `felix-w24-s7-continue-on-error-flip` — `security.yml:227` continue-on-error is STILL true, and flipping buys
+  nothing: stage-S4 excludes paths-filtered workflows from required checks (D143 reaffirmed by re-derivation).
+  **HUMAN-GATED — leave open:** `felix-w24-bl-close-6057-superseded` (PR #6057 OPEN, security waiver).
+  **STILL-LIVE — DO NOT batch-close** (the survey's "Sobelow vein fully triaged" overstated by three):
+  `task-felix-w21-bl-readiness-sobelow-inline` (readiness.ex:42 still line-anchored at `.sobelow-skips:28`, the
+  sole holdout of the 7 bounded interop sites), `felix-w23-bl-sobelow-transfer-proof-harness`,
+  `felix-w24-bl-blobstore-runtime-guard`, plus the non-Sobelow residue: w13 bounded-read-watch (watch; its board.ex
+  half is paid when S1 below merges — never double-file), w14 sync-deadletter, w18/w19 lock proofs, w20 devauth
+  watch, w21 janitor-ps / releasecapture-bound-tests / boundedcmd-eval, w22 codex-completion-deadbranch /
+  chatlive-overflow-banner / webhook-body-rightsize (bounded-but-oversized: 100MB pre-HMAC + no RateLimit on
+  `:github_webhook` — behavior-changing, needs its own wave), and the four gr-bl rows (D171).
+  `felix-w24-bl-stranded-sobelow-worktree` was NOT verified this wave — check the branch before touching it.
+
+- **D165 — D82 IS AMENDED BY NAME (the D153 precedent): the `tenancy/workspace_bundle` fence is LIFTED for
+  exactly two wave-25 slices — S3 (`felix-w25-s3-bundle-member-guard`, workspace_bundle.ex + its test) and the
+  catalog.ex escaper half of S2 — and for nothing else.** Both of the fence's grounds are dead: PR #6551 CLOSED
+  unmerged 2026-07-30 (content landed via #8130 the same minute), and the PDS crown is hardware-blocked climb work
+  (a 2235 MiB export that does not fit guerrilla — crown rows cancelled/considering, no PDS wave since w27 closed
+  2026-07-31, zero live claims on the five bundle-adjacent PDS rows, zero of 31 open PRs touching any tenancy
+  path). The fence was already crossed semantically by merged #9411 (scalar!→Repo.query!, non-PDS, 2026-08-03).
+  The guard row's own criterion 4 pre-authorized "the D82 fence is amended by name" as the unlock; its #6551
+  sequencing clause is unsatisfiable as written and satisfied in intent (the rewrite landed; files quiet since
+  2026-08-03). Conditions carried into the amendment: (i) lift scoped to the two named slices only; (ii)
+  hostile-manifest test RED-before (a manifest naming `users` + `schema_migrations` must be rejected 422 before
+  any COPY); (iii) behavior-preservation for catalog-member imports — the allow-set is DERIVED from the same
+  enumeration export uses (`Catalog.root_table()` + `live_e1/e2/e3` + `Map.keys(allowlist)`), never the pinned
+  lists, and a MEMBER table absent on the target stays tolerated (today's `table_exists?` skip path) — and the
+  37/0 `workspace_bundle_test.exs` baseline must be re-proven on CURRENT main, not quoted from the w23 prototype's
+  237/0; (iv) AUTO-RE-FENCE: if a PDS wave >27 opens or a tenancy file appears in any open PR, the lift is void
+  and the slice stops; (v) D148's two-clause waiver sentence stays true — the qi/1 honest-waiver comment is
+  updated, not deleted, and never replaced by a false "never raw client input" full-stop claim.
+
+- **D166 — THE ROSTER: re-verified backlog + fresh delta-audit, 6 slices, all round 1, all file-disjoint.**
+  Spine regardless of anything: S1 board bound, S2 dataset slug, S4 OnixEdit canonical events, S5 mailer offload.
+  S3 ships as **P3 scar-class defence-in-depth per D149 — it was NEVER P0 on the ledger** (the direction's "the
+  epic's only P0" is corrected; admin-only reachability is execution-proven 403/403/403 + admin-422). S6 recorder
+  ships re-scoped per D169. Fresh findings that did NOT make a slice go to backlog rows (D171), not silence.
+
+- **D167 — ZERO BUILDERS IN THE SOBELOW INSTRUMENT VEIN, reaffirmed as a hard commitment.** Everything there is
+  paid, human-gated, or a documented no-op (D164). The three still-live Sobelow-adjacent rows (readiness-inline,
+  transfer-proof-harness, blobstore-runtime-guard) are CONTENT/runtime rows, stay open, and are not rostered.
+
+- **D168 — THREE ROSTER PATHS WERE STALE; the real files are:** `api/lib/barkpark/tenancy/workspace_bundle/catalog.ex`
+  (not `tenancy/catalog.ex`), `api/lib/barkpark/plugins/onixedit/web/staleness_live.ex` and
+  `api/lib/barkpark/plugins/onixedit/bokbasen/status.ex` (not under `barkpark_web/plugins/`). Also corrected:
+  `staleness_live.ex` EXISTS on main (three lanes refuted the direction's "no longer exists" — the w13 watch row
+  names `load_books/0` as a DELIBERATE flat read, distinct from the fresh OnixEdit write-bypass finding in the
+  same file), and `Dataset` lives in `tenancy/`, not `content/`.
+
+- **D169 — RECORDER RE-SCOPED: the w22 row's "unbounded per session" is FALSE (runtime_text is turn-scoped —
+  resets at :341/:1103/:1132) and #6537 did NOT pay it (D64's 262144 bound covers the DISPLAY tail in
+  stream_segments.ex, not the durable persist path).** The true named failure mode: the per-TURN concat at
+  recorder.ex:1113 and the `source_markdown` persist seam (message.ex changeset has no `validate_length`) carry no
+  byte cap. S6 builds the narrowed shape; `task-felix-w22-bl-recorder-bounds` is closed superseded-by-S6 at merge.
+  Severity is defence-in-depth (codex DARK in prod, 0/38 sessions) — P3.
+
+- **D170 — ONE VERIFY LANE RETURNED A STUB, AND THE ROSTER SAYS SO.** The `mailer-stall-pin` report carried no
+  real content (its one fact is DEMOTED-NO-RERUN). Decide re-derived the premise directly: `Mailer.deliver` is
+  called synchronously at `accounts/user_notifier.ex:80` and `access/grant_notifier.ex:48`, no Task offload in
+  either file, and the fail-soft comment says auth callers intentionally ignore the result — so a supervised
+  async offload (`Task.Supervisor.async_nolink` on `Barkpark.TaskSupervisor`, keeping the Logger.error
+  observability INSIDE the task) is behavior-preserving for every caller that ignores the result. S5's builder
+  MUST re-verify each `deliver_*` caller's pattern-match before offloading (any caller that branches on
+  `{:error, _}` keeps a synchronous or awaited path). Seam ruling for S4: the canonical bypass-writer seam is
+  `Content.broadcast_document_mutation/3` (content.ex:522, its own docstring names this exact use) PLUS a
+  self-written `mutation_events` row — **NEVER `Content.upsert_document`**, which forces the draft twin and
+  coerces published→draft (writer.ex:459/:475), a behavior change.
+
+- **D171 — ADJUDICATED, NOT ROSTERED.** `gr-bl-tasks-route-parent-filter-ignored`: STILL-LIVE server defect
+  (index/2 reads only `params["parent"]`/`params["phase_id"]`; both `?parent_id=` and `?filter[parent_id]=`
+  silently ignored → unfiltered 200), but `tasks_controller.ex` carries open PR #11694 with a live review agent —
+  FENCED this wave, build after #11694 merges (honor-or-422, the row's own AC allows either).
+  `gr-bl-task-move-noop-help-drift`: server no-op-no-emit is working-as-designed (PDS-D451 comment); the defect
+  is the Go CLI's "always emits" help text — `internal/cli` is outside this epic's fence; row stays open, routed
+  to a CLI wave. `gr-bl-close-time-audit-vacuous-green` + `gr-bl-task-write-cap-breaks-briefs`: still-live,
+  observability/behavior-changing respectively — not improvement-only slices; stay open. New backlog filed this
+  wave: `felix-w25-bl-scim-sso-provision-seam` (Accounts has no token-free confirm; sso.ex:93-95 / scim.ex:296-297
+  reach past the context by structural necessity — fixing it is an API ADDITION, not a cleanup, so it needs its
+  own decision) and `felix-w25-bl-github-plugin-read-doctrine` (P4 — github plugin reads Content docs via raw Repo
+  in health.ex/relations.ex/outbox.ex against its own stated doctrine; reads skip no hooks, low severity).
+
+- **D172 — GUARDRAILS.** Builders **opus** except S3 (**fable** — tenancy blast radius + behavior-preservation
+  judgment; **HIGH-FLIP-RISK: the guard must red hostile manifests without redding one existing bundle test**).
+  Branch from **origin/main** into isolated worktrees; `CC=/usr/bin/clang` only where `cc` is shadowed; `.ex` PRs
+  WAIT for the Elixir Test gate. FENCES per-FILE: strictly OFF `portable_doc/` + `content/` (Paper Excellence +
+  BPML, PRs #11770/#11814/#11816), the security-wave controllers/plugs (#11765/#11766/#11809, incl.
+  `tasks_controller.ex` #11694), `cloud/`, and everything D82 still covers outside the D165 lift. Every guard
+  change is MUTATION-PROVEN (disable the guard → the new test reds). Every number quoted names the tree and load
+  it was taken under. File ownership is exclusive: `workspace_bundle.ex` belongs to S3 alone; `catalog.ex` to S2
+  alone; no slice shares a file.
+
+### Wave 25 roadmap (6 slices, round 1, parallel — disjoint files)
+
+| # | Slice | Task | Model | Round | Files |
+|---|---|---|---|---|---|
+| S1 | Bound `Board.snapshot`'s corpus scan — "the bounded HTTP reader has an unbounded LiveView twin" (board.ex:210 vs query.ex 500/1000, refreshed per socket every 15s) | `felix-w25-s1-board-snapshot-bound` | opus | 1 | tasks/board.ex, tasks/query.ex, test/…/board_test.exs |
+| S2 | Dataset slug format — the only tenancy slug schema without `validate_format`, reachable non-admin via `POST /v1/data/mutate/:dataset`; + document/assert `standard_conforming_strings` at the catalog escaper (D165 lift) | `felix-w25-s2-dataset-slug-format` | opus | 1 | tenancy/dataset.ex, tenancy/workspace_bundle/catalog.ex, test/…/dataset_test.exs |
+| S3 | Catalog-membership guard on `import_member/3` — P3 defence-in-depth per D149. **HIGH-FLIP-RISK: behavior preservation** (D165 conditions ii–v binding) | `felix-w25-s3-bundle-member-guard` | fable | 1 | tenancy/workspace_bundle.ex, test/…/workspace_bundle_test.exs |
+| S4 | OnixEdit canonical events — two raw `Repo.update` writes on Content Documents gain a `mutation_events` row + `broadcast_document_mutation/3` (never `upsert_document`, D170) | `felix-w25-s4-onixedit-canonical-events` | opus | 1 | plugins/onixedit/web/staleness_live.ex, plugins/onixedit/bokbasen/status.ex, test/…/plugins/onixedit/ |
+| S5 | Mailer offload — synchronous SMTP in the auth/grant request path moves to `Task.Supervisor.async_nolink`, observability preserved (D170 caller re-verify binding) | `felix-w25-s5-mailer-async-deliver` | opus | 1 | accounts/user_notifier.ex, access/grant_notifier.ex, test/…/user_notifier_test.exs |
+| S6 | Recorder per-turn cap — config-overridable byte cap on the runtime_text concat + `validate_length(:source_markdown)` at the message changeset seam (D169 re-scope) | `felix-w25-s6-recorder-turn-cap` | opus | 1 | studio_chat/recorder.ex, studio_chat/message.ex, test/…/recorder_test.exs |
+
+All six are file-disjoint and dispatch in parallel. S2 and S3 both sit under the D165 lift and its auto-re-fence
+condition — if a tenancy file appears in any open PR before dispatch, BOTH stop. The ledger batch-closes (D164)
+belong to the LEAD at Review, batched, with each close naming its paying commit.
+
 ## Wave log
+
+### Wave 2026-08-17 — Wave 25 DECIDED (building). "The Ledger Pays for the Lens."
+
+Ratified D164–D172. Two products in one motion: an honest ledger (every open row re-verdicted against
+origin/main, dated, commit-evidenced — 13+ rows PAID, 2 no-op, 1 human-gated, the rest still-live with fresh
+re-derivations committed as `tooling/grip/ledger/felix-w25-*.md`) and a fresh stable-core delta-audit that
+yielded four builder-grade findings (board bound, dataset slug, OnixEdit write-bypass, mailer stall) on top of
+two re-verified backlog rows (bundle guard per D149's P3 reprice, recorder re-scoped per-turn). The big call:
+**D82's workspace_bundle fence is amended by name (D165)** — both grounds dead (#6551 closed unmerged, PDS crown
+hardware-blocked), zero live collisions, the row's own criterion pre-authorized the unlock. Three direction
+premises failed smoke and the wave followed the evidence: staleness_live EXISTS on main, recorder is turn-scoped
+(not per-session) and unpaid by #6537, the bundle guard was never P0. One verify lane (mailer-stall-pin)
+returned a stub — disclosed in D170, premise re-derived at Decide rather than built on a hole. 6 slices round 1
+(5 opus + S3 fable, HIGH-FLIP-RISK), 2 new backlog rows filed. Grade: pending build+review.
 
 ### Wave 2026-07-29 — Wave 24 BUILT + REVIEWED, grade A. "The Arithmetic Held."
 
