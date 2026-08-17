@@ -346,6 +346,15 @@
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
+    // cch-w62 (D740) — UNWRAP THE NESTED ENVELOPE before keying anything. Five
+    // route families (self-update 13, rollback 10, the webhook proxy 6, PATCH
+    // /autoupdate 1, PATCH /admin channel 1 — 31 emitters in router.ex) send
+    // `{error: {code}}`, not the flat shape. Without this line `key` is a
+    // truthy OBJECT and the humanized-slug return below calls `key.replace`
+    // — a TypeError, in copy code whose whole job is to never crash. A nested
+    // envelope with no `code` resolves to undefined and takes the fallback,
+    // exactly like a missing slug.
+    if (key && typeof key === "object") key = key.code;
     if (key === "forbidden") {
       var proved = forbiddenEvidenceCopy(data);
       if (proved) return proved;
@@ -384,6 +393,27 @@
         if (Array.isArray(msg)) msg = msg[0];
         return first.replace(/_/g, " ") + " " + msg;
       }
+    }
+    // cch-w62 (D855) — THE SINGULAR-DETAIL RUNG, fenced to an enumerated slug
+    // allowlist. The server sometimes writes its most specific true sentence
+    // into `detail` (a STRING — the ladder above reads only `details`, the
+    // per-field MAP), and for exactly three measured slugs that sentence is
+    // surface-neutral product copy worth relaying verbatim: barkpark_required
+    // (create 422 — deliberately no siteCreateFailureCopy arm; it reaches
+    // friendly()), deploy_ability_required (settings 403), nothing_to_update
+    // (settings 422). The fence is keyed on the SLUG SET by name, never on an
+    // HTTP status — friendly() takes no status argument — and that is load-
+    // bearing: faultCopy passes ERRORS.server_error AS the fallback on a 5xx,
+    // so an unfenced rung would let a 5xx-borne detail (node_ports_exhausted,
+    // or read_token_mint_failed's raw upstream slug — the cch-w48-s2 class)
+    // outrank the 5xx honesty law by construction. CLI-voiced details
+    // (content_binding_required/empty, no_build_source — they embed bp flags
+    // and re-run lines) stay with their per-route arms and are NOT relayed
+    // here.
+    if ((key === "barkpark_required" || key === "deploy_ability_required" ||
+         key === "nothing_to_update") &&
+        typeof data.detail === "string" && data.detail) {
+      return data.detail;
     }
     return fallback || (key ? key.replace(/_/g, " ") : "") || "Something went wrong.";
   }
