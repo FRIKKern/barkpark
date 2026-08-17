@@ -11,12 +11,22 @@
  * admin token once landed in five files under `dist/` and in a visible `wss://`
  * URL during the astro parity work.
  *
- * So each config verifies the token against the server's own `auth_tier`
- * contract (GET /v1/capabilities) BEFORE baking it, with three outcomes:
- *   admin (or any privileged tier) → throw, hard-failing the build
- *   none / absent                  → throw (would join green, find nothing)
- *   read                           → bake it
- *   endpoint unreachable / non-2xx → drop the token, warn, build on
+ * So each config verifies the token against the server's own contract
+ * (GET /v1/capabilities?perms=1) BEFORE baking it, with these outcomes:
+ *   admin (or any privileged tier)    → throw, hard-failing the build
+ *   none / absent                     → throw (would join green, find nothing)
+ *   read + public-read MEMBERSHIP     → bake it
+ *   read WITHOUT a public-read grant  → throw (a FULL read token, not a mint)
+ *   read, server does not attest      → drop the token, warn, build on
+ *   endpoint unreachable / non-2xx    → drop the token, warn, build on
+ *
+ * The membership half closed the hole the first edition of this file declared
+ * "NOT covered on purpose": the server folds read/admin/public-read into one
+ * `auth_tier: "read"` echo (@read_perms, tenancy/auth.ex), so the old
+ * tier === 'read' check baked ANY read-capable token. Both guards now require
+ * the opt-in ?perms=1 `permissions` attestation to carry "public-read" —
+ * membership, never list equality (the public mint path emits an unordered
+ * mixed list).
  *
  * This file is the mutation proof for BOTH doors: delete or weaken either
  * guard and these tests red. Run it with
@@ -24,11 +34,6 @@
  *   cd templates/search-starter && node --test token-guard.test.mjs
  *
  * CI runs it on any change to either config (astro-search-finder-test.yml).
- *
- * NOT covered on purpose: the `read` tier is coarser than "public-read" — a
- * read-scoped token that is not a public-read mint still passes. That hole is
- * backlogged as `astro-guard-read-vs-publicread-tier`; this file pins only the
- * admin/none/read behaviour both configs implement today.
  */
 
 import { test, describe, afterEach } from 'node:test'
@@ -46,14 +51,23 @@ process.env.BARKPARK_TOKEN = TOKEN
 
 const realFetch = globalThis.fetch
 
-/** Stub `fetch` with a fixed /v1/capabilities response. */
-function stubTier(tier, { ok = true, status = 200 } = {}) {
+/**
+ * Stub `fetch` with a fixed /v1/capabilities response. `permissions` is the
+ * opt-in ?perms=1 attestation: pass an array to attest it, leave it undefined
+ * to imitate a server that predates the feature (the key is simply absent).
+ */
+function stubTier(tier, { ok = true, status = 200, permissions } = {}) {
   globalThis.fetch = async (url) => {
-    assert.equal(String(url), `${ORIGIN}/v1/capabilities`)
+    // Both guards must ASK for the attestation — a bare /v1/capabilities
+    // fetch silently gets no `permissions` key and the guard goes dark.
+    assert.equal(String(url), `${ORIGIN}/v1/capabilities?perms=1`)
     return {
       ok,
       status,
-      json: async () => (tier === undefined ? {} : { auth_tier: tier }),
+      json: async () => ({
+        ...(tier === undefined ? {} : { auth_tier: tier }),
+        ...(permissions === undefined ? {} : { permissions }),
+      }),
     }
   }
 }
@@ -158,14 +172,49 @@ for (const door of doors) {
       await assert.rejects(door.verify(), /does not authenticate/)
     })
 
-    test('a public-read token (auth_tier "read") passes and is baked', async () => {
-      stubTier('read')
+    test('an attested public-read token passes and is baked (membership, not equality)', async () => {
+      // The public mint path emits an unordered MIXED list — the guard must
+      // assert membership, never `=== ["public-read"]`.
+      stubTier('read', { permissions: ['read', 'public-read'] })
       const { token, note } = await door.verify()
       assert.equal(token, TOKEN)
       assert.equal(note, '')
 
-      stubTier('read')
+      stubTier('read', { permissions: ['read', 'public-read'] })
       assert.equal(await door.bake(), TOKEN)
+    })
+
+    test('a bare ["public-read"] mint passes too', async () => {
+      stubTier('read', { permissions: ['public-read'] })
+      const { token, note } = await door.verify()
+      assert.equal(token, TOKEN)
+      assert.equal(note, '')
+    })
+
+    test('a plain read token (auth_tier "read", no public-read grant) HARD-FAILS', async () => {
+      // THE closed hole: the server folds read/admin/public-read into one
+      // "read" tier, so this exact token used to pass and bake into the
+      // browser bundle. The attestation now positively identifies it as a
+      // full read token — never something to warn past.
+      stubTier('read', { permissions: ['read'] })
+      await assert.rejects(door.verify(), (err) => {
+        assert.match(err.message, /no "public-read" grant/)
+        assert.match(err.message, /FULL read token/)
+        return true
+      })
+    })
+
+    test('a server that does not attest permissions drops the token instead of failing', async () => {
+      // An older server ignores ?perms=1 entirely — the key is absent, which
+      // is NOT the same as []. The tier says "read" but nothing can confirm a
+      // public-read mint: cannot determine → dark, not broken.
+      stubTier('read')
+      const { token, note } = await door.verify()
+      assert.equal(token, '', 'an unattested token must never be baked')
+      assert.match(note, /does not attest/)
+
+      stubTier('read')
+      assert.equal(await door.bake(), '', 'the browser must get nothing')
     })
 
     test('an unreachable capabilities endpoint drops the token instead of failing', async () => {

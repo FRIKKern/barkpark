@@ -46,6 +46,15 @@ defmodule BarkparkWeb.CapabilitiesController do
     # keep receiving the exact old shape unless they ask.
     include_bpml = params["bpml"] in ["1", "true"]
 
+    # ?perms=1 opts in to the root "permissions" attestation key: the caller
+    # token's verbatim permission grants ([] for anon — emitted even for anon,
+    # so absent-vs-empty is unambiguous). Same opt-in discipline as
+    # ?build/?views/?chat/?bpml — strict-decoding released CLIs must keep
+    # receiving the exact old shape unless they ask. Consumers (the
+    # search-starter build guards) assert public-read MEMBERSHIP on it,
+    # because auth_tier collapses read/admin/public-read into one "read" echo.
+    include_perms = params["perms"] in ["1", "true"]
+
     # base_url must be the host the caller ACTUALLY dialed, not the frozen
     # boot-time PHX_HOST scalar — a custom instance hostname and the canonical
     # FQDN each get their own host back (D4 server-side: one instance, many
@@ -61,6 +70,8 @@ defmodule BarkparkWeb.CapabilitiesController do
         include_views: include_views,
         include_chat: include_chat,
         include_bpml: include_bpml,
+        include_perms: include_perms,
+        permissions: Capabilities.permissions_for_token(conn.assigns[:api_token]),
         server: server
       )
 

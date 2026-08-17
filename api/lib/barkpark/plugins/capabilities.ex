@@ -202,6 +202,25 @@ defmodule Barkpark.Plugins.Capabilities do
     end
   end
 
+  @doc """
+  The caller token's VERBATIM permission grants, for the opt-in `?perms=1`
+  root `permissions` attestation (see `maybe_gate_perms/2`). Echo only — no
+  new authorization logic: the membership predicate consumers apply
+  (`"public-read" in perms`) is the one `AnonPerspective.public_read_token?/1`
+  and `Search.DocumentsRetriever` already use. Mirrors that predicate's
+  guards: an absent token, a struct without the `:permissions` key, or a
+  non-list value all echo `[]` — only a list can carry grants.
+  """
+  @spec permissions_for_token(struct() | nil) :: [String.t()]
+  def permissions_for_token(nil), do: []
+
+  def permissions_for_token(token) do
+    case token do
+      %{permissions: perms} when is_list(perms) -> perms
+      _ -> []
+    end
+  end
+
   # The doc/task RANK carried by a (possibly `+chat`-suffixed) caller tier. The
   # orthogonal `chat` capability rides alongside the rank and never lifts it, so
   # every rank comparison and the echoed `auth_tier` use the base alone.
@@ -282,7 +301,33 @@ defmodule Barkpark.Plugins.Capabilities do
     |> maybe_gate_views(opts)
     |> maybe_gate_chat(base, opts)
     |> maybe_gate_bpml(base, opts)
+    |> maybe_gate_perms(opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
+  end
+
+  # The root `permissions` attestation key (wave api-read-path-security-sweep,
+  # astro-guard-read-vs-publicread-tier): the caller token's VERBATIM permission
+  # grants (e.g. ["public-read", "read"]), so a build guard can assert
+  # public-read MEMBERSHIP instead of the collapsed `auth_tier` echo —
+  # @read_perms (tenancy/auth.ex) folds read/admin/public-read into one "read"
+  # tier, which is too coarse to tell a safe-to-bake public mint from a full
+  # read token. STRICTLY OPT-IN (`include_perms: true`, wired from `?perms=1`)
+  # for the same reason `build`/`views`/`chat`/`bpml` are: released bp binaries
+  # strict-decode the manifest root (DisallowUnknownFields), so an
+  # unconditional new root key would brick every CLI in the wild. NOT a new
+  # `auth_tier` VALUE either: that enum is closed (manifest.schema.json), and
+  # `caller_rank/1` defaults unknown tiers to 0, so a new value would collapse
+  # public-read callers to anon and flip both template guards to throw.
+  # UNLIKE build/chat, the key IS emitted for anonymous callers (as []) so
+  # absent-vs-empty stays unambiguous: absent = the server was not asked (or
+  # predates the feature); [] = the server attests the caller holds no grants.
+  # Sits BEFORE the etag step so the gated key feeds etag_for/1.
+  defp maybe_gate_perms(manifest, opts) do
+    if Keyword.get(opts, :include_perms, false) do
+      Map.put(manifest, "permissions", Keyword.get(opts, :permissions, []))
+    else
+      manifest
+    end
   end
 
   # The root `bpml` vocabulary key (BPML masterplan W0): the block-tag →

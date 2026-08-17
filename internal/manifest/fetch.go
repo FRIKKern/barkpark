@@ -38,6 +38,13 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 	// unknown key. Older servers ignore the params entirely (proven inert —
 	// byte-identical 200s). chat=1 rides in the SAME commit that models
 	// Manifest.Chat — no bp ever asks for a key it cannot decode.
+	//
+	// ?perms=1 (the root "permissions" attestation, consumed by the
+	// search-starter build guards over plain HTTP) is DELIBERATELY not sent:
+	// bp has no consumer for the echo, and asking for a key this Manifest
+	// struct does not model would make Parse's DisallowUnknownFields a parse
+	// outage. If bp ever grows a consumer, the struct field and this param
+	// must land in the SAME commit — the chat=1 rule.
 	url := client.BaseURL() + CapabilitiesPath + "?views=1&chat=1"
 
 	var (

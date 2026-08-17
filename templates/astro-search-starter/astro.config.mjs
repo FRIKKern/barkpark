@@ -48,16 +48,26 @@ const docType = (process.env.BARKPARK_DOC_TYPE || '').trim()
  * landed in five files under dist/ and in a visible wss:// URL.
  *
  * So the token is VERIFIED before it is baked, against the server's own
- * `auth_tier` contract (GET /v1/capabilities → "admin" | "read" | "none")
- * rather than by sniffing the string, which has no reliable shape.
+ * contract (GET /v1/capabilities?perms=1) rather than by sniffing the string,
+ * which has no reliable shape. TWO server facts, both required: `auth_tier`
+ * must be "read" (rules out admin/write and does-not-authenticate), AND the
+ * opt-in `permissions` attestation must carry a "public-read" MEMBERSHIP — the
+ * tier alone is too coarse, because the server folds read/admin/public-read
+ * into one "read" echo, so a FULL read token used to pass this guard and bake.
+ * Membership, never list equality: the public mint path emits an unordered
+ * mixed list (e.g. ["public-read", "read"]).
  *
- * Two outcomes, deliberately different:
- *   - Positively privileged (any tier other than `read`) → HARD FAIL the build.
- *     This is never a transient condition and never something to warn past.
- *   - Cannot determine (API unreachable, non-2xx, malformed) → DO NOT fail the
- *     build; drop the token so the live path goes dark, and say so loudly. An
- *     offline or degraded build should lose a feature, never ship an unverified
+ * Three outcomes, deliberately different:
+ *   - Positively privileged (any tier other than `read`, or a `read` tier
+ *     whose attested permissions carry no `public-read` grant) → HARD FAIL the
+ *     build. This is never a transient condition and never something to warn
+ *     past.
+ *   - Cannot determine (API unreachable, non-2xx, malformed, or a server that
+ *     predates the ?perms=1 attestation) → DO NOT fail the build; drop the
+ *     token so the live path goes dark, and say so loudly. An offline or
+ *     degraded build should lose a feature, never ship an unverified
  *     credential — and never break a deploy over a network blip.
+ *   - Attested public-read → bake it.
  */
 async function verifyPublicReadToken(t, origin) {
   if (!t) return { token: '', note: '' }
@@ -65,20 +75,21 @@ async function verifyPublicReadToken(t, origin) {
     return { token: '', note: 'no BARKPARK_API_URL to verify against — live search disabled' }
   }
   let tier
+  let perms
   try {
-    const res = await fetch(origin + '/v1/capabilities', {
+    const res = await fetch(origin + '/v1/capabilities?perms=1', {
       headers: { authorization: `Bearer ${t}` },
       signal: AbortSignal.timeout(15_000),
     })
     if (!res.ok) {
       return { token: '', note: `capabilities returned ${res.status} — live search disabled` }
     }
-    tier = (await res.json())?.auth_tier
+    const body = await res.json()
+    tier = body?.auth_tier
+    perms = body?.permissions
   } catch (e) {
     return { token: '', note: `capabilities unreachable (${e?.name || 'error'}) — live search disabled` }
   }
-
-  if (tier === 'read') return { token: t, note: '' }
 
   // `none` is a DIFFERENT failure from a privileged token: the value does not
   // authenticate at all. Not a security problem — but baking it produces the
@@ -95,11 +106,44 @@ async function verifyPublicReadToken(t, origin) {
     )
   }
 
+  if (tier !== 'read') {
+    throw new Error(
+      `BARKPARK_TOKEN is an "${tier}" token, and this build would inline it into ` +
+        `the browser bundle as NEXT_PUBLIC_BARKPARK_WS_TOKEN — i.e. hand it to ` +
+        `every visitor.\n\n` +
+        `Only a public-read token may be used here. Mint one with:\n` +
+        `  POST <api>/v1/tokens  {"label":"<site> live search","permissions":["public-read"]}\n\n` +
+        `Or leave BARKPARK_TOKEN empty — the site still builds and both search ` +
+        `engines still work over the flat anonymous route; only the live WebSocket ` +
+        `upgrade stays dark.`,
+    )
+  }
+
+  // tier === 'read': require the positive public-read attestation.
+  if (Array.isArray(perms) && perms.includes('public-read')) {
+    return { token: t, note: '' }
+  }
+
+  if (!Array.isArray(perms)) {
+    // The server ignored ?perms=1 (predates the attestation) or returned a
+    // malformed key — the tier says `read` but nothing can confirm the token
+    // is a public-read mint rather than a full read token. Cannot determine →
+    // dark, not broken.
+    return {
+      token: '',
+      note:
+        'server does not attest token permissions (?perms=1 unsupported) — ' +
+        'cannot confirm a public-read mint; live search disabled',
+    }
+  }
+
   throw new Error(
-    `BARKPARK_TOKEN is an "${tier}" token, and this build would inline it into ` +
-      `the browser bundle as NEXT_PUBLIC_BARKPARK_WS_TOKEN — i.e. hand it to ` +
-      `every visitor.\n\n` +
-      `Only a public-read token (auth_tier "read") may be used here. Mint one with:\n` +
+    `BARKPARK_TOKEN authenticates as auth_tier "read", but the server's ` +
+      `permission attestation ${JSON.stringify(perms)} carries no "public-read" ` +
+      `grant — this is a FULL read token, not a public-read mint, and this ` +
+      `build would inline it into the browser bundle as ` +
+      `NEXT_PUBLIC_BARKPARK_WS_TOKEN — i.e. hand it to every visitor.\n\n` +
+      `Only a public-read token may be baked. Mint one with:\n` +
       `  POST <api>/v1/tokens  {"label":"<site> live search","permissions":["public-read"]}\n\n` +
       `Or leave BARKPARK_TOKEN empty — the site still builds and both search ` +
       `engines still work over the flat anonymous route; only the live WebSocket ` +

@@ -1348,4 +1348,90 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert %{"digest" => "bpml-" <> _} = body["bpml"]
     end
   end
+
+  describe "root `permissions` attestation (astro-guard-read-vs-publicread-tier, ?perms=1 opt-in)" do
+    # WHY the key exists: @read_perms (tenancy/auth.ex) folds read/admin/
+    # public-read into one `auth_tier: "read"` echo, so the tier alone cannot
+    # tell a safe-to-bake public-read mint from a full read token. The
+    # search-starter build guards assert public-read MEMBERSHIP on this echo.
+    # Opt-in by contract: released bp binaries strict-decode the manifest root
+    # (DisallowUnknownFields), so the default response must NEVER grow a new
+    # root key — ?perms=1 is the escape hatch, mirroring ?build/?bpml.
+    test "default manifest carries NO root permissions key (old-CLI compatibility)", %{conn: conn} do
+      body = caps_conn(conn) |> json_response(200)
+
+      refute Map.has_key?(body, "permissions"),
+             "default manifest leaked the root permissions key — it must be withheld unless ?perms=1"
+    end
+
+    test "?perms=1 echoes the caller token's verbatim permission list", %{conn: conn} do
+      # Mint a fresh token so the assertion is on a KNOWN list (the shared dev
+      # token may pre-exist locally with a different grant set). The echo is
+      # VERBATIM: no reorder, no dedup, no rank collapse.
+      raw = "bp-perms-echo-#{System.unique_integer([:positive])}"
+      Barkpark.Auth.create_token(raw, "perms echo", "test", ["read", "write", "admin"])
+
+      body =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw}")
+        |> get("/v1/capabilities?perms=1")
+        |> json_response(200)
+
+      assert body["permissions"] == ["read", "write", "admin"]
+      assert body["auth_tier"] == "admin"
+    end
+
+    test "a public-read mint attests membership while auth_tier still collapses to \"read\"",
+         %{conn: conn} do
+      # The exact distinction the guards need: this token and a plain ["read"]
+      # token are INDISTINGUISHABLE by auth_tier — only the attestation splits
+      # them. Mixed unordered list on purpose (membership, never equality).
+      raw = "bp-public-read-mint-#{System.unique_integer([:positive])}"
+      Barkpark.Auth.create_token(raw, "public mint", "test", ["public-read", "read"])
+
+      body =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw}")
+        |> get("/v1/capabilities?perms=1")
+        |> json_response(200)
+
+      assert body["auth_tier"] == "read"
+      assert "public-read" in body["permissions"]
+    end
+
+    test "anonymous ?perms=1 STILL gets the key, as [] (absent-vs-empty stays unambiguous)",
+         %{conn: conn} do
+      body = conn |> get("/v1/capabilities?perms=1") |> json_response(200)
+
+      assert body["auth_tier"] == "none"
+      assert body["permissions"] == []
+    end
+
+    test "the gated key feeds the etag (no 304 cross-contamination)", %{conn: conn} do
+      plain_etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+      perms_etag = caps_conn(build_conn(), "?perms=1") |> get_resp_header("etag") |> List.first()
+
+      assert is_binary(plain_etag) and is_binary(perms_etag)
+
+      refute plain_etag == perms_etag,
+             "?perms=1 must change the etag — a cached plain body must never 304-mask the attestation"
+    end
+
+    test "manifest.schema.json wires root `permissions` as ADDITIVE optional" do
+      schema_path =
+        Path.expand(Path.join([File.cwd!(), "..", "docs", "cli", "manifest.schema.json"]))
+
+      schema = schema_path |> File.read!() |> Jason.decode!()
+
+      perms_prop = get_in(schema, ["properties", "permissions"])
+      assert is_map(perms_prop), "manifest.schema.json root is missing the permissions property"
+      assert perms_prop["type"] == "array"
+      assert get_in(perms_prop, ["items", "type"]) == "string"
+
+      refute "permissions" in schema["required"],
+             "`permissions` must NOT be in the root required[] — it is opt-in additive " <>
+               "(the root is additionalProperties:false, so absence from properties would " <>
+               "make every ?perms=1 body schema-invalid)"
+    end
+  end
 end

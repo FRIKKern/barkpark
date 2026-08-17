@@ -76,6 +76,13 @@
       },
       "additionalProperties": false
     },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "OPT-IN (?perms=1) verbatim echo of the caller token's permission grants (e.g. [\"public-read\", \"read\"]). STRICTLY absent unless the caller asks — released CLIs strict-decode the root, so the default response never grows this key. UNLIKE build/chat it IS emitted for anonymous callers (as []) so absent-vs-empty stays unambiguous: absent = the server was not asked or predates the feature; [] = the server attests the caller holds no grants. Consumers assert MEMBERSHIP (e.g. \"public-read\" for the search-starter build guards), never list equality — auth_tier folds read/admin/public-read into one \"read\" echo, which this key exists to disambiguate. Grant names are a growth axis: no enum."
+    },
     "chat": {
       "type": "object",
       "additionalProperties": false,
