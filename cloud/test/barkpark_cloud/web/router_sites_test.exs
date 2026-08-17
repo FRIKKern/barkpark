@@ -1222,6 +1222,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       # the flat path (e.g. re-wrapping it) breaks this equality.
       assert body["detail"] ==
                "#{bp.slug} refused to mint the site's read token (HTTP 403): forbidden"
+
       # A site that cannot read its content is not a site. Nothing was written.
       assert Registry.list_sites_for_team(team) == []
     end
