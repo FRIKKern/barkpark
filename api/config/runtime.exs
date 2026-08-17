@@ -958,6 +958,19 @@ if config_env() == :prod do
 
   config :barkpark, :ticket_rate_limits, ticket_rate_limits
 
+  # Anonymous auth-write rails (BarkparkWeb.Plugs.AuthWriteRateLimit) — per-hour
+  # per-IP register budget, operator-tunable without a rebuild, same pattern as
+  # BARKPARK_TICKET_RATE_* above.
+  base_auth_write_limits = Application.get_env(:barkpark, :auth_write_rate_limits, [])
+
+  auth_write_rate_limits =
+    case System.get_env("BARKPARK_AUTH_RATE_REGISTER") do
+      nil -> base_auth_write_limits
+      raw -> Keyword.put(base_auth_write_limits, :register, String.to_integer(raw))
+    end
+
+  config :barkpark, :auth_write_rate_limits, auth_write_rate_limits
+
   if origins = System.get_env("DEFAULT_CORS_ORIGINS") do
     parsed = origins |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
     config :barkpark, :default_cors_origins, parsed
