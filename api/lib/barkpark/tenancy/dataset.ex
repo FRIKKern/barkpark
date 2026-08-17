@@ -14,6 +14,17 @@ defmodule Barkpark.Tenancy.Dataset do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
+  # Slug charset: lowercase alphanumeric, hyphen, and underscore, never leading
+  # with a separator. Underscore is PERMITTED (guerrilla prod census: 21 datasets,
+  # 0 underscore slugs, 0 violators — but underscore is a de-facto slug convention
+  # and is NOT a SQL-injection vector, so refusing it would lose zero security
+  # value; the named failure mode this guard closes is a quote/backslash slug
+  # reaching the interpolated workspace_bundle catalog escaper, and those chars
+  # stay refused). Uppercase, dot, space, and a leading hyphen/underscore are
+  # still refused. Siblings Workspace/Project gate the hyphen-only class; this
+  # loosens only the underscore, deliberately.
+  @slug_format ~r/^[a-z0-9][a-z0-9_-]*$/
+
   schema "datasets" do
     field :slug, :string
     field :name, :string
@@ -31,6 +42,9 @@ defmodule Barkpark.Tenancy.Dataset do
     |> validate_required([:slug, :name, :project_id])
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_length(:name, min: 1, max: 255)
+    |> validate_format(:slug, @slug_format,
+      message: "must be lowercase alphanumeric with hyphens or underscores"
+    )
     |> assoc_constraint(:project)
     |> unique_constraint([:slug, :project_id],
       name: :datasets_project_id_slug_index,
