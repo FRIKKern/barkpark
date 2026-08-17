@@ -393,6 +393,120 @@ defmodule Barkpark.PortableDoc.BpmlTest do
     end
   end
 
+  # ── notes joins the kernel (wave-6) ─────────────────────────────────────────
+
+  alias Barkpark.PortableDoc.Bpml.UnprintableError
+
+  describe "notes grid (wave-6 kernel tier)" do
+    test "a dict-item notes grid round-trips byte-equal (corpus shape {label,lead,text})" do
+      # the corpus dict-item keyset — {label, lead, text}, body under `text`
+      blocks = [
+        %{
+          "id" => "n1",
+          "type" => "notes",
+          "items" => [
+            %{"label" => "First", "lead" => "one", "text" => "The opening remark."},
+            %{"label" => "Second", "lead" => "two", "text" => "A follow-up with < & > chars."},
+            %{"label" => "Third", "text" => "No lead on this one."}
+          ]
+        }
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert bpml =~ ~s(<note label="First" lead="one">The opening remark.</note>)
+      # the body rides the `text` key, NEVER `body`
+      assert parsed == blocks
+      assert [%{"items" => [%{"text" => "The opening remark."} | _]}] = parsed
+      refute Enum.any?(hd(parsed)["items"], &Map.has_key?(&1, "body"))
+    end
+
+    test "a bare-string notes item prints tolerantly (heggemsnes-act remedies shape)" do
+      # 5 such items live in heggemsnes-act block hga-remedies; read-only tolerance
+      blocks = [
+        %{"type" => "notes", "items" => ["A remedy stated as a bare string < & >"]}
+      ]
+
+      bpml = Bpml.print_blocks(blocks)
+      assert bpml =~ "<note>A remedy stated as a bare string &lt; &amp; &gt;</note>"
+    end
+
+    test "an inline-array notes item refuses (UnprintableError, not a silent empty)" do
+      # 2 such items live in epic-paper-beauty-reference — a ProseMirror inline array
+      blocks = [
+        %{"type" => "notes", "items" => [[%{"type" => "text", "value" => "inline"}]]}
+      ]
+
+      assert_raise UnprintableError, fn -> Bpml.print_blocks(blocks) end
+    end
+  end
+
+  describe "the singular note widget (wave-6 composition split)" do
+    test "a text-shaped note block round-trips ({id,label,lead,text})" do
+      blocks = [
+        %{
+          "id" => "w1",
+          "type" => "note",
+          "label" => "Aside",
+          "lead" => "context",
+          "text" => "A standalone marginal note."
+        }
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert bpml =~ ~s(<note id="w1" label="Aside" lead="context">A standalone marginal note.</note>)
+      assert parsed == blocks
+    end
+
+    test "a content-shaped note block refuses honestly (non-empty content, no text)" do
+      # the 1 corpus block barkpark-tasks-mobile-wave w1-223 — accessors read "";
+      # printing it as an empty <note> would be a silent loss
+      blocks = [
+        %{
+          "id" => "w2",
+          "type" => "note",
+          "content" => [%{"type" => "text", "value" => "smuggled body"}]
+        }
+      ]
+
+      assert_raise UnprintableError, fn -> Bpml.print_blocks(blocks) end
+    end
+  end
+
+  describe "byline items fail honestly (wave-6 map-item 500 class)" do
+    test "a map item %{\"value\"=>bin} prints as its string instead of raising a 500" do
+      # the exact wave-5/6 paper shape — byline items stored as maps, not strings
+      blocks = [
+        %{
+          "id" => "by",
+          "type" => "byline",
+          "items" => [%{"value" => "Epic task-4792 · wave 6"}, "A plain string item"]
+        }
+      ]
+
+      bpml = Bpml.print_blocks(blocks)
+      assert bpml =~ "<item>Epic task-4792 · wave 6</item>"
+      assert bpml =~ "<item>A plain string item</item>"
+    end
+
+    test "a non-binary byline item refuses via UnprintableError (never a raw 500)" do
+      blocks = [%{"type" => "byline", "items" => [%{"unexpected" => "shape"}]}]
+      assert_raise UnprintableError, fn -> Bpml.print_blocks(blocks) end
+
+      lists = [%{"type" => "byline", "items" => [123]}]
+      assert_raise UnprintableError, fn -> Bpml.print_blocks(lists) end
+    end
+
+    test "a property arm: map-value byline items coerce, never crash" do
+      :rand.seed(:exsss, {2026, 8, 17})
+
+      for _ <- 1..40 do
+        v = gen_text()
+        bpml = Bpml.print_blocks([%{"type" => "byline", "items" => [%{"value" => v}]}])
+        assert bpml =~ "<item>#{esc_for_test(v)}</item>"
+      end
+    end
+  end
+
   # ── naming law: HTML aliases canonicalize ───────────────────────────────────
 
   describe "naming law" do
@@ -495,7 +609,7 @@ defmodule Barkpark.PortableDoc.BpmlTest do
   end
 
   # deterministic generator over the kernel vocabulary
-  defp gen_blocks(count), do: Enum.map(1..count, fn _ -> gen_block(Enum.random(1..10)) end)
+  defp gen_blocks(count), do: Enum.map(1..count, fn _ -> gen_block(Enum.random(1..13)) end)
 
   defp gen_block(1), do: %{"id" => gen_id(), "type" => "eyebrow", "text" => gen_text()}
 
@@ -559,9 +673,42 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       "id" => gen_id(),
       "type" => "section",
       "title" => gen_text(),
-      "blocks" => Enum.map(1..Enum.random(1..2), fn _ -> gen_block(Enum.random(1..9)) end)
+      "blocks" => Enum.map(1..Enum.random(1..2), fn _ -> gen_block(gen_nestable()) end)
     }
   end
+
+  # notes grid: items carry a label + a `text` body (never `body`, never empty —
+  # the parser drops an empty body key and this iso test asserts JSON equality),
+  # with `lead` present-or-absent. No `id` on grid items (corpus keyset is
+  # {label, lead, text}); id is present-only and would round-trip either way.
+  defp gen_block(11) do
+    %{
+      "id" => gen_id(),
+      "type" => "notes",
+      "items" =>
+        Enum.map(1..Enum.random(1..3), fn _ ->
+          base = %{"label" => gen_text(), "text" => gen_text()}
+          if Enum.random(1..2) == 1, do: Map.put(base, "lead", gen_text()), else: base
+        end)
+    }
+  end
+
+  # the divider and the disclosure — kernel leaves that never entered the
+  # generator (#11814 debt), now exercised under the property suite.
+  defp gen_block(12), do: %{"id" => gen_id(), "type" => "divider"}
+
+  defp gen_block(13) do
+    %{
+      "id" => gen_id(),
+      "type" => "expandable",
+      "summary" => gen_text(),
+      "blocks" => Enum.map(1..Enum.random(1..2), fn _ -> gen_block(gen_nestable()) end)
+    }
+  end
+
+  # block types safe to nest inside a section / expandable: every leaf and grid,
+  # never a `section` (10) or `expandable` (13) — keeps generated depth bounded.
+  defp gen_nestable, do: Enum.random([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12])
 
   defp gen_inline do
     # alternate marked/unmarked so adjacent unmarked text nodes never occur
@@ -600,4 +747,12 @@ defmodule Barkpark.PortableDoc.BpmlTest do
   end
 
   defp gen_id, do: "g" <> Integer.to_string(Enum.random(1000..9999))
+
+  # mirror the printer's text escaping (& < >) for asserting coerced output
+  defp esc_for_test(s) do
+    s
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
 end

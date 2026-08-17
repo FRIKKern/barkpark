@@ -26,6 +26,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h1" => ~w(id),
     "h2" => ~w(id),
     "h3" => ~w(id),
+    "notes" => ~w(id),
+    "note" => ~w(id label lead),
     "stat" => ~w(label value denom),
     "step" => ~w(title),
     "tag" => ~w(tag strength),
@@ -58,7 +60,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram stats steps callout hr expandable)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram stats notes note steps callout hr expandable)
 
   @inline_marks %{
     "b" => "strong",
@@ -273,6 +275,26 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
+  # The notes grid mirrors `stats`: a `<notes>` holds N `<note>` children, each
+  # carrying id/label/lead attrs and a plain-text body. The body maps to the key
+  # `text` — the legacy `notes` item vocab (slots.ex legacy_slot body→flat
+  # `text`); a `body` key would render every note EMPTY on web + TUI. Empty text
+  # is dropped, so canonical items are `{label, lead, text}` (id present-only).
+  defp build_block("notes", attrs, sc, cur) do
+    with {:ok, items, cur} <- child_seq("notes", "note", sc, cur, &note_item_builder/3) do
+      {:ok, %{"type" => "notes", "items" => items} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # The singular `note` widget (composition-doctrine split): the editable per-item
+  # twin of ONE `notes` grid item, promoted to a block with `"type" => "note"`.
+  # Same attrs and the same `text` body key as a grid item.
+  defp build_block("note", attrs, sc, cur) do
+    with {:ok, item, cur} <- note_item_builder(attrs, sc, cur) do
+      {:ok, Map.put(item, "type", "note"), cur}
+    end
+  end
+
   defp build_block("steps", attrs, sc, cur) do
     builder = fn step_attrs, sc, cur ->
       if sc do
@@ -361,6 +383,23 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp text_block(tag, base, attrs, sc, cur, key \\ "text") do
     with {:ok, text, cur} <- tag_text(tag, sc, cur) do
       {:ok, base |> Map.put(key, text) |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # Shared builder for a `<note>` — a `notes` grid item and the singular `note`
+  # block are the SAME shape (the block just adds its `"type"` tag). Body under
+  # `text` (never `body` — the legacy `notes` item vocab, slots.ex legacy_slot
+  # body→flat `text`), empty body dropped (the stats precedent).
+  defp note_item_builder(note_attrs, sc, cur) do
+    with {:ok, body, cur} <- tag_text("note", sc, cur) do
+      item =
+        %{}
+        |> put_attr("id", note_attrs)
+        |> put_attr("label", note_attrs)
+        |> put_attr("lead", note_attrs)
+        |> then(&if body == "", do: &1, else: Map.put(&1, "text", body))
+
+      {:ok, item, cur}
     end
   end
 
