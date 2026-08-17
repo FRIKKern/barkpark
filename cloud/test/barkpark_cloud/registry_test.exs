@@ -850,7 +850,10 @@ defmodule BarkparkCloud.RegistryTest do
 
       # The suffixed (team-disambiguated) shape survives the fold too — a
       # mixed-case suffixed url still yields the correct suffixed label.
-      assert Barkpark.subdomain_from_url(%{base | url: "  HTTPS://Gyldendal-71069EAA.Barkpark.Cloud"}) ==
+      assert Barkpark.subdomain_from_url(%{
+               base
+               | url: "  HTTPS://Gyldendal-71069EAA.Barkpark.Cloud"
+             }) ==
                "gyldendal-71069eaa"
 
       # DIVERGENCE NOTE (fourth normaliser spelling): DomainStatus.platform_host/1
