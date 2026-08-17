@@ -82,6 +82,13 @@ on:
       # file the fence's memory lives in could change without the gate that
       # reads it ever running.
       - "design/emit-manifest.json"
+      # the audit verb table (cch-w65) — the SOLE authority for BOTH the closed
+      # Elixir @actions vocabulary and the console's ACTION_LABELS region. Its two
+      # consumers ride globs above (audit_event.ex on **/*.ex, app.js on its own
+      # line below), but a JSON-ONLY edit — a new verb, a label reworded, a null's
+      # rationale deleted — matched nothing here, so the one file both vocabularies
+      # now read could change without design/check.mjs Part 0 ever running.
+      - "design/audit-actions.json"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"
@@ -222,6 +229,13 @@ on:
       # file the fence's memory lives in could change without the gate that
       # reads it ever running.
       - "design/emit-manifest.json"
+      # the audit verb table (cch-w65) — the SOLE authority for BOTH the closed
+      # Elixir @actions vocabulary and the console's ACTION_LABELS region. Its two
+      # consumers ride globs above (audit_event.ex on **/*.ex, app.js on its own
+      # line below), but a JSON-ONLY edit — a new verb, a label reworded, a null's
+      # rationale deleted — matched nothing here, so the one file both vocabularies
+      # now read could change without design/check.mjs Part 0 ever running.
+      - "design/audit-actions.json"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"

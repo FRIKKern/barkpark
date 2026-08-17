@@ -2266,6 +2266,93 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       refute Registry.get_site(site.id) == nil
     end
 
+    ## W68 — THE 502 ARM, WHICH NO TEST HAD EVER REACHED, AND WHICH USED TO SAY
+    ## "DEPLOY" IN A DELETE RECEIPT (charter D814, Option A).
+    ##
+    ## `teardown/2`'s 502 fires only on `{:error, reason}` — a programmed
+    ## `{:ok, 502, …}` never reaches it, because every `{:ok, 400..599}` is
+    ## mapped to the 422 above. `FakeBoxRelay` returns the programmed term
+    ## verbatim, so each of the four REACHABLE reasons is driven here
+    ## (`:identity_refused` is intercepted one clause earlier into the typed
+    ## 409, covered below). The details are pinned EXACTLY: before this wave the
+    ## `:no_admin_token` and catch-all sentences were `unreachable/2`'s deploy
+    ## copy, so the deploy-vs-teardown wording is precisely what can lose.
+    test "an unreachable box is a 502 whose copy narrates the TEARDOWN, never a deploy (all four reachable reasons)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      expected = [
+        {:not_live, "instance #{bp.slug} has no URL yet — it is still provisioning"},
+        {:no_admin_token,
+         "instance #{bp.slug} has no stored admin token — the control plane cannot " <>
+           "drive a teardown on it"},
+        {:decrypt_failed, "instance #{bp.slug}'s admin token could not be decrypted"},
+        # Any other reason (a transport error term) is the catch-all — the arm
+        # production actually populates. Its "is unreachable" substring is what
+        # `DeployLedger.classify/2` keys on and is preserved on purpose.
+        {:econnrefused,
+         "instance #{bp.slug} is unreachable — the teardown could not be delivered; " <>
+           "check instance health"}
+      ]
+
+      for {reason, detail} <- expected do
+        FakeBoxRelay.program(teardown: {:error, reason})
+
+        conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+        assert conn.status == 502, "#{reason}: status #{conn.status}, expected 502"
+        body = json_body(conn)
+        assert body["ok"] == false
+        assert body["error"] == "teardown_failed"
+        assert body["detail"] == detail
+        refute body["detail"] =~ "deploy", "#{reason}: a DELETE receipt said \"deploy\""
+
+        # An unreachable box was never torn down — the row must survive it.
+        refute Registry.get_site(site.id) == nil
+      end
+    end
+
+    ## W68 — THE ROLLBACK-COPY LEAK. The teardown 422 used to launder the box's
+    ## refusal body through `rollback_refusal/2`, so `{"error":"not_supported"}`
+    ## answered a DELETE with "this site has no live release yet — there is
+    ## nothing to roll back". Now the box's own word travels verbatim, and the
+    ## one verb-neutral typed sentence (`lock_held`) keeps its plain words.
+    test "a box refusal body never renders ROLLBACK prose in a delete receipt" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # The leak case measured in the W68 brief: before the fix this detail read
+      # "this site has no live release yet — there is nothing to roll back".
+      FakeBoxRelay.program(teardown: {:ok, 422, %{"error" => "not_supported"}})
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "teardown_failed"
+      assert body["detail"] == "not_supported"
+      refute body["detail"] =~ "roll back"
+
+      # The verb-neutral typed exit stays human: lock_held is a deploy running
+      # on the box, and saying so is true for a teardown too.
+      FakeBoxRelay.program(teardown: {:ok, 409, %{"error" => "lock_held"}})
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+
+      assert json_body(conn)["detail"] ==
+               "a deploy is running on the box — try again once it finishes"
+
+      # A body with no typed word at all still gets the honest fallback.
+      FakeBoxRelay.program(teardown: {:ok, 500, %{}})
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+      assert json_body(conn)["detail"] == "the instance could not tear this site down (HTTP 500)"
+
+      refute Registry.get_site(site.id) == nil
+    end
+
     test "another team's site is 404, never deleted (team-scoped)" do
       {_owner, team} = user_with_team()
       bp = live_barkpark(team)

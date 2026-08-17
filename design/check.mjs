@@ -11,6 +11,7 @@ import {
   evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, glyphOf, ARTIFACTS, repoRoot,
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
   readManifest, attribute, lostLines, regionDigest, MANIFEST_PATH,
+  auditActions, AUDIT_ACTIONS_PATH,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
 import { derive, contrast, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
@@ -20,6 +21,32 @@ import { fileURLToPath } from "node:url";
 
 let failed = false;
 const fail = (msg) => { console.error(msg); failed = true; };
+
+// ── Part 0: the audit verb table's own shape (charter cch-w65) ────────────────
+// design/audit-actions.json is the SOLE authority for TWO vocabularies — the
+// server's closed @actions allowlist (read at compile time by AuditEvent) and the
+// console's ACTION_LABELS region emitted below. Its shape gate runs FIRST and
+// exits immediately, because the ACTION_LABELS build() reads the table: a
+// malformed row would otherwise surface as a stack trace from inside Part A
+// instead of the one sentence that says which row is wrong and why. The predicate
+// is auditActions() itself, so this gate and the emitter cannot disagree about
+// what "well-formed" means.
+try {
+  const rows = auditActions();
+  const nulls = rows.filter((r) => r.label === null);
+  console.log(
+    `design/check.mjs — Part 0: ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
+    `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
+  );
+} catch (e) {
+  console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
+  console.error(`
+  ${AUDIT_ACTIONS_PATH} is the ONE table both audit vocabularies read. Until it is
+  well-formed nothing downstream can be trusted: the console's ACTION_LABELS region is
+  built from it and AuditEvent's @actions allowlist is derived from it at compile time.
+`);
+  process.exit(1);
+}
 
 // ── Part A: per-artifact byte-compare against committed ──────────────────────
 function firstDiff(a, b) {
