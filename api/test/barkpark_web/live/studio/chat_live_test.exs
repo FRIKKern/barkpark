@@ -815,6 +815,24 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "ended unexpectedly"
     end
 
+    # A codex runtime FAILURE event (protocol.ex :protocol_error / :error /
+    # :process_failed) carries an `error` map with the reason. Before this clause
+    # these kinds fell to the bare %Runtime.Event{} catch-all and rendered NOTHING
+    # — a framing buffer overflow left the transcript silent. MUTATION-PROOF:
+    # removing the codex-failure handle_info clause reds this — the render no
+    # longer carries the failure copy or the captured reason.
+    test "a codex :protocol_error surfaces its reason instead of rendering nothing",
+         %{view: view} do
+      send(
+        view.pid,
+        {:studio_chat_runtime_event, codex_protocol_error("ZZ_PROTOCOL_REASON_ZZ")}
+      )
+
+      html = render(view)
+      assert html =~ "protocol error"
+      assert html =~ "ZZ_PROTOCOL_REASON_ZZ"
+    end
+
     # charter D41 — the wire carries no thinking text, so the pulse is a live
     # counter off `system/thinking_tokens` (cumulative `estimated_tokens`).
     test "thinking_tokens frames render a live ✻ pulse with the cumulative count",
@@ -6304,6 +6322,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   # the durable-append assertion is the only thing under test.
   defp codex_turn_completed do
     %Barkpark.StudioChat.Runtime.Event{kind: :turn_completed, terminal_state: :completed}
+  end
+
+  defp codex_protocol_error(detail) do
+    %Barkpark.StudioChat.Runtime.Event{
+      kind: :protocol_error,
+      error: %{"code" => "buffer_overflow", "detail" => detail}
+    }
   end
 
   defp stream_delta(text) do
