@@ -140,6 +140,11 @@ on:
       - "deploy/site-runtime-install_test.sh"
       - "tooling/task-obsession/reland_check.py"
       - "tooling/task-obsession/reland_check.test.sh"
+      - "tooling/task-obsession/reland_fetch.py"
+      - "tooling/task-obsession/reland_workflow_sim.py"
+      - "tooling/task-obsession/reland_loudfail.test.sh"
+      - "tooling/task-obsession/fixtures/*.json"
+      - ".github/workflows/reland-check.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -212,6 +217,11 @@ on:
       - "deploy/site-runtime-install_test.sh"
       - "tooling/task-obsession/reland_check.py"
       - "tooling/task-obsession/reland_check.test.sh"
+      - "tooling/task-obsession/reland_fetch.py"
+      - "tooling/task-obsession/reland_workflow_sim.py"
+      - "tooling/task-obsession/reland_loudfail.test.sh"
+      - "tooling/task-obsession/fixtures/*.json"
+      - ".github/workflows/reland-check.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -500,6 +510,18 @@ jobs:
         # reland-check.yml runs reland_check.py in anger (and swallows its
         # stderr with `|| true`); its harness ran nowhere.
         run: bash tooling/task-obsession/reland_check.test.sh
+      - name: reland-check loud-fail matrix (HTTP error, truncation, zero digest)
+        # The re-land job is `continue-on-error: true`, so its green conclusion
+        # carries NO information — these fixtures are the only thing that proves
+        # it can still tell an error envelope, a 16%-of-the-corpus scan, and a
+        # signal-less ledger apart from a clean scan. RELAND_REQUIRE_YAML makes a
+        # missing PyYAML a failure instead of a silently skipped section.
+        env:
+          RELAND_REQUIRE_YAML: "1"
+        run: |
+          # The sim reads reland-check.yml itself, so PyYAML is load-bearing here.
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          bash tooling/task-obsession/reland_loudfail.test.sh
       - name: fleet-run verdict matrix
         run: bash tooling/fleet/fleet-run-verdict-test.sh
       - name: audit-paper-readers.sh syntax check
