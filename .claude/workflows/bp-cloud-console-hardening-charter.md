@@ -3755,6 +3755,73 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-18 — wave 73 REVIEW — grade A, the census finally has teeth: two round-1 slices built, reviewed, pushed with PRs open; two reviewer row-corrections; rounds 2–3 sequenced and waiting
+
+**Paper:** `cloud-console-hardening-wave-73-2026-08-17` (debrief appended). **Decisions:** D873–D877
+(charter PR #12051 — MERGED before Review, so this entry rides its own PR off origin/main rather than
+the charter PR branch; the wave-67 precedent's mechanism, inverted). Everything below re-verified by
+the single wave reviewer on `-r` branches off `origin/main` `ed048f293a` (zero cloud/ drift since the
+builders' merge-base), plus a union probe (both slices octopus-merged onto main): census 8/0,
+node harness 1116/1116, `node --check` clean — the slices cohere.
+
+**LANDED (two branches, PRs open, gates re-run green on each final state):**
+
+- `cch-w64-bl-124-typed-wire-codes-have-no-console-reader` → **#12067**, branch
+  `loop-epic/the-wire-vs-reader-census-guard-every-ty-0-r`. THE TRUNK, twice-deferred, now real:
+  `cloud/test/barkpark_cloud/console_reader_census_test.exs` — Side A re-derives the comment-stripped
+  `error:`/`code:` union over router.ex + auth.ex; Side B is the D873 two-part rule (whole quoted
+  literals ∪ the bare ERRORS keyset, with the rule and its reason pinned by a test). Set-relationship
+  assertions ONLY — (minted − read − classified) == [], rot arm (read ∩ classified) == [],
+  (classified − minted) == [] — no count literal anywhere. 137 CLASSIFIED per-emit-site rows in 7
+  per-arm blocks, alphabetical (script-verified), function-name cites only. HIGH-FLIP-RISK second
+  derivation DELIVERED by the reviewer: an independent extractor reproduced 171 minted / 72 read /
+  99 unread exactly; mutation re-proven red-green live. TWO ROW CORRECTIONS (the flip-risk law
+  earning its keep): `build_in_progress` was classified "CLI/PAT-only — app.js never calls a promote
+  path", FALSE on current bytes (runPromote drives the promote route; promoteFailure reads the 409
+  by STATUS with an honest sentence), and `teardown_failed` credited the generic 5xx law where the
+  real reader is wave-67's `siteDeleteFailureCopy`. Both now read STATUS-READ, naming the
+  status-keyed-reader class Side B structurally cannot see. An independent THIRD set of eyes before
+  merge remains warranted — manual lead dispatch (two rows being wrong on first landing means the
+  other 135 deserve one more adversarial pass).
+- `cch-w72-bl-no-fallback-friendly-sites-remainder` → **#12068**, branch
+  `loop-epic/the-nine-no-fallback-friendly-sites-stop-1-r` (byte-identical to the builder's — zero
+  reviewer fixes). The nine one-arg friendly() sites stop humanizing slugs (D876): four loader cards
+  route through `readFailureCopy` with honest per-loader fallbacks + read-scoped 403 sentences; five
+  action sites gain truthy honest fallbacks ("That token is still active — please try again." class —
+  each states only what the failure proves). friendly()'s humanizer tail byte-identical, pins
+  735/1009/1095 hold; zero live one-arg sites remain (reviewer-swept the whole file). 15 tail tests;
+  reviewer mutation sample on sites the builder did NOT mutate (loadActivity, confirmRevokeInvite)
+  redded 1109/1110/1114 by name. 1101 → 1116 pass.
+
+**STALLED:** nothing. **DEFERRED BY THE ROUNDS LAW (not failures):**
+`cch-w72-bl-deploy-arm-generic-swallows-the-singular-detail` (round 2, D874 — dispatch ONLY after
+#12067 merges: fence fifth slug instance_not_live + curated deploy_not_started, deletes its own
+census rows, rot arm run RED before deletion and quoted), then `cch-w72-bl-github-arm-unread-codes`
+(round 3, D875 — after the round-2 slice merges; shared ERRORS map, pinned sweeps, census file,
+test tail).
+
+**LEDGER:** both slice tasks `in_progress`, criteria 0–4 stamped with evidence mid-build, merge-gated
+row 5 open for the lead — ZERO ledger fixes (second fully-clean audit of the epic). Referent
+`cloud-console-hardening-epic-wave-73-log` closed by Review (paperwork done). Deferred rounds open +
+unclaimed; `cch-w72-bl-add-support-reachability-unpinned` stays open and CLOSES BY CLASSIFICATION
+when #12067 merges (D877 — its census rows are the evidence); `cch-w73-bl-github-install-callback-loop-open`
+filed at Decide, product-shaped.
+
+**WHAT WAVE 74 MUST TAKE (dispatch order is law):**
+
+1. Lead merges round 1: #12067 (census — after the second adversarial pass over CLASSIFIED) and
+   #12068 (independent files, any order), plus this wave-log PR. On #12067's merge, close
+   `cch-w72-bl-add-support-reachability-unpinned` by classification (D877) and stamp both slices'
+   merge-gated rows.
+2. THEN dispatch `cch-w72-bl-deploy-arm-generic-swallows-the-singular-detail` (round 2, D874), THEN
+   `cch-w72-bl-github-arm-unread-codes` (round 3, D875) as each dep merges — both re-briefed rows
+   already carry the rulings.
+3. The census's STATUS-READ class is now named in two rows: a status-keyed reader (promoteFailure,
+   siteDeleteFailureCopy) is invisible to Side B by construction. If a third such row appears, price
+   a Side-B arm for status-classifier functions rather than hand-carrying the class forever.
+4. Standing lead duty from D877: the merge-gated close on `cch-w70-bl-cli-drops-the-readable-types-menu-on-create`
+   (#11901 merged at Decide).
+
 ### 2026-08-17 — wave 72 REVIEW — grade A, three round-1 slices built and reviewed; the false attach sentence dies, five unread codes gain curated readers, the fence admits its fourth slug, and the CLI renders the readable-types menu
 
 **Paper:** `cloud-console-hardening-wave-72-2026-08-17` (debrief appended). **Decisions:** D867–D872
