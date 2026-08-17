@@ -91,6 +91,7 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content}
+  alias BarkparkWeb.{AnonPerspective, LegacyController}
 
   import Barkpark.TenancyFixtures
 
@@ -497,6 +498,112 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
 
       scoped_resp = conn |> authed(token) |> get(scoped(ws, project, "export/#{@dataset}"))
       assert scoped_resp.status == 200
+    end
+  end
+
+  # ── Legacy /api/documents — the drafts-by-id clamp ────────────────────────
+  #
+  # `LegacyController.show/2` passed the RAW `:id` to `Content.get_document`
+  # with no drafts clamp, while `QueryController.show/2` has always rejected a
+  # `drafts.` id for an `anon_pinned?` caller (query_controller.ex:371). This
+  # block certifies the ported clamp — and it takes TWO tests on purpose,
+  # because either one alone is a false green:
+  #
+  #   * The ROUTED test below is a TRIPWIRE, not a proof of the clamp. The only
+  #     `anon_pinned?` principal that can reach this route is a public-read
+  #     token (a tokenless caller is 401'd by RequireToken), and `pipeline
+  #     :require_token` mounts PublicRead, which 403s it two plugs UPSTREAM of
+  #     the controller. So the 403 would hold with the clamp deleted. What it
+  #     does prove is that the upstream denial is real: it reds if PublicRead's
+  #     allowlist ever admits the legacy route, which is exactly the day the
+  #     clamp stops being latent.
+  #   * The ACTION-LEVEL test is the real proof. It calls the action directly
+  #     with a REAL minted `["public-read"]` token in `:api_token` — resolved
+  #     through `Auth.verify_token/1`, the same path RequireToken uses, since
+  #     `CallerContext.from_conn/1` degrades to `anonymous()` for anything
+  #     without both `:id` and list `:permissions`.
+  #
+  # ## Mutation transcript — 2026-08-17 (this file + legacy_crud_test.exs)
+  #
+  #   * clamp branch DELETED from `LegacyController.show/2` → 36 tests, 1
+  #     failure: the action-level case, `left:` a 200 conn whose `resp_body` is
+  #     `{"id":"drafts.lc-clamp-1","status":"draft","title":"Unpublished"}` —
+  #     the drafts read, served. The ROUTED tripwire stayed GREEN, which is the
+  #     measurement that proves it certifies the upstream 403 and not the clamp.
+  #   * clamp WIDENED to a blanket `String.starts_with?(doc_id, "drafts.")`
+  #     (the `anon_pinned?` scope dropped) → 36 tests, 2 failures: the
+  #     `anon_pinned?-scoped` case here AND legacy_crud_test's "returns the
+  #     legacy doc shape + headers for an existing draft" (an admin/read/write
+  #     token's 200 on `drafts.lc-show-1`). Over-clamping is caught too.
+  #   * clamp as shipped → 0 failures.
+  describe "legacy /api/documents/:type/:id — drafts by id is clamped" do
+    setup do
+      ws = create_workspace!("legacy-clamp-ws")
+
+      # Default (unscoped) production scope — what `LegacyController` reads
+      # through, since `scope_opts/1` derives tenancy from the conn's assigns,
+      # not from the token's workspace binding.
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+          @dataset
+        )
+
+      # Draft-only: `drafts.lc-clamp-1` exists, the published `lc-clamp-1` does
+      # not, so a leak is observable as a 200 body rather than a coincidental 404.
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => "lc-clamp-1", "title" => "Unpublished"},
+          @dataset
+        )
+
+      raw = mint!(ws, ["public-read"], "legacy clamp public-read")
+      {:ok, token} = Auth.verify_token(raw)
+
+      %{ws: ws, token: raw, token_struct: token}
+    end
+
+    test "ACTION-LEVEL: a public-read caller gets :not_found for a drafts. id", %{
+      token_struct: token
+    } do
+      conn = build_conn() |> Plug.Conn.assign(:api_token, token)
+
+      # Sanity: this principal really is the pinned class the clamp keys on —
+      # otherwise the assertion below could pass for the wrong reason.
+      assert AnonPerspective.anon_pinned?(conn)
+
+      assert LegacyController.show(conn, %{
+               "type" => "post",
+               "id" => "drafts.lc-clamp-1"
+             }) == {:error, :not_found}
+    end
+
+    test "ACTION-LEVEL: the clamp is anon_pinned?-scoped — a read token still gets the draft",
+         %{ws: ws} do
+      raw = mint!(ws, ["read"], "legacy clamp read")
+      {:ok, token} = Auth.verify_token(raw)
+      conn = build_conn() |> Plug.Conn.assign(:api_token, token)
+
+      refute AnonPerspective.anon_pinned?(conn)
+
+      served = LegacyController.show(conn, %{"type" => "post", "id" => "drafts.lc-clamp-1"})
+
+      assert served.status == 200
+      assert Jason.decode!(served.resp_body)["id"] == "drafts.lc-clamp-1"
+    end
+
+    test "ROUTED TRIPWIRE: the legacy route is not in PublicRead's allowlist (403)", %{
+      conn: conn,
+      token: raw
+    } do
+      body =
+        conn
+        |> authed(raw)
+        |> get("/api/documents/post/drafts.lc-clamp-1")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "forbidden"
     end
   end
 

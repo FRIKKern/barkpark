@@ -7,7 +7,8 @@ defmodule BarkparkWeb.LegacyController do
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CallerContext, Envelope}
+  alias Barkpark.Content.{CallerContext, Envelope, Schema}
+  alias BarkparkWeb.AnonPerspective
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -48,8 +49,31 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def show(conn, %{"type" => type, "id" => doc_id}) do
-    with {:ok, doc} <- Content.get_document(doc_id, type, @dataset, scope_opts(conn)) do
-      json(conn, render_legacy_doc(doc, fetch_schema(conn, type), CallerContext.from_conn(conn)))
+    cond do
+      # DRAFTS-BY-ID CLAMP (api-read-path-security-sweep w2) — the guard
+      # QueryController.show/2 has always carried (query_controller.ex:371),
+      # absent here: this action passed the RAW id straight to get_document, so
+      # a `drafts.` id was fetchable by any published-pinned principal. Latent
+      # today only because `pipeline :require_token` 403s the one anon_pinned
+      # principal that can reach this route (a public-read token) two plugs
+      # upstream — defense in depth, so a future mount/allowlist change cannot
+      # re-open a drafts read here. Rejected as not-found BEFORE get_document,
+      # the same 404 the action already returns for a missing id.
+      #
+      # `anon_pinned?`-SCOPED, never a blanket prefix block: read-tier draft
+      # access by id IS the legacy contract (legacy_crud_test pins a 200 on
+      # `drafts.lc-show-1` for an admin/read/write token), and a bare
+      # String.starts_with? guard would break it.
+      AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
+        {:error, :not_found}
+
+      true ->
+        with {:ok, doc} <- Content.get_document(doc_id, type, @dataset, scope_opts(conn)) do
+          json(
+            conn,
+            render_legacy_doc(doc, fetch_schema(conn, type), CallerContext.from_conn(conn))
+          )
+        end
     end
   end
 
@@ -107,7 +131,22 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def schemas(conn, _params) do
-    schemas = Content.list_schemas(@dataset, scope_opts(conn))
+    # ANON FIELD DISCLOSURE (api-read-path-security-sweep w2): this route is
+    # deliberately NOT token-gated (see router.ex — public schema discovery),
+    # and it echoed `fields` for EVERY schema, private ones included — the full
+    # field definition of every private type to any anonymous reader (guerrilla:
+    # 39 schemas, 31 of them private-declared). Filter to explicitly-public
+    # schemas through the SAME predicate the query route, the anonymous search
+    # allowlist and the corpus graph use, so a schema flipped to private drops
+    # out of this list on the very next read — never a hardcoded public set.
+    #
+    # The 200 and the array shape are UNCHANGED on purpose: every external
+    # consumer of this route (deploy.sh, the docker-compose healthcheck,
+    # cloud/support.go) probes reachability/parse-ability, not membership.
+    schemas =
+      @dataset
+      |> Content.list_schemas(scope_opts(conn))
+      |> Enum.filter(&Schema.public_schema?/1)
 
     json(
       conn,
