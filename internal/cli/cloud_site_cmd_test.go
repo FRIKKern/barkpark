@@ -1334,6 +1334,169 @@ func TestRunCloudSiteDeleteRmAlias(t *testing.T) {
 	}
 }
 
+// --- typed site refusals (cch-w69 S6) ----------------------------------------
+//
+// RED BEFORE (recorded, and reproducible by reverting cloud_site_cmd.go alone):
+// both verbs used to hand the refusal to the bare `cloudFail`, which branches on
+// the substring "unauthorized" and nothing else. Every refusal below therefore
+// printed the label "failed" and exited 1 — a 409 the box refused, a 404 that is
+// not our site and a 500 the plane crashed on were one undifferentiated exit, and
+// `-o json` carried "failed" instead of the plane's own code. The pre-fix exits
+// were: identity_refused 409 → 1 (want 6), teardown_failed 422 → 1 (want 1, but
+// labelled "failed" instead of "teardown_failed"), 502 → 1 (want 8), 404 → 1
+// (want 4), forbidden 403 → 3 only by the "unauthorized" substring accident.
+
+// siteIdentityRefusedDetail is the control plane's OWN sentence for the refused
+// box (cloud/lib/barkpark_cloud/sites/deploy.ex `unreachable/2`
+// :identity_refused). The CLI relays it rather than minting a third wording, so
+// this fixture is the plane's bytes.
+const siteIdentityRefusedDetail = "The request was never sent — the instance rejected our access credential. Barkpark Cloud stops asking a box that refused it; the hourly update check is what notices the credential working again."
+
+func TestRunCloudSiteDeleteIdentityRefusedIsAConflict(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{409, `{"ok":false,"error":"identity_refused","detail":"` + siteIdentityRefusedDetail + `"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitConflict {
+		t.Fatalf("a 409 identity_refused must exit %d (conflict), got %d\n%s", exitConflict, code, stderr)
+	}
+	if strings.Contains(stdout, "deregistered") {
+		t.Fatalf("a refused teardown must not print a delete receipt:\n%s", stdout)
+	}
+	// The plane's sentence is RELAYED, not forked.
+	if !strings.Contains(stderr, "the instance rejected our access credential") {
+		t.Fatalf("the refusal must relay the plane's detail:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "still registered") {
+		t.Fatalf("a refused teardown must say the site is still registered:\n%s", stderr)
+	}
+}
+
+func TestRunCloudSiteRollbackIdentityRefusedIsAConflict(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{409, `{"ok":false,"error":"identity_refused","detail":"` + siteIdentityRefusedDetail + `"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitConflict {
+		t.Fatalf("a 409 identity_refused must exit %d (conflict), got %d\n%s", exitConflict, code, stderr)
+	}
+	if strings.Contains(stdout, "rolled back") {
+		t.Fatalf("a refused rollback must not print a rollback receipt:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "the instance rejected our access credential") {
+		t.Fatalf("the refusal must relay the plane's detail:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "Nothing was flipped") {
+		t.Fatalf("a refused rollback must say nothing was flipped:\n%s", stderr)
+	}
+}
+
+// A 422 teardown_failed keeps exit 1 (the ladder's default family) but must stop
+// printing the label "failed": -o json has to name the plane's own code, or no
+// script can tell a refused teardown from a transport error.
+func TestRunCloudSiteDeleteTeardownFailedJSONCarriesThePlanesCode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{422, `{"ok":false,"error":"teardown_failed","detail":"caddy validate rejected the disarm"}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "delete", testSiteID, "--yes")
+	if code != exitGeneric {
+		t.Fatalf("a 422 teardown_failed must exit %d, got %d", exitGeneric, code)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json envelope: %v\n%s", err, stdout)
+	}
+	if env.OK {
+		t.Fatalf("a refusal envelope must be ok:false:\n%s", stdout)
+	}
+	if env.Error.Code != "teardown_failed" {
+		t.Fatalf("json must carry the plane's code, got %q\n%s", env.Error.Code, stdout)
+	}
+	if !strings.Contains(env.Error.Message, "caddy validate rejected the disarm") {
+		t.Fatalf("the message must relay the plane's detail, got %q", env.Error.Message)
+	}
+}
+
+// 5xx → exitServer: the plane itself failed, which is a different retry story
+// from a refusal it measured.
+func TestRunCloudSiteRollbackServerFailureExitsServer(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{502, `{"ok":false,"error":"rollback_failed","detail":"instance blog is unreachable — the rollback could not be delivered"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitServer {
+		t.Fatalf("a 502 must exit %d (server), got %d\n%s", exitServer, code, stderr)
+	}
+	// An unknown/flat code still relays the plane's sentence — the default arm.
+	if !strings.Contains(stderr, "could not be delivered") {
+		t.Fatalf("the default arm must relay the plane's detail:\n%s", stderr)
+	}
+}
+
+func TestRunCloudSiteDeleteNotFoundExitsNotFound(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{404, `{"error":"not_found"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitNotFound {
+		t.Fatalf("a 404 must exit %d (not-found), got %d\n%s", exitNotFound, code, stderr)
+	}
+	if !strings.Contains(stderr, "no such site") {
+		t.Fatalf("a 404 must name the site as unknown:\n%s", stderr)
+	}
+}
+
+// The CAUSE outranks the STATUS: a teamless login is exit 1 with `bp team use`,
+// never exit 3 — the credential is fine (the doctrine #11711 pins).
+func TestRunCloudSiteDeleteNoTeamStaysGenericWithTheTeamFix(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{403, `{"error":"forbidden","reason":"no_team"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitGeneric {
+		t.Fatalf("a no_team refusal must stay exit %d, got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp team use") {
+		t.Fatalf("a no_team refusal must point at `bp team use`:\n%s", stderr)
+	}
+}
+
+// A plain 403 (the write ability, not the team) is an auth exit.
+func TestRunCloudSiteRollbackForbiddenExitsAuth(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{403, `{"error":"forbidden","required":"write","scope":"team"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitAuth {
+		t.Fatalf("a 403 forbidden must exit %d (auth), got %d\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "write") {
+		t.Fatalf("a forbidden refusal must name the ability it wanted:\n%s", stderr)
+	}
+}
+
+// THE PRESERVED SEAM: a refusal that is NOT a typed CloudRefusal (or a 401 whose
+// message carries the "unauthorized:" prefix) must still route through cloudFail
+// so expired-session handling reads identically to every other cloud verb.
+func TestRunCloudSiteDeleteUnauthorizedKeepsTheCloudFailSeam(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{401, `{"error":"invalid_token"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitAuth {
+		t.Fatalf("a 401 must exit %d (auth), got %d\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp login") {
+		t.Fatalf("the 401 seam must still tell the user to re-run `bp login`:\n%s", stderr)
+	}
+}
+
 // --- status ------------------------------------------------------------------
 
 func TestRunCloudSiteStatus(t *testing.T) {

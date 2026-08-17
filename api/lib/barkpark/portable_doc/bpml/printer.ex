@@ -4,7 +4,14 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   `Barkpark.PortableDoc.Bpml` — every choice here (indentation, attribute
   order, escaping, when a tag self-closes) defines THE canonical spelling the
   parser round-trips against. Pure string emission; no Repo, no I/O.
+
+  It is TOTAL over its input: every shape the kernel vocabulary cannot spell
+  raises `Barkpark.PortableDoc.Bpml.UnprintableError` (kind `:block`, `:inline`,
+  `:mark` or `:head_cell`) — never a bare `FunctionClauseError`, and never a
+  lossy `""`. Callers turn that into an honest 422.
   """
+
+  alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   @indent "  "
 
@@ -124,23 +131,28 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("section", attr_str(b, ["id", "title"]), children, d)
   end
 
-  defp block(%{"type" => type}, _d),
-    do:
-      raise(
-        ArgumentError,
-        "BPML printer: block type #{inspect(type)} is outside the kernel vocabulary"
-      )
+  # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
+  # typed refusal (UnprintableError) so the read path can label it 422 and the
+  # sync path can tell "unprintable paper" from "printer bug" — never a bare
+  # FunctionClauseError, which escaped the callers' rescue as a raw 500.
+  defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
+  defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
 
   # Head cells arrive in TWO shapes: the write chokepoint normalizes them to
   # inline-node lists (the canonical form BPML round-trips), while hand-authored
   # payloads may still carry the legacy %{"text" => …} map — accepted as input,
-  # canonicalized on round-trip.
+  # canonicalized on round-trip. A map WITHOUT a binary "text" (and a bare
+  # string cell) used to print "" — a silent cell loss; it now refuses.
   defp head_cell(cells) when is_list(cells), do: inline(cells)
-  defp head_cell(%{} = cell), do: esc(Map.get(cell, "text", ""))
+  defp head_cell(%{"text" => text}) when is_binary(text), do: esc(text)
+  defp head_cell(_other), do: raise(UnprintableError.new(:head_cell, nil))
 
   # ── inline ──────────────────────────────────────────────────────────────────
 
   defp inline(nodes) when is_list(nodes), do: Enum.map_join(nodes, "", &inline_node/1)
+  # A string (or anything else) where inline CONTENT belongs — a legacy string
+  # table cell / list item. Unspellable, not a crash.
+  defp inline(_other), do: raise(UnprintableError.new(:inline, nil))
 
   defp inline_node(%{"type" => "text"} = n) do
     Map.get(n, "marks", [])
@@ -156,14 +168,21 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       ~s(<a href="#{esc_attr(Map.get(n, "href", ""))}">) <>
         inline(Map.get(n, "children", [])) <> "</a>"
 
+  # An inline node type with no clause (census: `code` 87 papers, `strong` 84,
+  # `em` 34, `paragraph` 20, `valueref` 12) — the whole 500 class.
+  defp inline_node(%{"type" => type}), do: raise(UnprintableError.new(:inline, type))
+  defp inline_node(_other), do: raise(UnprintableError.new(:inline, nil))
+
   defp mark_tag("strong"), do: "b"
   defp mark_tag("em"), do: "i"
   defp mark_tag("code"), do: "code"
   defp mark_tag("underline"), do: "u"
   defp mark_tag("strike"), do: "s"
 
-  defp mark_tag(other),
-    do: raise(ArgumentError, "BPML printer: unknown inline mark #{inspect(other)}")
+  defp mark_tag(other) when is_binary(other) or is_atom(other),
+    do: raise(UnprintableError.new(:mark, other))
+
+  defp mark_tag(_other), do: raise(UnprintableError.new(:mark, nil))
 
   # ── helpers ─────────────────────────────────────────────────────────────────
 

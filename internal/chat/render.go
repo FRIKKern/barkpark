@@ -19,10 +19,10 @@ import (
 // (ct-w1-golden-harness) can call directly.
 //
 // Rendering law (charter D8/D10): every SETTLED assistant message is one
-// pdrender.RenderDoc call. RenderDoc reseeds its "Figure N." counter to 0 at
-// the head of every call, so one-call-per-message IS the per-message Figure
-// reset the charter mandates — a reply is a self-contained document, not a page
-// in one long paper. The live streaming tail (charter D9) is the ONE thing that
+// pdrender.RenderDoc call — a reply is a self-contained document, not a page in
+// one long paper. Nothing accumulates across replies: pdrender generates no
+// figure numbers at all (it only emphasises an author-typed "Figure N." lead,
+// mirroring the web reader), so a caption reads the same in message 1 and 50. The live streaming tail (charter D9) is the ONE thing that
 // does NOT go through pdrender: it is plain-text truth, word-wrapped and
 // redrawn per tick, and it is replaced by settled blocks at the turn boundary.
 

@@ -211,9 +211,13 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 		out = append(out, ctx.Theme.Body.Bold(true).Render(value)+denomSuffix)
 	}
 
-	// Caption under the number/bar.
+	// Caption under the number/bar. EVERY wrapped line is emitted — the label is
+	// authored content, and dropping its tail (the old firstLine() truncation ate
+	// " Aug" out of "…, 12 Aug" at wide widths) silently loses the author's words.
+	// The web grid wraps a label freely; a cell that grows a row is honest, and
+	// joinColumns pads uneven cell heights already.
 	if label != "" {
-		out = append(out, firstLine(wrapLines(ctx.Theme.Dim.Render(label), w)))
+		out = append(out, wrapLines(ctx.Theme.Dim.Render(label), w)...)
 	}
 
 	// Inline trend: the eighth-block sparkline, bounded to the cell width.
