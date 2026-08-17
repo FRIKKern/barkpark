@@ -259,7 +259,8 @@
     // rung wins first in friendly(), so the raw reason is structurally unreachable.
     checkout_failed: "Couldn't start checkout — the payment provider didn't accept the request. Please try again.",
     portal_failed: "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.",
-    // no_subscription — the billing screens' 404 when no Stripe subscription exists.
+    // no_subscription — the billing screens' 422 when no Stripe subscription
+    // exists (router.ex portal + cancel arms both emit 422 {no_subscription}).
     no_subscription: "This team doesn't have a subscription yet — start one from the Billing panel.",
     // live_twin — the resurrect 422 (resurrectOutcome -> friendly(d, generic));
     // the honest-generic fallback dropped the shipped name, this names the state.
