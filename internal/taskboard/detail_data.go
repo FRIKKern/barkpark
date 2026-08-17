@@ -18,6 +18,7 @@ package taskboard
 import (
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -29,6 +30,21 @@ import (
 // /v1/tasks list once, prime once — with the one list body decoded into the
 // board Task AND the TaskDetail reading model in a single pass.
 //
+// The two round-trips fly CONCURRENTLY (charter D113b). Both endpoints are
+// server-TTFB-bound and guerrilla serves them independently, so a sequential
+// prime paid for the list's latency for nothing; the goroutines below overlap
+// the two GETs instead. The list body's decode rides its own goroutine (it
+// needs nothing from prime), so a live swap sees one round-trip of wall time,
+// not two. apiclient.Client wraps a shared net/http.Client — safe for
+// concurrent use — and each goroutine writes its own result variables.
+//
+// Failure honesty is unchanged (fetch.go:33-36): both fetches are required, so
+// ANY error yields the SAME degraded outcome as the old sequential path — the
+// caller's honest degraded state, never a partial snapshot. The list error
+// takes precedence over the prime error, matching the old order (list first),
+// including when only prime succeeds. The 32MiB bound and the refuse-empty
+// envelope fence (#6033/#8604) live in getJSON/decodeTaskListFull, untouched.
+//
 // Tolerance contract (frozen wave-5): every detail field that is missing or
 // malformed on the wire decodes to its zero value — never an error, never a
 // dropped task. One odd content map degrades to a thin detail view; the board
@@ -37,17 +53,34 @@ import (
 // The DetailIndex embeds each task's post-overlay board row (syncDetails), so
 // details[id].Task always agrees with Snapshot.Tasks about derived readiness.
 func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
-	body, err := getJSON(c, "/v1/tasks?limit=1000")
-	if err != nil {
-		return Snapshot{}, nil, err
+	var (
+		tasks    []Task
+		details  DetailIndex
+		listErr  error
+		extras   primeExtras
+		primeErr error
+		wg       sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		body, err := getJSON(c, "/v1/tasks?limit=1000")
+		if err != nil {
+			listErr = err
+			return
+		}
+		tasks, details, listErr = decodeTaskListFull(body)
+	}()
+	go func() {
+		defer wg.Done()
+		extras, primeErr = fetchPrime(c)
+	}()
+	wg.Wait()
+	if listErr != nil {
+		return Snapshot{}, nil, listErr
 	}
-	tasks, details, err := decodeTaskListFull(body)
-	if err != nil {
-		return Snapshot{}, nil, err
-	}
-	extras, err := fetchPrime(c)
-	if err != nil {
-		return Snapshot{}, nil, err
+	if primeErr != nil {
+		return Snapshot{}, nil, primeErr
 	}
 	snap := composeSnapshot(tasks, extras, time.Now().UTC())
 	syncDetails(details, snap.Tasks)
