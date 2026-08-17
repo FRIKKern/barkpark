@@ -40,6 +40,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   require Logger
 
+  alias Barkpark.Accounts.User
+  alias Barkpark.Auth
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Content.Analytics
   alias Barkpark.Plugins.Enablement
@@ -147,103 +150,33 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   end
 
   def handle_event("reveal", %{"plugin_name" => name}, socket) do
-    case Settings.reveal(name, user_id: user_id(socket)) do
-      {:ok, map} ->
-        fields = socket.assigns.settings_fields
-
-        socket =
-          if fields == [] do
-            assign(socket,
-              settings_json: pretty(map),
-              masked: false,
-              loaded?: true,
-              error: nil
-            )
-          else
-            typed_form =
-              Enum.reduce(fields, socket.assigns.typed_form, fn field, acc ->
-                key = flat_key(field)
-                Map.put(acc, key, to_string(Map.get(map, key, "")))
-              end)
-
-            revealed = Enum.into(masked_keys(fields), %{}, fn k -> {k, true} end)
-
-            assign(socket,
-              typed_form: typed_form,
-              revealed: revealed,
-              masked: false,
-              loaded?: true,
-              error: nil
-            )
-          end
-
-        {:noreply, put_flash(socket, :info, "Revealed (audited).")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "No settings to reveal.")}
-    end
+    guard_installation_admin(socket, fn ->
+      do_reveal(socket, name)
+    end)
   end
 
   def handle_event("reveal_field", %{"field" => field}, socket) do
-    fields = socket.assigns.settings_fields
-    plugin_name = socket.assigns.plugin_name
-
-    if field in masked_keys(fields) do
-      case Settings.reveal(plugin_name, user_id: user_id(socket)) do
-        {:ok, map} ->
-          typed_form =
-            Map.put(socket.assigns.typed_form, field, to_string(Map.get(map, field, "")))
-
-          revealed = Map.put(socket.assigns.revealed, field, true)
-
-          {:noreply,
-           socket
-           |> assign(
-             typed_form: typed_form,
-             revealed: revealed,
-             masked: not all_masked_revealed?(fields, revealed),
-             error: nil
-           )
-           |> put_flash(:info, "Revealed #{field} (audited).")}
-
-        {:error, :not_found} ->
-          {:noreply, put_flash(socket, :error, "No settings to reveal.")}
-      end
-    else
-      {:noreply, socket}
-    end
+    guard_installation_admin(socket, fn ->
+      do_reveal_field(socket, field)
+    end)
   end
 
   def handle_event("save", %{"plugin_name" => name} = params, socket) do
-    fields = fields_for(name)
+    guard_installation_admin(socket, fn ->
+      fields = fields_for(name)
 
-    if fields == [] do
-      save_generic(socket, name, params)
-    else
-      save_typed(socket, name, fields, params)
-    end
+      if fields == [] do
+        save_generic(socket, name, params)
+      else
+        save_typed(socket, name, fields, params)
+      end
+    end)
   end
 
   def handle_event("delete", %{"plugin_name" => name}, socket) do
-    case Settings.delete(name, user_id: user_id(socket)) do
-      :ok ->
-        {:noreply,
-         socket
-         |> assign(
-           plugin_name: name,
-           settings_json: "",
-           settings_fields: [],
-           typed_form: %{},
-           revealed: %{},
-           masked: true,
-           loaded?: false,
-           error: nil
-         )
-         |> put_flash(:info, "Deleted #{name}.")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Nothing to delete.")}
-    end
+    guard_installation_admin(socket, fn ->
+      do_delete(socket, name)
+    end)
   end
 
   # Workspace theme picker (ts-w4e). Persists `settings["theme"]` on the current
@@ -357,6 +290,100 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     {:noreply, socket}
   end
 
+  # ── Credential handler bodies (reveal / reveal_field / delete) ───────────
+  #
+  # Invoked ONLY inside `guard_installation_admin/2` (see the handlers above);
+  # hoisted out of the handle_event/3 clause group so the clauses stay grouped.
+  defp do_reveal(socket, name) do
+    case Settings.reveal(name, user_id: user_id(socket)) do
+      {:ok, map} ->
+        fields = socket.assigns.settings_fields
+
+        socket =
+          if fields == [] do
+            assign(socket,
+              settings_json: pretty(map),
+              masked: false,
+              loaded?: true,
+              error: nil
+            )
+          else
+            typed_form =
+              Enum.reduce(fields, socket.assigns.typed_form, fn field, acc ->
+                key = flat_key(field)
+                Map.put(acc, key, to_string(Map.get(map, key, "")))
+              end)
+
+            revealed = Enum.into(masked_keys(fields), %{}, fn k -> {k, true} end)
+
+            assign(socket,
+              typed_form: typed_form,
+              revealed: revealed,
+              masked: false,
+              loaded?: true,
+              error: nil
+            )
+          end
+
+        {:noreply, put_flash(socket, :info, "Revealed (audited).")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "No settings to reveal.")}
+    end
+  end
+
+  defp do_reveal_field(socket, field) do
+    fields = socket.assigns.settings_fields
+    plugin_name = socket.assigns.plugin_name
+
+    if field in masked_keys(fields) do
+      case Settings.reveal(plugin_name, user_id: user_id(socket)) do
+        {:ok, map} ->
+          typed_form =
+            Map.put(socket.assigns.typed_form, field, to_string(Map.get(map, field, "")))
+
+          revealed = Map.put(socket.assigns.revealed, field, true)
+
+          {:noreply,
+           socket
+           |> assign(
+             typed_form: typed_form,
+             revealed: revealed,
+             masked: not all_masked_revealed?(fields, revealed),
+             error: nil
+           )
+           |> put_flash(:info, "Revealed #{field} (audited).")}
+
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "No settings to reveal.")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp do_delete(socket, name) do
+    case Settings.delete(name, user_id: user_id(socket)) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(
+           plugin_name: name,
+           settings_json: "",
+           settings_fields: [],
+           typed_form: %{},
+           revealed: %{},
+           masked: true,
+           loaded?: false,
+           error: nil
+         )
+         |> put_flash(:info, "Deleted #{name}.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Nothing to delete.")}
+    end
+  end
+
   defp guard_bound_ws(socket, params, fun) do
     bound =
       case socket.assigns[:current_workspace] do
@@ -417,6 +444,52 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         fun.()
     end
   end
+
+  # ── Installation-admin re-gate on the credential handlers (connectors W35, D274) ──
+  #
+  # Plugin credentials live in the installation-GLOBAL `plugin_settings` store
+  # (PK `plugin_name`, NO tenant column — `SettingsRecord`): ONE
+  # bokbasen/indx account per deployment, shared by EVERY tenant. The W26
+  # `:scoped_admin` mount gate only proves the actor administers the URL
+  # workspace — an admin of workspace B and ONLY B cleared it and could
+  # reveal / overwrite / delete every tenant's credentials (#5972 explicitly
+  # scoped credentials OUT of its per-write belt; this guard supplies the
+  # missing authority check). So each credential handler (reveal /
+  # reveal_field / save / delete) re-gates on INSTALLATION-level admin
+  # authority: a token principal must hold the global "admin" permission
+  # (`Auth.has_permission?/2` — the pre-W26 flat-:admin invariant restored for
+  # this subset); a user principal must be an owner/admin of the seeded
+  # Default (installation) workspace, via the `TenancyAuth.authorize/3`
+  # chokepoint. Fail-closed, negated-cond-first: a missing/unknown principal,
+  # an unseeded Default workspace, or insufficient authority is REFUSED with
+  # ZERO `Settings.*` calls — nothing revealed, written, or deleted.
+  defp guard_installation_admin(socket, fun) do
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    cond do
+      not installation_admin?(principal) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Plugin credentials are installation-wide — managing them requires installation-admin authority."
+         )}
+
+      true ->
+        fun.()
+    end
+  end
+
+  defp installation_admin?(%ApiToken{} = token), do: Auth.has_permission?(token, "admin")
+
+  defp installation_admin?(%User{} = user) do
+    case Tenancy.get_default_workspace() do
+      %{id: ws_id} -> TenancyAuth.authorize(user, ws_id, :admin) == :ok
+      _ -> false
+    end
+  end
+
+  defp installation_admin?(_), do: false
 
   # Workspace theme write, invoked by `set_workspace_theme` inside the
   # fail-closed scope guard. Persists `settings["theme"]` on the URL-bound
