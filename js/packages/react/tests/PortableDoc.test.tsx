@@ -504,6 +504,17 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     marker: 'bp-gauge',
   },
   {
+    type: 'route',
+    block: {
+      type: 'route',
+      sport: 'sykling',
+      distance: '4.2 km',
+      // the Google reference-vector polyline — three points, valid everywhere
+      polyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+    },
+    marker: 'bp-route__map',
+  },
+  {
     type: 'sheet',
     block: {
       type: 'sheet',
@@ -565,7 +576,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type ApiEndpoint MARK:js-count-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:js-count-code-tabs
     // scaffy:add-block-type Tabs MARK:js-count-tabs
-    expect(registered).toHaveLength(72)
+    expect(registered).toHaveLength(73)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {
