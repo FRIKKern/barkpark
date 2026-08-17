@@ -88,6 +88,15 @@ Re-claimed (fresh epoch 1), split, then released + moved to root. Final state **
 from `bp task ls --all` (unpublished drafts, invisible to every board and to the epic's child
 rail). They cannot orphan and cannot block the seal; recorded here rather than purged.
 
+## Review addendum (wave-7 review, later the same day)
+
+The rerun census now reads `48 {done: 31, in_progress: 5, open: 7, cancelled: 5}` — one
+open→done beyond the AFTER column: **#11889 merged** (origin/main 4cb125cde1) and the lead
+closed `task-421937b559e1c570` 5/5 on that merge, exactly the merge-gated path this row left
+open for it. Consequence for D52: the crown gate is LIT — the three parked crown briefs
+(pe-bl-framed-finale-authoring, pe-bl-css-bundle-freshness-gate, pe-w2-bl-device3-display-scale)
+are now dispatchable. `pe-w6-bp-paper-new` (#11934) remains the one merge-gated open row.
+
 ## Rerun
 
 ```
