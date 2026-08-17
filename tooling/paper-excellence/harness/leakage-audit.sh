@@ -24,7 +24,9 @@
 #                the ledger or full-text index; their mere presence fails.
 #   slug-read:   `bp paper view/pull <slug>` / `bp doc get <type> <slug>`
 #                whose slug is NOT in {guide slug} ∪ {guide-derived allowlist}
-#                ∪ {slugs this transcript itself creates/pushes}.
+#                ∪ {slugs this transcript itself creates/pushes}. A read verb
+#                with NO parseable slug (`bp paper view "$TARGET"`) is itself
+#                a finding — a content read we cannot bound.
 #   doc-query:   `bp doc query …` — a slug it names is checked against the
 #                allowlist; a slug-less or un-parseable query over any type
 #                but `tag` is itself a finding (a content read we cannot
@@ -262,19 +264,27 @@ for cmd in cmds:
                     "GRAPH — `bp doc %s` without a parseable slug (treated as a read)%s: %s"
                     % (sub, tail, part))
             continue
-        # slug-bearing reads.
-        slug = None
-        if verb == "paper" and sub in ("view", "pull"):
-            sm = re.search(SLUG, rest)
-            slug = sm.group(0) if sm else None
-        elif verb == "doc" and sub == "get":
-            sm = re.search(r"\w+\s+(" + SLUG + r")", rest)
-            slug = sm.group(1) if sm else None
-        if slug is not None:
-            bp_reads.append((slug, part))
-            if slug not in allow:
+        # slug-bearing reads. A read verb whose slug we CANNOT parse (a shell
+        # variable, an uppercase token, a hyphenless slug) is a content read we
+        # cannot bound — same rule as doc query/graph: un-parseable = finding.
+        is_read = (verb == "paper" and sub in ("view", "pull")) or \
+                  (verb == "doc" and sub == "get")
+        if is_read:
+            if verb == "paper":
+                sm = re.search(SLUG, rest)
+                slug = sm.group(0) if sm else None
+            else:
+                sm = re.search(r"\w+\s+(" + SLUG + r")", rest)
+                slug = sm.group(1) if sm else None
+            if slug is None:
                 add(chan or "slug-read",
-                    "LEAK — read of un-sanctioned slug `%s`%s: %s" % (slug, tail, part))
+                    "LEAK — `bp %s %s` without a parseable slug (treated as a read)%s: %s"
+                    % (verb, sub, tail, part))
+            else:
+                bp_reads.append((slug, part))
+                if slug not in allow:
+                    add(chan or "slug-read",
+                        "LEAK — read of un-sanctioned slug `%s`%s: %s" % (slug, tail, part))
 
 # non-Bash tools whose input carries the server host or /papers/.
 for name, blob in tools:
@@ -322,7 +332,8 @@ EOF
   # doc get, path-prefixed task/view) plus the seven channels proven to slip
   # past the 2-verb audit (doc query slug-filter + un-parseable filter, doc
   # revision, backlinks/related/history, paper capture, doc ls paper, raw curl
-  # of the server host, a non-Bash WebFetch, and $VAR-indirected bp).
+  # of the server host, a non-Bash WebFetch, $VAR-indirected bp, and a read
+  # verb with an un-parseable slug).
   cat > "$TMP/leaky.jsonl" <<'EOF'
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp search wave 6 grade"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp doc get paper heggemsnes-act -o json"}}]}}
@@ -339,10 +350,11 @@ EOF
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"curl -s https://guerrilla.barkpark.cloud/papers/heggemsnes-act"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"WebFetch","input":{"url":"https://guerrilla.barkpark.cloud/papers/heggemsnes-act","prompt":"summarize"}}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"B=/tmp/harness/.bin/bp && $B paper view paper-excellence-wave-7-2026-08-17"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bp paper view \"$TARGET\""}}]}}
 EOF
   echo "== selftest: CLEAN transcript should PASS =="
   audit "$TMP/clean.jsonl" "$TMP/guide.txt"; CLEAN_RC=0
-  echo "== selftest: LEAKY transcript should FAIL with all 15 findings =="
+  echo "== selftest: LEAKY transcript should FAIL with all 16 findings =="
   set +e
   LEAKY_OUT="$(audit "$TMP/leaky.jsonl" "$TMP/guide.txt")"
   LEAKY_RC=$?
@@ -354,8 +366,8 @@ EOF
   fi
   # Every fixture must be caught INDIVIDUALLY — the exact count proves no
   # detection was removed without its fixture going dark.
-  if ! printf '%s' "$LEAKY_OUT" | grep -q "FAIL — 15 finding"; then
-    echo "leakage-audit: SELFTEST FAIL — expected exactly 15 findings (one per channel fixture); a detection was removed or a channel slipped" >&2
+  if ! printf '%s' "$LEAKY_OUT" | grep -q "FAIL — 16 finding"; then
+    echo "leakage-audit: SELFTEST FAIL — expected exactly 16 findings (one per channel fixture); a detection was removed or a channel slipped" >&2
     exit 1
   fi
   # And every channel's marker must be present — deleting any single
@@ -370,6 +382,7 @@ HARD FAIL
 LEAK — read of un-sanctioned slug
 QUERY LEAK
 un-parseable `bp doc query
+without a parseable slug
 doc revision
 doc backlinks
 doc related
@@ -380,7 +393,7 @@ HTTP —
 NON-BASH
 indirection
 MARKERS
-  echo "leakage-audit: SELFTEST PASS — clean passes (incl. own-slug read-back, verb-only doc ls tag, host-free non-Bash tool); leaky fails on all 15 channels (query/revision/graph/capture/discovery/http/non-bash/indirection incl. path-prefixed + \$VAR-indirected bp)"
+  echo "leakage-audit: SELFTEST PASS — clean passes (incl. own-slug read-back, verb-only doc ls tag, host-free non-Bash tool); leaky fails on all 16 channels (query/revision/graph/capture/discovery/http/non-bash/indirection incl. path-prefixed + \$VAR-indirected bp + unparseable-slug read)"
   exit 0
 fi
 
