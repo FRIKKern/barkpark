@@ -18275,7 +18275,8 @@ test("cch-w66-bl: the other four create refusals get console voice, and only the
   assert.ok(f(mint).indexOf("acme-box-7") === -1, "no upstream slug in the modal");
   assert.ok(f(mint).indexOf("internal_error") === -1, "no mint goo in the modal");
   // barkpark_required (422) has NO arm on purpose: siteCreateBody() always
-  // sends barkpark_id (app.js ~9631), so the slug is structurally unreachable
+  // sends barkpark_id (grep -n 'function siteCreateBody' cloud/priv/static/app.js),
+  // so the slug is structurally unreachable
   // from this modal. It keeps the caller's fallback, and this assertion is the
   // record of that decision rather than an aspiration.
   assert.equal(f({ ok: false, status: 422, data: { error: "barkpark_required", detail: "name the instance to host this site (barkpark_id)" } }),
