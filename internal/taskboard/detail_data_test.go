@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // detailFixtureParts splits testdata/detail_fixture.json into the list-envelope
@@ -353,6 +356,138 @@ func TestPaperRefs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := details[tc.docID].PaperRefs(); !eq(got, tc.want) {
 				t.Errorf("%s PaperRefs() = %v, want %v", tc.docID, got, tc.want)
+			}
+		})
+	}
+}
+
+// concurrentFetchServer serves the two task endpoints from the detail fixture
+// behind a two-arrival barrier: each request registers, then blocks until the
+// OTHER request has also arrived (or a timeout fires). A sequential fetch can
+// never satisfy the barrier — its first request would wait for a second that
+// the client has not yet sent — so the timeout trips and the test fails. Only
+// two genuinely in-flight requests release the barrier, so a green run is proof
+// the two GETs overlap.
+func concurrentFetchServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	listBody, primeBody := detailFixtureParts(t)
+	var (
+		mu        sync.Mutex
+		remaining = 2
+	)
+	barrier := make(chan struct{})
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		remaining--
+		if remaining == 0 {
+			close(barrier)
+		}
+		mu.Unlock()
+		select {
+		case <-barrier:
+		case <-time.After(2 * time.Second):
+			t.Errorf("request to %s never saw a concurrent peer within 2s — the two fetches are serialized", r.URL.Path)
+		}
+		switch r.URL.Path {
+		case "/v1/tasks":
+			_, _ = w.Write(listBody)
+		case "/v1/tasks/prime":
+			_, _ = w.Write(primeBody)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// TestFetchSnapshotFull_ConcurrentFetch proves the /v1/tasks and
+// /v1/tasks/prime GETs run concurrently (charter D113b): the stub server only
+// answers once BOTH requests are in flight, so the fetch completing at all —
+// with both results composed into the snapshot — requires overlap.
+func TestFetchSnapshotFull_ConcurrentFetch(t *testing.T) {
+	srv := concurrentFetchServer(t)
+	defer srv.Close()
+
+	snap, details, err := FetchSnapshotFull(newClient(srv.URL))
+	if err != nil {
+		t.Fatalf("FetchSnapshotFull under the concurrency barrier: %v", err)
+	}
+	// composeSnapshot received the list result...
+	if len(snap.Tasks) != 6 {
+		t.Fatalf("decoded %d tasks, want 6 (list result must reach composeSnapshot)", len(snap.Tasks))
+	}
+	if len(details) != 6 {
+		t.Fatalf("hydrated %d details, want 6", len(details))
+	}
+	// ...and the prime result (counts + the ready overlay).
+	if snap.Counts["in_progress"] != 2 {
+		t.Fatalf("counts = %v, want in_progress:2 (prime result must reach composeSnapshot)", snap.Counts)
+	}
+	if got := snap.Tasks; got == nil {
+		t.Fatal("nil tasks")
+	}
+	byID := map[string]Task{}
+	for _, tk := range snap.Tasks {
+		byID[tk.DocID] = tk
+	}
+	if got := byID["drafts.cc-1"].Lifecycle; got != "ready" {
+		t.Fatalf("cc-1 lifecycle = %q, want \"ready\" (prime ready overlay applied)", got)
+	}
+}
+
+// TestFetchSnapshotFull_EitherErrorNoPartial proves the failure contract is
+// unchanged by the concurrent fetch: an error from EITHER endpoint yields the
+// same honest degraded outcome — a nil error is never returned, and the
+// snapshot/details are the zero value (no partial board) — INCLUDING when the
+// other endpoint succeeds.
+func TestFetchSnapshotFull_EitherErrorNoPartial(t *testing.T) {
+	listBody, primeBody := detailFixtureParts(t)
+	cases := []struct {
+		name            string
+		listOK, primeOK bool
+		wantInErr       string
+	}{
+		{"list fails, prime succeeds", false, true, "/v1/tasks"},
+		{"prime fails, list succeeds", true, false, "/v1/tasks/prime"},
+		{"both fail — list error takes precedence", false, false, "/v1/tasks"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/tasks":
+					if tc.listOK {
+						_, _ = w.Write(listBody)
+					} else {
+						w.WriteHeader(http.StatusInternalServerError)
+						_, _ = w.Write([]byte(`{"error":"list boom"}`))
+					}
+				case "/v1/tasks/prime":
+					if tc.primeOK {
+						_, _ = w.Write(primeBody)
+					} else {
+						w.WriteHeader(http.StatusInternalServerError)
+						_, _ = w.Write([]byte(`{"error":"prime boom"}`))
+					}
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			snap, details, err := FetchSnapshotFull(newClient(srv.URL))
+			if err == nil {
+				t.Fatalf("expected an error when an endpoint fails, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantInErr) || !strings.Contains(err.Error(), "status 500") {
+				t.Fatalf("error %q should name %q and the 500 status", err, tc.wantInErr)
+			}
+			// No partial snapshot: both must be the zero value.
+			if len(snap.Tasks) != 0 || snap.Counts != nil || !snap.FetchedAt.IsZero() {
+				t.Fatalf("degraded fetch returned a partial snapshot: %+v", snap)
+			}
+			if details != nil {
+				t.Fatalf("degraded fetch returned partial details: %+v", details)
 			}
 		})
 	}
