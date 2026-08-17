@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "document not found",
+    "hint": "Check the document _id, type, and dataset in the URL — the resource does not exist in this scope.",
+    "request_id": "F_reland_fixture_404"
+  }
+}
