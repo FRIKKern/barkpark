@@ -513,6 +513,17 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :server_type,
       :team_id
     ])
+    # Normalise-on-write at the single chokepoint every writer shares
+    # (register/upsert/adopt all flow through `Registry.register_barkpark/2` →
+    # here). The worker route `POST /v1/internal/barkparks` stores the body `url`
+    # VERBATIM (Auth.require_worker, no validate_format), and
+    # `barkparks_url_unique_idx` is on the RAW column — so ` https://h` and
+    # `https://h` were two distinct rows for one hostname, and every other reader
+    # (`subdomain_from_url/1`, DomainStatus.platform_host/1) had to re-derive the
+    # trim or diverge (cch-w69 D852). Fold the hostile spelling out here so the
+    # index means what it appears to mean. NEW-WRITES-ONLY — see
+    # `normalize_url/1`.
+    |> update_change(:url, &normalize_url/1)
     |> validate_required([:name, :slug, :team_id])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:template, max: 255)
@@ -844,6 +855,33 @@ defmodule BarkparkCloud.Registry.Barkpark do
     do: host |> String.downcase() |> String.trim() |> String.trim_trailing(".")
 
   defp normalize_custom_host(other), do: other
+
+  # Fold a hostile `:url` spelling to its canonical origin form (cch-w69 D852):
+  # strip leading/trailing whitespace (Elixir `String.trim/1` covers space, tab,
+  # NBSP, and CR/LF), downcase (scheme + host are case-insensitive; a managed
+  # `clean_url/1` value is already all-lowercase so it passes through
+  # byte-identical), and drop the trailing slash so `https://h/` and `https://h`
+  # collapse to one row under `barkparks_url_unique_idx`.
+  #
+  # HONESTY CLAUSE (durable, carried by the merge): this is NEW-WRITES-ONLY. It
+  # does NOT backfill existing rows and does NOT strengthen the raw-column unique
+  # index into an expression index — a pre-existing ` https://h` row and a fresh
+  # `https://h` write can still coexist until the backfill lands. The backfill is
+  # owned by `cch-w70-bl-worker-url-backfill-gated-on-prod-dup-scan`, gated on
+  # this prod dup-scan first (rows that would COLLIDE on normalisation must be
+  # reconciled by hand before a unique backfill, or the UPDATE fails):
+  #
+  #     SELECT url,
+  #            lower(btrim(regexp_replace(url, '/+$', ''))) AS normalised,
+  #            count(*)
+  #       FROM barkparks
+  #      WHERE url IS DISTINCT FROM lower(btrim(regexp_replace(url, '/+$', '')))
+  #      GROUP BY url, normalised
+  #      ORDER BY count DESC;
+  defp normalize_url(url) when is_binary(url),
+    do: url |> String.trim() |> String.downcase() |> String.trim_trailing("/")
+
+  defp normalize_url(other), do: other
 
   @doc """
   Changeset for the `StalenessWorker`'s offline flip and for the report path's
