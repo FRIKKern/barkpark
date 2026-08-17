@@ -13,6 +13,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "section" => ~w(id title),
     "callout" => ~w(id tone title),
     "diagram" => ~w(id caption),
+    "route" => ~w(id sport distance elevation duration caption),
     "code" => ~w(id),
     "eyebrow" => ~w(id),
     "p" => ~w(id),
@@ -57,7 +58,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram stats steps callout)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats steps callout)
 
   @inline_marks %{
     "b" => "strong",
@@ -211,6 +212,24 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       block =
         %{"type" => "diagram", "source" => text}
         |> put_attr("id", attrs)
+        |> put_attr("caption", attrs)
+
+      {:ok, block, cur}
+    end
+  end
+
+  # `route` (sport track): the body is the encoded polyline — opaque data like
+  # a diagram's mermaid source; whitespace is trimmed (the polyline alphabet is
+  # ASCII 63–126, so indentation can never be data).
+  defp build_block("route", attrs, sc, cur) do
+    with {:ok, text, cur} <- tag_text("route", sc, cur) do
+      block =
+        %{"type" => "route", "polyline" => String.trim(text)}
+        |> put_attr("id", attrs)
+        |> put_attr("sport", attrs)
+        |> put_attr("distance", attrs)
+        |> put_attr("elevation", attrs)
+        |> put_attr("duration", attrs)
         |> put_attr("caption", attrs)
 
       {:ok, block, cur}

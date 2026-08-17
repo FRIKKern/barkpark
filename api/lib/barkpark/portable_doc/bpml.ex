@@ -33,7 +33,7 @@ defmodule Barkpark.PortableDoc.Bpml do
   ## Kernel vocabulary
 
   Block tags: `paper section p pullquote ingress eyebrow h1 h2 h3 byline/item
-  ul/li table/tr/th/td code diagram stats/stat steps/step callout`.
+  ul/li table/tr/th/td code diagram route stats/stat steps/step callout`.
   Inline tags: `b i code u s a` (→ marks `strong em code underline strike`,
   and `<a href>` → a `link` node).
   """

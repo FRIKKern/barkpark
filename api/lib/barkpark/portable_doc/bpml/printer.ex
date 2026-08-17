@@ -82,6 +82,12 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       pad(d) <>
         "<diagram#{attr_str(b, ["id", "caption"])}>#{esc(Map.get(b, "source", ""))}</diagram>"
 
+  defp block(%{"type" => "route"} = b, d),
+    do:
+      pad(d) <>
+        "<route#{attr_str(b, ["id", "sport", "distance", "elevation", "duration", "caption"])}>" <>
+        "#{esc(Map.get(b, "polyline", ""))}</route>"
+
   defp block(%{"type" => "stats"} = b, d) do
     items =
       Enum.map(Map.get(b, "items", []), fn i ->
