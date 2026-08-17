@@ -341,7 +341,7 @@ if [ "$MODE" = "plan" ]; then
   say "  scanner flags a seeded fake bearer and passes a clean file."
   say ""
   say "  --scan-transcript <file>: config bearers (~/.config/barkpark), raw"
-  say "  raw bearer-header prints, the anthropic key prefix — ZERO hits or no commit."
+  say "  bearer-header prints, the anthropic key prefix — ZERO hits or no commit."
   rule
   say "Run it:  $0            (the proof — LIVE: boots + proves + tears down)"
   say "         $0 --negctl   (the control that must fire — free)"
