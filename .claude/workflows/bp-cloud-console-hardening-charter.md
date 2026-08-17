@@ -1320,9 +1320,105 @@ already been wrong three times in prose.
 | D850 | **RECORD CORRECTIONS: WAVE 68's SECOND REVIEW WAS DELIVERED — THE RECORD, NOT THE WORK, WAS MISSING — AND THE DOCTRINE GAINS A SURFACE REQUIREMENT** | review2-11708 posted a genuinely independent tenancy re-derivation at 08:28:17Z; #11708 merged 08:30:00Z — pre-merge by 103 seconds — but as an ISSUE COMMENT, invisible to `/pulls/N/reviews` (0 formal reviews on ALL ten wave-68 PRs; 0 on the 40 most recent merges — formal reviews have never existed in this repo). Three charter sentences said "still owed" and are corrected by this row + riders (D833's tail, the wave-68 plan paragraph, the wave-68 log's S3 bullet). SCOPE GUARD: wave 67's owed review (log :3550, #11540/#11552/#11553) was never delivered in ANY surface — that sentence stays TRUE; a blanket correction would launder a real three-PR debt. Honest split for wave 68: 5 of 10 PRs reviewed off-API (11694 REQUEST-CHANGES; 11696/11697/11700/11708 APPROVE), 5 never reviewed (11706/11710/11711/11716/11723). DOCTRINE: a single-identity fleet cannot APPROVE its own PRs — the one formal surface available is `gh pr review --comment` (event COMMENT), which DOES render in the reviews API; every future HIGH-FLIP-RISK second review posts through it so "owed" and "recorded" cannot diverge again. Carried from that review: F1 — the variant-loop `assert {:error, :taken} = …, msg` at registry_custom_host_test.exs:92-93 raises MatchError before the label renders (the loop's per-variant care is spent and discarded) — filed as `cch-w69-bl-custom-host-variant-loop-swallows-its-own-label`. |
 | D851 | **LAW 0 AT WAVE-69 OPEN: DENOMINATOR 431 LIVE PUBLISHED — QUOTE THE PUBLISHED QUERY, NEVER child_count** | At decide: 431 open / 395 done / 67 cancelled / 1 considering PUBLISHED; `child_count` reads 903, inflated by 9 draft-only rows (3 probe stubs, a near-duplicate w64 Law-0 pair, 3 cancelled drafts) — Law-0 arithmetic quotes the published query. At open: THREE cancels (`cch-w53-bl-action-labels-has-no-twofa-entry` duplicate of the twofa-rows row — D835's "lead dedupes" duty, discharged nine days late and recorded here; `cch-w68-bl-canonical-for-none-…` per D845; `cch-w65-bl-site-rollback-plane-types-…` folded per D847) and FOUR filings (S1, the wave referent, F1, the dns-label row) = +1 at open, honestly stated; the referent closes at review and the FIRST slice merge takes the wave negative; all eight slice rows are merge-gated closes, so full landing ≈ −8. The crown-paths instrument hole routes to cch-instruments-epic (D838/D839 routing) and never touches this denominator. Two of the digest's "at-open closes" (cch-w40-s4, the delete-route row) were ALREADY PAID by lead-loop minutes after the digest — do not double-count them. |
 | D852 | **THE CLAIM-HOST TWINS DIVERGE LIVE, THE DOOR IS THE WORKER ROUTE, AND THE FIX IS TRIM PARITY IN THE FRAGMENT** | The twins disagree TODAY on exactly the leading-whitespace class (space/tab/NBSP/CRLF: SQL yields "" — the anchored scheme regex misses, then the cut regex eats the string; the Elixir twin trims first): a stored `" https://<host>"` url normalises to "" so `provisioning_fqdn_claim/2` answers :free for a hostname a LIVE box serves — the hole #11708 closed, reopened by spelling. Reachability: worker-token only — POST /v1/internal/barkparks passes the body url VERBATIM (`:url` is cast with NO validate_format; `barkparks_url_unique_idx` is on the RAW column so alternate spellings coexist), while the CLI adopt path self-defeats (slug derived from the same fqdn reds on @slug_format). Brief it exactly so: live divergence, platform-credential-reachable, not customer-reachable. Fix = trim semantics in the SQL fragment (equivalence for hostile spellings, no behavior change for clean rows); the census drives BOTH normalisers via the shipped `fun_ast/3` AST extractor — NO defp promotion (the row's "drives the Elixir one directly" is re-worded; D45's no-AST ruling bound the ROUTER census, not registry.ex, where an AST census already ships); unicode rows assert twin-EQUALITY, never hardcoded strings (collation-dependent). The remaining copies are NAMED, not absorbed: `Barkpark.subdomain_from_url/1` (mints the DNS label + Hetzner box name from the same column, no trim/no downcase — backlogged as `cch-w69-bl-dns-label-minted-from-raw-url`) and `DomainStatus.platform_host/1` (documented divergence). |
+
+| D853 | **WAVE 69 IS FULLY LANDED, THE PIPELINE IS PROVEN LIVE, AND THE ROUNDS THAT DEFERRED S4/S5 ARE RE-DERIVED FROM FILE-TRUTH: BOTH RIDE ROUND 1** | State verified across digest+verify at `d020382028`/`d21641abd8`: #11783 merged 12:55:55Z (six-of-six wave-69 slices in), its deploy concluded SUCCESS, and prod's serving_sha advanced one step per cp-touching merge — 4/4 control-plane deploys since the #11781 un-brick, D842's "merged = LIVE suspended" condition fully discharged. The wave-69 rounds law (S4 behind S3, S5 behind S4) existed for app.js contention that no longer exists: V6 sheds app.js from S4 ENTIRELY (console needs zero bytes — see D854), and S5's app.js region (`siteDeleteFailureCopy`) is function-disjoint from everything else in flight. Measured file sets: S4 = deploy.ex + sites_deploy_test.exs + router_sites_test.exs; S5 = registry.ex + router.ex + app.js(siteDeleteFailureCopy) + destroy_failures_test + cascade_census_test. Intersection = ∅ — both dispatch round 1. The NEW same-file collisions are the mint sibling row (router.ex with S5, router_sites_test.exs with S4) — it is round 2 behind BOTH. Standing caution renewed: the shared main checkout predates #11706 (`teardown_refusal/2` absent from its bytes) — every brief cites origin/main, never the local tree. |
+| D854 | **S4 SCOPE+SHAPE RULING: MIGRATE ONTO THE EXISTING EXTRACTOR PAIR, DO NOT WIDEN ACROSS THE MODULE BOUNDARY, AND THE BOX'S WORDS TRAVEL AS FLAT TOP-LEVEL detail — OR THE CLI GOES MUTE WHILE THE CONSOLE GETS HONEST** | (1) REUSE: `refusal_detail/1` + `refusal_code/1` already live ~220 lines above the two refusal chains in the SAME module (nested-first; the flat arm is a strict SUPERSET of the chains' reads — it adds `failure_reason`, the "second chain site"). Both `rollback_refusal/2` and `teardown_refusal/2` migrate onto them; a fresh extractor would duplicate the fix the module already carries. (2) DO NOT WIDEN to `mint_failure_copy/2`: it is the THIRD structurally identical discarding chain but lives in `BarkparkCloud.Web.Router` — reuse across the boundary forces publishing two defp (a module-surface change) and turns D847's "one file-region, one owner" consolidation rationale false. It is a SIBLING ROW (`cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal`): local nested arm (~6 lines) or publish-the-pair, the sibling's builder chooses. Its transport premise is TRACE-proven, not run-proven — TokenController's 422 and every scoped-pipeline plug 401/403 are nested `%{error: %{code,message}}`, the committed flat `{"error":"forbidden"}` fixture at router_sites_test.exs:1194 is not a shape the box emits — so the sibling's acceptance MUST run the nested fixture. (3) THE FLAT-DETAIL LAW: `body["error"]` stays the existing route code (`"rollback_failed"`/`"teardown_failed"`, a STRING) and the box's words land in flat top-level `detail` (nested envelope unwrapped SERVER-side, composed `"code — message"`). The CLI's site arms (DeleteSpawnSite/RollbackSpawnSite → `cloudError`) decode flat strings ONLY — a nested `error` object fails the decode and degrades to a 200-rune raw clamp; the nested-tolerant `decodeRollbackError` serves the INSTANCE route, never sites. Console is safe by construction: `siteRollbackFailure`'s rollback_failed arm and `siteDeleteFailureCopy` render `detail` verbatim — S4 ships ZERO app.js bytes. (4) Honesty riders: the typed-token clauses (no_previous/not_supported/lock_held) will not fire on nested composites — acceptable, the box's words travel verbatim; state it in the test header. `teardown_unreachable/2` exists post-#11706 — any "teardown launders deploy prose" sentence is one wave stale. Fixture law: drive all three REAL shapes (nested map; settle_* flat sentence; `%{}`) and KEEP the flat fixtures — both shapes are real, only the bare token is fixture-only. |
+| D855 | **THE friendly() ENDGAME IS CUT WITH A MEASURED THREE-SLUG FENCE, AND THE PROBE PROVES THE FAIL-BEFORE IS SINGULAR** | One slice carries both rungs (D846's serialization law): the D740 unwrap (`if (key && typeof key === "object") key = key.code;`) plus the fenced singular-detail rung ABOVE the fallback return. The INCLUDE set is enumerated from the router, not guessed — of the eight create/settings/deploy refusal slugs, exactly THREE are RELAY (measured server sentence, surface-neutral, dropped by friendly() today): `barkpark_required` (create, 422 — deliberately no local arm so it reaches friendly()), `deploy_ability_required` (settings, 403), `nothing_to_update` (settings, 422). EXCLUDED and why: `content_binding_required`/`content_binding_empty`/`no_build_source` are CLI-voiced (embed bp flags/re-runs); `node_ports_exhausted` (503) and `read_token_mint_failed` (502, relays a raw upstream slug — the cch-w48-s2 class) are 5xx-borne, and the 5xx law wins the RELAY-vs-503 judgment call (both are locally covered by `siteCreateFailureCopy` anyway). #11783's local arms are DISJOINT from the fence — every detail-bearing arm it added is an excluded slug, so "the remainder" is the whole INCLUDE set. PROBE-PROVEN at verify: the one-line unwrap reds EXACTLY ONE test — #929 `cch-w30-s5` at __app.test.mjs:16493 (nested `{error:{code:"server_error"}}` flips from the flat fallback to the resolved server-fault sentence) — and the arity pin at :18107 stays green; the slice INVERTS the w30-s5 pin in the same commit (guard-plus-fix co-merge, never a standing red). BASELINE CORRECTION: the true committed baseline is **1085/1085** — D846's quoted 1082 and the survey grep's 1074 were both stale; re-derive at build, never commit the literal. `cch-w66-bl-friendly-is-blind-to-singular-detail` is cancelled INTO `cch-w62-bl-friendly-throws-on-the-nested-envelope-it-is-handed` (widened carrier): same ten lines, one owner. |
+| D856 | **S5 SHARPENED: THE NESTED CASE IS NECESSARY BUT NOT SUFFICIENT — delete_site/1 MUST GAIN THE RESCUE, OR THE TYPED ARM IS DEAD CODE** | Run-proven at verify (both suites green on origin/main; 2 tests + 7 tests, 0 failures): the FK inverse-orphan RAISES `Ecto.ConstraintError` out of the bare `Repo.delete(site)` — a router `case` cannot catch a raise, and the existing test's try/rescue + crash-envelope scaffold pins exactly that. So BOTH halves are required: (a) `Registry.delete_site/1` gains the `rescue %Ecto.ConstraintError{type: :foreign_key}` (D848's own mechanism) so it RETURNS a typed tuple, widening its @spec; (b) the router's `:ok ->` arm gains a NESTED case around `Registry.delete_site(site)` — the sibling relay arm matches `teardown_result` and is UNREACHABLE from inside `:ok` — rendering `500 + error: "registration_not_removed" + detail` stating both outcome halves (instance torn down; registration survives). A builder who ships only the router case changes nothing. Cites by TEXT, not line: the D820 "HARD MATCH, DELIBERATE" block now runs router.ex 7111-7127 (D848's 7077-7095 drifted); the census test's "500 server_error" prose (~:161) rewrites in the same PR; the destroy-failures test scaffold FLIPS from raise-expecting to plain conn reads (D848 authorized the rewrite). The CLI relays the typed 500 through #11784's default Detail-relay arm with ZERO new Go (its comment names registration_not_removed) — verify, don't build. Console arm: `siteDeleteFailureCopy` gains a registration_not_removed arm ABOVE the generic 5xx crash arm, relaying the plane's detail. |
+| D857 | **THE TWO LAW-0 FILLERS ARE ONE TASK — RUN-PROVEN COLLISION — AND THE TWOFA LABELS ARE PINNED HERE BECAUSE THEY EXIST NOWHERE ELSE** | Probe at verify: repointing emit.mjs's interior comment + `node design/emit.mjs --write` rewrote BOTH the app.js audit-labels generated region AND the same emit-manifest.json digest line (slot `cloud/priv/static/app.js#cloud SPA audit action labels`) in one stroke — the twofa fill regenerates the identical region+line, so two round-1 PRs red each other; `cch-w69-bl-audit-table-prose-repoint-after-app-js` is cancelled INTO `cch-w53-bl-twofa-rows-render-as-raw-slugs` (widened carrier, single owner — D851 already made it the sole twofa owner). Mechanics the builder cannot infer: the MARKER-BEGIN string is the emitter's LOOKUP KEY — repointing it in emit.mjs alone makes emit report "1 artifact(s) missing their marker block"; the marker line in app.js is HAND-edited in the same commit. Three hand-written stale `design/audit-actions.json` refs sit OUTSIDE any generated region (app.js :16783 comment, :16790 marker, :24183 export-block comment) and `--write` never touches them — hand-edit all three. LABELS PINNED (no copy exists in either task; the cancelled duplicate carried none): `twofa.enabled` → "enabled two-factor authentication", `twofa.disabled` → "disabled two-factor authentication" (house past-tense style); their `reason_code: d582-copy-not-written` rows become false the moment labels land — rewrite them. emit-fence asserts manifest KEYS, never digest VALUES — nothing reds a stale-digest race except the collision itself; the merge into one task removes the race. |
+| D858 | **WORKER-ROUTE WRITE SIDE: PRICED VERDICT = BUILD, AS DEFENSE-IN-DEPTH, WITH THE BACKFILL SPLIT OFF AND GATED ON A PROD DUP SCAN** | All three write paths (register/upsert/adopt) funnel through ONE `Barkpark.changeset/2` that casts `:url` with zero normalisation — the fix is normalise-on-write at that chokepoint (trim + downcase, strip trailing slash, keep origin form), pure code, no migration, safe to stage: the read side (#11785's btrim + the SQL fragment) already normalises at compare time, so there is NO live correctness gap and the at-risk population is worker-token-gated (managed URLs are minted by construction via `clean_url/1`). HONESTY CLAUSE, mandatory in the merge's durable venue: the fix tightens NEW writes only — `barkparks_url_unique_idx` is on the RAW column and cannot catch a new-normalised vs old-raw collision, so the slice NEVER claims the uniqueness backstop is strengthened. The backfill is ITS OWN row (`cch-w70-bl-worker-url-backfill-gated-on-prod-dup-scan`, backlog): `UPDATE … SET url = normalise(url)` runs each row through the raw unique index, and two existing spellings of one host ABORT it — the pre-flight dup scan (`SELECT lower(btrim(…url…)) n, count(*) … GROUP BY n HAVING count(*)>1`) gates it, unresolved dups block it, and no urgency forces it. |
+| D859 | **D836 BECOMES A ROUTED PACKET — AN OWNER-FACING RULING PAPER ON THE arpss TEMPLATE — AND NO ARM EVER BUILDS THE TIER RAISE** | Verify confirmed the packet is UNFILED: D836 is charter prose naming no carrier, and the original finding (#11547, `cch-w67-bl-any-member-can-destroy-a-site-…`) sits open, unlinked to the ruling that answered it. Wave 70 files `cch-w70-d836-site-delete-tier-ruling-packet`: author a standalone decision Paper (mirror `arpss-anon-exposure-ruling-2026-08-17` — owner rules in ~10 minutes, NO code, NO PR) carrying (a) the question framed against the BAND, not the verb — sites are a member-tier band end-to-end, raising delete alone lets a member create+deploy a site they cannot remove; (b) the measured trace by FUNCTION NAME (with_team_site → require_user_or_pat → require_ability("write") vs require_primary_team_admin, each with a rerun command); (c) the cost of ruling up = D836's three-slice shape with the admin-or-PAT combinator named as the load-bearing missing primitive (require_primary_team_admin/1 401s every PAT — wrong status AND wrong class); (d) the standing recommendation (keep member-tier, band-consistent) for the owner to ratify or overturn; (e) link-back BOTH ways — the Paper names #11547 + this row, and the lead annotates #11547 with the Paper (its criterion-1 "write the reason down" branch). Until product rules up, the tier raise is UNBUILDABLE by charter law. |
+| D860 | **LEDGER HYGIENE AT WAVE-70 OPEN: RE-HOMINGS, A WISH ARM CLOSED BY MEASUREMENT, AND THE RESIDUE FILED WHERE IT ACTUALLY LIVES** | (a) The two w68 residual instrument rows (`cch-w68-bl-smoke-rollback-fixture-shape-pin`, `cch-w68-s4a-followup-manifest-prunes-orphan-slots`) RE-PARENT to `cch-instruments-epic` — this charter already labels them instrument rows; parking them under the product epic was the Law-0 laundering surface. (b) The wish's "consolidate overlapping vocabulary owners" arm is CLOSED BY MEASUREMENT, not by a slice: the owner census proves the refusal vocabulary is already single-producer (usageUnavailableText / FORBIDDEN_ROLE_COPY produce; consumers echo); the one true second owner (`launchRoleClause`) is deliberate, pre-hoc, and test-pinned — leave it; D835 was the LABELS axis and its dedupe was discharged (D851). (c) The dead-menu defect is SETTLED by #11783 (known_templates retired on its route; a "readable_types rename" exists nowhere); the surviving residue is CLI-side and is filed as two backlog rows: `cch-w70-bl-cli-drops-the-readable-types-menu-on-create` (cloudError reads only flat error+detail — the 422 menu the console renders is silently discarded) and `cch-w70-bl-site-create-collapses-refusal-exit-families` (cloudFail maps every create refusal to exitGeneric; 503-transient and 422-user-fixable are indistinguishable to a script, while delete/rollback exit by family). (d) Stale-verdict weather, quoted for the record: 31 open · 12 CONFLICTING · 11 stale-green rows, 0 cch-payable, not in the required set — no repayment owed; do not drain a foreign backlog. (e) Merge-gated close OWED by the lead: `cch-w67-bl-the-cli-site-delete-receipt-flattens-every-typed-refusal` is open with #11784 MERGED — close it, do not re-file it. |
+| D861 | **THE MINT SIBLING IS SERVER-ONLY — THE POSITED CONSOLE HALF IS REFUTED, AND THE NESTED FIXTURE ALREADY RAN RED** | The digest claimed the mint slice "grew a console half" (a server-only fix enriches a string the console throws away). Verify REFUTED the fix target by running the console on origin/main bytes: the create modal always renders `siteCreateFailureCopy(r)`, and that function has a DEDICATED `read_token_mint_failed` WITHHOLD arm (cch-w66/D846) returning the curated "Something broke on our side minting this site's read token — not your input. Try again in a moment." — NOT the raw `friendly()` fallback "create failed (502)". The drop of `data.detail` on the mint 502 is deliberate and correct under the 5xx honesty law (D855's singular-detail rung fences 5xx-borne upstream slugs out of the relay allowlist for exactly this reason); a general `data.detail` reader in `friendly()`/`siteCreateFailureCopy` would re-leak what D846/D855 were built to fence and is REFUSED. The slice `cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal` is therefore SERVER-ONLY: teach `mint_failure_copy/2` (cloud/lib/barkpark_cloud/web/router.ex, the `body["error"] \|\| body["detail"] \|\| body["reason"]` is_binary-guarded chain) to unwrap a nested `%{"error" => %{"code","message"}}` map — the exact sibling of #11846/#11847/#11848. D854's acceptance floor is PAID IN ADVANCE: verify AUTHORED the nested fixture (no nested mint fixture existed anywhere in cloud/test) and RAN it red on pre-fix bytes — programmed 422 body `{"error":{"code":"unprocessable","message":"permissions [\"write\"] not allowed"}}` at the scoped token route, got `detail` = "bp-6018 refused to mint the site's read token (HTTP 422)" with the box's message ABSENT, while the flat `{"error":"forbidden"}` test at router_sites_test.exs:1188 stayed green (it asserts only `detail =~ bp.slug`, so it structurally cannot catch the drop — the builder should also strengthen it to `=~ "forbidden"`). The CLI relays the enriched detail for FREE (`cloudError` concatenates `detail` into the message) — CLI half is verify-only. Rerun recipe: tooling/grip/ledger/cch-w71-console-mint-detail-drop-2026-08-17.md. |
+| D862 | **THE CREATE-CLI SEAM RULING: ONE DIALECT (#11784), TWO SLICES IN SEQUENCED ROUNDS, AND THE PER-VERB EXIT TABLE IS PINNED** | The fleet's one head-on contradiction is settled at L2 on origin/main bytes: `type CloudRefusal` EXISTS (internal/cloudclient/client.go:346 — HTTPStatus/Code/Detail/Reason/Required/Scope/Details, NO readable_types field); the rival lane's "no such type" claim and its `statusExit` ladder (422→exit 2) are stale-worktree artifacts and are REJECTED. The one dialect create copies is #11784's `siteRefusalFail`→`siteRefusalExit` (no_team override→1 with the `bp team use` fix line, 404→4, 409→6, 401/403→3, ≥500→8, every 422→1). Create today routes the bare `cloudFail(out, "create site", cerr)` — auth-vs-generic only, so a user-fixable 422 and a transient 503 both exit 1. FIX = add a `siteRefusedCreate` kind and route create's error arm through `siteRefusalFail`; verify COMPILED AND TESTED this seam (6 family probes green with it, 4 red with the line reverted — and the reds exposed that detail-substring assertions are VACUOUS for this seam because `cloudError` already folds detail into Error(); acceptance must assert EXIT CODES). PER-VERB SCOPE LAW: POST /v1/sites has NO top-level 403 (`require_user` is 401-only; the box's mint-403 surfaces as the 502) and NO reachable 409 arm — create's acceptance table asserts families 401→3, 404→4, 422→1, 502/503→8, and never asserts 6. The two create slices share ONE seam in cloud_site_cmd.go, so they are SEQUENCED: exit-families merges first (round 1), the readable_types menu builds on the merged seam (round 2, AFTER `cch-w70-bl-site-create-collapses-refusal-exit-families` merges). D642/D693 discipline restated: no required context runs Go — builders run and quote `go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...` themselves (live green baseline taken this round: `ok internal/cli 26.247s`), and a green Cloud gate on an internal/cloudclient diff is a TEXT SCAN, not a Go test. |
+| D863 | **THE MENU RIDES CloudRefusal AND error.details — AND ITS CRITERION DEMANDS A STRUCTURED ASSERTION, BECAUSE THE PROSE MENU ALREADY REACHES THE TERMINAL** | The menu row's premise is PARTLY WRONG as filed: the plane's `content_binding_empty` `detail` ALREADY embeds the menu sentence and the `bp cloud site create …` re-run line (refuse_empty_binding composes them), so prose reaches the terminal today via cloudError's detail-concat; what the CLI verifiably drops is the STRUCTURED top-level `readable_types` array (`maybe_put_menu`; `[{type,count?}]`) that the console renders via `siteReadableTypesMenu` — cloudError decodes error/detail/reason/required/scope/details and never readable_types. RULING: (a) decode `readable_types` into a new field on `CloudRefusal` (census-safe — CloudRefusal is not a censused pair and readable_types is in no Cloud-suite allowlist); (b) machine output carries it at `error.details.readable_types` via the existing `renderErrorEnvelopeDetailed` channel (errors.go — additive, order-preserving raw bytes); (c) human render mirrors the console grammar `type (count)` / bare type when count absent, and KEEPS the `bp` re-run line (the console strips it via siteDetailWithoutCliReRun because it is CLI-voiced — the CLI is its home). ANTI-VACUITY LAW for this slice: the acceptance criterion must assert the STRUCTURED render or the `error.details.readable_types` envelope and red on pre-fix bytes — a `detail`-substring assertion passes pre-fix and proves nothing. |
+| D864 | **THREE STALE-OPENS CLOSE BY MEASUREMENT — AND TWO RECORDED ATTRIBUTIONS WERE PHANTOM** | (1) `cch-w67-bl-every-teardown-422-opens-by-saying-a-deploy-died` was settled by #11786 = commit 9a24537df5 (mode-aware `teardown_outcome/1`, teardown-voiced `teardown_exit_label/1`, deploy's `exit_label(-1)` byte-frozen) — NOT by #11846, and the row's recorded `github.issue: 11542` names a PR that does not exist. (2) `cch-w67-bl-the-cli-site-delete-receipt-flattens-every-typed-refusal` is satisfied by merged #11784 (`siteRefusalFail(out, siteRefusedDelete, ref, derr)` at delete's error arm) — D860e already ordered this close. (3) `cch-w39-bl-token-mint-403-carries-no-authority-evidence` has been fixed since cch-w37-s2: the token route's forbidden arm ships `Auth.forbidden(conn, required: "admin", scope: "team")` and the console renders the exact role sentence (node-probed on origin/main app.js: "You need the admin role on this team — an admin on this team can grant it."). WORDING LAW for close (3): the surveyor's "no bp CLI path consumes POST /v1/tokens" is REFUTED — internal/bootstrap/bootstrap.go:379 and internal/cli/vercel_cmd.go:553 both POST it; neither RENDERS the forbidden required/scope grammar, and both mint paths are admin-gated so the 403 is off-path. The close says "no CLI twin RENDERS the console's forbidden role sentence", never "no consumer exists". The two raw-dump render sites are filed as a priority-4 backlog row, not built. Rerun recipes: tooling/grip/ledger/cch-w71-three-stale-open-closes-rederivation-2026-08-17.md. |
+| D865 | **THE D858 DUP SCAN RAN ON LIVE PROD: ZERO DUP GROUPS — THE BACKFILL IS ARMED, STILL LEAD/OPS-GATED; AND THE dns-label SLICE REFRAMES TO DEFENSE-IN-DEPTH** | The read-only pre-flight scan D858 demands was executed against the live control plane (cloud-db-1, barkpark_cloud_prod): `SELECT lower(btrim(url)) n, count(*) FROM barkparks GROUP BY n HAVING count(*)>1` → (0 rows); corpus totals 9/9/9 (rows / non-null urls / distinct normalised forms). The gate's zero-collision arm is satisfied: `cch-w70-bl-worker-url-backfill-gated-on-prod-dup-scan` is ARMED but remains lead/ops-gated (prod DB access, not a builder worktree slice), and the scan MUST be re-run immediately before any actual UPDATE — the snapshot decays with every new box minted until #11850's write-normalisation lands. `cch-w69-bl-dns-label-minted-from-raw-url` builds THIS wave as defense-in-depth: `subdomain_from_url/1` (cloud/lib/barkpark_cloud/registry/barkpark.ex:439) still does scheme-strip + suffix-strip with NO trim and NO downcase on origin/main, and its output mints the worker's dns_label + claim slug (router.ex provision/claim/deprovision arms). Once #11850 merges, new rows arrive clean — the read-side fold protects old rows, the pre-merge window, and any future write path that bypasses the changeset. Same file as #11850 but a DIFFERENT function: the builder pulls latest main first and rebases trivially if #11850 landed mid-wave. |
+| D866 | **PARITY CENSUS VERDICT: EVIDENCE CLOSED EVERYWHERE, FAMILY-EXIT CLOSED FOR delete+rollback, CREATE CLOSES THIS WAVE — THE REMAINDER IS FILED, NOT BUILT** | Measured on origin/main: the DETAIL+EVIDENCE half of console↔CLI parity is closed for EVERY `bp cloud site` verb (#11711/#11784's typed `CloudRefusal` folds reason/required/scope/details into every message). The FAMILY-EXIT half: delete + rollback closed (#11784), create closes this wave (D862), and deploy (+ its upload/mint/poll sub-steps), the domain error arm (cloud_domain_cmd.go), and settings/get still route bare `cloudFail` and exit 1 for everything non-auth. Those are FILED as backlog rows this wave — not built, because they share cloud_site_cmd.go with the create seam and would collide mid-air; they are wave-72 spine candidates alongside the w64 census row, whose numbers moved in the epic's favor (173 typed codes / 57 literal-read / 116 unread; sharper union method: 65 referenced / 108 truly-absent — wave 72 should adopt the union census and partition by reachability before building any copy). One coverage anomaly recorded for honesty: the ledger-state-pack verify lane was flagged UNREPORTED by the coverage accountant but its report arrived late with full proofs (all 10 target rows + epic open, worker null, zero live foreign claims); the decide phase re-derived every claim epoch again at close time rather than trusting either snapshot. |
 ## Roadmap
 
-### Wave 69 — THE REFUSAL SPEAKS ITS OWN WORDS, AND THE PAPER TRAIL COMES HOME (build in flight)
+### Wave 71 — THE TERMINAL HEARS WHAT THE CONSOLE HEARS (build in flight)
+
+**Paper:** `cloud-console-hardening-wave-71-2026-08-17`. **This charter PR carries D861-D866.** Ceiling was
+D860 (merged #11831 — merged by this wave's decide phase BEFORE this delta was authored, per the
+merge-order law); wave 71 mints D861-D866, next wave opens at D867. Verification: 12 survey lanes +
+6 deep verifiers (one late report, noted in D866); premise smoke re-run at decide against origin/main
+tip `62f5ff7d48`, with the mint fixture RUN red and the create-CLI seam COMPILED AND TESTED before any
+slice was cut. Wave 70 closed the refusal-pipeline arc for the console; wave 71 finishes it for the
+arc's second audience — the terminal — and closes the last server chain that discards a box's words.
+
+**Slices (4, integration-ordered):** ROUND 1 — `cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal`
+(server: nested unwrap in `mint_failure_copy/2` + the D861 fixture, opus);
+`cch-w70-bl-site-create-collapses-refusal-exit-families` (CLI: `siteRefusedCreate` through
+`siteRefusalFail`, D862 exit table, opus); `cch-w69-bl-dns-label-minted-from-raw-url` (server:
+`subdomain_from_url/1` self-normalises, D865 defense-in-depth, opus). ROUND 2 —
+`cch-w70-bl-cli-drops-the-readable-types-menu-on-create` (CLI: CloudRefusal.ReadableTypes +
+`error.details.readable_types` + console-grammar render, D863, AFTER the exit-families slice merges —
+same seam, opus).
+
+**Closes by measurement (D864):** teardown-422 (#11786, recorded issue 11542 is phantom), CLI
+delete-receipt (#11784, owed since D860e), w39 token-mint-403 (cch-w37-s2 era; "no CLI twin RENDERS",
+never "no consumer"). **Lead debts:** merge #11850 as it greens (all four blocking contexts were green
+at decide time) and close `cch-w69-bl-worker-route-stores-url-unnormalised` on a fresh claim epoch;
+annotate #11547 with the D836 ruling Paper URL and close the packet row; the backfill row stays
+lead/ops-gated (D865). **Backlog filed:** deploy exit-families, domain/settings/get exit-families,
+platform_host fourth normaliser spelling, bootstrap/vercel mint-403 render sites (priority 4).
+
+
+### Wave 70 — EVERY ARM RELAYS THE MEASURED SENTENCE (build in flight)
+
+**Paper:** `cloud-console-hardening-wave-70-2026-08-17`. **This charter PR carries D853-D860.** Ceiling was
+D852; wave 70 mints D853-D860, next wave opens at D861. Verification: 14 survey lanes + 7 deep verifiers,
+zero coverage deficit both rounds; premise smoke re-run at decide against tip `d21641abd8` (cloud/ and
+internal/cloudclient byte-identical to the verify anchor `d020382028`). Wave 69 is fully landed (D853);
+this wave finishes the three-wave refusal-pipeline arc: after it, no arm of the site lifecycle — console
+or CLI, create/deploy/rollback/delete/teardown — invents a sentence the plane did not measure.
+
+**THE CUT — seven slices, six round-1.**
+
+| # | task | round | model | decision rows |
+|---|---|---|---|---|
+| S1 | `cch-w67-bl-rollback-refusal-discards-the-box-s-own-words` (re-scoped: deploy.ex only, zero app.js) | 1 | fable | D847, D854 |
+| S2 | `cch-w67-followup-delete-site-typed-fk-failure` (rescue + nested case, both required) | 1 | opus | D848, D856 |
+| S3 | `cch-w62-bl-friendly-throws-on-the-nested-envelope-it-is-handed` (widened: + D846 fenced rung; absorbs the w66 singular-detail row) | 1 | fable | D740, D846, D855 |
+| S4 | `cch-w53-bl-twofa-rows-render-as-raw-slugs` (widened: + the emit prose repoint; absorbs the w69 repoint row) | 1 | opus | D857 |
+| S5 | `cch-w69-bl-worker-route-stores-url-unnormalised` (normalise-on-write; backfill split off) | 1 | opus | D852, D858 |
+| S6 | `cch-w70-d836-site-delete-tier-ruling-packet` (papers-only — file the ruling, never build the raise) | 1 | opus | D836, D859 |
+| S7 | `cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal` | 2 — AFTER S1 and S2 merge | opus | D854 |
+
+**HIGH-FLIP-RISK, NAMED SO THE REVIEWER RE-DERIVES RATHER THAN RE-READS.** S1: the cross-surface
+FLAT-DETAIL constraint — re-derive from `cloudError`'s bytes in internal/cloudclient/client.go that the
+site arms decode flat strings only, and that S1's wire shape keeps them fed (a nested `error` object mutes
+the CLI). S5: REACHABILITY/TENANCY — the worker-route write path is platform-credential-gated, not
+customer-reachable; re-derive the changeset chokepoint claim (all three writers funnel through
+`Barkpark.changeset/2`) before trusting the slice's "single chokepoint" framing. S7: the mint-path nested
+transport is TRACE-proven only — the nested fixture must RUN red on pre-fix bytes or the slice proves
+nothing. Per D850, each independent second review posts via `gh pr review --comment`.
+
+**MERGE-ORDER NOTES.** S1 and S2 are file-disjoint (measured, D853) — either order. S3 and S4 share
+app.js in regions ~16k lines apart (friendly() at :346 vs the generated audit-labels block at :16790) —
+mergeable in either order. S2 and S3 share `__app.test.mjs` in far-apart regions — mergeable. S7 is
+serialized behind S1 (router_sites_test.exs) and S2 (router.ex) and does NOT build this run. No committed
+test-count literals anywhere (D855's 1085 is a decide-time observation — the stale-green merge window
+breaks main when two green PRs pin the same counter).
+
+**LEAD DUTIES.** (1) Close `cch-w67-bl-the-cli-site-delete-receipt-flattens-every-typed-refusal` —
+#11784 is MERGED (D860e). (2) After S1 and S2 merge: dispatch S7 with its AFTER line honoured. (3) On
+S6's Paper landing: annotate #11547 with the ruling Paper's URL (D859e). (4) Confirm each cp-touching
+merge's deploy concludes SUCCESS and serving_sha advances (D842 discipline, now routine). (5) Second
+reviews for S1/S5/S7 per the high-flip-risk block.
+
+**FILED AT DECIDE.** Backlog: `cch-w70-bl-cli-drops-the-readable-types-menu-on-create` (p3, D860c),
+`cch-w70-bl-site-create-collapses-refusal-exit-families` (p3, D860c),
+`cch-w70-bl-worker-url-backfill-gated-on-prod-dup-scan` (p3, D858). Cancelled-into:
+`cch-w66-bl-friendly-is-blind-to-singular-detail` → S3's carrier (D855);
+`cch-w69-bl-audit-table-prose-repoint-after-app-js` → S4's carrier (D857). Re-homed: the two w68
+residual instrument rows → `cch-instruments-epic` (D860a). Deferred, standing: the friendly-family
+fallback rows (`cch-w30-s5-followup-vague-fallbacks`, `cch-w34-bl-bare-friendly-renders-billing-copy-…`)
+and `cch-w69-bl-site-create-detail-is-cli-voiced-…` (server-side detail restructure) stay backlog — none
+is spine, and the w34 row's line-cites need re-anchoring before any build.
+
+### Wave 69 — THE REFUSAL SPEAKS ITS OWN WORDS, AND THE PAPER TRAIL COMES HOME (landed — six of six merged, deploys 4/4 post-#11781, prod serving advanced; D853)
 
 **Paper:** `cloud-console-hardening-wave-69-2026-08-17`. **This charter PR carries D841-D852.** Ceiling was
 D840; wave 69 mints D841-D852, next wave opens at D853. Verification: 16 digest lanes + 10 deep verifiers,
@@ -3580,6 +3676,115 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 ## Wave log
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
+
+### 2026-08-17 — wave 71 REVIEW — grade A, three round-1 slices built, mutation-verified and pushed with PRs open; the refusal-pipeline arc's terminal half closes for create, and the last server chain that discarded a box's words is gone
+
+**Paper:** `cloud-console-hardening-wave-71-2026-08-17` (debrief appended). **Decisions:** D861–D866
+(this PR, #11870). Entry written on the charter PR branch per the wave-67/68/69/70 precedent. Every
+red-before claim was re-proven at review by MUTATION, not read: each fix was reverted in place, the
+slice's suite run red, the fix restored, the gate re-run green.
+
+**LANDED (three branches with PRs open):**
+
+- S1 `cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal` →
+  `loop-epic/the-create-site-mint-chain-stops-discard-0-r` → **#11885**. `mint_failure_detail/1`
+  unwraps the typed envelope before the is_binary guard and composes `code — message`; flat bodies
+  pinned byte-identical by an equality assert; SERVER-ONLY per D861 (the console's WITHHOLD arm is
+  deliberate and untouched). Reviewer fix (the wave's only one): the 403 nested test now pins the
+  composed `"forbidden — admin token cannot mint public-read here"` string and its comment matches
+  the fixture. Mutation: reverting the one-line arm reds exactly the 2 nested tests; final gate
+  113/0.
+- S2 `cch-w70-bl-site-create-collapses-refusal-exit-families` →
+  `loop-epic/bp-cloud-site-create-exits-by-refusal-fa-1` → **#11886**. `siteRefusedCreate` through
+  the ONE #11784 ladder (D862); per-verb arms become switches; barkpark_not_found points at
+  `--instance`; exit table 401→3 / no_team→1 / 404→4 / 422→1 / 502·503→8, never 6. Wire
+  codes/statuses re-verified against router.ex at review (503 node_ports_exhausted, 502
+  read_token_mint_failed, 404 barkpark_not_found, 422 no_team — all confirmed). Anti-vacuity held:
+  tests assert EXIT CODES; mutation reds 5 of them. Zero reviewer changes; gates go build/vet/test
+  all green.
+- S3 `cch-w69-bl-dns-label-minted-from-raw-url` →
+  `loop-epic/subdomain-from-url-self-normalises-the-t-2` → **#11887**. `subdomain_from_url/1` folds
+  `trim |> downcase` before the strips (D865 defense-in-depth beside #11850); D852 hostile corpus +
+  suffixed shape pinned; platform_host/1 divergence documented in-test against backlog row
+  `cch-w71-bl-platform-host-fourth-normaliser-spelling` (exists, open). Mutation: dropping the fold
+  reds the corpus test 96/1. Zero reviewer changes; gate 96/0.
+
+**DEFERRED BY DESIGN (round 2):** `cch-w70-bl-cli-drops-the-readable-types-menu-on-create` (D863)
+shares the cloud_site_cmd.go seam with S2 and dispatches only AFTER #11886 merges. It was not built
+this run and its absence is sequencing, not a stall.
+
+**LEDGER:** clean — all three slice tasks `in_progress`, criteria stamped with real evidence as the
+builders worked, merge-gated rows left open for the lead; the deferred round-2 task untouched at
+`open`; zero reviewer ledger fixes (first wave in several with nothing to repair). **Cross-slice:**
+S1's composed `code — message` detail is exactly the string S2's 502 relay test carries — the two
+halves of the wave meet in one sentence, by construction.
+
+**LEAD DEBTS at merge:** merge order is free between #11885/#11886/#11887 (disjoint files); close
+each task's merge-gated criterion on merge (S1 index 4, S2 index 3, S3 index 2). Wave-70 debts
+restated: merge #11850 as it greens + close `cch-w69-bl-worker-route-stores-url-unnormalised`;
+annotate #11547 with the D836 ruling Paper; the backfill row stays lead/ops-gated (D865).
+
+**NEXT WAVE (72):** dispatch the round-2 readable-types menu slice (D863) once #11886 lands — the
+structured `CloudRefusal.ReadableTypes` + `error.details.readable_types` + console-grammar render,
+with the structured-assertion anti-vacuity law. Then the parity remainder D866 filed: deploy
+(+upload/mint/poll) exit-families, domain arm, settings/get — same-seam rows, sequence them. Spine
+candidate: the w64 typed-wire-codes census with the union method (65 referenced / 108 truly-absent),
+partitioned by reachability before building any copy.
+
+### 2026-08-17 — wave 70 REVIEW — grade A, five code slices + one ruling packet, all pushed with PRs open, ZERO reviewer fixes for the second consecutive wave; the refusal-pipeline arc closes except its round-2 mint chain
+
+**Paper:** `cloud-console-hardening-wave-70-2026-08-17` (debrief appended). **Decisions:** D853–D860
+(this PR, #11831). Entry written on the charter PR branch per the wave-67/68/69 precedent. Everything
+below re-verified by the single wave reviewer on `-r` branches off `origin/main` `0ff6fae4a6`: S1
+Elixir 199/0, S2 Elixir 9/0 + JS 1086/0, S3 JS 1091/0, S4 `design/check.mjs` PASS + emit-fence 9/9 +
+JS 1085/0, S5 Elixir 7/0 (NBSP fixtures byte-verified as real `\xc2\xa0`), S6 paper 200 + sentinel.
+Zero reviewer commits — every final branch is the builder's own.
+
+**LANDED (five branches with PRs open, one papers-only deliverable):**
+
+- S1 `cch-w67-bl-rollback-refusal-discards-the-box-s-own-words` → **#11846**. `rollback_refusal/2` +
+  `teardown_refusal/2` migrate onto `refusal_detail/1`; nested pre-poll refusals compose
+  "code — message" instead of dying into the fallback. HIGH-FLIP-RISK re-derived at review from
+  `cloudError`'s bytes: `error` unmarshals into a Go STRING (a nested object fails the decode →
+  raw clamp), `detail` decodes separately flat — S1's wire (error = route code string, detail = flat
+  composed sentence) keeps both site arms fed. Typed-token fate stated above `rollback_copy/2`.
+- S2 `cch-w67-followup-delete-site-typed-fk-failure` → **#11847**. Both D856 halves: registry rescue
+  (`{:error, :foreign_key_constraint, c}`, only the constraint NAME crosses) + router nested case
+  answering typed `500 registration_not_removed` stating both outcome halves; console arm above the
+  crash arm; destroy-failures test flipped to plain conn reads; census prose rewritten.
+- S3 `cch-w62-bl-friendly-throws-on-the-nested-envelope-it-is-handed` → **#11848**. The D740 unwrap +
+  the D855 three-slug fenced singular-detail rung, one commit; two pins inverted with citing comments
+  (w30-s5 nested, absorbed w66-bl barkpark_required — the relay is exactly D855's designation);
+  exclusions mutation-proven (fence-drop reds the new guard AND the w48-s2 raw-detail guard).
+- S4 `cch-w53-bl-twofa-rows-render-as-raw-slugs` → **#11849**. D857 labels land; every stale
+  `design/audit-actions.json` literal repointed (emit.mjs lookup key + hand-edited app.js marker +
+  check.mjs Part-0 comment — a one-word scope addition the repo-wide-grep criterion required); one
+  `--write` regenerated region + manifest digest. Sole surviving ref is historical prose in
+  `audit_event.ex`.
+- S5 `cch-w69-bl-worker-route-stores-url-unnormalised` → **#11850**. `update_change(:url,
+  &normalize_url/1)` at the chokepoint; HIGH-FLIP-RISK re-derived at review: register (:241), upsert
+  (:262), adopt (:304 via register_barkpark) ALL funnel through `Barkpark.changeset/2`. Honesty
+  clause (new-writes-only, raw index unstrengthened, dup-scan SQL quoted) in two durable venues.
+- S6 `cch-w70-d836-site-delete-tier-ruling-packet` — papers-only, NO branch/PR by design. Ruling
+  Paper `/papers/cch-w70-site-delete-tier-ruling-2026-08-17` published (21 blocks, band-framed,
+  function-name trace, priced raise, standing keep-member-tier recommendation); finding task carries
+  the slug as evidence and stays OPEN for the owner's ruling.
+
+**LEDGER:** one omission fixed at review — S2's console-arm criterion (index 3) was shipped but
+unstamped; stamped with reviewer evidence. All six tasks `in_progress` with merge/lead-gated criteria
+open. Wave referent closed by review.
+
+**NEXT WAVE MUST KNOW:** (1) Merge order is free among S1–S5 (regions disjoint; S3/S4 share app.js
+~16k lines apart — either order). (2) S7 `cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal`
+is round 2 — dispatch ONLY after #11846 (router_sites_test.exs) and #11847 (router.ex) both merge; its
+nested fixture must RUN red on pre-fix bytes (transport is trace-proven only). (3) Second reviews owed
+per D850 for S1 (#11846) and S5 (#11850) via `gh pr review --comment`. (4) Lead duties standing: close
+`cch-w67-bl-the-cli-site-delete-receipt-flattens-every-typed-refusal` (#11784 MERGED, D860e); annotate
+#11547 with the ruling Paper URL (D859e); confirm each cp-touching merge's deploy SUCCESS + serving_sha
+advance. (5) The worker-url backfill row stays gated on the prod dup-scan (D858) — note the quoted
+scan's `btrim()` under-reports NBSP-led dups; refine before running. (6) S3's fence tests pin
+relay-verbatim semantics with plausible synthetic detail sentences for deploy_ability_required /
+nothing_to_update — if the real server sentences prove CLI-voiced, that is a D855 census question.
 
 ### 2026-08-17 — wave 69 REVIEW — grade A, six round-1 slices, all pushed with PRs open, ZERO reviewer fixes; the deploy seam reopens and the five-strand debt is paid
 

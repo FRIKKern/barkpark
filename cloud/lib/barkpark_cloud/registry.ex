@@ -709,10 +709,34 @@ defmodule BarkparkCloud.Registry do
   is down (or a webhook already gone) never blocks the delete: the CP row is the
   truth, and the by-name reconciler can reap the leftover later.
   """
-  @spec delete_site(Site.t()) :: {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  @spec delete_site(Site.t()) ::
+          {:ok, Site.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :foreign_key_constraint, String.t()}
   def delete_site(%Site{} = site) do
     _ = deregister_content_webhook(site)
     Repo.delete(site)
+  rescue
+    # W70 S2 (D848/D856) — the INVERSE ORPHAN made typed. This is a bare
+    # `Repo.delete` on a struct with no declared constraint, so a child FK that
+    # regressed from CASCADE to RESTRICT/NO ACTION does not surface as
+    # `{:error, changeset}` — the DATABASE raises `Ecto.ConstraintError` here,
+    # AFTER the caller already tore the box down. Rather than let that crash
+    # become an untyped 500 `server_error`, catch the foreign_key case and hand
+    # the caller a typed tuple naming the constraint. `ConstraintError.message`
+    # is a ~12-line developer blob (SQL, the changeset hint, the whole struct) —
+    # it MUST NOT reach a user, so we surface only the constraint NAME and let
+    # the router compose the two-halves sentence. Any OTHER constraint type
+    # (unique/check/exclusion) is not something this row can hit and is re-raised
+    # untouched so a genuine bug still crashes loudly.
+    e in Ecto.ConstraintError ->
+      case e do
+        %Ecto.ConstraintError{type: :foreign_key, constraint: constraint} ->
+          {:error, :foreign_key_constraint, constraint}
+
+        other ->
+          reraise other, __STACKTRACE__
+      end
   end
 
   @doc """

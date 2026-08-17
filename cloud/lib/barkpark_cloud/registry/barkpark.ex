@@ -513,6 +513,20 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :server_type,
       :team_id
     ])
+    # Normalise-on-write at the single chokepoint every writer shares
+    # (register/upsert/adopt all flow through `Registry.register_barkpark/2` →
+    # here). The worker route `POST /v1/internal/barkparks` stores the body `url`
+    # VERBATIM (Auth.require_worker, no validate_format), and
+    # `barkparks_url_unique_idx` is on the RAW column — so ` https://h` and
+    # `https://h` were two distinct rows for one hostname, and every other reader
+    # (`subdomain_from_url/1`, DomainStatus.platform_host/1) had to re-derive the
+    # trim or diverge (cch-w69 D852). Folding the hostile spelling out here
+    # NARROWS what the index admits — it does not make the index canonical. The
+    # fold closes whitespace, case, and the trailing slash; it leaves trailing
+    # dot, scheme variance, port and path alone, so `barkparks_url_unique_idx`
+    # still admits six distinct rows for one claim host (enumerated in
+    # `normalize_url/1`). NEW-WRITES-ONLY — see `normalize_url/1`.
+    |> update_change(:url, &normalize_url/1)
     |> validate_required([:name, :slug, :team_id])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:template, max: 255)
@@ -844,6 +858,89 @@ defmodule BarkparkCloud.Registry.Barkpark do
     do: host |> String.downcase() |> String.trim() |> String.trim_trailing(".")
 
   defp normalize_custom_host(other), do: other
+
+  # Fold a hostile `:url` spelling to its canonical origin form (cch-w69 D852):
+  # strip leading/trailing whitespace (Elixir `String.trim/1` covers space, tab,
+  # NBSP, and CR/LF), downcase (scheme + host are case-insensitive; a managed
+  # `clean_url/1` value is already all-lowercase so it passes through
+  # byte-identical), and drop the trailing slash so `https://h/` and `https://h`
+  # collapse to one row under `barkparks_url_unique_idx`.
+  #
+  # THE SCHEME SEPARATOR IS NOT A TRAILING SLASH. This fold is a THIRD
+  # normaliser standing beside the claim-walk twins that #11785 built a census
+  # for, so it owes them the composition property
+  # `normalize_claim_host(normalize_url(x)) == normalize_claim_host(x)` — a fold
+  # that changes a claim-walk answer re-opens the `:free`-for-a-live-host hole by
+  # spelling. Stripping trailing slashes from the WHOLE string breaks it:
+  # `"https://"` would fold to `"https:"`, and the read side's scheme regex is
+  # ANCHORED on `://`, so it would stop recognising the scheme, fall through to
+  # its "cut at the first non-hostname character" step, and answer with the
+  # SCHEME LABEL as the hostname (`""` before the fold, `"https"` after). So the
+  # separator is preserved and only the part after it is trimmed.
+  # `barkpark_url_normalisation_test.exs` drives the composition property over
+  # the corpus rather than trusting this paragraph.
+  #
+  # WHAT THIS DOES NOT CLOSE. Whitespace, case and the trailing slash, and
+  # nothing else — trailing dot, scheme variance, port and path all survive the
+  # fold, so `barkparks_url_unique_idx` still admits SIX distinct rows that the
+  # read side maps onto the one claim host `gyldendal.barkpark.cloud`:
+  #
+  #     https://gyldendal.barkpark.cloud       https://gyldendal.barkpark.cloud.
+  #     http://gyldendal.barkpark.cloud        https://gyldendal.barkpark.cloud/studio
+  #     https://gyldendal.barkpark.cloud:4000  gyldendal.barkpark.cloud
+  #
+  # The claim walk is safe across all six (it normalises them together); the
+  # index is NARROWED, not made canonical, and the defense-in-depth backstop
+  # stays bypassable by those spellings.
+  #
+  # HONESTY CLAUSE (durable, carried by the merge): this is NEW-WRITES-ONLY. It
+  # does NOT backfill existing rows and does NOT strengthen the raw-column unique
+  # index into an expression index — a pre-existing ` https://h` row and a fresh
+  # `https://h` write can still coexist until the backfill lands. The backfill is
+  # owned by `cch-w70-bl-worker-url-backfill-gated-on-prod-dup-scan`, gated on
+  # this prod dup-scan first (rows that would COLLIDE on normalisation must be
+  # reconciled by hand before a unique backfill, or the UPDATE fails). The
+  # expression mirrors the fold below, separator-preservation included:
+  #
+  #     SELECT lower(regexp_replace(btrim(url), '(://)?/*$', '\1')) AS normalised,
+  #            count(*), array_agg(url)
+  #       FROM barkparks
+  #      WHERE url IS NOT NULL
+  #      GROUP BY 1
+  #     HAVING count(*) > 1;
+  #
+  # A collision the scan misses is not a 500: `unique_constraint(:url, name:
+  # :barkparks_url_unique_idx)` is already declared on this changeset, so a write
+  # whose normalised url lands on an existing row degrades to
+  # `{:error, changeset}` and the worker route renders a clean 422 — never a
+  # raised `Postgrex.Error`. That is the reason the fold is safe to ship ahead of
+  # the backfill, not any claim that a collision cannot happen.
+  defp normalize_url(url) when is_binary(url) do
+    case fold_url(url) do
+      # A slash-only url (`"/"`, `"//"`) folds to `""`, and `""` IS indexed:
+      # `barkparks_url_unique_idx` is partial on `WHERE url IS NOT NULL`, and
+      # `''` is not NULL. Letting the fold manufacture that value would hand the
+      # first junk write a GLOBAL claim on `''`, and the next team's write the
+      # 422 "is already provisioned" — a row `provisioning_fqdn_claim/2` has no
+      # empty-`norm` guard against either. Pre-fold those inputs stored as
+      # themselves and stayed distinct; they still do. (Whitespace-only input
+      # never reaches here — Ecto's `cast/3` treats it as an empty value and
+      # drops the change, so `:url` stays nil.)
+      "" when url != "" -> url
+      folded -> folded
+    end
+  end
+
+  defp normalize_url(other), do: other
+
+  defp fold_url(url) do
+    trimmed = url |> String.trim() |> String.downcase()
+
+    case String.split(trimmed, "://", parts: 2) do
+      [scheme, rest] -> scheme <> "://" <> String.trim_trailing(rest, "/")
+      [bare] -> String.trim_trailing(bare, "/")
+    end
+  end
 
   @doc """
   Changeset for the `StalenessWorker`'s offline flip and for the report path's

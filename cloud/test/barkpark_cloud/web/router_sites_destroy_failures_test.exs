@@ -95,19 +95,19 @@ defmodule BarkparkCloud.Web.RouterSitesDestroyFailuresTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
-  ## ── THE FK-REGRESSION 500 ──────────────────────────────────────────────────
+  ## ── THE FK-REGRESSION 500 (typed: registration_not_removed) ────────────────
   ##
-  ## `{:ok, _} = Registry.delete_site(site)` in the router is a strict match on
-  ## a bare `Repo.delete` that declares no constraint: loosen ONE cascade to
-  ## RESTRICT and it raises `Ecto.ConstraintError` AFTER the box teardown
-  ## already disarmed the Caddy route — the INVERSE ORPHAN. `Plug.ErrorHandler`
-  ## responds and then RE-RAISES, so `Router.call/2` never returns and
-  ## `conn.status` cannot be read; the envelope is captured with the
-  ## crash-envelope idiom from `crash_envelope_census_test.exs`
-  ## (`register_before_send` installed BEFORE the call forwards the sent
-  ## response to the test pid).
+  ## Loosen ONE cascade to RESTRICT and deleting the site row is refused by the
+  ## database AFTER the box teardown already disarmed the Caddy route — the
+  ## INVERSE ORPHAN. W70 S2 (D848/D856) made this HONEST: `Registry.delete_site/1`
+  ## now RESCUES the `Ecto.ConstraintError{type: :foreign_key}` and returns
+  ## `{:error, :foreign_key_constraint, constraint}`, and the router's `:ok` arm
+  ## answers a TYPED `500 registration_not_removed` naming the constraint and
+  ## both halves. So `delete_site/1` returns and `Router.call/2` returns — the
+  ## test is now a PLAIN conn read, not the raise-expecting crash-envelope idiom
+  ## it flipped from. `conn.status` is readable again.
 
-  test "a cascade FK loosened to RESTRICT is a 500 server_error AFTER the box teardown — the inverse orphan, measured" do
+  test "a cascade FK loosened to RESTRICT is a typed 500 registration_not_removed AFTER the box teardown — the inverse orphan, both halves stated" do
     {user, team} = user_with_team()
     bp = live_barkpark(team)
     site = static_site(bp)
@@ -137,42 +137,20 @@ defmodule BarkparkCloud.Web.RouterSitesDestroyFailuresTest do
 
     FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
 
-    parent = self()
+    conn = call(:delete, "/v1/sites/#{site.id}", token)
 
-    conn =
-      conn(:delete, "/v1/sites/#{site.id}")
-      |> put_req_header("authorization", "Bearer #{token}")
-      |> register_before_send(fn c ->
-        send(parent, {:crash_response, c.status, c.resp_headers, c.resp_body})
-        c
-      end)
+    # The typed answer: a 500 that NAMES the outcome instead of a bare
+    # server_error crash envelope.
+    assert conn.status == 500
+    body = json_body(conn)
+    assert body["ok"] == false
+    assert body["error"] == "registration_not_removed"
 
-    try do
-      Router.call(conn, @opts)
-
-      flunk(
-        "expected the FK regression to raise through Plug.ErrorHandler, but the call returned"
-      )
-    rescue
-      e ->
-        # Verified by running the mutation before pinning (W68 brief): the
-        # re-raise surfaces as Ecto.ConstraintError itself.
-        assert constraint_error?(e),
-               "expected Ecto.ConstraintError (possibly wrapped), got: #{inspect(e)}"
-
-        receive do
-          {:crash_response, status, headers, body} ->
-            assert status == 500
-
-            ct = for({"content-type", v} <- headers, do: v) |> List.first()
-            assert ct && String.contains?(ct, "application/json")
-
-            assert Jason.decode!(body)["error"] == "server_error"
-        after
-          0 ->
-            flunk(":no_response — the crash envelope was never sent (the origin zero-byte class)")
-        end
-    end
+    # The detail states BOTH halves and names the blocking constraint — never
+    # the raw multi-line ConstraintError.message.
+    assert body["detail"] =~ "torn down"
+    assert body["detail"] =~ "still registered"
+    assert body["detail"] =~ "site_artifacts_site_id_fkey"
 
     # The inverse orphan, both halves measured: the box WAS told to tear down…
     assert Enum.any?(FakeBoxRelay.calls(), fn
@@ -180,15 +158,9 @@ defmodule BarkparkCloud.Web.RouterSitesDestroyFailuresTest do
              _ -> false
            end)
 
-    # …and the registration SURVIVES the crash.
+    # …and the registration SURVIVES — that is the whole point of the refusal.
     refute Registry.get_site(site.id) == nil
   end
-
-  # `Plug.ErrorHandler` re-raises the original; depending on the adapter stack a
-  # raise from within the pipeline may arrive wrapped in `Plug.Conn.WrapperError`.
-  defp constraint_error?(%Ecto.ConstraintError{}), do: true
-  defp constraint_error?(%Plug.Conn.WrapperError{reason: %Ecto.ConstraintError{}}), do: true
-  defp constraint_error?(_), do: false
 
   ## ── THE TEARDOWN TIMEOUT (422, ~30.7s) ─────────────────────────────────────
   ##

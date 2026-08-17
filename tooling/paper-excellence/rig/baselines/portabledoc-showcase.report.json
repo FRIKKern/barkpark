@@ -19,7 +19,7 @@
       "cell": "portabledoc-showcase__light__1280",
       "file": "portabledoc-showcase__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2263105,
+      "bytes": 2257496,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -294,12 +294,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 207,
+        "total": 195,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 197,
+          "1": 185,
           "2": 10
         },
         "heavyRules": [
@@ -375,7 +375,7 @@
           },
           {
             "px": 2,
-            "y": 9418.3,
+            "y": 9414.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -385,7 +385,7 @@
           },
           {
             "px": 2,
-            "y": 11110.4,
+            "y": 11106.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -395,7 +395,7 @@
           },
           {
             "px": 2,
-            "y": 12950.6,
+            "y": 12944.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -411,7 +411,7 @@
       "cell": "portabledoc-showcase__light__1920",
       "file": "portabledoc-showcase__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2507011,
+      "bytes": 2495355,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -686,12 +686,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 207,
+        "total": 195,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 197,
+          "1": 185,
           "2": 10
         },
         "heavyRules": [
@@ -767,7 +767,7 @@
           },
           {
             "px": 2,
-            "y": 9477.7,
+            "y": 9473.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -777,7 +777,7 @@
           },
           {
             "px": 2,
-            "y": 11169.8,
+            "y": 11165.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -787,7 +787,7 @@
           },
           {
             "px": 2,
-            "y": 13069.3,
+            "y": 13063.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -803,7 +803,7 @@
       "cell": "portabledoc-showcase__dark__1280",
       "file": "portabledoc-showcase__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2257381,
+      "bytes": 2251794,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1078,12 +1078,12 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 207,
+        "total": 195,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 197,
+          "1": 185,
           "2": 10
         },
         "heavyRules": [
@@ -1159,7 +1159,7 @@
           },
           {
             "px": 2,
-            "y": 9418.3,
+            "y": 9414.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1169,7 +1169,7 @@
           },
           {
             "px": 2,
-            "y": 11110.4,
+            "y": 11106.4,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1179,7 +1179,7 @@
           },
           {
             "px": 2,
-            "y": 12950.6,
+            "y": 12944.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1195,7 +1195,7 @@
       "cell": "portabledoc-showcase__dark__1920",
       "file": "portabledoc-showcase__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2500213,
+      "bytes": 2490591,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 32,
@@ -1470,12 +1470,12 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 207,
+        "total": 195,
         "heavy": 10,
         "structuralHeavy": 10,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 197,
+          "1": 185,
           "2": 10
         },
         "heavyRules": [
@@ -1551,7 +1551,7 @@
           },
           {
             "px": 2,
-            "y": 9477.7,
+            "y": 9473.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1561,7 +1561,7 @@
           },
           {
             "px": 2,
-            "y": 11169.8,
+            "y": 11165.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1571,7 +1571,7 @@
           },
           {
             "px": 2,
-            "y": 13069.3,
+            "y": 13063.3,
             "width": 580,
             "parts": 1,
             "structural": true,

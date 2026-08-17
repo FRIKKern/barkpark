@@ -5,17 +5,21 @@ defmodule BarkparkCloud.SiteCascadeCensusTest do
   ## What this guards
 
   `DELETE /v1/sites/:id` tears the site down on its box FIRST and only then
-  deregisters the row, with `{:ok, _} = Registry.delete_site(site)` — a strict
-  match on a bare `Repo.delete` that declares no constraint. Every child row
-  therefore has to be swept by the DATABASE. If any FK referencing `sites` were
-  ever loosened to `ON DELETE RESTRICT` (or `NO ACTION`), that `Repo.delete`
-  raises `Ecto.ConstraintError`, the router answers
+  deregisters the row, with `Registry.delete_site(site)` — a bare `Repo.delete`
+  that declares no constraint. Every child row therefore has to be swept by the
+  DATABASE. If any FK referencing `sites` were ever loosened to `ON DELETE
+  RESTRICT` (or `NO ACTION`), that `Repo.delete` is refused by the database. As
+  of W70 S2 (D848/D856) `delete_site/1` rescues the foreign_key
+  `Ecto.ConstraintError` into `{:error, :foreign_key_constraint, c}` and the
+  router answers a TYPED
 
-      500 {"error":"server_error","request_id":"…"}
+      500 {"ok":false,"error":"registration_not_removed","detail":"…the constraint…both halves…"}
 
   and — because the box half already ran — the site's Caddy route is disarmed
   while the registration SURVIVES. The INVERSE ORPHAN: a dead site that is still
-  registered, reported by an envelope carrying no `ok` and no `detail`.
+  registered, now reported HONESTLY (constraint named, both halves stated) rather
+  than by a bare `server_error` crash envelope. Either way it is a state no
+  cascade should ever reach — which is what this census guards.
 
   ## Why it did not exist before, and what it caught
 
@@ -158,10 +162,13 @@ defmodule BarkparkCloud.SiteCascadeCensusTest do
       end
 
     assert offenders == [],
-           "site-delete cascade regression — `{:ok, _} = Registry.delete_site(site)` in " <>
-             "router.ex is a strict match on a bare Repo.delete, so a non-cascade FK raises " <>
-             "Ecto.ConstraintError AFTER the box teardown already ran: 500 server_error, box " <>
-             "torn down, site row surviving.\n" <> Enum.join(offenders, "\n")
+           "site-delete cascade regression — `Registry.delete_site/1` in registry.ex is a bare " <>
+             "Repo.delete, so a non-cascade FK is refused AFTER the box teardown already ran: the " <>
+             "box is torn down and the site row survives. W70 S2 made that answer HONEST — the " <>
+             "foreign_key ConstraintError is rescued into `{:error, :foreign_key_constraint, c}` " <>
+             "and the router answers a typed 500 registration_not_removed naming the constraint and " <>
+             "both halves — but the state it describes (a dead site still registered) is one no " <>
+             "cascade should ever reach.\n" <> Enum.join(offenders, "\n")
   end
 
   test "every table carrying a `site_id` column is in the census (catches an FK-less child)" do

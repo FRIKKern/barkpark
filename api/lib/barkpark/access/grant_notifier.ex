@@ -19,12 +19,21 @@ defmodule Barkpark.Access.GrantNotifier do
 
   @doc """
   Send the grant-access link to `email`. `url` is the fully-formed
-  `<base>/grant/<token>` claim link. Fail-soft: a down relay is logged (type
-  only, never the recipient PII) and returned as `{:error, reason}` — the caller
-  keeps the grant (already minted) and surfaces the link in the sheet regardless.
+  `<base>/grant/<token>` claim link.
+
+  NAMED FAILURE MODE: synchronous external I/O in a request path. In prod
+  `Mailer.deliver` opens an SMTP conversation via gen_smtp; a slow or unreachable
+  relay would stall the minting LiveView (the caller `render_hook`s this) up to
+  gen_smtp's own timeout. Delivery is offloaded to the shared
+  `Barkpark.TaskSupervisor` so the mint path returns immediately.
+
+  Fail-soft: the caller keeps the grant (already minted) and surfaces the link in
+  the sheet regardless — a down relay is logged (type only, never the recipient
+  PII) INSIDE the task. This returns `{:ok, mail}` as soon as the message is
+  built and handed to the supervisor; the delivery outcome is not observable
+  synchronously (and the caller never reads it).
   """
-  @spec deliver_grant(String.t(), String.t()) ::
-          {:ok, Swoosh.Email.t()} | {:error, term()}
+  @spec deliver_grant(String.t(), String.t()) :: {:ok, Swoosh.Email.t()}
   def deliver_grant(email, url) when is_binary(email) and is_binary(url) do
     body = """
     You've been granted access on Barkpark.
@@ -45,13 +54,20 @@ defmodule Barkpark.Access.GrantNotifier do
       |> subject("You've been granted access on Barkpark")
       |> text_body(body)
 
-    case Mailer.deliver(mail) do
-      {:ok, _meta} ->
-        {:ok, mail}
+    # Offload the SMTP round-trip off the request/LiveView process; the diagnostic
+    # log (reason only, never the recipient PII) rides INSIDE the task. `start_child`
+    # is deliberate — the caller is a long-lived LiveView and never retrieves the
+    # result, so fire-and-forget keeps a reply/DOWN out of its mailbox.
+    Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+      case Mailer.deliver(mail) do
+        {:ok, _meta} ->
+          :ok
 
-      {:error, reason} ->
-        Logger.error("airdrop grant email delivery failed: reason=#{inspect(reason)}")
-        {:error, reason}
-    end
+        {:error, reason} ->
+          Logger.error("airdrop grant email delivery failed: reason=#{inspect(reason)}")
+      end
+    end)
+
+    {:ok, mail}
   end
 end

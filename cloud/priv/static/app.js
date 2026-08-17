@@ -346,6 +346,15 @@
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
+    // cch-w62 (D740) — UNWRAP THE NESTED ENVELOPE before keying anything. Five
+    // route families (self-update 13, rollback 10, the webhook proxy 6, PATCH
+    // /autoupdate 1, PATCH /admin channel 1 — 31 emitters in router.ex) send
+    // `{error: {code}}`, not the flat shape. Without this line `key` is a
+    // truthy OBJECT and the humanized-slug return below calls `key.replace`
+    // — a TypeError, in copy code whose whole job is to never crash. A nested
+    // envelope with no `code` resolves to undefined and takes the fallback,
+    // exactly like a missing slug.
+    if (key && typeof key === "object") key = key.code;
     if (key === "forbidden") {
       var proved = forbiddenEvidenceCopy(data);
       if (proved) return proved;
@@ -384,6 +393,27 @@
         if (Array.isArray(msg)) msg = msg[0];
         return first.replace(/_/g, " ") + " " + msg;
       }
+    }
+    // cch-w62 (D855) — THE SINGULAR-DETAIL RUNG, fenced to an enumerated slug
+    // allowlist. The server sometimes writes its most specific true sentence
+    // into `detail` (a STRING — the ladder above reads only `details`, the
+    // per-field MAP), and for exactly three measured slugs that sentence is
+    // surface-neutral product copy worth relaying verbatim: barkpark_required
+    // (create 422 — deliberately no siteCreateFailureCopy arm; it reaches
+    // friendly()), deploy_ability_required (settings 403), nothing_to_update
+    // (settings 422). The fence is keyed on the SLUG SET by name, never on an
+    // HTTP status — friendly() takes no status argument — and that is load-
+    // bearing: faultCopy passes ERRORS.server_error AS the fallback on a 5xx,
+    // so an unfenced rung would let a 5xx-borne detail (node_ports_exhausted,
+    // or read_token_mint_failed's raw upstream slug — the cch-w48-s2 class)
+    // outrank the 5xx honesty law by construction. CLI-voiced details
+    // (content_binding_required/empty, no_build_source — they embed bp flags
+    // and re-run lines) stay with their per-route arms and are NOT relayed
+    // here.
+    if ((key === "barkpark_required" || key === "deploy_ability_required" ||
+         key === "nothing_to_update") &&
+        typeof data.detail === "string" && data.detail) {
+      return data.detail;
     }
     return fallback || (key ? key.replace(/_/g, " ") : "") || "Something went wrong.";
   }
@@ -13558,6 +13588,23 @@
         recovery: "close",
       };
     }
+    // (3b) 500 registration_not_removed — the INVERSE ORPHAN, made typed (W70
+    // S2). Unlike the crash envelope below, this 500 MEASURED both halves: the
+    // instance IS torn down, and the registration was NOT removed because a
+    // foreign-key constraint refused the row delete. The plane wrote the whole
+    // sentence — including the constraint name — into `detail`, so relay it
+    // verbatim rather than re-guessing an outcome this console did not observe.
+    // A retry cannot fix a surviving row a constraint is holding, so the
+    // recovery is "close", not "recheck": this needs support, not another click.
+    if (code === "registration_not_removed") {
+      return {
+        title: "The site is torn down but still registered",
+        body: (detail ||
+          "The instance was torn down, but the control plane could not remove the registration.") +
+          " Contact support to have the leftover registration removed.",
+        recovery: "close",
+      };
+    }
     // (4) THE CRASH ENVELOPE — no `ok`, no `detail`, just a slug and a
     // request_id. The route is BOX FIRST, so a crash can land on either side of
     // the teardown and the envelope does not say which: `crash_slug/2` stamps
@@ -16780,17 +16827,17 @@
   // unknown action (a newly-added verb the SPA hasn't learned) falls back to the
   // raw action so it still renders rather than disappearing.
   //
-  // GENERATED from design/audit-actions.json — the SOLE authority for the audit
+  // GENERATED from cloud/priv/audit-actions.json — the SOLE authority for the audit
   // register's verbs. That one table also feeds the server's closed @actions
   // allowlist (AuditEvent reads it at compile time), so this object and the
   // vocabulary it labels can no longer drift apart: they are two OUTPUTS of one
   // file, and neither side greps the other's syntax. A hand edit inside the
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
-    /* BEGIN GENERATED: audit action labels (design/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 36 of the 56 declared verbs have no entry here: they render
+    /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+    // 34 of the 56 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
-    // declared unlabelled ON PURPOSE with a reason in design/audit-actions.json
+    // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
     "member.invited": "invited a member",
     "member.role_changed": "changed a member's role",
@@ -16815,7 +16862,9 @@
     // instance write because the box answered our stored admin credential 401.
     // The actor tried; the request never left. The expanded detail carries the
     // wire word (reason: "identity_refused") and which write it was.
-    "barkpark.credentials_refused": "was refused — the instance rejected our access credential"
+    "barkpark.credentials_refused": "was refused — the instance rejected our access credential",
+    "twofa.enabled": "enabled two-factor authentication",
+    "twofa.disabled": "disabled two-factor authentication"
     /* END GENERATED: audit action labels */
   };
 
@@ -24180,7 +24229,7 @@
       // email and the system's own verb share ONE text run.
       activityRow: activityRow,
       // cch-w65: the audit verb → sentence-fragment lookup, so the harness can
-      // pin the SHIPPED artifact against design/audit-actions.json — every
+      // pin the SHIPPED artifact against cloud/priv/audit-actions.json — every
       // labelled verb serves its label, every unlabelled one falls back to its
       // raw dotted slug (D582). Without this the generated region is proven only
       // against itself by the design gate.
