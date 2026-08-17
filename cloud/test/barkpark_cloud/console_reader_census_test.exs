@@ -276,7 +276,8 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     # instance_not_live rows when the curated entry + fence admission merge.
     %{
       code: "artifact_conflict",
-      site: "router.ex settle_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      site:
+        "router.ex settle_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
       reason:
         "CLI-only: the prebuilt artifact chain is driven by bp deploy over a PAT; " <>
           "app.js has zero callers of the artifact route. A re-upload with a different " <>
@@ -284,14 +285,16 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     },
     %{
       code: "artifact_digest_mismatch",
-      site: "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      site:
+        "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
       reason:
         "CLI-only: bp's prebuilt upload declares a sha the received bytes must hash to; " <>
           "no console surface uploads artifacts. Flip: a console artifact upload ships."
     },
     %{
       code: "artifact_too_large",
-      site: "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      site:
+        "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
       reason:
         "CLI-only: size ceiling on the bp prebuilt upload path; zero app.js callers " <>
           "of the artifact route. Flip: a console artifact upload ships."
@@ -300,9 +303,11 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "build_in_progress",
       site: "router.ex promote_deployment (POST /v1/sites/:id/deployments/:dep_id/promote)",
       reason:
-        "CLI/PAT-only: the promote route is require_user_or_pat + write ability and " <>
-          "app.js never calls a promote path — preview promotion is a bp verb today. " <>
-          "Flip: the console previews panel gains a promote button."
+        "Console-reachable STATUS-READ: runPromote drives this route (the rollback/" <>
+          "redeploy buttons) and promoteFailure classifies the 409 by STATUS alone " <>
+          "with an honest in-flight sentence — a reader Side B cannot see, since no " <>
+          "slug literal exists. Flip: a second 409 code joins the promote route " <>
+          "(status-alone would then conflate two causes)."
     },
     %{
       code: "deploy_not_started",
@@ -322,14 +327,16 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     },
     %{
       code: "deployment_not_queued",
-      site: "router.ex upload_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      site:
+        "router.ex upload_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
       reason:
         "CLI-only: an artifact upload against a deployment no longer in queued state; " <>
           "the whole artifact chain has zero console callers. Flip: console upload ships."
     },
     %{
       code: "empty_artifact",
-      site: "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      site:
+        "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
       reason:
         "CLI-only: a zero-byte body on the bp prebuilt upload; zero console " <>
           "callers of the artifact route. Flip: a console artifact upload ships."
@@ -360,7 +367,8 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     },
     %{
       code: "not_prebuilt",
-      site: "router.ex upload_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      site:
+        "router.ex upload_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
       reason:
         "CLI-only: artifact upload against a deployment whose source is not prebuilt; " <>
           "zero console callers of the artifact chain. Flip: console upload ships."
@@ -383,7 +391,8 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     },
     %{
       code: "upload_failed",
-      site: "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      site:
+        "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
       reason:
         "CLI-only: storage-side write failure on the bp prebuilt upload; zero console " <>
           "callers of the artifact route. Flip: a console artifact upload ships."
@@ -1296,9 +1305,10 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "teardown_failed",
       site: "router.ex DELETE /v1/sites/:id",
       reason:
-        "Console-reachable 5xx-class fault tearing the site down; the 5xx honesty " <>
-          "law renders the server-fault sentence — honest. Flip: a wave rules " <>
-          "teardown-specific copy owed."
+        "Console-reachable STATUS-READ: siteDeleteFailureCopy (the wave-67 destroy " <>
+          "tier) classifies DELETE refusals by status and RELAYS the plane's detail " <>
+          "verbatim — a status-keyed reader Side B cannot see. Honest today. Flip: " <>
+          "a wave rules slug-keyed teardown copy owed."
     },
     %{
       code: "unknown_kind",
