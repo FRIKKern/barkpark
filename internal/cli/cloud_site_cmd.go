@@ -1393,12 +1393,16 @@ func siteRefusalFail(out *writer, kind siteRefusalKind, ref string, err error) i
 
 // siteRefusalDetails builds the machine-only `error.details` payload for a refused
 // site verb. Today its sole member is the readable-types menu a
-// `content_binding_empty` create refusal carries: the server's raw array is nested
-// under `readable_types` so a script reading `bp cloud site create -o json` gets
-// `error.details.readable_types` — the SAME list the console renders — with the
-// server's row and key ORDER intact (raw bytes, never re-marshalled). Returns nil
-// when the refusal carried no menu, so every other refusal emits a detail-less
-// envelope byte-identical to the pre-menu shape.
+// `content_binding_empty` create refusal carries: the cleaned array (junk rows
+// with an empty `type` already dropped by cloudError) is nested under
+// `readable_types` so a script reading `bp cloud site create -o json` gets
+// `error.details.readable_types` — the SAME list the console renders. The bytes
+// are re-serialized from the decoded rows, NOT the server's raw bytes: row order
+// and `type`-before-`count` key order are fixed by the ReadableType struct tags
+// (never a Go map that would alphabetize), so the fingerprint is stable while
+// junk rows stay out of the machine channel. Returns nil when the refusal
+// carried no menu, so every other refusal emits a detail-less envelope
+// byte-identical to the pre-menu shape.
 func siteRefusalDetails(re *cloudclient.CloudRefusal) json.RawMessage {
 	if len(re.ReadableTypesRaw) == 0 {
 		return nil

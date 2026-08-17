@@ -1616,7 +1616,9 @@ func TestRunCloudSiteCreateEmptyBindingRendersReadableTypesMenu(t *testing.T) {
 }
 
 // The MACHINE envelope carries the menu at error.details.readable_types with the
-// server's row + key ORDER preserved (raw bytes, never re-marshalled). ANTI-VACUITY:
+// server's row ORDER and `type`-before-`count` key order preserved (re-serialized
+// from the decoded rows via struct tags — junk rows dropped, never a Go map that
+// would alphabetize). ANTI-VACUITY:
 // error.details did not exist for this refusal pre-fix, so a decode of
 // error.details.readable_types reds outright on pre-fix bytes.
 func TestRunCloudSiteCreateEmptyBindingJSONCarriesReadableTypes(t *testing.T) {
@@ -1653,7 +1655,7 @@ func TestRunCloudSiteCreateEmptyBindingJSONCarriesReadableTypes(t *testing.T) {
 	if got[0].Count == nil || *got[0].Count != 12 || got[2].Count != nil {
 		t.Fatalf("counts must survive (task=12) and the count-less row stay bare (note):\n%s", stdout)
 	}
-	// KEY order preserved too — raw bytes, not a Go map that would alphabetize.
+	// KEY order preserved too — struct-tag order, not a Go map that would alphabetize.
 	if !strings.Contains(stdout, `"readable_types":[{"type":"task","count":12}`) {
 		t.Fatalf("the raw array bytes must carry the server's key order:\n%s", stdout)
 	}
