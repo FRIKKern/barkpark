@@ -145,6 +145,49 @@ const SECTION_RULE_MIN_PX = 1;
 const STRUCTURAL_RULE_SELECTOR =
   ".bp-paper-surface > #paper-body > h2, .bp-paper-surface > #paper-body > div:not([class]) > h2";
 
+// ── The INGRESS RATIO contract (pe-w2-bl-device5-ratio-arm, charter D6) ──────
+// The opening ingress reads BIGGER than the body prose, and that size
+// relationship is asserted as a RATIO of characters-per-line: the SAME
+// canonical probe text measured under the ingress's computed style and under a
+// plain body paragraph's. The regression this arm catches is the inverse of
+// pe-w1-reader-editorial-typography (#11626), which converted every role from
+// `rem` to `em` precisely because a rem-sized ingress freezes to the root and
+// collapses the ratio the moment the body token moves.
+//
+// CANONICAL TEXT on BOTH sides, never each element's own words: own-text ratios
+// are per-character sampling noise — 0.759–0.821 healthy across the seven
+// committed fixtures, leaving 0.003 of margin at any threshold — while the
+// canonical form reads 0.783 on every fixture at every width with ~0.05 of
+// margin per side (ledger
+// ingress-ratio-arm-mutation-and-instrument-divergence-2026-08-17.md).
+// Mutation-proven: re-imposing the pre-#11626 `font-size: 1.28rem` on
+// `.bp-role-ingress` moves every cell to ~0.880, far past the tolerance.
+const INGRESS_RATIO = 0.783;
+const INGRESS_RATIO_TOL = 0.01;
+const INGRESS_PROBE_TEXT =
+  "The rig measures what the reader sees: rules, air over a rule, and a column held to its measure — 0123456789.";
+
+// ── MARGINAL-COLOR-AS-VERDICT (charter D5/D21) — the tone census ─────────────
+// The eight-device crown's "marginal color as verdict" device ALREADY SHIPS on
+// the existing tone tokens: a callout's or card's verdict is carried by the
+// colour in its left margin (border-left) and its tone pair, resolved through
+// `--bp-tone-*-bg/-fg` (callouts) and `--st-*` (cards), per theme — ZERO new
+// tokens. This rig NAMES that device by measuring it: the computed color,
+// background and left-margin accent of every tone-classed variant present, per
+// (scheme × width) cell, recorded in report.json — so a token remap or a dead
+// tone class is a text diff against the committed baselines instead of an
+// eyeballed screenshot.
+const TONE_SELECTORS = [
+  ".bp-callout--info",
+  ".bp-callout--success",
+  ".bp-callout--warning",
+  ".bp-callout--danger",
+  ".bp-card--info",
+  ".bp-card--ok",
+  ".bp-card--warn",
+  ".bp-card--danger",
+];
+
 // Offline policy. The reader pulls mermaid + asciinema from cdn.jsdelivr.net,
 // and papers may embed remote media. We abort EVERY request that is not our
 // own loopback server, so the rig can never depend on the network — and can
@@ -355,11 +398,9 @@ async function main() {
   try {
     for (const scheme of SCHEMES) {
       for (const width of VIEWPORTS) {
-        // Scale can be demoted below (JPEG height cap) — see the retry.
-        let scale = DEVICE_SCALE_FACTOR;
         const context = await browser.newContext({
           viewport: { width, height: 1200 },
-          deviceScaleFactor: scale,
+          deviceScaleFactor: DEVICE_SCALE_FACTOR,
           colorScheme: scheme,
         });
         let blocked = 0;
@@ -377,7 +418,7 @@ async function main() {
         await page.evaluate(() => document.fonts.ready);
 
         // CONTENT assertions — never the HTTP status.
-        const seen = await page.evaluate((sel) => {
+        const seen = await page.evaluate(({ sel, probeText, toneSelectors }) => {
           const main = document.querySelector("main.bp-paper-article");
           const round = (n) => Math.round(n * 10) / 10;
           if (!main) return { wrapper: false, classes: null, paragraphs: 0, columnWidth: 0, maxWidth: null };
@@ -605,6 +646,92 @@ async function main() {
             });
           }
 
+          // ── the INGRESS RATIO, canonical text (see INGRESS_RATIO above) ────
+          // The same probe string, measured per character under BOTH computed
+          // styles; each side's CPL is its content width over that advance.
+          const perCharUnder = (style, text) => {
+            const probe = document.createElement("span");
+            probe.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;white-space:pre";
+            probe.style.fontFamily = style.fontFamily;
+            probe.style.fontSize = style.fontSize;
+            probe.style.fontWeight = style.fontWeight;
+            probe.style.fontStyle = style.fontStyle;
+            probe.style.letterSpacing = style.letterSpacing;
+            probe.style.fontFeatureSettings = style.fontFeatureSettings;
+            probe.textContent = text;
+            document.body.appendChild(probe);
+            const w = probe.getBoundingClientRect().width;
+            probe.remove();
+            return w / text.length;
+          };
+          const contentWidthOf = (el) => {
+            const c = getComputedStyle(el);
+            return el.getBoundingClientRect().width - (parseFloat(c.paddingLeft) || 0) - (parseFloat(c.paddingRight) || 0);
+          };
+          const ingressEl = main.querySelector(".bp-role-ingress");
+          // The body side of the ratio: a PLAIN prose paragraph — no role
+          // class, not inside a callout/card/figure/stat/quote — long enough
+          // to be prose rather than a caption.
+          const ingressBodyP = [...main.querySelectorAll("p")].find(
+            (p) =>
+              p !== ingressEl &&
+              !/bp-role-/.test(p.className) &&
+              !p.closest(".bp-callout, .bp-card, .bp-stats, figure, blockquote, .bp-role-ingress") &&
+              p.textContent.trim().length >= 120,
+          );
+          let ingressRatio = null;
+          let ingressNote = null;
+          if (!ingressEl) {
+            ingressNote = "no .bp-role-ingress in this fixture";
+          } else if (!ingressBodyP) {
+            ingressNote = "no plain body paragraph (>=120 chars) to compare against";
+          } else {
+            const ingCpl = contentWidthOf(ingressEl) / perCharUnder(getComputedStyle(ingressEl), probeText);
+            const bodyCpl = contentWidthOf(ingressBodyP) / perCharUnder(getComputedStyle(ingressBodyP), probeText);
+            if (ingCpl > 0 && bodyCpl > 0) ingressRatio = Math.round((ingCpl / bodyCpl) * 1000) / 1000;
+            else ingressNote = "probe measured a non-positive advance";
+          }
+
+          // ── the tone census (marginal-color-as-verdict, D5/D21) ────────────
+          // Computed per cell, so each theme's resolved token values are
+          // recorded — the verdict colour IS the left-margin accent.
+          const toneSamples = {};
+          for (const tsel of toneSelectors) {
+            const el = main.querySelector(tsel);
+            if (!el) {
+              toneSamples[tsel] = { absent: "not in this fixture" };
+              continue;
+            }
+            const tcs = getComputedStyle(el);
+            toneSamples[tsel] = { color: tcs.color, background: tcs.backgroundColor, accent: tcs.borderLeftColor };
+          }
+
+          // ── the prose h2, rendered px (device-3 will move this) ────────────
+          const h2El = main.querySelector("h2");
+          const h2Px = h2El
+            ? (() => {
+                const h = getComputedStyle(h2El);
+                return { fontSize: h.fontSize, fontWeight: h.fontWeight };
+              })()
+            : { absent: "no h2 in this fixture" };
+
+          // ── the stat-strip grid, in TRACKS (device 3's density signal) ─────
+          // The computed grid-template-columns is the RESOLVED track list, so
+          // its length is the column count the reader actually gets at this
+          // width. Zero means .bp-stats stopped resolving as a grid — asserted
+          // below, not here.
+          const statStrips = [...main.querySelectorAll(".bp-stats")];
+          let statTracks = null;
+          let statTracksNote = null;
+          if (!statStrips.length) {
+            statTracksNote = "no .bp-stats in this fixture";
+          } else {
+            statTracks = statStrips.map((el) => {
+              const v = getComputedStyle(el).gridTemplateColumns;
+              return v && v !== "none" ? v.split(" ").filter(Boolean).length : 0;
+            });
+          }
+
           return {
             wrapper: true,
             classes: main.className,
@@ -624,10 +751,17 @@ async function main() {
             captionWidth: captionWidth === null ? null : round(captionWidth),
             evidenceBand: bandRows.length ? Math.max(...bandRows.map((b) => b.width)) : null,
             bandRows,
+            ingressPresent: !!ingressEl,
+            ingressRatio,
+            ingressNote,
+            toneSamples,
+            h2Px,
+            statTracks,
+            statTracksNote,
             docOverflow: round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
             clientWidth: document.documentElement.clientWidth,
           };
-        }, BREAKOUT_SELECTOR);
+        }, { sel: BREAKOUT_SELECTOR, probeText: INGRESS_PROBE_TEXT, toneSelectors: TONE_SELECTORS });
         const cell = `${label}__${scheme}__${width}`;
         if (!seen.wrapper) fail(`${cell}: no <main class="…bp-paper-article"> in the DOM`);
         if (!seen.classes.includes("bp-paper-surface")) fail(`${cell}: wrapper lost bp-paper-surface (${seen.classes})`);
@@ -800,43 +934,49 @@ async function main() {
         }
         assertions += 2;
 
+        // ── the ingress-ratio arm, per cell (device 6) ─────────────────────
+        // Anti-vacuity FIRST: a fixture that CARRIES an ingress must yield a
+        // sample. An arm that silently skips the element it was built for is
+        // the vacuous green this rig exists to refuse.
+        if (seen.ingressPresent && seen.ingressRatio === null) {
+          fail(
+            `${cell}: the fixture carries .bp-role-ingress but the canonical ratio probe yielded no ` +
+              `sample (${seen.ingressNote}) — the ingress arm went vacuous`,
+          );
+        }
+        if (seen.ingressRatio !== null && Math.abs(seen.ingressRatio - INGRESS_RATIO) > INGRESS_RATIO_TOL) {
+          fail(
+            `${cell}: canonical ingress/body CPL ratio measures ${seen.ingressRatio}, outside ` +
+              `${INGRESS_RATIO}±${INGRESS_RATIO_TOL} — the ingress lost its size relationship to the prose ` +
+              `(a rem-sized role reads ~0.880 here; the em contract is #11626)`,
+          );
+        }
+        // A stat strip that is PRESENT must measure as a grid. Zero tracks on
+        // every strip means the density measurement is dead, not that the
+        // fixture is stats-less — the null-with-reason path covers absence.
+        if (seen.statTracks !== null && !seen.statTracks.some((n) => n > 0)) {
+          fail(
+            `${cell}: .bp-stats is present but no grid tracks were measured ` +
+              `(${JSON.stringify(seen.statTracks)}) — the stat-strip measurement is dead`,
+          );
+        }
+        assertions += (seen.ingressPresent ? 2 : 0) + (seen.statTracks === null ? 0 : 1);
+
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a
-        // full-page capture exceeds JPEG's 65,535px dimension cap — which a
-        // ~100-block paper at 2x does. Caught on 2026-08-12 with
-        // hobby-hardening-capstone. So: never trust the call, stat the file.
-        let file = path.join(outDir, `${cell}.${FORMAT}`);
-        const shoot = async () =>
-          page.screenshot({
-            path: file,
-            fullPage: true,
-            ...(FORMAT === "jpeg" ? { type: "jpeg", quality: JPEG_QUALITY } : {}),
-          });
-        await shoot();
-
-        if (fs.statSync(file).size < MIN_SHOT_BYTES && FORMAT === "jpeg") {
-          // Over the JPEG height cap. Re-capture the SAME full page at 1x —
-          // half the pixel height — and say so in the filename, so a shorter
-          // baseline can never be mistaken for a 2x one.
-          fs.rmSync(file);
-          scale = 1;
-          file = path.join(outDir, `${cell}@1x.jpeg`);
-          const ctx1x = await browser.newContext({
-            viewport: { width, height: 1200 },
-            deviceScaleFactor: scale,
-            colorScheme: scheme,
-          });
-          await ctx1x.route("**/*", (route) =>
-            new URL(route.request().url()).hostname === ALLOWED_HOST ? route.continue() : route.abort(),
-          );
-          const p1x = await ctx1x.newPage();
-          await p1x.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: "load" });
-          await p1x.evaluate((s) => document.documentElement.setAttribute("data-theme", s), scheme);
-          await p1x.evaluate(() => document.fonts.ready);
-          await p1x.screenshot({ path: file, fullPage: true, type: "jpeg", quality: JPEG_QUALITY });
-          await ctx1x.close();
-          console.log(`rig/shoot: ${cell} — over JPEG's 65535px cap at 2x, re-captured full page at 1x`);
-        }
+        // full-page capture exceeds JPEG's 65,535px dimension cap. So: never
+        // trust the call, stat the file. An @1x demotion retry used to live
+        // here for that case; it NEVER fired — zero `*@1x.*` files in
+        // baselines/, and hobby-hardening-capstone, the paper it was written
+        // for, captures at 2x in both formats — so the untested branch was
+        // removed (pe-w2-bl-device5-ratio-arm) and an under-size capture is a
+        // plain hard red below.
+        const file = path.join(outDir, `${cell}.${FORMAT}`);
+        await page.screenshot({
+          path: file,
+          fullPage: true,
+          ...(FORMAT === "jpeg" ? { type: "jpeg", quality: JPEG_QUALITY } : {}),
+        });
 
         const bytes = fs.statSync(file).size;
         if (bytes < MIN_SHOT_BYTES) fail(`${cell}: wrote ${bytes} B to ${file} — the capture did not produce an image`);
@@ -845,7 +985,7 @@ async function main() {
         shots.push({
           cell,
           file: path.basename(file),
-          scale,
+          scale: DEVICE_SCALE_FACTOR,
           bytes,
           ...seen,
           rules: {
@@ -871,8 +1011,11 @@ async function main() {
             (seen.doubledRules.length ? `, ${seen.doubledRules.length} DOUBLED rules` : "") +
             `, ${census.total} rules (${census.heavy} heavy, all structural)` +
             `, prose ${seen.proseCpl ?? "n/a"} CPL, ` +
+            `ingress ratio ${seen.ingressRatio ?? "n/a"}, ` +
+            `h2 ${seen.h2Px.fontSize ?? "n/a"}/${seen.h2Px.fontWeight ?? "n/a"}, ` +
+            `stat tracks ${seen.statTracks ? seen.statTracks.join("/") : "n/a"}, ` +
             `doc overflow ${seen.docOverflow}px, ${seen.paragraphs} paragraphs, ` +
-            `${blocked} off-host requests blocked, ${scale}x, ${bytes} B`,
+            `${blocked} off-host requests blocked, ${DEVICE_SCALE_FACTOR}x, ${bytes} B`,
         );
         await context.close();
       }
@@ -901,12 +1044,8 @@ async function main() {
       2,
     ) + "\n",
   );
-  const demoted = shots.filter((s) => s.scale !== DEVICE_SCALE_FACTOR);
   console.log(
-    `rig/shoot: OK — ${shots.length} full-page shots ` +
-      `(${shots.length - demoted.length} at ${DEVICE_SCALE_FACTOR}x` +
-      (demoted.length ? `, ${demoted.length} demoted to 1x by the JPEG height cap` : "") +
-      `), ${assertions} content assertions`,
+    `rig/shoot: OK — ${shots.length} full-page shots at ${DEVICE_SCALE_FACTOR}x, ${assertions} content assertions`,
   );
 }
 

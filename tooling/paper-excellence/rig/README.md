@@ -27,7 +27,7 @@ so the natural repo-relative invocation
 | `census.mjs` | the heavy-rule census — one measurement function, run on the artifact AND on a rendered paper |
 | `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 7); nonzero on any content failure |
 | `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff |
-| `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json` |
+| `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json`; its default slug list is every **published** fixture (`design-probe` is authored and has no live doc — `eight-minute-erasure` once drifted purely by being absent from this list) |
 | `fixtures/` | 7 papers, each stamped with the `source_rev` it was taken from (`design-probe` is authored, not published) |
 | `baselines/` | the committed panel (see below) |
 
@@ -91,11 +91,11 @@ baselines show them un-hydrated and nothing here claims otherwise.
   `> #paper-body > div:not([class]) > h2` leg is the first such rule.
 * **A JPEG capture can write nothing at all.** Playwright's JPEG encoder emits
   a **zero-byte file, without throwing**, when a full-page capture exceeds
-  JPEG's 65,535 px dimension cap — which a ~100-block paper at 2x does
+  JPEG's 65,535 px dimension cap — which a ~100-block paper at 2x can do
   (`hobby-hardening-capstone`, found 2026-08-12). The rig stats every file it
-  writes; over-tall pages are re-captured full-page at 1x and get an `@1x`
-  suffix so a shorter baseline can never pass as a 2x one. That retry has never
-  been observed to fire — see the `@1x` bullet under Deliberate limits.
+  writes and **fails hard** on anything under `MIN_SHOT_BYTES`. An `@1x`
+  demotion retry used to sit in front of that fail; it was removed as untested
+  code — see the `@1x` bullet under Deliberate limits.
 
 ## The theme pin
 
@@ -116,7 +116,44 @@ light and dark, at **1280 and 1920**, `deviceScaleFactor: 2`, JPEG q72, plus a
 component, prose characters-per-line, document horizontal overflow, the air
 + rule at every section boundary, and the full rule census** (total, heavy,
 per-weight histogram and every heavy rule with its owner), paragraph count, scale
-and blocked-request count.
+and blocked-request count — and, per cell, the four **crown measurements**
+(pe-w2-bl-device5-ratio-arm):
+
+* **`ingressRatio`** — the canonical-text ingress/body CPL ratio, **asserted**
+  at `0.783 ± 0.01` per cell (see the next section).
+* **`toneSamples`** — the computed color, background and left-margin accent of
+  every tone-classed callout/card variant present, per theme. This is the
+  **marginal-color-as-verdict** device (crown D5/D21) measured rather than
+  claimed: the verdict a callout or card carries IS the colour of its left
+  margin, resolved through the existing `--bp-tone-*` / `--st-*` tokens — the
+  device already ships on those tokens, **zero new tokens**, and this key is
+  where a token remap or a dead tone class becomes a text diff.
+* **`h2Px`** — the rendered font-size + weight of a prose h2 (27px/600 today;
+  the display-scale device will move it, and this key is where that move is a
+  reviewable number).
+* **`statTracks`** — the resolved grid track count of every `.bp-stats` strip
+  (8 at 1920, 7 at 1280, 4 at 768, 1 at 360 today): the stat-density device's
+  width signal. Absent elements record null-with-reason; a strip that is
+  present but yields zero tracks **fails the run** — the measurement refusing
+  to go vacuous.
+
+## The ingress-ratio arm
+
+The opening ingress reads bigger than the body prose, and the relationship is
+asserted as a **ratio of characters-per-line — the same canonical probe text
+measured under both computed styles** (`INGRESS_RATIO = 0.783`, tolerance
+`± 0.01`, per cell). Canonical text, never each element's own words: own-text
+ratios are per-character sampling noise (0.759–0.821 healthy across the panel,
+0.003 of margin at any threshold) while the canonical form reads 0.783 on every
+fixture at every width with ~0.05 of margin per side.
+
+The arm is **mutation-proven**: re-imposing the pre-#11626 `font-size: 1.28rem`
+on `.bp-role-ingress` (the rem-frozen sizing that #11626 removed) moves every
+cell to **0.880** and the run reds with
+`canonical ingress/body CPL ratio measures 0.88, outside 0.783±0.01`. A fixture
+that carries `.bp-role-ingress` but yields no sample is a **failure**, not a
+skip — an arm that silently misses the element it was built for is the vacuous
+green this rig exists to refuse.
 
 A paper opens a section in one of **two shapes**, and both are measured:
 
@@ -178,9 +215,10 @@ A red here is a review item, not a re-baseline reflex: read the drifted numbers,
 then `bash tooling/paper-excellence/rig/baseline.sh <slug>` **only** once the
 change behind them is the intended one.
 
-`--panel` runs every `fixtures/*.json` in one command. Measured cold on
-2026-08-17: all 7 pass, **56 shots / 1696 content assertions** in the default
-four-width set, and **28 shots** under `--panel --check`.
+`--panel` runs every `fixtures/*.json` in one command. Measured on 2026-08-17
+(with the crown measurements in): all 7 pass, **56 shots / 1888 content
+assertions** in the default four-width set, and **28 shots** under
+`--panel --check`.
 
 The PASS line counts **this run's** shots, read from the `report.json` this run
 wrote. `find`ing the out-dir counted every image ever left there, so a 7-fixture
@@ -246,16 +284,16 @@ Deliberate limits, stated rather than hidden:
   tree) and the pictures with the change — the `report.json` diff is then a true
   before/after at identical paths, and the panel does not have to be stored
   twice to get one.
-* **The `@1x` demotion branch has never fired, and this README used to claim it
-  had.** `shoot.mjs` re-captures at 1x when a JPEG comes back under
-  `MIN_SHOT_BYTES`, on the theory that a ~100-block paper at 2x clears JPEG's
-  65,535px cap. There are **zero** `*@1x.*` files in `baselines/`, and
-  `hobby-hardening-capstone` — the paper that supposedly triggered it —
-  photographs at **2x** on this host in both formats (18.5 MB as PNG at 1920,
-  and its committed JPEGs carry no suffix). So the retry is **untested code**:
-  it may still be the right guard against a zero-byte file, but nothing here
-  exercises it, no baseline depends on it, and it should not be budgeted for or
-  cited as a measured behaviour. The bullet it replaced said the opposite.
+* **The `@1x` demotion branch is GONE** (removed with
+  `pe-w2-bl-device5-ratio-arm`, 2026-08-17). It re-captured at 1x when a JPEG
+  came back under `MIN_SHOT_BYTES`, and it **never fired**: zero `*@1x.*` files
+  ever landed in `baselines/`, and `hobby-hardening-capstone` — the paper it was
+  written for — photographs at **2x** in both formats (18.5 MB as PNG at 1920,
+  and its committed JPEGs carry no suffix). Untested code is not a guard, so the
+  code caught up with this README: the `MIN_SHOT_BYTES` stat check remains, and
+  an under-size capture is now a plain hard red. If a paper ever genuinely
+  clears the 65,535px cap, the rig fails loudly and the fix is a deliberate
+  decision, not a silent scale change.
 * **The legacy shots in `../evidence/shots/` are a different capture**:
   above-the-fold only, `deviceScaleFactor: 1`, 1440x1200, taken against
   guerrilla over the network. They are not comparable to these below the fold,

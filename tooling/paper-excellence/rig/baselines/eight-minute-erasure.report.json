@@ -174,6 +174,49 @@
           "inkOffCentre": 0
         }
       ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(138, 100, 32)",
+          "background": "rgb(247, 240, 223)",
+          "accent": "rgb(138, 100, 32)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(166, 58, 46)",
+          "background": "rgb(247, 233, 230)",
+          "accent": "rgb(166, 58, 46)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
@@ -409,6 +452,49 @@
           "inkOffCentre": 0
         }
       ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(138, 100, 32)",
+          "background": "rgb(247, 240, 223)",
+          "accent": "rgb(138, 100, 32)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(166, 58, 46)",
+          "background": "rgb(247, 233, 230)",
+          "accent": "rgb(166, 58, 46)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
@@ -644,6 +730,49 @@
           "inkOffCentre": 0
         }
       ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(227, 182, 97)",
+          "background": "rgb(42, 34, 16)",
+          "accent": "rgb(227, 182, 97)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(240, 138, 128)",
+          "background": "rgb(42, 22, 20)",
+          "accent": "rgb(240, 138, 128)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
@@ -879,6 +1008,49 @@
           "inkOffCentre": 0
         }
       ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(227, 182, 97)",
+          "background": "rgb(42, 34, 16)",
+          "accent": "rgb(227, 182, 97)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(240, 138, 128)",
+          "background": "rgb(42, 22, 20)",
+          "accent": "rgb(240, 138, 128)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {

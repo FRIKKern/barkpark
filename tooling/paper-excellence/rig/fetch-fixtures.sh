@@ -12,8 +12,15 @@ set -euo pipefail
 RIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SLUGS=("$@")
 if [ ${#SLUGS[@]} -eq 0 ]; then
-  SLUGS=(heggemsnes-act hobby-hardening-capstone mechanical-spacing-doctrine \
-         paper-excellence-wave-2026-08-12 portabledoc-showcase)
+  # Every PUBLISHED fixture in the committed panel. eight-minute-erasure was
+  # missing from this list, so a bare refresh silently never touched it — that
+  # omission is exactly how it drifted (found 2026-08-17, ledger
+  # pe-w3-rig-fresh-pixels-drift-and-schema-gaps-2026-08-17.md). design-probe is
+  # deliberately absent: it is AUTHORED (BPML, no published paper behind it) and
+  # has no live document to refresh from.
+  SLUGS=(eight-minute-erasure heggemsnes-act hobby-hardening-capstone \
+         mechanical-spacing-doctrine paper-excellence-wave-2026-08-12 \
+         portabledoc-showcase)
 fi
 
 mkdir -p "$RIG_DIR/fixtures"
