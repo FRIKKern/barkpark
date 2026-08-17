@@ -71,7 +71,9 @@ defmodule BarkparkCloud.Web.RouterRegisterRateBucketTest do
       # runs before validation), so we exhaust 30 without 30 bcrypt hashes.
       for i <- 1..@register_limit do
         conn = register_from("203.0.113.5", %{email: fresh_email(), password: @short_password})
-        assert conn.status != 429, "attempt #{i} from 203.0.113.5 tripped 429 early (#{conn.status})"
+
+        assert conn.status != 429,
+               "attempt #{i} from 203.0.113.5 tripped 429 early (#{conn.status})"
       end
 
       tripped = register_from("203.0.113.5", %{email: fresh_email(), password: @short_password})
