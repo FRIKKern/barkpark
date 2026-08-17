@@ -2621,6 +2621,33 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
 
 ## Wave log
 
+### Wave 2026-08-18 — Wave 27 BUILT + REVIEWED, grade A. "Fail Closed, Push Everything."
+
+Six for six green, six for six pushed. write_scope FAILS CLOSED (#12071): the `_ -> nil` swallow is
+an exact two-shape split — {:invalid_dataset, details} → 422 validation_failed re-keyed under
+"dataset", :dataset_not_found retried once then 409; legit-nil arms byte-identical, wykb NEVER-WORSE
+pinned, mutation-proven (swallow restored reds 4/10, 422→200). Reviewer closed the builder-flagged
+escape: the slice WIDENED upsert_schema's error surface and two callers (plugins/bootstrap.ex,
+provision_schemas) matched the changeset shape exclusively — defensive catch-alls added on the -r
+branch. pg_catalog bundle guard is search-path-aware (#12072): pg_table_is_visible KEEPING
+relkind='r', pg_authid probe red-before-proven, both HIGH-FLIP-RISK judgments independently
+re-derived by the reviewer and both HELD (independent second reviews still owed before merge —
+#12071/#12072). Webhook 26MB cap (#12073): {:more} verbatim → canonical 413, RateLimit half
+descoped on the record. Spec-gate pins (#12074): both hashes triple-derived (verify, builder,
+reviewer), required-checks 181/0 — main's only felix-caused red is cured on merge. Codex failure
+kinds surface in the transcript (#12075). The #12041 contingency VERDICT: pollution, not drift —
+one committed chat_sessions row reproduces the exact shifting CI set; both victim files purge at
+setup (proof both directions), pushed onto #12041 itself (3c485af356). The reviewer's gate run then
+caught chat_live_test.exs as a THIRD victim of the same leak class (3/296 red on a real leaked row
+from the build wave) and applied the same guard on #12075's branch — 296/0 with the leaked row
+still committed. Ledger: immaculate — all six tasks in_progress with only merge-gated rows open,
+evidence on every stamp; zero fixes needed. Backlog open: media dataset-swallow mirror (after
+#12071 merges), recorder sandbox-escape root fix, sobelow baseline reconcile (fenced by #6057),
+checkout docstring honesty. Next wave: lead merges the six PRs (order: any; #12071 before the media
+mirror slice is built), closes felix-w19-bl-authority-lock-remaining-sites per D181 on #12041's
+merge, then Act III — the never-swept lens (access/, telemetry/, connectors, pulse/) with the two
+w27 backlog code rows as round-1 candidates. Grade: A.
+
 ### Wave 2026-08-17 — Wave 27 DECIDED (building). "Land the Fleet, Fail Closed."
 
 Ratified D179–D186. Verify corrected the direction mid-flight: #11853 merged at 21:18Z carrying the
