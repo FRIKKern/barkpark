@@ -110,6 +110,68 @@ defmodule Barkpark.Tenancy.DatasetTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Dataset.changeset/2 — slug format guard
+  #
+  # Named failure mode: an unvalidated slug reaching interpolated SQL (the
+  # workspace_bundle catalog escaper) under an unstated standard_conforming_strings
+  # assumption. Dataset was the only tenancy slug schema without validate_format;
+  # siblings Workspace/Project both gate @slug_format ~r/^[a-z0-9][a-z0-9-]*$/.
+  # These tests RED without the validate_format(:slug, ...) added in dataset.ex.
+  # ---------------------------------------------------------------------------
+
+  describe "Dataset.changeset/2 — slug format" do
+    test "rejects a slug bearing a single quote" do
+      cs =
+        Dataset.changeset(%Dataset{}, %{
+          slug: "it's",
+          name: "Quote",
+          project_id: Ecto.UUID.generate()
+        })
+
+      refute cs.valid?
+      assert "must be lowercase alphanumeric with hyphens" in errors_on(cs).slug
+    end
+
+    test "rejects a slug bearing a backslash" do
+      cs =
+        Dataset.changeset(%Dataset{}, %{
+          slug: "back\\slash",
+          name: "Backslash",
+          project_id: Ecto.UUID.generate()
+        })
+
+      refute cs.valid?
+      assert errors_on(cs).slug != []
+    end
+
+    test "rejects uppercase and leading-hyphen slugs" do
+      for bad <- ["UPPER", "-leading", "with space", "semi;colon"] do
+        cs =
+          Dataset.changeset(%Dataset{}, %{
+            slug: bad,
+            name: "Bad",
+            project_id: Ecto.UUID.generate()
+          })
+
+        refute cs.valid?, "expected #{inspect(bad)} to be rejected"
+        assert errors_on(cs).slug != []
+      end
+    end
+
+    test "accepts a normal lowercase-with-hyphens slug" do
+      cs =
+        Dataset.changeset(%Dataset{}, %{
+          slug: "staging-2",
+          name: "Staging",
+          project_id: Ecto.UUID.generate()
+        })
+
+      # No slug format error (project_id assoc is DB-checked on insert, not here).
+      assert errors_on(cs)[:slug] == nil
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Dataset.changeset/2 — DB-level project assoc constraint
   # ---------------------------------------------------------------------------
 
