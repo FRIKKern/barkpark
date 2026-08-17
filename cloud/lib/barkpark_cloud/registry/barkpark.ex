@@ -434,10 +434,21 @@ defmodule BarkparkCloud.Registry.Barkpark do
   (`gyldendal.barkpark.cloud`) and a suffixed one
   (`gyldendal-71069eaa.barkpark.cloud`) each yield the correct label. Falls back
   to `provisioning_subdomain/1` when `url` is missing (pre-reservation rows).
+
+  Self-normalises `trim |> downcase` before stripping (aligned with the write-side
+  `normalize_url` fold, cch-w69-bl / D865): this output mints the worker's
+  `dns_label`, the claim slug it turns into the DNS record + Hetzner box name, and
+  the deprovision label — so it must NOT depend on upstream cleanliness. Without
+  the fold a leading space defeats the case-sensitive `replace_prefix`, and an
+  uppercase scheme or mixed-case host passes through untouched, minting a wrong
+  DNS label for old rows, the pre-`normalize_url` write window, and any
+  changeset-bypassing write.
   """
   @spec subdomain_from_url(t()) :: String.t()
   def subdomain_from_url(%__MODULE__{url: url}) when is_binary(url) do
     url
+    |> String.trim()
+    |> String.downcase()
     |> String.replace_prefix("https://", "")
     |> String.replace_prefix("http://", "")
     |> String.replace_suffix("." <> @base_domain, "")
