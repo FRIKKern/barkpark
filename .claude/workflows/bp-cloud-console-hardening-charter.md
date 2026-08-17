@@ -1391,6 +1391,53 @@ row (wave-75 candidate). **Lead debts:** merge R1 (four PRs), then dispatch s5; 
 merge s6, dispatch s7; close each slice's merge-gated criterion on merge; dispatch the independent second
 reviewer on s1 and s5 before merging them; ignore the two advisory reds (D882).
 
+### Wave 74 REVIEW — 2026-08-18 (round 1 landed to PRs, grade A)
+
+**Grade A.** Round 1's four slices reviewed on their `-r` branches, every wave-relevant gate green,
+zero code fixes needed — the build was already correct. PRs open: `#12095` (deploy arm, task
+`cch-w72-bl-deploy-arm-generic-swallows-the-singular-detail`), `#12096` (census truth-labels,
+`cch-w74-census-truth-labels`), `#12097` (custom-host loop, `cch-w69-bl-custom-host-variant-loop-swallows-its-own-label`),
+`#12098` (in-image selftest, `cch-w69-bl-in-image-arm-selftest-case`). Each carries a single canonical
+`Task:` line; the pr-task-gate passed on all four.
+
+**What landed.** (1) The deploy arm stopped swallowing the plane's proof with ZERO handler edits:
+`instance_not_live` admitted as `friendly()`'s FIFTH singular-detail fence slug (shadow law — NO ERRORS
+entry, near-twin `not_live` guarded), `deploy_not_started` + `no_content_binding` curated in ERRORS
+(D879/D878 copy), `prebuilt_not_enabled` + `unknown_source` relabeled CLI-only, FOUR census rows deleted.
+Node harness 1121/0, census 8/0. (2) Eight non-deploy census rows relabeled to re-derived truth
+(label-only, no row add/delete, deploy-arm block untouched — clean union with s1). (3) The custom-host
+variant loop now collects-and-reports ALL failing spellings in one assertion instead of aborting at the
+first MatchError. (4) A standing, can-lose selftest case for the in-image escape arm (174 passed, up
+from 169).
+
+**Independent flip-risk re-derivation (E2, both HIGH-FLIP-RISK slices CONFIRMED).** I re-derived the
+reachability claims at BOTH caller and server, not from the builders' reasoning: `createAndDeploy` POSTs
+`{}`, `runDeploy` POSTs `{git_ref}`/`{}` — neither sends `via` or `source`. Server side:
+`maybe_bind_cloudflare` returns `{:cont}` for any `via != "cloudflare"` (all five cloudflare rows
+console-UNREACHABLE today), `deploy_static_site` defaults `source` to `"box-build"` (prebuilt_not_enabled
++ unknown_source CLI-only), and `no_content_binding` fires on `is_nil(site.bootstrap_dataset)` — reachable
+via Deploy on a CLI-created unbound site (curated entry justified). `instance_not_live`'s router detail
+matches the pinned relay string byte-for-byte. The single-reviewer law is satisfied on my end, but a
+genuinely independent SECOND (human) reviewer remains owed on s1's `no_content_binding` reachability +
+fence admission and (when it builds) s5's `invalid_name` before merge — the lead dispatches that.
+
+**MERGE BLOCKER — not this wave's defect.** All four PRs red on the blocking `Doc budgets + anchors`
+gate: `scripts/docs-anchors-check.sh` §5 reports `canonical-for 'none' has more than one owner` because
+two UNRELATED cold grip-ledger artifacts on origin/main both carry `canonical-for: none`
+(`tooling/grip/ledger/felix-w26-ssrf-toctou-verdict-2026-08-17.md`,
+`tooling/grip/ledger/onb-w6-release-cache-criteria-vs-d38-2026-08-18.md`). This is a main-wide breakage
+that reds EVERY open PR, tracked by open tasks `bl-canonical-for-none-collision` +
+`arpss-docs-anchors-canonical-none-collision`. Trivial fix (unique slug on each file, or exempt the
+sentinel in the check) is docs-governance, NOT a cloud-console slice — the lead must clear it before the
+merge queue moves.
+
+**Lead debts (unchanged from decide + this red).** Clear the doc-anchors main breakage; merge R1 (four
+PRs); then dispatch/merge R2 s5 → R3 s6 → R4 s7 in order (each waits on its dep merging; s5+s6+s7 share
+`__app.test.mjs` tail + census file); close each slice's merge-gated criterion on merge; dispatch the
+independent second reviewer on s1 (and s5 when built). Ledger audit: all four slice tasks honest —
+`in_progress`, every provable criterion stamped, only the merge-gated row open for the lead; no
+out-of-wave task touched. One duplicate doc-anchors task I filed by mistake was closed same-session.
+
 ### Wave 73 — THE MAP GROWS TEETH, THEN THE LAST LOUD ARMS (build in flight)
 
 **Paper:** `cloud-console-hardening-wave-73-2026-08-17`. **This charter PR carries D873-D877.** Ceiling was
