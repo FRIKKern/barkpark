@@ -18,11 +18,12 @@ defmodule Barkpark.Tenancy.Dataset do
   # character: `_`. A dataset slug is not admin-authored like those — it is
   # auto-created from the free-form `dataset` STRING on the first write that
   # names it (Content.WriteScope.resolve_dataset_id_for_write/2), and
-  # underscored dataset strings are in active use. Matching the siblings
-  # exactly would not refuse such a write; it would silently degrade it to
-  # `dataset_id: NULL` (the resolver swallows a changeset error), pushing the
-  # row onto the NULL-dataset_id partial unique index. This class matches the
-  # dataset-slug guard already in FinderLive.
+  # underscored dataset strings are in active use. A changeset refusal here is
+  # now a LOUD 422 at the write chokepoint (the resolver fails CLOSED —
+  # felix-w26 — it no longer degrades a refused slug to `dataset_id: NULL`),
+  # so matching the siblings exactly would hard-refuse every in-use
+  # underscored dataset string outright. This class matches the dataset-slug
+  # guard already in FinderLive.
   @slug_format ~r/^[a-z0-9][a-z0-9_-]*$/
 
   schema "datasets" do
