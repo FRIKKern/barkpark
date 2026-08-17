@@ -19,8 +19,12 @@
 #     enterprise settings leak in).
 #   * cwd is OUTSIDE the repo, so the agent cannot read the codebase, the wave
 #     paper, or this harness by walking the tree.
-#   * --model is pinned EXPLICITLY: bare defaults to the high-effort opus-5[1m];
-#     the cold run is judged at opus@medium, so the operator pins that id.
+#   * the model+effort are pinned EXPLICITLY as TWO flags: bare defaults to the
+#     high-effort opus-5[1m], and the CLI carries effort as a SEPARATE --effort
+#     flag (--model opus@medium is not a valid token — it emits
+#     unrecognized_model and silently falls back). RUBRIC L190 freezes the cold
+#     run at opus@medium, so the operator pins model=opus and effort=medium as
+#     two flags.
 #
 # The bp the agent uses is the slice-built binary (build-bp.sh) — put its dir on
 # PATH via BP_BIN_DIR so the run consumes THIS checkout's CLI, not a stale one.
@@ -53,7 +57,11 @@ fi
 
 CLAUDE_BIN="${CLAUDE_BIN:-/Users/pelle/.local/bin/claude}"
 [ -x "$CLAUDE_BIN" ] || { echo "spawn-cold: no claude binary at $CLAUDE_BIN (set CLAUDE_BIN)" >&2; exit 2; }
-COLD_MODEL="${COLD_MODEL:-opus}"   # explicit opus@medium pin; NOT bare's opus-5[1m]
+# RUBRIC L190 freezes the cold run at opus@medium. Effort is a SEPARATE CLI flag
+# from --model (--model opus@medium is not a valid token), so pin the two apart:
+# COLD_MODEL feeds --model, COLD_EFFORT feeds --effort. Default = opus + medium.
+COLD_MODEL="${COLD_MODEL:-opus}"
+COLD_EFFORT="${COLD_EFFORT:-medium}"
 
 # --- The scratch home + bp config (5 fields only). --------------------------
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/pe-cold-XXXXXX")"
@@ -91,7 +99,7 @@ COLD_PATH="$BP_BIN_DIR:$(dirname "$CLAUDE_BIN"):/opt/homebrew/bin:/usr/local/bin
 
 PROMPT="$(cat "$PROMPT_FILE")"
 
-echo "spawn-cold: HOME=$SCRATCH_HOME  cwd=$WORKDIR  model=$COLD_MODEL" >&2
+echo "spawn-cold: HOME=$SCRATCH_HOME  cwd=$WORKDIR  model=$COLD_MODEL  effort=$COLD_EFFORT" >&2
 echo "spawn-cold: bp=$BP_BIN_DIR/bp  transcript=$TRANSCRIPT" >&2
 
 set +e
@@ -101,7 +109,7 @@ set +e
     PATH="$COLD_PATH" \
     TERM=dumb \
     ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-    "$CLAUDE_BIN" --bare --setting-sources '' --model "$COLD_MODEL" \
+    "$CLAUDE_BIN" --bare --setting-sources '' --model "$COLD_MODEL" --effort "$COLD_EFFORT" \
       -p "$PROMPT" --output-format stream-json --verbose ) > "$TRANSCRIPT" 2>"$TRANSCRIPT.err"
 RC=$?
 set -e
