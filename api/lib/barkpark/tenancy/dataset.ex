@@ -14,7 +14,16 @@ defmodule Barkpark.Tenancy.Dataset do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @slug_format ~r/^[a-z0-9][a-z0-9-]*$/
+  # Deliberately WIDER than the Workspace/Project sibling format by one
+  # character: `_`. A dataset slug is not admin-authored like those — it is
+  # auto-created from the free-form `dataset` STRING on the first write that
+  # names it (Content.WriteScope.resolve_dataset_id_for_write/2), and
+  # underscored dataset strings are in active use. Matching the siblings
+  # exactly would not refuse such a write; it would silently degrade it to
+  # `dataset_id: NULL` (the resolver swallows a changeset error), pushing the
+  # row onto the NULL-dataset_id partial unique index. This class matches the
+  # dataset-slug guard already in FinderLive.
+  @slug_format ~r/^[a-z0-9][a-z0-9_-]*$/
 
   schema "datasets" do
     field :slug, :string
@@ -34,7 +43,7 @@ defmodule Barkpark.Tenancy.Dataset do
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_length(:name, min: 1, max: 255)
     |> validate_format(:slug, @slug_format,
-      message: "must be lowercase alphanumeric with hyphens"
+      message: "must be lowercase alphanumeric with hyphens or underscores"
     )
     |> assoc_constraint(:project)
     |> unique_constraint([:slug, :project_id],

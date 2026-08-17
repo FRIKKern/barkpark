@@ -116,6 +116,9 @@ defmodule Barkpark.Tenancy.DatasetTest do
   # workspace_bundle catalog escaper) under an unstated standard_conforming_strings
   # assumption. Dataset was the only tenancy slug schema without validate_format;
   # siblings Workspace/Project both gate @slug_format ~r/^[a-z0-9][a-z0-9-]*$/.
+  # Dataset's class adds `_` on purpose (see dataset.ex): its slug is auto-created
+  # from the free-form `dataset` STRING on first write, so banning `_` would not
+  # refuse that write — it would silently drop dataset_id to NULL.
   # These tests RED without the validate_format(:slug, ...) added in dataset.ex.
   # ---------------------------------------------------------------------------
 
@@ -129,7 +132,7 @@ defmodule Barkpark.Tenancy.DatasetTest do
         })
 
       refute cs.valid?
-      assert "must be lowercase alphanumeric with hyphens" in errors_on(cs).slug
+      assert "must be lowercase alphanumeric with hyphens or underscores" in errors_on(cs).slug
     end
 
     test "rejects a slug bearing a backslash" do
@@ -168,6 +171,19 @@ defmodule Barkpark.Tenancy.DatasetTest do
 
       # No slug format error (project_id assoc is DB-checked on insert, not here).
       assert errors_on(cs)[:slug] == nil
+    end
+
+    test "accepts an underscored slug — the auto-created write-path shape" do
+      for ok <- ["mirror_ds", "value_writeback_test", "a_1"] do
+        cs =
+          Dataset.changeset(%Dataset{}, %{
+            slug: ok,
+            name: ok,
+            project_id: Ecto.UUID.generate()
+          })
+
+        assert errors_on(cs)[:slug] == nil, "expected #{inspect(ok)} to be accepted"
+      end
     end
   end
 
