@@ -72,6 +72,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
+  alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
 
   # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
@@ -173,6 +174,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
   grammar keeps its single Elixir owner — the CLI never parses BPML.
 
     * parse failure → 422 with the collected teaching errors;
+    * the paper's CURRENT blocks are unprintable → 422 `bpml_unprintable`
+      BEFORE any op derives (a BPML document cannot describe them, so a sync
+      would silently delete every non-kernel block behind a 200);
+    * applied but the post-write state is unprintable → still 200 with `rev`
+      (the write LANDED — a 500 would strand the anchor) and `bpml: nil` plus a
+      `bpml_unprintable` marker;
     * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
       is silently lost);
     * no changes → 200 `{ok, unchanged: true}`;
@@ -237,8 +244,30 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # x-paper-rev. NEVER the row's _rev hash.
         current_rev = to_string(get_in(paper.content || %{}, ["rev"]))
         current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
+        unprintable = unprintable_current(current_blocks)
 
         cond do
+          # ENTRY GUARD, before anything derives. If the paper's CURRENT blocks
+          # cannot be printed as BPML, the pushed document cannot describe them
+          # either — and `Diff.derive/2` would faithfully remove every block the
+          # (necessarily kernel-only) parse does not carry: a silent DESTRUCTION
+          # behind a 200. Nothing legitimate breaks, because pull already
+          # refuses such a paper (422) — no client can hold a working copy of
+          # one. Ordered before the rev check on purpose: an unprintable paper
+          # has no honest BPML sync at ANY rev, so "pull first" would be a lie.
+          unprintable != nil ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: "bpml_unprintable",
+                message:
+                  "this paper's current blocks cannot be printed as BPML, so a BPML document cannot describe them — syncing would delete everything outside the kernel: #{unprintable}",
+                hint:
+                  "edit this paper with block ops (or bp bulldocs publish); BPML sync works once every block is inside the kernel vocabulary"
+              }
+            })
+
           current_rev != to_string(base_rev) ->
             conn
             |> put_status(:precondition_failed)
@@ -278,22 +307,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
       {:ok, result} ->
-        canonical =
+        {canonical, echo_refusal} =
           case Content.get_paper(slug, dataset, scope) do
-            nil ->
-              nil
-
-            paper ->
-              Barkpark.PortableDoc.Bpml.print_paper(%{
-                "slug" => paper.doc_id,
-                "title" => paper.title,
-                "blocks" => get_in(paper.content || %{}, ["blocks"]) || []
-              })
+            nil -> {nil, nil}
+            paper -> canonical_echo(paper)
           end
 
-        conn
-        |> put_resp_header("x-paper-rev", to_string(result.rev))
-        |> json(%{
+        payload = %{
           ok: true,
           slug: result.slug,
           # STRING on the wire, like x-paper-rev and the unchanged leg — one
@@ -301,7 +321,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
           rev: to_string(result.rev),
           op_count: result.op_count,
           bpml: canonical
-        })
+        }
+
+        conn
+        |> put_resp_header("x-paper-rev", to_string(result.rev))
+        |> json(maybe_mark_echo(payload, echo_refusal))
 
       {:error, :precondition_failed} ->
         conn
@@ -331,6 +355,51 @@ defmodule BarkparkWeb.BulldocsIngestController do
           error: %{code: "invalid_op", message: "the derived batch could not be applied"}
         })
     end
+  end
+
+  # The sync entry guard's probe: nil when every current block is printable,
+  # else the printer's typed refusal message (kind+type). A print is pure string
+  # work on blocks already in memory — cheap enough to run before deriving.
+  defp unprintable_current(blocks) do
+    _ = Barkpark.PortableDoc.Bpml.print_blocks(blocks)
+    nil
+  rescue
+    e in UnprintableError -> Exception.message(e)
+  end
+
+  # The canonical echo AFTER a successful write. The ops already committed, so an
+  # unprintable post-write state must NOT change the verdict: a 500 would strand
+  # the client's rev anchor on a write that landed, and a 422 would simply lie.
+  # It degrades to `bpml: nil` plus an explicit marker, and the rev is still the
+  # anchor to pull from. Only UnprintableError is rescued — a real printer bug
+  # still crashes loudly (charter D3).
+  # Public (not an action — no route names it) so the degrade contract is
+  # directly testable: the sync path itself can no longer REACH an unprintable
+  # post-write state now that the entry guard closes that door, and a rescue
+  # nobody can prove is a rescue nobody should trust.
+  @doc false
+  def canonical_echo(paper) do
+    bpml =
+      Barkpark.PortableDoc.Bpml.print_paper(%{
+        "slug" => paper.doc_id,
+        "title" => paper.title,
+        "blocks" => get_in(paper.content || %{}, ["blocks"]) || []
+      })
+
+    {bpml, nil}
+  rescue
+    e in UnprintableError -> {nil, Exception.message(e)}
+  end
+
+  @doc false
+  def maybe_mark_echo(payload, nil), do: payload
+
+  def maybe_mark_echo(payload, refusal) do
+    Map.merge(payload, %{
+      bpml_unprintable: refusal,
+      hint:
+        "the ops applied and `rev` is your new anchor, but the persisted blocks can no longer be printed as BPML — pull format=json to see them"
+    })
   end
 
   # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
