@@ -29,6 +29,16 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
       starve strangers. The app registers once per launch; 10/min brakes a
       runaway loop without touching real use. Pairs with the per-user
       device-row cap in `Push.register_device_token/2`.
+    * `"register:"<peer_ip>` — 30 / 60s, on `POST /v1/auth/register`
+      (arpss wave 3). Caps account-creation writes per IP — each hit is an
+      unauthenticated Repo.transaction that mints a user + team + membership +
+      trial. NOTE the DISTINCT prefix: `"register:"` is the unauth signup
+      bucket, `"push_register:"` above is the AUTHED device-push bucket — same
+      word, different physics, so they must never share a key. Per-IP (not
+      per-user) because there is no session yet to key on, and 30 (not the
+      @default_limit of 10) for the same corporate-NAT-headroom reason as
+      `oauth_exchange` below: a whole office signs up from one NAT'd IP on the
+      last hop.
 
   The key is `{key_string, window}` where `window = div(now_ms, @window_ms)`, so
   elapsed windows are lazily swept on the next `check/1` for that key and the
@@ -47,6 +57,7 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
     "app_token" => 10,
     "app_token_revoke" => 10,
     "push_register" => 10,
+    "register" => 30,
     # cch-w10: `"oauth_exchange:"<peer_ip>` — 30 / 60s, on `POST
     # /v1/auth/oauth/exchange`. An EXPLICIT entry, not the @default_limit of 10,
     # and the reason is the one push_register above documents from the other side:

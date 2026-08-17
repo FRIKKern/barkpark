@@ -181,6 +181,14 @@ done
 if [ -z "$port" ]; then echo "TEST HARNESS FAIL: the fixture server never announced a port" >&2; exit 99; fi
 BASE="http://127.0.0.1:$port"
 
+# Hermeticity: the token-matrix rows below distinguish token-PRESENT from
+# token-ABSENT, and check()'s subshell INHERITS the caller's environment — a
+# developer running this harness with LEDGER_TOKEN exported (say, after poking
+# the gate by hand) would red every token-absent row for a reason that has
+# nothing to do with the gate. CI never sets it on the self-test step; make the
+# local run match.
+unset LEDGER_TOKEN
+
 pass=0 fail=0
 check() { # check <label> <expected_exit> <env...>
   local label="$1" want="$2"; shift 2
@@ -214,7 +222,7 @@ check_says() { # check_says <label> <expected_exit> <substring> <env...>
 check "active task passes"          0 'TASK_ID=active'
 check "open task fails"             1 'TASK_ID=openone'
 check "in_progress but unclaimed"   1 'TASK_ID=claimless'
-check "nonexistent task fails"      1 'TASK_ID=ghost'
+check "nonexistent task fails"      1 'TASK_ID=ghost LEDGER_TOKEN=harness-token'
 check "garbled json is neutral"     2 'TASK_ID=garbled'
 check "no task ref fails"           1 'TASK_ID='
 check "wrong worker fails"          1 'TASK_ID=active EXPECTED_WORKER=nobody'
@@ -339,10 +347,32 @@ fi
 # red (`ghost`, above and below), so this reroute loses zero true detection.
 check_says "200 with result:null is UNCHECKED" 2 "carried no task document" 'TASK_ID=nullresult'
 check_says "200 with a bare doc is UNCHECKED"  2 "carried no task document" 'TASK_ID=baredoc'
-# ...and the 404 keeps the accusation, because there it is TRUE. Assert the
-# words: an exit code alone cannot tell "does not exist" from "could not check",
-# and printing the wrong one of those at a reader is the whole defect.
-check_says "404 still accuses definitively"    1 "does not exist on the ledger" 'TASK_ID=ghost'
+# ...and the 404 keeps the accusation WHEN WE READ AS OURSELVES, because there it
+# is TRUE: an authenticated read that gets 404 means the task really is not there.
+# Assert the words: an exit code alone cannot tell "does not exist" from "could
+# not check", and printing the wrong one of those at a reader is the whole defect.
+# (Token PRESENT is load-bearing here — a token-ABSENT 404 is UNCHECKED now; see
+# the token-matrix section below.)
+check_says "404 still accuses definitively"    1 "does not exist on the ledger" 'TASK_ID=ghost LEDGER_TOKEN=harness-token'
+
+# -- Authenticated ledger read: the private-flip token matrix (wave 3) ---------
+# fetch_doc sends `Authorization: Bearer $LEDGER_TOKEN` ONLY when the token is
+# non-empty, so a future flip of tasks to private cannot make main unmergeable:
+# authenticated reads still see the task. The three states that matter:
+#   token PRESENT + 404 → the task genuinely is not there → definitive FAIL (1).
+#   token ABSENT  + 404 → cannot tell missing from private → UNCHECKED (2), and
+#                         the message must NAME the secret so a reader knows the
+#                         fix is provisioning, not editing their PR.
+#   token PRESENT + 2xx → the happy path is unbroken; the auth header does not
+#                         perturb a task that reads fine.
+# MUTATION PROOF (recorded here so the guard is falsifiable): delete the `-H
+# Authorization` construction / the token-absent arm of the 404 case in
+# scripts/pr-task-gate.sh and the "token absent, 404 is UNCHECKED" row below
+# reds (a token-absent ghost reverts to the exit-1 accusation) — the row is not
+# satisfiable by the pre-change gate.
+check_says "token present, 404 accuses"        1 "does not exist on the ledger" 'TASK_ID=ghost LEDGER_TOKEN=harness-token'
+check_says "token absent, 404 is UNCHECKED"    2 "BARKPARK_TASK_TOKEN"          'TASK_ID=ghost'
+check      "token present, happy path passes"  0 'TASK_ID=active LEDGER_TOKEN=harness-token'
 
 # -- Bounded retry, then FAIL (D24) -------------------------------------------
 # A flaky ledger that 500s the first N requests per id and then answers. This is
@@ -399,14 +429,16 @@ check "two 500s then 200 passes"      0 "TASK_ID=blip1 LEDGER_BASE=$FLAKY PR_TAS
 check "one attempt does not retry"    2 "TASK_ID=blip2 LEDGER_BASE=$FLAKY PR_TASK_GATE_RETRIES=1"
 check "permanent 500 is UNCHECKED"    2 "TASK_ID=perma500 LEDGER_BASE=$FLAKY PR_TASK_GATE_RETRIES=3"
 check "unreachable host is UNCHECKED" 2 "TASK_ID=active LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=2"
-# A 404 is an ANSWER, not an outage, so it must not be retried: with a 5s
-# backoff and 3 attempts, a retried 404 could not finish inside 5s. Retrying an
-# answer would only make the verdict a function of the wall clock.
+# A 404 is an ANSWER, not an outage, so it must not be retried — and this holds
+# on the NEW token-absent branch too, which reroutes a 404 to UNCHECKED (exit 2):
+# with a 5s backoff and 3 attempts, a retried 404 could not finish inside 5s.
+# Retrying an answer would only make the verdict a function of the wall clock. No
+# LEDGER_TOKEN, so ghost's 404 takes the exit-2 arm; it must still fail FAST.
 t404=$SECONDS
 ( TASK_ID=ghost LEDGER_BASE="$BASE" PR_TASK_GATE_RETRIES=3 PR_TASK_GATE_RETRY_DELAY=5 bash "$GATE" ) >/dev/null 2>&1
 rc404=$?; el404=$((SECONDS - t404))
-if [ "$rc404" = 1 ] && [ "$el404" -lt 5 ]; then pass=$((pass+1)); printf 'ok   %-40s (exit 1, %ss)\n' "404 fails at once, never retried" "$el404"
-else fail=$((fail+1)); printf 'FAIL %-40s want exit 1 under 5s, got %s in %ss\n' "404 fails at once, never retried" "$rc404" "$el404"; fi
+if [ "$rc404" = 2 ] && [ "$el404" -lt 5 ]; then pass=$((pass+1)); printf 'ok   %-40s (exit 2, %ss)\n' "token-absent 404 fails fast, never retried" "$el404"
+else fail=$((fail+1)); printf 'FAIL %-40s want exit 2 under 5s, got %s in %ss\n' "token-absent 404 fails fast, never retried" "$rc404" "$el404"; fi
 
 # A retry count that is not a positive integer would make the bound test error
 # out, which reads as FALSE and retries forever — a gate that hangs instead of

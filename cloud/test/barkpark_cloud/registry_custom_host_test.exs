@@ -80,7 +80,14 @@ defmodule BarkparkCloud.RegistryCustomHostTest do
         {"mixed case", fn h -> "https://" <> String.upcase(h) end},
         {"trailing dot", fn h -> "https://" <> h <> "." end},
         {"explicit port", fn h -> "https://" <> h <> ":4000" end},
-        {"path suffix", fn h -> "https://" <> h <> "/studio" end}
+        {"path suffix", fn h -> "https://" <> h <> "/studio" end},
+        # The seventh spelling is the one the SQL fragment used to read as ""
+        # (its scheme regex is anchored, so leading whitespace made the next
+        # step eat the whole url) — a stored ` https://<host>` therefore held
+        # NOTHING and this pre-check let the thief through. Censused in
+        # registry_claim_host_normaliser_test.exs; kept here so the custom-host
+        # suite itself drives the class it was blind to.
+        {"leading whitespace", fn h -> " \thttps://" <> h end}
       ]
 
       for {{label, spell}, i} <- Enum.with_index(variants) do
