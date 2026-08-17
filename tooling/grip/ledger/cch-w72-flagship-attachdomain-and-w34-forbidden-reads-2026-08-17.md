@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 2000tok -->
+<!-- doc-tier: cold | canonical-for: cch-w72-flagship-attachdomain-w34-forbidden-reads | budget: 2000tok -->
 # cch-w72 verifier re-derivation recipes — flagship attachDomain 422 shape + w34 bare-forbidden reads
 
 Written by the wave-72 flagship-shape verifier. NOT committed by me — Decide commits one phase later. Every row is a command that re-derives a load-bearing fact from origin/main.
