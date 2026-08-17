@@ -138,9 +138,14 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   # A generic disclosure container — same wrapping shape as `section`, carrying
   # a `summary` attr and a body of blocks. Web (compose.ex :1529 → <details>)
-  # and TUI legs already ship; this is the missing BPML leg.
+  # and TUI legs already ship; this is the missing BPML leg. The body is read
+  # with the SAME key preference as the renderer (compose.ex container_children:
+  # "children" first, then "blocks") — a `children`-keyed expandable renders
+  # fully on the web, so printing it empty would be a silent loss through sync.
+  # The parser emits canonical "blocks", so the second print is byte-stable.
   defp block(%{"type" => "expandable"} = b, d) do
-    children = Enum.map(Map.get(b, "blocks", []), &block(&1, d + 1))
+    body = Map.get(b, "children") || Map.get(b, "blocks") || []
+    children = Enum.map(body, &block(&1, d + 1))
     wrap("expandable", attr_str(b, ["id", "summary"]), children, d)
   end
 
@@ -203,14 +208,18 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # scalar, no children); `strong`/`em` carry an inline-node LIST in `children`
   # (no value). Each prints to the SAME mark spelling the parser round-trips
   # into canonical text-node marks — so the SECOND print is byte-stable.
-  defp inline_node(%{"type" => "code"} = n),
-    do: "<code>#{esc(Map.get(n, "value", ""))}</code>"
+  # Guarded: a node carrying its content in the OTHER key (a `code` smuggling
+  # `children`, a `strong`/`em` smuggling a `value`) would print empty — a
+  # silent loss. Those shapes refuse (fail-honest) rather than guess.
+  defp inline_node(%{"type" => "code"} = n) do
+    case Map.get(n, "children") || [] do
+      [] -> "<code>#{esc(Map.get(n, "value", ""))}</code>"
+      _children -> raise(UnprintableError.new(:inline, "code"))
+    end
+  end
 
-  defp inline_node(%{"type" => "strong"} = n),
-    do: "<b>#{inline(Map.get(n, "children", []))}</b>"
-
-  defp inline_node(%{"type" => "em"} = n),
-    do: "<i>#{inline(Map.get(n, "children", []))}</i>"
+  defp inline_node(%{"type" => "strong"} = n), do: child_mark(n, "strong", "b")
+  defp inline_node(%{"type" => "em"} = n), do: child_mark(n, "em", "i")
 
   # A raw string where an inline node belongs (census: 18 papers) — a legacy
   # untyped text run. Escaped verbatim, not a crash.
@@ -223,6 +232,17 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # lands here too, so the read path can label it 422 rather than 500.
   defp inline_node(%{"type" => type}), do: raise(UnprintableError.new(:inline, type))
   defp inline_node(_other), do: raise(UnprintableError.new(:inline, nil))
+
+  defp child_mark(n, type, tag) do
+    children = Map.get(n, "children") || []
+    value = Map.get(n, "value")
+
+    if children == [] and is_binary(value) and value != "" do
+      raise(UnprintableError.new(:inline, type))
+    else
+      "<#{tag}>#{inline(children)}</#{tag}>"
+    end
+  end
 
   defp mark_tag("strong"), do: "b"
   defp mark_tag("em"), do: "i"

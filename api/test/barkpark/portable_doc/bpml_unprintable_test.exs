@@ -62,6 +62,21 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
       assert Exception.message(e) =~ ~s(inline node type "paragraph")
     end
 
+    test "a code node smuggling children refuses — printing the value alone would drop them" do
+      e = refusal([p([%{"type" => "code", "children" => [%{"type" => "text", "value" => "x"}]}])])
+
+      assert e.kind == :inline
+      assert e.type == "code"
+    end
+
+    test "a strong/em node smuggling its text in value refuses — <b></b> would drop it" do
+      for type <- ["strong", "em"] do
+        e = refusal([p([%{"type" => type, "value" => "smuggled"}])])
+        assert e.kind == :inline
+        assert e.type == type
+      end
+    end
+
     test "genuinely untyped inline content (a number cell) still refuses" do
       e =
         refusal([

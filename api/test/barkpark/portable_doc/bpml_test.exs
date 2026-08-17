@@ -277,7 +277,14 @@ defmodule Barkpark.PortableDoc.BpmlTest do
     end
 
     test "non-list inline content (a single node) is coerced through the node printer" do
-      blocks = [%{"id" => "p1", "type" => "paragraph", "content" => %{"type" => "text", "value" => "solo"}}]
+      blocks = [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => %{"type" => "text", "value" => "solo"}
+        }
+      ]
+
       assert Bpml.print_blocks(blocks) =~ ~s(<p id="p1">solo</p>)
     end
 
@@ -287,7 +294,9 @@ defmodule Barkpark.PortableDoc.BpmlTest do
           "id" => "t1",
           "type" => "table",
           "head" => ["Claim", "Status"],
-          "rows" => [[[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "b"}]]]
+          "rows" => [
+            [[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "b"}]]
+          ]
         }
       ]
 
@@ -300,9 +309,17 @@ defmodule Barkpark.PortableDoc.BpmlTest do
   describe "divider (the kernel's <hr/> leaf)" do
     test "a divider round-trips through <hr/>" do
       blocks = [
-        %{"id" => "a", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "above"}]},
+        %{
+          "id" => "a",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "above"}]
+        },
         %{"id" => "d", "type" => "divider"},
-        %{"id" => "b", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "below"}]}
+        %{
+          "id" => "b",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "below"}]
+        }
       ]
 
       {bpml, parsed} = roundtrip!(blocks)
@@ -326,7 +343,11 @@ defmodule Barkpark.PortableDoc.BpmlTest do
           "type" => "expandable",
           "summary" => "Details",
           "blocks" => [
-            %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "hidden"}]}
+            %{
+              "id" => "p",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "hidden"}]
+            }
           ]
         }
       ]
@@ -341,6 +362,34 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       {bpml, parsed} = roundtrip!(blocks)
       assert bpml =~ ~s(<expandable id="e" summary="Empty"/>)
       assert parsed == blocks
+    end
+
+    test "a children-keyed expandable prints its body (renderer key preference, never empty)" do
+      # compose.ex container_children/1 reads "children" first — the web renders
+      # this shape fully, so BPML printing it as <expandable/> would silently
+      # lose the body through sync. The parser re-emits canonical "blocks".
+      blocks = [
+        %{
+          "id" => "e",
+          "type" => "expandable",
+          "summary" => "Legacy",
+          "children" => [
+            %{
+              "id" => "p",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "kept"}]
+            }
+          ]
+        }
+      ]
+
+      bpml = Bpml.print_blocks(blocks)
+      assert bpml =~ ~s(<expandable id="e" summary="Legacy">)
+      assert bpml =~ "kept"
+
+      assert {:ok, parsed} = Bpml.parse_blocks(bpml)
+      assert [%{"type" => "expandable", "blocks" => [%{"type" => "paragraph"}]}] = parsed
+      assert Bpml.print_blocks(parsed) == bpml
     end
   end
 
