@@ -7,7 +7,9 @@ defmodule Barkpark.Content.Papers.EpicQuality do
   hollow-body and reader-shape laws.
 
   This gate measures editorial composition rather than ornamental block count.
-  A canonical Epic Paper must have a real opening, one coherent outline, a
+  A canonical Epic Paper must have a real opening, one coherent outline — read
+  across the WHOLE tree, container-nested headings included, and with numeric
+  string levels coerced exactly as the renderer coerces them — a
   bounded first-pass reading load, semantic tables and procedures, and no
   exact empty scaffolds. Long-form evidence remains welcome behind a collapsed
   `expandable`, following the canonical reference Paper's appendix treatment.
@@ -129,7 +131,7 @@ defmodule Barkpark.Content.Papers.EpicQuality do
 
     failures
     |> maybe_add(
-      not Enum.any?(opening, &(Map.get(&1, "type") == "heading" and Map.get(&1, "level") == 1)),
+      not Enum.any?(opening, &(Map.get(&1, "type") == "heading" and heading_level(&1) == 1)),
       :opening_missing_h1
     )
     |> maybe_add(not MapSet.member?(types, "ingress"), :opening_missing_ingress)
@@ -141,8 +143,8 @@ defmodule Barkpark.Content.Papers.EpicQuality do
 
   defp add_outline_failures(failures, blocks) do
     levels =
-      for %{"type" => "heading", "level" => level} <- blocks,
-          is_integer(level),
+      for %{"type" => "heading"} = heading <- walk_maps(blocks),
+          level = heading_level(heading),
           do: level
 
     failures
@@ -187,6 +189,22 @@ defmodule Barkpark.Content.Papers.EpicQuality do
   end
 
   defp add_reader_failures(failures, _invalid), do: [{:reader_check_failed, "suite"} | failures]
+
+  # The heading level as the RENDERER reads it, or nil when there is no level to
+  # read. `Render.Compose.heading_level/1` (compose.ex) coerces numeric-string
+  # levels, so `{"level": "1"}` renders an h1 — the floor must agree or it 422s a
+  # paper that reads correctly. Non-numeric junk ("h2", "state") stays excluded
+  # rather than being invented into a level the reader never sees.
+  defp heading_level(%{"level" => level}) when is_integer(level), do: level
+
+  defp heading_level(%{"level" => level}) when is_binary(level) do
+    case Integer.parse(String.trim(level)) do
+      {parsed, ""} -> parsed
+      _ -> nil
+    end
+  end
+
+  defp heading_level(_block), do: nil
 
   defp maybe_add(failures, true, failure), do: [failure | failures]
   defp maybe_add(failures, false, _failure), do: failures
