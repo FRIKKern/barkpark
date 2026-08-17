@@ -554,6 +554,21 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # A write's `dataset` STRING was REFUSED by dataset-row resolution
+  # (WriteScope fail-closed contract, felix-w26-bl-write-scope-swallow-nil):
+  # the Tenancy.Dataset changeset rejected the slug (format/length). 422 under
+  # the canonical `validation_failed` code — already an @hints member, so
+  # known_codes/OpenAPI are untouched — with the changeset messages re-keyed
+  # under "dataset" (the key the caller actually sent; the row's :slug is an
+  # internal name). Replaces the old silent degrade to a dataset_id=NULL stamp.
+  defp build({:error, {:invalid_dataset, details}}) when is_map(details),
+    do: %{
+      code: "validation_failed",
+      message: "dataset failed validation",
+      status: 422,
+      details: details
+    }
+
   defp build({:error, %Ecto.Changeset{} = cs}) do
     details =
       Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
