@@ -186,3 +186,105 @@ test("fence does NOT over-fire: a legitimate design/tokens.json edit regenerates
     "the edited token did not reach the regenerated paper-surface.css",
   );
 });
+
+// ── (c) TWO generated regions in ONE file attribute INDEPENDENTLY ─────────────
+// The ledger is keyed `<path>#<artifact name>`, not by path alone. A path-keyed
+// ledger gives two regions in one file ONE slot: last write wins, the loser reads
+// "unattributed" forever (design/check.mjs red permanently, `--write` refusing
+// all-or-nothing). The registry comment invites a second markerBegin/markerEnd per
+// file, so this is a shape the emitter must actually hold.
+//
+// PROVEN ABLE TO FAIL BY MUTATION (run 2026-08-17): revert regionKey() to
+// `u.path`, re-bless with --adopt so the path-keyed world is self-consistent, and
+// `node --test design/emit-fence.test.mjs` reports `# fail 2` — the two-slot test
+// below and the "hand-edit the SECOND region" case go RED (--adopt writes ONE
+// app.js slot; the loser is UNATTRIBUTED whatever anyone does to it). The
+// "hand-edit the FIRST region" case stays green in both directions: under the
+// path key the surviving slot belongs to the LAST artifact registered, so the
+// first region reds for the wrong reason — it pins the mirror-image behaviour,
+// not the collision. All three are green with the composite key.
+//
+// The second region is registered INSIDE THE TEMP COPY (never in the real
+// ARTIFACTS): a probe marker appended to app.js plus an ARTIFACTS.push() spliced
+// into the copied emit.mjs, so the real tree keeps exactly its 18 surfaces.
+const TWO_REGION_FILE = "cloud/priv/static/app.js"; // already owns the bp-theme-ids region
+const PROBE_NAME = "second-region probe";
+const PROBE_BEGIN = "/* BEGIN GENERATED: bp-probe */";
+const PROBE_END = "/* END GENERATED: bp-probe */";
+const PROBE_BODY = "    var BP_PROBE = 1;";
+
+function addSecondRegion(root) {
+  // 1. the file grows a SECOND marker block, byte-identical to what the probe emits.
+  const js = readIn(root, TWO_REGION_FILE);
+  writeIn(root, TWO_REGION_FILE, `${js}\n${PROBE_BEGIN}\n${PROBE_BODY}\n${PROBE_END}\n`);
+  // 2. the COPIED emitter registers it — pushed before evaluateAll() is defined so
+  //    the CLI at the bottom of the module sees the extra artifact.
+  const src = readIn(root, "design/emit.mjs");
+  const anchor = "export function evaluateAll()";
+  assert.ok(src.includes(anchor), "could not find evaluateAll() to register the probe artifact before");
+  const push = `ARTIFACTS.push({ name: ${JSON.stringify(PROBE_NAME)}, path: ${JSON.stringify(TWO_REGION_FILE)}, kind: "css",
+  markerBegin: ${JSON.stringify(PROBE_BEGIN)}, markerEnd: ${JSON.stringify(PROBE_END)},
+  build: () => ${JSON.stringify(PROBE_BODY)} });\n\n`;
+  writeIn(root, "design/emit.mjs", src.replace(anchor, push + anchor));
+}
+
+const manifestKeys = (root) =>
+  Object.keys(JSON.parse(readIn(root, "design/emit-manifest.json")).regions);
+
+test("two generated regions in ONE file each own a ledger slot and attribute independently", () => {
+  const root = makeTree();
+  addSecondRegion(root);
+
+  // The probe is brand-new, so it is UNKNOWN until blessed — --adopt is the one
+  // sanctioned way in, and it must not disturb the region already recorded there.
+  const adopt = emit(root, ["--adopt"]);
+  assert.equal(adopt.code, 0, `--adopt should succeed\n${adopt.out}\n${adopt.err}`);
+  assert.match(adopt.out, /adopt second-region probe/, "--adopt did not bless the second region");
+
+  const keys = manifestKeys(root).filter((k) => k.startsWith(`${TWO_REGION_FILE}#`));
+  assert.deepEqual(
+    keys.slice().sort(),
+    [`${TWO_REGION_FILE}#${PROBE_NAME}`, `${TWO_REGION_FILE}#cloud SPA theme ids`].sort(),
+    "the two regions of one file must hold TWO distinct ledger slots (a path-keyed ledger holds one)",
+  );
+
+  // Both attributed: --check is clean over 20 units (18 surfaces + probe + mirror).
+  const clean = emit(root, ["--check"]);
+  assert.equal(clean.code, 0, `both regions must attribute after --adopt\n${clean.out}\n${clean.err}`);
+  assert.doesNotMatch(clean.err, /UNATTRIBUTED/, "a region in the two-region file reads unattributed");
+});
+
+// Independence has a second half: a hand-edit of EITHER region must red on its OWN
+// name and leave the other one attributed. Same predicate design/check.mjs Part A
+// runs (attribute()), driven here through the emitter's own --check.
+for (const [which, marker] of [["the first", "BEGIN GENERATED: bp-theme ids"], ["the second", PROBE_BEGIN]]) {
+  test(`a hand-edit inside ${which} region of a two-region file reds --check on that region ALONE`, () => {
+    const root = makeTree();
+    addSecondRegion(root);
+    assert.equal(emit(root, ["--adopt"]).code, 0, "--adopt must bless both regions first");
+
+    const sentinel = "  var bpHandAuthoredSentinel = 1; // DO-NOT-DELETE";
+    const before = readIn(root, TWO_REGION_FILE);
+    const escaped = marker.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    const after = before.replace(new RegExp(`(${escaped}[^\\n]*\\n)`), `$1${sentinel}\n`);
+    assert.notEqual(after, before, `could not inject into ${which} region`);
+    writeIn(root, TWO_REGION_FILE, after);
+
+    const r = emit(root, ["--check"]);
+    assert.notEqual(r.code, 0, `a hand-edit inside ${which} region must red --check\n${r.out}\n${r.err}`);
+    const edited = which === "the first" ? "cloud SPA theme ids" : PROBE_NAME;
+    const untouched = which === "the first" ? PROBE_NAME : "cloud SPA theme ids";
+    assert.ok(
+      r.err.includes(`UNATTRIBUTED ${edited}`) || r.err.includes(`DRIFT ${edited}`),
+      `the report must name the edited region (${edited})\n${r.err}`,
+    );
+    assert.ok(
+      !r.err.includes(`UNATTRIBUTED ${untouched}`),
+      `the UNTOUCHED region (${untouched}) was dragged down with its file-mate — the slots are not independent\n${r.err}`,
+    );
+    // and the fence still refuses to write over the hand-edited bytes.
+    const w = emit(root, ["--write"]);
+    assert.notEqual(w.code, 0, "--write must refuse over a hand-edited region in a two-region file");
+    assert.ok(readIn(root, TWO_REGION_FILE).includes(sentinel), "the sentinel was DELETED — the fence did not hold");
+  });
+}
