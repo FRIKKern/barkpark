@@ -3797,6 +3797,31 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-18 — wave 74 REVIEW — 4/4 round-1 slices built, gated, PUSHED and PR'd (#12095–#12098). Grade A
+
+**Paper:** `cloud-console-hardening-wave-74-2026-08-18` (debrief appended). Round 1 shipped whole, zero
+reviewer fixes: **s1** (#12095, `cch-w72-bl-deploy-arm-generic-swallows-the-singular-detail`) —
+instance_not_live as friendly()'s FIFTH fence slug (shadow law, near-twin `not_live` guarded),
+deploy_not_started + no_content_binding curated with the D879/D878 sentences, four census rows deleted
+rot-arm-red-first, prebuilt_not_enabled + unknown_source relabeled CLI-only, zero handler edits;
+**s2** (#12096, `cch-w74-census-truth-labels`) — eight non-deploy rows relabeled to proven truth
+(email_mismatch + invalid_current_password STATUS-READ, five cloudflare rows console-UNREACHABLE
+sync-path, invalid_settings guard-shielded), no row add/delete; **s3** (#12097) — the custom-host
+variant loop now names EVERY failing spelling in one assertion (was: MatchError before the label built);
+**s4** (#12098) — escape-check selftest case 11, in-image arm can-lose both directions, 169→174.
+REVIEW re-proofs: both s1 HIGH-FLIP-RISK judgments independently re-derived CONFIRMED
+(no_content_binding console-reachable: bootstrap_dataset optional at create + confirmDeploy renders on
+no-repo sites; fence admission: single emit site, static surface-neutral detail); s2's cloudflare flip
+re-derived CONFIRMED (two /deploy callers, neither sends `via`; maybe_bind_cloudflare conts). Mutations:
+fence-slug rename reds 1 node test; reinstated census row reds the rot arm; reject-nothing reds s3 with
+all seven labels; widening the in-image arm to `cloud/*` reds 8 incl. case 11(b). s1+s2 union
+test-merged clean, census green on the union. **Next wave / lead:** merge order is
+s1 → s2/s3/s4 (any order), each with an independent second reviewer on s1 and s2's flips per the
+wave-73 law; then dispatch R2 `cch-w72-bl-github-arm-unread-codes` (github trio + the D881 seal guard,
+AFTER s1 merges), R3 `cch-w73-bl-newcreaterepo-success-fields-unasserted` (after s5), R4
+`cch-w74-password-change-401-conflation` (after s6, deletes the invalid_current_password row s2's label
+now points at). Advisory reds per D882 stay ignorable; the four blocking gates are the law.
+
 ### 2026-08-18 — wave 74 DECIDE (build in flight) — ZERO READER OWED: pay the map's last owed rows, cure the named lies, land the seal as a guard
 
 **Paper:** `cloud-console-hardening-wave-74-2026-08-18`. **Decisions:** D878–D882 (this PR). The wave-73
