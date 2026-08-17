@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 6000tok -->
+<!-- doc-tier: cold | canonical-for: build-concurrency-collapse-w21 | budget: 6000tok -->
 
 # The build-concurrency collapse at 2026-08-06T22:29:27Z is a FIX, not a lull — re-derivation recipe (wave 21)
 

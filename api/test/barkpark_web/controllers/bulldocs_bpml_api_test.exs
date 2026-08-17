@@ -11,6 +11,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
   alias Barkpark.Content
   alias Barkpark.LabelFixtures
   alias Barkpark.PortableDoc.Bpml
+  alias Barkpark.Repo
 
   @token "barkpark-test-ingest-token"
   @ingest_path "/v1/plugins/bulldocs/papers"
@@ -305,6 +306,177 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
 
       assert %{"error" => err} = json_response(conn, 404)
       assert err["hint"] =~ "publish"
+    end
+  end
+
+  # ── fail-honest: the printer's typed refusal at both doors ──────────────────
+  #
+  # The 2026-08-17 full-corpus census (776 published papers,
+  # tooling/grip/ledger/bpml-full-corpus-census-2026-08-17.md) found 141 papers
+  # answering a RAW HTTP 500 on the pull, because the printer crashed with an
+  # unrescued FunctionClauseError on every unprintable shape except an unknown
+  # block type. The same papers made the sync path DESTRUCTIVE: a kernel-only
+  # BPML document cannot describe a non-kernel block, and the differ faithfully
+  # deleted every one of them behind a 200.
+  describe "unprintable papers fail honestly" do
+    # Legacy rows carry shapes the write chokepoint no longer mints, so the
+    # fixture writes them the way history did: publish a clean paper, then put
+    # the historical blocks on the row.
+    defp with_blocks!(slug, blocks) do
+      {:ok, paper} =
+        Content.upsert_paper(
+          LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [
+              %{
+                "id" => "p1",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "A real paragraph of content."}]
+              }
+            ]
+          })
+        )
+
+      content = paper.content |> Map.put("blocks", blocks) |> Map.delete("body_html")
+
+      paper
+      |> Ecto.Changeset.change(content: content)
+      |> Repo.update!()
+
+      Content.get_paper(slug)
+    end
+
+    test "a persisted inline node outside the kernel is a labelled 422, not a 500", %{conn: conn} do
+      slug = "bpml-unprintable-inline-#{System.unique_integer([:positive])}"
+
+      with_blocks!(slug, [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [
+            %{"type" => "text", "value" => "run "},
+            %{"type" => "code", "value" => "mix test"}
+          ]
+        }
+      ])
+
+      assert %{"error" => err} =
+               conn
+               |> get("/papers/#{slug}/source", %{"format" => "bpml"})
+               |> json_response(422)
+
+      assert err["code"] == "bpml_unprintable"
+      assert err["message"] =~ ~s(inline node type "code")
+      assert err["message"] =~ "kind: inline"
+      assert err["hint"] =~ "format=json"
+
+      # the block truth is still readable — the refusal is about the VIEW
+      assert %{"source" => %{"kind" => "blocks"}} =
+               build_conn() |> get("/papers/#{slug}/source") |> json_response(200)
+    end
+
+    test "a table head cell with no printable text refuses instead of silently losing the cell",
+         %{conn: conn} do
+      slug = "bpml-unprintable-head-#{System.unique_integer([:positive])}"
+
+      with_blocks!(slug, [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "head" => [%{"content" => [%{"type" => "text", "value" => "Claim"}]}],
+          "rows" => [[[%{"type" => "text", "value" => "a"}]]]
+        }
+      ])
+
+      assert %{"error" => err} =
+               conn
+               |> get("/papers/#{slug}/source", %{"format" => "bpml"})
+               |> json_response(422)
+
+      assert err["code"] == "bpml_unprintable"
+      assert err["message"] =~ "kind: head_cell"
+    end
+
+    test "sync REFUSES an unprintable paper up front — the non-kernel block survives",
+         %{conn: conn} do
+      slug = "bpml-sync-destructive-#{System.unique_integer([:positive])}"
+
+      blocks = [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Kept."}]
+        },
+        %{"id" => "d1", "type" => "divider"}
+      ]
+
+      paper = with_blocks!(slug, blocks)
+      rev = to_string(get_in(paper.content, ["rev"]))
+
+      # exactly what a client could send: the kernel-only spelling of this paper
+      kernel_only = """
+      <paper slug="#{slug}" title="#{paper.title}">
+        <p id="p1">Kept and edited.</p>
+      </paper>
+      """
+
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => kernel_only, "baseRev" => rev})
+
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "bpml_unprintable"
+      assert err["message"] =~ ~s(block type "divider")
+      assert err["hint"] =~ "block ops"
+
+      # THE POINT: nothing was derived and nothing was applied — before the
+      # guard this returned 200 and deleted the divider.
+      after_paper = Content.get_paper(slug)
+      assert pc(after_paper, "blocks") == blocks
+      assert to_string(get_in(after_paper.content, ["rev"])) == rev
+    end
+
+    test "the canonical echo degrades to bpml:nil and keeps the rev anchor" do
+      slug = "bpml-echo-degrade-#{System.unique_integer([:positive])}"
+
+      paper =
+        with_blocks!(slug, [
+          %{
+            "id" => "p1",
+            "type" => "paragraph",
+            "content" => [%{"type" => "code", "value" => "unprintable"}]
+          }
+        ])
+
+      # A write that LANDED must not be reported as a failure: a 500 strands the
+      # client's rev anchor and a 422 lies about what happened.
+      assert {nil, refusal} = BarkparkWeb.BulldocsIngestController.canonical_echo(paper)
+      assert refusal =~ "kind: inline"
+
+      payload =
+        BarkparkWeb.BulldocsIngestController.maybe_mark_echo(
+          %{ok: true, slug: slug, rev: "7", op_count: 2, bpml: nil},
+          refusal
+        )
+
+      assert payload.ok == true
+      assert payload.rev == "7"
+      assert payload.bpml == nil
+      assert payload.bpml_unprintable == refusal
+      assert payload.hint =~ "anchor"
+    end
+
+    test "a printable paper's echo is unchanged — the rescue is narrow" do
+      slug = "bpml-echo-clean-#{System.unique_integer([:positive])}"
+
+      paper =
+        with_blocks!(slug, [%{"id" => "h1", "type" => "heading", "level" => 1, "text" => "H"}])
+
+      assert {bpml, nil} = BarkparkWeb.BulldocsIngestController.canonical_echo(paper)
+      assert bpml =~ "<h1 id=\"h1\">H</h1>"
+
+      payload = %{ok: true, bpml: bpml}
+      assert BarkparkWeb.BulldocsIngestController.maybe_mark_echo(payload, nil) == payload
     end
   end
 

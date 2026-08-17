@@ -16,13 +16,14 @@
 // tail SETTLES into server-computed PortableDoc blocks. Nothing rendered from
 // a delta outlives the turn that produced it.
 //
-// # Figure numbering — per-message reset (charter D10)
+// # Figure captions — the author's words, per message (charter D10)
 //
 // Each assistant reply is rendered as its OWN document (one pdrender.RenderDoc
-// call per message), so "Figure N." numbering resets per message. That is the
-// deliberate chat convention — a reply is a self-contained document, not a
-// page in one long paper — documented here so it reads as a decision, not an
-// accident inherited from RenderDoc's per-call counter seeding.
+// call per message) — a reply is a self-contained document, not a page in one
+// long paper. Figure captions therefore never drift between replies: pdrender
+// generates no numbering whatsoever (it emphasises an author-typed "Figure N."
+// lead and adds nothing, the same rule the web reader follows), so there is no
+// counter whose state could leak across messages.
 //
 // # Result-boundary settlement (charter D8/D15)
 //

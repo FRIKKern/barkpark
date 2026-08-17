@@ -551,9 +551,16 @@
  * Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the reader binds — never
  * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
  * §2 guards drift vs the reader). */
-.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
 .bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
 .bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
+/* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose column
+ * exactly like .bp-table (the reader's three breakout classes). Values byte-copied from
+ * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
+ * §2 guards drift — pe-w2-parity-widening). Keep BYTE-IDENTICAL with the root.html.heex
+ * copy. */
+.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
  * byte-identically to /papers. Keep byte-aligned with the root.html.heex copy. */
