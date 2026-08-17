@@ -668,8 +668,8 @@ func TestWhoamiInstanceTeamFallsBackToCloudTeam(t *testing.T) {
 // `bp doctor`, and leaks no bearer. A whoami that paid the 10s GET would blow the
 // deadline and trip the tripwire.
 func TestWhoamiCLIFreshnessIsNetworkFree(t *testing.T) {
-	withTempConfigHome(t)          // cold cache: nothing written yet
-	withCLIVersion(t, "1.14.0")    // non-dev, so only the cache could yield a reading
+	withTempConfigHome(t)       // cold cache: nothing written yet
+	withCLIVersion(t, "1.14.0") // non-dev, so only the cache could yield a reading
 
 	// Tripwire: whoami must never call the network release resolver.
 	t.Cleanup(swapVar(&onboardingLatestRelease, func() (string, error) {
