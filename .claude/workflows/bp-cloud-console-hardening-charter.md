@@ -3392,6 +3392,94 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-17 — wave 68 REVIEW — grade A, BOTH STRANDED PRs FOLDED IN: six round-1 slices, all pushed with PRs open, one review fix
+
+**Paper:** `cloud-console-hardening-wave-68-2026-08-17` (debrief appended). **Decisions:** D828–D840
+(this PR, #11678). Entry written on the charter PR branch per the wave-67 precedent. Everything below
+re-verified by the single wave reviewer on `-r`/original branches off `origin/main` `4b5d802a1d`, plus a
+UNION probe (all six slices octopus-merged onto main): node gates, smoke 111/111, census 61-site pin,
+design check, and the merged Elixir targeted set 154/0 — the slices cohere, `strict:false` holds.
+
+**LANDED (six PRs, all open, gates re-run green on each final branch):**
+
+- S1 `cch-w66-bl-the-delete-route-lies-in-its-own-two-hundred-and-its-five-oh-two` → **#11706**, branch
+  `loop-epic/the-delete-route-s-untested-arms-502-tim-0-r`. D814 Option A ships: teardown-LOCAL
+  `teardown_unreachable/2` + `teardown_refusal/2` in `deploy.ex` — a DELETE receipt can no longer say
+  "deploy" or "nothing to roll back"; verb-free clauses delegate so the D741 `identity_refused` copy and
+  DeployLedger's "is unreachable" key stay byte-shared. The three never-driven arms get tests that can
+  lose: the 502 (all four reachable `{:error, reason}`s, exact details), the FK-regression 500 (NEW
+  `async: false` `router_sites_destroy_failures_test.exs`, in-sandbox DDL flip + crash-envelope idiom),
+  and the REAL `BoxRelay.HTTP` 30.7s timeout-as-422 (`:slow`, transport faked at
+  `StudioLinkFakeHttpClient`). `site_cascade_census_test.exs` now asserts FK TARGETS by
+  confrelid/confkey value (the #11553 reviewer ask, paid). Review fix: `mix format` reflow of two test
+  files. Gate 118/0.
+- S2 `cch-w67-s4-the-console-stops-asserting-absence-over-failure-in-seven-more-places` → **#11707**,
+  branch `loop-epic/twelve-degrade-to-empty-reads-become-hon-1`. All TWELVE degrade-to-empty GET reads
+  (D832 — the briefed seven were a floor) split failure from absence, including the state-destroying one
+  (`showAuthInviteBanner` no longer burns the parked invite token on a 500) and the cached-forever one
+  (`loadNewTemplates`). `__unknown_census.mjs` widened in place to a 61-row per-GET-call-site census
+  (47 guarded · 12 sanctioned · 2 degrades) with ADD/REMOVE/DECAY arms and a regex-literal-aware brace
+  walk that REFUSES (exit 2) on overlapping extents; registered as the fifth direct-run census step in
+  `console-harness.yml`. Reviewer re-proved DECAY can lose live. NOTE: Decide's "misattributes 5 of 61"
+  did not reproduce — the walker WAS broken (esc()'s `/"/g` corrupted ~30 extents) but innermost-wins
+  rescued every attribution; recorded in the slice commit body. Gate 1075/1075 + census OK.
+- S3 `cch-w68-s3-a-custom-host-cannot-steal-a-hostname-another-row-serves` → **#11708**, branch
+  `loop-epic/a-custom-host-cannot-steal-a-hostname-an-2`. The #10944 re-land (D833), shape as law: two
+  explicit heads `/1 → /2`, CONDITIONAL `exclude_self_claim` (nil adds NO predicate — the unconditional
+  form is `id != NULL`, name-steal-permissive), the PR's triple-`regexp_replace` fragment byte-for-byte,
+  `normalize_claim_host/1` twin, all six `claim_leg/2` legs byte-untouched, census co-edited with
+  MUTATION 3 re-armed. **HIGH-FLIP-RISK: TENANCY — the reviewer independently re-derived the judgment**
+  (claim_leg reads only the candidate row's own selected fields; removing the asker from the walk cannot
+  change any other row's verdict) **and an independent SECOND reviewer before merge is still owed —
+  manual lead dispatch.** Gate 38/0 targeted + FULL cloud suite 3625/0. After merge: close #10944 as
+  superseded naming #11708. Residual filed: `cch-w68-bl-claim-host-normaliser-twins-unguarded`.
+- S4a `cch-w68-s4a-emit-manifest-regions-keyed-by-artifact-not-path` → **#11709**, branch
+  `loop-epic/two-generated-regions-can-share-one-file-3`. The emit ledger keys by `${path}#${name}`
+  (D835): four key sites routed through exported `regionKey(u)`, 19 manifest keys migrated digest-
+  identical, fence proves two regions in one file attribute independently (mutation asymmetry recorded
+  honestly in the test header), `emit-manifest.json` added to doc-gates.yml both lists. Unblocks the
+  round-2 labels slice. Builder filed `cch-w68-s4a-followup-manifest-prunes-orphan-slots`. Gate PASS + 8/8.
+- S6 `cch-w67-followup-site-delete-button-wiring-unproven` → **#11710**, branch
+  `loop-epic/the-destroy-tier-s-wiring-is-proven-smok-4`. smoke's `rollback` expectation now DISPATCHES
+  all seven loadSite success-branch controls and asserts handlers > 0, five legacy needles re-asserted
+  first (the runner drops includes beside a check), `#site-load-retry` asserted ABSENT as the negative
+  control. Reviewer re-proved the mutation red live (dead `#site-delete` reds by name). One file,
+  PIN_TOTAL_SCENARIOS stays 111. Residual filed: `cch-w68-bl-smoke-rollback-fixture-shape-pin`.
+- S7 `cch-w40-s4-the-cli-reads-the-refusal-evidence-instead-of-printing-a-bare-slug` → **#11711**
+  (SUPERSEDES #10086), branch `loop-epic/10086-re-lands-on-its-one-import-hunk-an-5`. Mechanical rebase,
+  exactly D839's price: ONE conflict (client.go imports, union gofmt-sorted); reviewer verified the five
+  untouched files land BYTE-IDENTICAL to `pull/10086/head` and client.go carries only the PR's hunks
+  over main's drift. `CloudRefusal` + `evidence()`/`flattenDetails` + `RollbackError.Reason` land; the
+  teamless-403 → exit 1 ladder is a deliberate pinned contract change. D839's priced risk CLEARED: full
+  `go test ./...` 29 packages, 0 FAIL; `gofmt -l` clean. The PR's two authored commits kept (faithful
+  rebase of fleet-authored history). After merge: close #10086 naming #11711; the plane half of
+  `reason:"no_team"` still lives on unmerged #9956 — the decoder is correct but untriggered until then.
+
+**STALLED:** nothing. All six round-1 slices built, reviewed, pushed, PR'd.
+
+**LEDGER:** all six slice tasks `in_progress` with only merge-gated criteria open (S6 has NO merge-gated
+row — the lead should close it on merge with the compare evidence). Referent
+`cloud-console-hardening-epic-wave-68-log` closed by Review (paperwork done; its own merge-gated
+criterion rides the charter PR). Law 0 this wave: closes 3 / new rows 3 at open (D840), plus 2 reviewer
+residual rows filed (both instrument-adjacent guards, priority 2–3) against −2 more on merge (#10944,
+#10086 both close) — net still ≤ 0 once the wave merges.
+
+**WHAT WAVE 69 MUST TAKE (dispatch order is law — sequenced rounds):**
+
+1. Merge round 1 first: #11706, #11707 (S2 — unblocks BOTH round-2 slices), #11708 (after the
+   independent second tenancy review), #11709 (unblocks the labels slice), #11710, #11711, plus this
+   charter PR #11678. Budget ~30 min per merge (D830 serialized Elixir gate). Charter-ledger conflicts:
+   union, this file's order is newest-first.
+2. THEN `cch-w68-s5-the-recheck-and-settle-tier-stop-inventing-outcomes` (round 2, needs S2's app.js +
+   __app.test.mjs on main): recheckSiteDeleted's five-fixtures-wrongly-succeed defect (D834), the
+   `navigate: !!onSite` re-ruling with the lateOk pin flipped BY NAME, and the Re-check loop bound.
+3. THEN `cch-w65-bl-action-labels-and-actions-are-uncoupled` (round 2, needs S4a's re-keyed manifest AND
+   S2's app.js): design/audit-actions.json as the SOLE table; the lead dedupes the four overlapping
+   vocabulary rows on merge.
+4. Post-merge lead duties, by name: close #10944 (superseded by #11708) and #10086 (superseded by
+   #11711) — each is −1 on the stale-verdict-watch population (19 → 17); close S6's task; stamp every
+   merge-gated criterion from the real compare, `identical` phrased per D829.
+
 ### 2026-08-10 — wave 67 REVIEW — grade A−, THE CROWN LANDED: the console can delete a site. Two round-1 slices, both pushed with PRs open, three review fixes
 
 **Paper:** `cloud-console-hardening-wave-67-2026-08-10` (debrief appended). **Decisions:** D811–D827
