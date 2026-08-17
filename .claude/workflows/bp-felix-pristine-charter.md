@@ -2509,6 +2509,26 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
 
 ## Wave log
 
+### Wave 2026-08-17 — Wave 26 BUILT + REVIEWED, grade A. "Six Green, One Caught."
+
+All six round-1 slices built, gates re-run green on the reviewer's final state, pushed with PRs: S1
+dataset-slug guard, underscore-safe, supersedes #11853 (#12037, 60/0); S3 SSRF DNS-rebinding TOCTOU pin
+with the Mint `:hostname` contract independently re-derived from deps (#12038, 19/0 + webhooks 111/0);
+blobstore read-seam traversal guard (#12039, 41/0, **reviewer fixed** the builder-flagged leading-dash
+regression on the `-r` branch — `unique_filename/1` genuinely emits `-<hex>.ext` for empty-slug
+basenames, so `@blob_segment`'s leading class is now `[A-Za-z0-9-]`; leading `.`/`_` stay refused);
+chatlive two-seam honesty (#12040, 295/0 — 3 local failures proved ENVIRONMENTAL: a stale committed
+chat_sessions row in the shared barkpark_test DB, clean partition green, row deleted); authority-lock
+lock-wait proofs for the two remaining sites (#12041, 77/0, test-only); release_capture 124/125 bounds
+(#12042, 3/0, test-only — pins branch EFFECT via wide wall-clock separation since the exit codes are
+private; the 126 rescue branch stays uncovered). Ledger spotless: every slice `in_progress` with
+evidence stamped mid-claim, merge-gated criteria left for the lead, S2 (task-966de76b9dd92783,
+pg_catalog broadening) honestly open for round 2 AFTER S1 merges and #11853 closes (D165(iv)
+auto-re-fence). HIGH-FLIP-RISK second reviews owed before merging S1 and S3 (named in both PR bodies).
+Next wave: lead merges the six (S1 first), closes #11853, dispatches S2, then considers the
+never-swept core (access/, telemetry/, connectors/ interior) and the Session-GenServer
+sandbox-escape leak the chatlive gate exposed. Grade: A.
+
 ### Wave 2026-08-17 — Wave 26 DECIDED (building). "The Seal Is Executed, Not Declared."
 
 Ratified D173–D178. Premise smoke refuted the wish's core claim — wave 25 was NOT fully landed: #11853 was OPEN
