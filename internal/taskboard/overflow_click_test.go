@@ -46,8 +46,8 @@ func TestWideBoardOverflowMarkerClickStepsCursor(t *testing.T) {
 	base := func() Model {
 		m := composeFixture()
 		m.width, m.height, m.wide = 120, 10, true // short pane ⇒ the 7-row spine overflows
-		m.ui.Cursor = 2                            // a mid-spine row so slideTop holds top=1
-		m.ui.SpineScroll = 1                       // window top 1 ⇒ ↑ above AND ↓ below both show
+		m.ui.Cursor = 2                           // a mid-spine row so slideTop holds top=1
+		m.ui.SpineScroll = 1                      // window top 1 ⇒ ↑ above AND ↓ below both show
 		return m
 	}
 	m := base()
@@ -252,8 +252,8 @@ func TestWideReadingOverflowMarkerClickFreeScrolls(t *testing.T) {
 }
 
 // splitLines / joinLines / lineAt keep the marker-row assertions terse.
-func splitLines(s string) []string  { return strings.Split(s, "\n") }
-func joinLines(ls []string) string  { return strings.Join(ls, "\n") }
+func splitLines(s string) []string { return strings.Split(s, "\n") }
+func joinLines(ls []string) string { return strings.Join(ls, "\n") }
 func lineAt(lines []string, i int) string {
 	if i < 0 || i >= len(lines) {
 		return "<out of range>"
