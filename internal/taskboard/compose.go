@@ -635,6 +635,18 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 		}
 		return m, nil // the press acted; the release is not an input of its own
 	}
+	// Footer-verb clicks are hit-tested FIRST — the ONE wide press that must
+	// survive the pendingClose clear below (mirror narrow program.go's verb-first
+	// early-out): a two-step x arm/fire lives in that guard, so a verb click routes
+	// through clickFooterVerb (which owns the x-exception) before anything disarms
+	// it (charter D111). Genuine chrome/pane clicks miss every span, fall through,
+	// and keep the documented clear.
+	if ev.Button == tea.MouseButtonLeft && ev.Action == tea.MouseActionPress {
+		if verb, ok := m.footerVerbAt(ev.X, ev.Y); ok {
+			nm, cmd := m.clickFooterVerb(verb)
+			return nm.(Model), cmd
+		}
+	}
 	if cx < 0 || cy < 0 {
 		return m, nil
 	}
@@ -647,9 +659,9 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	if pl >= inner {
 		return m, nil
 	}
-	// Every press/wheel that reaches a pane is non-x input — exactly like the
-	// narrow reducer, it clears the transient strip and disarms the close guard
-	// (wide exposes no footer-verb click targets, so there is no x-exception).
+	// Every press/wheel that reaches HERE is non-verb input — footer-verb clicks
+	// (the sole x-exception) were already routed above — so exactly like the narrow
+	// reducer it clears the transient strip and disarms the close guard.
 	m.pendingClose = ""
 	m.ui.Strip = ActionStrip{}
 	// X: pure threshold over the assembled row.
@@ -702,8 +714,17 @@ func (m Model) wideMouseMotion(cx, cy, innerW, inner int, now time.Time) (Model,
 	case cx >= boardW+paneGutter2 && cy >= 0 && cy < inner:
 		stop = m.rightPaneStopAt(cy, innerW, inner, now)
 	}
+	// The board footer's verbs tint on hover exactly as narrow does (charter D111 /
+	// D96): footerVerbAt resolves the same span geometry the click router uses, and
+	// the verb rides queueHover into HoverFooterVerb, which renderFooterSegs paints
+	// with the D96 background tint (verbHoverStyle) — never an accent foreground.
+	gl, _, _ := m.wideGeom()
+	verb := rune(0)
+	if v, ok := m.footerVerbAt(cx+gl, cy+1); ok {
+		verb = v
+	}
 	m.ui, _ = setHoverStop(m.ui, stop)
-	return m.queueHover(target, 0)
+	return m.queueHover(target, verb)
 }
 
 // paneRow is a composeAt row's vertical class in wide mode, keyed on Y alone (the
