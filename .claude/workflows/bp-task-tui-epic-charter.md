@@ -2733,4 +2733,61 @@ task-tui-wave-21-settlement):**
 Gates from the builder's OWN worktree; spineRows stays the ONE producer; the -race baseline
 is certified clean on 94b12757a0 given CC=/usr/bin/clang — any red belongs to the slice.
 
-Next D-number: D120.
+### Wave 21 2026-08-17 (REVIEWED: all 3 round-1 slices green, two comment/format review fixes, pushed + PRs open)
+
+**Review facts:** every gate re-ran green on the final heads. Slice 1 (D115/D120): full
+package suite + `-race` + vet + build under CC=/usr/bin/clang; the union/dedup mechanics,
+NOW-completeness (window-absent claimed row rescued WITH full-depth detail), the
+all-three-required error contract and the denominator mutation control all pin real behavior
+(the mutation control reproduces the twin-doubled "3 in flight" + phantom "showing 2 of 4"
+lie before asserting the collapse). Slice 2 (D119/D121): marker helpers re-derive the paint's
+own window offsets (flattenSpine+slideTop on the board; readingWindowTop at both right-pane
+depths), resolver -1 contracts byte-untouched, TestHitMapWideNoOp still green, depth>0
+stop-first ordering honest (windowFrame paints the marker OVER a window-edge stop). Slice 3
+(D122): reviewer re-ran hermetic-proof.sh — 18/18 twice, transcripts AND reports
+byte-identical after timestamp/pid/tempdir normalization, and byte-identical to the
+builder's committed evidence frames (only report.md's date line churned; restored). TWO
+review fixes: (1) detail_data_test.go's TestFetchSnapshotFull doc comment still said "the
+SAME two calls / zero extra network" — un-staled for the third leg (slice 1 `-0-r`);
+(2) overflow_click_test.go was unformatted — gofmt'd (slice 2 `-1-r`).
+
+**Landed (review-verified, gates re-run green on final heads):**
+- **ttw19-bl-drafts-now-drop** → `loop-epic/the-now-band-and-the-in-flight-count-tel-0-r`.
+  D115/D120 exactly as chartered: REQUIRED third GET ?lifecycle_status=in_progress&limit=1000
+  (wg.Add(3), shared 30s ctx, decode in-goroutine, precedence list > prime > inflight, zero
+  live.go changes — timeouts auto-classify), pure fetch.go merge seam (mergeInflight LIST-wins
+  dedup + countInProgress over the union), ONLY the in_progress bucket collapses (done/open
+  stay prime-raw, commented against ttw20-bl-prime-counts-collapse-twins). composeSnapshot
+  frozen, program.go untouched.
+- **ttw20-wide-overflow-marker-clicks** → `loop-epic/the-wide-panes-overflow-markers-answer-c-1-r`.
+  D119/D121: router special-casing only, three call sites (boardPaneMouse → moveCursor ∓1;
+  depth-0 rightPaneMouse marker → scrollPreview, the booby-trap defused; depth>0 → freeScroll
+  after rightPaneStopAt wins). New wideBoardMarkerAt / rightPaneMarkerAt mirror the paint's
+  producers so resolution and paint cannot drift; counted-vs-countless glyph split asserted.
+- **ttw21-hermetic-drive** → `loop-epic/the-drive-harness-goes-hermetic-fixture--2` (no
+  review fixes — original head IS final). D122 in the LIVE-pinned shape: stdlib fixture
+  (11-doc corpus, list + prime + held-open SSE welcome/keepalive, D115 route served, export
+  DELIBERATELY absent as a polling tripwire, refuse-empty corpus fence), DRIVE_MODE=hermetic|live
+  split (18 churn-independent asserts hermetic w/ XDG redirect + literal '● live' asserted at
+  boot AND run end; selection-identity asserts fenced live), evidence-hermetic/ split,
+  hermetic-proof.sh empty-diff determinism proof. Zero Go-tree edits — fence held.
+
+**Ledger:** all three slice tasks honestly in_progress, criteria evidence-stamped mid-claim,
+only the lead-owned merge criterion open; W21 backlog rows (ttw21-bl-cache-key-dataset,
+ttw21-bl-spec-s0-glyph-prose) filed open. Zero ledger fixes needed — second consecutive
+clean board. Grade: A (commentary in wave paper task-tui-wave-21-settlement).
+
+**Next wave (dispatch order):** (1) LEAD merges the three round-1 PRs (file-disjoint by
+construction; slice 1 final is `-0-r`, slice 2 final is `-1-r`, slice 3 final is the original
+`-2` branch) and closes each merge criterion; hermetic evidence report.md churns its date
+line on re-runs by design. (2) The api/-fenced twin fix **ttw20-bl-prime-counts-collapse-twins**
+is now the highest-value open account — until it lands, summedLifecycleCounts (showing-N-of-M's
+M and progressPct's denominator) stays twin-inflated in its done/open terms; it is OUTSIDE
+the internal/ fence, so it needs its own wave or a lead one-off. (3) Candidate promotion:
+hermetic-ize the G2/G3-class identity asserts — deterministic against the fixed corpus, the
+builder deliberately left them live-mode per the brief's cut; a small pure-bash slice.
+(4) ttw21-bl-cache-key-dataset (cacheKey omits Config.Dataset) is the best small Go slice.
+(5) ttw21-bl-spec-s0-glyph-prose is a cosmetic docs edit outside internal/. (6) find-jump
+stays CONSIDERING — the taste-signal gate stands; do not promote without user signal.
+
+Next D-number: D124.
