@@ -18488,6 +18488,14 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     malformed_request: "We couldn't read that request — reload the page and try again.",
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",
     request_too_large: "That's too large for us to accept. Try a smaller value or file.",
+    // cch-w72-s2 (D871) — the five new curated readers, pinned in the same commit
+    // that added them to the ERRORS map. Deleting any one from app.js reds this
+    // sweep BY NAME (the slug falls through to "a caller fallback").
+    checkout_failed: "Couldn't start checkout — the payment provider didn't accept the request. Please try again.",
+    portal_failed: "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.",
+    no_subscription: "This team doesn't have a subscription yet — start one from the Billing panel.",
+    live_twin: "A live instance with that name already exists — decommission it first.",
+    role_too_high: "You can't grant a role higher than your own.",
   };
   for (const [slug, copy] of Object.entries(PINNED)) {
     assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
@@ -18518,6 +18526,9 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     "no_admin_token", "instance_unreachable", "network_error", "limit_reached",
     "billing_not_configured", "forbidden", "server_error", "malformed_body",
     "malformed_request", "unsupported_media_type", "request_too_large",
+    // cch-w72-s2 (D871) — the five new curated readers join the ban sweep in the
+    // same commit that registered them; each must stay free of a support-channel.
+    "checkout_failed", "portal_failed", "no_subscription", "live_twin", "role_too_high",
   ];
 
   // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
@@ -21543,4 +21554,68 @@ test("cch-w62 (D855): the rung relays only a non-empty STRING detail", () => {
   // And the two rungs compose: a NESTED allowlisted slug still relays.
   assert.equal(hooks.friendly({ error: { code: "nothing_to_update" }, detail: "nothing to update" }, "fb"),
     "nothing to update");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w72-s2 (charter D871) — FIVE UNREAD REFUSALS GAIN CURATED CONSOLE SENTENCES,
+// AND THE SINGULAR-DETAIL FENCE ADMITS ITS FOURTH SLUG.
+//
+// (1) The billing trio + live_twin + role_too_high are typed wire codes the plane
+// measures that had no console reader (bl-124 census). Each now names its state,
+// and none relays the server's own reason string (the billing arms ship
+// `reason: inspect(...)` — a raw Elixir term, cch-w48-s2 class).
+test("cch-w72-s2: the five new refusals render their curated sentences through friendly()", () => {
+  assert.equal(hooks.friendly({ error: "checkout_failed" }, "fb"),
+    "Couldn't start checkout — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "portal_failed" }, "fb"),
+    "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "no_subscription" }, "fb"),
+    "This team doesn't have a subscription yet — start one from the Billing panel.");
+  assert.equal(hooks.friendly({ error: "live_twin" }, "fb"),
+    "A live instance with that name already exists — decommission it first.");
+  assert.equal(hooks.friendly({ error: "role_too_high" }, "fb"),
+    "You can't grant a role higher than your own.");
+});
+
+test("cch-w72-s2: the billing refusals NEVER relay the server's raw reason (cch-w48-s2 class)", () => {
+  // The server ships `reason: inspect(...)` — a raw Elixir term. The curated rung
+  // wins first in friendly(), so the term is structurally unreachable in copy.
+  const raw = '%Stripe.Error{code: :card_declined, message: "your card was declined"}';
+  assert.equal(hooks.friendly({ error: "checkout_failed", reason: raw }, "fb"),
+    "Couldn't start checkout — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "portal_failed", reason: raw }, "fb"),
+    "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.");
+});
+
+// (2) THE FENCE'S FOURTH SLUG. provisioning_in_progress relays its measured 409
+// detail verbatim — and gets NO ERRORS entry (THE SHADOW LAW): a curated entry
+// would win the earlier rung and silently disable this relay.
+test("cch-w72-s2: provisioning_in_progress is the fence's fourth slug — its detail relays verbatim", () => {
+  const detail = "This instance is still provisioning. Try removing it once it's up or has failed.";
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress", detail: detail }, "Please try again."),
+    detail);
+  // Without a detail, the slug keeps its pre-rung rendering: the caller's fallback.
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress" }, "Please try again."),
+    "Please try again.");
+});
+
+test("cch-w72-s2: THE SHADOW LAW — provisioning_in_progress has NO ERRORS entry", () => {
+  // If it had a curated ERRORS sentence, friendly() with no detail would return
+  // that sentence, not the caller's fallback — and the earlier curated rung would
+  // shadow the fence relay above. A bare slug returning the fallback proves the
+  // key is unregistered, so the fence is the ONLY thing that renders its state.
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress" }, "the caller's fallback"),
+    "the caller's fallback");
+  // The two rungs compose: a NESTED provisioning_in_progress still relays.
+  assert.equal(hooks.friendly({ error: { code: "provisioning_in_progress" }, detail: "still provisioning" }, "fb"),
+    "still provisioning");
+});
+
+test("cch-w72-s2: the fence's three original slugs still relay, and an unfenced detail-bearing slug drops to the fallback", () => {
+  // Fence semantics otherwise unchanged: the pre-existing three still relay…
+  assert.equal(hooks.friendly({ error: "barkpark_required", detail: "name the instance" }, "fb"), "name the instance");
+  assert.equal(hooks.friendly({ error: "deploy_ability_required", detail: "mint a deploy token" }, "fb"), "mint a deploy token");
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: "nothing to update" }, "fb"), "nothing to update");
+  // …and a detail-bearing slug OUTSIDE the allowlist still drops to the fallback.
+  assert.equal(hooks.friendly({ error: "some_other_slug", detail: "a raw upstream string" }, "fb"), "fb");
 });

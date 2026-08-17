@@ -248,7 +248,26 @@
     malformed_body: "We couldn't read that request — reload the page and try again.",
     malformed_request: "We couldn't read that request — reload the page and try again.",
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",
-    request_too_large: "That's too large for us to accept. Try a smaller value or file."
+    request_too_large: "That's too large for us to accept. Try a smaller value or file.",
+    // cch-w72-s2 (charter D871) — FIVE typed refusals the plane measures that had
+    // no console reader (bl-124 census: ~171 typed wire codes, ~57 console
+    // literals). Each names the state; NONE relays the server's own reason string.
+    // The billing trio (checkout_failed/portal_failed) are 422s on
+    // POST /v1/billing/checkout|portal read via friendly(r.data, generic) in
+    // openCheckout/openBillingPortal — the server ships `reason: inspect(...)`, a
+    // raw Elixir term that must NEVER reach copy (cch-w48-s2 class); the curated
+    // rung wins first in friendly(), so the raw reason is structurally unreachable.
+    checkout_failed: "Couldn't start checkout — the payment provider didn't accept the request. Please try again.",
+    portal_failed: "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.",
+    // no_subscription — the billing screens' 404 when no Stripe subscription exists.
+    no_subscription: "This team doesn't have a subscription yet — start one from the Billing panel.",
+    // live_twin — the resurrect 422 (resurrectOutcome -> friendly(d, generic));
+    // the honest-generic fallback dropped the shipped name, this names the state.
+    live_twin: "A live instance with that name already exists — decommission it first.",
+    // role_too_high — the invitation-create arm (router.ex:5450); its no-fallback
+    // fall-through rendered a humanized "role too high" slug. The curated rung
+    // precedes any fallback in friendly(), so this covers every reader.
+    role_too_high: "You can't grant a role higher than your own."
   };
   // cch-w35-s4 — THE ROLE SENTENCES, keyed by the server's own `required` label.
   // Auth.forbidden/2 (cloud/lib/barkpark_cloud/web/auth.ex) merges evidence AROUND
@@ -410,8 +429,16 @@
     // (content_binding_required/empty, no_build_source — they embed bp flags
     // and re-run lines) stay with their per-route arms and are NOT relayed
     // here.
+    // cch-w72-s2 (D855 -> D871) — provisioning_in_progress is the fence's FOURTH
+    // slug. Its 409 detail is measured, surface-neutral product copy ("This
+    // instance is still provisioning. Try removing it once it's up or has
+    // failed."), and its render path is already friendly(r.data, "Please try
+    // again.") in runDecommission. THE SHADOW LAW: it gets NO ERRORS entry on
+    // purpose — the curated rung above wins first and would silently disable this
+    // relay, so the specific measured sentence must reach the person through the
+    // fence, not a fixed console string.
     if ((key === "barkpark_required" || key === "deploy_ability_required" ||
-         key === "nothing_to_update") &&
+         key === "nothing_to_update" || key === "provisioning_in_progress") &&
         typeof data.detail === "string" && data.detail) {
       return data.detail;
     }
