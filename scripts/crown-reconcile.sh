@@ -247,15 +247,51 @@
 # run(s) with no job list, 0 row(s) with carried never measured` while exiting 2.
 # The reason for the silence must be inside the sentence that announces it.
 #
+# AN EMPTY WINDOW ON A VERIFIED CROWN IS A DEFERRAL, NOT A PAGE (charter D597).
+#
+# The empty-population arm used to exit 2 unconditionally, and rc 2 pages. A
+# repo that simply stops merging for a day empties the 24h window BY
+# CONSTRUCTION, so the reconciler reds every 6 hours forever: measured
+# 2026-08-15T18:28Z..08-17, EIGHT consecutive scheduled runs, every one "COULD
+# NOT VERIFY: the population was EMPTY", #11217 at 41 comments. An alarm that
+# pages on quiescence is the rc-4 lesson again — paging here is what mutes the
+# alarm for the one case that is not.
+#
+# So an empty window may read GREEN — as a NAMED deferral (QUIET WINDOW), with
+# its own ::warning, never as RECONCILED — and ONLY when ALL THREE hold:
+#
+#   (1) the serving-sha check RAN and VERIFIED that the sha the box is serving
+#       has its cp row — production runs a commit the record knows;
+#   (2) the re-ask list was PRESENT-EMPTY — read, and affirmatively owing
+#       nothing. A graced deferral still owed a row must NOT go green, and a
+#       list that is ABSENT or unread proves nothing;
+#   (3) ZERO ledger rows sit inside the window. Rows-exist-but-no-runs STAYS
+#       rc 2: a row with no run is an accusation source, not quiescence.
+#
+# Any OTHER silence still outranks quiescence: the only reason() the arm
+# tolerates is the reverse direction's own no-alibi refusal, which an empty
+# window fires by construction — and that refusal line is printed INSIDE the
+# deferral text, because quiescence-green must not imply the reverse direction
+# was checked.
+#
+# STATED RESIDUAL, not code: a repo quiet for 60 days trips GitHub's
+# scheduled-workflow auto-disable, and a quiescence-green run produces no
+# failure heartbeat that would notice the schedule going dark.
+#
 # EXIT CODES  0 = reconciled — every delivering run has its row, every row has its
-#                 run, and the serving sha is recorded
+#                 run, and the serving sha is recorded. ALSO 0: a QUIET WINDOW —
+#                 zero delivering runs, zero in-window rows, serving sha verified
+#                 recorded, re-ask list PRESENT-EMPTY — announced as a named
+#                 deferral with its own ::warning, never as RECONCILED
 #             1 = BEHIND or WRONG (or SERVING-UNRECORDED, or GRACED-UNRECORDED
 #                 — a sha an earlier run graced and nothing ever recorded), WITH
 #                 COUNTS
 #             2 = could not read, or the population was empty (including a window
 #                 whose every delivering run PREDATES the recorder) — a WARNING
 #                 that is never counted clean. A rate with no denominator is
-#                 refused.
+#                 refused. An empty population escapes to the QUIET WINDOW
+#                 deferral (rc 0) ONLY under the three conditions above;
+#                 anything short of all three stays here.
 #                 An ABSENT re-ask list is one of these conditions: a memory
 #                 that was destroyed cannot re-ask, so it is a named silence.
 #                 A DECLARED first run (CROWN_STATE_FIRST_RUN=1) is not.
@@ -890,6 +926,16 @@ RECONCILABLE=$((DELIVERING - PREDATES))
 WRONG=0
 UNCLASSIFIED=0
 ROWS_EXAMINED=0
+# The quiescence count, for the QUIET WINDOW arm below (charter D597). Distinct
+# from ROWS_EXAMINED on purpose: an in-window row seen down the no-alibi branch
+# was COUNTED but never CLASSIFIED — there is no alibi source to judge it
+# against — so it must never inflate the WRONG denominator.
+QUIET_ROWS=0
+QUIET_ROWS_READ=0
+# The refusal is a variable so the QUIET WINDOW arm can tolerate EXACTLY this
+# sentence and no other — a guard pinned to prose that could drift from the
+# reason() call would silently tolerate nothing, or everything.
+NOALIBI_REASON="no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
 : > "$WORK/wrong.txt"
 sort -u "$WORK/wide-shas.txt" > "$WORK/wide-shas-sorted.txt"
 sort -u "$WORK/wide-runs.txt" > "$WORK/wide-runs-sorted.txt"
@@ -898,7 +944,20 @@ if [ "$WIDE_SHAS" -eq 0 ]; then
   # Without a single delivering run in the widened window there is no ALIBI
   # source, and every row would be accused of being a ghost. That is the
   # comforting-direction mistake inverted — loud, but manufactured. Refuse.
-  reason "no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
+  reason "$NOALIBI_REASON"
+  # The QUIESCENCE question is narrower than the WRONG question and still needs
+  # an answer here: "do any rows sit inside the window at all?" needs no alibi
+  # source, only a count. A read that fails leaves QUIET_ROWS_READ=0, and the
+  # QUIET WINDOW arm below fails CLOSED on it — an uncounted window can never
+  # green.
+  if crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
+    QUIET_ROWS="$(jq --argjson cut "$CUTOFF_EPOCH" \
+      '[.deliveries[]
+        | select((.first_seen_at // "") != "")
+        | . + {at: (try (.first_seen_at | sub("\\.[0-9]+"; "") | sub("Z?$"; "Z") | fromdateiso8601) catch 0)}
+        | select(.at >= $cut)] | length' "$WORK/recent.json" 2>/dev/null)"
+    case "${QUIET_ROWS:-}" in ''|*[!0-9]*) QUIET_ROWS=0 ;; *) QUIET_ROWS_READ=1 ;; esac
+  fi
 elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
   jq --argjson cut "$CUTOFF_EPOCH" \
     '[.deliveries[]
@@ -907,6 +966,8 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
       | select(.at >= $cut)]' "$WORK/recent.json" > "$WORK/recent-window.json" 2>/dev/null
   if [ -s "$WORK/recent-window.json" ]; then
     ROWS_EXAMINED="$(jq 'length' "$WORK/recent-window.json")"
+    QUIET_ROWS="$ROWS_EXAMINED"
+    QUIET_ROWS_READ=1
     while IFS=' ' read -r sha carried run; do
       [ -n "$sha" ] || continue
       if [ "$carried" = "true" ]; then
@@ -941,6 +1002,11 @@ fi
 
 # ── SERVING: what the box says it is running, versus the crown ───────────────
 SERVING_RED=0
+# 1 ONLY when the serving check RAN end-to-end and the served sha HAS its cp
+# row. Condition (1) of the QUIET WINDOW arm (charter D597): a check that was
+# skipped, could not read, or found no row leaves this 0 — quiescence can never
+# be asserted over an unverified crown.
+SERVING_VERIFIED=0
 SERVING_SHA=""
 SERVING_SKEW=0
 SERVING_SKEW_AHEAD=0
@@ -1024,6 +1090,10 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
         else
           SERVING_RED=1
         fi
+      else
+        # The served sha has its cp row: the check ran and the crown answered
+        # for the exact commit production is running.
+        SERVING_VERIFIED=1
       fi
     else
       reason "the crown could not be asked about the serving sha — the serving check did NOT run"
@@ -1123,7 +1193,31 @@ if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$
 fi
 
 if [ "$DELIVERING" -eq 0 ]; then
+  # ── QUIET WINDOW (charter D597): an empty window on a VERIFIED crown ───────
+  # A repo that stops merging empties this window BY CONSTRUCTION, and rc 2
+  # here paged every 6 hours forever (8-run streak 2026-08-15..17, #11217 at 41
+  # comments). Quiescence reads green ONLY when all three hold: (1) the serving
+  # check verified the served sha has its cp row, (2) the re-ask list was
+  # PRESENT-EMPTY, (3) zero ledger rows sit inside the window. Any OTHER
+  # reason() than the reverse direction's structural no-alibi refusal is a real
+  # silence and still outranks quiescence — the refusal itself is unavoidable
+  # on an empty window and is repeated inside the deferral text below, because
+  # a green here must not imply the reverse direction was checked.
+  QUIET_OTHER_REASONS="$(grep -vxF "$NOALIBI_REASON" "$REASONS_FILE" 2>/dev/null | awk 'NF' | wc -l | tr -d ' ')"
+  if [ "$SERVING_VERIFIED" = "1" ] && [ "$STATE_STATE" = "PRESENT-EMPTY" ] && [ "$QUIET_ROWS_READ" = "1" ] && [ "$QUIET_ROWS" -eq 0 ] && [ "${QUIET_OTHER_REASONS:-1}" -eq 0 ]; then
+    say ""
+    say "QUIET WINDOW: ${SUCCESS_COUNT}${FLOOR} successful run(s) in the window and none of them delivered — and the crown is VERIFIED as far as an empty window allows: the serving sha ${SERVING_SHA} has its cp row, the re-ask list was PRESENT-EMPTY (nothing graced is still owed a row), and ZERO crown row(s) sit inside the window (nothing was delivered and nothing claims to have been). This is a NAMED DEFERRAL, not a reconciliation: the verdict over a real population is deferred to the next run whose window holds one."
+    say "  the reverse direction has no alibi source on an empty window and was NOT checked — quiescence-green does not imply the reverse direction was checked."
+    say "::warning::QUIET WINDOW — zero delivering deploy.yml runs in the last ${WINDOW_HOURS}h on a verified crown (serving sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows). A deferral, not a silence: paging here is what mutes the alarm for the one case that is not."
+    exit 0
+  fi
   say ""
+  if [ "$QUIET_ROWS_READ" = "1" ] && [ "$QUIET_ROWS" -gt 0 ]; then
+    # Rows-exist-but-no-runs is NOT quiescence and STAYS rc 2: a row claiming a
+    # delivery no run made is an accusation source, unjudgeable without an
+    # alibi population.
+    say "ROWS WITHOUT RUNS: ${QUIET_ROWS} crown row(s) sit inside the window while NO delivering run does — a row with no run is an accusation source, not quiescence, so this stays a warning."
+  fi
   say "COULD NOT VERIFY: the population was EMPTY — ${SUCCESS_COUNT}${FLOOR} successful run(s) in the window and none of them delivered. A rate with no denominator is refused, so this is a warning, not a green."
   exit 2
 fi
