@@ -144,8 +144,11 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
     end
 
     test "the whitelisted class emits on :article only — never on :email" do
-      article = Render.render_html(raw_box("bp-section--framed"), %{style: :article, doctype: false})
-      assert article == ~s(<div class="bp-section--framed" style="display:flex;flex-direction:column"></div>)
+      article =
+        Render.render_html(raw_box("bp-section--framed"), %{style: :article, doctype: false})
+
+      assert article ==
+               ~s(<div class="bp-section--framed" style="display:flex;flex-direction:column"></div>)
 
       email = Render.render_html(raw_box("bp-section--framed"), %{doctype: false})
       refute email =~ "bp-section--framed"
