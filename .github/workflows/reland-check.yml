@@ -10,7 +10,19 @@ name: reland-check
 # derived + a seed list) carry no signal and are excluded; a finding against a
 # task the PR's own task DEPENDS ON is suppressed (best-effort — needs a read
 # token to fetch edges; without one, dependency findings are shown, still
-# advisory). Ledger unreachable → no findings (never blocks on infra).
+# advisory).
+#
+# ADVISORY ≠ SILENT (arpss-w2, 2026-08-17). This job used to report "0 findings"
+# for three DIFFERENT realities: a clean scan, a 404 error envelope read as an
+# empty ledger (`curl -sS` has no `--fail`), and a 16%-of-the-corpus scan
+# (limit=1000, no offset walk, 6212 live tasks). The fetch now runs through
+# tooling/task-obsession/reland_fetch.py, which captures the HTTP status code,
+# offset-walks to exhaustion under a page cap, asks for ?count=true so `total` is
+# known, and prints a tri-state `status=ok|infra|skipped`. NOTHING here reads
+# `findings` without first reading `status`. `continue-on-error: true` stays —
+# every loud state is a ::warning/::notice plus an always() summary, NEVER an
+# ::error, because reverts and follow-ups legitimately re-touch landed files.
+# Mutation proof: bash tooling/task-obsession/reland_loudfail.test.sh.
 
 on:
   pull_request:
@@ -61,11 +73,48 @@ jobs:
           PR_TASK: ${{ steps.ref.outputs.task_id }}
         run: |
           set -uo pipefail
-          # Public query — no token needed to list task docs + their land digests.
-          if ! curl -sS -m 20 -o /tmp/tasks.json \
-              "${LEDGER_BASE%/}/v1/data/query/production/task?perspective=published&limit=1000"; then
-            echo "::notice title=Re-land check skipped::Ledger unreachable; not evaluating overlap (advisory)."
+          # The ledger read is anonymous-capable, but authenticate it anyway: the
+          # token is already in this step's env, and an authenticated read is the
+          # one that survives the task/paper visibility ruling either way.
+          fetch_out="$(python3 tooling/task-obsession/reland_fetch.py \
+            --base "$LEDGER_BASE" --out /tmp/tasks.json \
+            --limit 1000 --max-pages 20 --timeout 20 --token "${LEDGER_TOKEN:-}")"
+          printf '%s\n' "$fetch_out"
+          get() { printf '%s\n' "$fetch_out" | sed -n "s/^$1=//p" | head -1; }
+          status="$(get RELAND_STATUS)"; pages="$(get RELAND_PAGES)"
+          docs="$(get RELAND_DOCS)";     total="$(get RELAND_TOTAL)"
+          truncated="$(get RELAND_TRUNCATED)"; auth="$(get RELAND_AUTH)"
+          note="$(get RELAND_NOTE)"
+          {
+            echo "status=${status:-infra}"
+            echo "pages=${pages:-0}"
+            echo "docs=${docs:-0}"
+            echo "total=${total}"
+            echo "truncated=${truncated:-0}"
+            echo "auth=${auth:-anon}"
+            echo "note=${note}"
+          } >> "$GITHUB_OUTPUT"
+
+          # A fork PR gets no secrets, so the ledger was read anonymously: the
+          # scan is real but its COVERAGE is whatever an unauthenticated reader
+          # sees. Said BEFORE the status gates so a fork is never silent about it.
+          # Distinct from a rotated token, which 401s and lands in `infra` below.
+          if [ "$auth" = "anon" ]; then
+            echo "::notice title=Re-land check read the ledger ANONYMOUSLY::No BARKPARK_TASK_TOKEN (fork PRs get no secrets) — coverage is limited to publicly readable ledger rows, so this scan may be incomplete."
+          fi
+
+          # STATUS FIRST — a fetch that did not happen must never render as a
+          # clean scan. Loud, but still advisory: ::warning, never ::error.
+          if [ "$status" = "infra" ]; then
+            echo "::warning title=Re-land check DID NOT RUN::${note:-the ledger fetch failed}. This is NOT a clean scan — overlap was not evaluated (advisory, non-blocking)."
             echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$status" = "skipped" ]; then
+            echo "::notice title=Re-land check skipped::${note:-not evaluated}."
+            echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$truncated" = "1" ]; then
+            echo "::warning title=Re-land check scanned a PARTIAL ledger::walked ${pages} page(s) / ${docs} of ${total:-unknown} tasks — ${note:-page cap reached}. Findings below are incomplete (advisory)."
           fi
 
           # Best-effort dependency-edge suppression: needs a read token.
@@ -79,14 +128,42 @@ jobs:
             fi
           fi
 
-          args=(--files /tmp/changed.txt --tasks /tmp/tasks.json --out /tmp/findings.json)
+          args=(--files /tmp/changed.txt --tasks /tmp/tasks.json --out /tmp/findings.json --strict)
           [ -n "${PR_TASK:-}" ] && args+=(--pr-task "$PR_TASK")
-          python3 tooling/task-obsession/reland_check.py "${args[@]}" "${deps[@]}" 2>/tmp/reland.err || true
+          # `${deps[@]+…}` not `"${deps[@]}"`: an EMPTY array is an unbound
+          # variable under `set -u` on bash < 4.4, which aborts this whole step —
+          # and `continue-on-error` would render that abort as a green check with
+          # no findings written. Same silent-green class this job is fixing.
+          python3 tooling/task-obsession/reland_check.py \
+            "${args[@]}" ${deps[@]+"${deps[@]}"} 2>/tmp/reland.err || true
+          cat /tmp/reland.err
+          # Re-read STATUS from the check itself: `|| true` above means a crash
+          # would otherwise leave the fetch's `ok` standing over an empty result.
+          cstatus="$(sed -n 's/^RELAND_STATUS=//p' /tmp/reland.err | head -1)"
+          digests="$(sed -n 's/^RELAND_DIGESTS_SCANNED=//p' /tmp/reland.err | head -1)"
+          zero="$(sed -n 's/^RELAND_ZERO_DIGEST=//p' /tmp/reland.err | head -1)"
           n="$(sed -n 's/^RELAND_FINDINGS=//p' /tmp/reland.err | head -1)"
+          echo "digests=${digests:-0}" >> "$GITHUB_OUTPUT"
+          if [ -z "$cstatus" ]; then
+            echo "status=infra" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Re-land check DID NOT RUN::reland_check.py printed no status (it crashed). This is NOT a clean scan (advisory, non-blocking)."
+            echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$cstatus" != "ok" ]; then
+            echo "status=${cstatus}" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Re-land check DID NOT RUN::the fetched payload carried no task ledger. This is NOT a clean scan (advisory, non-blocking)."
+            echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$zero" = "1" ]; then
+            echo "::warning title=Re-land check has NO SIGNAL to read::scanned ${docs} task(s) and not one carries a content.landed digest, so 0 findings means 'nothing to compare against', not 'no overlap'. Tracked as arpss-reland-check-zero-landed-signal (advisory)."
+          fi
           echo "findings=${n:-0}" >> "$GITHUB_OUTPUT"
 
       - name: Post the advisory (non-blocking)
-        if: steps.check.outputs.findings != '0' && steps.check.outputs.findings != ''
+        # STATUS before FINDINGS: an infra/skipped run has no findings to post.
+        if: steps.check.outputs.status == 'ok' && steps.check.outputs.findings != '0' && steps.check.outputs.findings != ''
+        env:
+          AUTH: ${{ steps.check.outputs.auth }}
         run: |
           set -uo pipefail
           {
@@ -95,5 +172,55 @@ jobs:
             echo "This PR changes files that recently-closed tasks already landed. This is **advisory** — reverts and follow-ups legitimately touch the same files. If this is intentional, add a \`blocks\` dependency edge to the prior task to silence it."
             echo ""
             python3 -c 'import json; d=json.load(open("/tmp/findings.json")); [print("- task **%s** already landed: %s" % (f["task"], ", ".join("`%s`" % x for x in f["overlap"]))) for f in d["findings"]]'
+            if [ "${AUTH:-}" = "anon" ]; then
+              echo ""
+              echo "> **Read ANONYMOUSLY — this list may be incomplete.** \`BARKPARK_TASK_TOKEN\` was not available (fork PRs get no secrets), so only ledger rows visible to an unauthenticated reader were scanned. Re-run this check on a branch in the base repo for the full picture."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::warning title=Re-land advisory::${{ steps.check.outputs.findings }} recently-closed task(s) already landed files this PR changes. Advisory only — see the job summary."
+
+      - name: What this check actually did (always)
+        if: always()
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
+          PAGES: ${{ steps.check.outputs.pages }}
+          DOCS: ${{ steps.check.outputs.docs }}
+          TOTAL: ${{ steps.check.outputs.total }}
+          TRUNCATED: ${{ steps.check.outputs.truncated }}
+          DIGESTS: ${{ steps.check.outputs.digests }}
+          FINDINGS: ${{ steps.check.outputs.findings }}
+          AUTH: ${{ steps.check.outputs.auth }}
+          NOTE: ${{ steps.check.outputs.note }}
+        run: |
+          set -uo pipefail
+          # The honest states, spelled out: this job is advisory, so its green
+          # conclusion carries no information — this table is the signal.
+          case "${STATUS:-infra}" in
+            ok) verdict="scanned the ledger" ;;
+            infra) verdict="**DID NOT RUN** — this is not a clean scan" ;;
+            skipped) verdict="deliberately not evaluated" ;;
+            *) verdict="**unknown** (the check printed no status)" ;;
+          esac
+          {
+            echo "### Re-land check: ${verdict}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| status | \`${STATUS:-infra}\` |"
+            echo "| ledger pages walked | ${PAGES:-0} |"
+            echo "| tasks scanned | ${DOCS:-0}${TOTAL:+ of ${TOTAL}} |"
+            echo "| truncated | ${TRUNCATED:-0} |"
+            echo "| land digests found | ${DIGESTS:-0} |"
+            echo "| findings | ${FINDINGS:-0} |"
+            echo "| ledger read as | \`${AUTH:-anon}\` |"
+            echo "| changed files | $(wc -l < /tmp/changed.txt 2>/dev/null || echo '?') |"
+            [ -n "${NOTE:-}" ] && echo "| note | ${NOTE} |"
+            if [ "${DIGESTS:-0}" = "0" ] && [ "${STATUS:-}" = "ok" ] && [ "${DOCS:-0}" != "0" ]; then
+              echo ""
+              echo "> **0 findings here means \"nothing to compare against\"**, not \"no overlap\": no scanned task carries a \`content.landed\` digest. Root cause tracked as \`arpss-reland-check-zero-landed-signal\`."
+            fi
+            if [ "${AUTH:-}" = "anon" ]; then
+              echo ""
+              echo "> Read **anonymously** — \`BARKPARK_TASK_TOKEN\` was unavailable (fork PRs get no secrets), so coverage is whatever an unauthenticated reader can see."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
