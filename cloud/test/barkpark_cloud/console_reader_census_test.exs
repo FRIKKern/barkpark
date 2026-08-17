@@ -272,8 +272,10 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
   # ---------------------------------------------------------------------------
   @classified [
     # ------------------------------------------------------------------ deploy arm
-    # Round 2 (D874) deletes the deploy_not_started@deploy_static_site and
-    # instance_not_live rows when the curated entry + fence admission merge.
+    # Round 2 (D874, wave 74 cch-w72-bl) PAID: deploy_not_started (curated ERRORS
+    # entry, D879 copy) + instance_not_live (fifth fence slug) + no_content_binding
+    # (curated ERRORS entry, D878) gained readers — their four rows were deleted
+    # in the same diff, rot arm run red first.
     %{
       code: "artifact_conflict",
       site:
@@ -310,22 +312,6 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "(status-alone would then conflate two causes)."
     },
     %{
-      code: "deploy_not_started",
-      site: "router.ex deploy_static_site (POST /v1/sites/:id/deploy)",
-      reason:
-        "Console-reachable READER OWED: the Deploy button's own route, and the 503 " <>
-          "ships reason: inspect(reason) which the D855 fence rightly refuses to relay. " <>
-          "Round 2 (D874) ships the curated ERRORS entry and DELETES this row."
-    },
-    %{
-      code: "deploy_not_started",
-      site: "router.ex start_prebuilt_deploy",
-      reason:
-        "CLI-only twin of the console emit: the prebuilt artifact chain's start step, " <>
-          "zero app.js callers (w73 deploy-twin-check). The round-2 reader will read " <>
-          "this site's code too — the rot arm deletes BOTH rows in that diff."
-    },
-    %{
       code: "deployment_not_queued",
       site:
         "router.ex upload_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
@@ -342,28 +328,12 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "callers of the artifact route. Flip: a console artifact upload ships."
     },
     %{
-      code: "instance_not_live",
-      site: "router.ex deploy_static_site (POST /v1/sites/:id/deploy)",
-      reason:
-        "Member-reachable READER OWED: single emit site on the Deploy button's route, " <>
-          "422 with a static surface-neutral detail. Round 2 (D874) admits it as the " <>
-          "singular-detail fence's fifth slug — NO ERRORS entry — and DELETES this row."
-    },
-    %{
       code: "invalid_cursor",
       site: "router.ex GET /v1/sites/:id/deployments",
       reason:
         "Guard-shielded from the console: app.js requests the deployments list without " <>
           "a cursor param, so only a hand-built or CLI/PAT request can send a bad one. " <>
           "Flip: console keyset pagination for deployments ships."
-    },
-    %{
-      code: "no_content_binding",
-      site: "router.ex deploy_static_site (POST /v1/sites/:id/deploy)",
-      reason:
-        "Console-reachable, fallback-covered: deploying a site with no content binding " <>
-          "renders the deploy caller's designed failure copy via friendly()'s fallback " <>
-          "argument — honest but unspecific. Flip: a wave rules per-slug copy owed."
     },
     %{
       code: "not_prebuilt",
@@ -377,17 +347,20 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "prebuilt_not_enabled",
       site: "router.ex deploy_static_site (POST /v1/sites/:id/deploy)",
       reason:
-        "Console-reachable, fallback-covered: a deploy that resolves to the prebuilt " <>
-          "path on a site where the capability is off renders the deploy caller's " <>
-          "fallback copy. Flip: a wave measures the sentence and rules curated copy owed."
+        "CLI-only (relabeled D878, wave 74): the arm keys on request-body `source`, " <>
+          "and NO console deploy caller sends one — runDeploy ships {git_ref}, " <>
+          "createAndDeploy ships {} — so the default box-build never resolves to " <>
+          "prebuilt from the console. Flip: a console UI that starts sending source."
     },
     %{
       code: "unknown_source",
       site: "router.ex deploy_static_site (POST /v1/sites/:id/deploy)",
       reason:
-        "Console-reachable defensive arm: the site's deploy source column carries an " <>
-          "unrecognized value — data drift, not a user action; renders the deploy " <>
-          "caller's fallback copy. Flip: a new deploy source kind ships and is named."
+        "CLI-only (relabeled D878, wave 74): the arm keys on request-body `source` " <>
+          "(default \"box-build\" when absent, always in Registry.Deployment.sources()), " <>
+          "and NO console deploy caller sends one — runDeploy ships {git_ref}, " <>
+          "createAndDeploy ships {}. Only a CLI/PAT or hand-built request can carry an " <>
+          "unrecognized source. Flip: a console UI that starts sending source."
     },
     %{
       code: "upload_failed",

@@ -268,7 +268,30 @@
     // role_too_high — the invitation-create arm (router.ex:5450); its no-fallback
     // fall-through rendered a humanized "role too high" slug. The curated rung
     // precedes any fallback in friendly(), so this covers every reader.
-    role_too_high: "You can't grant a role higher than your own."
+    role_too_high: "You can't grant a role higher than your own.",
+    // cch-w72-bl (charter D878/D879) — the deploy arm's two curated cures. Both
+    // are read via friendly(r.data, …) in runDeploy/createAndDeploy; the curated
+    // rung wins first, so nothing else in either 4xx/5xx body can reach copy.
+    //
+    // deploy_not_started — the 503 from deploy_static_site (and its CLI prebuilt
+    // twin, start_prebuilt_deploy). The body ships `reason: inspect(reason)` — a
+    // raw Elixir term that must NEVER reach a person (cch-w48-s2 class) — and a
+    // `detail` whose console spelling says "Retry the deploy", which is a LIE at
+    // the CLI twin: settle_deployment_artifact answers a same-sha re-POST
+    // `200 already_uploaded` and builds nothing. D879 settles the copy with NO
+    // bare retry verb — "start a fresh deploy" is true at both emit sites
+    // (console: press Deploy again mints a new row; CLI: mint a new prebuilt
+    // deployment).
+    deploy_not_started: "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.",
+    // no_content_binding — the 422 from deploy_static_site on a site with no
+    // bootstrap_dataset (the Deploy button renders on CLI-created unbound sites:
+    // the console create form guards only its own creates). The state is
+    // PERMANENT until content is bound — the old fallback "Please try again."
+    // was a measured transience lie (D878) — and the wire detail is CLI-voiced
+    // ("--dataset …"), so the fence's CLI-voiced exclusion bars relaying it.
+    // The sentence states permanence + the bind remedy; no transience verb, no
+    // CLI incantation.
+    no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy."
   };
   // cch-w35-s4 — THE ROLE SENTENCES, keyed by the server's own `required` label.
   // Auth.forbidden/2 (cloud/lib/barkpark_cloud/web/auth.ex) merges evidence AROUND
@@ -438,8 +461,17 @@
     // purpose — the curated rung above wins first and would silently disable this
     // relay, so the specific measured sentence must reach the person through the
     // fence, not a fixed console string.
+    // cch-w72-bl (D855 -> D874) — instance_not_live is the fence's FIFTH slug.
+    // Single emit site (router.ex deploy_static_site, 422), a STATIC surface-
+    // neutral detail ("the instance hosting this site has no URL yet — wait for
+    // it to finish provisioning"), read via friendly(r.data, …) in runDeploy and
+    // createAndDeploy. The SHADOW LAW holds here too: NO ERRORS entry — and
+    // beware the near-twin key `not_live` ALREADY in ERRORS above; adding
+    // instance_not_live "for symmetry" would win the curated rung first and
+    // silently disable this relay.
     if ((key === "barkpark_required" || key === "deploy_ability_required" ||
-         key === "nothing_to_update" || key === "provisioning_in_progress") &&
+         key === "nothing_to_update" || key === "provisioning_in_progress" ||
+         key === "instance_not_live") &&
         typeof data.detail === "string" && data.detail) {
       return data.detail;
     }
