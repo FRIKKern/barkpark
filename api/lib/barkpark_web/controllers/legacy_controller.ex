@@ -29,11 +29,31 @@ defmodule BarkparkWeb.LegacyController do
       # /v1/data/query enforces, now closed on the legacy surface too.
       case forbidden_filter_field(filter_map, schema, caller_context) do
         nil ->
+          # DRAFTS-LIST CLAMP (api-read-path-security-sweep w3) — the LIST twin
+          # of the show/2 by-id clamp above. `list_documents` defaults to the
+          # `:raw` perspective (content/query.ex:57 — the identity apply at :166),
+          # so `drafts.` rows ARE in the result set. QueryController.index has
+          # always narrowed anon reads via `perspective: AnonPerspective.resolve`
+          # (query_controller.ex:66); this action passed no perspective, so the
+          # LIST arm had the same latent shape the show/2 clamp closed on the
+          # by-id arm. Pin an `anon_pinned?` caller to `:published` here too.
+          #
+          # `anon_pinned?`-SCOPED, never a blanket `:published`: read-tier draft
+          # LISTING is the legacy contract (legacy_crud_test pins an admin token
+          # seeing `drafts.lc-list-2`), so an unconditional clamp would break it —
+          # non-anon callers keep the `:raw` default. Latent today only because
+          # `pipeline :require_token` mounts Plugs.PublicRead, which 403s the one
+          # anon_pinned principal that can reach this route (a public-read token)
+          # two plugs upstream — so a future allowlist change cannot re-open the
+          # list arm alone while the show/2 arm stays clamped.
+          perspective = if AnonPerspective.anon_pinned?(conn), do: :published, else: :raw
+
           documents =
             Content.list_documents(
               type,
               @dataset,
-              [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
+              [perspective: perspective, filter_map: filter_map, limit: 10_000] ++
+                scope_opts(conn)
             )
 
           json(conn, %{
@@ -54,9 +74,11 @@ defmodule BarkparkWeb.LegacyController do
       # QueryController.show/2 has always carried (query_controller.ex:371),
       # absent here: this action passed the RAW id straight to get_document, so
       # a `drafts.` id was fetchable by any published-pinned principal. Latent
-      # today only because `pipeline :require_token` 403s the one anon_pinned
-      # principal that can reach this route (a public-read token) two plugs
-      # upstream — defense in depth, so a future mount/allowlist change cannot
+      # today only because `pipeline :require_token` mounts Plugs.PublicRead,
+      # which 403s the one anon_pinned principal that can reach this route (a
+      # public-read token) two plugs upstream — NOT RequireToken, which accepts
+      # any verified token (require_token.ex only 403s a share-token off its
+      # surface). Defense in depth, so a future mount/allowlist change cannot
       # re-open a drafts read here. Rejected as not-found BEFORE get_document,
       # the same 404 the action already returns for a missing id.
       #
