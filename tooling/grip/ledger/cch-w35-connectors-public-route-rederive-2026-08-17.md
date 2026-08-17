@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 800tok -->
+<!-- doc-tier: cold | canonical-for: cch-w35-connectors-public-route-rederive | budget: 800tok -->
 # Re-derivation: Connectors public route is ARMED (premise refuted) — W35
 
 Claim under test (digest contradiction A): "https://guerrilla.barkpark.cloud/connectors/* 404s on

@@ -41,13 +41,13 @@ ASSERT CMD "cd api && mix test" TIER ci
 
 // describeEnvelope is the -o json shape of `bp scaffy describe`.
 type describeEnvelope struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Direction   string         `json:"direction"`
-	Domain      string         `json:"domain"`
-	Tags        string         `json:"tags"`
-	Variables   []describeVar  `json:"variables"`
-	Ops         map[string]int `json:"ops"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Direction   string           `json:"direction"`
+	Domain      string           `json:"domain"`
+	Tags        string           `json:"tags"`
+	Variables   []describeVar    `json:"variables"`
+	Ops         map[string]int   `json:"ops"`
 	Asserts     []describeAssert `json:"asserts"`
 }
 

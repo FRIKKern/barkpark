@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 900tok -->
+<!-- doc-tier: cold | canonical-for: cch-w35-telegram-webhook-dead-union | budget: 900tok -->
 # Telegram mode:"webhook" is a dead union member — re-derivation recipe (wave 35)
 
 VERDICT: REMOVE is safe. No named consumer forces the wire-it path. In webhook
