@@ -78,4 +78,6 @@ nonzero on any non-MATCH**:
 
 It fails **loud** on any network error (unreachable host, non-200, bad JSON): a
 check that cannot reach the catalog exits nonzero, never a false green. Run it
-in seconds from any session, or wire it as an optional CI parity sweep.
+in seconds from any session; CI runs it as an ACTING post-merge gate
+(.github/workflows/scaffy-catalog-drift.yml, charter D100) that auto-seeds
+drift when BARKPARK_SEED_TOKEN exists and reds the suite hard otherwise.
