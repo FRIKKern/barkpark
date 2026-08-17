@@ -228,7 +228,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		stack:         []Frame{{Kind: FrameBoard, Title: "tasks"}},
 		papers:        map[string]PaperState{},
 		cacheDir:      cfg.CacheDir,
-		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project),
+		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset),
 		fetch:         FetchSnapshotFull,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
