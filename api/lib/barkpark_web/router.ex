@@ -60,6 +60,20 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    # Structural backstop for the public-read tier on the flat CycleFleet read
+    # (arpss-cycle-api-publicread-followup). The LIVE guard stays the controller
+    # seal `CycleFleetController.authorize_cycle/3` (cycle_fleet_controller.ex:412),
+    # which 403s a public-read token via `Plugs.PublicRead.public_read_token?/1`
+    # — ONE tier definition, shared. This mount closes the STRUCTURAL gap the
+    # seal cannot: a FUTURE flat read route added under `:cycle_api` would
+    # silently reopen the class, because the plug denies deny-by-default while a
+    # new controller action would have to re-derive the seal by hand. Mounted at
+    # the TAIL so `:api_token` (RequireToken) and `:current_workspace`
+    # (DeriveWorkspaceFromToken/AssignDefaultScope) are assigned before it runs.
+    # The `/v1/cycles/:epic/:wave` path is not in the plug allowlist, so a
+    # public-read token is denied with the plug canonical message; a read/write/
+    # admin token no-ops through it (`public_read_token?/1` is false).
+    plug(BarkparkWeb.Plugs.PublicRead)
   end
 
   # Grant-fold overlay for the FLAT `/v1/data` READ routes (airdrop-grants

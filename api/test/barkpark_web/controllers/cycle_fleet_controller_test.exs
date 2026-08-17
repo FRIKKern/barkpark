@@ -583,6 +583,21 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       allowed = build_conn() |> bearer(read) |> get(path) |> json_response(200)
       assert allowed["cycle_ledger"]["profile"] == "epic"
     end
+
+    # NON-VACUOUS mount proof (arpss-cycle-api-publicread-followup): the
+    # `code == "forbidden"` assertions above pass in BOTH states — the
+    # controller seal (`authorize_cycle/3`) AND the `Plugs.PublicRead` mount on
+    # `:cycle_api` each emit `forbidden`, so they cannot witness the mount. The
+    # mount's ONLY observable change is the FLAT-path 403 MESSAGE, which flips
+    # from the controller seal's "workspace access required" to the plug
+    # canonical string. Assert the FLAT path ONLY: the scoped mirror already
+    # rides `Plugs.PublicRead` (router.ex:187/:488) and its message never moves,
+    # so diffing it would look like the mount did nothing (a second vacuity
+    # trap). Unmount the plug from `:cycle_api` and EXACTLY this line reds.
+    flat_denied = build_conn() |> bearer(public_read) |> get(flat)
+
+    assert json_response(flat_denied, 403)["error"]["message"] ==
+             "public-read tokens may only read published public documents"
   end
 
   # The singleton arm above only pins `permissions == ["public-read"]`. A token
