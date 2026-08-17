@@ -2438,6 +2438,27 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
 
 ## Wave log
 
+### Wave 2026-08-17 — Wave 25 BUILT + REVIEWED, grade A. "Six for Six, Pushed."
+
+All six round-1 slices built, reviewed, gate-re-run on the reviewer's final state, and **pushed with PRs
+open** — #11852 S1 board cap, #11853 S2 dataset slug, #11855 S3 bundle guard, #11856 S4 OnixEdit events
+(-r: honest test comment + format), #11857 S5 mailer offload, #11858 S6 recorder cap (-r: format). Every
+guard was independently mutation-re-proven at review, not just re-read: S1 limit-drop reds only the cap
+test; S2 validate_format-drop reds exactly the 3 negative tests; S3 (HIGH-FLIP-RISK) guard-disabled imports
+the crafted users+schema_migrations bundle to completion and only the hostile test reds — 38 baseline tests
+untouched; S5 delivery-skip reds all 3 notifier tests; S6 cap-passthrough reds exactly the two persist-site
+tests. S2's degrade-to-nil premise and S5's 7/7 discard-census were re-derived from source, not trusted.
+Review fixes were minimal (two slices: one misleading test comment, mix format on three files) — the
+builders' trees were honest. Ledger audit clean: all six rows in_progress with evidence stamped mid-claim
+and only merge-gated criteria open. LEAD TO EXECUTE ON MERGE: the D164 batch-closes (each close naming its
+paying commit — read the row's verbatim text on the w24-s2 CSRF caveat first), close
+task-felix-w22-bl-recorder-bounds superseded when #11858 merges, dispatch a genuinely independent second
+reviewer on #11855 before merging it (flip-risk protocol), and eyeball S4's new :onixedit source tag (its
+events ARE webhook-dispatched — intended, but confirm OnixEdit writes may echo outward). Next wave: the
+still-live D164 remainder (readiness-sobelow-inline as the sole bounded-interop holdout,
+webhook-body-rightsize as its own behavior-changing wave, w14 sync-deadletter, the gr-bl rows when their
+fences lift) plus the two fresh backlog rows (scim-sso-provision-seam, github-plugin-read-doctrine).
+
 ### Wave 2026-08-17 — Wave 25 DECIDED (building). "The Ledger Pays for the Lens."
 
 Ratified D164–D172. Two products in one motion: an honest ledger (every open row re-verdicted against
