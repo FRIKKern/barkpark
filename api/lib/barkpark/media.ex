@@ -597,16 +597,27 @@ defmodule Barkpark.Media do
     end
   end
 
-  # A path is a safe server-blob path iff it is a non-empty relative path whose
-  # every `/`-segment matches @blob_segment (so `.`, `..`, an absolute leading
-  # `/`, a trailing `/`, and any `\`/null/space shape all fail closed).
-  defp valid_blob_path?(relative_path) do
+  @doc """
+  True iff `relative_path` is a safe server-blob path: a non-empty relative path
+  whose every `/`-segment matches `@blob_segment` (so `.`, `..`, an absolute
+  leading `/`, a trailing `/`, and any `\\`/null/space shape all fail closed).
+
+  Promoted from a private write-side check to a PUBLIC guard so the read/serve
+  seam can enforce the same invariant (`Barkpark.Media.Blobstore`'s
+  `serve_strategy`/`ensure_local`/`delete` reject a traversal-shaped `file.path`
+  before it reaches `send_file`/`File.rm`). See `put_blob/2` for the write seam.
+  """
+  @spec valid_blob_path?(term()) :: boolean()
+  def valid_blob_path?(relative_path) when is_binary(relative_path) do
     segments = String.split(relative_path, "/")
 
     relative_path != "" and
       not String.starts_with?(relative_path, "/") and
       Enum.all?(segments, &Regex.match?(@blob_segment, &1))
   end
+
+  # A non-binary path (e.g. nil) is never a safe blob path — fail closed.
+  def valid_blob_path?(_relative_path), do: false
 
   # Stamp tenancy scope (:workspace_id / :project_id) onto write attrs when the
   # caller supplied it via opts. Only non-nil keys are added, so an unscoped

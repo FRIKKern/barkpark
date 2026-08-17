@@ -38,6 +38,7 @@ defmodule Barkpark.MediaTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Media
+  alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
@@ -129,6 +130,66 @@ defmodule Barkpark.MediaTest do
     test "works for a nested path" do
       relative = "a/b/c/d.jpg"
       assert Media.file_path(relative) == Path.join(@upload_dir, relative)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # valid_blob_path?/1 + the Blobstore read/serve seam traversal guard
+  # (felix-w24-bl-blobstore-runtime-guard — scar-class defence-in-depth)
+  #
+  # `media_files.path` is typed server-generated + "never raw client input", but
+  # a workspace bundle import COPYs rows past the changeset (Blobstore.Local PATH
+  # PROVENANCE clause 2), so an admin bundle CAN plant `../../..`. The write-seam
+  # allowlist `Media.valid_blob_path?/1` is now enforced at the Blobstore
+  # dispatch verbs (`serve_strategy`/`ensure_local`/`delete`), so a traversal
+  # `file.path` fails closed BEFORE `send_file`/`File.rm`.
+  #
+  # MUTATION PROOF: `delete/1 skips File.rm` deletes an EXTERNAL sentinel iff the
+  # guard is removed — flip `safe_blob_path?/1` to always-true and it reds.
+  # ---------------------------------------------------------------------------
+
+  describe "valid_blob_path?/1" do
+    test "accepts a server-generated blob path" do
+      assert Media.valid_blob_path?("2026/06/photo-a1b2c3d4.png")
+    end
+
+    test "rejects traversal, absolute, empty, and non-binary shapes" do
+      refute Media.valid_blob_path?("../../../etc/passwd")
+      refute Media.valid_blob_path?("2026/../../secret")
+      refute Media.valid_blob_path?("/etc/passwd")
+      refute Media.valid_blob_path?("")
+      refute Media.valid_blob_path?(nil)
+    end
+  end
+
+  describe "Blobstore read/serve seam traversal guard" do
+    test "serve_strategy rejects a traversal path with the missing-blob shape" do
+      assert Blobstore.serve_strategy("../../../etc/passwd") == {:error, :not_found}
+    end
+
+    test "ensure_local rejects a traversal path with the missing-blob shape" do
+      assert Blobstore.ensure_local("../../../etc/passwd") == {:error, :not_found}
+    end
+
+    test "delete skips File.rm for a traversal path (mutation: reds if the guard is removed)" do
+      # A sentinel OUTSIDE the media root. The relative path from upload_dir to it
+      # is `../…` — the exact bundle-planted traversal shape. With the guard,
+      # Blobstore.delete never resolves it to File.rm, so the sentinel survives;
+      # remove the guard and File.rm(Path.join(upload_dir, "../…")) deletes it.
+      # A single-level `..` escape out of the media root — the exact
+      # bundle-planted shape. Its resolved location sits beside upload_dir.
+      traversal_rel = "../felix-blob-sentinel-#{System.unique_integer([:positive])}"
+      sentinel = Path.expand(Media.file_path(traversal_rel))
+      File.write!(sentinel, "do not delete me")
+      on_exit(fn -> File.rm(sentinel) end)
+
+      # Sanity: it is genuinely a traversal shape that resolves OUTSIDE the root,
+      # so the mutation (guard removed → File.rm) would truly delete it.
+      assert String.starts_with?(traversal_rel, "..")
+      refute String.starts_with?(sentinel, Path.expand(@upload_dir) <> "/")
+
+      assert Blobstore.delete(traversal_rel) == :ok
+      assert File.exists?(sentinel), "guard must reject the traversal path before File.rm"
     end
   end
 
