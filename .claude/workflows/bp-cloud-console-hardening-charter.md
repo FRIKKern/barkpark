@@ -3717,6 +3717,51 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-17 — wave 72 REVIEW — grade A, three round-1 slices built and reviewed; the false attach sentence dies, five unread codes gain curated readers, the fence admits its fourth slug, and the CLI renders the readable-types menu
+
+**Paper:** `cloud-console-hardening-wave-72-2026-08-17` (debrief appended). **Decisions:** D867–D872
+(this PR, #11891). Entry written on the charter PR branch per the wave-67/68/69/70/71 precedent.
+
+**LANDED (three round-1 branches, review-fixed where named):**
+
+- S1 `cch-w40-bl-attach-domain-422-collapses-five-server-slugs-into-one-false-sentence` →
+  `loop-epic/attachdomain-stops-lying-the-pure-copy-a-0-r`. `attachDomainFailureCopy(status, data)`
+  extracted pure (D870); the false "Only <name>.barkpark.cloud …" sentence is gone; per-slug truth
+  table pinned; `domain_not_pointed` relays expected_ip + observed via textContent. REVIEWER FIX
+  (the wave's one real bug): `pointed_at?(_host, nil, _opts)` answers `{:error, []}`, so the wire
+  CAN carry `expected_ip: null` and the copy arm rendered "Point an A record at null." — the remedy
+  clause now renders only on a real target string, pinned by a new assertion. Gate 1096/0.
+- S2 `cch-w72-s2-curated-readers-and-the-fence-admits-provisioning` →
+  `loop-epic/five-unread-refusals-gain-curated-senten-1-r`. Five D871 curated ERRORS entries
+  (checkout_failed, portal_failed, no_subscription, live_twin, role_too_high) — all five slugs
+  byte-verified against their router.ex emit sites at review; billing `reason: inspect(...)` is
+  structurally unreachable; both pinned sweeps (cch-w35-s4 / cch-w50-s2) extended in the same diff.
+  `provisioning_in_progress` is the fence's fourth slug with NO ERRORS entry (THE SHADOW LAW) — the
+  console-reachable emitter (DELETE /v1/barkparks/:id) ships the detail; the bare emitter is the
+  internal deprovision route, off-path. Reviewer fix: comment said the no_subscription arm is a 404;
+  both emitters are 422. Gate 1097/0.
+- S3 `cch-w70-bl-cli-drops-the-readable-types-menu-on-create` →
+  `loop-epic/bp-cloud-site-create-renders-the-readabl-2-r`. D863/D872 rider built: CloudRefusal
+  gains ReadableTypes + ReadableTypesRaw; `error.details.readable_types` rides the machine envelope
+  via new `useErrorDetailed` (nil details = byte-identical envelope); the human arm composes verdict
+  + console-grammar menu + the KEPT bp re-run line. Wire shape verified at review against
+  `maybe_put_menu`/`menu_row` and the byte-exact "Re-run naming a type" marker. ACCEPTED DEVIATION
+  (disclosed): the envelope bytes are re-serialized CLEANED rows (junk empty-type rows dropped, key
+  order fixed by struct tags), not the server's raw bytes — the comments claiming "raw bytes" were
+  corrected at review. Go build/vet/test green (internal/ dispatches no required CI context; run
+  locally with CC=/usr/bin/clang).
+
+**DEFERRED BY DESIGN (round 2):** `cch-w64-bl-124-typed-wire-codes-have-no-console-reader` — the
+census-as-guard ExUnit test — waits for S1+S2 to MERGE (their new ERRORS keys + fence row change the
+reader side) and for #11885 if it lands first. Dispatch order for the lead: merge round 1 (S1, S2,
+S3 in any order — file-disjoint), then dispatch the census slice briefed from origin/main AFTER the
+reader-side merges. HIGH-FLIP-RISK on that slice is the reachability classification: an independent
+second reviewer is warranted before its merge (E2).
+
+**Ledger:** clean — all three slice tasks in_progress with evidence stamped as-built, only the
+merge-gated "PR merged" rows open for the lead; the deferred census task honestly open/unclaimed.
+No ledger fixes were needed.
+
 ### 2026-08-17 — wave 71 REVIEW — grade A, three round-1 slices built, mutation-verified and pushed with PRs open; the refusal-pipeline arc's terminal half closes for create, and the last server chain that discarded a box's words is gone
 
 **Paper:** `cloud-console-hardening-wave-71-2026-08-17` (debrief appended). **Decisions:** D861–D866
