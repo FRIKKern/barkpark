@@ -23,7 +23,16 @@ defmodule Barkpark.Media do
   # `/` → empty first segment) is rejected, and an empty path is rejected. This
   # is a strict allowlist, NOT a blocklist, so an unforeseen escape shape fails
   # closed.
-  @blob_segment ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+  #
+  # A LEADING `-` is permitted: `unique_filename/1` genuinely emits `-<hex>.ext`
+  # when the client basename slugs to empty (CJK/emoji/space-only names), so
+  # those files exist on disk and in `media_files.path` — refusing them here
+  # would 404 the read/serve seam for legitimately stored blobs. A leading `-`
+  # has no path semantics (the joined path never starts with it), unlike a
+  # leading `.` (traversal/hidden — still refused) or a leading `_` (still
+  # refused, which keeps `_renditions/…` cache paths outside the Blobstore
+  # verbs by construction).
+  @blob_segment ~r/\A[A-Za-z0-9-][A-Za-z0-9._-]*\z/
 
   @doc """
   The media blob root.

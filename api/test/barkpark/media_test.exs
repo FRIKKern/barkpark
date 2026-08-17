@@ -160,6 +160,18 @@ defmodule Barkpark.MediaTest do
       refute Media.valid_blob_path?("")
       refute Media.valid_blob_path?(nil)
     end
+
+    # unique_filename/1 emits `-<hex>.ext` when the client basename slugs to
+    # empty (CJK/emoji/space-only names) — those blobs are legitimately stored,
+    # so the read/serve guard must accept them or serving them regresses to 404.
+    test "accepts the leading-dash filename unique_filename emits for empty slugs" do
+      assert Media.valid_blob_path?("2026/08/-a1b2c3d4.png")
+    end
+
+    test "still rejects leading-dot and leading-underscore segments" do
+      refute Media.valid_blob_path?("2026/08/.hidden")
+      refute Media.valid_blob_path?("_renditions/abc/file.png")
+    end
   end
 
   describe "Blobstore read/serve seam traversal guard" do
