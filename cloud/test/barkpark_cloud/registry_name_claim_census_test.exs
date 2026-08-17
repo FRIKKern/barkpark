@@ -61,7 +61,7 @@ defmodule BarkparkCloud.RegistryNameClaimCensus.Extract do
   end
 
   @doc """
-  The subscription statuses `provisioning_fqdn_claim/1` treats as LIVE, read
+  The subscription statuses `provisioning_fqdn_claim/2` treats as LIVE, read
   out of the one SQL fragment inside that function (scoped to the function so
   an unrelated `subscriptions` query elsewhere cannot answer for it).
   """
@@ -69,7 +69,7 @@ defmodule BarkparkCloud.RegistryNameClaimCensus.Extract do
   def live_subscription_statuses(source) when is_binary(source) do
     fragment =
       source
-      |> fun_ast(:provisioning_fqdn_claim, 1)
+      |> fun_ast(:provisioning_fqdn_claim, 2)
       |> binaries()
       |> Enum.find(&(&1 =~ "FROM subscriptions s"))
 
@@ -78,7 +78,7 @@ defmodule BarkparkCloud.RegistryNameClaimCensus.Extract do
         list |> String.split(",") |> Enum.map(&(&1 |> String.trim() |> String.trim("'")))
 
       _ ->
-        raise "no `s.status IN (…)` fragment inside provisioning_fqdn_claim/1"
+        raise "no `s.status IN (…)` fragment inside provisioning_fqdn_claim/2"
     end
   end
 
@@ -134,7 +134,7 @@ defmodule BarkparkCloud.RegistryNameClaimCensusTest do
   A name-claim leg cannot be deleted, renamed, dead-coded or gutted without
   something reporting it.
 
-  `Registry.provisioning_fqdn_claim/1` decides whether a hostname another
+  `Registry.provisioning_fqdn_claim/2` decides whether a hostname another
   tenant's box is still being dialled with can be handed to the next tenant —
   the predicate behind the live gyldendal cross-tenant transmission. Widening
   it is a one-line edit, and until this file nothing anywhere reported that its
@@ -174,7 +174,7 @@ defmodule BarkparkCloud.RegistryNameClaimCensusTest do
       `right: :free`. This is the proof that a source census alone is vacuous.
 
       MUTATION 3 (the guard gutted, no leg touched): drop `'past_due'` from the
-      `s.status IN ('active','past_due')` fragment in provisioning_fqdn_claim/1.
+      `s.status IN ('active','past_due')` fragment in provisioning_fqdn_claim/2.
       The live-status pin reds ALONE. The three constants are pinned in THREE
       SEPARATE tests on purpose: stacked in one body, the first failing assert
       shadows the other two, so a diff moving all three would report only one.

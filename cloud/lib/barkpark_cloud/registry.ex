@@ -53,13 +53,13 @@ defmodule BarkparkCloud.Registry do
 
   # A barkpark row that has NEVER phoned home (last_seen_at nil) and is older
   # than this stops holding a name claim against custom-host attachment — see
-  # provisioning_fqdn_taken?/1. Every live instance reports within a minute of
+  # provisioning_fqdn_taken?/2. Every live instance reports within a minute of
   # provisioning, so 7 days of silence-from-birth is unambiguous abandonment.
   #
   # SILENCE-FROM-BIRTH IS NOT ABANDONMENT ON ITS OWN. Measured 2026-08-08, this
   # clock alone was 0-for-3 on live data: all three rows it would have released
   # were on live subscriptions and one was still being polled every ~15 minutes
-  # with its decrypted admin bearer token. `provisioning_fqdn_claim/1` therefore
+  # with its decrypted admin bearer token. `provisioning_fqdn_claim/2` therefore
   # guards it with three further legs; this constant is only the LAST of six.
   @abandoned_claim_after_days 7
 
@@ -5450,8 +5450,9 @@ defmodule BarkparkCloud.Registry do
   that, the host must not already be claimed by ANY other surface that answers
   on our boxes — a Site domain, another barkpark's `custom_host` (exact, or as
   a PARENT domain owned by a different team: `sub.barkpark.jarl.no` is refused
-  while `barkpark.jarl.no` belongs to someone else), or a provisioning FQDN
-  (any barkpark's `url`, clean or suffixed) — each of those would silently
+  while `barkpark.jarl.no` belongs to someone else), or ANOTHER barkpark's
+  provisioning FQDN (its `url` host, compared NORMALISED — a url-held FQDN and
+  a custom_host are ONE namespace) — each of those would silently
   shadow or be shadowed by the attach. Taken → `{:error, :taken}`. The
   pre-check is check-then-write; the `barkparks_custom_host_unique_idx` unique
   constraint is the atomic backstop for a custom_host↔custom_host race
@@ -5482,14 +5483,14 @@ defmodule BarkparkCloud.Registry do
   # barkpark's custom_host (self is excluded — re-attaching your own host is an
   # idempotent no-op, not a conflict), a DIFFERENT team's custom_host as a
   # PARENT of `norm` (attach-domain V2: you may nest under your own attached
-  # domain, never under someone else's), or any barkpark's provisioning FQDN
-  # (`url` stores `https://<fqdn>` — including this barkpark's own primary
-  # FQDN, which never needs attaching).
+  # domain, never under someone else's), or ANOTHER barkpark's provisioning
+  # FQDN (`url` stores `https://<fqdn>`; self is excluded there too, so a row
+  # may attach the host it already answers on).
   defp custom_host_taken?(norm, %Barkpark{id: self_id, team_id: team_id}) do
     registered_site_domain?(norm) or
       other_barkpark_custom_host?(norm, self_id) or
       foreign_custom_host_suffix?(norm, team_id) or
-      provisioning_fqdn_taken?(norm)
+      provisioning_fqdn_taken?(norm, self_id)
   end
 
   # Does `norm` sit UNDER a custom_host owned by a different team? The stored
@@ -5520,8 +5521,20 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  defp provisioning_fqdn_taken?(norm) do
-    case provisioning_fqdn_claim(norm) do
+  # Does ANOTHER row already answer on `norm` as its provisioning FQDN? A
+  # url-held FQDN and a custom_host occupy ONE hostname namespace — the two
+  # partial unique indexes (`barkparks_url_unique_idx`,
+  # `barkparks_custom_host_unique_idx`) are DISJOINT and structurally cannot
+  # see across them, so this pre-check is the only guard there is.
+  #
+  # Self is EXCLUDED, exactly as `other_barkpark_custom_host?/2` does it: a row
+  # attaching the host it ALREADY serves (its own provisioning FQDN — e.g.
+  # re-attaching to re-run the DNS upsert after a repair) shadows nobody, so
+  # refusing it would only block a legitimate re-attach. Excluding self cannot
+  # widen the walk for anyone else: `claim_leg/2` is evaluated per OTHER row, so
+  # every leg that would have held the name against a stranger still holds it.
+  defp provisioning_fqdn_taken?(norm, self_id) do
+    case provisioning_fqdn_claim(norm, self_id) do
       :free ->
         false
 
@@ -5569,15 +5582,46 @@ defmodule BarkparkCloud.Registry do
 
   Widening the carve-out means deleting a leg here, and the refusal names which
   leg refused so that cost is visible before anyone does.
+
+  The stored `url` is matched NORMALISED, never string-equal to
+  `"https://" <> host`: scheme stripped, everything from the first character
+  outside the hostname alphabet cut (port, path, query, fragment), trailing dot
+  dropped, case folded. Matching one exact spelling of the origin reads only one
+  of the ways the column is written and lets every other spelling of the SAME
+  hostname through — that is the hole this walk closes.
+
+  `self_id` (the /2 head; `/1` passes `nil` and excludes nobody) drops the
+  asking row from the walk, so a row may attach the host it already answers on.
+  Two things this walk deliberately does NOT do, both pre-existing and owned
+  elsewhere: it adds no `custom_host IS NULL` gate, so a re-attach still
+  overwrites an existing `custom_host` and orphans that host's A record — the
+  class-level seam owned by
+  `cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`;
+  and a self-attach still runs the real persist-and-enqueue path
+  (`persist_and_enqueue_domain`, `web/router.ex`), so it enqueues an
+  attach_domain job and a DNS upsert — reasoned idempotent, not driven by a test
+  here.
   """
   @spec provisioning_fqdn_claim(String.t()) :: :free | {:held, atom(), String.t()}
-  def provisioning_fqdn_claim(host) when is_binary(host) do
-    url = "https://" <> host
+  def provisioning_fqdn_claim(host) when is_binary(host), do: provisioning_fqdn_claim(host, nil)
+
+  @spec provisioning_fqdn_claim(String.t(), Ecto.UUID.t() | nil) ::
+          :free | {:held, atom(), String.t()}
+  def provisioning_fqdn_claim(host, self_id) when is_binary(host) do
+    norm = normalize_claim_host(host)
     cutoff = DateTime.add(DateTime.utc_now(), -@abandoned_claim_after_days, :day)
     sample_cutoff = DateTime.add(DateTime.utc_now(), -@recent_sample_window_hours, :hour)
 
     Barkpark
-    |> where([b], b.url == ^url)
+    |> where(
+      [b],
+      fragment(
+        "regexp_replace(regexp_replace(regexp_replace(lower(?), '^[a-z][a-z0-9+.-]*://', ''), '[^a-z0-9.-].*$', ''), '\\.+$', '') = ?",
+        b.url,
+        ^norm
+      )
+    )
+    |> exclude_self_claim(self_id)
     |> select([b], %{
       id: b.id,
       last_seen_at: b.last_seen_at,
@@ -5598,6 +5642,27 @@ defmodule BarkparkCloud.Registry do
     })
     |> Repo.all()
     |> Enum.find_value(:free, &claim_leg(&1, cutoff))
+  end
+
+  # CONDITIONAL, and that is the whole point: an unconditional
+  # `b.id != ^self_id` compiles to SQL `id != NULL` when `self_id` is nil, which
+  # is never true — every row would drop out of the walk and EVERY name would
+  # read `:free` through the /1 head. No id predicate is the only safe nil case.
+  defp exclude_self_claim(query, nil), do: query
+  defp exclude_self_claim(query, self_id), do: where(query, [b], b.id != ^self_id)
+
+  # The url side of the comparison, in Elixir: the same shape the SQL fragment
+  # above produces for `b.url`. `normalize_domain/1` is NOT a drop-in — it only
+  # case-folds and trims a trailing dot, so a caller passing an origin
+  # (`https://host:4000/studio`) would compare a scheme-and-port-bearing string
+  # against a bare hostname and match nothing.
+  defp normalize_claim_host(host) when is_binary(host) do
+    host
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r{^[a-z][a-z0-9+.-]*://}, "")
+    |> String.replace(~r/[^a-z0-9.-].*$/, "")
+    |> String.trim_trailing(".")
   end
 
   # Which leg (if any) keeps THIS row's name claim? nil = this row is a
