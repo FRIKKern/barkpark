@@ -626,6 +626,46 @@ func TestSignup422SurfacesValidation(t *testing.T) {
 	}
 }
 
+// TestSignupPostCommitTransportDropRecoversHonestly: when POST /v1/auth/register
+// drops in transport (the connection fails with no HTTP status — the account may
+// already have been committed server-side), runSignupCloud must NOT print a bare
+// "signup failed: <transport>" that strands a possibly-created account. It takes
+// the recovery path: an honest receipt naming that the account may already exist
+// and advising `bp login` with the same credentials — and it writes NO config.
+// The transport failure is injected by closing the test server before the call,
+// so the client dials a dead address (a real transport error, never a
+// *cloudclient.CloudRefusal, which is exactly the seam runSignupCloud keys on).
+func TestSignupPostCommitTransportDropRecoversHonestly(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := srv.URL
+	srv.Close() // dialing deadURL now fails in transport — no HTTP status is ever returned
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "hunter2pw!", "--url", deadURL})
+	})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	// The recovery copy names the ambiguous state and advises login with the same
+	// creds — never the bare "signup failed:" line.
+	if bytes.Contains([]byte(stderr), []byte("signup failed:")) {
+		t.Fatalf("transport drop must NOT print the bare 'signup failed:' line:\n%s", stderr)
+	}
+	for _, want := range []string{"may already have been created", "bp login --email ada@x.com", "same password"} {
+		if !bytes.Contains([]byte(stderr), []byte(want)) {
+			t.Fatalf("recovery receipt missing %q:\n%s", want, stderr)
+		}
+	}
+	// Fail closed: no session is minted from an unconfirmed register.
+	cfg, _ := LoadConfig()
+	if cfg.CloudToken != "" {
+		t.Fatalf("a transport-dropped signup must not persist a token; got %q", cfg.CloudToken)
+	}
+}
+
 // TestSignupConfirmMismatchNeverCallsServer: the prompted password is typed twice
 // and the two differ → signup errors BEFORE any network call. We stand up a
 // counting server and assert it received ZERO requests.
