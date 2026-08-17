@@ -589,8 +589,11 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   # minted `["public-read", "read"]` is the SAME tier but missed the old
   # list-equality clause in `authorize_cycle/3` and read the flat ledger, because
   # `:cycle_api` mounts `DeriveWorkspaceFromToken` and not `Plugs.PublicRead`.
-  # Mutation-checked: reverting `authorize_cycle/3` to the singleton pattern
-  # makes the two mixed-shape 403 assertions below fail with a 200.
+  # Mutation-checked (review2-11697): reverting `authorize_cycle/3` to the
+  # singleton pattern reds ONLY the FLAT-path 403 assertion below (200 leak).
+  # The scoped path is defense-in-depth — `Plugs.PublicRead` on `:require_token`
+  # (router.ex, `allowed_route?` whitelist) already 403s a public-read tier
+  # there, so that arm stays green under the revert and is NOT the proof.
   test "a mixed-shape [public-read, read] token is refused exactly like the singleton", %{
     workspace: workspace,
     project: project,
