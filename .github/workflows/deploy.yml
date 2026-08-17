@@ -22,6 +22,12 @@ on:
       # instance, behind Caddy's /connectors path route). Without this, merging
       # bridge code would deploy NOTHING.
       - "connectors/**"
+      # The cloud-sandbox-runner source: instance-deploy.sh (line ~1047)
+      # installs the runner FROM scripts/connectors/ onto the content instance.
+      # A runner-only merge is byte-identical to prod today ONLY by piggyback on
+      # a co-triggering merge — without this line a runner/.mjs-only change lands
+      # on main but never reaches guerrilla (charter D275, W35).
+      - "scripts/connectors/**"
       # deploy-filter-exempt: editing THIS workflow deploys nothing by itself —
       # the next real code merge carries it. Marked explicitly so
       # scripts/check-deployyml-filters.sh can tell "deliberately targetless"
@@ -84,7 +90,11 @@ jobs:
           # NEITHER job regex — so a templates-only merge ran this workflow, deployed
           # NOTHING, and reported GREEN. check-deployyml-filters.sh below is the
           # tripwire that stops that pair of lists drifting again.
-          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
+          # scripts/connectors/ rides the content instance too: instance-deploy.sh
+          # installs the cloud-sandbox-runner from that tree (charter D275, W35).
+          # The prefix is exact — scripts/connectors, not scripts — so a change
+          # under scripts/other/ does not falsely flip instance=true.
+          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates|scripts/connectors)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
       - name: Assert every on.push.paths entry has a deploy target
         run: bash scripts/check-deployyml-filters.sh
       - name: Assert the control-plane smoke test can fail on a dead box
