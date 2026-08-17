@@ -507,10 +507,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end)
   end
 
+  # Search-path visibility, NOT nspname='public' (felix-w27): the unqualified
+  # COPY/INSERT below resolves `table` via search_path — pg_catalog implicit-
+  # FIRST — so this classifier must answer the same question COPY asks, or a
+  # pg_catalog relation (pg_authid) slips OUT of `assert_member_tables!/1`'s
+  # `foreign` set instead of being refused. `relkind = 'r'` is KEPT: a bare
+  # pg_table_is_visible would match views/indexes/sequences too.
+  # RESIDUAL (accepted): this resolves the search-path WINNER, so a public
+  # member shadowed by a same-named pg_catalog relation would classify as the
+  # catalog copy; no app table name collides with pg_catalog today.
   defp table_exists?(table) do
     Repo.query!(
-      "SELECT 1 FROM pg_class cl JOIN pg_namespace n ON n.oid = cl.relnamespace " <>
-        "WHERE n.nspname = 'public' AND cl.relname = $1 AND cl.relkind = 'r'",
+      "SELECT 1 FROM pg_class cl " <>
+        "WHERE cl.relname = $1 AND cl.relkind = 'r' " <>
+        "AND pg_catalog.pg_table_is_visible(cl.oid)",
       [table]
     ).rows != []
   end
