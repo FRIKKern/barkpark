@@ -78,6 +78,65 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 	}
 }
 
+// inflightFetchPath is the D120 third fetch: the SAME /v1/tasks route with the
+// server-side lifecycle filter, so the response is the same {ok,docs} envelope
+// decodeTaskListFull already decodes — and, crucially, the same twin-COLLAPSED
+// projection (api tasks/query.ex collapses lifecycle-divergent twins; prime's
+// lifecycle_counts do not, D115). The filter param is read optionally by the
+// controller — an older server ignores it and answers the full window, which
+// the union dedup (mergeInflight) degrades to window-truth, never garbage.
+const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=1000"
+
+// mergeInflight unions the in-flight fetch's rows into the window list, deduped
+// by doc_id with the LIST (window) copy winning on overlap — two copies of one
+// doc differ only by fetch timing, and the window copy is the one whose
+// lifecycle the rest of the corpus was fetched against. Union-only rows append
+// AFTER the window rows, before composeSnapshot: the ready overlay ignores
+// them (an in-flight row is never stored open|blocked), board.Now picks them
+// up via its unchanged predicate, and syncDetails embeds them with zero
+// special-casing. The detail indexes merge the same way (list wins) so a
+// rescued NOW row opens at full depth — the thin-frame fallback stays the
+// safety net, not the plan.
+func mergeInflight(tasks []Task, details DetailIndex, inflight []Task, inflightDetails DetailIndex) ([]Task, DetailIndex) {
+	seen := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		seen[t.DocID] = true
+	}
+	for _, t := range inflight {
+		if seen[t.DocID] {
+			continue
+		}
+		seen[t.DocID] = true
+		tasks = append(tasks, t)
+	}
+	if details == nil && len(inflightDetails) > 0 {
+		details = make(DetailIndex, len(inflightDetails))
+	}
+	for id, d := range inflightDetails {
+		if _, ok := details[id]; !ok {
+			details[id] = d
+		}
+	}
+	return tasks, details
+}
+
+// countInProgress is the collapsed in-flight denominator: the count of
+// lifecycle==in_progress rows over the DEDUPED UNION mergeInflight built —
+// never len(third-fetch) (a stale filtered copy whose window twin already
+// moved on must not count) and never prime's raw bucket (twin-doubled, the
+// D115 lie). Deriving from the union also makes the number immune to an old
+// server that ignored the filter and to param drift: a 200-empty in-flight
+// body degrades the count to window-truth.
+func countInProgress(tasks []Task) int {
+	n := 0
+	for _, t := range tasks {
+		if t.Lifecycle == lifeInProgress {
+			n++
+		}
+	}
+	return n
+}
+
 // maxBoardFetchBytes bounds the board's task-corpus fetch. The generic
 // GetConditional cap (8 MiB, sized for the capabilities manifest) went dark on
 // guerrilla when /v1/tasks?limit=1000 crossed 9.1 MB (2026-07-24). 32 MiB buys

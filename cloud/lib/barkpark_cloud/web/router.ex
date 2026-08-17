@@ -12540,7 +12540,7 @@ defmodule BarkparkCloud.Web.Router do
   # older than public-read), and naming WHICH box and WHAT it said is the
   # difference between a fixable error and a shrug.
   defp mint_failure_copy(bp, {:instance, status, body}) do
-    detail = body["error"] || body["detail"] || body["reason"]
+    detail = mint_failure_detail(body)
 
     base =
       "#{bp.slug} refused to mint the site's read token (HTTP #{status})"
@@ -12559,6 +12559,39 @@ defmodule BarkparkCloud.Web.Router do
 
   defp mint_failure_copy(bp, _reason),
     do: "#{bp.slug} is unreachable — could not mint the site's read token"
+
+  # The box's refusal arrives one of two ways: FLAT (`{"error": "forbidden"}`)
+  # or wrapped in a typed envelope (`{"error": {"code": ..., "message": ...}}` —
+  # TokenController's 422, and the 401/403 auth plugs nest the same way). A
+  # wrapped body used to reach the is_binary guard in mint_failure_copy/2 as a
+  # MAP, fail it, and the box's own words were discarded — the sibling of the
+  # rollback/teardown relay's nested-envelope drop (#11846). Reach INTO the
+  # envelope BEFORE the guard: compose the machine `code` and the human string
+  # as `code — message` so the 502 detail names WHY, not just WHICH box. The flat
+  # arm is untouched, so flat bodies resolve BYTE-IDENTICALLY to pre-fix output.
+  defp mint_failure_detail(%{"error" => %{} = err}) do
+    human = err["message"] || err["detail"] || err["reason"]
+    code = err["code"]
+
+    cond do
+      is_binary(code) and code != "" and is_binary(human) and human != "" ->
+        "#{code} — #{human}"
+
+      is_binary(human) and human != "" ->
+        human
+
+      is_binary(code) and code != "" ->
+        code
+
+      true ->
+        nil
+    end
+  end
+
+  defp mint_failure_detail(body) when is_map(body),
+    do: body["error"] || body["detail"] || body["reason"]
+
+  defp mint_failure_detail(_body), do: nil
 
   ## site-spawner W8 (charter D73/D74/D75) — CREATE VERIFIES THE BINDING BY
   ## READING IT.

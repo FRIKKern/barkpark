@@ -59,7 +59,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "ingress"} = b, d), do: inline_tag("ingress", b, d)
 
   defp block(%{"type" => "byline"} = b, d) do
-    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<item>#{esc(&1)}</item>")
+    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<item>#{byline_item(&1)}</item>")
     wrap("byline", attr_str(b, ["id"]), items, d)
   end
 
@@ -89,6 +89,30 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       end)
 
     wrap("stats", attr_str(b, ["id"]), items, d)
+  end
+
+  # The notes grid — the browser twin ships at compose.ex:1099 (notes_html), the
+  # TUI leg at pdrender notesRenderer; this is the BPML leg. Each item is a
+  # `<note>` carrying its body in the `text` key (the legacy `notes` vocab; a
+  # `body` key would render every note EMPTY). Item shapes and their handling
+  # mirror the head-cell/inline tolerance rules: a dict item spells its attrs +
+  # text; a BARE STRING escapes verbatim (the heggemsnes-act remedies shape, a
+  # lossless read-only tolerance); anything else (an inline-array item) refuses.
+  defp block(%{"type" => "notes"} = b, d) do
+    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}#{note_item(&1)}")
+    wrap("notes", attr_str(b, ["id"]), items, d)
+  end
+
+  # The singular `note` widget (composition-doctrine split) — the same `<note>`
+  # spelling as one grid item, at block level. A CONTENT-shaped note (non-empty
+  # `content`, no binary `text` — the one legacy corpus block whose accessors
+  # read it as "") would print as an empty `<note>`, a silent loss; it refuses.
+  defp block(%{"type" => "note"} = b, d) do
+    cond do
+      is_binary(Map.get(b, "text")) -> pad(d) <> note_item(b)
+      empty_content?(Map.get(b, "content")) -> pad(d) <> note_item(b)
+      true -> raise(UnprintableError.new(:block, "note"))
+    end
   end
 
   defp block(%{"type" => "steps"} = b, d) do
@@ -176,6 +200,28 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # untyped cell. Escaped verbatim; canonicalized to an inline-node list on read.
   defp head_cell(s) when is_binary(s), do: esc(s)
   defp head_cell(_other), do: raise(UnprintableError.new(:head_cell, nil))
+
+  # One `<note>` element (grid item OR the singular widget's body). A dict item
+  # spells id/label/lead + its `text` body; a BARE STRING escapes verbatim (the
+  # heggemsnes-act remedies shape, a lossless read-only tolerance); an
+  # inline-array (or any other) item refuses via the ONE typed refusal.
+  defp note_item(%{} = i),
+    do: "<note#{attr_str(i, ["id", "label", "lead"])}>#{esc(Map.get(i, "text", ""))}</note>"
+
+  defp note_item(s) when is_binary(s), do: "<note>#{esc(s)}</note>"
+  defp note_item(_other), do: raise(UnprintableError.new(:block, "notes"))
+
+  defp empty_content?(c), do: c in [nil, [], ""]
+
+  # Byline items are canonically BARE STRINGS (parser `tag_text`). A map item
+  # `%{"value" => binary}` (generator/producer drift — the wave papers' own
+  # shape) used to crash `esc(to_string(map))` with Protocol.UndefinedError,
+  # escaping the callers' rescue as a RAW 500. It now coerces to the string
+  # (fail-soft, mirroring head-cell/inline string coercion); any other non-binary
+  # item refuses via the ONE typed refusal so the read path labels it 422.
+  defp byline_item(s) when is_binary(s), do: esc(s)
+  defp byline_item(%{"value" => v}) when is_binary(v), do: esc(v)
+  defp byline_item(_other), do: raise(UnprintableError.new(:block, "byline"))
 
   # ── inline ──────────────────────────────────────────────────────────────────
 
