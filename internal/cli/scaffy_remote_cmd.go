@@ -639,9 +639,11 @@ func scaffyRunConsent(out *writer, g globals, path string, vars map[string]strin
 //
 //	R-004 local hand-edit  — sha256(local .scaffy) ≠ sidecar.source_sha256
 //	                         (or the .scaffy went missing since it was pulled);
-//	R-005 server-side drift — the server's CURRENT command doc no longer
-//	                         matches the sidecar's recorded source_sha256 / rev,
-//	                         or the doc is gone from the catalog entirely.
+//	R-005 server-side drift — the command's OWN source server (prov.Server,
+//	                         NOT the connected one) no longer matches the
+//	                         sidecar's recorded source_sha256 / rev, the doc is
+//	                         gone from that server's catalog, the sidecar records
+//	                         no server, or that server is unreachable (D104).
 //
 // Any mismatch is a loud NAMED finding in the compiler "file:line: RULE msg"
 // house style (scaffy.Finding.String), exit 5 — never silent (D34). A clean
@@ -662,22 +664,18 @@ func runScaffyPullCheck(out *writer, g globals) int {
 		return exitOK
 	}
 
-	// Axis (b) needs the current server catalog. A pulled command that can't
-	// be re-verified against its source is an incomplete check — fetch first
-	// and fail loudly (like ls/pull) rather than skip the server axis silently.
+	// Axis (b) checks each pulled command against the server it was PULLED FROM
+	// (its sidecar's prov.Server) — NOT whatever server bp happens to be pointed
+	// at right now (D104). Sidecars are grouped by their source server so each
+	// distinct catalog is fetched at most once; a fetch failure, or an empty /
+	// absent prov.Server, is a NAMED finding on that command — never a silent
+	// skip and never a false verdict against the wrong server's catalog.
 	ctx := resolveContext(g)
-	docs, err := scaffyFetchCommandDocs(ctx)
-	if err != nil {
-		return useError(out, "network", "scaffy pull --check: "+err.Error(), exitGeneric)
-	}
-	byID := make(map[string]scaffyCommandDoc, len(docs))
-	for _, d := range docs {
-		byID[d.ID] = d
-	}
+	fetchCatalog := scaffyCatalogFetcher(ctx)
 
 	var findings []scaffy.Finding
 	for _, p := range pulled {
-		findings = append(findings, scaffyCheckOne(p, ctx.Server, byID)...)
+		findings = append(findings, scaffyCheckOne(p, fetchCatalog)...)
 	}
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].File != findings[j].File {
@@ -705,8 +703,8 @@ func runScaffyPullCheck(out *writer, g globals) int {
 		}
 	}
 	if len(findings) == 0 {
-		out.outf("clean: %d pulled command(s) match their provenance (local sha + server rev/sha) against %s",
-			len(pulled), ctx.Server)
+		out.outf("clean: %d pulled command(s) match their provenance (local sha + each command's own source server's rev/sha)",
+			len(pulled))
 		return exitOK
 	}
 	out.outf("%d drift finding(s) across %d pulled command(s) — re-pull to refresh, or revert the local edit",
@@ -745,11 +743,49 @@ func scaffyPulledSidecars(dir string) ([]scaffyPulledCommand, error) {
 	return out, nil
 }
 
+// scaffyCatalogFetcher returns a memoized per-server catalog resolver: it fetches
+// each distinct provenance server's command catalog at most once and caches the
+// {docID → doc} index (or the fetch error) so a tree with N sidecars spread across
+// M servers costs M fetches, not N. The connected context's bearer is sent ONLY to
+// the connected server — a FOREIGN provenance server is queried tokenless (the
+// command schema is public, D44), never with the wrong server's credential.
+func scaffyCatalogFetcher(ctx manifest.Context) func(server string) (map[string]scaffyCommandDoc, error) {
+	type result struct {
+		byID map[string]scaffyCommandDoc
+		err  error
+	}
+	cache := map[string]*result{}
+	return func(server string) (map[string]scaffyCommandDoc, error) {
+		if r, ok := cache[server]; ok {
+			return r.byID, r.err
+		}
+		sctx := ctx
+		sctx.Server = server
+		if server != ctx.Server {
+			sctx.Token = ""
+		}
+		docs, err := scaffyFetchCommandDocs(sctx)
+		r := &result{err: err}
+		if err == nil {
+			r.byID = make(map[string]scaffyCommandDoc, len(docs))
+			for _, d := range docs {
+				r.byID[d.ID] = d
+			}
+		}
+		cache[server] = r
+		return r.byID, r.err
+	}
+}
+
 // scaffyCheckOne audits one pulled command on both drift axes. Findings point
 // at the .scaffy source (the artifact a user reasons about) at its header line.
 // A sidecar that won't even parse is itself R-004 drift — the provenance is
-// unreadable, so nothing can be vouched for.
-func scaffyCheckOne(p scaffyPulledCommand, server string, byID map[string]scaffyCommandDoc) []scaffy.Finding {
+// unreadable, so nothing can be vouched for. Axis (b) is checked against the
+// command's OWN source server (its sidecar's prov.Server), resolved through
+// fetchCatalog — the wrong-server catalog is never consulted (D104): an empty
+// prov.Server or an unreachable source server is its own NAMED R-005 finding,
+// not a false verdict borrowed from whatever server bp is pointed at now.
+func scaffyCheckOne(p scaffyPulledCommand, fetchCatalog func(server string) (map[string]scaffyCommandDoc, error)) []scaffy.Finding {
 	rel := filepath.ToSlash(p.SourcePath)
 	raw, err := os.ReadFile(p.SidecarPath)
 	if err != nil {
@@ -781,28 +817,46 @@ func scaffyCheckOne(p scaffyPulledCommand, server string, byID map[string]scaffy
 		}
 	}
 
-	// Axis (b): server-side drift. Re-fetched doc vs the sidecar's rev + sha.
-	doc, ok := byID[prov.DocID]
+	// Axis (b): server-side drift, verified against the sidecar's OWN source
+	// server (prov.Server) — never the currently-connected one (D104). An empty
+	// server field or an unreachable server is a distinct NAMED finding, so the
+	// audit stays honest rather than borrowing a verdict from the wrong catalog.
 	switch {
-	case !ok:
+	case prov.Server == "":
 		findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
-			Msg:  fmt.Sprintf("command doc %q no longer served by %s", prov.DocID, orDash(server)),
-			Hint: "the upstream command was removed or renamed — verify before relying on it"})
+			Msg:  "provenance sidecar records no source server — server-side drift cannot be verified",
+			Hint: "re-pull the command so the sidecar records the server it came from"})
 	default:
-		srvSum := sha256.Sum256([]byte(doc.Source))
-		srvSHA := hex.EncodeToString(srvSum[:])
+		byID, ferr := fetchCatalog(prov.Server)
 		switch {
-		case prov.SourceSHA256 != "" && srvSHA != prov.SourceSHA256:
+		case ferr != nil:
 			findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
-				Msg: fmt.Sprintf("server source changed: doc %s now sha256 %s ≠ recorded %s (rev %s → %s)",
-					prov.DocID, scaffyShort(srvSHA), scaffyShort(prov.SourceSHA256), orDash(prov.Rev), orDash(doc.Rev)),
-				Hint: "re-pull to adopt the server's current source"})
-		case prov.Rev != "" && doc.Rev != "" && doc.Rev != prov.Rev:
-			// Bytes identical, only the rev advanced (a metadata-only edit).
-			findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
-				Msg: fmt.Sprintf("server rev advanced %s → %s for doc %s (source bytes unchanged)",
-					prov.Rev, doc.Rev, prov.DocID),
-				Hint: "re-pull to refresh the sidecar rev"})
+				Msg:  fmt.Sprintf("provenance server %s unreachable (%v) — server-side drift unverified", prov.Server, ferr),
+				Hint: "restore connectivity to the source server, or re-pull from a reachable mirror"})
+		default:
+			doc, ok := byID[prov.DocID]
+			switch {
+			case !ok:
+				findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
+					Msg:  fmt.Sprintf("command doc %q no longer served by %s", prov.DocID, prov.Server),
+					Hint: "the upstream command was removed or renamed — verify before relying on it"})
+			default:
+				srvSum := sha256.Sum256([]byte(doc.Source))
+				srvSHA := hex.EncodeToString(srvSum[:])
+				switch {
+				case prov.SourceSHA256 != "" && srvSHA != prov.SourceSHA256:
+					findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
+						Msg: fmt.Sprintf("server source changed: doc %s now sha256 %s ≠ recorded %s (rev %s → %s)",
+							prov.DocID, scaffyShort(srvSHA), scaffyShort(prov.SourceSHA256), orDash(prov.Rev), orDash(doc.Rev)),
+						Hint: "re-pull to adopt the server's current source"})
+				case prov.Rev != "" && doc.Rev != "" && doc.Rev != prov.Rev:
+					// Bytes identical, only the rev advanced (a metadata-only edit).
+					findings = append(findings, scaffy.Finding{File: rel, Line: 1, Rule: RuleProvenanceServerDrift,
+						Msg: fmt.Sprintf("server rev advanced %s → %s for doc %s (source bytes unchanged)",
+							prov.Rev, doc.Rev, prov.DocID),
+						Hint: "re-pull to refresh the sidecar rev"})
+				}
+			}
 		}
 	}
 	return findings
