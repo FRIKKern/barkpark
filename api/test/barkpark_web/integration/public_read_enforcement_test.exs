@@ -38,6 +38,47 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
   drafts + private-schema cases returned 200 (leak reproduced), restoring them
   returns the suite to green.
 
+  ## Mutation transcript — 2026-08-17 (the `:require_token` mount, re-proven)
+
+  Deleting the single `plug(BarkparkWeb.Plugs.PublicRead)` line from
+  `pipeline :require_token` (router.ex:488) and running only this file:
+
+      23 tests, 11 failures
+
+  All eleven are the bearer-gated clamp, ten of them the flat+scoped pairs
+  (`export`, `analytics`, `history`, `revision`, `listen`) plus the mixed
+  `["public-read","read"]` case; the leaked bodies are in the failure output
+  (`history` SCOPED returned 200 with a DRAFT-status revision title). The two
+  `listen` arms fail through the yield-or-flunk path — "held the connection open
+  for 5s" — flat and, as of this commit, SCOPED
+  (`/w/clamp-ws/p/clamp-proj/v1/data/listen/production`). Restoring the line:
+
+      23 tests, 0 failures
+
+  So the whole bearer-gated describe fails closed only because that one line is
+  mounted, and the scoped `listen` route is no longer the one leak route
+  certified on its flat arm alone.
+
+  ## Live re-proof — guerrilla, 2026-08-17
+
+  A fresh `["public-read"]` token minted through the spawner's own route
+  (`POST /w/default/p/default/v1/tokens`, HTTP 201, id 9e1eb0fc) was refused on
+  all FIVE routes over BOTH shapes — ten requests, ten
+  `403 {"error":{"code":"forbidden","message":"public-read tokens may only read
+  published public documents"}}`: export, analytics, history, revision, and
+  `listen` — which answered `HTTP/2 403` with
+  `content-type: application/json`, i.e. no `text/event-stream` upgrade and no
+  held socket, flat AND scoped.
+
+  Teardown, and the two traps in it: self-revoke
+  (`DELETE /v1/auth/app-tokens/current`) is itself 403'd by the very clamp under
+  certification, so the token was killed with the ADMIN bearer
+  (`DELETE /v1/auth/app-tokens` body `{"token": …}` -> 200 `revoked_at`
+  2026-08-17T07:31:06Z). Death was then verified on a BEARER-GATED route —
+  `GET /v1/data/export/production` -> 401 `unauthorized`. The same dead token
+  still returns 200 on `GET /v1/data/query/production/paper`, because that route
+  is anonymously readable: a dead-check there reports FALSE-ALIVE.
+
   read/write/admin tokens are NOT clamped — PublicRead acts ONLY on a token
   whose permissions CARRY `"public-read"` (membership, mirroring
   `AnonPerspective.anon_pinned?/1` — list EQUALITY was the bypass a
@@ -365,6 +406,37 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
           flunk("""
           /v1/data/listen held the connection open for 5s with a public-read token.
           The clamp is not mounted on :require_token — this is the unbounded-stream leak.
+          """)
+      end
+    end
+
+    # The SCOPED mirror of the case above — `listen` was the ONE leak route with a
+    # flat arm only, so the scoped clamp on
+    # `/w/:ws/p/:proj/v1/data/listen/:dataset` ([:scoped_api, :require_token],
+    # router.ex:2336) was uncertified while export/analytics/history/revision each
+    # carried both arms. It is the same unbounded-stream primitive on the route a
+    # spawned site's BUILD token actually addresses, so it gets the same
+    # yield-or-flunk shape rather than a bare `json_response/2` (an unclamped SSE
+    # upgrade never returns and would HANG the suite instead of failing it).
+    test "listen: SCOPED halts at the pipeline and never opens an SSE stream", %{
+      conn: conn,
+      ws: ws,
+      project: project,
+      public_read: token
+    } do
+      url = scoped(ws, project, "listen/#{@dataset}")
+      task = Task.async(fn -> conn |> authed(token) |> get(url) end)
+
+      case Task.yield(task, 5_000) || Task.shutdown(task, :brutal_kill) do
+        {:ok, response} ->
+          assert json_response(response, 403)["error"]["code"] == "forbidden"
+          refute response.resp_body =~ "event:"
+
+        nil ->
+          flunk("""
+          #{url} held the connection open for 5s with a public-read token.
+          The clamp is not mounted on :require_token — this is the unbounded-stream
+          leak, reached over the SCOPED route a spawned site's BUILD token uses.
           """)
       end
     end

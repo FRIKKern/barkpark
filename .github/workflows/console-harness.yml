@@ -309,8 +309,8 @@ jobs:
     # `FAIL console-unit: failure` with no verdict at all, because it had
     # `outputs:` None and its `decide` line took no verdict argument.
     #
-    # SIX of this job's steps can exit 2 (nine exit(2) sites: breakpoint-sweep
-    # 4, member-authority-sweep 1, and one each in the four censuses). Each of
+    # SEVEN of this job's steps can exit 2 (ten exit(2) sites: breakpoint-sweep
+    # 4, member-authority-sweep 1, and one each in the five censuses). Each of
     # those steps classifies its own exit code and publishes the verdict BEFORE
     # exiting — the shape proven to survive `exit 1` on run 31136979488. A step
     # that PASSES publishes nothing, so the chain below reduces to the one
@@ -324,6 +324,7 @@ jobs:
         ${{ steps.sweep.outputs.verdict
         || steps.member-authority.outputs.verdict
         || steps.binding-census.outputs.verdict
+        || steps.unknown-census.outputs.verdict
         || steps.reason-arm-census.outputs.verdict
         || steps.me-envelope-census.outputs.verdict
         || steps.agent-event-census.outputs.verdict }}
@@ -797,6 +798,42 @@ jobs:
           echo "::error title=console-unit ${v} — __agent_event_vocabulary_census.mjs::__agent_event_vocabulary_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
           exit 1
 
+      # ── THE ABSENCE-AS-ANSWER CENSUS, AS A DIRECT RUN (cch-w67-s4, D821) ────
+      #
+      # Fifth of the census family, and the oldest instrument in it:
+      # __unknown_census.mjs used to reach CI only through its __app.test.mjs
+      # spawn test. Wave 68 widened it from a 4-row fold allowlist into a
+      # per-GET-call-site census (every api("GET") site in app.js pinned with a
+      # guarded|sanctioned|degrades verdict plus a proof regex), and a widened
+      # instrument earns the same first-class step its four census siblings
+      # have: its rc is read bare — never piped, a pipe eats the rc — and its
+      # exit-2 REFUSED band (broken walker / zero call sites / breached
+      # positive control) stays distinguishable from a measured defect.
+      #
+      # WHY IT CAN LOSE, one line per arm (all five mutation-proven in a temp
+      # copy, cch-w67-s4): ADD — an unpinned api("GET") arrival reds and names
+      # the function; REMOVE — a deleted or MOVED call site reds (moving between
+      # functions is an ADD+REMOVE pair, which is the attribution proof);
+      # DECAY — stripping a pinned `guarded` row's !ok arm reds because the
+      # row's proof regex stops matching; REFUSE — overlapping walker extents
+      # exit 2 rather than misattribute.
+      - name: Absence-as-answer census (per-GET-call-site ADD + REMOVE + verdict decay)
+        id: unknown-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__unknown_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __unknown_census.mjs::__unknown_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
   # app.css, or scans its comment nesting, or reads `--x:` declarations out of
@@ -1208,7 +1245,7 @@ jobs:
           #   literal string NEVER for jobs that must always run. A skip is
           #   accepted only against a gate-value of exactly 'false'.
           #   verdict is OPTIONAL and ADVISORY: jobs that publish one (the three
-          #   browser instruments, and console-unit for its six exit-2-capable
+          #   browser instruments, and console-unit for its seven exit-2-capable
           #   steps) get their failure NAMED; jobs that do not
           #   pass nothing and are judged exactly as before. It is read on the
           #   failure path ONLY, and cannot reach `bad` from there either.

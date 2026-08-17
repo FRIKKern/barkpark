@@ -74,7 +74,26 @@ name: Shell harnesses
 # lane runs on edits to them. That is deliberately wider than "the script and its
 # test": an input that can break a harness must be able to trigger it.
 #
-# The honest limit, stated once for all thirteen tenants: this workflow is NOT
+# A further tenant (deploy-reliability W35): the 96-assertion
+# mutation matrix behind scripts/deploy-reliability-exit-run.sh — the exit
+# artefact's headline instrument, the one thing that re-derives the epic's
+# never-covered number on demand. `grep -rln deploy-reliability-exit-run
+# .github/` returned NOTHING before this: 96 assertions that neutralise each
+# refusal guard by its `# MUT:` anchor and watch the refusal disappear were a
+# document, not a gate, so an edit to the runner broke them in silence.
+# crown-reconcile.test.sh, the comparable instrument, is gated twice. The harness
+# is fixture-driven and offline — `git init` repos in mktemp, a stub producer, a
+# `--depth 1` file:// clone for the shallow case, git identity passed with
+# `git -c` so a runner without a configured user still commits — so no secret and
+# no network is involved. The last four paths entries are INPUTS, not the
+# harness: its closing probes bind the runner's printed 90s cap and flag set to
+# the real client and census command, and the artefact's own invariants to
+# check-doc-budgets.sh. An input that can break a harness must be able to trigger
+# it (same reason cloud.yml is in this list for seal-run). Default checkout depth
+# is deliberate: the one probe that wants `origin/main` (seal-run byte identity)
+# refuses to fake a verdict when the ref is unresolvable and says so by name.
+#
+# The honest limit, stated once for every tenant here: this workflow is NOT
 # one of main's required contexts (those are exactly: Elixir gate, PR references
 # an active task, Cloud gate, Console gate). Wiring makes a harness RUN, not
 # BLOCK. Running is the prerequisite; registering is a separate, evidence-gated
@@ -138,6 +157,18 @@ on:
       - "scripts/workflow-portability-check.sh"
       - "scripts/workflow-portability-check.test.sh"
       - ".claude/workflows/*.workflow.js"
+      # DEPLOY-RELIABILITY EXIT RUNNER (W35). Per file, never a directory glob —
+      # D26. The first two are the runner and its harness; the last four are the
+      # INPUTS the harness's closing probes bind the runner's claims to, so an
+      # edit to any of them reds here on the PR that makes it rather than leaving
+      # the artefact's quoted numbers as fiction. seal-run.sh, the fifth input, is
+      # already listed above.
+      - "scripts/deploy-reliability-exit-run.sh"
+      - "scripts/deploy-reliability-exit-run.test.sh"
+      - "internal/cloudclient/client.go"
+      - "internal/cli/cloud_deploy_census_cmd.go"
+      - "scripts/deploy-reliability-exit-2026-08-10.md"
+      - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
   push:
     branches: [main]
@@ -192,6 +223,15 @@ on:
       - "scripts/workflow-portability-check.sh"
       - "scripts/workflow-portability-check.test.sh"
       - ".claude/workflows/*.workflow.js"
+      # DEPLOY-RELIABILITY EXIT RUNNER (W35) — mirrors the pull_request list
+      # above, inputs included. A lane wired on PRs only goes dark the moment a
+      # merge lands.
+      - "scripts/deploy-reliability-exit-run.sh"
+      - "scripts/deploy-reliability-exit-run.test.sh"
+      - "internal/cloudclient/client.go"
+      - "internal/cli/cloud_deploy_census_cmd.go"
+      - "scripts/deploy-reliability-exit-2026-08-10.md"
+      - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
 
 permissions:
@@ -532,3 +572,40 @@ jobs:
         # this RUN, not BLOCK. Promotion is a separate evidence-gated decision,
         # filed as ecd-bl-tripwire-promotion.
         run: bash scripts/workflow-portability-check.sh .claude/workflows
+
+  exit-runner-guard:
+    name: deploy-reliability-exit-run.sh mutation matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # The DEFAULT depth is correct here. The harness builds every fixture with
+        # `git init` in mktemp (and its shallow case from a `--depth 1` file://
+        # clone), so it needs no history of this repository. The single probe that
+        # would use `origin/main` — seal-run.sh byte identity — refuses to fake a
+        # verdict when the ref is unresolvable and reports the skip BY NAME.
+      - name: python3 is present (the census stub's envelope is python3-shaped)
+        # scripts/deploy-reliability-exit-run.test.sh:48 hard-refuses with exit 2
+        # when python3 is missing — correctly red, but illegibly so. Fail by NAME,
+        # matching the python3/jq/node name-checks above.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — add actions/setup-python" >&2
+            exit 1
+          }
+          python3 --version
+      - name: deploy-reliability-exit-run.sh syntax check
+        run: bash -n scripts/deploy-reliability-exit-run.sh
+      - name: deploy-reliability-exit-run.test.sh syntax check
+        run: bash -n scripts/deploy-reliability-exit-run.test.sh
+      - name: the exit runner's refusals can still LOSE (96 assertions, offline)
+        # THE REASON THIS LANE EXISTS: `grep -rln deploy-reliability-exit-run
+        # .github/` matched nothing, so the epic's headline instrument — the one
+        # that re-derives the never-covered number — had 96 assertions guarding
+        # it and no runner to execute them. Every refusal here is proven by
+        # MUTATION: the guard's `if` is neutralised by its `# MUT:` anchor and the
+        # refusal is watched disappearing, and the mutation step asserts the sed
+        # changed a line, so a renamed anchor reds instead of no-opping.
+        # No `continue-on-error` here or anywhere in this file — it launders a red
+        # into the green JOB conclusion the fleet reads.
+        run: bash scripts/deploy-reliability-exit-run.test.sh
