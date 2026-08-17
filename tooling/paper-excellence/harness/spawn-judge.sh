@@ -42,6 +42,13 @@ CLAUDE_BIN="${CLAUDE_BIN:-/Users/pelle/.local/bin/claude}"
 COLD_SOURCE="$HARNESS_DIR/spawn-cold.sh"
 [ -f "$COLD_SOURCE" ] || { echo "spawn-judge: no pin source at $COLD_SOURCE" >&2; exit 2; }
 eval "$(grep -E '^COLD_(MODEL|EFFORT)=' "$COLD_SOURCE")"
+# Fail LOUD if the pin lines moved: a refactor that indents or renames them in
+# spawn-cold.sh must break this script here, with a named cause — never later
+# as a bare `unbound variable`, and never a silent fallback.
+[ -n "${COLD_MODEL:-}" ] && [ -n "${COLD_EFFORT:-}" ] || {
+  echo "spawn-judge: FAIL — could not extract the COLD_MODEL/COLD_EFFORT pin lines from $COLD_SOURCE (did a refactor move or rename them?)" >&2
+  exit 2
+}
 
 mkdir -p "$(dirname "$TRANSCRIPT")"
 PROMPT="$(cat "$PROMPT_FILE")"
