@@ -59,6 +59,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   end
 
   setup %{conn: conn} do
+    # Wave-26 leaked-session pollution guard (felix-w27, third victim — same
+    # class the felix-w27-s6 slice guarded in studio_chat_test.exs and
+    # chat_render_golden_test.exs): a Recorder that outlived a prior test's
+    # sandbox owner can COMMIT chat_sessions rows that escape rollback and ride
+    # list_sessions' recency-desc ordering ahead of seeded rows — reddening the
+    # sidebar/empty-state assertions here on a shifting set. At setup no test
+    # in this file has created a session yet, so every visible row is such a
+    # leak; purge for a clean baseline. Restrict-FK children first; deleting
+    # sessions cascades the delete_all children. Runs inside this test's
+    # sandbox transaction and rolls back with it — test-infra hygiene only.
+    Barkpark.Repo.query!("DELETE FROM chat_runtime_usage_receipts")
+    Barkpark.Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
+    Barkpark.Repo.delete_all(Barkpark.StudioChat.Session)
+
     {:ok, _} =
       Auth.create_token(@admin_token, "chat admin", "production", ["read", "write", "admin"])
 
