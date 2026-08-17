@@ -19,7 +19,7 @@
       "cell": "heggemsnes-act__light__1280",
       "file": "heggemsnes-act__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1132030,
+      "bytes": 1133185,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -128,18 +128,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 14,
+        "total": 6,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 1,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 928,
+            "y": 926,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -149,7 +149,7 @@
           },
           {
             "px": 2,
-            "y": 1694.3,
+            "y": 1692.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -159,7 +159,7 @@
           },
           {
             "px": 2,
-            "y": 2214.2,
+            "y": 2212.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -169,7 +169,7 @@
           },
           {
             "px": 2,
-            "y": 3607.9,
+            "y": 3605.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -179,7 +179,7 @@
           },
           {
             "px": 2,
-            "y": 3850.2,
+            "y": 3848.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -195,7 +195,7 @@
       "cell": "heggemsnes-act__light__1920",
       "file": "heggemsnes-act__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1220102,
+      "bytes": 1220193,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -304,18 +304,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 14,
+        "total": 6,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 1,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 928,
+            "y": 907.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -325,7 +325,7 @@
           },
           {
             "px": 2,
-            "y": 1694.3,
+            "y": 1673.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -335,7 +335,7 @@
           },
           {
             "px": 2,
-            "y": 2214.2,
+            "y": 2193.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -345,7 +345,7 @@
           },
           {
             "px": 2,
-            "y": 3607.9,
+            "y": 3587.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -355,7 +355,7 @@
           },
           {
             "px": 2,
-            "y": 3850.2,
+            "y": 3829.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -371,7 +371,7 @@
       "cell": "heggemsnes-act__dark__1280",
       "file": "heggemsnes-act__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 1129602,
+      "bytes": 1130791,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -480,18 +480,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 14,
+        "total": 6,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 1,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 928,
+            "y": 926,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -501,7 +501,7 @@
           },
           {
             "px": 2,
-            "y": 1694.3,
+            "y": 1692.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -511,7 +511,7 @@
           },
           {
             "px": 2,
-            "y": 2214.2,
+            "y": 2212.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -521,7 +521,7 @@
           },
           {
             "px": 2,
-            "y": 3607.9,
+            "y": 3605.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -531,7 +531,7 @@
           },
           {
             "px": 2,
-            "y": 3850.2,
+            "y": 3848.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -547,7 +547,7 @@
       "cell": "heggemsnes-act__dark__1920",
       "file": "heggemsnes-act__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 1217647,
+      "bytes": 1217576,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 16,
@@ -656,18 +656,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 14,
+        "total": 6,
         "heavy": 5,
         "structuralHeavy": 5,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9,
+          "1": 1,
           "2": 5
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 928,
+            "y": 907.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -677,7 +677,7 @@
           },
           {
             "px": 2,
-            "y": 1694.3,
+            "y": 1673.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -687,7 +687,7 @@
           },
           {
             "px": 2,
-            "y": 2214.2,
+            "y": 2193.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -697,7 +697,7 @@
           },
           {
             "px": 2,
-            "y": 3607.9,
+            "y": 3587.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -707,7 +707,7 @@
           },
           {
             "px": 2,
-            "y": 3850.2,
+            "y": 3829.8,
             "width": 580,
             "parts": 1,
             "structural": true,
