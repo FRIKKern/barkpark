@@ -23,7 +23,7 @@ let failed = false;
 const fail = (msg) => { console.error(msg); failed = true; };
 
 // ── Part 0: the audit verb table's own shape (charter cch-w65) ────────────────
-// design/audit-actions.json is the SOLE authority for TWO vocabularies — the
+// cloud/priv/audit-actions.json is the SOLE authority for TWO vocabularies — the
 // server's closed @actions allowlist (read at compile time by AuditEvent) and the
 // console's ACTION_LABELS region emitted below. Its shape gate runs FIRST and
 // exits immediately, because the ACTION_LABELS build() reads the table: a
