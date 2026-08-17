@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -285,6 +287,179 @@ func TestDeviceLoginTimeoutExitsAuth(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(err.Error()), []byte("--email")) {
 		t.Fatalf("timeout message should offer the email fallback; got %q", err.Error())
+	}
+}
+
+// TestDeviceLoginSurvivesTransientPollError is the regression guard for the
+// onb-w4 fix: a single transient 500 mid-poll must NOT abort the interactive
+// flow. Before the fix, login_device.go returned ANY non-nil poll error, so one
+// injected 500 killed `bp login` after exactly one poll — while the one-shot
+// --device-poll mapped the identical error to a retryable exitGeneric. The loop
+// now retries a non-terminal (asDeviceAuthError==false) error with backoff, so
+// the flow rides through the blip and still lands the token.
+func TestDeviceLoginSurvivesTransientPollError(t *testing.T) {
+	withTempConfigHome(t)
+	withInstantDevicePolls(t, 10)
+
+	var pollHits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/device/start":
+			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
+		case "/v1/auth/device/poll":
+			switch pollHits.Add(1) {
+			case 1:
+				// A pending steady-state before the blip.
+				_, _ = io.WriteString(w, `{"status":"pending"}`)
+			case 2:
+				// The injected transient failure — a 500 with NO refusal substring,
+				// so classifyDevicePollError keeps it a generic (retryable) error.
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(w, `{"error":"internal_server_error"}`)
+			default:
+				// The user has since approved — the flow must reach here.
+				_, _ = io.WriteString(w, `{"token":"sess-survive","team_id":"team-survive"}`)
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &Config{}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+		t.Fatalf("a transient 500 must NOT abort the interactive flow: %v\nstderr:\n%s", err, stderr.String())
+	}
+	// The flow rode past the blip: poll 1 (pending), poll 2 (500, retried), poll 3
+	// (approved) — a pre-fix loop would have stopped at 2.
+	if pollHits.Load() < 3 {
+		t.Fatalf("flow aborted early on the transient error; poll hits = %d, want >= 3", pollHits.Load())
+	}
+	loaded, _ := LoadConfig()
+	if loaded.CloudToken != "sess-survive" {
+		t.Fatalf("the surviving flow must persist the token; got %q", loaded.CloudToken)
+	}
+}
+
+// TestDeviceLoginRefusalAbortsWithNoRetry proves the OTHER direction of the
+// onb-w4 fix: a TRUE refusal (deviceAuthError) still terminates immediately with
+// ZERO retries — the retry path must never swallow the user's denial. The plane
+// answers the very first poll with a refusal; the loop must abort after exactly
+// one poll, return a *deviceAuthError (→ exitAuth), and persist no token.
+func TestDeviceLoginRefusalAbortsWithNoRetry(t *testing.T) {
+	withTempConfigHome(t)
+	withInstantDevicePolls(t, 10)
+
+	var pollHits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/device/start":
+			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
+		case "/v1/auth/device/poll":
+			pollHits.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":"access_denied"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &Config{}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	if !asDeviceAuthError(err) {
+		t.Fatalf("a refusal must be a terminal deviceAuthError; got %T: %v", err, err)
+	}
+	if pollHits.Load() != 1 {
+		t.Fatalf("a refusal must abort with NO retry; poll hits = %d, want 1", pollHits.Load())
+	}
+	if loaded, _ := LoadConfig(); loaded.CloudToken != "" {
+		t.Fatalf("a refused login must not persist a token; got %q", loaded.CloudToken)
+	}
+}
+
+// TestDeviceLoginAllErrorsCannotSpinForever proves the retry bound is finite: a
+// server that ALWAYS returns a transient 500 must not loop forever. The retry
+// path is capped by devicePollMax, so the flow terminates with a *deviceAuthError
+// (the timeout) after exactly devicePollMax polls — never more.
+func TestDeviceLoginAllErrorsCannotSpinForever(t *testing.T) {
+	withTempConfigHome(t)
+	const maxPolls = 4
+	withInstantDevicePolls(t, maxPolls)
+
+	var pollHits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/device/start":
+			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
+		case "/v1/auth/device/poll":
+			pollHits.Add(1)
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":"internal_server_error"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &Config{}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	if !asDeviceAuthError(err) {
+		t.Fatalf("an all-error server must terminate with the timeout deviceAuthError; got %T: %v", err, err)
+	}
+	if got := pollHits.Load(); got != maxPolls {
+		t.Fatalf("retries must be bounded by devicePollMax; poll hits = %d, want %d", got, maxPolls)
+	}
+	if loaded, _ := LoadConfig(); loaded.CloudToken != "" {
+		t.Fatalf("a never-approved login must persist no token; got %q", loaded.CloudToken)
+	}
+}
+
+// TestDeviceLoginPersistFailureAbortsHonestly pins the post-approval edge of the
+// transient-retry fix: when the plane APPROVES but SaveConfig fails locally, the
+// loop must abort with the honest save error — never re-poll the now-burned code
+// (which would answer expired_or_invalid and mask the disk problem as a refusal).
+func TestDeviceLoginPersistFailureAbortsHonestly(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	// Squat the config DIR with a plain file so SaveConfig's MkdirAll fails.
+	if err := os.WriteFile(filepath.Join(xdg, "barkpark"), []byte("squat"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withInstantDevicePolls(t, 10)
+
+	var pollHits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/device/start":
+			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
+		case "/v1/auth/device/poll":
+			pollHits.Add(1)
+			// Approved on the FIRST poll — the failure under test is local.
+			_, _ = io.WriteString(w, `{"token":"sess-persist","team_id":"team-persist"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &Config{}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	if err == nil {
+		t.Fatal("a failed SaveConfig after approval must surface an error")
+	}
+	if asDeviceAuthError(err) {
+		t.Fatalf("a local persistence failure must NOT read as an auth refusal; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "save config") {
+		t.Fatalf("the honest local cause must surface verbatim; got %v", err)
+	}
+	if got := pollHits.Load(); got != 1 {
+		t.Fatalf("a persist failure must abort with NO re-poll of the burned code; poll hits = %d, want 1", got)
 	}
 }
 
