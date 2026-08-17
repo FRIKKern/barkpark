@@ -854,6 +854,11 @@ function sectionBlockToNode(block, bpId, bpType) {
   const attrs = { bpId, bpType: bpType || "section" };
   if (block && block.title != null) attrs.title = block.title;
   if (block && block.layout != null) attrs.layout = block.layout;
+  // FRAMED-FINALE (charter D34): the scalar `variant` ("framed") rides node.attrs
+  // VERBATIM, PRESENT-ONLY (a no-variant section adds NOTHING — byte-identical to
+  // the pre-variant path; mirrors layout above). Without this thread the canvas
+  // silently DROPPED the frame on open.
+  if (block && block.variant != null) attrs.variant = block.variant;
 
   const children = (block && block.blocks) || [];
 
@@ -908,6 +913,10 @@ function sectionNodeToBlock(node, id, taken) {
   // SEPARATE attr). The persisted layout stays cells-free (doctrine: span/order
   // live on children, hoisted into attrs.cells for canvas transport only).
   if (attrs.layout != null) block.layout = attrs.layout;
+  // FRAMED-FINALE (charter D34): lower the scalar variant back, present-only. This
+  // ONE site covers replace-block, insert, docToBlocks AND the source-mode
+  // sentinels — every reconstruction path funnels through here.
+  if (attrs.variant != null) block.variant = attrs.variant;
 
   // STEP-6: cells is a bpId-keyed OBJECT map (not a positional array). Split each
   // child's cell back BY THE CHILD'S OWN bpId, so a canvas reorder (which changes
@@ -3716,6 +3725,10 @@ function stableSectionKey(node) {
     // just confirmed must still match the live node.
     layout: a.layout == null ? null : a.layout,
     cells: a.cells == null ? null : a.cells,
+    // FRAMED-FINALE (charter D34): variant joins the echo key so a variant-bearing
+    // section the server just confirmed still matches the live node (and a DROPPED
+    // variant is never mistaken for an own-echo).
+    variant: a.variant == null ? null : a.variant,
     content: node.content || null,
   });
 }
