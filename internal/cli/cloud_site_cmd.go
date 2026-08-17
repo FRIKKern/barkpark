@@ -230,7 +230,13 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 
 	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
 	if cerr != nil {
-		return cloudFail(out, "create site", cerr)
+		// The create refusal rides the SAME #11784 ladder as delete/rollback — one
+		// dialect, never a second. POST /v1/sites emits no top-level 403 and no 409,
+		// so the exit families that land here are: 401 → cloudFail fallthrough (the
+		// shared `bp login` sentence, byte-identical "create site" label), no_team →
+		// 1 with the `bp team use` fix, barkpark_not_found 404 → 4, every 422 → 1,
+		// node_ports_exhausted 503 / read_token_mint_failed 502 → 8 relaying detail.
+		return siteRefusalFail(out, siteRefusedCreate, name, cerr)
 	}
 
 	// --deploy (D19) turns create into the one-motion: on a successful create the CLI
@@ -1289,52 +1295,74 @@ func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult
 	out.outf("  the box teardown ran first (the control plane refuses to deregister a site whose teardown errored), but this envelope carries no measured box state — nothing here read the route, the slots or the tree, so the teardown itself is UNVERIFIED by this receipt.")
 }
 
-// siteRefusalKind names WHICH site verb was refused. The two share the exit
+// siteRefusalKind names WHICH site verb was refused. The three share the exit
 // ladder and the label, but not their sentences: a refused rollback flipped
-// nothing, while a refused teardown leaves a site that is BOTH still registered
-// and still serving — copy that blurs the two tells the reader the wrong thing
-// about what state their site is now in.
+// nothing, a refused teardown leaves a site that is BOTH still registered and
+// still serving, and a refused create never wrote a row at all — copy that blurs
+// them tells the reader the wrong thing about what state their site is now in.
 type siteRefusalKind int
 
 const (
 	siteRefusedRollback siteRefusalKind = iota
 	siteRefusedDelete
+	// siteRefusedCreate is `bp cloud site create`'s refusal arm (cch-w70). It joins
+	// the ONE #11784 dialect rather than minting a second ladder: POST /v1/sites
+	// emits no top-level 403 and no 409, so its refusals resolve on the SAME
+	// status-family exit map (401 → cloudFail, no_team → 1, 404 → 4, 422 → 1,
+	// 5xx → 8) — only its sentences differ, because a refused create wrote nothing.
+	siteRefusedCreate
 )
 
 // what is the cloudFail fallthrough label — byte-unchanged from the strings these
-// two verbs have always printed ("roll site back: …", "delete site: …"), so the
-// shared auth seam reads identically before and after this slice.
+// verbs have always printed ("roll site back: …", "delete site: …", "create
+// site: …"), so the shared auth seam reads identically before and after this slice.
 func (k siteRefusalKind) what() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "delete site"
+	case siteRefusedCreate:
+		return "create site"
+	default:
+		return "roll site back"
 	}
-	return "roll site back"
 }
 
 // noun is how a sentence refers to the refused act.
 func (k siteRefusalKind) noun() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "the deletion of"
+	case siteRefusedCreate:
+		return "the creation of"
+	default:
+		return "the rollback of"
 	}
-	return "the rollback of"
 }
 
 // verb is the bare action, for a sentence that already names the site ("not
 // allowed to delete site %q").
 func (k siteRefusalKind) verb() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "delete"
+	case siteRefusedCreate:
+		return "create"
+	default:
+		return "roll back"
 	}
-	return "roll back"
 }
 
 // nothingClause is the honesty tail: what did NOT happen, stated positively so a
 // deny path never reads like a partial action.
 func (k siteRefusalKind) nothingClause() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "Nothing was torn down and the site is still registered."
+	case siteRefusedCreate:
+		return "No site was created."
+	default:
+		return "Nothing was flipped."
 	}
-	return "Nothing was flipped."
 }
 
 // siteRefusalFail maps a refused site rollback / delete onto the unified `bp:`
@@ -1427,6 +1455,12 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 			ref, siteRefusalDetail(detail, "the box reported no reason."))
 	case "not_found":
 		return fmt.Sprintf("no such site %q (or it is not in your team)", ref)
+	case "barkpark_not_found":
+		// create-only: the 404 is about the INSTANCE named to host the site, never
+		// the site (which does not exist yet). Point the reader at --instance, not
+		// at a site slug they never typed.
+		return fmt.Sprintf("the instance named to host site %q is not in your team (or no longer exists) — list your fleet with `bp cloud status` and re-run with a valid --instance. %s",
+			ref, kind.nothingClause())
 	case "forbidden":
 		return fmt.Sprintf("your Cloud login is not allowed to %s site %q — %s %s",
 			kind.verb(), ref, siteRefusalDetail(detail, "it needs the `write` ability on the team that owns the site."), kind.nothingClause())
@@ -1434,12 +1468,22 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 		// The plane crashed partway. For a delete that is the one genuinely
 		// ambiguous state (the box teardown runs FIRST), and saying so is the
 		// difference between a retry and a look.
-		if kind == siteRefusedDelete {
+		switch kind {
+		case siteRefusedDelete:
 			return fmt.Sprintf("the control plane errored while deleting %q: %s The box teardown runs BEFORE the row is deregistered, so the site may be torn down yet still registered — read `bp cloud site status %s` before retrying.",
 				ref, siteRefusalDetail(detail, "it gave no reason."), ref)
+		case siteRefusedCreate:
+			// create's real 5xx paths carry their own codes (node_ports_exhausted
+			// 503 / read_token_mint_failed 502, both handled by the default relay
+			// arm) — a bare server_error is an unexpected crash. The read token is
+			// minted BEFORE the row is inserted and no row is written unless the whole
+			// pipeline succeeds, so a crash leaves no site.
+			return fmt.Sprintf("the control plane errored while creating %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		default:
+			return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 		}
-		return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
-			ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 	default:
 		// Every other code — including the flat `teardown_failed`/`rollback_failed`
 		// twins' detail, `not_rollbackable`, and `registration_not_removed` when it
