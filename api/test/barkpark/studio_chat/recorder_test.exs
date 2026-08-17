@@ -2511,4 +2511,113 @@ defmodule Barkpark.StudioChat.RecorderTest do
       assert StudioChat.get_session(revoked).agent_state == "unknown"
     end
   end
+
+  # ── the durable accumulator's per-turn byte cap (charter D169) ──────────────
+  #
+  # `runtime_text` (the codex lane's TURN-scoped durable accumulator) persists
+  # verbatim as `source_markdown` at BOTH persist sites — turn_completed and the
+  # terminal-error clause. D64's 262_144 bound covers only the DISPLAY tail
+  # (StreamSegments); the PERSIST path had no twin, so a runaway turn could write
+  # unbounded bytes into one chat_messages row. These tests pin the config-
+  # overridable byte cap at both sites, truncate-with-marker (NEVER turn-abort —
+  # W22/D131), and prove the guard is load-bearing by mutation (disable it → red).
+  describe "runtime_text per-turn byte cap (charter D169)" do
+    @cap_bytes 256
+
+    setup do
+      current = Application.get_env(:barkpark, :claude_chat, [])
+      Application.put_env(:barkpark, :claude_chat, Keyword.put(current, :max_runtime_text_bytes, @cap_bytes))
+      on_exit(fn -> Application.put_env(:barkpark, :claude_chat, current) end)
+      :ok
+    end
+
+    defp text_delta(sid, payload) do
+      {:studio_chat_runtime_event,
+       %Event{
+         kind: :text_delta,
+         provider: "codex",
+         session_id: sid,
+         native: %{"params" => %{"delta" => payload}}
+       }}
+    end
+
+    defp runtime_kind(sid, kind),
+      do: {:studio_chat_runtime_event, %Event{kind: kind, provider: "codex", session_id: sid}}
+
+    defp persisted_assistant(sid),
+      do: StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "assistant"))
+
+    test "turn_completed persists TRUNCATED-with-marker, never beyond the cap (:1126 site)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, runtime_kind(sid, :turn_started))
+      # one turn's worth of deltas, far past the 256-byte cap
+      frame(recorder, text_delta(sid, String.duplicate("a", 4096)))
+      frame(recorder, runtime_kind(sid, :turn_completed))
+
+      row = persisted_assistant(sid)
+      assert row, "turn_completed must persist the codex assistant row"
+      # THE BOUND: the durable byte size never exceeds the configured cap…
+      assert byte_size(row.source_markdown) <= @cap_bytes
+      # …the turn still SETTLED (it truncated, it did not abort)…
+      assert String.ends_with?(row.source_markdown, "truncated at the persist byte cap …]")
+      # …and the text really was clipped (non-vacuous: 4096 bytes went in).
+      assert byte_size(row.source_markdown) < 4096
+    end
+
+    test "the terminal-error clause persists TRUNCATED text too (:1145 site)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, runtime_kind(sid, :turn_started))
+      frame(recorder, text_delta(sid, String.duplicate("b", 4096)))
+      # a mid-turn death: the terminal-error clause is the SECOND persist site
+      frame(recorder, runtime_kind(sid, :error))
+
+      row = persisted_assistant(sid)
+      assert row, "the terminal-error clause must persist the partial turn"
+      assert byte_size(row.source_markdown) <= @cap_bytes
+      assert String.ends_with?(row.source_markdown, "truncated at the persist byte cap …]")
+    end
+
+    test "a turn UNDER the cap persists verbatim — no marker, no clip",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, runtime_kind(sid, :turn_started))
+      frame(recorder, text_delta(sid, "a short honest answer"))
+      frame(recorder, runtime_kind(sid, :turn_completed))
+
+      row = persisted_assistant(sid)
+      assert row.source_markdown == "a short honest answer"
+      refute String.contains?(row.source_markdown, "truncated at the persist byte cap")
+    end
+
+    test "raising the cap lets the full turn persist (config is truly overridable)",
+         %{sid: sid, recorder: recorder} do
+      current = Application.get_env(:barkpark, :claude_chat, [])
+      Application.put_env(:barkpark, :claude_chat, Keyword.put(current, :max_runtime_text_bytes, 100_000))
+
+      frame(recorder, runtime_kind(sid, :turn_started))
+      frame(recorder, text_delta(sid, String.duplicate("c", 4096)))
+      frame(recorder, runtime_kind(sid, :turn_completed))
+
+      row = persisted_assistant(sid)
+      # under the raised cap the whole 4096 bytes survive, no marker
+      assert byte_size(row.source_markdown) == 4096
+      refute String.contains?(row.source_markdown, "truncated at the persist byte cap")
+    end
+
+    test "the Message changeset carries a grapheme backstop on source_markdown" do
+      # The byte cap is the real bound; this is the second fence. Prove it exists
+      # and reds a pathological over-long row (independent of the recorder path).
+      over = String.duplicate("x", 1_048_577)
+
+      cs =
+        Barkpark.StudioChat.Message.changeset(%Barkpark.StudioChat.Message{}, %{
+          session_id: Ecto.UUID.generate(),
+          seq: 1,
+          role: "assistant",
+          source_markdown: over
+        })
+
+      refute cs.valid?
+      assert %{source_markdown: [_ | _]} = Ecto.Changeset.traverse_errors(cs, & &1)
+    end
+  end
 end
