@@ -2507,7 +2507,135 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
   main itself carries pre-existing non-required reds (spec-gate, compose-smoke, Sobelow) inherited by every PR — the
   four required contexts (Elixir/Cloud/Console gate + active-task) are what gate a merge.
 
+## Wave 27 Decisions (2026-08-17) — LAND THE FLEET, FAIL CLOSED
+
+- **D179 — THE MERGE TRAIN EXECUTED AT DECIDE; WHAT WAS GREEN IS ON MAIN.** The wish's premise
+  ("wave 26 landed its fixes") was corrected twice: first by premise smoke (all six build PRs open),
+  then by verify (#11853 MERGED at 21:18Z as b10593ab94, byte-identical in code to #12037 — the
+  second review proved zero behavior delta). Executed at Decide 2026-08-17T21:35Z: **#12025**
+  (charter D173–D178), **#12040** (chatlive two-seam), **#12042** (release_capture bounds) merged
+  with all four required contexts green; **#12037 CLOSED superseded-by-#11853** (CONFLICTING/DIRTY,
+  content already an ancestor of main; S1 second-review verdict recorded on the close comment).
+  #12038/#12039 each red on ONE unrelated single-test flake (InstanceSiteDeployControllerTest door
+  census; Pulse.MetricsTest vitals) — failed jobs re-run at 21:41Z; the lead merges each on green
+  and closes felix-w26-s3-ssrf-rebind-pin / felix-w24-bl-blobstore-runtime-guard by the D181 recipe.
+  #12041 is the one REAL red (ChatRenderGoldenTest sidebar byte-lock, chat_render_golden_test.exs:200)
+  — resolved by the felix-w27-s6 contingency below. The Sobelow reds on the train were PROVEN
+  stale-baseline line-shift by diff-independence (identical 6 router.ex CSRF findings on disjoint
+  diffs) and structurally cannot gate a merge (continue-on-error, excluded from every required
+  aggregator) — reconcile filed as backlog `felix-w27-bl-sobelow-baseline-lineshift`, fenced by #6057.
+
+- **D180 — LEDGER CLOSES EXECUTED WITH READ-BACK; SUPERSEDE-CLOSES USE criteria_override, NEVER
+  MET-FLIPS.** Five rows closed live at Decide, each read back `done`:
+  `task-felix-w22-bl-codex-completion-deadbranch` + `task-felix-w21-bl-releasecapture-bound-tests`
+  on #12040/#12042 merge evidence; `felix-w26-s1-11853-rescue` recording the SUPERSEDE INVERSION
+  (content landed via #11853, #12037 closed superseded — every substantive obligation met on main);
+  `felix-w23-bl-dataset-slug-format` (all four criteria substantively delivered by merged #11853)
+  and `felix-w23-bl-bundle-member-guard` (substance delivered by merged #11855; residuals NAMED in
+  the override: crit3's controller-test pass-count never captured, crit4's PR-6551 gate obsolete —
+  6551 closed unmerged). The server itself enforces the honesty rule: `bp task stamp` REFUSES a
+  MERGE-GATED criterion (`merge_gated_criterion`), so the sanctioned lead seal is
+  `bp task close … --set criteria_override="<why it is done anyway>"` — override on the record.
+
+- **D181 — THE CLOSE RECIPE IS CLAIM-STATE-DEPENDENT (supersedes D164's re-claim wording as the
+  universal recipe).** Proven live on scratch tasks AND on the real rows: a HELD claim closes by
+  presenting the CURRENT holder's worker+epoch (or your own worker + current epoch with
+  `--set holder_override="…"` — the not_holder refusal is an honesty gate whose documented normal
+  case is a lead sealing a merge-gated task); a LAPSED claim (worker null) closes by re-claim →
+  close. Wrong epoch answers `fenced_off` — the CAS is real; epochs moved twice within minutes
+  tonight (TTL sweeper), so ALWAYS re-read `claim.epoch` immediately before closing. Recipe row:
+  `tooling/grip/ledger/felix-w27-held-claim-close-recipe-2026-08-17.md` (rides this PR).
+
+- **D182 — write_scope FAILS CLOSED, WITH THE FRAME CORRECTED AND THE writer.ex FENCE LIFTED BY
+  NAME.** The defect is real and reachable non-admin TODAY (the #11853 slug gate makes the error
+  branch fire on any format-invalid dataset segment of POST /v1/data/mutate/:dataset), but
+  "isolation-weakening" overstated it: the honest harm is silent-accept-of-invalid-slug +
+  split-brain visibility between strict dataset_id readers (search/sheets/media) and NULL-tolerant
+  string readers — workspace/project scoping stays intact. The slice ships the verify-pinned
+  contract: legit-nil boundary byte-identical (cond arm, read arms, wykb NEVER-WORSE);
+  `{:error, :dataset_not_found}` retried once then `{:error, :conflict}` (409 — never a spurious
+  422, never nil); changeset errors become `{:error, {:invalid_dataset, details}}` re-keyed under
+  "dataset", riding Repo.rollback → 422 `validation_failed` with zero known_codes/OpenAPI change;
+  all 5 put_scope_attrs call sites restructured. FENCE LIFT (named, this slice only): writer.ex is
+  nominally held by #8465, whose required greens date to 2026-07-31 (merge-base 2,500 commits
+  behind) — it must re-gate before any merge anyway, so two call-site hoists cost it at most a
+  trivial rebase. The identical swallow in media.ex:641-644 is OUT of this slice's fence — filed as
+  `felix-w27-bl-media-dataset-swallow-mirror` so the "refused resolution is loud" claim is not
+  overstated. HIGH-FLIP-RISK: the legit-nil/defect-nil boundary — independent second review owed.
+
+- **D183 — THE WEBHOOK CAP IS ANCHORED AND THE 413 DISCIPLINE IS LAW.** GitHub documents a hard
+  25 MB webhook payload ceiling, so a 26 MB config-overridable cap at the existing CacheBodyReader
+  chokepoint rejects zero legitimate deliveries — provably behavior-preserving. Verified from
+  pinned deps: ONLY the 3-tuple `{:more, chunk, conn}` reaches the canonical 413 payload_too_large
+  envelope; a well-typed 2-tuple `{:error, :too_large}` raises non-enveloped Plug.BadRequestError
+  (400). The slice returns read_body's `{:more…}` verbatim under a reduced :length; the global
+  100MB endpoint length is untouched. The RateLimit half of the w22 brief is DESCOPED on the
+  record (webhook_secret_cached memoization already blunted per-probe cost). Recipe row:
+  `felix-w27-plug-bodyreader-413-propagation-2026-08-17.md`.
+
+- **D184 — TWO REFUTATIONS RECORDED, NOTHING BUILT ON THEM.** (i) signed_url's unclamped ttl:
+  the sole caller (delivery/urls.ex:147) passes no opts — ttl is never request-derived; no named
+  failure mode from request data; already-good. (ii) the Session-GenServer "sandbox escape": the
+  Ecto SQL sandbox exists only in test env — a Recorder committing on a pooled connection is
+  correct prod behavior; test-infra hygiene, not a Felix slice. Found instead and filed low:
+  undo_checkout's `admin?` = write-or-admin behind require_write, so ANY writer force-releases any
+  checkout — the docstring lies (`felix-w27-bl-checkout-docstring-honesty`; tightening to true
+  admin would be a behavior change, out of improvement-only scope). Recipe row:
+  `felix-w27-signed-url-callsites-2026-08-17.md`.
+
+- **D185 — MAIN'S ONLY FELIX-CAUSED RED GETS ITS TWO-LINE FIX AS A SLICE.** The spec-gate census
+  (section 18) reds on exactly two UNPINNED protection-claim rows in the TRACKED
+  felix-w25-sobelow-row-verdicts ledger file. Verify re-derived both hashes independently
+  (25db097ed62f / 451500fdf367) and proved by mutation that the two class-C pins flip the census
+  red→green and the suite exit 1→0 with the planted-claim canary still firing.
+
+- **D186 — THE ROSTER: 5 slices round 1 + 1 lead-dispatched contingency; fences swept live.**
+  Round 1 (all file-disjoint, zero open-PR collisions on a live sweep): write_scope fail-closed
+  (`felix-w26-bl-write-scope-swallow-nil`, **fable**, HIGH-FLIP-RISK), pg_catalog bundle-guard
+  broadening (`task-966de76b9dd92783`, **fable**, HIGH-FLIP-RISK: tenancy privilege boundary — its
+  #11853-terminal sequencing gate CLEARED by the merge, its "publish the draft" wish-step was
+  already stale), webhook 25MB cap (`task-felix-w22-bl-webhook-body-rightsize`, opus), spec-gate
+  pins (`felix-w27-s5-spec-gate-pins`, opus), codex protocol_error surfacing
+  (`felix-w26-bl-codex-protocol-error-swallow`, opus — ROUND 1 because #12040 merged at Decide,
+  freeing chat_live.ex; the slice targets the codex Runtime.Event path, distinct from #12040's
+  claude-pipeline overflow clause). Round 2, lead-dispatched on the re-run verdict:
+  `felix-w27-s6-12041-golden-contingency` (opus — flake-or-drift verdict first, GOLDEN_REGEN only
+  if real, then merge #12041 and close felix-w19-bl-authority-lock-remaining-sites per D181).
+  Wave Paper: `felix-pristine-wave-27-2026-08-17`.
+
+### Wave 27 roadmap (5 slices round 1 + 1 contingency round 2)
+
+1. **write_scope fail-closed** — `felix-w26-bl-write-scope-swallow-nil` (fable, large, round 1).
+   Gate: mix test on the touched files + fail-before revert run. HIGH-FLIP-RISK second review owed.
+2. **pg_catalog bundle-guard broadening** — `task-966de76b9dd92783` (fable, medium, round 1).
+   Gate: workspace_bundle_test.exs + 3 sibling suites green; pg_authid red-before probe.
+   HIGH-FLIP-RISK second review owed.
+3. **webhook 25MB body cap** — `task-felix-w22-bl-webhook-body-rightsize` (opus, medium, round 1).
+   Gate: 413 payload_too_large envelope test red-before/green-after.
+4. **spec-gate census pins** — `felix-w27-s5-spec-gate-pins` (opus, small, round 1).
+   Gate: bash scripts/required-checks.test.sh exit 1→0, section-18 ok lines quoted.
+5. **codex protocol_error surfacing** — `felix-w26-bl-codex-protocol-error-swallow` (opus, small,
+   round 1). Gate: chat_live_test.exs 0 failures + clause-removal fail-before.
+6. **#12041 golden contingency** — `felix-w27-s6-12041-golden-contingency` (opus, small, round 2 —
+   lead dispatches on the re-run verdict; AFTER workflow 32068069994's re-run reports).
+
 ## Wave log
+
+### Wave 2026-08-17 — Wave 27 DECIDED (building). "Land the Fleet, Fail Closed."
+
+Ratified D179–D186. Verify corrected the direction mid-flight: #11853 merged at 21:18Z carrying the
+byte-identical slug package, so the planned "merge #12037 first" inverted into "close #12037
+superseded" and both owed slug second-reviews went moot. Act I largely EXECUTED at Decide: #12025 +
+#12040 + #12042 merged (all-4 green), #12037 closed superseded, #12038/#12039 single-flake reds
+re-run, five ledger rows closed live with read-back (two on fresh merge evidence, one recording the
+supersede inversion, two w23 dup-family rows by supersede via criteria_override with residuals
+named). The close recipe is now claim-state-dependent (D181): held → present current worker+epoch or
+holder_override; lapsed → re-claim → close; the epoch CAS is real (fenced_off measured twice). Two
+refutations recorded honestly (signed_url ttl not request-derived; sandbox-escape is test-infra) —
+no slice built on either. Five slices round 1 (write_scope fail-closed + pg_catalog broadening on
+fable with HIGH-FLIP-RISK flags; webhook 25MB cap, spec-gate pins, codex protocol_error on opus) +
+the #12041 golden contingency round 2. Backlog seeded: media dataset-swallow mirror, sobelow
+baseline reconcile (fenced by #6057), checkout docstring honesty. Grade: pending build+review.
 
 ### Wave 2026-08-17 — Wave 26 BUILT + REVIEWED, grade A. "Six Green, One Caught."
 
