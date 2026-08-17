@@ -53,6 +53,14 @@ on:
       # Same #963->#969-class gap as the carve-outs above; amends charter D57,
       # which prescribed a manual workaround instead.
       - "cloud/priv/static/__fixtures__/**"
+      # Scaffy census trap: scaffy/** PRs skip the Go gate, so a catalog- or
+      # fixture-only edit runs NO Go job today. corpus_test.go corpus guards read
+      # the catalog in place (D30) and the lint/parse/format/apply/jsassert suites
+      # read the testdata fixtures, so those edits change what the Go suite asserts
+      # with no .go diff — same #963->#969-class gap as the carve-outs above. Closes
+      # it at the trigger. scaffy/seed/** is excluded: no Go test reads it.
+      - "scaffy/commands/**"
+      - "internal/scaffy/testdata/**"
   pull_request:
     paths:
       - "**/*.go"
@@ -64,6 +72,10 @@ on:
       - "internal/taskboard/testdata/**"
       - "docs/cli/fixtures/**"
       - "cloud/priv/static/__fixtures__/**"
+      # Scaffy census trap (mirrors the push list): catalog + testdata fixtures
+      # gate the Go suite though scaffy/** PRs otherwise skip it; seed/** excluded.
+      - "scaffy/commands/**"
+      - "internal/scaffy/testdata/**"
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
