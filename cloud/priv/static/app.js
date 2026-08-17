@@ -16680,7 +16680,19 @@
   // Map the closed dotted action vocabulary to a human sentence fragment. An
   // unknown action (a newly-added verb the SPA hasn't learned) falls back to the
   // raw action so it still renders rather than disappearing.
+  //
+  // GENERATED from design/audit-actions.json — the SOLE authority for the audit
+  // register's verbs. That one table also feeds the server's closed @actions
+  // allowlist (AuditEvent reads it at compile time), so this object and the
+  // vocabulary it labels can no longer drift apart: they are two OUTPUTS of one
+  // file, and neither side greps the other's syntax. A hand edit inside the
+  // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
+    /* BEGIN GENERATED: audit action labels (design/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+    // 36 of the 56 declared verbs have no entry here: they render
+    // as their raw dotted slug through humanAction's fallback below, each one
+    // declared unlabelled ON PURPOSE with a reason in design/audit-actions.json
+    // (charter D582 — ugly, not false).
     "member.invited": "invited a member",
     "member.role_changed": "changed a member's role",
     "member.removed": "removed a member",
@@ -16693,10 +16705,10 @@
     "site.created": "created a site",
     "site.deleted": "deleted a site",
     "site.deploy_requested": "requested a deploy",
-    "site.rolled_back": "rolled back a site",
     "site.env_changed": "replaced a site's environment",
     "site.domain_added": "added a domain",
     "site.github_connected": "connected a repo",
+    "site.rolled_back": "rolled back a site",
     "barkpark.go_live": "launched a Barkpark",
     "barkpark.deleted": "removed a Barkpark",
     "barkpark.autoupdate_changed": "changed autoupdate",
@@ -16705,6 +16717,7 @@
     // The actor tried; the request never left. The expanded detail carries the
     // wire word (reason: "identity_refused") and which write it was.
     "barkpark.credentials_refused": "was refused — the instance rejected our access credential"
+    /* END GENERATED: audit action labels */
   };
 
   function humanAction(a) { return ACTION_LABELS[a] || a; }
@@ -24067,6 +24080,12 @@
       // cch-w22-s5: the Overview digest's audit row — the host where an actor
       // email and the system's own verb share ONE text run.
       activityRow: activityRow,
+      // cch-w65: the audit verb → sentence-fragment lookup, so the harness can
+      // pin the SHIPPED artifact against design/audit-actions.json — every
+      // labelled verb serves its label, every unlabelled one falls back to its
+      // raw dotted slug (D582). Without this the generated region is proven only
+      // against itself by the design gate.
+      humanAction: humanAction,
       tlvCoalesceKey: tlvCoalesceKey,
       tlvCoalesceKeyByTarget: tlvCoalesceKeyByTarget,
       tlvVerdictOf: tlvVerdictOf,

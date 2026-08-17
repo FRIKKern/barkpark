@@ -164,6 +164,7 @@ internal/pdrender/testdata/styleguide_tokens.txt
 internal/agent/report.go
 .github/workflows/cloud.yml
 design/emit-fence.test.mjs
+design/audit-actions.json
 cloud/test/barkpark_cloud/web/**
 .github/required-checks.json
 .github/workflows/console-harness.yml
