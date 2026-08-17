@@ -17046,25 +17046,240 @@ test("cch-w34-s1: readFailureCopy overrides ONLY the generic forbidden slug", ()
 
 // ── the census is part of the gate, and it must be able to lose ────────────
 
-test("cch-w34-s1: the absence-as-answer census runs clean against the shipped app.js", () => {
+test("cch-w34-s1/cch-w67-s4: the per-GET-call-site census runs clean against the shipped app.js", () => {
   const censusPath = fileURLToPath(new URL("./__unknown_census.mjs", import.meta.url));
   const r = spawnSync(process.execPath, [censusPath], { encoding: "utf8" });
-  assert.equal(r.status, 0, "the census must equal its pin:\n" + r.stdout + r.stderr);
-  // cch-w66-s3: FOUR, not five. loadSite left the population under the REMOVE
-  // arm — its deployments read now has a real not-ok arm and the list says so —
-  // and its ALLOWLIST row was deleted rather than left to describe a tree that
-  // has moved. The other four sites of cch-w34-bl-five-remaining-absence-
-  // collapses are untouched and still pinned.
-  assert.match(r.stdout, /OK: the absence-as-answer set equals its 4-site pin\./);
-  // The five positive controls are PRESENT and unflagged — that is the proof it
-  // discriminates rather than counting `|| []` idioms.
+  assert.equal(r.status, 0, "the census must equal its pin and every proof must hold:\n" + r.stdout + r.stderr);
+  // cch-w67-s4 (charter D821): the census is now a census of EVERY api("GET")
+  // call site — verdict guarded|sanctioned|degrades per row, ADD arm on
+  // unpinned arrivals, REMOVE arm on decay (departed sites AND decayed
+  // proofs). The counts are read from the census's own OK line rather than
+  // re-pinned here — the census's EXPECT table is the single pin.
+  assert.match(r.stdout, /OK: all \d+ GET call sites equal the pin \(\d+ guarded · \d+ sanctioned · \d+ degrades\) and every verdict proof holds\./);
+  // The walker self-check: the old brace-walk's regex-literal blindness let one
+  // function's extent swallow its neighbours; overlap is now a REFUSAL (exit 2).
+  assert.match(r.stdout, /0 top-level overruns/);
+  // The five positive controls are PRESENT and hold no GET call site — the
+  // proof the census discriminates functions rather than counting text.
   assert.match(r.stdout, /controls present : presenceChip lifecyclePill catalogViewState metricsAgeText freshnessModel/);
-  assert.match(r.stdout, /controls flagged : \(none\)/);
+  assert.match(r.stdout, /controls w\/ GETs : \(none\)/);
   assert.match(r.stdout, /controls missing : \(none\)/);
-  // Neither fixed loader may still be in the population.
-  assert.ok(r.stdout.indexOf("loadInstanceSites") === -1);
-  assert.ok(r.stdout.indexOf("loadTokens") === -1);
-  assert.ok(r.stdout.indexOf("loadSite") === -1, "cch-w66-s3: nor the site card's deployments read");
+  // The wave-68 dozen may never slide back into the degrades column.
+  for (const fixed of ["loadProviders", "loadGithub", "renderOAuthButtons", "newRenderOAuth",
+    "loadNewTemplates", "loadInstanceVerify", "fetchMembers", "loadInvite",
+    "showAuthInviteBanner", "newRenderReady", "loadSites"]) {
+    assert.ok(!new RegExp("degrades\\s+" + fixed + "\\b").test(r.stdout),
+      fixed + " must not be pinned 'degrades' after cch-w67-s4");
+  }
+  // Wave-68 correction 5: loadSiteDomains paints NO sentence on failure —
+  // sanctioned-silent, and pinning it 'guarded' would itself be the lie.
+  assert.match(r.stdout, /sanctioned loadSiteDomains/);
+  assert.doesNotMatch(r.stdout, /guarded\s+loadSiteDomains/);
+  // The two honest residues stay visible, each owned: recheckSiteDeleted's
+  // degrade-to-DONE belongs to cch-w68-s5, the palette's silent omit to
+  // cch-w34-bl-five-remaining-absence-collapses.
+  assert.match(r.stdout, /degrades\s+recheckSiteDeleted/);
+  assert.match(r.stdout, /degrades\s+openCommandPalette/);
+});
+
+// ── cch-w67-s4 · TWELVE DEGRADE-TO-EMPTY READS BECOME HONEST (charter D821) ──
+// Each pair below pins BOTH arms of a split: the failed read speaks its own
+// state, and the genuine empty keeps its honest copy byte-for-byte. The drives
+// reuse the cch-w34-s1 rig (driveLoader/recordingDom) because the collapse
+// lives in the fetch callback, which no pure-helper pin can reach.
+
+const drivePR = (status, payload) =>
+  driveLoader(() => hooks.loadProviders(), { status, payload, ids: ["provider-roster", "provider-connect"] });
+
+test("cch-w67-s4 loadProviders: a 500 speaks + Retry — never 'No providers connected yet.'", async () => {
+  const { html } = await drivePR(500, { error: "server_error" });
+  assert.match(html(), /Couldn't load providers/);
+  assert.match(html(), /broke on our side/, "a 5xx names US as the party at fault");
+  assert.match(html(), /data-providers-retry/, "the one next action is a retry");
+  assert.ok(html().indexOf("No providers connected yet") === -1,
+    "a failed read must never be painted as an empty roster");
+});
+
+test("cch-w67-s4 loadProviders: the genuine empty keeps its copy (the roster helper owns it)", () => {
+  assert.match(hooks.providerRosterHtml([], false), /No providers connected yet\./);
+});
+
+const driveGithub = (status, payload) =>
+  driveLoader(() => {
+    sandbox.document.getElementById("github-card").isConnected = true;
+    hooks.loadGithub();
+  }, { status, payload, ids: ["github-card"] });
+
+test("cch-w67-s4 loadGithub: a 500 no longer paints the 'Not configured' badge", async () => {
+  const { html } = await driveGithub(500, { error: "server_error" });
+  assert.match(html(), /Couldn't load GitHub/);
+  assert.match(html(), /data-github-retry/);
+  assert.ok(html().indexOf("aren't configured") === -1,
+    "a configuration claim may only ever describe a 200");
+  assert.ok(html().indexOf("Not configured") === -1);
+});
+
+test("cch-w67-s4 loadGithub: a genuine 200-empty still reads not-configured", async () => {
+  const { html } = await driveGithub(200, {});
+  assert.match(html(), /aren't configured/);
+  assert.match(html(), /Not configured/);
+  assert.ok(html().indexOf("Couldn't load GitHub") === -1);
+});
+
+const driveVerify = (status, payload) =>
+  driveLoader(() => hooks.loadInstanceVerify({ id: "bp-verify-1" }), { status, payload, ids: ["instance-verify"] });
+
+test("cch-w67-s4 loadInstanceVerify: a failed events read no longer vanishes the card", async () => {
+  const { html } = await driveVerify(500, { error: "server_error" });
+  assert.notEqual(html(), "", "the card used to blank itself — indistinguishable from 'no verify run'");
+  assert.match(html(), /Couldn't load verification/);
+  assert.match(html(), /data-verify-retry/);
+});
+
+test("cch-w67-s4 loadInstanceVerify: a genuine 200 with no verify events renders the card, not the failure", async () => {
+  const { html } = await driveVerify(200, { events: [] });
+  assert.notEqual(html(), "", "an empty stream still paints the verify card in its never-checked state");
+  assert.ok(html().indexOf("Couldn't load verification") === -1);
+});
+
+const driveOAuth = (status, payload) =>
+  driveLoader(() => hooks.renderOAuthButtons(), { status, payload, ids: ["oauth-buttons", "oauth-divider"] });
+
+test("cch-w67-s4 renderOAuthButtons: a failed read no longer asserts 'no SSO' on the sign-in screen", async () => {
+  const { dom } = await driveOAuth(500, { error: "server_error" });
+  const container = dom.els["oauth-buttons"];
+  assert.equal(container.hidden, false, "the block stays visible — hidden would claim 'no SSO here'");
+  assert.match(container.innerHTML, /couldn't check whether single sign-on is available/i);
+  assert.match(container.innerHTML, /data-oauth-retry/);
+});
+
+test("cch-w67-s4 renderOAuthButtons: a genuine 200-empty still hides the block (no SSO IS the fact)", async () => {
+  const { dom } = await driveOAuth(200, { providers: [] });
+  assert.equal(dom.els["oauth-buttons"].hidden, true);
+  assert.equal(dom.els["oauth-divider"].hidden, true);
+});
+
+// showAuthInviteBanner: the one degrade that DESTROYED state. The park must
+// survive a transient failure and be consumed only on a determinate dead link.
+async function driveInviteBanner(status, payload) {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document, sessionStorage: sandbox.sessionStorage };
+  const dom = recordingDom(["login-card", "auth-invite"]);
+  const removed = [];
+  sandbox.sessionStorage = { getItem: () => "tok-1", setItem() {}, removeItem: (k) => { removed.push(k); } };
+  sandbox.fetch = fetchStub(status, payload);
+  sandbox.document = dom.document;
+  try {
+    hooks.showAuthInviteBanner("tok-1");
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { Object.assign(sandbox, saved); }
+  return { html: dom.els["auth-invite"].innerHTML, removed };
+}
+
+test("cch-w67-s4 showAuthInviteBanner: a live invitation banners the team and keeps the park", async () => {
+  const { html, removed } = await driveInviteBanner(200, { team: { name: "Acme Inc" }, email: "ada@acme.com" });
+  assert.match(html, /invited to join/);
+  assert.match(html, /Acme Inc/);
+  assert.equal(removed.length, 0);
+});
+
+test("cch-w67-s4 showAuthInviteBanner: a determinate 404 consumes the park and says the link is dead", async () => {
+  const { html, removed } = await driveInviteBanner(404, { error: "not_found" });
+  assert.match(html, /isn't valid any more/);
+  assert.ok(removed.indexOf("bpcloud.invite") !== -1, "a dead link's park is correctly consumed");
+});
+
+test("cch-w67-s4 showAuthInviteBanner: a 500 keeps the park — a transient failure must not destroy the invitation", async () => {
+  const { html, removed } = await driveInviteBanner(500, { error: "server_error" });
+  assert.match(html, /couldn't check your invitation/i);
+  assert.ok(html.indexOf("isn't valid any more") === -1,
+    "a failure is never reported as the link being dead");
+  assert.equal(removed.length, 0,
+    "clearParkedInvite() on a transient failure was the state-destroying arm — it must be gone");
+});
+
+test("cch-w67-s4 loadNewTemplates: a failure is returned as a {fault} marker and NEVER cached", async () => {
+  const saved = sandbox.fetch;
+  try {
+    sandbox.fetch = fetchStub(500, { error: "server_error" });
+    const v1 = await hooks.loadNewTemplates();
+    assert.ok(v1 && v1.fault, "a failed read resolves to a {fault} marker, not []");
+    assert.equal(v1.fault.status, 500);
+    // The failure was not cached: a healthy read straight after gets the list.
+    sandbox.fetch = fetchStub(200, { templates: [{ slug: "tpl-a", title: "A", description: "d" }] });
+    const v2 = await hooks.loadNewTemplates();
+    assert.ok(Array.isArray(v2) && v2[0].slug === "tpl-a",
+      "the old code cached the failure as [] FOREVER — retry must refetch");
+    // And the success IS cached: a later failing transport never regresses it.
+    sandbox.fetch = fetchStub(500, { error: "server_error" });
+    const v3 = await hooks.loadNewTemplates();
+    assert.ok(Array.isArray(v3) && v3[0].slug === "tpl-a");
+  } finally { sandbox.fetch = saved; }
+});
+
+test("cch-w67-s4 inviteLandingState: a failed preview read is check_failed, never 'invalid'", () => {
+  const now = Date.now();
+  // The server's own determinate answers keep their states byte-for-byte.
+  assert.equal(hooks.inviteLandingState(404, null, null, now), "invalid");
+  assert.equal(hooks.inviteLandingState(200, {}, null, now), "invalid",
+    "a 200 with no team is the same dead-link claim by another route");
+  // A 500 and an offline read are NOT answers about the link.
+  assert.equal(hooks.inviteLandingState(500, null, null, now), "check_failed");
+  assert.equal(hooks.inviteLandingState(0, null, null, now), "check_failed");
+  assert.equal(hooks.inviteLandingState(502, null, null, now), "check_failed");
+});
+
+test("cch-w67-s4 inviteStateHtml: check_failed is recoverable copy with a re-check action", () => {
+  const html = hooks.inviteStateHtml("check_failed", {});
+  assert.match(html, /couldn(&#39;|')t check this invitation/i);
+  assert.match(html, /data-invite-act="recheck"/);
+  assert.match(html, /invite-ico--warn/, "recoverable → warn '!', never the dead-link danger mark");
+  assert.ok(html.indexOf("isn't valid any more") === -1);
+});
+
+test("cch-w67-s4 membersPanelHtml: a failed invitations read names itself — never 'No pending invitations.'", () => {
+  const members = [{ user_id: "u2", email: "a@x.io", role: "member", joined_at: "2026-06-01T00:00:00Z" }];
+  const fault = { status: 500, data: { error: "server_error" } };
+  const html = hooks.membersPanelHtml(members, [], { role: "admin", userId: "u1" }, fault);
+  assert.match(html, /Couldn't load pending invitations/);
+  assert.match(html, /data-invites-retry/);
+  assert.ok(html.indexOf("No pending invitations") === -1,
+    "an empty-queue assertion may only ever describe a 200");
+  // A plain member still sees no invitations section, fault or not.
+  const plain = hooks.membersPanelHtml(members, [], { role: "member", userId: "u1" }, fault);
+  assert.ok(!plain.includes("Pending invitations"));
+  // And the legacy 3-arg call is byte-identical to a 4-arg call with no fault.
+  assert.equal(
+    hooks.membersPanelHtml(members, [], { role: "admin", userId: "u1" }),
+    hooks.membersPanelHtml(members, [], { role: "admin", userId: "u1" }, null));
+});
+
+test("cch-w67-s4 globalSiteRow: the fleet-down third state is distinct from the honest dash", () => {
+  const s = { id: "s", name: "orphan", framework: "astro", domains: [] };
+  const down = hooks.globalSiteRow(s, null, true);
+  assert.match(down, /\(unavailable\)/);
+  assert.match(down, /couldn't load your instances/i);
+  assert.ok(down.indexOf("on —") === -1,
+    "'unknown because the read failed' must not wear the 'no instance resolved' dash");
+  assert.ok(!down.includes("site-inst-link"), "still no fabricated instance link");
+  // The two-state contract survives byte-exact for every existing caller.
+  assert.equal(hooks.globalSiteRow(s, null), hooks.globalSiteRow(s, null, false));
+  assert.match(hooks.globalSiteRow(s, null), /on —/);
+});
+
+test("cch-w67-s4 siteDetailHtml: a failed fleet read explains the missing instance segment", () => {
+  const site = { id: "s1", name: "acme", slug: "acme", framework: "astro", domains: ["acme.com"] };
+  const withFault = hooks.siteDetailHtml(site, null, [], "acme.com", [], "refuse", null, null,
+    { status: 500, data: { error: "server_error" } });
+  assert.match(withFault, /instance unavailable/);
+  assert.match(withFault, /couldn(&#39;|')t load your instances/i);
+  // No fault, no bp → the segment is simply absent (unchanged behaviour).
+  const bare = hooks.siteDetailHtml(site, null, [], "acme.com", [], "refuse");
+  assert.ok(bare.indexOf("instance unavailable") === -1);
+  // A resolved bp always wins over a stale-looking fault argument.
+  const withBp = hooks.siteDetailHtml(site, { id: "bp-1", name: "Prod" }, [], "acme.com", [], "refuse", null, null,
+    { status: 500 });
+  assert.match(withBp, />Prod</);
+  assert.ok(withBp.indexOf("instance unavailable") === -1);
 });
 
 // ── cch-w36-s3 · A ROLE WE DO NOT KNOW IS NOT A ROLE OF "MEMBER" ───────────

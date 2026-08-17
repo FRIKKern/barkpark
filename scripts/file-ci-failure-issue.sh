@@ -24,9 +24,12 @@
 # reads UNSUBSCRIBED, which means GitHub notifies the owner only when they are
 # participating or @mentioned. The proof this mattered is #5658, open since
 # 2026-07-22 with 8 comments, every one authored by github-actions and none by
-# a human. So a NEW issue is filed WITH an assignee and an @mention. This is
-# routing, not delivery: whether the human then reads it is not something this
-# script can prove, and #5658 is the standing counter-example.
+# a human. So a NEW issue is filed WITH an assignee and an @mention, and an
+# EXISTING issue that has nobody assigned gets assigned + @mentioned on the
+# comment that reports the next firing — once, because the assignment it just
+# made is what silences the mention on every firing after it. This is routing,
+# not delivery: whether the human then reads it is not something this script can
+# prove, and #5658 is the standing counter-example.
 #
 # LOUD ON DEGRADE. Every unusable-input and API failure emits ::error:: and
 # exits non-zero. It never warns-and-passes: a notifier that silently no-ops is
@@ -39,7 +42,8 @@
 #       1 = the alert could NOT be delivered (loudly).
 #
 # Env: GITHUB_TOKEN GITHUB_REPOSITORY (required)
-#      CI_FAILURE_ASSIGNEE (login to route a NEW issue to; default: the owner
+#      CI_FAILURE_ASSIGNEE (login to route to — a NEW issue, or an existing one
+#        that has nobody assigned; default: the owner
 #        half of GITHUB_REPOSITORY. Set it to the EMPTY string to file unrouted
 #        deliberately — that is an opt-out and warns about nothing.)
 #      CI_FAILURE_KEY (idempotency key, default $GITHUB_WORKFLOW)
@@ -133,19 +137,54 @@ case "$status" in
 esac
 
 # `issues` also returns pull requests; drop anything carrying pull_request.
-existing="$(jq -r --arg title "$title" \
+# The list response ALREADY carries `assignees`, so the comment path can tell a
+# routed issue from an unrouted one without a second round trip: number and
+# assignee count come out of this one extraction, tab-separated.
+existing_row="$(jq -r --arg title "$title" \
   'if type == "array"
-   then [ .[] | select(has("pull_request") | not) | select(.title == $title) | .number ] | first // empty
+   then [ .[] | select(has("pull_request") | not) | select(.title == $title)
+          | "\(.number)\t\((.assignees // []) | length)" ] | first // empty
    else empty end' "$body_file" 2>/dev/null)"
+existing="${existing_row%%$'\t'*}"
+existing_assignees="${existing_row#*$'\t'}"
 
 if [ -n "$existing" ]; then
   # Ongoing condition: comment, do not mint a duplicate.
-  comment="$(jq -n --arg c "$context" \
-    '{body: ("Still failing.\n\n" + $c)}')"
+  #
+  # ROUTE ONCE, THEN STOP NAGGING. An issue filed before this script routed
+  # anything has NO assignee, and every later firing took this path — #5658 sat
+  # open from 2026-07-22 with 8 comments, all from github-actions, nobody
+  # assigned. So when the existing issue has ZERO assignees, assign it (the
+  # same source as the create path) AND @mention in that same comment. Both
+  # halves are conditioned on the SAME zero-assignee test, which is what makes
+  # this route-once rather than nag: the next firing sees an assignee and says
+  # nothing. Mentioning without assigning would repeat forever — the crown
+  # fires 6-hourly — and assigning without mentioning leans on auto-subscribe
+  # this script cannot prove.
+  mention='' patch_rejected=''
+  if [ "${existing_assignees:-0}" = 0 ] && [ -n "$assignee" ]; then
+    patch_status="$(api PATCH "/repos/$repo/issues/$existing" \
+      "$(jq -n --arg a "$assignee" '{assignees: [$a]}')")"
+    if [ "$patch_status" = 200 ]; then
+      mention="$(printf '\nRouted to @%s, who is now assigned to this issue — it was filed with nobody assigned. Set `CI_FAILURE_ASSIGNEE` on the calling step to route it elsewhere.\n' "$assignee")"
+    else
+      # Same degrade contract as the create path: the comment IS the alarm, so
+      # a rejected assignment warns and still exits 0. The @mention stays in
+      # the body — it is the routing that survived.
+      patch_rejected="$patch_status"
+      mention="$(printf '\nRouted to @%s by mention only: this issue has nobody assigned and GitHub returned HTTP %s for the assignment. Check that the login can be assigned in this repository, or set `CI_FAILURE_ASSIGNEE` on the calling step.\n' "$assignee" "$patch_status")"
+    fi
+  fi
+
+  comment="$(jq -n --arg c "$context" --arg mention "$mention" \
+    '{body: ("Still failing.\n\n" + $c + $mention)}')"
   status="$(api POST "/repos/$repo/issues/$existing/comments" "$comment")"
   case "$status" in
     201) printf 'commented on existing issue #%s (%s)\n' "$existing" "$title"
          printf '::notice title=CI failure still open::%s — commented on #%s\n' "$title" "$existing"
+         if [ -n "$patch_rejected" ]; then
+           warn "issue #$existing carries the failure and the comment @mentions @$assignee, but GitHub returned HTTP $patch_rejected for the assignment, so nobody is assigned to it. Check that the login can be assigned in this repository, or set CI_FAILURE_ASSIGNEE on the calling step."
+         fi
          exit 0 ;;
     000) die "could not reach the GitHub API to comment on existing issue #$existing" ;;
     *)   die "GitHub API returned HTTP $status commenting on issue #$existing: $(head -c 400 "$body_file")" ;;

@@ -631,6 +631,19 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
         "REGISTERED AT BIRTH, in the same commit as the key (dr-w32-s3). This census FAILS OPEN — the register is hand-typed and nothing derives the emitted set — so a key that ships without its row is a key this guard silently does not cover. The row is here because the gauge the epic's wind-down rests on must not be the next instrument nobody reads: its reader ships in the same PR rather than being promised to a later slice.",
       disposition: :has_reader,
       stay: nil
+    },
+    %{
+      key: "never_covered_sites",
+      what:
+        "WHICH {site, environment} pairs are never-covered — the named tail behind the count `coverage_cohorts` reports, bounded at 20 rows and carrying its own unbounded total and truncation marker",
+      surface:
+        "GET /v1/deploy-ledger/census — emitted on the `coverage_cohorts` node of DeployLedger.census/3, beside the counts it names",
+      audience:
+        "the operator with a never-covered count in front of them and no idea which site to look at: internal/cloudclient/client.go decodes DeployCoverageSite and internal/cli/cloud_deploy_census_cmd.go's renderDeployCoverageSites prints slug, environment and row count, plus the cut marker when the tail is longer than the list.",
+      reason:
+        "REGISTERED AT BIRTH, in the same commit as the key (dr-w34-s1) — the doctrine `coverage_cohorts` established one wave earlier. The count it names shipped ANONYMOUS for two waves: `coverage_cohorts/2` already SELECTED site_id and discarded it in the merge, so the never-covered split could be built by environment and never by site. A naming that shipped without a reader would be the same defect one level down — a list nobody can see is not an improvement on a number nobody can act on.",
+      disposition: :has_reader,
+      stay: nil
     }
   ]
 

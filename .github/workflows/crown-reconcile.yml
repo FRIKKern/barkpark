@@ -205,13 +205,28 @@ jobs:
           rc=0
           bash scripts/crown-reconcile.sh --repo "${{ github.repository }}" --window-hours 24 || rc=$?
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          # Four verdicts, four messages. A compute fault must NEVER be reported
-          # as a credential fault, and a read that did not happen must never be
+          # The case table. A compute fault must NEVER be reported as a
+          # credential fault, and a read that did not happen must never be
           # reported as a clean reconciliation.
+          #
+          # rc 0 carries TWO named shapes. RECONCILED is the real green. QUIET
+          # WINDOW (charter D597) is a benign NAMED deferral: an EMPTY deploy
+          # window on a VERIFIED crown — serving sha recorded, re-ask list
+          # PRESENT-EMPTY, zero in-window rows — where the script prints its
+          # own ::warning naming the class, so the deferral is SAID without
+          # this table's help. Measured 2026-08-15T18:28Z..08-17: the
+          # empty-population rc 2 paged SIX consecutive scheduled runs on a
+          # quiet repo (#11217 at 41 comments) — paging here is what mutes the
+          # alarm for the one case that is not (the rc-4 precedent, dr-w31-s2).
+          # Rows-exist-but-no-runs is NOT quiescence and STAYS rc 2: a row
+          # with no run is an accusation source. STATED RESIDUAL, not code: a
+          # repo quiet for 60 days trips GitHub's scheduled-workflow auto-disable,
+          # and a quiescence-green run produces no failure heartbeat that would
+          # notice the schedule going dark.
           case "$rc" in
-            0) echo "::notice::the crown reconciles with what deploy.yml actually delivered over the last 24h"; exit 0 ;;
+            0) echo "::notice::the crown reconciles with what deploy.yml actually delivered over the last 24h — or the window was QUIET, and the script's own ::warning above named that deferral itself"; exit 0 ;;
             1) echo "::error::THE CROWN DOES NOT MATCH WHAT WAS DEPLOYED. A delivering run has no row, a row has no run, or production is serving a sha the record has never heard of — the counts and the population are in the log above. This cannot clear itself: the missing rows must be recorded, or the recorder's gate fixed."; exit 1 ;;
-            2) echo "::error::SILENCE — the reconciler COULD NOT READ part of what it compares, the population was empty, or its re-ask list was ABSENT with no first-run statement (a destroyed memory, or a fetch that failed). Its own text has always said this is NOT a green, and it exited 0 until #11365. The named conditions are in the log above. A benign in-flight grace no longer lands here: that is rc 4."; exit 1 ;;
+            2) echo "::error::SILENCE — the reconciler COULD NOT READ part of what it compares, the population was empty, or its re-ask list was ABSENT with no first-run statement (a destroyed memory, or a fetch that failed). Its own text has always said this is NOT a green, and it exited 0 until #11365. The named conditions are in the log above. A benign in-flight grace no longer lands here: that is rc 4. An empty window on a VERIFIED crown no longer lands here either: that is the rc-0 QUIET WINDOW deferral — landing here on an empty window means at least one quiescence condition failed."; exit 1 ;;
             3) echo "::error::CONFIGURATION FAULT — this run's credential cannot reach the control plane, or a flag is wrong. A reconciler that cannot read what it reconciles must not report success. This is NOT a statement about the crown's contents."; exit 1 ;;
             4) echo "::warning::NOT YET DUE — everything was read and nothing is accused, but a SERVING GRACE is open: the box is serving a sha whose recorder POST has not landed yet. The accusation is not dropped, it is DEFERRED — the sha is on the re-ask list, and the next run that still finds no row exits 1 as GRACED-UNRECORDED. Measured before this arm existed, rc=2 fired SIX times in this workflow's whole history and FIVE were exactly this benign grace, so paging here is what mutes the alarm for the one case that is not."; exit 0 ;;
             *) echo "::error::crown-reconcile.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
@@ -287,7 +302,11 @@ jobs:
               `exit 0`. A benign in-flight SERVING GRACE is NOT this: that is
               rc 4, which warns and exits 0 and therefore never reaches this
               issue at all — its accusation is collected by the next run as
-              GRACED-UNRECORDED (`1`).
+              GRACED-UNRECORDED (`1`). An empty window on a VERIFIED crown
+              (serving sha recorded, re-ask list PRESENT-EMPTY, zero in-window
+              rows) is NOT this either: that is the rc-0 QUIET WINDOW deferral
+              and never reaches this issue — an empty window landing here means
+              at least one quiescence condition failed.
             - `3` — a CONFIGURATION fault: the runner could not reach the control
               plane at all, or `CROWN_API_TOKEN` was set to an empty string.
               That says nothing about the crown's contents.

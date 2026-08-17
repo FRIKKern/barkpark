@@ -372,7 +372,7 @@ defmodule BarkparkWeb.CycleFleetController do
   defp with_scope(conn, %{"epic_id" => epic_id, "wave_id" => wave_id} = params, action, fun) do
     case conn.assigns[:current_workspace] do
       %{id: workspace_id} ->
-        case authorize_cycle(conn.assigns[:api_token], workspace_id, action) do
+        case authorize_cycle(conn, workspace_id, action) do
           :ok ->
             project_id =
               case {params["project_slug"], conn.assigns[:current_project]} do
@@ -396,11 +396,29 @@ defmodule BarkparkWeb.CycleFleetController do
     end
   end
 
-  defp authorize_cycle(%{permissions: ["public-read"]}, _workspace_id, :read),
-    do: {:error, :forbidden}
+  # MEMBERSHIP, never list equality. This clause used to pattern-match
+  # `%{permissions: ["public-read"]}` — the singleton shape only — so a token
+  # minted `["public-read", "read"]` (a legal mint) missed the pattern and fell
+  # through to `TenancyAuth.authorize/3`, which sees a workspace member holding
+  # `read` and says :ok. The `:cycle_api` pipeline mounts
+  # `DeriveWorkspaceFromToken` (so `current_workspace` is assigned for any
+  # workspace-bound token) but NOT `Plugs.PublicRead`, so nothing downstream
+  # re-tested the tier: the mixed-shape token read the flat
+  # `GET /v1/cycles/:epic/:wave` ledger while the singleton got 403.
+  #
+  # ONE definition of the tier: `Plugs.PublicRead.public_read_token?/1`, public
+  # by design for exactly this question. A second copy here is how a clamp and
+  # its enforcement drift apart.
+  defp authorize_cycle(conn, workspace_id, :read) do
+    if BarkparkWeb.Plugs.PublicRead.public_read_token?(conn) do
+      {:error, :forbidden}
+    else
+      TenancyAuth.authorize(conn.assigns[:api_token], workspace_id, :read)
+    end
+  end
 
-  defp authorize_cycle(token, workspace_id, action),
-    do: TenancyAuth.authorize(token, workspace_id, action)
+  defp authorize_cycle(conn, workspace_id, action),
+    do: TenancyAuth.authorize(conn.assigns[:api_token], workspace_id, action)
 
   defp select(params, keys), do: Map.take(params, keys)
 

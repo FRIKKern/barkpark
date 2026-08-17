@@ -20,6 +20,11 @@
 #         one that keeps the repaired WRONG axis able to LOSE)
 #   (c3) NO RUN ID AT ALL: the head-sha comparison is the fallback    → 0 and 1
 #   (d) WINDOW EMPTY: nothing to compare is never a green            → exit 2
+#   (u) QUIET WINDOW: an empty window on a VERIFIED crown — serving
+#       sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows —
+#       is a NAMED deferral (rc 0, own ::warning), not a 6-hourly
+#       page; each condition is pinned by the ONE fixture that fails
+#       it alone, and rows-exist-but-no-runs STAYS rc 2          → 0, then 2×4
 #   (e) CROWN UNREADABLE: a read that did not happen is never green  → exit 2
 #   (f) SERVING-UNRECORDED: the box serves a sha with no cp row      → exit 1
 #   (t) THE SANDBOX ITSELF: a tool this harness "removes" is actually
@@ -409,6 +414,92 @@ run_cr 2 "every successful run predates the window" \
   --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE"
 saw "COULD NOT VERIFY: the population was EMPTY" "an empty population is refused, not rounded to reconciled"
 not_saw "RECONCILED:" "it never claims reconciliation over zero runs"
+
+section "(u) QUIET WINDOW: an empty window on a VERIFIED crown is a NAMED deferral"
+# The live streak, in fixture form. A quiet repo empties the 24h window BY
+# CONSTRUCTION, and the empty-population rc 2 paged SIX consecutive scheduled
+# runs 2026-08-15T18:28Z..08-17 (#11217 at 41 comments) — all saying only that
+# nothing happened. Quiescence may read green ONLY when all three conditions
+# hold, and each condition is pinned below by the ONE fixture that fails it
+# alone — so removing any single condition from the guard reds this section.
+#
+# (u1) all three conditions hold → rc 0, said with its own class name.
+# The crown's rows are dated OUTSIDE the window: the serving sha's cp row
+# exists (condition 1 — the sha lookup carries no window filter, exactly as in
+# production, where the last deploy predates the quiet day), the seeded state
+# file is PRESENT-EMPTY (condition 2), and zero rows sit INSIDE the window
+# (condition 3).
+CROWN_QUIET="$(crown_json crown-quiet \
+  "$(row "$SHA_A" cp false "$OUT" 1)" \
+  "$(row "$SHA_A" instance false "$OUT" 1)")"
+run_cr 0 "empty window, serving sha recorded, list PRESENT-EMPTY, zero in-window rows" \
+  --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_QUIET" --health-fixture "$HEALTH_BASE"
+saw "QUIET WINDOW:" "the deferral is SAID, with its own class name"
+saw "::warning::QUIET WINDOW" "and it carries its own ::warning annotation — a warning, never a silent green"
+saw "quiescence-green does not imply the reverse direction was checked" "the reverse-direction no-alibi refusal prints INSIDE the deferral text"
+not_saw "RECONCILED:" "quiescence is a deferral — it never claims reconciliation"
+not_saw "COULD NOT VERIFY" "and the named deferral replaces the empty-population page, not merely precedes it"
+not_saw "COULD NOT FULLY READ" "the tolerated structural refusal is not reported as a silence on the green path"
+
+# (u2) CONDITION 1 ALONE: the serving check did not run, everything else quiet.
+# No health fixture means no serving verification — and an unverified crown
+# must not read green off an empty window. This is the ONLY fixture where
+# condition 1 is the sole blocker (no reason() fires, no deferral fires), so a
+# guard that drops SERVING_VERIFIED greens here and reds the harness.
+run_cr 2 "the same empty window with the serving check NOT run is NOT quiescence" \
+  --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_QUIET"
+saw "COULD NOT VERIFY: the population was EMPTY" "an unverified crown stays a warning"
+not_saw "QUIET WINDOW:" "no quiescence is asserted over a crown nobody verified"
+
+# (u3) CONDITION 2 ALONE: the re-ask list is PRESENT with an entry that retires
+# CLEANLY (its cp row exists, outside the window) — so no accusation fires, no
+# reason() fires, and the ONLY blocker is that the list was not PRESENT-EMPTY.
+# A graced deferral in the same run as an empty window must never be laundered
+# by it, and a guard that drops the PRESENT-EMPTY clause greens here.
+CROWN_QUIET_D="$(crown_json crown-quiet-d \
+  "$(row "$SHA_A" cp false "$OUT" 1)" \
+  "$(row "$SHA_A" instance false "$OUT" 1)" \
+  "$(row "$SHA_D" cp true "$OUT" 1)")"
+STATE_QP="$TMP/state-quiet-present.txt"; seed_state "$STATE_QP"
+printf '%s %s\n' "$SHA_D" "$(( $(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$NOW" +%s 2>/dev/null || date -u -d "$NOW" +%s) - 600 ))" >> "$STATE_QP"
+CR_STATE="$STATE_QP"
+run_cr 2 "the same empty window with a PRESENT re-ask list is NOT quiescence" \
+  --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_QUIET_D" --health-fixture "$HEALTH_BASE"
+CR_STATE=""
+saw "retired from the re-ask list" "the entry retired cleanly — the blocker is the list's state, not an accusation"
+saw "COULD NOT VERIFY: the population was EMPTY" "a list that was not affirmatively empty stays a warning"
+not_saw "QUIET WINDOW:" "PRESENT is not PRESENT-EMPTY — quiescence needs the affirmative statement that nothing is owed"
+
+# (u4) CONDITION 3 ALONE: rows EXIST inside the window while no run does. A row
+# with no run is an accusation source, not quiescence — it STAYS rc 2, and it
+# is named. A guard that drops the zero-rows clause greens here.
+CROWN_QUIET_ROWS="$(crown_json crown-quiet-rows \
+  "$(row "$SHA_A" cp false "$OUT" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)")"
+run_cr 2 "rows exist inside the window while NO delivering run does — not quiescence" \
+  --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_QUIET_ROWS" --health-fixture "$HEALTH_BASE"
+saw "ROWS WITHOUT RUNS: 1 crown row(s) sit inside the window" "the rows-exist-but-no-runs sub-case is its own named line"
+saw "an accusation source, not quiescence" "and it says WHY rows without runs cannot read green"
+saw "COULD NOT VERIFY: the population was EMPTY" "it stays the rc-2 warning"
+not_saw "QUIET WINDOW:" "a window holding unexplained rows is never quiet"
+
+# (u5) THE FLOOR: any OTHER silence still outranks quiescence. One in-window
+# run whose job list cannot be read leaves DELIVERING=0 — but that run MIGHT
+# have delivered, so the window is unreadable, not empty. Only the structural
+# no-alibi refusal is tolerated on the green path; every other reason() blocks.
+RUNS_QUIET_UNREAD="$(runs_json runs-quiet-unread "$SHA_A:$IN1")"
+JOBS_ELSEWHERE="$(jobs_json jobs-elsewhere "9:success")"
+run_cr 2 "a run whose job list could not be read is a SILENCE, and silence outranks quiescence" \
+  --runs-fixture "$RUNS_QUIET_UNREAD" --jobs-fixture "$JOBS_ELSEWHERE" --crown-fixture "$CROWN_QUIET" --health-fixture "$HEALTH_BASE"
+saw "its job list could not be read" "the unreadable run is named"
+not_saw "QUIET WINDOW:" "an unreadable window is never a quiet one"
+
+# The doctrine is STATED in the script, not only implemented — same contract as
+# section (q): a rule that lives only in a guard expression is a rule the next
+# reader has to reverse-engineer.
+for phrase in "QUIET WINDOW" "PRESENT-EMPTY" "an accusation source, not quiescence" "scheduled-workflow auto-disable"; do
+  if grep -qF "$phrase" "$CR"; then ok "the script states: $phrase"; else bad "the script never states '$phrase' — the quiescence boundary is undocumented"; fi
+done
 
 section "(e) MUTATION: the crown cannot be read — a silence is never a green"
 run_cr 2 "the crown fixture does not exist" \
@@ -948,6 +1039,39 @@ else
     ok "the rc=4 arm does not raise an error annotation"
   fi
 fi
+# …AND NEITHER DOES THE QUIET WINDOW. The empty-population page (8 consecutive
+# scheduled reds on a quiet repo, #11217 at 41 comments) is the same lesson as
+# rc 4, and the case table must SAY so — the named case, the rationale, and the
+# rows-exist boundary — or the next reader of the yml re-derives the page.
+if grep -qF "QUIET WINDOW" "$WF"; then
+  ok "the case table documents the QUIET WINDOW named case"
+else
+  bad "$WF never names the QUIET WINDOW case — an rc-0 deferral the table does not document reads as a plain green"
+fi
+if grep -qF "the rc-4 precedent, dr-w31-s2" "$WF"; then
+  ok "and it carries the rc-4 precedent rationale — paging on the benign case is what mutes the alarm for the real one"
+else
+  bad "$WF documents the quiet case without the rc-4 precedent rationale that justifies an empty window ever reading green"
+fi
+if grep -qF "STAYS rc 2" "$WF"; then
+  ok "and it states that rows-exist-but-no-runs STAYS rc 2 — the boundary of the tolerance is written down"
+else
+  bad "$WF never states the rows-exist boundary — a reader cannot tell what the quiet tolerance does NOT cover"
+fi
+if grep -qF "scheduled-workflow auto-disable" "$WF"; then
+  ok "the 60-day scheduled-workflow auto-disable is a STATED residual beside the case it sharpens"
+else
+  bad "$WF's case table never states the 60-day auto-disable residual — a quiescence-green schedule can go dark unnoticed and unstated"
+fi
+RC0_ARM="$(grep '^            0)' "$WF" | head -1)"
+if [ -z "$RC0_ARM" ]; then
+  bad "there is no rc=0 case arm to check — this assertion would be vacuous, so it fails instead"
+elif printf '%s' "$RC0_ARM" | grep -q 'QUIET'; then
+  ok "the rc-0 arm's own message admits rc 0 carries two shapes — a QUIET WINDOW is not relabelled as a reconciliation"
+else
+  bad "the rc-0 arm still claims only 'the crown reconciles' — a QUIET WINDOW landing there is silently relabelled as a full reconciliation"
+fi
+
 # The script and the workflow must agree on what 4 MEANS: an rc the yml handles
 # and the script never returns is decoration, and the reverse is a page.
 if grep -q '^#             4 = NOT YET DUE' "$CR"; then
