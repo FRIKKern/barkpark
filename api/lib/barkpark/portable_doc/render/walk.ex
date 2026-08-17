@@ -201,10 +201,29 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       inner <> "</div>"
   end
 
+  # Section-frame hook (charter D19): the ONLY classes a PdBox may emit. The
+  # whitelist is MANDATORY, not defensive decoration — walk renders raw
+  # external Pd JSON, so an open `"class"` pass-through would let any document
+  # claim arbitrary paper-surface classes (class injection). Compose stamps
+  # these as FIXED literals (compose_section_stack); anything else stays inert.
+  @box_class_whitelist ~w(bp-section--framed)
+
   defp box(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
-    ~s(<div style="#{box_style(Map.get(n, "style"))}">) <> inner <> "</div>"
+
+    ~s(<div#{box_class_attr(n, pal)} style="#{box_style(Map.get(n, "style"))}">) <>
+      inner <> "</div>"
   end
+
+  # Emits the class attr ONLY when the palette is :article (email output stays
+  # byte-identical — Outlook is inline-only) AND the value is in the fixed
+  # whitelist above. Everything else — email palettes, unknown classes,
+  # author-injected values — emits "" (the pre-hook bytes).
+  defp box_class_attr(%{"class" => class}, %{style: :article})
+       when class in @box_class_whitelist,
+       do: ~s( class="#{class}")
+
+  defp box_class_attr(_n, _pal), do: ""
 
   defp box_style(nil), do: ""
 

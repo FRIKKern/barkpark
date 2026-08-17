@@ -134,7 +134,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp block(%{"type" => "section"} = b, d) do
     children = Enum.map(Map.get(b, "blocks", []), &block(&1, d + 1))
-    wrap("section", attr_str(b, ["id", "title"]), children, d)
+    wrap("section", attr_str(drop_nonscalar_variant(b), ["id", "title", "variant"]), children, d)
   end
 
   # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
@@ -143,6 +143,15 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # FunctionClauseError, which escaped the callers' rescue as a raw 500.
   defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
   defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
+
+  # `variant` must be a SCALAR string to print — `attr_str`'s `to_string/1`
+  # raises Protocol.UndefinedError on a map. A non-binary variant is DROPPED
+  # (fail-soft, mirroring the render side's unknown-variant fall-through),
+  # never crashed: a hand-authored map here is noise, not an unprintable paper.
+  defp drop_nonscalar_variant(%{"variant" => v} = b) when not is_binary(v),
+    do: Map.delete(b, "variant")
+
+  defp drop_nonscalar_variant(b), do: b
 
   # Head cells arrive in TWO shapes: the write chokepoint normalizes them to
   # inline-node lists (the canonical form BPML round-trips), while hand-authored

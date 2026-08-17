@@ -10,7 +10,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   @block_attrs %{
     "paper" => ~w(slug title),
-    "section" => ~w(id title),
+    "section" => ~w(id title variant),
     "callout" => ~w(id tone title),
     "diagram" => ~w(id caption),
     "route" => ~w(id sport distance elevation duration caption),
@@ -328,7 +328,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       {:ok,
        %{"type" => "section", "blocks" => []}
        |> put_attr("id", attrs)
-       |> put_attr("title", attrs), cur}
+       |> put_attr("title", attrs)
+       |> put_attr("variant", attrs), cur}
     else
       {blocks, errors, cur} = block_seq(cur, "section")
       {errors, cur} = expect_close("section", cur, errors)
@@ -337,7 +338,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         {:ok,
          %{"type" => "section", "blocks" => blocks}
          |> put_attr("id", attrs)
-         |> put_attr("title", attrs), cur}
+         |> put_attr("title", attrs)
+         |> put_attr("variant", attrs), cur}
       else
         {:skip, errors, cur}
       end

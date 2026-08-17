@@ -1,0 +1,9 @@
+   The task TUI is glanceable, live, an… ··· 2/14 ││ The live tmux drive ships as a committed SGR harness and the feels-      │
+ ├─▎⠦ The live tmux drive ships as a committed S… ││ native bar is finally judged                                             │
+ │    C5/7 · P1 · 3/5                             ││ ⠋ in_progress · P1 · C5/7 · task · epic-builder-the-live-tmux-drive-shi… │
+ ├─ ⠦ Wide-mode footer verbs become clickable ag… ││                                                                          │
+ │    C5/7 · P2 · 4/5                             ││ criteria 3/5                                                             │
+ ├─ ⠦ The TUI card and cheatsheet finally speak … ││   ✓ A committed re-runnable harness exists under scripts/taskboard-      │
+ │    C5/7 · P3 · 4/5                             ││     drive/ that builds the real binary from ./cmd/barkpark, launches it  │
+ ├─ ⠦ The board discloses its 1000-row horizon —… ││     in detached tmux 3.4 sessions at 130x40 and 70x24 against the        │
+ │    C5/7 · P2 · 4/5                             ││     configured server, injects raw SGR bytes per gesture, captures       │
