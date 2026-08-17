@@ -1172,6 +1172,10 @@
         {
           "type": "text",
           "value": "IN FLIGHT: wave 1 is VERIFYING — the survey is digested above and ten verifiers (nine Opus, one Fable) are proving the load-bearing claims with run output. Next: Decide cuts the wave plan from the verified ledger. The epic heartbeat lives on task-4792223ca9eb5a7d."
+        },
+        {
+          "type": "text",
+          "value": " [Correction, 2026-08-12 Review: this milestone is history — all ten verifiers reported, Decide cut the seven-slice plan below, six round-1 slices were built and reviewed; the wave's outcome lives in the Debrief section at the end.]"
         }
       ],
       "id": "pew1-callout",
@@ -1745,9 +1749,201 @@
       ],
       "id": "block-45",
       "type": "paragraph"
+    },
+    {
+      "id": "pew1-h-debrief",
+      "level": 2,
+      "text": "Debrief — the wave as it merges",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Review re-ran every slice gate green, mutation-proved the two guards (the parity gate reds on the exact one-sided add it was built to catch; the evidence manifest fails on a one-byte tamper), and merged all six branches onto origin/main in one conflict-free octopus — the integrated tree runs content + portable_doc at 2222/0. No review fixes were needed; the final branches are the builders' own. Grade: A-."
+        }
+      ],
+      "id": "pew1-deb-p1",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        [
+          {
+            "type": "text",
+            "value": "Slice"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Final branch"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Verdict"
+          }
+        ]
+      ],
+      "id": "pew1-deb-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "S1 parity gate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/parity-gate-catches-one-sided-css-adds-v-0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "§2/§5/§6 producer-exhaustive + 9-entry allowlist + rot guard; review mutation re-proved the red on the exact crown-fix shape. Mirror-side adds remain ungated (recorded)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S2 write-path normalizer"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/normalize-item-shapes-and-inline-leaf-di-1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Five defects fixed at one chokepoint; review independently re-derived the blast radius — 46 live corpus blocks byte-identical, byline strings untouched, refusals only more satisfiable. Independent second review before merge is warranted (high-flip-risk)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S3 figure legibility"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/charts-and-mermaid-legible-at-narrow-wid-2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Ticks 5.09→11.0px, mermaid labels 3.60→16.0px at 360; annotation clamp; region tone ladder. Every chart scrolls below ~670px containers — uniform floor, accepted trade-off."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S4 erasure twin"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/the-eight-minute-erasure-twin-friction-l-3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "/papers/eight-minute-erasure (46 blocks, zero HTML, zero spacers) + /papers/paper-authoring-excellence live; 12-row residual table classifies every gap with an owner. The .cast assets are draft docs — purge hazard on pe-bl-asciicast-selfhost."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S5 hermetic rig"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/hermetic-render-screenshot-rig-benchmark-4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Rig green in a cold worktree: render → 6 full-page 2x shots → 30 content assertions; 27-file evidence manifest verifies and was tamper-proven. Baselines are macOS-face; numeric pins wait for pe-w2-rig-ci-image-baselines."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S6 door copy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/the-paper-door-stops-selling-html-manife-5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Manifest, onramp and bp usage all sell blocks + the value-keyed leaf law + the guide slug; the openapi hand-edit re-verified byte-equal to the Elixir literal by the reviewer."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Ledger audit: all six slice tasks in_progress with evidence stamped as work happened, only the lead-owned 'PR merged' criteria open — one omission found and fixed in review (pe-w1-erasure-twin criterion 3, the FRICTION.md residual table, was proven on the branch but never stamped). All nine charter backlog children exist and are open. The stale IN FLIGHT callout above carries a dated correction."
+        }
+      ],
+      "id": "pew1-deb-p2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "What fell short of the wish, honestly: the reader still renders body prose at 16px — the crown defect is measured, gated, and UNFIXED this wave, by design (D14: the typography slice is round 2, dispatched only after the parity gate merges, so the fix cannot ship unverifiable). The twin lost the artifact's display scale, accent-italic, clock-strip geometry and per-trial dots — each loss is a named, owned residual, which is the Heggemsnes Act working as declared: humility recorded as tasks, not vibes."
+        }
+      ],
+      "id": "pew1-deb-p3",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NEXT WAVE: merge the six round-1 PRs (any order; lead closes each task's 'PR merged' criterion on merge), then dispatch S7 pe-w1-reader-editorial-typography — the payoff slice (18px token, rem→em roles, 66–72 CPL, hyphens off). After S3 merges, refresh the rig baselines (chart CSS changed); after the normalizer deploys, corpus repair rides cch-w57-bl-eleven-papers-render-200-with-prose-the-reader-drops. Wave 2 candidates stay ranked in the charter backlog (pe-bl-*)."
+        }
+      ],
+      "id": "pew1-deb-callout",
+      "type": "callout"
     }
   ],
-  "source_rev": "198bf7c503833fe03fc6da21920625d1",
+  "source_rev": "c8170e3daa4c792a16afd6a678ffcd1a",
   "style": "article",
   "title": "Twin and Close — the founding wave"
 }
