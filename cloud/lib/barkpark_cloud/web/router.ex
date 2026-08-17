@@ -7050,16 +7050,49 @@ defmodule BarkparkCloud.Web.Router do
   # DELETE /v1/sites/:id → 200 {ok, status:"deleted"} | error. The inverse of a
   # spawn: tear the site down on its box (stop slots, disarm the Caddy route,
   # delete the tree) THEN deregister the row. BOX FIRST — a failed teardown must
-  # not orphan a still-serving box behind a deleted registration. If the box is
-  # gone (its Barkpark was deleted), there is nothing to tear down: just
-  # deregister. Team-scoped, write ability (same as rollback).
+  # not orphan a still-serving box behind a deleted registration. Team-scoped,
+  # write ability (same as rollback).
+  #
+  # W67 S2 (D811) — NO "the box is gone" ARM. This route used to open with
+  # `teardown_result = if is_nil(bp), do: :ok, else: Sites.Deploy.teardown(site, bp)`
+  # and stamp `box_present: not is_nil(bp)` into the audit row. Both were DEAD:
+  # `sites.barkpark_id` is NOT NULL and `sites_barkpark_id_fkey` is ON DELETE
+  # CASCADE (confdeltype='c'), so deleting a Barkpark deletes its sites with it —
+  # a persisted site ALWAYS has its box row, `get_barkpark/1` cannot answer nil
+  # for one, and `box_present` could only ever record `true`. A constant dressed
+  # as a measurement is exactly what this epic exists to remove. The FK is now
+  # asserted by `site_cascade_census_test.exs` — specifically by its
+  # "sites.barkpark_id is NOT NULL and ON DELETE CASCADE" test, added in W67
+  # REVIEW because the four census tests it shipped with all looked the OTHER way
+  # (FKs whose PARENT is `sites`) and `fk_census_test.exs` reads no delete
+  # behaviour at all, so this sentence was claiming a guard nobody had written.
+  # Drop the NOT NULL or loosen the FK now and that test reds, naming this arm. The one residual window — another request
+  # deleting the Barkpark between the load above and this line, cascading this
+  # site away — is a 500 either way: it was `Repo.delete` raising
+  # `Ecto.StaleEntryError` before, it is `teardown/2`'s function clause now.
   delete "/v1/sites/:id" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       bp = Registry.get_barkpark(site.barkpark_id)
-      teardown_result = if is_nil(bp), do: :ok, else: Sites.Deploy.teardown(site, bp)
+      teardown_result = Sites.Deploy.teardown(site, bp)
 
       case teardown_result do
         :ok ->
+          # HARD MATCH, DELIBERATE, AND IT HAS A PRICE (W67 S2 / D820).
+          # `Registry.delete_site/1` is a bare `Repo.delete` on a struct with no
+          # declared constraint, so every child row is swept by the DATABASE.
+          # Three FKs reference `sites` (deployments, site_artifacts,
+          # content_publishes) and all three are ON DELETE CASCADE. If one were
+          # ever loosened to RESTRICT, `Repo.delete` RAISES `Ecto.ConstraintError`
+          # here — after the box teardown above already disarmed the Caddy route —
+          # and `handle_errors` answers `500 {"error":"server_error"}` with no
+          # `ok` and no `detail` while the site row SURVIVES: the INVERSE ORPHAN,
+          # a dead site that is still registered. It stays a hard match because
+          # there is no honest typed answer at this point (the box is already
+          # gone, so neither retrying nor refusing is true), and the loud crash is
+          # better than a 200 over a half-deleted site. The tripwire that keeps
+          # the branch impossible is `site_cascade_census_test.exs` — an EXACT-SET
+          # census of the FKs referencing `sites` plus their confdeltype — backed
+          # by per-child delete-path tests in `router_sites_test.exs`.
           {:ok, _} = Registry.delete_site(site)
 
           _ =
@@ -7069,7 +7102,7 @@ defmodule BarkparkCloud.Web.Router do
               action: "site.deleted",
               target_type: "site",
               target_id: site.id,
-              metadata: %{slug: site.slug, kind: site.kind, box_present: not is_nil(bp)}
+              metadata: %{slug: site.slug, kind: site.kind}
             })
 
           push_event(site.team_id, "sites")
@@ -7077,10 +7110,14 @@ defmodule BarkparkCloud.Web.Router do
 
           json(conn, 200, %{ok: true, status: "deleted", slug: site.slug})
 
-        # Same typed relay as the rollback route (cch-w63-s3 / D763). NAMED
-        # DEFERRAL: `teardown_failed` has ZERO readers in `app.js`, so this
-        # route's refusal has no console surface at all yet — the code is on the
-        # wire so a reader CAN be written; writing it is not this slice.
+        # Same typed relay as the rollback route (cch-w63-s3 / D763). THE
+        # DEFERRAL IS OVER: the console gained its site-delete flow — and the
+        # reader for these two arms — in W67 S1
+        # (cch-w63-bl-teardown-failed-has-no-console-reader-at-all, cloud/priv/static
+        # only). Until then `teardown_failed` had ZERO readers in `app.js` and no
+        # console caller could even reach this route, so the refusal had no human
+        # surface at all. The wire shape below is unchanged by that slice; this
+        # comment is edited here because S2 owns router.ex this wave.
         {:error, status, detail, code} ->
           json(conn, status, %{ok: false, error: code, detail: detail})
 
