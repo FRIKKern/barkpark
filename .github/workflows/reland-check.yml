@@ -155,7 +155,7 @@ jobs:
             echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if [ "$zero" = "1" ]; then
-            echo "::warning title=Re-land check has NO SIGNAL to read::scanned ${docs} task(s) and not one carries a content.landed digest, so 0 findings means 'nothing to compare against', not 'no overlap'. Tracked as arpss-reland-check-zero-landed-signal (advisory)."
+            echo "::warning title=Re-land check has NO SIGNAL to read::scanned ${docs} task(s) and not one carries a content.landed digest, so 0 findings means 'nothing to compare against', not 'no overlap'. ROOT CAUSE: content.landed is written only when a closer passes a 'landed' map at close time (close.ex merge_landed) and no closer does — the CLI close sends no such key; the repo also has no merge webhook wired, so the reconcile path never fires either. Fix tracked as arpss-reland-teach-closer-landed; signal gap as arpss-reland-check-zero-landed-signal (advisory)."
           fi
           echo "findings=${n:-0}" >> "$GITHUB_OUTPUT"
 
@@ -217,7 +217,7 @@ jobs:
             [ -n "${NOTE:-}" ] && echo "| note | ${NOTE} |"
             if [ "${DIGESTS:-0}" = "0" ] && [ "${STATUS:-}" = "ok" ] && [ "${DOCS:-0}" != "0" ]; then
               echo ""
-              echo "> **0 findings here means \"nothing to compare against\"**, not \"no overlap\": no scanned task carries a \`content.landed\` digest. Root cause tracked as \`arpss-reland-check-zero-landed-signal\`."
+              echo "> **0 findings here means \"nothing to compare against\"**, not \"no overlap\": no scanned task carries a \`content.landed\` digest. **Root cause (dominant):** \`content.landed\` is written only by the close-path \`merge_landed\` (\`close.ex\`) when the closer supplies a \`landed\` map at close time — and no closer does (the \`bp\` CLI close sends no \`landed\` key). **Secondary:** the repo has no merge webhook wired, so the \`reconcile_merge_gate\` path never fires to backfill one either. Teaching a closer to compute and pass \`landed.files\` is tracked as \`arpss-reland-teach-closer-landed\`; this signal gap as \`arpss-reland-check-zero-landed-signal\`."
             fi
             if [ "${AUTH:-}" = "anon" ]; then
               echo ""
