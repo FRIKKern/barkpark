@@ -31,6 +31,18 @@
 // them. The fence refuses that write, names every line it would have deleted, and
 // exits non-zero. `--force` performs it anyway, `--adopt` re-blesses the tree.
 //
+// THE LEDGER KEY IS `<path>#<artifact name>`, NOT the path alone. One file may
+// carry TWO generated regions (the registry below explicitly invites it via
+// markerBegin/markerEnd — the cloud SPA's app.js is the first case), and a ledger
+// keyed by path alone gives both regions ONE slot: last write wins, the loser
+// reads "unattributed" forever, check.mjs reds permanently and --write refuses
+// all-or-nothing. The chosen shape is the flat composite `${path}#${name}` (over a
+// nested {path: {name: digest}}) because it keeps the manifest one sorted level
+// deep — greppable, and a stale entry is one visibly deleted line. The artifact
+// `name` is the same string the CLI prints, so a manifest line names the surface a
+// refusal names. A unit with NO name (check.mjs' Part I synthetic fixtures, which
+// exercise attribute() on invented paths) keys by the bare path.
+//
 // CSS surfaces are spliced into a BEGIN/END GENERATED: tokens marker block that
 // must already exist (mirrors the status-tones precedent). Go surfaces are whole
 // generated *_gen.go files. check.mjs imports the builders here for the drift gate
@@ -2262,13 +2274,21 @@ export function evaluate(a) {
 export function evaluateAll() { return ARTIFACTS.map(evaluate); }
 
 // ── the write fence: attribution by generated-region digest (charter D21) ────
-// design/emit-manifest.json maps artifact path → SHA-256 of the generated region
+// design/emit-manifest.json maps `<path>#<artifact name>` → SHA-256 of the region
 // this emitter last wrote there. It is written ONLY by --write and --adopt, and it
 // is the emitter's entire memory of its own output. Committed alongside the
 // artifacts, exactly like the 18 generated files themselves: change tokens.json,
 // run --write, commit the artifacts AND the manifest.
 export const MANIFEST_PATH = "design/emit-manifest.json";
 const MANIFEST_ABS = join(here, "emit-manifest.json");
+
+// The ledger key: an artifact's IDENTITY, not its path. Two ARTIFACTS entries may
+// share one file (distinct markerBegin/markerEnd), and both must own a slot — see
+// the header note for why the shape is a flat `${path}#${name}` composite. A unit
+// without a name (synthetic fixtures) keys by path alone, which is what it is.
+export function regionKey(u) {
+  return u.name ? `${u.path}#${u.name}` : u.path;
+}
 
 export function regionDigest(region) {
   return region == null ? null : createHash("sha256").update(region, "utf8").digest("hex");
@@ -2287,7 +2307,9 @@ function writeManifest(regions) {
   for (const k of Object.keys(regions).sort()) sorted[k] = regions[k];
   writeFileSync(MANIFEST_ABS, JSON.stringify({
     $comment:
-      "GENERATED ATTRIBUTION LEDGER — do not hand-edit. One SHA-256 per artifact " +
+      "GENERATED ATTRIBUTION LEDGER — do not hand-edit. One SHA-256 per artifact, " +
+      "keyed `<path>#<artifact name>` (NOT path alone: one file may carry two " +
+      "generated regions, and each owns its own slot), taken " +
       "over the GENERATED REGION ONLY (the marker interior for css/html surfaces, " +
       "the whole file for go/ts/elixir). design/emit.mjs --write refuses to replace " +
       "a region whose digest does not match, because those bytes were never emitted " +
@@ -2307,7 +2329,7 @@ function writeManifest(regions) {
 //                    the milder failure, and --adopt clears it in one command.
 export function attribute(r, regions) {
   if (r.error || r.currentRegion == null) return "unknown";
-  const recorded = regions?.[r.path];
+  const recorded = regions?.[regionKey(r)];
   if (recorded === undefined) return "unknown";
   return recorded === regionDigest(r.currentRegion) ? "attributed" : "unattributed";
 }
@@ -2371,7 +2393,8 @@ function run(mode, { force = false } = {}) {
     for (const u of [...results, ...(mirrorUnit ? [mirrorUnit] : [])]) {
       if (u.error || u.currentRegion == null) { console.error(`  skip  ${u.name}: ${u.error ?? "region unreadable"}`); continue; }
       const d = regionDigest(u.currentRegion);
-      if (next[u.path] !== d) { next[u.path] = d; console.log(`  adopt ${u.name} (${u.path})`); adopted++; }
+      const k = regionKey(u);
+      if (next[k] !== d) { next[k] = d; console.log(`  adopt ${u.name} (${u.path})`); adopted++; }
       else console.log(`  ok    ${u.name} (already blessed)`);
     }
     writeManifest(next);
@@ -2424,7 +2447,7 @@ function run(mode, { force = false } = {}) {
     if (mode === "write") {
       if (r.drift) { writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++; }
       else { console.log(`  ok    ${r.name} (already current)`); }
-      nextRegions[r.path] = regionDigest(r.expectedRegion);
+      nextRegions[regionKey(r)] = regionDigest(r.expectedRegion);
     } else {
       if (r.drift) { console.error(`  DRIFT ${r.name} (${r.path})`); changed++; }
       else if (r.attribution !== "attributed") { console.error(`  UNATTRIBUTED ${r.name} (${r.path}) — in sync with tokens.json, but ${MANIFEST_PATH} has no matching record`); changed++; }
@@ -2446,7 +2469,7 @@ function run(mode, { force = false } = {}) {
     if (mode === "write") {
       if (drift) { writeFileSync(post.abs, post.expected); console.log(`  WROTE ${post.name} (${post.path})`); changed++; }
       else { console.log(`  ok    ${post.name} (already current)`); }
-      nextRegions[post.path] = regionDigest(post.generatedBlock);
+      nextRegions[regionKey(post)] = regionDigest(post.generatedBlock);
     } else {
       if (drift) { console.error(`  DRIFT ${post.name} (${post.path})`); changed++; }
       else if (mirrorUnit.attribution !== "attributed") { console.error(`  UNATTRIBUTED ${post.name} (${post.path}) — in sync, but ${MANIFEST_PATH} has no matching record`); changed++; }
