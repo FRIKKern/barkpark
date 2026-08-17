@@ -3677,6 +3677,60 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-17 — wave 71 REVIEW — grade A, three round-1 slices built, mutation-verified and pushed with PRs open; the refusal-pipeline arc's terminal half closes for create, and the last server chain that discarded a box's words is gone
+
+**Paper:** `cloud-console-hardening-wave-71-2026-08-17` (debrief appended). **Decisions:** D861–D866
+(this PR, #11870). Entry written on the charter PR branch per the wave-67/68/69/70 precedent. Every
+red-before claim was re-proven at review by MUTATION, not read: each fix was reverted in place, the
+slice's suite run red, the fix restored, the gate re-run green.
+
+**LANDED (three branches with PRs open):**
+
+- S1 `cch-w70-bl-create-mint-chain-discards-the-box-s-nested-refusal` →
+  `loop-epic/the-create-site-mint-chain-stops-discard-0-r` → **#11885**. `mint_failure_detail/1`
+  unwraps the typed envelope before the is_binary guard and composes `code — message`; flat bodies
+  pinned byte-identical by an equality assert; SERVER-ONLY per D861 (the console's WITHHOLD arm is
+  deliberate and untouched). Reviewer fix (the wave's only one): the 403 nested test now pins the
+  composed `"forbidden — admin token cannot mint public-read here"` string and its comment matches
+  the fixture. Mutation: reverting the one-line arm reds exactly the 2 nested tests; final gate
+  113/0.
+- S2 `cch-w70-bl-site-create-collapses-refusal-exit-families` →
+  `loop-epic/bp-cloud-site-create-exits-by-refusal-fa-1` → **#11886**. `siteRefusedCreate` through
+  the ONE #11784 ladder (D862); per-verb arms become switches; barkpark_not_found points at
+  `--instance`; exit table 401→3 / no_team→1 / 404→4 / 422→1 / 502·503→8, never 6. Wire
+  codes/statuses re-verified against router.ex at review (503 node_ports_exhausted, 502
+  read_token_mint_failed, 404 barkpark_not_found, 422 no_team — all confirmed). Anti-vacuity held:
+  tests assert EXIT CODES; mutation reds 5 of them. Zero reviewer changes; gates go build/vet/test
+  all green.
+- S3 `cch-w69-bl-dns-label-minted-from-raw-url` →
+  `loop-epic/subdomain-from-url-self-normalises-the-t-2` → **#11887**. `subdomain_from_url/1` folds
+  `trim |> downcase` before the strips (D865 defense-in-depth beside #11850); D852 hostile corpus +
+  suffixed shape pinned; platform_host/1 divergence documented in-test against backlog row
+  `cch-w71-bl-platform-host-fourth-normaliser-spelling` (exists, open). Mutation: dropping the fold
+  reds the corpus test 96/1. Zero reviewer changes; gate 96/0.
+
+**DEFERRED BY DESIGN (round 2):** `cch-w70-bl-cli-drops-the-readable-types-menu-on-create` (D863)
+shares the cloud_site_cmd.go seam with S2 and dispatches only AFTER #11886 merges. It was not built
+this run and its absence is sequencing, not a stall.
+
+**LEDGER:** clean — all three slice tasks `in_progress`, criteria stamped with real evidence as the
+builders worked, merge-gated rows left open for the lead; the deferred round-2 task untouched at
+`open`; zero reviewer ledger fixes (first wave in several with nothing to repair). **Cross-slice:**
+S1's composed `code — message` detail is exactly the string S2's 502 relay test carries — the two
+halves of the wave meet in one sentence, by construction.
+
+**LEAD DEBTS at merge:** merge order is free between #11885/#11886/#11887 (disjoint files); close
+each task's merge-gated criterion on merge (S1 index 4, S2 index 3, S3 index 2). Wave-70 debts
+restated: merge #11850 as it greens + close `cch-w69-bl-worker-route-stores-url-unnormalised`;
+annotate #11547 with the D836 ruling Paper; the backfill row stays lead/ops-gated (D865).
+
+**NEXT WAVE (72):** dispatch the round-2 readable-types menu slice (D863) once #11886 lands — the
+structured `CloudRefusal.ReadableTypes` + `error.details.readable_types` + console-grammar render,
+with the structured-assertion anti-vacuity law. Then the parity remainder D866 filed: deploy
+(+upload/mint/poll) exit-families, domain arm, settings/get — same-seam rows, sequence them. Spine
+candidate: the w64 typed-wire-codes census with the union method (65 referenced / 108 truly-absent),
+partitioned by reachability before building any copy.
+
 ### 2026-08-17 — wave 70 REVIEW — grade A, five code slices + one ruling packet, all pushed with PRs open, ZERO reviewer fixes for the second consecutive wave; the refusal-pipeline arc closes except its round-2 mint chain
 
 **Paper:** `cloud-console-hardening-wave-70-2026-08-17` (debrief appended). **Decisions:** D853–D860
