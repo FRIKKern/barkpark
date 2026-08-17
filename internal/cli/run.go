@@ -220,9 +220,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	}
 
 	// Prod write-guard: a write against a prod-looking target needs confirmation
-	// unless --yes. (scoped_admin still attempts — the guard is local UX, not the
-	// client preflight-refuse that rule #2 forbids.)
-	if cmd.Writes && isProd(ctx, m) && !g.yes {
+	// unless --yes, or unless the server itself advertises production:false on
+	// /v1/meta (absence of the field falls back fail-closed). (scoped_admin still
+	// attempts — the guard is local UX, not the client preflight-refuse that
+	// rule #2 forbids.)
+	if cmd.Writes && isProd(ctx, m) && !g.yes && !serverDeclaredNonProd(ctx.Server) {
 		if !confirmProdWrite(out, cmd, ctx) {
 			out.errf("aborted: prod write not confirmed")
 			return exitUsage
@@ -1833,6 +1835,18 @@ func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) b
 
 // isProd decides whether the target is production via a name/url heuristic on
 // the manifest's server identity and the resolved server URL.
+//
+// FAIL CLOSED (onb-backlog-isprod-custom-host-write-confirm): the old shape
+// defaulted to non-prod unless the host matched a substring allowlist
+// (api.barkpark.cloud / "prod"), so a custom production hostname like
+// cms.gyldendal.no skipped the destructive-write confirm entirely — and every
+// live fleet host emits the generic server.name "barkpark", so the name leg
+// caught no real prod either. Now any host that is not provably local IS prod:
+// localhost/loopback/0.0.0.0 stay unprompted, everything else confirms. The
+// two ways out are --yes (the sole client-side bypass — no env carve-out) and
+// the server itself advertising production:false on /v1/meta
+// (serverDeclaredNonProd — consulted by the write-guard call sites, not here,
+// so this stays a pure offline heuristic that whoami can always evaluate).
 func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 	name := strings.ToLower(m.Server.Name)
 	if name == "prod" || name == "production" {
@@ -1842,7 +1856,7 @@ func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 	if strings.Contains(s, "localhost") || strings.Contains(s, "127.0.0.1") || strings.Contains(s, "0.0.0.0") {
 		return false
 	}
-	return strings.Contains(s, "api.barkpark.cloud") || strings.Contains(s, "prod")
+	return true
 }
 
 // dryRun prints the resolved method/path/headers(redacted)/body and exits 0

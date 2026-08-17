@@ -86,11 +86,40 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 }
 
 // metaResponse is the subset of GET /v1/meta the CLI surfaces in whoami.
+//
+// Production is the server-authoritative production signal consumed by the
+// prod write-guard (serverDeclaredNonProd). It is a *bool so tolerance runs
+// both directions — an old server that omits the key parses as nil (the guard
+// stays fail-closed), and an old CLI ignores the extra key (plain
+// json.Unmarshal). It rides /v1/meta and NEVER the capabilities manifest:
+// manifest decoding is strict (DisallowUnknownFields), so a manifest field
+// would brick every older CLI against a newer server (D16).
 type metaResponse struct {
 	ServerTime    string            `json:"serverTime"`
 	MinAPIVersion string            `json:"minApiVersion"`
 	MaxAPIVersion string            `json:"maxApiVersion"`
 	SchemaHashes  map[string]string `json:"currentDatasetSchemaHash"`
+	Production    *bool             `json:"production"`
+}
+
+// serverDeclaredNonProd asks GET /v1/meta whether the server explicitly
+// advertises production:false — the ONLY server-side signal that may skip the
+// prod write-confirm now that isProd/isProdServer fail closed on custom hosts.
+// Everything else keeps the guard: field absent (old server), production:true,
+// transport error, non-2xx, or an unparseable body all return false. Callers
+// short-circuit behind the isProd heuristic and --yes, so this network consult
+// only happens when a confirm would otherwise fire.
+func serverDeclaredNonProd(server string) bool {
+	metaURL := strings.TrimRight(server, "/") + "/v1/meta"
+	status, body, err := doRequest("GET", metaURL, map[string]string{}, nil)
+	if err != nil || status < 200 || status >= 300 {
+		return false
+	}
+	var meta metaResponse
+	if json.Unmarshal(body, &meta) != nil {
+		return false
+	}
+	return meta.Production != nil && !*meta.Production
 }
 
 // whoamiSourceName classifies where ctx.Server was chosen from, for whoami's
