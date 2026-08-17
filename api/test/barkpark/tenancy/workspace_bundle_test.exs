@@ -1530,6 +1530,60 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── the membership guard is not schema-blind (felix-w27, pg_catalog) ─────────
+  #
+  # NAMED FAILURE MODE: schema-blind existence filter. The felix-w25-s3 guard
+  # above rejects foreign PUBLIC tables, but `table_exists?/1` classified by
+  # `nspname = 'public'` while the unqualified COPY in the import path resolves
+  # via search_path (pg_catalog implicit-FIRST) — so a crafted manifest naming
+  # a pg_catalog relation (pg_authid, the role/password table) was FILTERED OUT
+  # of `assert_member_tables!/1`'s `foreign` set instead of refused.
+  #
+  # RED-BEFORE (recorded venue: this header comment; also the commit body):
+  # against the unmodified nspname='public' table_exists?/1, the probe below
+  # FAILS with "Expected exception Barkpark.Tenancy.WorkspaceBundle.
+  # InvalidBundleError but nothing was raised" — the hostile member imports
+  # (0-row silent skip). Green-after: the search-path-visibility rewrite keeps
+  # pg_authid in `foreign` and refuses it before any COPY/INSERT/DDL.
+  describe "import refuses pg_catalog relations — the membership guard is search-path-aware (felix-w27)" do
+    test "a crafted manifest appending pg_authid is refused invalid_bundle naming pg_authid" do
+      # Role-independent on purpose: row_count 0 means the refusal is asserted
+      # without ever writing (or reading) pg_authid, so the probe passes under
+      # non-superuser prod-host test roles.
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      # Ground truth first: no export enumeration ever emits a pg_catalog
+      # relation — a manifest naming one is crafted/foreign by construction.
+      refute "pg_authid" in Enum.map(manifest["tables"], & &1["name"])
+
+      hostile_member = %{
+        "name" => "pg_authid",
+        "partition" => "E1",
+        "import_strategy" => "copy",
+        "columns" => ["rolname"],
+        "order_columns" => ["rolname"],
+        "row_count" => 0,
+        "md5" => "d41d8cd98f00b204e9800998ecf8427e"
+      }
+
+      hostile_bundle =
+        repack(Map.put(manifest, "tables", manifest["tables"] ++ [hostile_member]), dumps)
+
+      err =
+        assert_raise WorkspaceBundle.InvalidBundleError, fn ->
+          WorkspaceBundle.import_bundle(hostile_bundle, mode: :merge)
+        end
+
+      # The refusal rides the existing 422 invalid_bundle oracle and NAMES the
+      # pg_catalog relation.
+      assert err.code == "invalid_bundle"
+      assert err.message =~ "pg_authid"
+    end
+  end
+
   # Re-pack a (possibly tampered) manifest + in-memory dumps into a bundle
   # binary, through the SAME Archive.pack/3 the engine uses.
   defp repack(manifest, dumps) do
