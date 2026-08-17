@@ -1,0 +1,9 @@
+ ▎ The task TUI is glanceable, live, an… ··· 2/14│ │ The task TUI is glanceable, live, and never flickers                     │
+                                                 │ │ ✓ done · C3/7 · task · relevance-loop                                    │
+   Paper Excellence epic — close the a… ··· 20/58│ │                                                                          │
+ ├─ ⠇ Wave-3 decide referent: the visible wave's…│ │ criteria 4/4                                                             │
+ │    C5/7 · P1 · ✓✓○ 2/3 · pe-w3-decide · 2m    │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
+ ├─ ⠇ Sections get a class hook on both wrappers…│ │     ↳ cache_test.go includes an intra-session out-of-order rollback gua… │
+ │    C5/7 · P2 · 6/7                            │ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
+ ├─ ⠇ The rig learns to measure the crown — four…│ │     constant motion.                                                     │
+ │    C5/7 · P3 · 5/6                            │ │     ↳ board/components/anim tests cover in_progress ordering, claim fre… │

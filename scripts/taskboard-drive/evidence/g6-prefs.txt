@@ -1,0 +1,2 @@
+before: "details_pane_ratio":0.6054054054054054
+after:  "details_pane_ratio":0.6825396825396826

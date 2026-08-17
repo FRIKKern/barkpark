@@ -916,14 +916,34 @@ func (m Model) clickFooterVerb(verb rune) (tea.Model, tea.Cmd) {
 }
 
 // footerVerbAt maps an absolute terminal click (x,y) to the board footer verb
-// whose span contains it, or (0,false). NARROW board mode only — the portrait
-// primary surface: wide two-pane and the reading frames expose no footer verb
-// targets (the reading footer omits c/x/o by charter). The geometry mirrors
-// Compose byte-for-byte: the footer is the last painted row (Y == height-1 after
-// Compose's clamps and its one blank top row), inset by the left gutter gl, and
-// the spans are computed at the same inner width renderFooter paints at.
+// whose span contains it, or (0,false). Both board frames now expose the verbs
+// (charter D111): the reading frames still omit c/x/o, so a pushed frame bails.
+// The geometry mirrors Compose byte-for-byte — the footer is the last painted
+// row, inset by the left gutter gl, and the spans are computed at the exact
+// inner width renderFooter paints at:
+//
+//   - NARROW: the footer spans the whole portrait inner width (width-gl-gr), so
+//     the ladder sheds against that.
+//   - WIDE (D111): the footer is the LEFT board pane, so it sheds against the
+//     live dragged/persisted boardPaneCols — one grammar, two widths. The pad is
+//     the same gl; the footer row is the pane's last row (Y == wideGeom's inner).
 func (m Model) footerVerbAt(x, y int) (rune, bool) {
-	if m.wide || m.topFrame().Kind != FrameBoard {
+	if m.topFrame().Kind != FrameBoard {
+		return 0, false
+	}
+	if m.wide {
+		gl, innerW, inner := m.wideGeom()
+		if y != inner {
+			return 0, false
+		}
+		boardW := m.boardPaneCols(innerW)
+		col := x - gl
+		_, spans := buildBoardFooter(boardW, m.ui.MouseReleased)
+		for _, s := range spans {
+			if col >= s.start && col < s.end {
+				return s.verb, true
+			}
+		}
 		return 0, false
 	}
 	width, height := m.width, m.height

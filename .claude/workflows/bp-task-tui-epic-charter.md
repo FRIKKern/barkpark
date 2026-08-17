@@ -2343,4 +2343,183 @@ ttw18-bl-narrow-reading-width-skew — one width producer for narrow reading fra
 known hit⇄paint drift vector). (4) ttw18-bl-wide-footer-verb-clicks (P3) if the mouse story
 is to be uniform. (5) ttw18-bl-go-toolchain-skew stays P4 latent.
 
-Next D-number: D109.
+### Wave 19 2026-08-17 (DECIDED: prove it native + one grammar — the D109 reconciliation wave)
+
+**Premise-smoke verdicts (run, not assumed):** the wish's epic id `task-tui-epic` does NOT exist —
+the epic spine is `task-tui-goal` (bp not_found vs published, re-confirmed at Decide). The wish's
+literal build command `go build .` fails at repo root (no Go files; main is `./cmd/barkpark`).
+D40's "showing N of M" mandate git-shown and read for coverage (line 567). dr-w35-s1 is a
+DEPLOY-RELIABILITY reconcile (D594), not a prior D109 draft — D109 is authored fresh here.
+
+**D109 — Reconciliation: ten taskboard-adjacent merges landed after this charter's last commit
+(2026-07-23); four are load-bearing on charter law and are hereby read INTO law.**
+(a) **#6129** (48bf746a1c, 2026-07-25) shipped the pointer-DRAGGABLE wide divider with
+`DetailsPaneRatio` PERSISTED in `~/.config/barkpark/taskboard-preferences.json` (atomic write on
+drag release only, tolerant load, ratio (0,1) exclusive — preferences.go), plus the
+criteria-first + purpose-dossier reading order. This RETIRES D101's phantom-scrub as refuted
+(the drag gesture now exists: compose.go wideDragging/resizeWidePanes; live-drive-proven
+including persistence across kill+relaunch), AMENDS the zero-persistent-settings flavor
+(details_pane_ratio is the FIRST and only persisted TUI setting — a gesture-set physical
+preference, not a mode/toggle; the no-settings-SCREEN law stands), and SUPERSEDES D15's content
+order (criteria checklist + purpose dossier now lead, before stamps/timeline/prose — a thin task
+still stays thin is retained as intent). (b) **#11564** (5ea0637910) RETIRES the D11/D18
+breadcrumb ROW (Breadcrumb/crumbSeg survive only as a trail renderer; every +1 crumb Y-offset
+removed) and introduces `docLayout` as the ONE reading-column seam. (c) **#11570** (c0c37aab03)
+re-anchors the doc-column cap on D24's 72-cell measure (docLayout caps at 72, centered).
+(d) **#11624** (a0715cf5cc) dresses the reading document as a sheet: ─ top edge + │ side rails
+via `renderDocPane`, the one painter. Non-load-bearing: #6033 (32MiB fetch bound), #8133
+(disposition strip), #8604 (refuse empty envelope), #8648 (poison-parity tests), #6002 (D99
+close-out); #8281 is internal/cli, not taskboard. Stale citations corrected: mouseMotion is
+program.go:795 (and HAS the reading-frame branch), footerVerbAt is program.go:925. Residue
+ordered: prune the retired '›' breadcrumb glyph from readingGlyphExtras + its stale
+allowedGlyphs comment (W19 hygiene slice).
+
+**D110 — The SGR tmux drive protocol is PROVEN end-to-end; the drive graduates from spike to
+committed harness + judged verdict.** W19 verify drove the REAL compiled binary in detached
+tmux 3.4 (130x40 and 70x24, `new-session -d -x/-y` alone fixes geometry; `send-keys -l` with
+ANSI-C `$'\033[<…'` delivers, hex `-H` equivalent) against guerrilla: wheel(65), click
+press/release(0 M/m), hover motion(35) accent paint, divider drag (press-on-gutter/motion-32/
+release) with prefs rewrite 0.6054→0.4444 AND persistence across kill+relaunch, exact 2-col
+gutter hover bounds, M toggle — ALL LANDED. Grammar truths the harness must encode: (1) there
+is NO click-again-descend — a single click is select+activate (leaf descends on FIRST click;
+a second click on an epic root FOLDS it); (2) shift-click(4) reaching the app acts as a plain
+click — the bypass is TERMINAL-native selection, by construction unprovable via send-keys;
+(3) the M-toggle footer mode note is invisible below a 102-col inner board width — ACCEPTED as
+shed-ladder design, never scored as a drive failure; (4) evidence law: frames churn (spinners,
+elapsed stamps, live SSE) — diffs MUST normalize or compare single rows, and coordinates MUST
+be located from a capture (read the │ columns), never hard-coded (the persisted ratio moves
+them). Recipe ledger row: tooling/grip/ledger/task-tui-w19-tmux-sgr-drive-protocol-2026-08-17.md.
+One live defect-candidate observed (conn header flapped ✗ offline ↔ ● live while the CLI
+reached guerrilla) is FILED (ttw19-bl-conn-state-flap), not fixed blind in-wave.
+
+**D111 — Wide footer verbs RE-DERIVED against the live dragged geometry (supersedes the filed
+fixed-46 premise).** boardPaneCols is a live dragged/persisted width clamped
+[minBoardWidth=24, innerW−paneGutter2−minReadingWidth]; verb spans shed RIGHT-TO-LEFT one at a
+time (mutation-probed: on the sub-60 footer line o clips <57, x <46, c <36; ZERO spans only
+≤35 — refuting the filed all-or-nothing premise), and thresholds are line-form-dependent
+(the ≥60 line shifts them), so acceptance asserts against buildBoardFooter's ACTUAL emitted
+spans at boardW, never literal columns. The fix shape: footerVerbAt gains a wide branch
+(spans rebuilt at m.boardPaneCols(innerW), offset by the wide pad, honestly !ok when the verb
+is shed); handleWideMouse gains narrow's verb-first early-out ABOVE the unconditional
+pendingClose/Strip clear at compose.go:653-654 (probe-proven side effect today) WITHOUT
+regressing the chrome-click clear; TestFooterVerbAtDegradesHonestly's wide assertion is flipped
+DELIBERATELY (mutation-proven a real tripwire — removing the m.wide gate reds it today); D96's
+verb-click==key-press parity governs dispatch (two-step x arm/fire survives a verb click).
+
+**D112 — Width-skew NARROWED to the floor mismatch; the unguarded seam RE-TARGETED to the wide
+preview resolvers.** The filed measure/paint fork is GONE (both narrow sides route
+docLayout(m.width−gutter)); the probe-quantified residual is readingWidth() missing composeAt's
+width<20→20 floor — a 1-3 cell gap at m.width 19-22 only (gap 0 at ≥23). The task re-scopes to
+that floor alignment + a mutation-provable regression test; the old "RED on the old fork" DoD
+is unproducible and retired. Seam truth by mutation: compose.go:258 (the direction's named
+site) is GUARDED (−2 reds 5 tests) — but rightPaneStopAt (`inner − 1`) and scrollPreview
+(`len(body) − (inner − 1)`) are UNGUARDED (full suite green on −2 at both). The slice extracts
+one shared top-edge avail seam (mirroring docBodyRow) that renderDocPane/composeAt/
+rightPaneStopAt/scrollPreview all call, plus tests that red on drift at both wide-preview
+resolvers (the D105c class, third instance).
+
+**D113 — Honesty + latency: D40's "showing N of M" finally ships; the two fetches parallelize.**
+(a) Board.TaskCount is populated (board.go) but NEVER rendered — the live board shows TRUE
+totals (prime counts sum 6733) atop a 1000-row window with zero disclosure; the '+' on ready is
+ReadyHeadClamped only. Ship the momentum-line note (`· showing N of M`) gated on
+TaskCount < summed prime counts, with its own shed priority (never a mid-token clip); fixtures
+stay non-truncated so existing goldens stay byte-frozen, and a NEW truncated fixture test
+proves the note. (b) FetchSnapshotFull fetches list THEN prime strictly sequentially; both are
+server-TTFB-bound and guerrilla parallelizes (concurrency roughly halved wall time on quiet
+runs) — parallelize the two fetches preserving the both-required/honest-degraded-on-any-failure
+contract. Magnitude deliberately NOT quoted: measured under swap-thrash, the numbers are the
+load (measure-on-a-quiet-host law). (c) RATIFIED as intentional, no slice: task prose renders
+NoColor while paper bodies render ANSI256 — color=state governs task FACTS; the paper is a
+document surface (D20 stands with this decision number on it).
+
+**Ledger hygiene executed at Decide:** ttw18-narrow-rail-hover CLOSED done (work merged as
+#6002/425001b42a, ancestor-proven; criteria 0-4 were builder-stamped, merge criterion stamped
+now). ttw18-chip-full-manifest CLOSED done (#6003/e024eea1e2 ancestor-proven).
+ttw18-bl-go-toolchain-skew CLOSED cancelled — premise refuted (CI honors the go.mod 1.25.0 pin
+via go-version-file everywhere that matters; local go1.26.2 is a forward-compatible minor-ahead;
+no local/CI gofmt disagreement); the stale "pinned go 1.24.2" comment in cli-release.yml rides
+the W19 hygiene slice. Find-jump stays FILED not promoted (ttw19-bl-find-jump, considering):
+zero user signal anywhere in wish/amendments/design docs; the only charter-safe shape is a
+transient Esc-dismissable /-jump (navigation, not reconfiguration — wish law "no mode maze"
+stands); the structural argument (board sees 1000 of 6733 rows) is recorded, the promotion
+gate is an explicit user taste signal. Cross-fence finding FILED (ttw19-bl-drafts-now-drop):
+the drafts.* NOW-band drop has NO Go-side filter (BuildBoard's NOW predicate is pure
+claim/worker/lifecycle) — the drop is the /v1/tasks published-list contract, an api/ ruling
+outside this wave's internal/ fence. CI gating gap FILED into the hygiene slice: go-tests.yml
+whitelists internal/pdrender/testdata/** but NOT internal/taskboard/testdata/** — a
+taskboard-golden-only PR runs no Go suite.
+
+**Wave plan (7 slices; rounds are law; builders opus except the drive; gates in the task
+briefs, dry-run at Decide; wave paper task-tui-wave-2026-08-17):**
+1. **ttw17-bl-live-tmux-drive** (large, FABLE, round 1) — D110. The committed re-runnable
+   harness under scripts/taskboard-drive/ + the full gesture matrix at 130x40 and 70x24 against
+   guerrilla + the epic's first honest feels-native verdict, recorded on the task and ledger.
+   No internal/ code edits (collision-free by construction).
+2. **ttw18-bl-wide-footer-verb-clicks** (medium, opus, round 1) — D111. program.go + compose.go
+   + mouse_test.go ONLY (reuse buildBoardFooter/verbSpans; render.go belongs to slice 4).
+3. **ttw19-showing-n-of-m** (small, opus, round 1) — D113a. render.go + render_test.go.
+4. **ttw19-concurrent-snapshot-fetch** (small, opus, round 1) — D113b. detail_data.go (+ test).
+5. **ttw19-golden-and-gating-hygiene** (small, opus, round 1) — D109 residue + gating gap:
+   glyph '›' prune, dragged-divider golden compose_wide_dragged_120, go-tests.yml testdata
+   path, cli-release.yml comment.
+6. **ttw18-bl-narrow-reading-width-skew** (medium, opus, ROUND 2, after slices 2+5 merge —
+   compose.go/compose_test.go collision fence, not a code dependency) — D112. Floor alignment +
+   shared avail seam + mutation-provable tests at rightPaneStopAt/scrollPreview.
+7. **ttw19-docs-tui-currency** (small, opus, round 1) — net-neutral rewrites of
+   docs/cards/tui.md (≤2400B) and docs/cheatsheets/tui.md (≤2400B): mouse first-class, persisted
+   divider, sheet reading document; + spineRows Code anchor. Gates run from the builder's OWN
+   worktree (the primary checkout false-reds docs-anchors-check via mainbase/ pollution).
+
+Next D-number: D114.
+
+### Wave 19 2026-08-17 (REVIEWED: all 6 round-1 slices green, one review fix, pushed + PRs open)
+
+**Review facts:** the reviewer re-ran every gate on the final heads — including the FULL live
+tmux drive (25/25 asserts pass, exit 0, on tmux 3.4 against guerrilla — an independent fourth
+consecutive all-pass run) and slice 3's suite under `-race` — plus an octopus integration merge
+of all six branches onto origin/main with `go build ./cmd/barkpark` + `go test ./internal/...`
+fully green (30 packages). ONE review fix: the cheatsheet's mouse row said "click again
+activates", contradicting the drive-proven one-gesture grammar (single click = select+activate)
+and the card's own prose — fixed on the `-5-r` branch, both doc gates re-run green (2397B/2400B).
+
+**Landed (review-verified, gates re-run green on final heads):**
+- **ttw17-bl-live-tmux-drive** → `loop-epic/the-live-tmux-drive-ships-as-a-committed-0`.
+  D110 closed: committed harness `scripts/taskboard-drive/drive.sh` (build → detached tmux
+  130x40 + 70x24 → SGR bytes per gesture → located/normalized asserts → evidence + report),
+  feels-native verdict in `tooling/grip/ledger/task-tui-w19-feels-native-verdict-2026-08-17.md`:
+  all 9 scored gestures PASS vs the lazygit bar; shift-click NOT SCORED per D110. Two defects
+  are owned open tasks: ttw19-bl-conn-state-flap (re-observed), ttw19-bl-wide-focus-oneway
+  (NEW: Enter→Esc strands keyboard j/k in the preview; the one feels-native miss).
+- **ttw18-bl-wide-footer-verb-clicks** → `loop-epic/wide-mode-footer-verbs-become-clickable--1`.
+  D111 exactly as chartered: footerVerbAt wide branch against live boardPaneCols, verb-first
+  early-out above the pendingClose clear (two-step x survives, chrome clicks still disarm),
+  D96 hover tint via HoverFooterVerb; 5 new wide tests all deriving coords from
+  buildBoardFooter's real spans.
+- **ttw19-showing-n-of-m** → `loop-epic/the-board-discloses-its-1000-row-horizon-2`. D113a:
+  momentum line gains a dim `showing N of M` on its own shed rung (criteria tally sheds first,
+  note drops WHOLE); summedLifecycleCounts matches TaskCount's population; zero golden churn.
+- **ttw19-concurrent-snapshot-fetch** → `loop-epic/the-two-snapshot-fetches-fly-in-parallel-3`.
+  D113b: list + prime GETs overlap under a WaitGroup; two-arrival-barrier stub proves overlap
+  (builder negatively proved it trips a sequential fetch); either-error → same degraded outcome,
+  list-error precedence keeps old semantics; `-race` clean.
+- **ttw19-golden-and-gating-hygiene** → `loop-epic/sheet-era-glyph-and-golden-hygiene-retir-4`.
+  D109 residue: '›' pruned from readingGlyphExtras (zero goldens carry it), dragged-divider
+  golden compose_wide_dragged_120 + divider-column assert, go-tests.yml now whitelists
+  internal/taskboard/testdata/** (both triggers), cli-release.yml comment corrected.
+- **ttw19-docs-tui-currency** → `loop-epic/the-tui-card-and-cheatsheet-finally-spea-5-r`
+  (the one -r final branch). Card + cheatsheet speak mouse/divider/sheet under the 2400B caps;
+  spineRows Code anchor CI-pins the one-producer law; reviewer's click-grammar fix on top.
+
+**Ledger:** all six slice tasks honestly in_progress, criteria evidence-stamped mid-claim, only
+the lead-owned merge criterion open. Zero ledger fixes needed — first wave in memory where the
+board needed no correction. Grade: A- (commentary in wave paper task-tui-wave-2026-08-17).
+
+**Next wave (dispatch order):** (1) LEAD merges the six round-1 PRs (file-disjoint by
+construction; slice 5's final branch is `-5-r`) and closes each merge criterion; drive-harness
+PR's evidence dir churns on re-runs by design. (2) THEN dispatch **ttw18-bl-narrow-reading-width-skew**
+(round 2 — waits ONLY on the compose.go/compose_test.go collision fence with slices 2+5, both
+now merged): D112 floor alignment + the shared top-edge avail seam + mutation-proofs at
+rightPaneStopAt/scrollPreview. (3) **ttw19-bl-wide-focus-oneway** is the highest-value NEW
+board defect (keyboard route back from preview focus — the one feels-native miss). (4)
+ttw19-bl-conn-state-flap needs a live-channel diagnosis. (5) ttw19-bl-find-jump stays
+considering pending a user taste signal.

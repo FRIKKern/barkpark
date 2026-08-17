@@ -162,6 +162,52 @@ func TestComposeWideGolden(t *testing.T) {
 	composeGolden(t, "compose_wide_120.txt", got)
 }
 
+// WIDE two-pane at 120 with a DRAGGED divider: a persisted non-default
+// DetailsPaneRatio (0.4444, as if the user had dragged the split wider), driving
+// the layout through boardPaneCols' ratio path instead of the fixture's fixed
+// 46-col wideBoardCols. The board pane widens past its default third, so the
+// resize handle lands well right of compose_wide_120's. TestComposeWideGolden
+// pins ONLY the default split; without this the drag's ratio→column geometry had
+// no frame baseline, so a regression there would ship silently.
+func TestComposeWideDraggedGolden(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 1     // the subject task — same target as the default-split golden
+	m.wideBoardCols = 0 // drop the fixture's fixed split so the ratio drives the layout
+	m.wideDetailsRatio = 0.4444
+	got := ansi.Strip(Compose(m))
+	assertWidthSafe(t, got, 120)
+	composeGolden(t, "compose_wide_dragged_120.txt", got)
+
+	// The point of a dragged baseline: its divider sits at a DIFFERENT column than
+	// the default-third split, proving the ratio actually moved the panes (and that
+	// this golden is not a stale copy of compose_wide_120).
+	def := composeFixture()
+	def.width, def.height, def.wide = 120, 40, true
+	def.ui.Cursor = 1
+	defCol := dividerCol(t, ansi.Strip(Compose(def)))
+	dragCol := dividerCol(t, got)
+	if dragCol <= defCol {
+		t.Fatalf("a wider board pane must push the divider RIGHT of the default split: dragged col %d, default col %d",
+			dragCol, defCol)
+	}
+}
+
+// dividerCol returns the rune column of the wide resize handle (↔) — painted once,
+// on the identity row at the pane boundary — so a test can compare where the split
+// fell across two frames without re-deriving the pane geometry.
+func dividerCol(t *testing.T, frame string) int {
+	t.Helper()
+	for _, ln := range strings.Split(frame, "\n") {
+		if i := strings.IndexRune(ln, '↔'); i >= 0 {
+			return len([]rune(ln[:i]))
+		}
+	}
+	t.Fatalf("no ↔ resize handle in the wide frame:\n%s", frame)
+	return -1
+}
+
 // TestEnterChecksOpenTaskRow — the picker vocabulary: entering a task CHECKS
 // its reader marker. While a FrameTask is on the navigation stack its board row
 // wears ◆ (in place of the lifecycle glyph, same color), and

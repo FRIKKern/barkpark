@@ -1,0 +1,23 @@
+{
+  "_comment": "Hand-authored TUI golden for the framed-finale section variant (charter D19) — the ADDITIVE sibling of section.golden.json, which stays generator-owned (`mix barkpark.paper_components.gen_golden_parity`) and byte-unchanged. `input` is the authored block; `expected` is the structural projection the framed render must realize: a SQUARE (lipgloss.NormalBorder) frame in rule color REPLACING the two-rule band, with the bold title and child prose inside the frame, and an honest degrade to the byte-identical band path below MinWidth.",
+  "type": "section-framed",
+  "input": {
+    "type": "section",
+    "variant": "framed",
+    "title": "Closing the loop",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          { "type": "text", "value": "The finale paragraph sits inside the frame." }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "container_role": "section-framed",
+    "border": "square",
+    "title": "Closing the loop",
+    "prose": ["The finale paragraph sits inside the frame."]
+  }
+}

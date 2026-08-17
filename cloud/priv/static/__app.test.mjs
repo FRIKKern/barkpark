@@ -20842,6 +20842,34 @@ test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT 
   assert.match(bare.body, /still registered/);
 });
 
+test("cch-w70-s2: siteDeleteFailureCopy — the typed 500 registration_not_removed relays the plane's two-halves detail ABOVE the generic 5xx crash arm", () => {
+  // The route now answers a foreign-key-blocked delete with a TYPED 500:
+  // {"ok":false,"error":"registration_not_removed","detail":"the instance was
+  // torn down, but the registration could not be removed: … constraint …"}.
+  // This is a 5xx, so WITHOUT its own arm it would fall to the crash-envelope
+  // (arm 4), which refuses to state the outcome — but here the plane MEASURED
+  // both halves and named the constraint, so the reader must relay that detail.
+  const inverse = hooks.siteDeleteFailureCopy(500, {
+    ok: false,
+    error: "registration_not_removed",
+    detail:
+      "the instance was torn down, but the registration could not be removed: deleting the site row " +
+      "was refused by the foreign-key constraint site_artifacts_site_id_fkey. The site is no longer " +
+      "serving, yet it is still registered here — support must remove the row by hand.",
+  });
+  // The plane's own sentence — including the constraint name — is relayed verbatim.
+  assert.match(inverse.body, /site_artifacts_site_id_fkey/);
+  assert.match(inverse.body, /torn down/);
+  assert.match(inverse.body, /still registered/);
+  // It is NOT the crash-envelope arm: that one refuses to name the outcome and
+  // offers a re-check. This one states the outcome and sends the operator to
+  // support, because a retry cannot clear a constraint-held row.
+  const boom = hooks.siteDeleteFailureCopy(500, { error: "server_error", request_id: "F9-abc123" });
+  assert.notEqual(inverse.title, boom.title, "the typed inverse orphan must not wear the crash-envelope sentence");
+  assert.doesNotMatch(inverse.body, /doesn't say how far it got/);
+  assert.equal(inverse.recovery, "close");
+});
+
 test("cch-w67 + cch-w68-s5: the settle plan survives a modal dismissed mid-flight — a late FAILURE still speaks, and a late SUCCESS on this site's screen NOW navigates (D834)", () => {
   // Modal still ours: inline beside the ONE recovery; success navigates off the
   // dead site screen.
