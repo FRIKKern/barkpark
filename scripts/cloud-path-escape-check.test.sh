@@ -921,6 +921,74 @@ gate_says "share NO common ancestor" "  …and names the condition, not a raw gi
 gate_says "refusing a two-dot fallback" "  …and refuses the fallback that sweeps in the whole base"
 echo
 
+# ── case 11: the in-image reader arm reds a cloud/lib escape, both directions ─
+# The cloud/lib reader arm (cch-w69-s1) is FATAL for any census row whose reader
+# lives under cloud/lib/, covered or not — cloud/lib compiles INTO the
+# control-plane image, the image builds from cloud/ alone, so a repo-root read
+# there is green everywhere except the deploy's `mix compile` (the #11723 / D841
+# class). s1 mutation-proved that arm by hand; this case makes the proof STANDING
+# — a future edit that reorders the arm behind the coverage exit, or breaks its
+# tab-IFS parse, reds here instead of staying green. It can lose in BOTH
+# directions: the cloud/lib reader must red, and its cloud/test twin must pass
+# (tests never run inside the image). Fixtures are built here, census-independent.
+echo "case 11: the in-image reader arm reds a cloud/lib escape (both directions)"
+
+# (a) a cloud/lib reader that Path.expand-escapes to a DECLARED repo-root file is
+#     FATAL. deploy/site-deploy.sh IS in CLOUD_PATHS, so dispatch coverage is not
+#     the question — the file cannot exist in the docker build context, and no
+#     declaration can put it there. This must red the in-image arm, not surface
+#     as a coverage miss that invites declaring an already-declared path.
+FX4="$TMPROOT/in-image-lib"
+make_fixture "$FX4"
+mkdir -p "$FX4/deploy"
+: >"$FX4/deploy/site-deploy.sh"
+cat >"$FX4/cloud/lib/audit_reader.ex" <<'EX'
+  @actions Path.expand("../../deploy/site-deploy.sh", __DIR__)
+EX
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX4" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) — a cloud/lib reader escaping to a declared file reds"
+else
+  no "PASSED with a cloud/lib reader escaping the image — the #11723/D841 hole"
+fi
+if has "$out" "IN-IMAGE READER ESCAPES THE BUILD CONTEXT: cloud/lib/audit_reader.ex reads deploy/site-deploy.sh"; then
+  ok "the violation line names both the reader and the escaped path"
+else
+  no "in-image violation did not name reader+path: $out"
+fi
+# It must red HERE — as the in-image arm — never as an UNCOVERED coverage miss:
+# the arm runs FIRST for exactly this reason, so a declared path never gets a
+# missing-declaration red that would invite declaring what dispatch cannot place
+# inside the build context.
+if has "$out" "UNCOVERED repo-root read: deploy/site-deploy.sh"; then
+  no "the declared read surfaced as a coverage miss — the in-image arm did not claim it first"
+else
+  ok "the declared read did not surface as a coverage miss — the in-image arm claimed it"
+fi
+
+# (b) the SAME read moved under cloud/test must NOT trip the arm. Tests never run
+#     inside the control-plane image, so a cloud/test escape to a declared file
+#     is the coverage ratchet's business and passes clean.
+FX5="$TMPROOT/in-image-test"
+make_fixture "$FX5"
+mkdir -p "$FX5/deploy"
+: >"$FX5/deploy/site-deploy.sh"
+cat >"$FX5/cloud/test/barkpark_cloud/audit_reader_test.exs" <<'EX'
+  @actions Path.expand("../../../deploy/site-deploy.sh", __DIR__)
+EX
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX5" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "exit 0 — the same escape under cloud/test does not trip the in-image arm"
+else
+  no "a cloud/test escape to a declared file red (rc=$rc): $out"
+fi
+if has "$out" "IN-IMAGE READER ESCAPES THE BUILD CONTEXT"; then
+  no "the in-image arm fired on a cloud/test reader — it must judge cloud/lib only"
+else
+  ok "the in-image arm stayed silent on the cloud/test reader"
+fi
+echo
+
 echo "----"
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
