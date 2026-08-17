@@ -131,6 +131,19 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("section", attr_str(drop_nonscalar_variant(b), ["id", "title", "variant"]), children, d)
   end
 
+  # The divider is a self-closing leaf — the kernel's one rule (<hr/>). Web
+  # (compose.ex :439 → PdHr) and TUI (pdrender.go) legs already ship; this is
+  # the BPML leg that dominates the one-blocker-away set (82 of 93 papers).
+  defp block(%{"type" => "divider"} = b, d), do: pad(d) <> "<hr#{attr_str(b, ["id"])}/>"
+
+  # A generic disclosure container — same wrapping shape as `section`, carrying
+  # a `summary` attr and a body of blocks. Web (compose.ex :1529 → <details>)
+  # and TUI legs already ship; this is the missing BPML leg.
+  defp block(%{"type" => "expandable"} = b, d) do
+    children = Enum.map(Map.get(b, "blocks", []), &block(&1, d + 1))
+    wrap("expandable", attr_str(b, ["id", "summary"]), children, d)
+  end
+
   # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
   # typed refusal (UnprintableError) so the read path can label it 422 and the
   # sync path can tell "unprintable paper" from "printer bug" — never a bare
@@ -154,13 +167,21 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # string cell) used to print "" — a silent cell loss; it now refuses.
   defp head_cell(cells) when is_list(cells), do: inline(cells)
   defp head_cell(%{"text" => text}) when is_binary(text), do: esc(text)
+  # A bare-string head cell (census: 6 papers, formerly a silent 500) — a legacy
+  # untyped cell. Escaped verbatim; canonicalized to an inline-node list on read.
+  defp head_cell(s) when is_binary(s), do: esc(s)
   defp head_cell(_other), do: raise(UnprintableError.new(:head_cell, nil))
 
   # ── inline ──────────────────────────────────────────────────────────────────
 
   defp inline(nodes) when is_list(nodes), do: Enum.map_join(nodes, "", &inline_node/1)
-  # A string (or anything else) where inline CONTENT belongs — a legacy string
-  # table cell / list item. Unspellable, not a crash.
+  # A single inline node where a LIST belongs (census: 16 papers) — coerced
+  # through the node printer rather than crashed.
+  defp inline(%{} = node), do: inline_node(node)
+  # A bare string where inline CONTENT belongs — a legacy string table cell /
+  # list item. Escaped verbatim, not a crash.
+  defp inline(s) when is_binary(s), do: esc(s)
+  # Anything else (a number, nil, a boolean) is genuinely unspellable.
   defp inline(_other), do: raise(UnprintableError.new(:inline, nil))
 
   defp inline_node(%{"type" => "text"} = n) do
@@ -177,8 +198,29 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       ~s(<a href="#{esc_attr(Map.get(n, "href", ""))}">) <>
         inline(Map.get(n, "children", [])) <> "</a>"
 
-  # An inline node type with no clause (census: `code` 87 papers, `strong` 84,
-  # `em` 34, `paragraph` 20, `valueref` 12) — the whole 500 class.
+  # Node-spelled inline marks — the corpus's real shapes (census: `code` 87
+  # papers, `strong` 84, `em` 34). `code` carries its text in the VALUE key (a
+  # scalar, no children); `strong`/`em` carry an inline-node LIST in `children`
+  # (no value). Each prints to the SAME mark spelling the parser round-trips
+  # into canonical text-node marks — so the SECOND print is byte-stable.
+  defp inline_node(%{"type" => "code"} = n),
+    do: "<code>#{esc(Map.get(n, "value", ""))}</code>"
+
+  defp inline_node(%{"type" => "strong"} = n),
+    do: "<b>#{inline(Map.get(n, "children", []))}</b>"
+
+  defp inline_node(%{"type" => "em"} = n),
+    do: "<i>#{inline(Map.get(n, "children", []))}</i>"
+
+  # A raw string where an inline node belongs (census: 18 papers) — a legacy
+  # untyped text run. Escaped verbatim, not a crash.
+  defp inline_node(s) when is_binary(s), do: esc(s)
+
+  # Fail-honest catchalls. `valueref` (12 papers) and `paragraph` (20) STAY a
+  # typed refusal (kind :inline): a valueref resolves against live data the
+  # printer cannot reach, and a paragraph is a BLOCK, unspellable inline — both
+  # are honest 422s, not a lossy guess. Every other unspelled inline node type
+  # lands here too, so the read path can label it 422 rather than 500.
   defp inline_node(%{"type" => type}), do: raise(UnprintableError.new(:inline, type))
   defp inline_node(_other), do: raise(UnprintableError.new(:inline, nil))
 

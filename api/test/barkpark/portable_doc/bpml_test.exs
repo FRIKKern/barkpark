@@ -26,6 +26,8 @@ defmodule Barkpark.PortableDoc.BpmlTest do
     {bpml, parsed}
   end
 
+  defp p_node(content), do: %{"id" => "p1", "type" => "paragraph", "content" => content}
+
   # ── 1 · isomorphism on real published papers ────────────────────────────────
 
   describe "isomorphism on real papers" do
@@ -212,6 +214,133 @@ defmodule Barkpark.PortableDoc.BpmlTest do
 
       assert Bpml.print_blocks(legacy) == Bpml.print_blocks(canonical)
       assert {:ok, ^canonical} = Bpml.parse_blocks(Bpml.print_blocks(legacy))
+    end
+  end
+
+  # ── inline vocabulary: the corpus's real inline shapes now print ────────────
+
+  describe "node-spelled inline marks (wave-3 inline vocabulary)" do
+    test "code/strong/em nodes print to canonical mark form, byte-stable on reprint" do
+      blocks = [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [
+            %{"type" => "text", "value" => "run "},
+            %{"type" => "code", "value" => "mix test"},
+            %{"type" => "text", "value" => " then "},
+            %{"type" => "strong", "children" => [%{"type" => "text", "value" => "commit"}]},
+            %{"type" => "text", "value" => " and "},
+            %{"type" => "em", "children" => [%{"type" => "text", "value" => "push"}]}
+          ]
+        }
+      ]
+
+      bpml1 = Bpml.print_blocks(blocks)
+      assert bpml1 =~ "<code>mix test</code>"
+      assert bpml1 =~ "<b>commit</b>"
+      assert bpml1 =~ "<i>push</i>"
+
+      # print → parse → print is byte-stable in canonical form: the parser
+      # re-reads b/i/code into text-node marks, and printing those emits the
+      # SAME bytes.
+      assert {:ok, parsed} = Bpml.parse_blocks(bpml1)
+      assert Bpml.print_blocks(parsed) == bpml1
+    end
+
+    test "a code node escapes its value, no children read" do
+      blocks = [p_node([%{"type" => "code", "value" => ~s(a < b && c)}])]
+      assert Bpml.print_blocks(blocks) =~ "<code>a &lt; b &amp;&amp; c</code>"
+    end
+
+    test "strong/em recurse their children (nested marks)" do
+      blocks = [
+        p_node([
+          %{
+            "type" => "strong",
+            "children" => [%{"type" => "code", "value" => "x"}]
+          }
+        ])
+      ]
+
+      bpml1 = Bpml.print_blocks(blocks)
+      assert bpml1 =~ "<b><code>x</code></b>"
+      assert {:ok, parsed} = Bpml.parse_blocks(bpml1)
+      assert Bpml.print_blocks(parsed) == bpml1
+    end
+  end
+
+  describe "raw-string and non-list inline content (wave-3 coercion)" do
+    test "a raw-string list element prints escaped" do
+      blocks = [p_node(["hi < there ", %{"type" => "text", "value" => "friend"}])]
+      assert Bpml.print_blocks(blocks) =~ ~s(<p id="p1">hi &lt; there friend</p>)
+    end
+
+    test "non-list inline content (a single node) is coerced through the node printer" do
+      blocks = [%{"id" => "p1", "type" => "paragraph", "content" => %{"type" => "text", "value" => "solo"}}]
+      assert Bpml.print_blocks(blocks) =~ ~s(<p id="p1">solo</p>)
+    end
+
+    test "a bare-string head cell prints (census: 6 papers, formerly a 500)" do
+      blocks = [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "head" => ["Claim", "Status"],
+          "rows" => [[[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "b"}]]]
+        }
+      ]
+
+      assert Bpml.print_blocks(blocks) =~ "<th>Claim</th><th>Status</th>"
+    end
+  end
+
+  # ── divider and expandable join the kernel (wave-3) ─────────────────────────
+
+  describe "divider (the kernel's <hr/> leaf)" do
+    test "a divider round-trips through <hr/>" do
+      blocks = [
+        %{"id" => "a", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "above"}]},
+        %{"id" => "d", "type" => "divider"},
+        %{"id" => "b", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "below"}]}
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert bpml =~ ~s(<hr id="d"/>)
+      assert parsed == blocks
+    end
+
+    test "a divider with no id round-trips" do
+      blocks = [%{"type" => "divider"}]
+      {bpml, parsed} = roundtrip!(blocks)
+      assert bpml =~ "<hr/>"
+      assert parsed == blocks
+    end
+  end
+
+  describe "expandable (the kernel's disclosure)" do
+    test "expandable round-trips with summary and children" do
+      blocks = [
+        %{
+          "id" => "e",
+          "type" => "expandable",
+          "summary" => "Details",
+          "blocks" => [
+            %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "hidden"}]}
+          ]
+        }
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert bpml =~ ~s(<expandable id="e" summary="Details">)
+      assert parsed == blocks
+    end
+
+    test "an empty expandable round-trips as a self-closed tag" do
+      blocks = [%{"id" => "e", "type" => "expandable", "summary" => "Empty", "blocks" => []}]
+      {bpml, parsed} = roundtrip!(blocks)
+      assert bpml =~ ~s(<expandable id="e" summary="Empty"/>)
+      assert parsed == blocks
     end
   end
 
