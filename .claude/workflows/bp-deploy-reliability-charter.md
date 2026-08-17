@@ -12149,3 +12149,44 @@ superseded; (4) merge #11534 BEFORE #10811/#10129/#10086; (5) after S3 merges, c
 merges, close #5658; (6) close #10400 and #10722 as superseded (D547/D604). NEVER release the epic Goal's
 claim (D593). The owner's one human act: approve the device-link URL so the 2026-08-17 reading exists —
 otherwise the artefact ships the refusal, verbatim, and that is an honest exit (D565).
+
+### Wave 2026-08-17 (wave 35) — REVIEWED · Paper `deploy-reliability-wave-35-2026-08-17` · grade **A**
+
+**THE EXIT WAVE FINISHED WHAT IT NAMED, AND THE REVIEW CHANGED NOTHING — SEVEN SLICES, ZERO FIXES.** All seven
+round-1 slices built, gate-green, reviewed adversarially, and PUSHED with PRs open. For the first time in this
+epic the reviewer's fix count is zero: every diff survived byte-level verification, both high-risk mutations
+were independently re-proven, and every ledger write checked out against the live board.
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `dr-w35-s1-union-charter-reconcile` | `…-decisions-and-0` | #11699 | Seven strands + 22 sidecars as ONE pure-addition commit (+3233/0). Reviewer verified all four charter hunks contiguously present, trio log entries byte-verbatim, 14 sidecars sha-identical, 13362 = D594's 13351 + 11 rider lines. Merges BEFORE #10407/#10496/#10522/#10173 close as superseded; conflicts with the clean trio at identical anchors if the trio lands first — keep ONE copy. |
+| `dr-w34-s1-coverage-envelope-window-and-sites` | `…-can-l-0-r` | #11534 | Finished as a rebase per D595: merge conflict-free, ONE blank line formatted, both floors RE-MEASURED (149/268 hold, refusals quoted). Now CLEAN/MERGEABLE, all blocking check-runs SUCCESS on `2740f8808a`. Merge BEFORE #10811/#10129/#10086. Builder measured D596's mirror at 16 reds not 10 and filed `task-771a5688941feb24` for the charter correction. |
+| `dr-w35-s3-crown-quiescence-named-deferral` | `…-verified-cro-2` | #11700 | QUIET WINDOW: rc 0 + own ::warning ONLY under all three D597 conditions, each failing CLOSED; rows-without-runs stays rc 2 with its own sentence. 229/0; reviewer independently re-proved a condition-removal mutation (226/3). HIGH-FLIP-RISK — second independent reviewer owed before merge. Reviewer's re-derivation found one residual BEYOND the ruling: BEHIND is run-derived, so quiescence cannot see a DEAD PUSH TRIGGER (merges landing while deploy.yml never fires greens the window) — filed `dr-w35-bl-quiet-window-cannot-see-a-dead-trigger`. |
+| `dr-w33-followup-comment-path-routing` | `…-routes-once-and-3` | #11701 | Zero-assignee comment path PATCHes the assignee once + @-mentions in the same comment, same-response extraction (no second round trip), create-path degrade contract. 64/0; reviewer re-proved routing can lose (58/6). paper-readers cap 30→75 with the sizing arithmetic committed above the value. |
+| `dr-w35-s5-second-exit-artefact` | `…-second-dated-4` | #11702 | The refusal branch, quoted verbatim with pipe-free rc: INFRA FAULT exit 2, 401, session named. Producer vouched (`e7379a38b3`, D581 superseded WITH a date). Every number carries reader + window; the 27-call-site figure it could not reproduce was replaced by a measured 29 with its reader. 9135B under its new 9800B cap; zero forbidden words. |
+| `dr-w35-s6-exit-harness-ci-owner` | `…-96-assertion-harness-s-5` | #11703 | `exit-runner-guard` tenant in shell-harnesses.yml; paths mirror 53==53 (reviewer re-verified via yaml.safe_load); tenant proven able to lose (92/4 under MUT:G-SHALLOW flip). Advisory lane; first Actions run settles the three named runner-environment risks. |
+| `dr-w35-s7-ledger-partition-execution` | `…-partitioned-i-6` | #11704 | D602 executed row by row: FOUR run-proven closes (dr-w26-s3/s6/s7 and dr-w33-s4 — reviewer re-read all four `done` at full criteria on the live board) + ONE cited cancel that caught a SECOND non-ancestor-sha defect (the row cited `5871026758`; the landed sha is #11536's squash `733b28cd62`). Every not-closed row in a named bucket; three corrections to the wave's own inputs recorded, not smoothed (in_progress=8 → deduction 182; cheap-cuts split 6/4/1/1=12; `bp export`'s `content` key ABSENT on 6,643/6,657 rows). |
+
+**WHAT THE REVIEW ADDED.** No code changed; the review's product is verification depth plus one finding and one
+correction of scope: (1) the dead-trigger blindness above, filed with a reproduce-first criterion; (2) S7's gate
+is structurally weak AS BRIEFED (`node … | tail -3 &&` gates on tail's rc, not node's) — the reviewer re-captured
+the predicate's real rc separately (rc=1, the pre-committed NO-SEAL, `roster=342 orphans=196` at review time);
+future briefs must not pipe a gate's deciding command. S7's stamped evidence minute-stamps run a few minutes fast
+(disclosed inside the record file itself; the head sha in every stamp is correct and load-bearing).
+
+**WHAT THE LEAD OWNS ON MERGE.** The D593 law stands: NEVER `bp task release task-fb4fb869490b4213`. Sequence
+per the wave-35 plan: (1) clean trio #10133 → #10612 → #11539 (re-prove merge-tree first); (2) this charter PR
+#11681; (3) #11699, then close #10407/#10496/#10522/#10173 as superseded — expect the trio-anchor conflicts and
+the #11681 EOF collision, both resolve by UNION/keep-one; (4) #11534 BEFORE #10811/#10129/#10086; (5) after
+#11700 merges, close #11217; after #11701 merges, close #5658 naming BOTH truths; (6) close #10400/#10722 as
+superseded (D547/D604). Every slice task keeps its merge-gated criterion OPEN for the lead. #11700's verdict
+semantics still deserve the independent second reviewer E2 promises.
+
+**WHAT WAVE 36 TAKES.** The epic's remaining mass is not code: (a) the owner's ONE browser approval
+(device-link, 600 s) so the third exit reading is a READING — then the `--days 22` raw-status retest and the
+live `as_of` twin-stamp; (b) the lead-merge sequence above — after it, origin/main alone tells the whole story
+and the stranded-PR era is closed; (c) the partition's named buckets are the whole open ledger now: 7 PR-blocked
+rows follow their PRs, 5 human-judgement rows and the 3+1 `-hg-` rows go in front of the owner as a packet, and
+`dr-w5-s4` (4/8) is the one row with real unbuilt work; (d) the two filed instruments of this wave —
+`dr-w35-bl-quiet-window-cannot-see-a-dead-trigger` and `dr-w35-bl-whoami-presence-oracle` — are the only new
+code this epic still owes. The exit remains D565-shaped: an honest refusal is an exit; the word SEAL is not.
