@@ -21,6 +21,14 @@ defmodule BarkparkWeb.GraphDraftLeakTest do
   tests below; the fix restores green. The AnonPerspective reroute in
   `graph_traverse_opts` is defense-in-depth only — public-read is already 403
   at the route (asserted below), so that clamp is NOT the proof.
+
+  SECOND PIN (wave 2, arpss-wave1-residue-pins): the gate holds only because
+  `resolve_graph_root/2` normalises the REQUEST id (`pub_id =
+  Content.published_id(id)`) before the published-only match — otherwise
+  `GET /v1/graph/drafts.<id>` names the draft row directly and walks straight
+  past the perspective gate. Mutation proof: changing that line to
+  `pub_id = id` reds ONLY the two `drafts.<id>` arms below; every other test
+  here stays green.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -108,6 +116,43 @@ defmodule BarkparkWeb.GraphDraftLeakTest do
       assert resp.status == 404,
              "graph_tasks resolved a draft-only root at the default perspective " <>
                "(got #{resp.status}): #{resp.resp_body}"
+
+      refute resp.resp_body =~ secret_title
+    end
+
+    test "GET /v1/graph/drafts.<id> at the default perspective is 404 — the request id is normalised",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("leak-prefix-root")
+      secret_title = "DRAFT-SECRET-#{doc_id}"
+      mk_draft_only!(doc_id, secret_title, scope)
+
+      # The attacker asks for the drafts. twin BY NAME. `pub_id =
+      # Content.published_id(id)` strips the prefix BEFORE the published-only
+      # match, so the default perspective still resolves nothing. Drop that
+      # normalisation (`pub_id = id`) and this arm 200s the draft row straight
+      # past the perspective gate.
+      resp = conn |> bearer(@read_token) |> get("/v1/graph/drafts.#{doc_id}")
+
+      assert resp.status == 404,
+             "an explicitly drafts.-prefixed request id resolved at the DEFAULT " <>
+               "perspective (got #{resp.status}) — the request id is not normalised " <>
+               "before the published-only match: #{resp.resp_body}"
+
+      refute resp.resp_body =~ secret_title,
+             "the draft's real title leaked through /v1/graph/drafts.<id> at the default perspective"
+    end
+
+    test "GET /v1/graph/drafts.<id>/tasks at the default perspective is 404 (second caller)",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("leak-prefix-tasks")
+      secret_title = "DRAFT-SECRET-#{doc_id}"
+      mk_draft_only!(doc_id, secret_title, scope)
+
+      resp = conn |> bearer(@read_token) |> get("/v1/graph/drafts.#{doc_id}/tasks")
+
+      assert resp.status == 404,
+             "graph_tasks resolved a drafts.-prefixed request id at the default " <>
+               "perspective (got #{resp.status}): #{resp.resp_body}"
 
       refute resp.resp_body =~ secret_title
     end
