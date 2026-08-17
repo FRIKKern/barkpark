@@ -1,1 +1,1 @@
- ▎ Cloud Console hardening — the Clou… ··· 87/220│ │ The drive harness anchors row identity on the slug — 12-char titles      │
+ ▎ The task TUI is glanceable, live, a… ··· 15/23│ │ hitmap.go height-2 reservation — audit whether it should share the top-  │

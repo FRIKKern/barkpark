@@ -1,9 +1,9 @@
- ▎ Cloud Console hardening — the Clou… ··· 87/220│ │ Cloud Console hardening — the Cloud GUI Remake's chartered successor     │
-                                                 │ │ ○ open · P1 · C4/7 · task · epic-decide-w67                              │
-   The task TUI is glanceable, live, an… ··· 9/19│ │                                                                          │
- ├─ ⠋ The drive harness anchors row identity on …│ │ criteria 0/4                                                             │
- │    C5/7 · P2 · 3/4                            │ │   ○ BAND 2 is routed: gr-blk-studio-presence-perf-flake is re-parented   │
- ├─ ⠋ The conn dot never calls a slow fetch offl…│ │     to Felix pristine (task-96a908af98698118), and for repo-git hygiene, │
- │    C5/7 · P1 · 4/5                            │ │     CI/merge-gate governance and Cloud test-infra either an owning epic  │
- ├─ ⠋ The reading geometry stops taking a -2 mut…│ │     is filed or the absence is recorded as a standing finding with task- │
- │    C5/7 · P2 · 4/5                            │ │     openapi-drift-chronic named as the same class.                       │
+ ▎ The task TUI is glanceable, live, a… ··· 15/23│ │ The task TUI is glanceable, live, and never flickers                     │
+                                                 │ │ ✓ done · C3/7 · task · relevance-loop                                    │
+   Scaffy epic — commands as content: a… ··· 1/14│ │                                                                          │
+ ├─ ⠋ The story stops contradicting the engine: …│ │ criteria 4/4                                                             │
+ │    C5/7 · P2 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
+ ├─ ⠋ pull --check answers for the server that p…│ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
+ │    C5/7 · P1 · 4/5                            │ │     constant motion.                                                     │
+ ├─ ⠋ bp scaffy describe: a command's contract i…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
+ │    C5/7 · P1 · 4/5                            │ │   ✓ The current taskboard regression suite is green.                     │
