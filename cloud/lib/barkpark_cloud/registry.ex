@@ -5623,11 +5623,22 @@ defmodule BarkparkCloud.Registry do
       # its first character — the whole stored url normalised to `""`, matched
       # nothing, and `provisioning_fqdn_claim/2` answered `:free` for a hostname
       # a LIVE box serves. The character set is exactly the 25 codepoints
-      # `String.trim/1` strips (Unicode `White_Space`), so the twins agree by
-      # construction rather than by the six spellings a test happens to drive;
-      # `registry_claim_host_normaliser_test.exs` censuses that agreement.
+      # `String.trim/1` strips (Unicode `White_Space`).
+      #
+      # Every C0 control in that set is spelled `\uXXXX`, never `\t`/`\v`/`\f`:
+      # PostgreSQL 15 has no `\v` case in its escape-string lexer, so there
+      # `E'\v'` is the LETTER v ("any other character following a backslash is
+      # taken literally"), while 16+ reads it as U+000B. That one-character
+      # difference broke the twins BOTH ways on 15 — U+000B was not trimmed (a
+      # VT-led url normalised to `""` again), and the letter `v` WAS, so a
+      # stored `https://host.tv` normalised to `host.t` and the claim answered
+      # `:free` for a live `.tv` box. `\uXXXX` is documented and reads the same
+      # on every supported server. The set's LENGTH is 25 under either
+      # spelling, so only membership testing catches this;
+      # `registry_claim_host_normaliser_test.exs` drives all 25 codepoints
+      # through both twins for exactly that reason.
       fragment(
-        "regexp_replace(regexp_replace(regexp_replace(btrim(lower(?), E'\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'), '^[a-z][a-z0-9+.-]*://', ''), '[^a-z0-9.-].*$', ''), '\\.+$', '') = ?",
+        "regexp_replace(regexp_replace(regexp_replace(btrim(lower(?), E'\\u0009\\u000a\\u000b\\u000c\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'), '^[a-z][a-z0-9+.-]*://', ''), '[^a-z0-9.-].*$', ''), '\\.+$', '') = ?",
         b.url,
         ^norm
       )

@@ -59,6 +59,29 @@ defmodule BarkparkCloud.RegistryClaimHostTwins.Extract do
     String.replace(expr, "?", "$1")
   end
 
+  @doc """
+  Just the `characters` argument of the fragment's `btrim(lower(?), …)` — the
+  SQL literal naming the whitespace alphabet, as Postgres receives it.
+
+  Lifted rather than retyped because the defect this suite exists to catch lives
+  INSIDE this literal: `E'\\v'` is U+000B on PostgreSQL 16+ and the LETTER v on
+  15, and a hand-copied set in the test would be read by the same lexer with the
+  same blind spot, agreeing with the shipped bug.
+  """
+  @spec sql_btrim_set(binary) :: binary
+  def sql_btrim_set(source) when is_binary(source) do
+    expr = sql_normalise_expr(source)
+
+    case Regex.run(~r/btrim\(lower\(\$1\), (E'[^']*')\)/, expr) do
+      [_, set] ->
+        set
+
+      _ ->
+        raise "no btrim(lower($1), E'…') in the fragment — the whitespace alphabet " <>
+                "moved or was deleted, and every membership census below is vacuous."
+    end
+  end
+
   @doc "MUTATION: the Elixir twin with its `String.trim/1` step deleted."
   @spec without_elixir_trim(binary) :: binary
   def without_elixir_trim(source) when is_binary(source) do
@@ -143,6 +166,33 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
   spellings. Reproduced pre-fix for space, tab, CR/LF, NBSP, VT, FF and the
   ideographic space; all now agree (`describe "the twins agree"`).
 
+  ## The SECOND divergence, and why this file grew (measured 2026-08-17, in CI)
+
+  The `btrim` that closed the above was spelled `E'\\t\\n\\v\\f\\r …'`, and that
+  passed locally on PostgreSQL 17 while failing in CI on PostgreSQL 15. PG15's
+  escape-string lexer has no `\\v` case, so there `E'\\v'` is the LETTER v ("any
+  other character following a backslash is taken literally"); 16+ reads U+000B.
+  The set was 25 characters long on both, so nothing that counted could see it.
+  It broke the twins in BOTH directions on 15:
+
+    * U+000B was not in the set, so a VT-led url normalised to `""` again — the
+      original hole, reopened for one spelling.
+    * the letter `v` WAS in the set, so `https://gyldendal.tv` normalised to
+      `gyldendal.t` on the SQL side against `gyldendal.tv` on the Elixir side.
+      An ORDINARY hostname, no hostile spelling, reading `:free` while a live box
+      serves it.
+
+  Every C0 control in the fragment's set is now spelled `\\uXXXX`, which is
+  documented and reads identically on every supported server.
+
+  And the reason a six-spelling corpus could not see any of this: 19 of the 25
+  codepoints were never driven. The whitespace corpus is now GENERATED from the
+  codepoint list, and `"the corpus drives EVERY codepoint String.trim/1 strips"`
+  derives Elixir's real trim alphabet by scanning the whole Unicode range and
+  compares — so the completeness claim is enforced rather than asserted in prose.
+  Two membership arms bracket the fragment's set from both sides: it must strip
+  every whitespace codepoint, and it must not touch the hostname alphabet.
+
   ## Reachability, framed exactly
 
   LIVE divergence, PLATFORM-CREDENTIAL-reachable, NOT customer-reachable. The
@@ -156,9 +206,11 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
 
   ## What this file proves, in three arms
 
-    * TWIN EQUALITY (rung 1) — a 21-class corpus through both normalisers
-      (20 compared for byte equality, 1 pinned as a measured divergence),
-      compared output-for-output. Byte equality, not "both non-empty".
+    * TWIN EQUALITY (rung 1) — a 43-class corpus through both normalisers (42
+      compared for byte equality, 1 pinned as a measured divergence), compared
+      output-for-output. Byte equality, not "both non-empty". 25 of the classes
+      are generated, one per Unicode `White_Space` codepoint, and the generator's
+      codepoint list is itself checked against `String.trim/1`'s real behaviour.
     * BEHAVIOUR (rung 2) — a row stored with a whitespace-led url, inserted
       through the same `Ecto.Changeset.change/2` fixture the custom-host suite
       uses, and the PUBLIC `provisioning_fqdn_claim/2` asked for the clean
@@ -216,14 +268,60 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
   # No expected STRINGS here on purpose: this censuses that the twins agree with
   # EACH OTHER. A hardcoded table would pass with both twins broken identically,
   # and for the case-folding rows it would pin a collation this test does not own.
-  @corpus [
+  @host "a.barkpark.cloud"
+
+  # Unicode `White_Space` — the alphabet `String.trim/1` strips, and the set the
+  # fragment's `btrim` must mirror. Named per codepoint so a failure says WHICH
+  # one broke. The list cannot quietly fall behind Elixir's Unicode tables or
+  # quietly shrink: "the corpus drives every codepoint String.trim/1 strips"
+  # derives the real alphabet by scanning the whole Unicode range and compares.
+  @white_space [
+    {0x0009, "CHARACTER TABULATION"},
+    {0x000A, "LINE FEED"},
+    {0x000B, "LINE TABULATION"},
+    {0x000C, "FORM FEED"},
+    {0x000D, "CARRIAGE RETURN"},
+    {0x0020, "SPACE"},
+    {0x0085, "NEXT LINE"},
+    {0x00A0, "NO-BREAK SPACE"},
+    {0x1680, "OGHAM SPACE MARK"},
+    {0x2000, "EN QUAD"},
+    {0x2001, "EM QUAD"},
+    {0x2002, "EN SPACE"},
+    {0x2003, "EM SPACE"},
+    {0x2004, "THREE-PER-EM SPACE"},
+    {0x2005, "FOUR-PER-EM SPACE"},
+    {0x2006, "SIX-PER-EM SPACE"},
+    {0x2007, "FIGURE SPACE"},
+    {0x2008, "PUNCTUATION SPACE"},
+    {0x2009, "THIN SPACE"},
+    {0x200A, "HAIR SPACE"},
+    {0x2028, "LINE SEPARATOR"},
+    {0x2029, "PARAGRAPH SEPARATOR"},
+    {0x202F, "NARROW NO-BREAK SPACE"},
+    {0x205F, "MEDIUM MATHEMATICAL SPACE"},
+    {0x3000, "IDEOGRAPHIC SPACE"}
+  ]
+
+  # One class per whitespace codepoint, in the LEADING position — the position
+  # the anchored scheme regex makes discriminating. A TRAILING run is eaten by
+  # the hostname-alphabet cut whether or not anyone trimmed, so it cannot tell a
+  # trimming fragment from a non-trimming one and would dilute the mutation arms.
+  #
+  # Generated, not hand-listed, because hand-listing is exactly how the first
+  # version of this guard shipped green while broken: it drove SIX spellings and
+  # never asked about the other 19 codepoints. `\v` sat in the fragment's set as
+  # the LETTER v on PostgreSQL 15 and nothing noticed.
+  @ws_classes (for {cp, name} <- @white_space do
+                 hex = cp |> Integer.to_string(16) |> String.pad_leading(4, "0")
+                 {:equal, "leading U+#{hex} #{name}", <<cp::utf8>> <> "https://" <> @host}
+               end)
+
+  @structural_classes [
     {:equal, "plain https origin", "https://a.barkpark.cloud"},
-    {:equal, "leading space", " https://a.barkpark.cloud"},
-    {:equal, "leading tab", "\thttps://a.barkpark.cloud"},
+    # Two codepoints, and the ONE class that stays split when neither side
+    # trims — load-bearing for the both-deleted mutation arm.
     {:equal, "leading CRLF", "\r\nhttps://a.barkpark.cloud"},
-    {:equal, "leading NBSP (U+00A0)", " https://a.barkpark.cloud"},
-    {:equal, "leading vertical tab / form feed", "\v\fhttps://a.barkpark.cloud"},
-    {:equal, "leading ideographic space (U+3000)", "　https://a.barkpark.cloud"},
     {:equal, "trailing whitespace", "https://a.barkpark.cloud \t\n"},
     {:equal, "whitespace on both ends", " https://a.barkpark.cloud "},
     {:equal, "uppercase scheme and host", "HTTPS://A.BARKPARK.CLOUD"},
@@ -236,20 +334,29 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
     {:equal, "bracketed IPv6 authority", "https://[::1]:4000/"},
     {:equal, "bare IPv4", "10.0.0.1"},
     {:equal, "embedded newline mid-host", "https://a.barkpark\n.cloud"},
+    # Ordinary hostnames that begin and end with the LETTER v — the second half
+    # of the PG15 `E'\v'` defect. With `v` in the trim set the fragment answered
+    # `gyldendal.t` where the Elixir twin answered `gyldendal.tv`, so a live
+    # `.tv` box read `:free`. No hostile spelling required, which is why these
+    # sit in the plain corpus rather than the whitespace family.
+    {:equal, "hostname ending in v (.tv)", "https://gyldendal.tv"},
+    {:equal, "hostname starting with v", "https://vpn.barkpark.cloud"},
     {:equal, "empty string", ""},
     {:equal, "whitespace only", " \t "},
     {:divergent, "Unicode dotted capital I (collation-dependent case folding)",
      "https://İxample.barkpark.cloud"}
   ]
 
-  @whitespace_classes [
-    "leading space",
-    "leading tab",
-    "leading CRLF",
-    "leading NBSP (U+00A0)",
-    "leading vertical tab / form feed",
-    "leading ideographic space (U+3000)"
-  ]
+  @corpus @ws_classes ++ @structural_classes
+
+  # The classes a trim is REQUIRED for: every single whitespace codepoint, plus
+  # the CRLF pair.
+  @whitespace_classes Enum.map(@ws_classes, fn {_, label, _} -> label end) ++ ["leading CRLF"]
+
+  # The alphabet the chain must never erode. `btrim` takes a SET of characters,
+  # so one stray letter in it silently truncates every hostname that begins or
+  # ends with that letter — invisible to any length check on the set.
+  @hostname_alphabet String.graphemes("abcdefghijklmnopqrstuvwxyz0123456789.-")
 
   defp source, do: File.read!(@source_path)
 
@@ -257,6 +364,21 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
     %Postgrex.Result{rows: [[out]]} = Repo.query!("SELECT " <> expr, [input])
     out
   end
+
+  # `btrim($1, <set>)` with the set inlined as the SQL literal the fragment
+  # carries — so the SERVER's reading of its escapes is what gets measured, which
+  # is the whole point: `E'\v'` differs between PostgreSQL 15 and 16+.
+  defp sql_btrim(set, input) do
+    %Postgrex.Result{rows: [[out]]} = Repo.query!("SELECT btrim($1, #{set})", [input])
+    out
+  end
+
+  defp server_version do
+    %Postgrex.Result{rows: [[v]]} = Repo.query!("SELECT current_setting('server_version')", [])
+    v
+  end
+
+  defp hex(cp), do: cp |> Integer.to_string(16) |> String.pad_leading(4, "0")
 
   # Both twins over the whole corpus: %{label => {elixir_out, sql_out}}.
   defp twin_outputs(src) do
@@ -293,8 +415,73 @@ defmodule BarkparkCloud.RegistryClaimHostNormaliserTest do
   ## ─────────────────────────────────────────────────────────────────────────
 
   describe "the twins agree" do
-    test "the corpus covers at least 11 classes and both twins were actually read" do
-      assert length(@corpus) >= 11
+    test "the corpus drives EVERY codepoint String.trim/1 strips" do
+      # The completeness claim, made enforceable. The first version of this guard
+      # asserted "the fragment's set is exactly the 25 codepoints String.trim/1
+      # strips" in a COMMENT while driving six spellings, so five of them could
+      # be — and one was — broken in silence. Elixir's real trim alphabet is
+      # derived here by scanning the whole Unicode range, not restated, so this
+      # also reds if a future Elixir adds a White_Space codepoint.
+      trimmed_by_elixir =
+        for cp <- 0..0x10FFFF,
+            cp not in 0xD800..0xDFFF,
+            String.trim(<<cp::utf8>>) == "",
+            do: cp
+
+      driven = for {cp, _name} <- @white_space, do: cp
+
+      assert MapSet.new(driven) == MapSet.new(trimmed_by_elixir),
+             """
+             The corpus no longer drives exactly the codepoints String.trim/1 strips.
+
+               undriven (Elixir trims, corpus is silent): #{inspect(Enum.sort(trimmed_by_elixir -- driven), base: :hex)}
+               overdriven (corpus claims, Elixir keeps):  #{inspect(Enum.sort(driven -- trimmed_by_elixir), base: :hex)}
+
+             Every undriven codepoint is a spelling the fragment can normalise
+             differently from its twin with this suite still green — which is the
+             hole that let `E'\\v'` ship as the letter v on PostgreSQL 15.
+             """
+
+      # And each driven codepoint really is a corpus class, not just a list entry.
+      for {cp, _name} <- @white_space do
+        assert Enum.any?(@corpus, fn {_kind, _label, input} ->
+                 String.starts_with?(input, <<cp::utf8>>)
+               end)
+      end
+    end
+
+    test "the fragment's btrim set strips every whitespace codepoint — MEMBERSHIP, not length" do
+      # Length is not the invariant: the pre-fix set was 25 characters long on
+      # PostgreSQL 15 too. It just held the letter `v` instead of U+000B.
+      set = Extract.sql_btrim_set(source())
+
+      for {cp, name} <- @white_space do
+        assert sql_btrim(set, <<cp::utf8>> <> "x") == "x",
+               "the fragment's btrim set does not strip U+#{hex(cp)} #{name} on " <>
+                 "PostgreSQL #{server_version()} — a url led by it normalises to \"\" " <>
+                 "while the Elixir twin names its host, so the claim reads :free for a live box"
+      end
+    end
+
+    test "the fragment's btrim set does NOT touch the hostname alphabet" do
+      # The other direction, and the one that caught the second half of the PG15
+      # `\v` defect: a stray letter in the set truncates every hostname that
+      # begins or ends with it. `https://gyldendal.tv` normalised to
+      # `gyldendal.t`, and no whitespace was involved.
+      set = Extract.sql_btrim_set(source())
+
+      for c <- @hostname_alphabet do
+        subject = c <> "x" <> c
+
+        assert sql_btrim(set, subject) == subject,
+               "the fragment's btrim set eats #{inspect(c)}, a hostname character — " <>
+                 "every host starting or ending with it normalises short on the SQL " <>
+                 "side only, and reads :free while a live box serves it"
+      end
+    end
+
+    test "the corpus covers at least 40 classes and both twins were actually read" do
+      assert length(@corpus) >= 40
 
       src = source()
 
