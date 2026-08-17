@@ -1,0 +1,23 @@
+
+  ──────────────────────────────────────────────────────────────── 
+ │ The live tmux drive ships as a committed SGR harness and the   │
+ │ feels-native bar is finally judged                             │
+ │ ⠿ in_progress · P1 · C5/7 · task · epic-builder-the-live-tmux… │
+ │                                                                │
+ │ criteria 3/5                                                   │
+ │   ✓ A committed re-runnable harness exists under               │
+ │     scripts/taskboard-drive/ that builds the real binary from  │
+ │     ./cmd/barkpark, launches it in detached tmux 3.4 sessions  │
+ │     at 130x40 and 70x24 against the configured server, injects │
+ │     raw SGR bytes per gesture, captures styled frames (-e) and │
+ │     normalizes churn (spinners/elapsed/SSE) before diffing; a  │
+ │     full run exits 0 on this host.                             │
+ │     ↳ scripts/taskboard-drive/drive.sh: builds via CC=/usr/bi… │
+ │   ✓ Every D110 matrix gesture (wheel, click select+activate,   │
+ │     epic-root fold toggle, leaf first-click descend, hover     │
+ │     motion accent paint, divider drag with prefs persistence   │
+ │     across kill+relaunch, divider hover 2-col bounds, M toggle │
+ │     off/on) has captured before/after frame evidence with the  │
+ │     visible delta named, recorded in a durable venue the merge │
+ │   ↓ more below                                                 │
+ jk move · enter open · esc back · space scroll · M mouse      
