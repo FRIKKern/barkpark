@@ -214,6 +214,7 @@ cloud/lib/**
 .github/workflows/cloud.yml
 .github/workflows/deploy.yml
 deploy/**
+design/audit-actions.json
 deploy/site-deploy.sh
 deploy/site-deploy-node.sh
 internal/**

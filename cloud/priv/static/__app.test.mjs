@@ -21233,3 +21233,35 @@ test("cch-w68-s5 (D834): a successful delete invalidates the sites list BY THE M
   const refetch = fetchFn.calls.filter((c) => c.method === "GET" && c.path === "/v1/sites");
   assert.equal(refetch.length, 1, "the mutation itself re-read the list the deleted site was in");
 });
+
+// ── cch-w65: the SHIPPED artifact serves the single audit verb table ──────────
+// design/audit-actions.json is the SOLE authority for the audit register's verbs:
+// AuditEvent derives its closed @actions allowlist from it at compile time, and
+// design/emit.mjs emits `actions[].label` into app.js's ACTION_LABELS region. The
+// design gate proves the REGION matches the table. This proves the RUNNING code
+// does — humanAction() reads that object, and the fallback charter D582 blessed
+// (`ACTION_LABELS[a] || a`) has to hold for every verb declared without a label.
+// Without this arm the generated region is only ever compared to itself.
+test("cch-w65: humanAction serves design/audit-actions.json — every label, and D582's raw-slug fallback for every null", () => {
+  const table = JSON.parse(
+    fs.readFileSync(path.join(REPO_ROOT, "design/audit-actions.json"), "utf8"),
+  ).actions;
+  assert.ok(table.length >= 50, `the table shrank to ${table.length} verbs — this arm has gone vacuous`);
+
+  const labelled = table.filter((r) => r.label !== null);
+  const unlabelled = table.filter((r) => r.label === null);
+  assert.ok(labelled.length > 0 && unlabelled.length > 0,
+    "both states must be populated or one of the two assertions below proves nothing");
+
+  for (const { verb, label } of labelled) {
+    assert.equal(hooks.humanAction(verb), label,
+      `${verb} is labelled ${JSON.stringify(label)} in the table but the shipped ACTION_LABELS does not serve it`);
+  }
+  for (const { verb } of unlabelled) {
+    assert.equal(hooks.humanAction(verb), verb,
+      `${verb} is declared unlabelled-on-purpose (D582), so humanAction must return the raw dotted slug — a label appeared from somewhere the table does not own`);
+  }
+  // The fallback is the whole reason a null row is honest rather than a hole: an
+  // action the SPA has never heard of still renders instead of disappearing.
+  assert.equal(hooks.humanAction("site.invented_by_a_future_slice"), "site.invented_by_a_future_slice");
+});
