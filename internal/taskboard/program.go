@@ -1702,6 +1702,12 @@ func (m Model) readingWidth() int {
 	} else {
 		w -= 4
 	}
+	// composeAt re-floors the post-gutter width at 20 (compose.go:234-237) BEFORE
+	// docLayout; mirror that floor or the scroll clamp under-counts the true paint
+	// at tiny widths (narrow, m.width 19..22: the measure lagged paint by 3/3/2/1).
+	if w < 20 {
+		w = 20
+	}
 	if m.wide {
 		w = w - m.boardPaneCols(w) - paneGutter2
 		if w < minReadingWidth {
