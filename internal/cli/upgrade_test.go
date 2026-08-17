@@ -562,6 +562,7 @@ func TestRunUpgradeCheckYAML(t *testing.T) {
 }
 
 func TestRunUpgradeCheckBehind(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.1")
 	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
@@ -572,6 +573,7 @@ func TestRunUpgradeCheckBehind(t *testing.T) {
 }
 
 func TestRunUpgradeCheckUpToDate(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.2")
 	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
@@ -581,7 +583,50 @@ func TestRunUpgradeCheckUpToDate(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeCheckWritesReleaseCache: `bp upgrade --check` runs a
+// network-bearing resolve, so it must warm the release cache a later
+// network-free whoami reads its freshness verdict from — landing the resolved
+// version with a fresh CheckedAt.
+func TestRunUpgradeCheckWritesReleaseCache(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "0.0.1")
+	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("release cache must start cold")
+	}
+	out, _, _ := newTestWriter()
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitGeneric {
+		t.Fatalf("--check behind = %d, want %d", code, exitGeneric)
+	}
+	rc, fresh := readReleaseCache()
+	if !fresh || rc.Latest != "0.0.2" {
+		t.Fatalf("release cache = %+v fresh=%v, want fresh latest 0.0.2 from the --check resolve", rc, fresh)
+	}
+}
+
+// TestRunUpgradeFailedResolveWritesNoReleaseCache: when the release resolve
+// fails, runUpgrade returns before the cache write, so nothing is cached — a
+// verdict is never fabricated from a resolve that never landed.
+func TestRunUpgradeFailedResolveWritesNoReleaseCache(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "0.0.1")
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close() // connection refused → latestReleaseVersion errors
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	out, _, _ := newTestWriter()
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitGeneric {
+		t.Fatalf("--check with a dead base = %d, want %d", code, exitGeneric)
+	}
+	if _, fresh := readReleaseCache(); fresh {
+		t.Errorf("a failed resolve must write no release cache")
+	}
+}
+
 func TestRunUpgradeEndToEnd(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.1")
 	exe, srv := upgradeFixture(t, "0.0.2", []byte("new-binary"), "")
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
