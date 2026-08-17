@@ -144,7 +144,12 @@ defmodule Barkpark.Content.PapersCacheProvenanceTest do
   end
 
   describe "legacy" do
-    test "a paper with both fields and no stamp fails closed" do
+    # Superseded by pe-w2-reader-stamp-guard: an absent stamp claims nothing
+    # about the CURRENT renderer, so a byte mismatch cannot contradict it. The
+    # old fail-closed reading took 59 live papers dark for ~4 weeks. Full
+    # classification pinned in
+    # test/barkpark/content/papers/reader_lagging_stamp_test.exs.
+    test "a paper with both fields and no stamp is lagging, not divergent" do
       blocks = blocks()
 
       paper =
@@ -153,7 +158,7 @@ defmodule Barkpark.Content.PapersCacheProvenanceTest do
           "body_html" => older_renderer_emit(blocks)
         })
 
-      assert {:error, :ambiguous_source} = Papers.reader_source(paper, @dataset, [])
+      assert {:blocks, ^blocks} = Papers.reader_source(paper, @dataset, [])
     end
   end
 
@@ -308,9 +313,11 @@ defmodule Barkpark.Content.PapersCacheProvenanceTest do
              "provenance is not consulted — every sv state produced #{inspect(hd(distinct))}"
 
       # And the specific verdicts, so a future change cannot satisfy the above
-      # by scrambling them.
-      assert {:absent, {:error, :ambiguous_source}} = Enum.at(verdicts, 0)
-      assert {nil, {:error, :ambiguous_source}} = Enum.at(verdicts, 1)
+      # by scrambling them. Since pe-w2-reader-stamp-guard only the CURRENT
+      # digest can fail closed: absent and nil stamps claim nothing about this
+      # renderer, so they are lagging (serve blocks, restamp).
+      assert {:absent, {:blocks, ^blocks}} = Enum.at(verdicts, 0)
+      assert {nil, {:blocks, ^blocks}} = Enum.at(verdicts, 1)
       assert {"old", {:blocks, ^blocks}} = Enum.at(verdicts, 2)
       assert {:current, {:error, :ambiguous_source}} = Enum.at(verdicts, 3)
     end
