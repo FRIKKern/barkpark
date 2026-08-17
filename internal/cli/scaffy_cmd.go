@@ -82,6 +82,15 @@ func runScaffy(out *writer, g globals, args []string) int {
 			return exitOK
 		}
 		return runScaffyRemove(out, g, args[1:])
+	case "describe":
+		// The AST-only contract reader lives in scaffy_describe_cmd.go — this
+		// file carries the dispatch case ONLY, so TestScaffyPureLocal's
+		// scaffy_cmd.go scan stays satisfied (the D48/D102 precedent).
+		if g.help {
+			printScaffyDescribeHelp(out)
+			return exitOK
+		}
+		return runScaffyDescribe(out, args[1:])
 	case "discover":
 		// The git-mining pass lives in scaffy_discover_cmd.go (engine in
 		// internal/scaffy/discover.go) — dispatch ONLY, like the remote verbs.
@@ -111,7 +120,7 @@ func runScaffy(out *writer, g globals, args []string) int {
 		}
 		// A bare `bp scaffy` with no verb is incomplete usage (the `bp <noun>`
 		// convention in Execute's manifest path); usageErrf keeps -o json parity.
-		return usageErrf(out, func() { printScaffyHelp(out) }, "scaffy needs a verb: validate, fmt, run, remove, discover, pull, or ls")
+		return usageErrf(out, func() { printScaffyHelp(out) }, "scaffy needs a verb: validate, fmt, run, remove, describe, discover, pull, or ls")
 	default:
 		return usageErrf(out, func() { printScaffyHelp(out) }, "unknown command %q %q", "scaffy", verb)
 	}
@@ -756,7 +765,7 @@ func scaffyFindingsJSON(findings []scaffy.Finding) []any {
 }
 
 func printScaffyHelp(out *writer) {
-	out.outf(`usage: bp scaffy <validate|fmt|run|remove|discover> [flags] <path>...
+	out.outf(`usage: bp scaffy <validate|fmt|run|remove|describe|discover> [flags] <path>...
 
 Validate, format, apply and retract .scaffy command files (the pinned Scaffy
 v2 grammar + engine, internal/scaffy). Pure local: no server, no auth, no
@@ -781,6 +790,11 @@ commands:
                             command + exact vars, in reverse, drift-refused
                             per op. DIRECTION "remove" commands run FORWARD
                             (bp scaffy run) — never through remove (D36).
+  describe <command.scaffy|name>
+                            read a command's contract straight off the AST —
+                            header, per-variable synthesized kind, op counts
+                            keyed by shape, and closing asserts. No run, no
+                            repo, no server. -o json for the machine envelope.
   discover [--since <date|duration>] [--until <rev>] [--min-support N] [--top N]
                             mine git history for Scaffy candidates: ranked
                             accretion files (commits × co-change partners ×

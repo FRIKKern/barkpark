@@ -480,6 +480,77 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
     end
   end
 
+  # ── wave-6: byline map-item items no longer answer a RAW 500 ────────────────
+  #
+  # The wave-5/6 papers themselves stored byline items as maps
+  # (%{"value" => binary}); the printer's byline clause ran `esc(to_string(map))`
+  # → Protocol.UndefinedError → escaped the rescue as a raw HTTP 500
+  # (tooling/grip/ledger/pe-w6-byline-map-item-500-class-2026-08-17.md). The
+  # clause now coerces the map to its string; a non-binary item refuses 422.
+  describe "byline map-item items fail honestly (wave-6)" do
+    test "a byline whose items are maps prints (200), not a raw 500", %{conn: conn} do
+      slug = "bpml-byline-map-#{System.unique_integer([:positive])}"
+
+      with_blocks!(slug, [
+        %{
+          "id" => "by",
+          "type" => "byline",
+          "items" => [%{"value" => "Epic task-4792 · wave 6"}, "A plain author"]
+        }
+      ])
+
+      body = conn |> get("/papers/#{slug}/source", %{"format" => "bpml"}) |> response(200)
+      assert body =~ "<item>Epic task-4792 · wave 6</item>"
+      assert body =~ "<item>A plain author</item>"
+    end
+
+    test "a byline with a non-binary item is a labelled 422, not a 500", %{conn: conn} do
+      slug = "bpml-byline-bad-#{System.unique_integer([:positive])}"
+
+      with_blocks!(slug, [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "A real paragraph."}]
+        },
+        %{"id" => "by", "type" => "byline", "items" => [%{"unexpected" => "shape"}]}
+      ])
+
+      assert %{"error" => err} =
+               conn
+               |> get("/papers/#{slug}/source", %{"format" => "bpml"})
+               |> json_response(422)
+
+      assert err["code"] == "bpml_unprintable"
+    end
+  end
+
+  # ── wave-6: the notes grid round-trips over the wire ────────────────────────
+  describe "notes grid over the wire (wave-6)" do
+    test "a dict-item notes grid reads back as BPML and re-parses to the same blocks",
+         %{conn: conn} do
+      slug = "bpml-notes-grid-#{System.unique_integer([:positive])}"
+
+      blocks = [
+        %{
+          "id" => "n1",
+          "type" => "notes",
+          "items" => [
+            %{"label" => "First", "lead" => "one", "text" => "The opening remark."},
+            %{"label" => "Second", "text" => "A follow-up."}
+          ]
+        }
+      ]
+
+      with_blocks!(slug, blocks)
+
+      out = conn |> get("/papers/#{slug}/source", %{"format" => "bpml"}) |> response(200)
+      assert out =~ ~s(<note label="First" lead="one">The opening remark.</note>)
+      assert {:ok, %{"blocks" => reparsed}} = Bpml.parse_paper(out)
+      assert reparsed == blocks
+    end
+  end
+
   describe "full circle" do
     test "BPML in → blocks stored → BPML out → identical blocks", %{conn: conn} do
       slug = "bpml-circle-paper"

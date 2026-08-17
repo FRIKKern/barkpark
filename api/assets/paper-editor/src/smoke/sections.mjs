@@ -625,3 +625,72 @@ check("S2 echo: a layout-bearing section own-echoes (stableSectionKey includes l
   assert.equal(ownEcho, true, "an unchanged grid section is its own echo");
   assert.equal(idWrites.length, 0);
 });
+
+// ═════ FRAMED-FINALE — the scalar `variant` attr (charter D34) ═══════════════
+// A section MAY carry a scalar `variant` ("framed" — the framed-finale device).
+// render/BPML/pdrender already handle it; the canvas must PRESERVE it (three drop
+// sites: sectionBlockToNode threads it, sectionNodeToBlock lowers it, and the
+// bpSection schema DECLARES it — PM strips undeclared attrs on setContent, so the
+// declaration is load-bearing even with both converters fixed) and stableSectionKey
+// includes it (echo fidelity). PRESENT-ONLY: a no-variant section is byte-identical
+// to the pre-variant path. distrust-vacuous-green: every preserve assertion pairs
+// with a zero-ops check, and the echo-key test asserts the FAILING direction.
+
+const FRAMED_SECTION = () => ({ ...SECTION(), variant: "framed" });
+
+// ── D34 TEST 1: ROUND-TRIP — variant survives blocks→node→docToBlocks byte-equal.
+check("D34 variant round-trip: variant:'framed' survives blocks→node→docToBlocks byte-equal", () => {
+  const src = FRAMED_SECTION();
+  const node = runToTiptap([src]).content[0];
+  assert.equal(node.attrs.variant, "framed", "variant rides node.attrs verbatim (sectionBlockToNode threads it)");
+  const back = docToBlocks(runToTiptap([src]));
+  assert.deepEqual(back, [src], "the whole framed section round-trips byte-equal (sectionNodeToBlock lowers it)");
+});
+
+// ── D34 TEST 2: ZERO-OPS — an untouched framed section emits NOTHING, and folds.
+check("D34 variant zero-ops: an untouched framed section round-trips with ZERO ops", () => {
+  const blocks = [FRAMED_SECTION()];
+  const doc = runToTiptap(blocks);
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 0, "no spurious variant diff — an untouched framed section is zero-ops");
+  const folded = assertFolds(blocks, doc, ops, "framed section round-trip");
+  assert.deepEqual(folded[0], FRAMED_SECTION());
+});
+
+// ── D34 TEST 3: THE BUG — a structural reorder's coarse replace-block must CARRY
+//    variant (before the fix, the rebuilt subtree silently dropped the frame).
+check("D34 variant reorder: a structural reorder's replace-block CARRIES variant:'framed'", () => {
+  const blocks = [FRAMED_SECTION()];
+  const doc = runToTiptap(blocks);
+  // Swap two children in the live doc — a structural change → coarse replace-block.
+  const c = doc.content[0].content;
+  [c[0], c[1]] = [c[1], c[0]];
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1, "exactly one op");
+  assert.equal(ops[0].op, "replace-block", "a reorder is a structural change → replace-block");
+  assert.equal(ops[0].block.variant, "framed", "THE ASSERTION: the rebuilt section still carries variant");
+  const folded = assertFolds(blocks, doc, ops, "framed reorder fidelity");
+  assert.equal(folded[0].variant, "framed", "folded section keeps the frame");
+});
+
+// ── D34 TEST 4: BACKWARD-COMPAT — a no-variant section adds NO variant attr and
+//    stays zero-ops (present-only; the legacy path is structurally untouched).
+check("D34 backward-compat: a no-variant section adds NO variant attr and is zero-ops", () => {
+  const sec = runToTiptap([SECTION()]).content[0];
+  assert.ok(sec.attrs.variant == null, "no variant attr on a no-variant section");
+  const blocks = [SECTION()];
+  assert.equal(runToOps(blocks, runToTiptap(blocks)).length, 0, "legacy section is zero-ops");
+});
+
+// ── D34 TEST 5: ECHO KEY, both directions — a framed section own-echoes, and a
+//    variant MISMATCH is NOT an own-echo (pins variant INSIDE stableSectionKey;
+//    without it the mismatch case false-matches and this test reds).
+check("D34 echo key: framed own-echoes; a variant mismatch is NOT an own-echo", () => {
+  const server = [FRAMED_SECTION()];
+  const { ownEcho, idWrites } = reconcileServerEcho(server, runToTiptap(server).content);
+  assert.equal(ownEcho, true, "an unchanged framed section is its own echo");
+  assert.equal(idWrites.length, 0);
+  // The FAILING direction: same section, live node lacks the variant.
+  const dropped = reconcileServerEcho(server, runToTiptap([SECTION()]).content);
+  assert.equal(dropped.ownEcho, false, "a dropped variant must NOT read as an own-echo");
+});
