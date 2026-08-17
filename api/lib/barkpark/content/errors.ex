@@ -134,6 +134,19 @@ defmodule Barkpark.Content.Errors do
                          "missing_source",
                          "source_not_found",
                          "constraint",
+                         # BPML create-on-push (masterplan W3, charter D41) —
+                         # bulldocs_ingest_controller.ex sync_create/6. A push to
+                         # an ABSENT slug births the paper through the full publish
+                         # wall; `slug_mismatch` (422) refuses when the document's
+                         # own <paper slug> disagrees with the pushed path, and
+                         # `create_wall` (422) carries EVERY wall violation under
+                         # `errors` when the birth is refused — both write NOTHING.
+                         # PUBLIC on /v1/plugins/bulldocs, so a spec-generated SDK
+                         # must expect these variants on the sync route. Each
+                         # envelope carries its own controller-owned `hint`, so
+                         # (like every code in this set) they take no @hints entry.
+                         "slug_mismatch",
+                         "create_wall",
                          # Session-handoff (tasks 3-4) — the session legs of the
                          # SAME controller. `missing_slug` (422, an upsert body
                          # with no slug), `invalid_kind` (422, an event kind
