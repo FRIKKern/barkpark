@@ -1032,36 +1032,67 @@ defmodule BarkparkCloud.Web.Router do
   ## Auth — POST /v1/auth/register {email, password, team_name?}
   ##   → 201 {token, team_id} (user created + a team + an owner membership + a
   ##     session token; the caller is logged in immediately, exactly like login)
-  ##   → 409 {error: "email_taken"}              (email already registered)
-  ##   → 422 {error: "<field>_invalid"|..., details?}  (changeset rejection)
+  ##   → 409 {error: "email_taken"}              (email already registered, and
+  ##     the submitted password is VALID — see the enumeration note below)
+  ##   → 422 {error: "<field>_invalid"|..., details?}  (bad payload / invalid password)
+  ##   → 429 {error: "rate_limited"}             (>30 register attempts/min per IP)
   ##
   ## The whole user→team→membership→token chain runs inside ONE Repo.transaction
   ## (`register/3` below), so a half-way failure rolls back — no orphan user or
   ## team is ever left behind. The duplicate-email check runs BEFORE the insert,
   ## and the citext unique index is the race backstop (a unique-violation on the
-  ## email maps to 409, never a 500). YAGNI: no email verification, no captcha,
-  ## no rate-limiter — rate-limiting this unauthenticated endpoint is a deploy
-  ## concern (a fronting proxy / WAF rule), not application logic.
+  ## email maps to 409, never a 500).
+  ##
+  ## RATE-LIMITED per IP (arpss w3): each hit is an unauthenticated write that
+  ## mints a whole user→team→membership→trial. `"register:"<peer_ip>` (30/60s)
+  ## brakes a signup flood — its OWN bucket, distinct from the authed
+  ## `"push_register:"` device bucket (same word, different physics). Corporate-NAT
+  ## headroom is why it is 30, not the default 10 (see RateLimiter @limits).
+  ##
+  ## ENUMERATION-SAFE (arpss w3): the password-FORMAT gate runs BEFORE the
+  ## `get_user_by_email` duplicate lookup, so an EXISTING email + an INVALID
+  ## password answers 422 byte-for-byte identically to a FRESH email + the same
+  ## invalid password — a probe cannot turn "409 vs 422" into an account-existence
+  ## oracle. Reusing the SAME length rules the registration changeset applies
+  ## (`min_password_length()`..72) guarantees the 422 body is the same bytes the
+  ## fresh-email path emits from `register_error/1`. The 409 email_taken survives
+  ## ONLY for a duplicate carrying a VALID password — the honest signal a real
+  ## signup needs (app.js maps {error:"email_taken"} → "That email is already
+  ## registered."; client_test.go pins the 409 body). Because the invalid-password
+  ## gate sits ahead of BOTH the pre-insert `get_user_by_email` guard AND
+  ## `register/4` (whose `classify_register_error` is the citext-race backstop),
+  ## neither 409 path can fire for an invalid password — both oracle layers closed.
   post "/v1/auth/register" do
-    email = conn.body_params["email"]
-    password = conn.body_params["password"]
-    team_name = conn.body_params["team_name"]
+    case DeviceAuthRateLimiter.check("register:" <> (peer_ip(conn) || "unknown")) do
+      {:error, :rate_limited} ->
+        json(conn, 429, %{error: "rate_limited"})
 
-    with true <- is_binary(email) and is_binary(password),
-         nil <- Accounts.get_user_by_email(email) do
-      case register(email, password, team_name, session_opts(conn)) do
-        {:ok, %{token: token, team: team}} ->
-          json(conn, 201, %{token: token, team_id: team.id})
+      :ok ->
+        email = conn.body_params["email"]
+        password = conn.body_params["password"]
+        team_name = conn.body_params["team_name"]
 
-        {:error, :email_taken} ->
-          json(conn, 409, %{error: "email_taken"})
+        with true <- is_binary(email) and is_binary(password),
+             %Ecto.Changeset{valid?: true} <- register_password_changeset(password),
+             nil <- Accounts.get_user_by_email(email) do
+          case register(email, password, team_name, session_opts(conn)) do
+            {:ok, %{token: token, team: team}} ->
+              json(conn, 201, %{token: token, team_id: team.id})
 
-        {:error, %Ecto.Changeset{} = changeset} ->
-          json(conn, 422, register_error(changeset))
-      end
-    else
-      false -> json(conn, 422, %{error: "validation_failed"})
-      %{} -> json(conn, 409, %{error: "email_taken"})
+            {:error, :email_taken} ->
+              json(conn, 409, %{error: "email_taken"})
+
+            {:error, %Ecto.Changeset{} = changeset} ->
+              json(conn, 422, register_error(changeset))
+          end
+        else
+          false -> json(conn, 422, %{error: "validation_failed"})
+          # Invalid-password changeset — 422 BEFORE the email lookup (the
+          # enumeration seal). Must precede the `%{}` clause: a changeset is a
+          # struct and would otherwise be caught as the "existing user" map.
+          %Ecto.Changeset{} = changeset -> json(conn, 422, register_error(changeset))
+          %{} -> json(conn, 409, %{error: "email_taken"})
+        end
     end
   end
 
@@ -9371,6 +9402,25 @@ defmodule BarkparkCloud.Web.Router do
       end)
 
     if email_unique?, do: {:error, :email_taken}, else: {:error, changeset}
+  end
+
+  # arpss w3 — the enumeration seal. Validate ONLY the password's FORMAT (the same
+  # length window `User.validate_password/1` enforces: min..72), with NO email
+  # lookup and NO hashing, so the register handler can answer 422 for a malformed
+  # password BEFORE it ever asks whether the email exists. A validation-only
+  # changeset (not `User.password_changeset/2`) is deliberate: the happy path
+  # re-hashes inside `register/4`, and hashing here too would bcrypt every signup
+  # twice. 72 is the Bcrypt 72-byte input cap User pins as `@max_password_length`;
+  # the min tracks `User.min_password_length/0` so the two paths can't drift and
+  # the 422 body stays byte-identical to the fresh-email path's `register_error/1`.
+  defp register_password_changeset(password) do
+    %Accounts.User{}
+    |> Ecto.Changeset.cast(%{password: password}, [:password])
+    |> Ecto.Changeset.validate_required([:password])
+    |> Ecto.Changeset.validate_length(:password,
+      min: Accounts.User.min_password_length(),
+      max: 72
+    )
   end
 
   # Map a validation changeset to the 422 body. A single offending field becomes
