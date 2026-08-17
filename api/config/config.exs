@@ -105,6 +105,17 @@ config :barkpark, :ticket_rate_limits,
   message: 60,
   attachment: 30
 
+# Per-IP abuse rails for UNAUTHENTICATED auth writes, per HOUR, billed in a
+# bucket of their own ON TOP of the shared 60/min anon-write meter
+# (BarkparkWeb.Plugs.AuthWriteRateLimit). `register` = POST /v1/auth/register,
+# which mails a third party on every call (confirmation for a fresh address,
+# re-notification for an existing account), so the meaningful ceiling is MAIL
+# volume, not request volume: 5/hour/IP fits a human signing up with retries and
+# bounds the mailbomb. Prod-tunable without a rebuild via
+# BARKPARK_AUTH_RATE_REGISTER (runtime.exs). Throttle only — invite codes /
+# allowlists / closing signup are the instance owner's policy call.
+config :barkpark, :auth_write_rate_limits, register: 5
+
 # The preview-JWT signing secret is env-specific and is NEVER a hardcoded
 # default in this shared base (closes Sobelow Config.Secrets, config.exs:64
 # at the source rather than the baseline):

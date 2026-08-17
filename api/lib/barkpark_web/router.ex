@@ -568,6 +568,16 @@ defmodule BarkparkWeb.Router do
     plug(:fetch_session)
   end
 
+  # Second, TIGHTER meter for anonymous account creation, stacked ON TOP of
+  # `:user_auth` (which already bills the shared 60/min anon-write bucket). Its
+  # own per-IP per-hour bucket — default 5/h, BARKPARK_AUTH_RATE_REGISTER — so a
+  # register flood neither starves the other anonymous writes from that IP nor
+  # turns the API-shaped 60/min ceiling into a 3600-mail/hour amplifier against a
+  # third party. Only `POST /v1/auth/register` rides this.
+  pipeline :auth_register_throttle do
+    plug(BarkparkWeb.Plugs.AuthWriteRateLimit, class: :register)
+  end
+
   # Core user-login session gate (distinct from API-token auth): login bearer
   # or `user_session` cookie → :current_user, then the require_mfa org gate.
   pipeline :require_user do
@@ -1488,11 +1498,27 @@ defmodule BarkparkWeb.Router do
     get("/openapi.json", OpenApiController, :index)
   end
 
+  # ── Anonymous account creation — its OWN, tighter bucket ────────────────
+  # POST /v1/auth/register is an UNAUTHENTICATED write that mails a third party
+  # (a fresh address gets a confirmation mail; an existing one re-mails the
+  # account holder). It rides `:user_auth` exactly as the other public auth
+  # routes do — so it keeps the shared 60/min anon-write meter — and then bills a
+  # SECOND, per-IP, per-hour bucket of its own (default 5/h,
+  # BARKPARK_AUTH_RATE_REGISTER). Two independent buckets mean a register flood
+  # can neither starve the other anonymous writes from that IP nor use the
+  # API-shaped 60/min ceiling as a 3600-mail/hour amplifier. Throttle only —
+  # invite codes / allowlists / closing signup are the owner's policy call.
+  # See BarkparkWeb.Plugs.AuthWriteRateLimit.
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through([:user_auth, :auth_register_throttle])
+
+    post("/register", AuthController, :register)
+  end
+
   # ── Core user auth (login/sessions/MFA/email flows) — public entry ───────
   scope "/v1/auth", BarkparkWeb do
     pipe_through(:user_auth)
 
-    post("/register", AuthController, :register)
     post("/login", AuthController, :login)
     post("/verify-email", AuthController, :verify_email)
     post("/request-reset", AuthController, :request_reset)
