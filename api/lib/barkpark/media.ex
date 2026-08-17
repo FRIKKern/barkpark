@@ -23,7 +23,16 @@ defmodule Barkpark.Media do
   # `/` → empty first segment) is rejected, and an empty path is rejected. This
   # is a strict allowlist, NOT a blocklist, so an unforeseen escape shape fails
   # closed.
-  @blob_segment ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+  #
+  # A LEADING `-` is permitted: `unique_filename/1` genuinely emits `-<hex>.ext`
+  # when the client basename slugs to empty (CJK/emoji/space-only names), so
+  # those files exist on disk and in `media_files.path` — refusing them here
+  # would 404 the read/serve seam for legitimately stored blobs. A leading `-`
+  # has no path semantics (the joined path never starts with it), unlike a
+  # leading `.` (traversal/hidden — still refused) or a leading `_` (still
+  # refused, which keeps `_renditions/…` cache paths outside the Blobstore
+  # verbs by construction).
+  @blob_segment ~r/\A[A-Za-z0-9-][A-Za-z0-9._-]*\z/
 
   @doc """
   The media blob root.
@@ -597,16 +606,27 @@ defmodule Barkpark.Media do
     end
   end
 
-  # A path is a safe server-blob path iff it is a non-empty relative path whose
-  # every `/`-segment matches @blob_segment (so `.`, `..`, an absolute leading
-  # `/`, a trailing `/`, and any `\`/null/space shape all fail closed).
-  defp valid_blob_path?(relative_path) do
+  @doc """
+  True iff `relative_path` is a safe server-blob path: a non-empty relative path
+  whose every `/`-segment matches `@blob_segment` (so `.`, `..`, an absolute
+  leading `/`, a trailing `/`, and any `\\`/null/space shape all fail closed).
+
+  Promoted from a private write-side check to a PUBLIC guard so the read/serve
+  seam can enforce the same invariant (`Barkpark.Media.Blobstore`'s
+  `serve_strategy`/`ensure_local`/`delete` reject a traversal-shaped `file.path`
+  before it reaches `send_file`/`File.rm`). See `put_blob/2` for the write seam.
+  """
+  @spec valid_blob_path?(term()) :: boolean()
+  def valid_blob_path?(relative_path) when is_binary(relative_path) do
     segments = String.split(relative_path, "/")
 
     relative_path != "" and
       not String.starts_with?(relative_path, "/") and
       Enum.all?(segments, &Regex.match?(@blob_segment, &1))
   end
+
+  # A non-binary path (e.g. nil) is never a safe blob path — fail closed.
+  def valid_blob_path?(_relative_path), do: false
 
   # Stamp tenancy scope (:workspace_id / :project_id) onto write attrs when the
   # caller supplied it via opts. Only non-nil keys are added, so an unscoped
