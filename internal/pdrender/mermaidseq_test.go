@@ -103,7 +103,7 @@ func TestSequenceDispatch(t *testing.T) {
 	if strings.Contains(got, "◇ Mermaid diagram") {
 		t.Errorf("sequence should draw, not fold:\n%s", got)
 	}
-	if !strings.Contains(got, "Client") || !strings.ContainsAny(got, "▶◀") || !strings.Contains(got, "Figure") {
+	if !strings.Contains(got, "Client") || !strings.ContainsAny(got, "▶◀") || !strings.Contains(got, "Seq.") {
 		t.Errorf("sequence render missing lifelines/arrow/caption:\n%s", got)
 	}
 }
