@@ -852,6 +852,12 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     end
 
     test "every typed exit code maps to its own honest label + the stream's reason" do
+      # Exit 23 is deliberately ABSENT from this deploy-request table: the shell
+      # only produces 23 for a NON-deploy mode refused by the per-site lock (a
+      # blocked DEPLOY queues on `flock -w 1200` and times out as 15 — it can
+      # never exit 23). The old pin here drove {23, "rollback: …"} under a
+      # deploy request, a state the shell cannot produce; the honest 23 pins
+      # live below, driven under the modes that CAN exit 23.
       for {code, fragment, slug} <- [
             {13, "STAGE failed", "exit-13"},
             {14, "HEALTH gate failed", "exit-14"},
@@ -861,7 +867,6 @@ defmodule Barkpark.Sites.DeployRunnerTest do
             {16, "SWITCH failed", "exit-16"},
             {21, "rollback: no previous release", "exit-21"},
             {22, "rollback: not supported", "exit-22"},
-            {23, "rollback: a deploy is in flight", "exit-23"},
             {24, "rollback failed", "exit-24"}
           ] do
         put_cfg(enabled: true, command: stub("echo 'the real reason #{code}'; exit #{code}"))
@@ -872,6 +877,63 @@ defmodule Barkpark.Sites.DeployRunnerTest do
         assert status.failure_reason =~ fragment
         assert status.failure_reason =~ "the real reason #{code}"
       end
+    end
+
+    # ── teardown speaks teardown (Port fallback path) ─────────────────────
+    #
+    # REACHABILITY, framed honestly: the typed 23/25 exit-code arms below are
+    # user-visible on THIS Port fallback path only (handle_info exit_status →
+    # finish_run → failure_reason). On the systemd path the exit code is swept
+    # by `--collect`, so the same copy is minted from the LOG markers instead
+    # (TEARDOWN_FAILED= / lock_held — see "systemd unit path — finalize"); the
+    # exit-code arms are LATENT there. The -1 abnormal-end opener, by contrast,
+    # is live on EVERY teardown failure path, both sinks.
+
+    test "exit 23 under a ROLLBACK keeps its rollback voice — the state the shell produces" do
+      put_cfg(enabled: true, rollback_command: stub("echo 'deploy lock held'; exit 23"))
+
+      assert DeployRunner.trigger(req("rb-23", mode: "rollback")) == {:ok, :started}
+      assert %{state: :done, exit_code: 23, mode: :rollback} = status = await_done("rb-23")
+      assert status.failure_reason =~ "rollback: a deploy is in flight (exit 23)"
+    end
+
+    test "exit 23 under a TEARDOWN speaks the lock sentence — no rollback verb, no dead deploy" do
+      put_cfg(
+        enabled: true,
+        teardown_command:
+          stub(
+            "echo \"deploy lock held for 'td-23' — refusing to teardown while a deploy runs (lock_held)\"; exit 23"
+          )
+      )
+
+      assert DeployRunner.trigger(req("td-23", mode: "teardown")) == {:ok, :started}
+      assert %{state: :done, exit_code: 23, mode: :teardown} = status = await_done("td-23")
+
+      assert status.failure_reason =~
+               "a deploy is running on the box — try again once it finishes (exit 23)"
+
+      refute status.failure_reason =~ "rollback"
+      refute status.failure_reason =~ "deploy process died abnormally"
+    end
+
+    test "exit 25 under a TEARDOWN is teardown-voiced and carries the script's own detail" do
+      put_cfg(
+        enabled: true,
+        teardown_command:
+          stub("""
+          echo 'TEARDOWN FAILED — the /sites/td-25 route is still being served'
+          echo 'TEARDOWN_FAILED=td-25 detail="the /sites/td-25 route is still being served"'
+          exit 25
+          """)
+      )
+
+      assert DeployRunner.trigger(req("td-25", mode: "teardown")) == {:ok, :started}
+      assert %{state: :done, exit_code: 25, mode: :teardown} = status = await_done("td-25")
+
+      assert status.failure_reason =~ "teardown failed — the site was not torn down (exit 25)"
+      assert status.failure_reason =~ "route is still being served"
+      refute status.failure_reason =~ "deploy failed"
+      refute status.failure_reason =~ "deploy process died abnormally"
     end
 
     test "exit 0 has no failure_reason" do
@@ -1580,7 +1642,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert status.stages == []
     end
 
-    test "a teardown whose log carries no TORN_DOWN= is an abnormal end (-1)" do
+    test "a teardown whose log carries no typed marker is an abnormal end (-1) — teardown-voiced" do
       dir = run_dir()
 
       engine =
@@ -1603,6 +1665,79 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       status = DeployRunner.status("halfgone")
       assert status.state == :done
       assert status.exit_code == -1
+      # The -1 opener is the LIVE arm on every teardown failure (both sinks): it
+      # must speak teardown — the old copy opened every teardown 422 with
+      # "deploy process died abnormally", telling a user who pressed Delete that
+      # a deploy died.
+      assert status.failure_reason =~ "the teardown did not complete"
+      assert status.failure_reason =~ "caddy validate rejected the disarm"
+      refute status.failure_reason =~ "deploy process died abnormally"
+    end
+
+    test "a teardown TEARDOWN_FAILED= log finalizes typed 25 with the script's own detail" do
+      dir = run_dir()
+
+      # systemd sweeps the exit code (`--collect`), so the typed 25 is recovered
+      # from the engine's own TEARDOWN_FAILED= marker — on this path the LOG
+      # marker is what is live; the exit-CODE arm never fires here.
+      engine =
+        stub("""
+        echo 'TEARDOWN FAILED — the /sites/unittd25 route is still being served' >> "$BARKPARK_SITE_LOG_FILE"
+        echo 'TEARDOWN_FAILED=unittd25 detail="the /sites/unittd25 route is still being served"' >> "$BARKPARK_SITE_LOG_FILE"
+        exit 25
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        teardown_command: engine
+      )
+
+      assert DeployRunner.trigger(req("unittd25", mode: "teardown")) == {:ok, :started}
+
+      status = DeployRunner.status("unittd25")
+      assert status.state == :done
+      assert status.exit_code == 25
+      assert status.failure_reason =~ "teardown failed — the site was not torn down (exit 25)"
+      assert status.failure_reason =~ "the /sites/unittd25 route is still being served"
+      refute status.failure_reason =~ "deploy process died abnormally"
+    end
+
+    test "a teardown refused by the deploy lock finalizes typed 23 with the lock sentence" do
+      dir = run_dir()
+
+      # The engine logs `… (lock_held)` and exits 23 for ANY non-deploy mode the
+      # per-site lock refuses; the sentence matches the CP's own lock_held copy
+      # (cloud/sites/deploy.ex) so both refusal surfaces speak identically.
+      engine =
+        stub("""
+        echo "deploy lock held for 'unittd23' — refusing to teardown while a deploy runs (lock_held)" >> "$BARKPARK_SITE_LOG_FILE"
+        exit 23
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        teardown_command: engine
+      )
+
+      assert DeployRunner.trigger(req("unittd23", mode: "teardown")) == {:ok, :started}
+
+      status = DeployRunner.status("unittd23")
+      assert status.state == :done
+      assert status.exit_code == 23
+
+      assert status.failure_reason =~
+               "a deploy is running on the box — try again once it finishes (exit 23)"
+
+      refute status.failure_reason =~ "rollback"
+      refute status.failure_reason =~ "deploy process died abnormally"
     end
   end
 
