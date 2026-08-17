@@ -8,19 +8,27 @@ in CI, and a year from now.
 
 ```sh
 bash tooling/paper-excellence/rig/gate.sh              # the gate: render + shoot + assert
+bash tooling/paper-excellence/rig/gate.sh --panel      # every committed fixture, one command
+bash tooling/paper-excellence/rig/gate.sh --panel --check   # …and diff the committed numbers
 bash tooling/paper-excellence/rig/baseline.sh          # re-capture the committed panel
 bash tooling/paper-excellence/rig/fetch-fixtures.sh    # the ONE networked step: refresh fixtures
 ```
+
+Any path the shell accepts works: `gate.sh` resolves the fixture and the out-dir
+to **absolute** paths before it `cd`s into `api/`. Until 2026-08-17 it did not,
+so the natural repo-relative invocation
+(`gate.sh tooling/paper-excellence/rig/fixtures/design-probe.json`) died inside
+`render.exs`, which `File.read!`s the path verbatim from `api/`.
 
 | file | what it does |
 |---|---|
 | `render.exs` | renders a fixture through the real `PortableDoc.Render` + the real bulldocs layout |
 | `shoot.mjs` | serves the rendered page on loopback and photographs it, asserting DOM content |
 | `census.mjs` | the heavy-rule census — one measurement function, run on the artifact AND on a rendered paper |
-| `gate.sh` | render + shoot the committed `heggemsnes-act` fixture; nonzero on any content failure |
+| `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 7); nonzero on any content failure |
 | `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff |
 | `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json` |
-| `fixtures/` | 5 papers, each stamped with the `source_rev` it was taken from |
+| `fixtures/` | 7 papers, each stamped with the `source_rev` it was taken from (`design-probe` is authored, not published) |
 | `baselines/` | the committed panel (see below) |
 
 ## How it stays hermetic
@@ -86,7 +94,8 @@ baselines show them un-hydrated and nothing here claims otherwise.
   JPEG's 65,535 px dimension cap — which a ~100-block paper at 2x does
   (`hobby-hardening-capstone`, found 2026-08-12). The rig stats every file it
   writes; over-tall pages are re-captured full-page at 1x and get an `@1x`
-  suffix so a shorter baseline can never pass as a 2x one.
+  suffix so a shorter baseline can never pass as a 2x one. That retry has never
+  been observed to fire — see the `@1x` bullet under Deliberate limits.
 
 ## The theme pin
 
@@ -131,6 +140,52 @@ pinned to the band's left edge (290.6px of ink, 374.7px off the column axis on
 ceiling now rather than an issue, so ink and box agree; the assertion exempts a
 row whose ink is WIDER than its box, because that component is self-scrolling and
 where its ink sits is a scroll position rather than a layout fact.
+
+## The report check — the committed numbers as an oracle
+
+```sh
+bash tooling/paper-excellence/rig/gate.sh --check [fixture.json] [out-dir]
+bash tooling/paper-excellence/rig/gate.sh --panel --check
+node tooling/paper-excellence/rig/shoot.mjs --report-diff <baseline.report.json> <fresh.report.json>
+```
+
+`--check` re-captures under the **baseline env** (`SHOT_FORMAT=jpeg`,
+`SHOT_QUALITY=72`, `SHOT_WIDTHS=1280,1920`) and diffs this run's `report.json`
+against the committed `baselines/<slug>.report.json`, exiting nonzero on any
+numeric drift. Until 2026-08-17 nothing did: the gate shot to a temp dir and
+asserted, `baseline.sh` overwrote the repo, and the promise above that "a band
+regression is a text diff in `report.json`" had no code behind it.
+
+**Image byte counts are ignored, and only they.** The reports are otherwise
+byte-reproducible on one host — all 7 fixtures re-shot on 2026-08-17 matched the
+committed baselines across **4437** measured values with zero differences — but
+one JPEG byte count differed ~1.5% across hosts while every measurement matched.
+That is encoder noise, and bytes are already refused as an oracle above.
+Everything else is a measurement: column width, evidence band per component,
+prose CPL, section beats, doubled rules, the full rule census, paragraph count,
+scale, blocked requests.
+
+The check **can lose**, proven by mutation on a copy of
+`baselines/design-probe.report.json`:
+
+| copy | result |
+|---|---|
+| unperturbed | exit 0 — `247 measured values compared, 0 differences (4 image byte counts ignored)` |
+| `shots[0].columnWidth` 660 → 661 | exit 1 — `1 measurement(s) drifted … shots[0].columnWidth: 660 → 661` |
+| `shots[0].bytes` +99999 | exit 0 — encoder noise is not a layout fact |
+
+A red here is a review item, not a re-baseline reflex: read the drifted numbers,
+then `bash tooling/paper-excellence/rig/baseline.sh <slug>` **only** once the
+change behind them is the intended one.
+
+`--panel` runs every `fixtures/*.json` in one command. Measured cold on
+2026-08-17: all 7 pass, **56 shots / 1696 content assertions** in the default
+four-width set, and **28 shots** under `--panel --check`.
+
+The PASS line counts **this run's** shots, read from the `report.json` this run
+wrote. `find`ing the out-dir counted every image ever left there, so a 7-fixture
+loop over one out-dir reported `8/16/24/…` while each fixture wrote 8 — a number
+that grows with the temp dir's history is not a measurement.
 
 ## The heavy-rule census
 
@@ -191,8 +246,16 @@ Deliberate limits, stated rather than hidden:
   tree) and the pictures with the change — the `report.json` diff is then a true
   before/after at identical paths, and the panel does not have to be stored
   twice to get one.
-* **`hobby-hardening-capstone` is `@1x`** (the JPEG cap above), and its files
-  say so in their names.
+* **The `@1x` demotion branch has never fired, and this README used to claim it
+  had.** `shoot.mjs` re-captures at 1x when a JPEG comes back under
+  `MIN_SHOT_BYTES`, on the theory that a ~100-block paper at 2x clears JPEG's
+  65,535px cap. There are **zero** `*@1x.*` files in `baselines/`, and
+  `hobby-hardening-capstone` — the paper that supposedly triggered it —
+  photographs at **2x** on this host in both formats (18.5 MB as PNG at 1920,
+  and its committed JPEGs carry no suffix). So the retry is **untested code**:
+  it may still be the right guard against a zero-byte file, but nothing here
+  exercises it, no baseline depends on it, and it should not be budgeted for or
+  cited as a measured behaviour. The bullet it replaced said the opposite.
 * **The legacy shots in `../evidence/shots/` are a different capture**:
   above-the-fold only, `deviceScaleFactor: 1`, 1440x1200, taken against
   guerrilla over the network. They are not comparable to these below the fold,
