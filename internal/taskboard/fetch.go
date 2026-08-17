@@ -2,8 +2,10 @@ package taskboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -84,22 +86,67 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 // flagship), which shrinks this fetch instead of chasing it with a bigger cap.
 const maxBoardFetchBytes = 32 << 20
 
-// getJSON issues an authenticated GET to a top-level path, reusing the Client's
-// configured http.Client and bearer token (via the public GetConditionalBounded
-// helper, called with no If-None-Match so it always fetches the body, and the
-// board's own maxBoardFetchBytes cap). It does not modify apiclient. Every
-// error carries the path, and a non-200 carries the status plus a one-line body
-// hint, so the shell's degraded banner can say WHICH call failed and why
-// ("GET /v1/tasks/prime: status 401: …").
+// snapshotFetchTimeout is the snapshot path's OWN request budget, carried as a
+// per-request context deadline (see snapshotHTTP below). It is deliberately NOT
+// a raise of the apiclient's Timeout: the one shared Client also serves the
+// interactive claim/close verbs, where the 5s DefaultTimeout is right — a
+// keystroke must fail fast, never hang half a minute. The heavy corpus GET
+// (/v1/tasks?limit=1000, ~9 MB live) and prime routinely see 2.0-2.4s of server
+// TTFB on guerrilla, so the inherited 5s left ~2x margin and blew under load —
+// which the old path then mislabeled "offline" (a lie; the server answers).
+// 30s is a snapshot-shaped budget: generous enough that a slow-but-alive server
+// completes, finite so a genuinely dead read still surfaces.
+const snapshotFetchTimeout = 30 * time.Second
+
+// snapshotHTTP is the snapshot path's transport. It carries NO client-level
+// Timeout — the deadline rides each request's context (getJSONCtx), so the
+// budget is scoped to the snapshot fetch alone and can never leak into the
+// apiclient the interactive verbs share. A plain shared http.Client is safe for
+// concurrent use (the list and prime GETs fly concurrently, charter D113b).
+var snapshotHTTP = &http.Client{}
+
+// getJSON is getJSONCtx under the snapshot path's own default budget. Kept as
+// the two-arg convenience so every snapshot-path caller gets the scoped
+// deadline even when it has no context of its own to thread.
 func getJSON(c *apiclient.Client, path string) ([]byte, error) {
-	res, err := c.GetConditionalBounded(c.BaseURL()+path, "", maxBoardFetchBytes)
+	ctx, cancel := context.WithTimeout(context.Background(), snapshotFetchTimeout)
+	defer cancel()
+	return getJSONCtx(ctx, c, path)
+}
+
+// getJSONCtx issues an authenticated GET to a top-level path with the caller's
+// context deadline, the Client's bearer token, and the board's own
+// maxBoardFetchBytes cap. It does not modify apiclient — the request runs on
+// snapshotHTTP precisely so the apiclient's interactive 5s Timeout cannot clamp
+// a snapshot-sized read (and the snapshot budget cannot slow a keystroke).
+// Every error carries the path, and a non-200 carries the status plus a
+// one-line body hint, so the shell's degraded banner can say WHICH call failed
+// and why ("GET /v1/tasks/prime: status 401: …"). The cap is a refusal, never a
+// trim — a truncated JSON body would parse as garbage or a plausible prefix.
+func getJSONCtx(ctx context.Context, c *apiclient.Client, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d%s", path, res.StatusCode, bodyHint(res.Body))
+	if token := c.Token(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	return res.Body, nil
+	resp, err := snapshotHTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBoardFetchBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	if int64(len(body)) > maxBoardFetchBytes {
+		return nil, fmt.Errorf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", path, maxBoardFetchBytes)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: status %d%s", path, resp.StatusCode, bodyHint(body))
+	}
+	return body, nil
 }
 
 // bodyHint condenses an error body into a short single-line ": …" suffix so a
@@ -120,9 +167,11 @@ func bodyHint(body []byte) string {
 // fetchPrime asks for prime at the clamp maximum — which buys the deepest ready
 // head and event tail one call allows. The ticker only renders a short tail, but
 // the ready overlay wants every claimable row it can get (past the clamp the
-// overlay covers the top of the queue only, which composeSnapshot flags).
-func fetchPrime(c *apiclient.Client) (primeExtras, error) {
-	body, err := getJSON(c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
+// overlay covers the top of the queue only, which composeSnapshot flags). The
+// context carries FetchSnapshotFull's shared snapshot budget, so both halves of
+// one snapshot expire together.
+func fetchPrime(ctx context.Context, c *apiclient.Client) (primeExtras, error) {
+	body, err := getJSONCtx(ctx, c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
 	if err != nil {
 		return primeExtras{}, err
 	}
