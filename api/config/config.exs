@@ -204,6 +204,23 @@ config :barkpark, :audit_dispatch_async, true
 # `Barkpark.Webhooks.auto_disable_threshold/0` reads this (module default 20).
 config :barkpark, :webhook_auto_disable_threshold, 20
 
+# INBOUND GitHub webhook body cap (BYTES), read by `BarkparkWeb.Plugs.CacheBodyReader`.
+# The endpoint parses up to `length: 100_000_000` (100 MB) BEFORE the HMAC gate
+# runs, and CacheBodyReader tees the raw bytes on the webhook path — so an
+# unauthenticated, bogus-signature sender can force pre-auth buffering up to that
+# global bound. GitHub documents a hard 25 MB payload ceiling (larger events are
+# never delivered), so a per-route cap at 26 MB rejects zero legitimate deliveries
+# while bounding the pre-signature buffering. NOTE: this BOUNDS buffering (reads up
+# to the cap before the {:more} → 413 short-circuits), it does not PREVENT it.
+#
+# DESCOPE (felix-w27): the original slice also proposed a per-probe RATE LIMIT on
+# this route. That half is deliberately dropped — `Settings.webhook_secret_cached/0`
+# already memoizes the secret (short-TTL `:persistent_term`), so a burst of bogus
+# signatures no longer forces a DB read + audit row per request; the marginal cost
+# of an unauthenticated probe is now near-zero. The body cap is the load-bearing
+# resource bound; a rate limiter would add moving parts without a measured win.
+config :barkpark, :github_webhook_body_cap, 26_000_000
+
 # Config-gated media upload allowlist + per-upload size cap (SECURITY, PART 2).
 # Ships OFF: empty lists + nil cap = allow-all, i.e. accept every server-derived
 # MIME / extension and any size up to the endpoint's 100 MB body bound — today's
