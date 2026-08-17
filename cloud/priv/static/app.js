@@ -1685,7 +1685,7 @@
               // dead "Revoking…" button the operator can never retry.
               b.disabled = false;
               b.textContent = "Revoke";
-              toast({ kind: "error", title: "Couldn't revoke", body: friendly(r.data) });
+              toast({ kind: "error", title: "Couldn't revoke", body: friendly(r.data, "That device is still signed in — please try again.") });
             }
           });
         });
@@ -4744,7 +4744,7 @@
         if (r.ok) {
           toast({ kind: "success", title: "Token revoked" });
         } else {
-          toast({ kind: "error", title: "Couldn't revoke token", body: friendly(r.data) });
+          toast({ kind: "error", title: "Couldn't revoke token", body: friendly(r.data, "That token is still active — please try again.") });
         }
         loadTokens();
       });
@@ -6315,7 +6315,8 @@
     api("GET", "/v1/barkparks").then(function (r) {
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load fleet</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to this fleet.",
+            "Your fleet couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         return;
       }
       absorbServerStepEstimates(r.data); // measured deploy-rail medians ride along
@@ -6842,7 +6843,8 @@
         // that never arrived. Mark the staleness; never blank the body.
         if (!full) { markRefreshStale(); return; }
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to this fleet.",
+            "Your fleet couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         return;
       }
       clearRefreshStale(); // the read landed — what's on screen is current again
@@ -12151,7 +12153,8 @@
       var r = res[0];
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load sites</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to these sites.",
+            "Your sites couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         return;
       }
       var sites = (r.data && r.data.sites) || [];
@@ -17201,7 +17204,8 @@
     api("GET", activityQuery(null)).then(function (r) {
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load activity</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to this activity.",
+            "The activity feed couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         toggleActivityMore(false);
         return;
       }
@@ -21467,7 +21471,7 @@
     if (status === 409 && data && data.error === "last_owner") {
       return "You're the last owner — promote another member to owner first.";
     }
-    return friendly(data);
+    return friendly(data, "That role change didn't go through — please try again.");
   }
 
   // Pure: honest copy for a failed member removal. The server's 409 last_owner is
@@ -21536,7 +21540,7 @@
       api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/invitations/" + encodeURIComponent(invId)).then(function (r) {
         closeModal();
         if (r.ok) toast({ kind: "success", title: "Invitation revoked" });
-        else toast({ kind: "error", title: "Couldn't revoke invitation", body: friendly(r.data) });
+        else toast({ kind: "error", title: "Couldn't revoke invitation", body: friendly(r.data, "That invitation is still active — please try again.") });
         loadMembers();
       });
     });
@@ -21804,7 +21808,7 @@
       api("DELETE", "/v1/env-vars/" + encodeURIComponent(id)).then(function (r) {
         closeModal();
         if (r.ok) toast({ kind: "success", title: "Variable deleted" });
-        else toast({ kind: "error", title: "Couldn't delete variable", body: friendly(r.data) });
+        else toast({ kind: "error", title: "Couldn't delete variable", body: friendly(r.data, "That variable is still stored — please try again.") });
         loadEnvVars();
       });
     });
@@ -23667,6 +23671,12 @@
       // fetch and a recording-innerHTML DOM rather than asserted from markup.
       loadInstanceSites: loadInstanceSites, loadTokens: loadTokens,
       readFailureCopy: readFailureCopy,
+      // cch-w72-bl — the four no-fallback loader empty-state cards, now routed
+      // through readFailureCopy so an unread typed slug reads honest copy instead
+      // of a humanized slug. Impure (fetch + paint), driven with the same
+      // driveLoader/recordingDom rig as loadInstanceSites/loadTokens above.
+      // (loadOverview is already exported below for the refetch-storm harness.)
+      loadFleet: loadFleet, loadSites: loadSites, loadActivity: loadActivity,
       overviewScopes: { full: OVERVIEW_FULL, fleet: OVERVIEW_FLEET, onboarding: OVERVIEW_ONBOARDING },
       overviewData: overviewData, // stable object identity — the harness resets its fields
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
