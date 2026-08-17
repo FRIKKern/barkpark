@@ -290,32 +290,6 @@ func sectionActivity(tasks []Task, evAt map[string]time.Time) time.Time {
 	return la
 }
 
-// BuildBoard is the ENTIRE zero-config organization policy for the portrait
-// task TUI. It is pure: the same (snapshot, repo, now) always yields the same
-// Board, and it never reads the wall clock — the now parameter is the only
-// notion of "current time", so goldens and unit tests are deterministic.
-//
-// Policy, in order:
-//   - NOW  = tasks holding a LIVE claim (claim present, worker non-empty) whose
-//     lifecycle is in_progress, newest-updated first. A swept lease clears the
-//     worker (and the server reverts lifecycle to open), so expired claims fall
-//     out of NOW automatically — the board trusts the server's claim truth.
-//   - EPICS = parent-rooted groups. A root is a task whose parent is empty or
-//     points at a doc absent from the snapshot. A root becomes an epic when it
-//     is a goal OR heads a subtree (has children); a lone parentless non-goal
-//     task is an orphan instead. Within an epic, children order
-//     in_progress -> ready -> blocked -> open (updated desc inside each), with
-//     recent terminal rows (done/closed/cancelled younger than 24h) pinned at
-//     the bottom and older terminal rows folded into DoneFolded. An epic whose
-//     freshest member is older than 7d is Dormant.
-//   - Epics rank by freshest member (updated desc), with a boost that floats any
-//     epic mentioning a repo-correlated task above the unmentioned ones.
-//   - ORPHANS = every parentless non-goal leaf. Terminal orphans older than
-//     the fold threshold collapse into OrphansFolded (the flat-queue live shape
-//     is dominated by long-closed loose tasks); the survivors are band-ordered
-//     exactly like epic children (in_progress -> ready -> blocked -> open ->
-//     recent-terminal, updated desc inside each band) rather than a raw
-//     updated-desc mix, so the live rows sit above the just-closed tail.
 // recomputeInProgress returns a COPY of a Snapshot's lifecycle Counts with ONLY
 // the in_progress bucket rewritten to the true number of in_progress rows in
 // s.Tasks — every other bucket, and Snapshot.Counts itself, is left untouched
@@ -351,6 +325,32 @@ func recomputeInProgress(s Snapshot) map[string]int {
 	return out
 }
 
+// BuildBoard is the ENTIRE zero-config organization policy for the portrait
+// task TUI. It is pure: the same (snapshot, repo, now) always yields the same
+// Board, and it never reads the wall clock — the now parameter is the only
+// notion of "current time", so goldens and unit tests are deterministic.
+//
+// Policy, in order:
+//   - NOW  = tasks holding a LIVE claim (claim present, worker non-empty) whose
+//     lifecycle is in_progress, newest-updated first. A swept lease clears the
+//     worker (and the server reverts lifecycle to open), so expired claims fall
+//     out of NOW automatically — the board trusts the server's claim truth.
+//   - EPICS = parent-rooted groups. A root is a task whose parent is empty or
+//     points at a doc absent from the snapshot. A root becomes an epic when it
+//     is a goal OR heads a subtree (has children); a lone parentless non-goal
+//     task is an orphan instead. Within an epic, children order
+//     in_progress -> ready -> blocked -> open (updated desc inside each), with
+//     recent terminal rows (done/closed/cancelled younger than 24h) pinned at
+//     the bottom and older terminal rows folded into DoneFolded. An epic whose
+//     freshest member is older than 7d is Dormant.
+//   - Epics rank by freshest member (updated desc), with a boost that floats any
+//     epic mentioning a repo-correlated task above the unmentioned ones.
+//   - ORPHANS = every parentless non-goal leaf. Terminal orphans older than
+//     the fold threshold collapse into OrphansFolded (the flat-queue live shape
+//     is dominated by long-closed loose tasks); the survivors are band-ordered
+//     exactly like epic children (in_progress -> ready -> blocked -> open ->
+//     recent-terminal, updated desc inside each band) rather than a raw
+//     updated-desc mix, so the live rows sit above the just-closed tail.
 func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	board := Board{
 		Counts:           recomputeInProgress(s),
