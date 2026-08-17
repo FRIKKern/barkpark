@@ -329,3 +329,145 @@ func TestNearestVerb(t *testing.T) {
 		}
 	}
 }
+
+// tierFilteredTree builds a small manifest tree that stands in for a
+// server-filtered manifest: it declares `doc` and `search` but deliberately
+// OMITS `task` (and every other tier-gated noun), exactly as the server would
+// for a low-tier caller. `task` is in the baked catalog (completionNouns), so a
+// low-tier caller typing it is the auth-hidden case; a word never in the catalog
+// is a genuine typo.
+func tierFilteredTree() *manifest.Tree {
+	m := &manifest.Manifest{
+		AuthTier: "none",
+		Nouns: []manifest.Noun{
+			{Name: "doc", Summary: "Documents."},
+			{Name: "search", Summary: "Full-text search."},
+		},
+		Commands: []manifest.Command{
+			{ID: "doc.ls", Noun: "doc", Verb: "ls"},
+			{ID: "doc.get", Noun: "doc", Verb: "get"},
+			{ID: "search.query", Noun: "search", Verb: "query"},
+		},
+	}
+	return m.Tree()
+}
+
+// TestAuthHiddenNoun drives the classification predicate directly: a baked-catalog
+// noun absent from a low-tier tree is hidden; a visible noun, a non-catalog word,
+// and — critically — ANY noun for an admin caller are not.
+func TestAuthHiddenNoun(t *testing.T) {
+	tree := tierFilteredTree()
+
+	// `task` is a real baked-catalog noun the low-tier tree does not carry → hidden.
+	if !authHiddenNoun(tree, "none", "task") {
+		t.Error("a baked-catalog noun absent from a low-tier tree must classify as auth-hidden")
+	}
+	// `workspace` and `token` are likewise catalog nouns filtered out at low tier.
+	for _, hidden := range []string{"workspace", "token", "webhook"} {
+		if !authHiddenNoun(tree, "read", hidden) {
+			t.Errorf("catalog noun %q absent from a low-tier tree must be auth-hidden", hidden)
+		}
+	}
+
+	// A noun the tree DOES carry is never hidden — it is dispatched normally.
+	if authHiddenNoun(tree, "none", "doc") {
+		t.Error("a visible noun must never be classified auth-hidden")
+	}
+
+	// A word that is not in the baked catalog at all is a genuine typo, not hidden.
+	for _, typo := range []string{"tsk", "zqxwvut", "workspce"} {
+		if authHiddenNoun(tree, "none", typo) {
+			t.Errorf("non-catalog word %q must not be classified auth-hidden", typo)
+		}
+	}
+
+	// ADMIN NEVER HIDDEN: an admin's manifest is the whole tree, so a noun missing
+	// for them is genuinely unknown — the auth-hidden diagnosis must never fire and
+	// falsely tell an admin to re-authenticate.
+	if authHiddenNoun(tree, "admin", "task") {
+		t.Error("admin callers must never receive an auth-hidden diagnosis")
+	}
+}
+
+// TestSuggestUnknownNounAuthHidden pins the auth-hidden branch end to end: the
+// message names the tier and points at `bp login` (both on the human help block
+// and in the machine-readable error envelope), and it does NOT emit a misleading
+// "did you mean?" typo suggestion for the hidden noun.
+func TestSuggestUnknownNounAuthHidden(t *testing.T) {
+	tree := tierFilteredTree()
+
+	// Human output (table/plain): both the primary line and the help block render.
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	code := suggestUnknownNoun(w, tree, "none", "task")
+	if code != exitUsage {
+		t.Errorf("auth-hidden exit = %d, want %d", code, exitUsage)
+	}
+	human := stderr.String()
+	for _, want := range []string{"real command", "tier=none", "barkpark login", "--token"} {
+		if !strings.Contains(human, want) {
+			t.Errorf("auth-hidden human output missing %q:\n%s", want, human)
+		}
+	}
+	// It must NOT masquerade as a typo of a visible noun.
+	if strings.Contains(human, "did you mean") || strings.Contains(human, "unknown command") {
+		t.Errorf("auth-hidden noun must not get a typo/unknown-command diagnosis:\n%s", human)
+	}
+
+	// Machine output (-o json): the login remedy must ride the error envelope hint,
+	// since the human help block is skipped entirely there — an agent parsing the
+	// envelope must still learn to authenticate.
+	var mstdout, mstderr bytes.Buffer
+	mw := newWriter(&mstdout, &mstderr)
+	mw.output = "json"
+	suggestUnknownNoun(mw, tree, "none", "task")
+	env := mstdout.String()
+	for _, want := range []string{`"hint"`, "barkpark login", "hidden at your auth tier"} {
+		if !strings.Contains(env, want) {
+			t.Errorf("auth-hidden json envelope missing %q:\n%s", want, env)
+		}
+	}
+}
+
+// TestSuggestUnknownNounGenuineTypo is the negative guard: a word that is NOT a
+// baked-catalog noun keeps the ordinary typo/unsupported diagnosis (nearest known
+// noun + "unknown command"), never a false auth-hidden login prompt.
+func TestSuggestUnknownNounGenuineTypo(t *testing.T) {
+	tree := tierFilteredTree()
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	code := suggestUnknownNoun(w, tree, "none", "serach")
+	if code != exitUsage {
+		t.Errorf("typo exit = %d, want %d", code, exitUsage)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "unknown command") {
+		t.Errorf("genuine typo lost its unknown-command line:\n%s", out)
+	}
+	if strings.Contains(out, "auth tier") || strings.Contains(out, "barkpark login") {
+		t.Errorf("genuine typo must not get an auth-hidden login prompt:\n%s", out)
+	}
+	// The nearest visible noun is still suggested.
+	if !strings.Contains(out, "did you mean `barkpark search`") {
+		t.Errorf("genuine typo lost its did-you-mean suggestion:\n%s", out)
+	}
+}
+
+// TestSuggestUnknownNounAdminNeverHidden guards the admin path through the full
+// classifier: an admin who names a noun their (complete) tree lacks gets the
+// ordinary unknown-command diagnosis, never a spurious re-authenticate prompt.
+func TestSuggestUnknownNounAdminNeverHidden(t *testing.T) {
+	tree := tierFilteredTree()
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	suggestUnknownNoun(w, tree, "admin", "task")
+	out := stderr.String()
+	if !strings.Contains(out, "unknown command") {
+		t.Errorf("admin should get the ordinary unknown-command diagnosis:\n%s", out)
+	}
+	if strings.Contains(out, "auth tier") || strings.Contains(out, "barkpark login") {
+		t.Errorf("admin must never be told to re-authenticate for a missing noun:\n%s", out)
+	}
+}
