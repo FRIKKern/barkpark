@@ -7108,38 +7108,63 @@ defmodule BarkparkCloud.Web.Router do
 
       case teardown_result do
         :ok ->
-          # HARD MATCH, DELIBERATE, AND IT HAS A PRICE (W67 S2 / D820).
-          # `Registry.delete_site/1` is a bare `Repo.delete` on a struct with no
-          # declared constraint, so every child row is swept by the DATABASE.
-          # Three FKs reference `sites` (deployments, site_artifacts,
-          # content_publishes) and all three are ON DELETE CASCADE. If one were
-          # ever loosened to RESTRICT, `Repo.delete` RAISES `Ecto.ConstraintError`
-          # here — after the box teardown above already disarmed the Caddy route —
-          # and `handle_errors` answers `500 {"error":"server_error"}` with no
-          # `ok` and no `detail` while the site row SURVIVES: the INVERSE ORPHAN,
-          # a dead site that is still registered. It stays a hard match because
-          # there is no honest typed answer at this point (the box is already
-          # gone, so neither retrying nor refusing is true), and the loud crash is
-          # better than a 200 over a half-deleted site. The tripwire that keeps
-          # the branch impossible is `site_cascade_census_test.exs` — an EXACT-SET
-          # census of the FKs referencing `sites` plus their confdeltype — backed
-          # by per-child delete-path tests in `router_sites_test.exs`.
-          {:ok, _} = Registry.delete_site(site)
+          # THE INVERSE ORPHAN, NOW TYPED (W70 S2 / D848, D856 — supersedes the
+          # W67 S2 / D820 hard match). `Registry.delete_site/1` is a bare
+          # `Repo.delete` on a struct with no declared constraint, so every child
+          # row is swept by the DATABASE. Three FKs reference `sites`
+          # (deployments, site_artifacts, content_publishes) and all three are ON
+          # DELETE CASCADE. If one were ever loosened to RESTRICT, `Repo.delete`
+          # RAISES `Ecto.ConstraintError` — AFTER the box teardown above already
+          # disarmed the Caddy route, so the box is gone and the site row SURVIVES:
+          # a dead site that is still registered. Under the old hard match that
+          # raise became `handle_errors`' `500 {"error":"server_error"}` with no
+          # `ok`, no `detail`, and no name for either half of the outcome. That
+          # was rejected as a lie by omission: the answer measured TWO facts (the
+          # instance IS torn down; the registration was NOT removed) and stated
+          # neither. `delete_site/1` now RESCUES the foreign_key case and returns
+          # `{:error, :foreign_key_constraint, constraint}`, so the nested case
+          # below answers a typed `500 registration_not_removed` whose detail
+          # names the blocking constraint and BOTH halves. It is still a 500 — the
+          # box being already gone means neither retry nor refuse is true, and a
+          # human (support) must remove the surviving row — but it is an HONEST
+          # 500 the console and CLI can read. The tripwire that keeps the branch
+          # from silently regressing is `site_cascade_census_test.exs` (an
+          # EXACT-SET census of the FKs referencing `sites` plus their confdeltype)
+          # backed by per-child delete-path tests in `router_sites_test.exs` and
+          # the behavioural 500 in `router_sites_destroy_failures_test.exs`.
+          #
+          # NB: the sibling `{:error, status, detail, code}` relay arm below
+          # matches `teardown_result` (the box seam), NOT this delete — it is
+          # unreachable from inside `:ok`, which is why the delete's own failure
+          # needs this nested case rather than a fourth outer arm.
+          case Registry.delete_site(site) do
+            {:ok, _} ->
+              _ =
+                Accounts.record_audit(%{
+                  team_id: site.team_id,
+                  actor_user_id: conn.assigns.current_user.id,
+                  action: "site.deleted",
+                  target_type: "site",
+                  target_id: site.id,
+                  metadata: %{slug: site.slug, kind: site.kind}
+                })
 
-          _ =
-            Accounts.record_audit(%{
-              team_id: site.team_id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "site.deleted",
-              target_type: "site",
-              target_id: site.id,
-              metadata: %{slug: site.slug, kind: site.kind}
-            })
+              push_event(site.team_id, "sites")
+              push_event(site.team_id, "audit")
 
-          push_event(site.team_id, "sites")
-          push_event(site.team_id, "audit")
+              json(conn, 200, %{ok: true, status: "deleted", slug: site.slug})
 
-          json(conn, 200, %{ok: true, status: "deleted", slug: site.slug})
+            {:error, :foreign_key_constraint, constraint} ->
+              json(conn, 500, %{
+                ok: false,
+                error: "registration_not_removed",
+                detail:
+                  "the instance was torn down, but the registration could not be removed: deleting " <>
+                    "the site row was refused by the foreign-key constraint #{constraint}. The site " <>
+                    "is no longer serving, yet it is still registered here — support must remove the " <>
+                    "row by hand. This is not something a retry can fix."
+              })
+          end
 
         # Same typed relay as the rollback route (cch-w63-s3 / D763). THE
         # DEFERRAL IS OVER: the console gained its site-delete flow — and the
