@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 1500tok -->
+<!-- doc-tier: cold | canonical-for: foreign-share-token-flat-read-live-confirm-recipes | budget: 1500tok -->
 # foreign-scope share-token flat-read — LIVE CONFIRMED (2026-08-17)
 
 Verifier [foreign-share-live], api-read-path-security-sweep wave 2. Finding
