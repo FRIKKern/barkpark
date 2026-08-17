@@ -229,6 +229,56 @@ defmodule BarkparkCloud.SiteCascadeCensusTest do
              "cover this; this constraint is what replaced it."
   end
 
+  # ── THE FK TARGETS, EXACTLY (added in W68 — the #11553 reviewer ask) ────────
+  # Every test above pins WHICH tables reference `sites` and HOW they delete,
+  # but the referenced side of each constraint was only ever a WHERE filter:
+  # `site_fks/0` selects on `p.relname = 'sites'`, so a cascade re-pointed at
+  # another table would merely VANISH from that set, and the barkpark_id test
+  # never read its target at all — `sites_barkpark_id_fkey` re-pointed at any
+  # other table (or at a column other than `id`) stayed green everywhere. This
+  # test reads the referenced side by value: `confrelid` resolved through
+  # pg_class/pg_namespace and `confkey` through pg_attribute, per child column.
+  #
+  # Mutation-proved 2026-08-17 (W68): `ALTER TABLE sites DROP CONSTRAINT
+  # sites_barkpark_id_fkey; ADD ... REFERENCES teams(id) ON DELETE CASCADE`
+  # reds the test below with `measured [["public.teams", "id"]]` while every
+  # other census test in this file stays green — exactly the re-point the
+  # filter-shaped reads above cannot see.
+  defp fk_target(child_table, child_column) do
+    sql = """
+    SELECT tn.nspname || '.' || p.relname, ta.attname
+    FROM pg_constraint c
+    JOIN pg_class cl ON cl.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    JOIN pg_class p ON p.oid = c.confrelid
+    JOIN pg_namespace tn ON tn.oid = p.relnamespace
+    JOIN unnest(c.conkey) WITH ORDINALITY k(attnum, ord) ON true
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    JOIN unnest(c.confkey) WITH ORDINALITY fk(attnum, ord) ON fk.ord = k.ord
+    JOIN pg_attribute ta ON ta.attrelid = c.confrelid AND ta.attnum = fk.attnum
+    WHERE c.contype = 'f' AND n.nspname = 'public'
+      AND cl.relname = $1 AND a.attname = $2
+    """
+
+    Repo.query!(sql, [child_table, child_column]).rows
+  end
+
+  test "each cascade FK targets EXACTLY public.sites(id), and sites.barkpark_id targets public.barkparks(id) (confrelid/confkey by value)" do
+    for {child, col} <- Map.keys(@site_children) do
+      assert fk_target(child, col) == [["public.sites", "id"]],
+             "#{child}.#{col} no longer references public.sites(id) — measured " <>
+               "#{inspect(fk_target(child, col))}. A cascade re-pointed at another table " <>
+               "sweeps the WRONG rows on site delete (and this census's other tests only " <>
+               "see it as a disappearance, not as the re-point it is)."
+    end
+
+    assert fk_target("sites", "barkpark_id") == [["public.barkparks", "id"]],
+           "sites.barkpark_id no longer references public.barkparks(id) — measured " <>
+             "#{inspect(fk_target("sites", "barkpark_id"))}. D811's dead-arm deletion rests " <>
+             "on THIS constraint pairing a site to its box row; re-pointed, `get_barkpark/1` " <>
+             "loads garbage and the delete route tears down the wrong box."
+  end
+
   test "DIAGNOSTIC: the measured census, printed" do
     fks = site_fks()
 
