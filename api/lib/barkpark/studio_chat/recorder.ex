@@ -32,6 +32,29 @@ defmodule Barkpark.StudioChat.Recorder do
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
   @idle_after_ms 30 * 60 * 1000
 
+  # ── the durable accumulator's per-turn byte cap (charter D169) ──────────────
+  #
+  # `runtime_text` is the codex lane's TURN-scoped durable accumulator (reset at
+  # :turn_started, on turn_completed, and on the terminal-error clause). Its
+  # single write is an uncapped `<>` concat of every text_delta, and it persists
+  # verbatim as `source_markdown` at BOTH persist sites (turn_completed and the
+  # terminal-error clause) via `persist_runtime_text/1`.
+  #
+  # D64's 262_144 bound governs only the DISPLAY tail (`StreamSegments`, a
+  # live-render memory policy). The PERSIST path had no twin — a runaway turn
+  # could persist unbounded bytes into one `chat_messages` row. This cap is that
+  # twin: a durability ceiling on one turn's durable text. It is DELIBERATELY
+  # larger than the display bound (1 MiB vs 256 KiB) — the display tail is a
+  # rolling window the reader watches, the persist cap is the final durable size
+  # of a whole turn, so it can be looser without the display ever showing it.
+  #
+  # W22/D131 precedent: NEVER turn-abort. A capped turn still SETTLES and
+  # persists its (truncated-with-marker) text — truncation is a size policy, not
+  # a failure. `byte_size` is the real bound here; `Message`'s `validate_length`
+  # counts GRAPHEMES and is only a backstop.
+  @default_max_runtime_text_bytes 1_048_576
+  @runtime_text_truncation_marker "\n\n[… turn output truncated at the persist byte cap …]"
+
   # ── public API ─────────────────────────────────────────────────────────────
 
   @doc """
@@ -1110,7 +1133,7 @@ defmodule Barkpark.StudioChat.Recorder do
         # raw frame is broadcast at every ingest site, so deriving here would put
         # the `stable` frame on the wire ahead of the bytes it covers — see
         # `ingest_runtime_event/3`. The durable accumulation stays.
-        %{state | runtime_text: state.runtime_text <> runtime_delta(event)}
+        %{state | runtime_text: cap_runtime_text(state.runtime_text <> runtime_delta(event))}
         |> publish_activity(%{state: :working, line: "writing…"})
 
       :approval_requested ->
@@ -1344,10 +1367,56 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp persist_runtime_text(%{runtime_text: text, session_id: session_id})
        when is_binary(text) and text != "" do
-    persist(session_id, %{role: "assistant", source_markdown: text, metadata: %{}}, "assistant")
+    # The explicit byte guard at the persist seam — the REAL bound covering both
+    # persist sites (turn_completed and the terminal-error clause both funnel
+    # here). Accumulation already caps in-flight, but this makes the durable size
+    # provable at the one write, independent of how `runtime_text` was built.
+    source_markdown = cap_runtime_text(text)
+
+    persist(
+      session_id,
+      %{role: "assistant", source_markdown: source_markdown, metadata: %{}},
+      "assistant"
+    )
   end
 
   defp persist_runtime_text(_state), do: :ok
+
+  # Bound one turn's durable accumulator to `max_runtime_text_bytes/0`
+  # (charter D169). Truncate-with-marker at a UTF-8 boundary — NEVER abort the
+  # turn (W22/D131). Idempotent under re-application: capped text re-caps to
+  # itself, so accumulation past the cap freezes the content and keeps the
+  # marker at the tail rather than growing without bound.
+  defp cap_runtime_text(text) when is_binary(text) do
+    cap = max_runtime_text_bytes()
+
+    if byte_size(text) <= cap do
+      text
+    else
+      marker = @runtime_text_truncation_marker
+      keep = max(cap - byte_size(marker), 0)
+      truncate_to_valid_utf8(text, keep) <> marker
+    end
+  end
+
+  # The largest valid-UTF-8 prefix of `text` no longer than `max_bytes`. Backs
+  # off up to 3 bytes so a truncation never splits a multi-byte grapheme.
+  defp truncate_to_valid_utf8(text, max_bytes) when byte_size(text) <= max_bytes, do: text
+  defp truncate_to_valid_utf8(_text, max_bytes) when max_bytes <= 0, do: ""
+
+  defp truncate_to_valid_utf8(text, max_bytes) do
+    prefix = binary_part(text, 0, max_bytes)
+
+    if String.valid?(prefix),
+      do: prefix,
+      else: truncate_to_valid_utf8(text, max_bytes - 1)
+  end
+
+  defp max_runtime_text_bytes do
+    :barkpark
+    |> Application.get_env(:claude_chat, [])
+    |> Keyword.get(:max_runtime_text_bytes, @default_max_runtime_text_bytes)
+  end
 
   defp session_exited(session_id) do
     StudioChat.cancel_pending_approvals(session_id)
