@@ -9644,21 +9644,120 @@
     return body;
   }
 
+  // cch-w66-bl — Pure: the readable-types menu, composed from the payload's
+  // OBJECTS. `readable_types` is what the server's menu_row/1 emits: a list of
+  // `{type, count}` MAPS, with `count` OMITTED when the site's own probe
+  // reported no total. A naive `.join(", ")` therefore paints "[object Object]",
+  // and inventing a number would be worse — a type with no proven magnitude is
+  // listed bare. Returns "" when nothing usable survives, which is the caller's
+  // signal to relay the server's own menu sentence rather than promise a menu.
+  function siteReadableTypesMenu(types) {
+    if (!Array.isArray(types)) return "";
+    return types.map(function (t) {
+      if (!t || typeof t !== "object" || typeof t.type !== "string" || !t.type) return "";
+      return typeof t.count === "number" ? t.type + " (" + t.count + ")" : t.type;
+    }).filter(function (s) { return !!s; }).join(", ");
+  }
+
+  // cch-w66-bl — Pure: the binding refusal MINUS its CLI re-run clause. The
+  // control plane writes ONE `detail` for both surfaces and ends it with a
+  // literal `bp cloud site create … --doc-type <type>` line (router.ex ~12620).
+  // Every sentence before that line is surface-neutral and worth relaying; the
+  // incantation must never reach a modal that already HAS those fields.
+  function siteDetailWithoutCliReRun(detail) {
+    var s = String(detail || "");
+    var cut = s.indexOf("Re-run naming a type");
+    if (cut === -1) cut = s.indexOf("`bp ");
+    return (cut === -1 ? s : s.slice(0, cut)).trim();
+  }
+
   // cch-w37-s1 — Pure: the create-site error line. The router answers a failed
   // create with `%{error: "invalid", details: <per-field map>}`, and this branch
   // used to render `r.data.error` RAW — so the person reads the literal token
   // `invalid` while the server holds the exact field that failed. friendly()
-  // now prefers those details, and the `known_templates` hint (the one thing
-  // the payload carries that friendly() cannot know) is kept as the suffix.
+  // now prefers those details.
+  //
+  // cch-w66-bl (charter D846) \u2014 THE FALLBACK USED TO BEAT THE ANSWER. Five real
+  // refusals on POST /v1/sites \u2014 content_binding_empty, content_binding_required,
+  // barkpark_not_found, node_ports_exhausted, read_token_mint_failed \u2014 are in no
+  // ERRORS entry and carry no `details`, so friendly() walked past both and took
+  // THIS caller's fallback: the status line. A person who mis-bound a dataset
+  // read "create failed (422)" while the very same payload carried the sentence
+  // naming the fix AND the menu of types the site can actually read.
+  //
+  // The arms are LOCAL, on purpose. friendly() is one global map serving 55 call
+  // sites and takes no status argument (D395/D740/D846, arity-pinned in
+  // __app.test.mjs) \u2014 a per-route refusal is exactly the thing that does not
+  // belong in it. Each arm takes one of three stances, and which one a slug gets
+  // is a copy decision, not a mechanism:
+  //
+  //   RELAY    the detail is surface-neutral and actionable \u2192 print it verbatim
+  //            (node_ports_exhausted), or relay its verdict sentence and compose
+  //            the menu from the machine-readable list (content_binding_empty).
+  //   AUTHOR   the detail is CLI-voiced, or absent entirely \u2192 the console writes
+  //            its own (content_binding_required, barkpark_not_found).
+  //   WITHHOLD the detail is server-internal goo \u2192 server-fault stance, nothing
+  //            relayed (read_token_mint_failed).
+  //
+  // `barkpark_required` gets NO arm: siteCreateBody() always sends barkpark_id,
+  // so it is unreachable from this modal and an arm for it would be copy nobody
+  // can read. The dead `known_templates` suffix is RETIRED here \u2014 POST /v1/sites
+  // has no emitter for it (the sole emitter is the launch template check, on
+  // another route), so it was dressing a payload this route cannot send.
   function siteCreateFailureCopy(r) {
     var data = r && r.data;
+    var slug = data && data.error;
+    var detail = (data && typeof data.detail === "string" && data.detail) || "";
+
+    if (slug === "content_binding_empty") {
+      var relayed = siteDetailWithoutCliReRun(detail);
+      var menu = siteReadableTypesMenu(data.readable_types);
+      if (menu) {
+        // The server's FIRST sentence is the verdict ("this site would build
+        // from nothing \u2014 <why>"); its second is the same menu we are about to
+        // render from the machine-readable list, so it is dropped rather than
+        // printed twice.
+        var stop = relayed.indexOf(". ");
+        var verdict = (stop === -1 ? relayed : relayed.slice(0, stop + 1)) ||
+          "this site would build from nothing.";
+        return cap(verdict) +
+          " It can read: " + menu + " \u2014 pick one of those as the content type above.";
+      }
+      // No machine-readable menu: the server's own sentences are the most
+      // specific true thing anyone has (why the binding is empty, and why the
+      // menu is unavailable), so they all stand \u2014 and the console supplies the
+      // next step the stripped CLI line used to carry.
+      return cap(relayed ||
+        "this site would build from nothing \u2014 the content you bound has nothing this site can read.") +
+        " Check the workspace/project/dataset and content type above.";
+    }
+    // The server's detail here says "bind it with `--dataset \u2026`" \u2014 a flag, for a
+    // person who is looking straight at that field.
+    if (slug === "content_binding_required") {
+      return "This site needs content to build from \u2014 fill in the workspace/project/dataset above.";
+    }
+    // Both 404 arms answer with a bare slug by design (no existence leak across
+    // team boundaries), so there is nothing to relay.
+    if (slug === "barkpark_not_found") {
+      return "This instance is gone \u2014 refresh and pick another.";
+    }
+    if (slug === "node_ports_exhausted") {
+      return detail ||
+        "This instance has no free port left for another node site \u2014 retire one, or move to a larger box.";
+    }
+    // The mint detail can end in a raw upstream slug plus the box's HTTP status.
+    // It is our fault either way, and the person's input was never judged.
+    if (slug === "read_token_mint_failed") {
+      return "Something broke on our side minting this site's read token \u2014 not your input. " +
+        "Try again in a moment.";
+    }
+
     // The caller's designed fallback keeps the old second choice: a payload
     // that carries only a `message` still renders that message, and only a
     // payload that says nothing at all falls to the status line.
     var fallback = (data && typeof data.message === "string" && data.message) ||
       ("create failed (" + ((r && r.status) || 0) + ")");
-    var known = data && data.known_templates;
-    return String(friendly(data, fallback)) + (known ? " \u2014 templates: " + known.join(", ") : "");
+    return String(friendly(data, fallback));
   }
 
   function siteTemplateLabel(t) {

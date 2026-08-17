@@ -18123,14 +18123,164 @@ test("cch-w37-s1: creating a site stops rendering the bare token `invalid`", () 
   // The worst string in the epic: the person read the literal slug.
   assert.equal(f(taken), "slug has already been taken");
   assert.ok(f(taken).indexOf("invalid") === -1, "the raw token never reaches the error box");
-  // The known_templates hint is the one thing friendly() cannot know — kept.
+  // cch-w66-bl (D846) — THE known_templates SUFFIX IS RETIRED, AND THIS PIN
+  // MOVED WITH IT IN THE SAME COMMIT. `POST /v1/sites` has NO emitter for
+  // `known_templates` (grep: the sole emitter is the launch template check, on
+  // another route), so the clause was dead code dressed as a feature and the
+  // assertion below was pinning a payload the server cannot send. Rewritten as
+  // the honest contract: the create modal renders the field answer alone, and a
+  // stray `known_templates` key changes NOTHING.
   assert.equal(f({ ok: false, status: 422, data: { error: "invalid", details: { template: ["is invalid"] }, known_templates: ["next-starter", "astro-starter"] } }),
-    "template is invalid — templates: next-starter, astro-starter");
+    "template is invalid");
   // Unchanged shapes: a curated slug, a message-only body, and a silent failure.
   assert.equal(f({ ok: false, status: 402, data: { error: "no_active_subscription" } }),
     "You need an active subscription to launch.");
   assert.equal(f({ ok: false, status: 500, data: { message: "upstream exploded" } }), "upstream exploded");
   assert.equal(f({ ok: false, status: 502, data: null }), "create failed (502)");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w66-bl (charter D846) — THE CREATE MODAL STOPS SAYING "create failed (422)".
+//
+// RED BEFORE THIS BLOCK, measured on origin/main (1082/1082 green):
+//
+//   siteCreateFailureCopy({status: 422, data: {error: "content_binding_empty",
+//     detail: "this site would build from nothing — …", readable_types: […]}})
+//     → "create failed (422)"
+//   siteCreateFailureCopy({status: 422, data: {error: "content_binding_required", …}})
+//     → "create failed (422)"
+//   siteCreateFailureCopy({status: 404, data: {error: "barkpark_not_found"}})
+//     → "create failed (404)"
+//   siteCreateFailureCopy({status: 503, data: {error: "node_ports_exhausted", detail: "…"}})
+//     → "create failed (503)"
+//   siteCreateFailureCopy({status: 502, data: {error: "read_token_mint_failed", detail: "…"}})
+//     → "create failed (502)"
+//
+// Five real refusals, five status lines. None of these slugs is in ERRORS and
+// none of them carries `details`, so friendly() walks straight to the CALLER's
+// fallback — and this caller's fallback is the status line, which beats both the
+// slug AND the server's own `detail`. The person who mis-bound a dataset read a
+// number about the very payload that named the fix.
+//
+// THE FIX IS LOCAL TO siteCreateFailureCopy. friendly() is a 55-site global map
+// (D395/D740/D846): its arity pin above — friendly.length === 2 — must keep
+// passing, and no status may reach it. Everything below is arms in the caller.
+test("cch-w66-bl: the empty-binding 422 renders the server's sentence and a menu built from readable_types OBJECTS", () => {
+  const f = hooks.siteCreateFailureCopy;
+  // The EXACT payload router_sites_test.exs:1265-1340 pins (detail composed by
+  // refuse_empty_binding/6, menu by menu_row/1 — {type, count} MAPS, whose
+  // order is the admin candidate order and whose numbers are the site's own).
+  const r = {
+    ok: false,
+    status: 422,
+    data: {
+      error: "content_binding_empty",
+      detail:
+        "this site would build from nothing — post in production has no documents this site can read. " +
+        "This site CAN read: task (12), paper (40). " +
+        "Re-run naming a type this site can read: `bp cloud site create <name> --kind static " +
+        "--framework astro --dataset acme/blog/production --doc-type <type>`",
+      readable_types: [{ type: "task", count: 12 }, { type: "paper", count: 40 }],
+    },
+  };
+  assert.equal(f(r),
+    "This site would build from nothing — post in production has no documents this site can read. " +
+    "It can read: task (12), paper (40) — pick one of those as the content type above.");
+  // The two ways this arm can lose: the object list painted through String(),
+  // and the CLI incantation relayed into a web modal that HAS the fields.
+  assert.ok(f(r).indexOf("[object Object]") === -1, "readable_types is a list of MAPS — never String()'d");
+  assert.ok(f(r).indexOf("bp cloud site create") === -1, "no CLI incantation in the modal");
+  assert.ok(f(r).indexOf("--doc-type") === -1, "no CLI flag in the modal");
+  assert.ok(f(r).indexOf("422") === -1, "the status line is gone");
+  // A type whose own probe reported no total is listed WITHOUT a number
+  // (menu_row/1's second clause) — never with a fabricated one.
+  assert.equal(f({ ok: false, status: 422, data: {
+    error: "content_binding_empty",
+    detail: "this site would build from nothing — post in production has no documents this site can read. This site CAN read: paper. Re-run naming a type this site can read: `bp cloud site create …`",
+    readable_types: [{ type: "paper" }],
+  } }),
+    "This site would build from nothing — post in production has no documents this site can read. " +
+    "It can read: paper — pick one of those as the content type above.");
+  // Junk rows are dropped, and a menu that carries NOTHING usable is treated as
+  // ABSENT rather than rendered as an empty promise.
+  assert.equal(f({ ok: false, status: 422, data: {
+    error: "content_binding_empty",
+    detail: "this site would build from nothing — post in production has no documents this site can read. Nothing in production is readable by this site's public-read token.",
+    readable_types: [null, "paper", { count: 3 }, {}],
+  } }),
+    "This site would build from nothing — post in production has no documents this site can read. " +
+    "Nothing in production is readable by this site's public-read token. " +
+    "Check the workspace/project/dataset and content type above.");
+});
+
+test("cch-w66-bl: with no menu, the 422 keeps the server's whole refusal MINUS its CLI re-run clause", () => {
+  const f = hooks.siteCreateFailureCopy;
+  // The 404 arm: the menu call itself was :unavailable, so `readable_types` is
+  // omitted entirely. The server's second sentence is surface-neutral and is
+  // the most specific true thing anyone has — relay it; only the `bp cloud …`
+  // line is cut, and the console's own next step replaces it.
+  assert.equal(f({ ok: false, status: 422, data: {
+    error: "content_binding_empty",
+    detail:
+      "this site would build from nothing — production/post answered 404 for this site's own read token — " +
+      "that dataset or type does not exist, or the type is not readable by a public-read token. " +
+      "The control plane could not list what IS readable in production. " +
+      "Re-run naming a type this site can read: `bp cloud site create <name> --kind static " +
+      "--framework astro --dataset acme/blog/production --doc-type <type>`",
+  } }),
+    "This site would build from nothing — production/post answered 404 for this site's own read token — " +
+    "that dataset or type does not exist, or the type is not readable by a public-read token. " +
+    "The control plane could not list what IS readable in production. " +
+    "Check the workspace/project/dataset and content type above.");
+  // A payload with the slug and NOTHING else still reads as a refusal about the
+  // binding, never as a status number.
+  assert.equal(f({ ok: false, status: 422, data: { error: "content_binding_empty" } }),
+    "This site would build from nothing — the content you bound has nothing this site can read. " +
+    "Check the workspace/project/dataset and content type above.");
+});
+
+test("cch-w66-bl: the other four create refusals get console voice, and only the surface-neutral detail is relayed", () => {
+  const f = hooks.siteCreateFailureCopy;
+  // content_binding_required — the server's detail is CLI-VOICED ("bind it with
+  // `--dataset <workspace>/<project>/<dataset>`", router.ex ~6894). The modal
+  // HAS that field: relaying the flag would send a person hunting a terminal.
+  const required = { ok: false, status: 422, data: {
+    error: "content_binding_required",
+    detail: "a static site builds FROM your content — bind it with `--dataset <workspace>/<project>/<dataset>` (missing: dataset)",
+  } };
+  assert.equal(f(required),
+    "This site needs content to build from — fill in the workspace/project/dataset above.");
+  assert.ok(f(required).indexOf("--dataset") === -1, "a CLI flag never reaches a web modal");
+  // barkpark_not_found (404) — console-authored; the payload carries no detail
+  // at all (both arms are a bare slug, deliberately, to avoid an existence leak).
+  assert.equal(f({ ok: false, status: 404, data: { error: "barkpark_not_found" } }),
+    "This instance is gone — refresh and pick another.");
+  // node_ports_exhausted (503) — its detail is already surface-neutral and says
+  // exactly what to do, so it is relayed VERBATIM.
+  const ports = "this instance has no free node-slot port left — retire a node site or move to a larger box";
+  assert.equal(f({ ok: false, status: 503, data: { error: "node_ports_exhausted", detail: ports } }), ports);
+  // …and when that detail is missing, the console says the same thing in its own
+  // words rather than falling back to "create failed (503)".
+  assert.equal(f({ ok: false, status: 503, data: { error: "node_ports_exhausted" } }),
+    "This instance has no free port left for another node site — retire one, or move to a larger box.");
+  // read_token_mint_failed (502) — a SERVER fault, and its detail can end in a
+  // raw upstream slug (router.ex ~6908 relays the mint failure through). Keep
+  // the server-fault stance and relay none of it.
+  const mint = { ok: false, status: 502, data: {
+    error: "read_token_mint_failed",
+    detail: "acme-box-7 answered the token mint HTTP 500: internal_error",
+  } };
+  assert.equal(f(mint),
+    "Something broke on our side minting this site's read token — not your input. Try again in a moment.");
+  assert.ok(f(mint).indexOf("acme-box-7") === -1, "no upstream slug in the modal");
+  assert.ok(f(mint).indexOf("internal_error") === -1, "no mint goo in the modal");
+  // barkpark_required (422) has NO arm on purpose: siteCreateBody() always
+  // sends barkpark_id (grep -n 'function siteCreateBody' cloud/priv/static/app.js),
+  // so the slug is structurally unreachable
+  // from this modal. It keeps the caller's fallback, and this assertion is the
+  // record of that decision rather than an aspiration.
+  assert.equal(f({ ok: false, status: 422, data: { error: "barkpark_required", detail: "name the instance to host this site (barkpark_id)" } }),
+    "create failed (422)");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
