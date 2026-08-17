@@ -41,4 +41,22 @@ HIGH-FLIP-RISK slices (a genuinely independent second reviewer is owed before me
 
 ## Wave log
 
-_(empty — wave 1 in flight)_
+### Wave 2026-08-17
+
+Wave 1 built and reviewed — all five round-1 slices landed green, gates re-run on the reviewer's final state. Grade **A-**. Each slice's seal was independently re-derived by mutation (revert the clamp → the guarding test reds with the leaked body; restore → green), not merely re-read.
+
+**Shipped (final branches are the `-r` review branches):**
+
+- **stw10-backlog-drafts-id-seam** — `loop-epic/drafts-id-doc-clamp-three-committed-regr-0-r`. 9 routed regression tests over every route reaching the `drafts.`-id clamp (flat + scoped doc, scoped preview/doc, `docs:read` share, mixed `["public-read","read"]` token), each negative paired with a non-vacuous positive control. Test-only; no `query_controller.ex` change. Mutation independently re-run: clamp off → 5 reds, each leaking the `DRAFTS-ID-LEAK-CANARY` body. No reviewer fix needed.
+- **task-d223068f55efbf47** — `loop-epic/graph-perspective-existence-gate-close-t-1-r`. `resolve_graph_root/2` now honours the requested perspective, so a default-perspective draft-only id returns 404 instead of leaking its real title + UUID through the traversal; both callers (`graph_show`, `graph_tasks`) covered. Reviewer FIX: the new test file was unformatted and would red the format gate — `mix format` applied and committed. Mutation independently re-run: revert the gate → the 3 load-bearing tests red, leaking `DRAFT-SECRET-*` title + UUID.
+- **task-758ef042eb60c65e** — `loop-epic/astro-guard-certify-port-to-the-unguarde-2-r`. Ported the astro `verifyPublicReadToken` build guard to the unguarded Next twin (`next.config.mjs` async factory), 16 `node --test` cases driving BOTH doors, and a CI path filter + job that bites both configs. Hardens an unguarded door; deployed sites carry public-read tokens (no live "admin ships to every visitor"). No reviewer fix needed.
+- **ssw8-bl-public-read-reaches-export-analytics-listen** — `loop-epic/ssw8-certify-scoped-listen-arm-router-mu-3-r`. Added the SCOPED listen 403 arm — the one leak route certified on its flat arm alone. Mutation independently re-run: unmount `PublicRead` from `:require_token` → 11 reds, both listen arms flunking on a held socket. Builder's live guerrilla mint/probe/revoke transcript preserved in the test `@moduledoc`. No reviewer fix needed.
+- **cycle-fleet-list-equality-seal** — `loop-epic/seal-the-cycle-fleet-list-equality-publi-4-r`. `authorize_cycle/3` now asks the shared `PublicRead.public_read_token?/1` predicate (membership) instead of matching the `["public-read"]` singleton, so a mixed `["public-read","read"]` token is refused exactly like the singleton. Mutation independently re-run: revert to singleton match → the mixed token reads the ledger (200). No reviewer fix needed.
+
+**Stalled:** none. All five slices are green and pushed.
+
+**Ledger audit:** clean. Every slice task `in_progress`, parented to the epic, claimed with a live epoch and honest now-line; criteria stamped as-worked with merge-gated rows (and ssw8's independent-reviewer row) left `met=false` for the lead. No ledger lies to fix.
+
+**HIGH-FLIP-RISK — independence still owed at merge:** d223 (leak mechanism + zero-delta judgment) and cycle-fleet (mixed-token reachability) were re-derived independently by the reviewer and both held. A genuinely independent SECOND reviewer is still warranted before the lead merges these two, per the charter's dual-review rule.
+
+**Next wave should take:** the dispatch order is merge round 1 first (all five `-r` branches, lead closes each merge-gated criterion on merge; name the independent reviewer on the d223, cycle-fleet, and ssw8 PRs). Then the backlog rulings this wave deliberately did NOT build: `pdf-bl-anon-read-exposure` (the anon read-tier ruling — MAP + escalate, do not flip `visibility`), `astro-guard-read-vs-publicread-tier` (needs an API capabilities field), `api-schemas-anon-field-disclosure`, `anon-register-unauth-write`, `reland-check-silent-falsegreen`, `legacy-documents-drafts-id-latent-clamp`, `foreign-scope-share-token-flat-read`.
