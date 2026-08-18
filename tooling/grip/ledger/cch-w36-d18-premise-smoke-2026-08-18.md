@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 900tok -->
+<!-- doc-tier: cold | canonical-for: cch-w36-d18-premise-smoke | budget: 900tok -->
 # Wave 36 — D18 premise-smoke re-derivation recipe (2026-08-18)
 
 Assignment: prove charter D18 authorizes the forward-through / no-pre-verify MCP
