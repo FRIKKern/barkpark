@@ -1,60 +1,101 @@
-# Epic charter — Consumer web-demo & scaffold-template correctness audit
+# HTTP controller + plug correctness epic — charter
 
-Epic task: `web-templates-correctness-audit`
-Wave Paper: `web-templates-correctness-wave-2026-08-18`
-Audited against origin/main `9fd1e383e7affd6281742566a07a979967737397`.
+Epic task: `api-controller-plug-correctness-audit` · wave Paper: `web-glue-robustness-wave-2026-08-18`
+Pinned tree for wave 1: `origin/main` @ `cd75286b72d08e439adccf7a338e5c8e8e607641`
 
 ## Vision
 
-An improvement-only, evidence-based correctness/robustness/UX sweep of the Next.js consumer surfaces users COPY — the `web/` demo (app, components, lib) and the two `create-barkpark-app` scaffolds (`blog-starter`, `website-starter`). A bug in a template ships to EVERY scaffolded project, so correctness in the higher-reach tier has multiplied blast radius. This is a DISTINCT lens from the merged consumer CSP/XSS security work (injection); do NOT re-pave the `proxy.ts` nonce, `lib/csp.ts`, or the template `middleware.ts`. NON-security. Four classes: (1) data-fetching & error states, (2) rendering correctness, (3) Next patterns, (4) async & state. The deliverable is an HONEST per-class verdict — the count stated even when zero — where every REAL finding carries a concrete input/state → broken-UI-or-crash reproduced against origin/main and is fixed with a test or before/after repro (or filed if larger), and every SAFE pattern is cited by the specific guard that makes it safe (error-boundaried, optional-chained, fallback-rendered, awaited). The honest cited-safe verdict IS the A-grade; a manufactured finding count is the failure mode.
-
-Fence: `web/` (app, components, lib) + `js/packages/create-barkpark-app/templates` + any test tree (`web/__tests__`) ONLY. DISJOINT from the running JS-SDK wave (`js/packages/core`, `js/packages/nextjs`, `js/packages/react`) and the search+media wave (`api/lib/barkpark/search`, `api/lib/barkpark/media`). A template change touching a file vendored into `cloud/priv/templates` requires `make cloud-templates-sync` — the ONLY permitted `cloud/` touch. No `api/`, no `internal/`.
+The HTTP glue layer — 80 controllers and 49 plugs under `api/lib/barkpark_web/controllers`
+and `api/lib/barkpark_web/plugs` — is where edge-case bugs hide: a param that arrives as a
+list instead of a string, a status code that says 200 when the row was never found, a plug
+that answers without halting, an error branch nobody wrote. This epic is an
+improvement-only, evidence-first correctness ledger over that layer. Every candidate is
+either a REAL defect carrying its concrete failing request (method + path + params → wrong
+status or 500) and a conn test that reds without the fix, or a SAFE pattern cited by the
+specific guard that makes it safe. The honest per-class count — stated even where it is
+zero — is the deliverable, not a fix quota. This is a robustness lens, never a second pass
+over the merged content-plane security campaign.
 
 ## Decisions
 
-- **D1 — The `web/` demo ships ZERO correctness fixes; the honest per-class zero IS the finding.** Why: 17 scouts plus a dedicated graph-view verifier re-derived every web/ candidate to a cited guard (bp-fetch throws only structured `BpUpstreamError`; `app/error.tsx`+`global-error.tsx`+`not-found.tsx` cover let-throw fetches; 3 date formatters NaN-guard; `fetchCorpusGraph` never-throws and always returns arrays; every effect has cleanup, every promise a catch). Manufacturing a fix on a guarded path is the exact failure the reach-weighted direction rejected.
-- **D2 — All five real findings are template-tier; fix the four offline-provable ones, file the fifth.** Why: the reach-weighting prediction held exactly — bugs are dense where comment density drops, which is the scaffold edges the demo has no analogue for (by-id 404, module-eval webhook throw, unguarded sitemaps, pre-seed empty data).
-- **D3 (CROWN) — Swallow `BarkparkNotFoundError` → `null` in `getDocById` (blog) AND `getDoc` (website).** Why: the by-id endpoint 404s a missing doc, and `barkparkFetch` throws `BarkparkNotFoundError` (a plain error with NO `NEXT_NOT_FOUND` digest) → renders `error.tsx` (500) not `not-found.tsx` (404), making `if(!x) notFound()` DEAD CODE. Swallowing is symmetric with `getDocBySlug` and the SDK's own `client.doc` 404→null convention, and every one of the six call sites already branches on null. Fixes authors/[id] 500, dangling-ref valid-post 500, AND the fresh-scaffold pre-seed home/about/pricing 500. HIGH-FLIP (ships to every scaffold).
-- **D4 — The webhook fix defers validation to request time (lazy handler → 503 when unset), NOT a `.env.example` default.** Why: `createWebhookHandler({secret: process.env.BARKPARK_WEBHOOK_SECRET!})` runs at MODULE-EVAL and throws `TypeError` on the unset secret, failing `next build` at "Collecting page data" for every fresh scaffold (build-probe confirmed exit 1 unset / exit 0 set). A guessable `changeme` default would ship a live webhook secret; deferring the throw un-breaks the build while keeping fail-CLOSED (an unconfigured webhook 503s, never fail-open verifies). HIGH-FLIP.
-- **D5 — Template sitemaps adopt the demo's degrade-to-static pattern + a NaN date guard.** Why: `web/app/sitemap.ts` already proves the pattern ("NEVER throws: any upstream failure degrades to the static routes"); the template sitemaps have NO try/catch (crash on API 500/network during build or crawl) and hand an Invalid Date to Next's `lastModified` → `.toISOString()` `RangeError`.
-- **D6 — Render-tier dates get a per-template `formatDate` helper; fractional `?page` floored; portable-doc `void` gets `.catch()`.** Why: LOW severity but cheap and offline-provable — four render sites currently emit the literal "Invalid Date" behind a truthiness-only guard; `?page=2.5` sends a fractional offset to the API; the `void hydratePortableDoc()` leaves an unhandled rejection.
-- **D7 — Every template fix runs `make cloud-templates-sync` and stages ONLY its own mirrored `cloud/priv/templates` paths — never `git add -A`, never the whole cloud dir.** Why: the drift test is bidirectional and armed (trees drift-clean today, Makefile:140); a full-tree sync followed by a broad add stages reverts of sibling slices' cloud copies at merge — the vendored-drift merge hazard.
-- **D8 — Proof standard: templates have no harness, so each slice adds a self-contained extract-and-compare test in `web/__tests__` (runs under plain `node --test`, no workspace linking) PLUS a before/after node repro of the real template behavior.** Why: uniform verify bar; the wish accepts a `web/__tests__` analogue or a before/after repro, and the self-contained test needs neither the `@barkpark/*` dist build nor the server-only loader.
-- **D9 — All wave-1 slices are round 1 (distinct files, no cross-slice code dependency); builder model opus@medium throughout.** Why: Fable is capped until Aug 21 and none of these slices is visually designed (correctness, not CSS); the fixes are well-specified and file-disjoint, so they build in parallel this run.
-- **D10 — The `BARKPARK_SERVER_TOKEN` dev-token default and the blog pagination-windowing UX gap are FILED, not built blind.** Why: the token default is a documented design tradeoff (a prod-guard that throws on `NODE_ENV==='production' && unset` is HIGH-FLIP and needs its own decision); the "fudged totalPages" (wire `countDocs` → true total) is a UX item outside the correctness fence.
+- **D1. The verdict is the deliverable; a cited zero outranks a manufactured fix.** Fourteen
+  of sixteen survey lanes came back a swept zero with a NAMED guard (`Repo.uuid_or_nil` on
+  every binary_id lookup, `min/max` clamps on every limit/offset, 22-of-22 emitting plugs
+  pairing response with `halt`). Churn on an already-safe pattern is what the wish forbids.
+- **D2. The surviving 500 surface is the DEEPER frame, not the action head.** Phoenix 1.8.9
+  converts an action-head clause mismatch into a clean 400 via `Phoenix.ActionClauseError`
+  (`pipeline.ex:144-152` → `exceptions.ex:69-72`, `status(_) → 400`). That refutes most of
+  the wish's premise (1). What still 500s is a `FunctionClauseError`/`CaseClauseError` raised
+  in a private helper or a context callee, where the top stack frame is not the action.
+  Every wave-1 build slice is that exact shape.
+- **D3. The unifying defect is one sentence: an unvalidated param TYPE, not a missing param.**
+  Plug decodes `?x[]=v` to a list and `?x[k]=v` to a map. Five of six slices are the same
+  bug — a list-valued param sails past a key-presence match and raises three frames down.
+  Naming the class once is why six independent findings cost one review, not six.
+- **D4. Fix at the boundary that OWNS the type, and let the framework do the rest.** For an
+  action-head-reachable param, adding `when is_binary(x)` to the CONTROLLER HEAD makes the
+  top frame the action, so Phoenix returns 400 for free. For a helper-internal shape, guard
+  the element (`is_map/1`) or make the private helper TOTAL with a catch-all clause.
+- **D5. A FILTER fails loud, a SCOPE SELECTOR fails soft.** `?kind[]=x` on task edges must
+  400 — a silently-ignored filter is the dishonesty `query_controller`'s `invalid_filter_op`
+  guard exists to refuse. `?dataset[]=x` falls back to the documented `"production"` default,
+  matching that module's own `|| "production"` convention. Uniformity here would be wrong.
+- **D6. Error CONSTRUCTORS must be total.** `cycle_fleet`'s `receipt_error/2` had clauses for
+  two of the four keys it is called with, so any malformed body raised INSIDE the error
+  builder before the `else` could render its 422. A partial helper on the error path is
+  invisible to anyone scanning `else` blocks — this class gets a `_key` catch-all, never a
+  dynamic-atom collapse (`:"#{key}_required"` is an unbounded-atom hazard).
+- **D7. Concurrency races are FILED, never built here.** The RateLimiter ETS read-modify-write
+  and the Quota count-then-compare TOCTOU are real and fail-open, but both fix loci sit
+  OUTSIDE the fence (`lib/barkpark/rate_limiter.ex`, `lib/barkpark/tenancy/quota.ex`) and
+  neither is deterministically provable by a single-process conn test.
+- **D8. A finding with no possible mutation proof still ships — labelled.** `Plug.Adapters.Test.Conn.chunk/2`
+  returns `{:ok, …}` on every clause, so no conn test can red `listen_controller.ex:62`. The
+  fix lands on the 11-of-12 guard census as its evidence, and the task says so in writing.
+  Claiming a red-without-fix proof there would be exactly the stamped-evidence-overstates trap.
+- **D9. Two files are FILE-only for the whole epic while their PRs are open.**
+  `share_controller.ex` (#12405) and `share_link_controller.ex` (#12404) are actively
+  diverging. Correctness findings there are filed, never built, until those merge.
+- **D10. Every builder brief carries the host bootstrap.** A fresh worktree needs
+  `mix deps.get` then `CC=/usr/bin/clang MIX_ENV=test mix compile` once — `cc` on this host is
+  aliased to a Claude wrapper and breaks the argon2 NIF. The wave's own verify round lost
+  cycles to this. `mix test` auto-runs `ecto.create`/`ecto.migrate`, so the "run migrations
+  first" folklore is wrong for the test path and is struck from the briefs.
+- **D11. Instrument traps are findings, not footnotes.** Three of this wave's greps returned
+  confident fake zeros: `\s` is undefined in POSIX ERE so `git grep -E` silently matches
+  nothing; zsh does not word-split an unquoted scalar pathspec so git receives one argument
+  and exits 1; a `Repo.get`-only census is blind to `where([x], x.id == ^param)`. RULE for
+  every future wave: mutation-check a class grep against a KNOWN POSITIVE before quoting its
+  zero.
+- **D12. Coverage is accounted, and the remainder is filed by name.** Wave 1's censuses closed
+  the Papers/meta block (18 modules), the auth/deploy long tail (17), and the hot core (5).
+  What remains unopened is filed as a backlog task, not implied verified.
 
 ## Roadmap
 
-Wave 1 (this wave) — four file-disjoint round-1 slices, all opus@medium:
+### Wave 1 — the six proven 500s (this wave, all round 1)
 
-| Slice | Task | Surface | Size | Files (source; cloud mirror synced) |
+| # | Slice | Surface | Size | Model |
 |---|---|---|---|---|
-| S1 crown 404→500 | `wtc-w1-s1-byid-notfound-swallow` | template lib | medium | blog+website `lib/barkpark.ts` |
-| S2 webhook build-break | `wtc-w1-s2-webhook-lazy-init` | template route | medium | blog+website `app/api/barkpark/webhook/route.ts` |
-| S3 sitemap degrade | `wtc-w1-s3-sitemap-degrade-nan` | template route | small | blog+website `app/sitemap.ts` |
-| S4 render robustness | `wtc-w1-s4-render-date-page-hydrate` | template pages | medium | blog+website render pages + new `lib/format-date.ts`, blog page/draft-preview/portable-doc-surface |
+| 1 | `receipt_error/2` totality — malformed release-gate body 500 → 422 | `cycle_fleet_controller.ex` | small | opus |
+| 2 | SCIM scalar member/op element → 500 on 5 request shapes | `scim_groups_controller.ex`, `scim_users_controller.ex` | small | opus |
+| 3 | Task `edges` `kind[]` CaseClauseError + `request_dataset/1` list dataset | `tasks_controller.ex` | medium | opus |
+| 4 | SSO list-param 500 on OIDC/SAML/social callbacks (HIGH-FLIP) | `oidc_controller.ex`, `saml_controller.ex`, `social_controller.ex` | medium | fable |
+| 5 | Bulldocs `?dataset[]=` → `Ecto.Query.CastError` 500 → 404 | `bulldocs_email_controller.ex`, `bulldocs_source_controller.ex` | small | opus |
+| 6 | `listen_controller.ex:62` unguarded `chunk/2` hard bind | `listen_controller.ex` | small | opus |
 
-Backlog (filed, future waves):
-- `wtc-backlog-server-token-prod-guard` — fail-loud when `BARKPARK_SERVER_TOKEN` unset in production (documented tradeoff; needs a decision).
-- `wtc-backlog-blog-pagination-true-total` — wire `countDocs` → true `totalPages` so the pagination window stops fudging (UX, out of correctness fence).
+### Wave 2 and beyond — candidate shape (not yet cut)
+
+- Close the controller census remainder: the modules no wave-1 lane opened, swept for the
+  same four classes with the D11-corrected instrument.
+- The partial-private-helper census: `receipt_error/2` is unlikely to be the only error
+  constructor called with more argument values than it has clauses. Grep the class, not the file.
+- Conn-level coverage for routes that have none — `webhook_controller` replay/test-send and
+  `tickets_attachments` both ship with zero controller tests, which is why their seams went
+  unexamined for so long.
+- The out-of-fence robustness items filed in wave 1 (rate-limit race, quota TOCTOU,
+  `Accounts.get_user/1` uuid parity) if a later epic takes the contexts.
 
 ## Wave log
 
-### Wave 2026-08-18 — wave 1 (grade A)
-
-**Landed (4 file-disjoint template-tier slices, all gates re-run green on the reviewer's final branches):**
-
-- **S1 crown — by-id 404→null** (`wtc-w1-s1-byid-notfound-swallow`, branch `loop-epic/s1-crown-swallow-barkparknotfounderror-n-0`). `getDocById` (blog) and `getDoc` (website) now swallow `BarkparkNotFoundError`→null so a by-id miss renders `not-found.tsx` (404) not `error.tsx` (500). Reviewer independently re-derived the crown: the thrower (`js/packages/nextjs/src/server/core.ts:211`) and the catcher both reference `BarkparkNotFoundError` from `@barkpark/core`, so `instanceof` matches in a deduped install — the SDK's own `client.doc` convention. HIGH-FLIP: an independent 2nd reviewer is owed before merge (manual lead step).
-- **S2 webhook lazy-init** (`wtc-w1-s2-webhook-lazy-init`, branch `loop-epic/s2-webhook-lazy-init-createwebhookhandle-1`). Webhook route no longer calls `createWebhookHandler` at module-eval; an unset `BARKPARK_WEBHOOK_SECRET` now serves a fail-CLOSED 503 instead of breaking `next build`. `validateConfig` throw + `{POST,GET}` handler shape verified in source. HIGH-FLIP: 2nd reviewer owed.
-- **S3 sitemap degrade + NaN guard** (`wtc-w1-s3-sitemap-degrade-nan`, final branch `loop-epic/s3-sitemap-degrade-to-static-on-upstream-2-r`). Both template sitemaps degrade-to-static on upstream failure and NaN-guard `_updatedAt`. **Reviewer fix:** the builder shipped without the required `create-barkpark-app` changeset (the changesets CI gate reds a public-package change without one); reviewer added it on the `-r` branch — integrate `-r`, not the original.
-- **S4 render robustness** (`wtc-w1-s4-render-date-page-hydrate`, branch `loop-epic/s4-render-robustness-formatdate-helper-f-3`). `formatDate` null-guard against "Invalid Date", floored fractional `?page`, `.catch()` on the portable-doc hydrate. Sound.
-
-**web/ demo:** honest ZERO across all four correctness classes, upheld — every candidate cited to a guard. The reach-weighting prediction (D2) held: all five real bugs were in the higher-reach scaffold tier where comment density drops.
-
-**Filed, not built:** `wtc-backlog-server-token-prod-guard` (BARKPARK_SERVER_TOKEN prod-guard — needs a decision) and `wtc-backlog-blog-pagination-true-total` (UX, out of correctness fence).
-
-**Ledger:** clean — every slice `in_progress` with all non-merge-gated criteria stamped with real evidence; the lead-owned "PR merged" row left open on each. The lead closes those on merge.
-
-**Grade A.** Honest cited-safe verdict delivered exactly as the wish demanded; one point off A+ for the self-contained tests pinning logic-shape rather than importing the shipped template modules (unavoidable; compensated by drift-diff + git-diff) and S3's missing changeset (reviewer-fixed).
-
-**Next wave:** merge wave 1 first (S1/S2/S4 originals + the S3 `-r` branch; give S1 + S2 an independent second reviewer before merge). Then the two backlog items become candidate slices once their decisions are made — the `BARKPARK_SERVER_TOKEN` prod-guard needs a flip-risk decision (throw on `NODE_ENV==='production' && unset`), and the blog pagination true-total wiring (`countDocs`→`totalPages`) is a UX slice.
+<!-- one row per wave: wave, date, slices merged, grade, paper -->
