@@ -629,6 +629,64 @@ test("bp pointed at a LOOPBACK server is a local read: L3, mirroring loopback cu
 });
 
 // =============================================================================
+// bp scaffy LOCAL verbs are L3, not L2 (tgw12-s2)
+// =============================================================================
+//
+// `bp` heads to the remote content server, so it derives L2 — UNLESS the URL is
+// loopback (already tested above). But five scaffy verbs are PURE LOCAL:
+// scaffy_cmd.go's header says so verbatim ("no network, no auth, no manifest —
+// this file never touches the server"), and the engine (internal/scaffy)
+// parses/formats/applies .scaffy files against the cwd tree. Their fact is
+// re-derived from the LOCAL CHECKOUT, so the honest ceiling is L3. Filing them
+// L2 let checkCeiling accept an L2 claim on a local-only fact — a level-skip.
+
+test("URL-free local bp scaffy verbs derive L3 — they touch only the cwd tree", () => {
+  assert.equal(deriveLevel("bp scaffy validate x.scaffy"), "L3");
+  assert.equal(deriveLevel("bp scaffy fmt --check f.scaffy"), "L3");
+  assert.equal(deriveLevel("bp scaffy run x.scaffy"), "L3");
+  assert.equal(deriveLevel("bp scaffy discover --since HEAD~5"), "L3");
+  // `remove` is the fifth pure-local verb per scaffy_cmd.go's header — same class.
+  assert.equal(deriveLevel("bp scaffy remove x.scaffy"), "L3");
+  // --var flags after the verb do not change the verb classification.
+  assert.equal(deriveLevel("bp scaffy run make-command.scaffy --var Name=Foo"), "L3");
+});
+
+test("the ceiling now REJECTS an L2 claim on a local scaffy verb", () => {
+  // The bug this slice fixes: checkCeiling('L2', deriveLevel('bp scaffy validate …'))
+  // returned ok:true because the verb derived L2. It now derives L3, so an L2
+  // claim is a LEVEL-SKIP.
+  const verdict = checkCeiling("L2", deriveLevel("bp scaffy validate x.scaffy"));
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.reason, "LEVEL-SKIP");
+  assert.equal(verdict.claimed, "L2");
+  assert.equal(verdict.derived, "L3");
+  // An honest L3 claim is accepted.
+  assert.equal(checkCeiling("L3", deriveLevel("bp scaffy validate x.scaffy")).ok, true);
+});
+
+test("the demotion is SUBCOMMAND-scoped — remote scaffy verbs and other bp verbs stay L2", () => {
+  // `pull` and `ls --remote` live in scaffy_remote_cmd.go, carry a Server and
+  // hit /v1/data/query — they are genuine remote reads and must keep L2.
+  assert.equal(deriveLevel("bp scaffy ls --remote"), "L2");
+  assert.equal(deriveLevel("bp scaffy pull post"), "L2");
+  // A local verb with an EXPLICIT remote server still reaches the server on -s,
+  // so the URL keeps it at L2 — the demotion is URL-free only.
+  assert.equal(deriveLevel("bp scaffy pull note -s https://guerrilla.barkpark.cloud"), "L2");
+  assert.equal(deriveLevel("bp scaffy validate x.scaffy -s https://guerrilla.barkpark.cloud"), "L2");
+  // Every OTHER bp verb is unaffected — bp still heads to the remote server.
+  assert.equal(deriveLevel("bp search query x -o json"), "L2");
+  assert.equal(deriveLevel("bp task get foo -o json"), "L2");
+  assert.equal(deriveLevel("bp doc ls tag -o json"), "L2");
+});
+
+test("a loopback-server local scaffy verb stays L3 by the loopback rule, not the carve-out", () => {
+  // Belt and braces: the loopback branch already returns L3, and the carve-out
+  // must not disturb it.
+  assert.equal(deriveLevel("bp -s http://localhost:4001 scaffy validate x.scaffy"), "L3");
+  assert.equal(deriveLevel("cd /Volumes/SATECHI/github/barkpark && bp scaffy fmt --check f.scaffy"), "L3");
+});
+
+// =============================================================================
 // THE PARSEABILITY FLOOR — prose can never be graded as evidence (D30 (d))
 // =============================================================================
 //
@@ -762,7 +820,11 @@ test("the review's floor fix costs the corpus distribution nothing", () => {
   const dist = {};
   for (const c of commands) dist[deriveLevel(c)] = (dist[deriveLevel(c)] || 0) + 1;
   assert.equal(commands.length, 651);
-  assert.deepEqual(dist, { L1: 32, L2: 93, L3: 380, L6: 146 });
+  // tgw12-s2 moved exactly ONE frozen row: `bp scaffy run
+  // classify-block-type.scaffy …` was over-promoted L2 (bp → remote server) and
+  // is now L3 (pure-local scaffy verb, no url). That correction — L2 93→92,
+  // L3 380→381 — is the fix landing on real evidence, not a floor regression.
+  assert.deepEqual(dist, { L1: 32, L2: 92, L3: 381, L6: 146 });
 });
 
 test("KNOWN L1 SHAPES: the ssh forms the corpus actually uses are never demoted", () => {

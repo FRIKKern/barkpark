@@ -317,6 +317,40 @@ function firstRemoteUrlHost(command) {
 // reads the LOCAL dev server, which is a property of the checkout — L3.
 const REMOTE_API_HEADS = new Set(["bp", "gh"]);
 
+// The `bp scaffy` carve-out: five verbs are PURE LOCAL and touch no server.
+// scaffy_cmd.go's own header states it (verbatim): "PURE LOCAL like make/style:
+// no network, no auth, no manifest — this file never touches the server." Its
+// engine (internal/scaffy: Parse/Lint/ValidateFile/Format/Run/Remove and the
+// git-mining discover pass) reads and writes the cwd tree only. So a URL-free
+// `bp scaffy validate|fmt|run|remove|discover …` re-derives its fact from the
+// LOCAL CHECKOUT — L3 — exactly like `mix test` or `node <script>`, and filing
+// it at the remote-API L2 is a one-level authority INFLATION: checkCeiling
+// accepts an author's L2 claim on a fact only the local tree can settle.
+//
+// The boundary is the whole judgment, re-derived from the two source files, not
+// assumed: `pull` and `ls --remote` live in scaffy_remote_cmd.go, carry a
+// `Server` and hit `<server>/v1/data/query/<dataset>/command` — they stay L2.
+// The demotion therefore requires BOTH (a) a local verb AND (b) NO url token in
+// the command: a non-loopback `-s https://…` reaches the L2 branch below, and a
+// loopback `-s http://localhost…` is already caught by hasOnlyLoopbackTargets
+// (L3). Only the URL-FREE local-verb invocation is demoted here.
+const LOCAL_SCAFFY_VERBS = new Set(["validate", "fmt", "run", "remove", "discover"]);
+
+function isLocalScaffyInvocation(command) {
+  URL_TOKEN.lastIndex = 0;
+  if (URL_TOKEN.exec(command) !== null) return false; // any url ⇒ not the URL-free local shape
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  const si = tokens.indexOf("scaffy");
+  if (si === -1) return false;
+  // The verb is the first non-flag token after `scaffy` (`ls --remote` → `ls`,
+  // `discover --since X` → `discover`, `fmt --check f` → `fmt`).
+  for (let i = si + 1; i < tokens.length; i += 1) {
+    if (tokens[i].startsWith("-")) continue;
+    return LOCAL_SCAFFY_VERBS.has(tokens[i]);
+  }
+  return false;
+}
+
 function hasOnlyLoopbackTargets(command) {
   URL_TOKEN.lastIndex = 0;
   let seen = false;
@@ -503,7 +537,12 @@ function segmentLevel(text, maskText = text) {
 
   // L2 — origin/main, or another remote read through a remote-API client.
   if (!mentionOnly && (GIT_SHOW_REMOTE.test(probe("git")) || GH_API.test(probe("gh")))) return "L2";
-  if (REMOTE_API_HEADS.has(head)) return hasOnlyLoopbackTargets(command) ? "L3" : "L2";
+  if (REMOTE_API_HEADS.has(head)) {
+    if (hasOnlyLoopbackTargets(command)) return "L3";
+    // A URL-free local `bp scaffy` verb touches only the cwd tree — L3.
+    if (head === "bp" && isLocalScaffyInvocation(command)) return "L3";
+    return "L2";
+  }
 
   // L4 — the read's TARGET is a known generated artifact. Checked before the
   // generic L3 family: `cat docs/openapi.json` is an artifact read, not source.
