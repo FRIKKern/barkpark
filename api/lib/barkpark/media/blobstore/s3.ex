@@ -72,6 +72,20 @@ defmodule Barkpark.Media.Blobstore.S3 do
   # note at req/1 for why this is a spurious-503 guard, never a truncation guard.
   @receive_timeout 60_000
 
+  # The hard ceiling, in bytes, on the response body `download/2` will buffer
+  # off the bucket. Tied to the 100 MB upload cap that bounds every
+  # legitimately-written object: the Plug body cap at endpoint.ex:155
+  # (`Plug.Parsers` `length: 100_000_000`) and the raw read at
+  # media_controller.ex:316 (`read_body length:/read_length: 100_000_000`).
+  # Every bucket object was written through one of those two capped writers, so
+  # a body OVER this cap did not come from a normal upload — it is an
+  # out-of-band bucket writer or a redirect to a hostile origin. Req 0.6.3 has
+  # NO `max_response_size`, so `download/2` enforces the ceiling itself with an
+  # `into:` streaming collector (`download_collector/0`) that halts past the cap
+  # rather than stream an unbounded body into memory. A fail-safe default: the
+  # bucket is the source of truth, and no legitimate original exceeds it.
+  @max_download_bytes 100_000_000
+
   # ── PATH PROVENANCE ────────────────────────────────────────────────────────
   #
   # The TWO-CLAUSE reachability verdict behind every
@@ -274,8 +288,16 @@ defmodule Barkpark.Media.Blobstore.S3 do
     tmp_path = full_path <> ".part-#{System.unique_integer([:positive])}"
 
     with :ok <- File.mkdir_p(Path.dirname(full_path)),
-         {:ok, %Req.Response{status: 200, body: body}} <- req(:get, url, []),
-         :ok <- File.write(tmp_path, body),
+         # `into: download_collector()` streams the body through the size cap
+         # (@max_download_bytes). An over-cap body HALTs the collector, which
+         # stamps an overflow flag on the response — refuse_over_cap/1 turns
+         # that into {:error, :too_large} BEFORE any File.write, so the
+         # truncated partial body never reaches the cache and the error falls
+         # to the `other ->` clause -> {:error, :storage_unavailable}.
+         {:ok, %Req.Response{status: 200} = response} <-
+           req(:get, url, into: download_collector()),
+         :ok <- refuse_over_cap(response),
+         :ok <- File.write(tmp_path, response.body),
          # rename is atomic on one filesystem — concurrent readers see either
          # no file (→ re-download) or the complete blob, never a torn write.
          :ok <- File.rename(tmp_path, full_path) do
@@ -289,6 +311,37 @@ defmodule Barkpark.Media.Blobstore.S3 do
         Logger.warning("Barkpark.Media.Blobstore.S3.download #{relative_path}: #{inspect(other)}")
 
         {:error, :storage_unavailable}
+    end
+  end
+
+  # The `into:` streaming collector for download/2's GET. Req delivers the body
+  # in chunks and folds each through this fun; we accumulate into `resp.body`
+  # and HALT the instant the running total crosses @max_download_bytes,
+  # stamping an overflow flag the caller converts to an error. In real (Finch)
+  # streaming this aborts mid-transfer — the unbounded body never fully lands
+  # in memory. HONESTY LIMIT: under the Req.Test plug seam (steps.ex run_plug)
+  # the stub PRE-BUFFERS and delivers the whole body as ONE {:data} chunk, so
+  # the suite proves the over-cap REFUSAL, not a true mid-stream memory abort.
+  defp download_collector do
+    fn {:data, chunk}, {req, resp} ->
+      resp = update_in(resp.body, &(&1 <> chunk))
+
+      if byte_size(resp.body) > @max_download_bytes do
+        {:halt, {req, Req.Response.put_private(resp, :bp_download_over_cap, true)}}
+      else
+        {:cont, {req, resp}}
+      end
+    end
+  end
+
+  # Reads the overflow flag download_collector/0 stamps when it halts past the
+  # cap. Returns an error tuple so the `with` in download/2 short-circuits
+  # BEFORE File.write — a truncated over-cap body is never cached.
+  defp refuse_over_cap(%Req.Response{} = response) do
+    if Req.Response.get_private(response, :bp_download_over_cap, false) do
+      {:error, :too_large}
+    else
+      :ok
     end
   end
 
