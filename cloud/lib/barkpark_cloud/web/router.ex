@@ -4421,6 +4421,25 @@ defmodule BarkparkCloud.Web.Router do
     reason |> inspect() |> String.slice(0, 300)
   end
 
+  # A SAFE, generic billing-error summary for the CLIENT. The Stripe gateway
+  # binds the RAW Stripe HTTP response body into `{:stripe_http_error, status,
+  # body}` (StripeGateway.request/2), and that body can carry customer/PII
+  # internals — `cus_…` ids, request echoes. So it is NEVER echoed to the
+  # client: the http-error shape collapses to a bounded message keyed ONLY on
+  # the integer status, and EVERY other error shape collapses to one generic
+  # constant (fail-closed — an unexpected term never reaches the wire raw). The
+  # full detail is logged server-side at the gateway bind, so operators keep the
+  # diagnostic. NOTE: deliberately NOT `vercel_reason/1` — its String.slice(0,
+  # 300) would leave a `cus_…` id intact. The `error:` CODE is unchanged, so the
+  # JS `friendly()` / Go cloudError key still resolves with zero UI regression.
+  defp billing_reason({:stripe_http_error, status, _body}) when is_integer(status) do
+    "billing provider returned an error (HTTP #{status})"
+  end
+
+  defp billing_reason(_reason) do
+    "billing request could not be completed"
+  end
+
   ## Instance-API proxy (C4 — charter decisions D46 / D51) — the console's
   ## gateway into a live instance's OWN HTTP API. EXPLICIT routes only, no
   ## free-form passthrough: each match names ONE `Registry.InstanceApiCatalog`
@@ -5839,7 +5858,7 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "billing_not_configured"})
 
           {:error, reason} ->
-            json(conn, 422, %{error: "checkout_failed", reason: inspect(reason)})
+            json(conn, 422, %{error: "checkout_failed", reason: billing_reason(reason)})
         end
     end
   end
@@ -5869,7 +5888,7 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "no_subscription"})
 
           {:error, reason} ->
-            json(conn, 422, %{error: "portal_failed", reason: inspect(reason)})
+            json(conn, 422, %{error: "portal_failed", reason: billing_reason(reason)})
         end
     end
   end
@@ -5929,7 +5948,7 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "no_subscription"})
 
           {:error, reason} ->
-            json(conn, 422, %{error: "cancel_failed", reason: inspect(reason)})
+            json(conn, 422, %{error: "cancel_failed", reason: billing_reason(reason)})
         end
     end
   end
@@ -6005,7 +6024,7 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 400, %{error: "invalid_signature"})
 
       {:error, reason} ->
-        json(conn, 400, %{error: "invalid_webhook", reason: inspect(reason)})
+        json(conn, 400, %{error: "invalid_webhook", reason: billing_reason(reason)})
     end
   end
 
