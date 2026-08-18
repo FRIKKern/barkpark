@@ -3833,6 +3833,45 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-18 — wave 77 REVIEW — THE HONEST CLOSE lands: ruling paper + terminal reconcile, both green, 0 code. Grade A
+
+Paper-only wave, two round-1 slices, zero repo files changed — the deliverables are two Barkpark
+Papers + a reconciled ledger. Both gates re-verified green from the reviewer's worktree.
+
+- **cch-w77-s1-epic-close-ruling-paper** (final branch: none — server-paper slice, empty FILES, clean
+  tree; no commit is correct). Ruling paper `cloud-console-hardening-epic-close-ruling-2026-08-18`
+  live (HTTP 200), and its body quotes the LIVE VERDICT-TOKEN verbatim — I re-ran the predicate and
+  got the identical string: `NO-SEAL a=FAIL b=PASS c=PASS orphans=427 considering=1 roster=933`. The
+  sentinel `already honest` is present. Two denominators stated separately: honesty arc (6 chartered
+  D1–D6, each fixed + fail-able instrument) = COMPLETE; residue = 427 orphans, 94% this epic's own
+  cch-* unbuilt slices, re-homed per-row over successor waves. Records the four D885 evidence-closes
+  (#12095–#12098), the three honest-miss rows that STAY OPEN (cch-w38-s1, cch-w39-s2, cch-w58-s2), and
+  the two ratio-trap tripwires. Ledger honest: crit 0–3 met + stamped, crit 4 (epic Goal close) left
+  MERGE-GATED for the lead, lifecycle in_progress.
+- **cch-w77-s2-terminal-close-reconcile-and-residue-map** (final branch: none — bp-ledger slice, no
+  files). Reconciled `cch-epic-close-terminal-seal-wave` crit 1 from the false `emits SEAL a=PASS…` to
+  the honest LIVE `NO-SEAL a=FAIL b=PASS c=PASS orphans=427` (verified on-server), and attached the
+  authoritative `residue_forwarding_map` field (prefix-exact split cch-*:401 / gr-*:10 / task-*:13,
+  functional split labeled HEURISTIC; destinations = instruments successor / task-47bc4168392dec17 /
+  stay). Both successors confirmed real + open. D93 pacing respected: MAP published, NO rows re-homed
+  this wave. Ledger honest: crit 0–2 met + stamped, crit 3 MERGE-GATED, lifecycle in_progress.
+
+**Grade A.** The wave executed wave 76's proven map without repeating its mistakes: the D881 census
+seal HOLDS on origin/main (verified NO-SEAL is the HONEST verdict, a=FAIL is correct — a=PASS is only
+reachable by dumping backlog into one successor, the D93/D94/D83 sin); the completion verdict is
+'already honest, with evidence' with both denominators kept separate; every count re-derived live,
+never quoted. Docked from A+ only because the terminal disposition is a RULING not a machine SEAL
+(correctly so) and the epic Goal close remains lead-gated — i.e. the epic is READY to close on the
+ruling, not yet closed. Ledger audit: clean — both slices claimed, stamped honest evidence as-worked,
+lifecycle truthful, merge-gated criteria left open for the lead; no lies to fix.
+
+**Next wave:** the honesty arc is DONE. The lead merges the charter PR (#12163), then closes the epic
+Goal `cloud-console-hardening-epic` on the RULING (crit 4 of s1) and the two merge-gated slice crits.
+Residue custody is FUTURE paced work under `cch-instruments-epic` (instruments/gate/harness) and
+`task-47bc4168392dec17` (GUI-remake console-defect/feature/ops backlog) — re-home ~10 non-gate rows
+per wave per D93; do NOT batch-close by progress ratio (refuted) and do NOT close the three honest-miss
+rows. There is no round 2 in this wave.
+
 ### 2026-08-18 — wave 75 DECIDE (build in flight) — THE SEAL WAVE: prove it, then make it true (D883)
 
 Wave 74 landed round 1 only; its grade-A seal was **claimed, not built**. Six verifiers re-ran the
