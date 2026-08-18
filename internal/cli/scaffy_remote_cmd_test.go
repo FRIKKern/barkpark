@@ -392,6 +392,60 @@ func TestScaffyPullValidationRefusalWritesNothing(t *testing.T) {
 	}
 }
 
+// TestScaffyPullTraversalDomainRefusesAndWritesNothing is the path-escape
+// regression (BOUNDARY-1). The served doc carries a hostile domain
+// "../../../tmp/evil" — a raw JSON metadata field with no charset gate. The pull
+// id (fmt.Sprintf("%s--%s--%s", domain, concept, variant)) then becomes
+// "../../../tmp/evil--note--default", and filepath.Join Cleans it OUT of
+// scaffy/commands/ to ../tmp/evil--note--default.scaffy — a write outside the
+// base dir against an untrusted server. The containment guard must REFUSE before
+// any MkdirAll/WriteFile and leave nothing on disk anywhere.
+//
+// MUTATION-PROOF: reverting the guard in scaffy_remote_cmd.go (the
+// scaffyPathWithinBase / id char check before MkdirAll) reds this test — the
+// pull returns exitOK and the escaped file lands at ../tmp/evil--note--default
+// .scaffy, outside scaffy/commands/. The '/'-bearing, ".."-bearing domain is the
+// forward-slash "../" vector, the only one that escapes on non-Windows.
+func TestScaffyPullTraversalDomainRefusesAndWritesNothing(t *testing.T) {
+	withTempConfigHome(t)
+	root := chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "../../../tmp/evil", scaffyRemoteNoteSrc),
+	})
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "note")
+	if code != exitValidation {
+		t.Fatalf("traversal pull exit = %d, want %d (containment guard must refuse)\nstdout:\n%s\nstderr:\n%s",
+			code, exitValidation, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "nothing written") {
+		t.Errorf("refusal should state nothing was written:\n%s", stderr)
+	}
+
+	// The Cleaned escape target — ../tmp/evil--note--default.scaffy relative to
+	// the temp cwd — must NOT exist. This is the file the pre-fix code writes.
+	escaped := filepath.Join(root, "..", "tmp", "evil--note--default.scaffy")
+	if _, err := os.Stat(escaped); err == nil {
+		t.Errorf("traversal pull wrote OUTSIDE scaffy/commands at %s", escaped)
+		_ = os.Remove(escaped)
+	}
+	escapedSidecar := filepath.Join(root, "..", "tmp", "evil--note--default.provenance.json")
+	if _, err := os.Stat(escapedSidecar); err == nil {
+		t.Errorf("traversal pull wrote a sidecar OUTSIDE scaffy/commands at %s", escapedSidecar)
+		_ = os.Remove(escapedSidecar)
+	}
+
+	// NOTHING landed under the temp root either — not the base dir, not a file.
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("refused traversal pull left files behind under the tree: %v", names)
+	}
+}
+
 func TestScaffyPullAmbiguousConceptListsVariantsExitsTwo(t *testing.T) {
 	withTempConfigHome(t)
 	chdirTemp(t)
