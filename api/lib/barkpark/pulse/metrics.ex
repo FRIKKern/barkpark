@@ -52,6 +52,16 @@ defmodule Barkpark.Pulse.Metrics do
   end
 
   @doc """
+  Test-only: synchronously run one sample (atomically snapshot + drain the
+  counters, publish, broadcast) and return the resulting snapshot, WITHOUT
+  re-arming the autonomous timer. It also cancels any pending autonomous
+  `:tick`, so once a test calls this the 2 s sampler can no longer fire and
+  drain the counters between a bump loop and its assertion. Prod never calls
+  this — the `:tick` handler's cadence is unchanged.
+  """
+  def sample_now, do: GenServer.call(__MODULE__, :sample_now)
+
+  @doc """
   The latest sampled snapshot (or a zeroed one before the first tick /
   with the sampler off). Reads are `:persistent_term` — free.
   """
@@ -93,15 +103,38 @@ defmodule Barkpark.Pulse.Metrics do
       ticks: 0,
       storage: %{bytes: 0, rows: 0},
       cost_total_nanos: cost0,
-      cost_pending_nanos: 0
+      cost_pending_nanos: 0,
+      tref: nil
     }
 
-    Process.send_after(self(), :tick, @tick_ms)
-    {:ok, state}
+    tref = Process.send_after(self(), :tick, @tick_ms)
+    {:ok, %{state | tref: tref}}
   end
 
   @impl true
-  def handle_info(:tick, %{ref: ref, swt: swt0, last_ms: last_ms} = state) do
+  def handle_info(:tick, state) do
+    {_snap, state} = do_sample(state)
+
+    tref = Process.send_after(self(), :tick, @tick_ms)
+
+    {:noreply, %{state | tref: tref}}
+  end
+
+  @impl true
+  def handle_call(:sample_now, _from, state) do
+    # test-only: cancel the pending autonomous tick and do not re-arm, so the
+    # 2 s sampler can no longer drain the counters mid-test; sample synchronously
+    # so the caller observes exactly this interval's rates.
+    if is_reference(state.tref), do: Process.cancel_timer(state.tref)
+    {snap, state} = do_sample(state)
+    {:reply, snap, %{state | tref: nil}}
+  end
+
+  # One sampling pass: snapshot + atomically drain the counters, integrate cost,
+  # publish to :persistent_term, broadcast vitals. Returns {snap, new_state}.
+  # Does NOT touch the timer — the caller owns cadence (handle_info re-arms the
+  # 2 s prod loop; sample_now deliberately does not).
+  defp do_sample(%{ref: ref, swt: swt0, last_ms: last_ms} = state) do
     swt1 = :erlang.statistics(:scheduler_wall_time)
     elapsed_s = max(0.001, (now_ms() - last_ms) / 1000)
 
@@ -160,9 +193,7 @@ defmodule Barkpark.Pulse.Metrics do
 
     broadcast_vitals(snap, storage)
 
-    Process.send_after(self(), :tick, @tick_ms)
-
-    {:noreply,
+    {snap,
      %{
        state
        | swt: swt1,
