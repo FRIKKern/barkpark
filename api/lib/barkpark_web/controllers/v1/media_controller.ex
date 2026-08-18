@@ -450,6 +450,14 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  # Force-release privilege for `undo_checkout`. NOTE: write==force-release is
+  # DELIBERATE here — any write token may release ANY actor's checkout lock,
+  # diverging from the pure-admin sibling `Access.admin?/1` (access.ex). The
+  # holder-only fallback in `Checkout.ensure_can_release/3` is therefore dead on
+  # the API path (`require_write` runs first, so admin? is always true). This is
+  # the current, intended posture; whether it SHOULD tighten to true-admin is
+  # tracked separately (felix-w28-bl-checkout-tighten-adjudication) — do not
+  # change behavior here.
   defp admin?(conn) do
     token = conn.assigns[:api_token]
 
