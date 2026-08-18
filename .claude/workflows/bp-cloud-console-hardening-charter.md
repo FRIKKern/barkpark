@@ -3828,6 +3828,32 @@ D879 verbatim at app.js:285; cch-w70-bl is already done (#11886 merged). HIGH-FL
 verdicts — a genuinely independent second reviewer is owed before merge. Paper:
 `cloud-console-hardening-wave-75-2026-08-18`.
 
+### 2026-08-18 — wave 75 REVIEW — the seal is REAL: 1/1 round-1 slice built, gated, PUSHED and PR'd. Grade A
+
+**Paper:** `cloud-console-hardening-wave-75-2026-08-18` (debrief appended). Round 1 shipped as ONE atomic
+slice. **s1** (`cch-w75-s1-the-seal`, branch `loop-epic/wave-75-s1-the-seal-reword-github-error--0-r`) —
+the D881 seal now EXISTS and can lose: `reader_owed/1` scans `@classified` reasons only (never file
+source, so the moduledoc's own lowercase "reader owed" and the hyphenated flip phrases survive), asserts
+zero rows carry `READER OWED`, with an anti-vacuity probe folded into the rot-arm test. The 3 github_error
+rows reworded to CLASSIFICATION-STANDS (admin-gated reader, genuinely-ambiguous slug), the 4 residue rows
+(prebuilt_not_enabled, unknown_source, invalid_name, unknown_template) relabeled to their true bare-router
+emits — every false "(vercel_reason mapping)" site-label corrected, zero manufactured copy.
+repo_not_in_installation PAID: row deleted rot-arm-red-first + the curated ERRORS reader shipped
+("GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect."), which
+wins first in `friendly()` (line 441) before the fallback. One `__app.test.mjs` tail test pins the curated
+copy and forbids a transience verb. **REVIEW re-proofs:** both HIGH-FLIP-RISK github verdicts
+independently re-derived CONFIRMED — `#site-github` renders only for `authority === "grant"` (app.js
+l.12756), so `openSiteGithub` (sole console caller of GET /v1/github/repos, l.14631) is admin-only and
+github_error is never member-reachable from the console; the curated repo_not_in_installation rung
+precedes the fallback. **Mutation:** injecting `READER OWED` into a live `@classified` reason reds the seal
+test by name; reverting → green. **One reviewer fix:** the anti-vacuity probe map tripped `mix format`
+(Cloud CI gate) — reformatted in place; all three gate legs (node --check, 1122 node tests, 9 census
+tests, mix format) re-run green on the final `-r` branch. **Ledger:** honest — 5/5 buildable criteria
+stamped, merge-gated criterion 5 open for the lead; no fixes needed. **Next wave / lead:** merge s1, then
+dispatch R2 (`cch-w73-bl-newcreaterepo-success-fields-unasserted`, still open/unclaimed) — it shares the
+`__app.test.mjs` tail so it waits for s1. A genuinely independent SECOND reviewer on s1's github verdicts
+is owed before merge per the E2 flip-risk law (this workflow spawns one reviewer). Grade **A**.
+
 ### 2026-08-18 — wave 74 REVIEW — 4/4 round-1 slices built, gated, PUSHED and PR'd (#12095–#12098). Grade A
 
 **Paper:** `cloud-console-hardening-wave-74-2026-08-18` (debrief appended). Round 1 shipped whole, zero
