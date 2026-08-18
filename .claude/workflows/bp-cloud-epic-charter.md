@@ -1,60 +1,65 @@
-# Epic charter — Consumer web-demo & scaffold-template correctness audit
+# create-barkpark-app + codegen correctness epic — charter
 
-Epic task: `web-templates-correctness-audit`
-Wave Paper: `web-templates-correctness-wave-2026-08-18`
-Audited against origin/main `9fd1e383e7affd6281742566a07a979967737397`.
+Epic task: `create-app-codegen-correctness-audit` (task-e9e8867d672b9acf) · wave Paper: `create-app-codegen-correctness-wave-2026-08-18`
 
 ## Vision
 
-An improvement-only, evidence-based correctness/robustness/UX sweep of the Next.js consumer surfaces users COPY — the `web/` demo (app, components, lib) and the two `create-barkpark-app` scaffolds (`blog-starter`, `website-starter`). A bug in a template ships to EVERY scaffolded project, so correctness in the higher-reach tier has multiplied blast radius. This is a DISTINCT lens from the merged consumer CSP/XSS security work (injection); do NOT re-pave the `proxy.ts` nonce, `lib/csp.ts`, or the template `middleware.ts`. NON-security. Four classes: (1) data-fetching & error states, (2) rendering correctness, (3) Next patterns, (4) async & state. The deliverable is an HONEST per-class verdict — the count stated even when zero — where every REAL finding carries a concrete input/state → broken-UI-or-crash reproduced against origin/main and is fixed with a test or before/after repro (or filed if larger), and every SAFE pattern is cited by the specific guard that makes it safe (error-boundaried, optional-chained, fallback-rendered, awaited). The honest cited-safe verdict IS the A-grade; a manufactured finding count is the failure mode.
-
-Fence: `web/` (app, components, lib) + `js/packages/create-barkpark-app/templates` + any test tree (`web/__tests__`) ONLY. DISJOINT from the running JS-SDK wave (`js/packages/core`, `js/packages/nextjs`, `js/packages/react`) and the search+media wave (`api/lib/barkpark/search`, `api/lib/barkpark/media`). A template change touching a file vendored into `cloud/priv/templates` requires `make cloud-templates-sync` — the ONLY permitted `cloud/` touch. No `api/`, no `internal/`.
+The two Node surfaces a user runs on their own machine — `npx create-barkpark-app` and the
+`barkpark generate` codegen CLI — must never hang without a diagnostic, never leave a
+half-written project that blocks the retry, never emit a package manifest npm rejects, and
+never die with an opaque `TypeError` on an edge-case schema. This epic is an
+improvement-only, evidence-first correctness ledger over `js/packages/create-barkpark-app/src`
+and `js/packages/codegen/src`: every candidate is either a REAL bug carrying the concrete
+input that breaks it and a test that reds without the fix, or a SAFE pattern cited by the
+guard that makes it safe. The honest per-class count — stated even where it is zero — is the
+deliverable, not a fix quota.
 
 ## Decisions
 
-- **D1 — The `web/` demo ships ZERO correctness fixes; the honest per-class zero IS the finding.** Why: 17 scouts plus a dedicated graph-view verifier re-derived every web/ candidate to a cited guard (bp-fetch throws only structured `BpUpstreamError`; `app/error.tsx`+`global-error.tsx`+`not-found.tsx` cover let-throw fetches; 3 date formatters NaN-guard; `fetchCorpusGraph` never-throws and always returns arrays; every effect has cleanup, every promise a catch). Manufacturing a fix on a guarded path is the exact failure the reach-weighted direction rejected.
-- **D2 — All five real findings are template-tier; fix the four offline-provable ones, file the fifth.** Why: the reach-weighting prediction held exactly — bugs are dense where comment density drops, which is the scaffold edges the demo has no analogue for (by-id 404, module-eval webhook throw, unguarded sitemaps, pre-seed empty data).
-- **D3 (CROWN) — Swallow `BarkparkNotFoundError` → `null` in `getDocById` (blog) AND `getDoc` (website).** Why: the by-id endpoint 404s a missing doc, and `barkparkFetch` throws `BarkparkNotFoundError` (a plain error with NO `NEXT_NOT_FOUND` digest) → renders `error.tsx` (500) not `not-found.tsx` (404), making `if(!x) notFound()` DEAD CODE. Swallowing is symmetric with `getDocBySlug` and the SDK's own `client.doc` 404→null convention, and every one of the six call sites already branches on null. Fixes authors/[id] 500, dangling-ref valid-post 500, AND the fresh-scaffold pre-seed home/about/pricing 500. HIGH-FLIP (ships to every scaffold).
-- **D4 — The webhook fix defers validation to request time (lazy handler → 503 when unset), NOT a `.env.example` default.** Why: `createWebhookHandler({secret: process.env.BARKPARK_WEBHOOK_SECRET!})` runs at MODULE-EVAL and throws `TypeError` on the unset secret, failing `next build` at "Collecting page data" for every fresh scaffold (build-probe confirmed exit 1 unset / exit 0 set). A guessable `changeme` default would ship a live webhook secret; deferring the throw un-breaks the build while keeping fail-CLOSED (an unconfigured webhook 503s, never fail-open verifies). HIGH-FLIP.
-- **D5 — Template sitemaps adopt the demo's degrade-to-static pattern + a NaN date guard.** Why: `web/app/sitemap.ts` already proves the pattern ("NEVER throws: any upstream failure degrades to the static routes"); the template sitemaps have NO try/catch (crash on API 500/network during build or crawl) and hand an Invalid Date to Next's `lastModified` → `.toISOString()` `RangeError`.
-- **D6 — Render-tier dates get a per-template `formatDate` helper; fractional `?page` floored; portable-doc `void` gets `.catch()`.** Why: LOW severity but cheap and offline-provable — four render sites currently emit the literal "Invalid Date" behind a truthiness-only guard; `?page=2.5` sends a fractional offset to the API; the `void hydratePortableDoc()` leaves an unhandled rejection.
-- **D7 — Every template fix runs `make cloud-templates-sync` and stages ONLY its own mirrored `cloud/priv/templates` paths — never `git add -A`, never the whole cloud dir.** Why: the drift test is bidirectional and armed (trees drift-clean today, Makefile:140); a full-tree sync followed by a broad add stages reverts of sibling slices' cloud copies at merge — the vendored-drift merge hazard.
-- **D8 — Proof standard: templates have no harness, so each slice adds a self-contained extract-and-compare test in `web/__tests__` (runs under plain `node --test`, no workspace linking) PLUS a before/after node repro of the real template behavior.** Why: uniform verify bar; the wish accepts a `web/__tests__` analogue or a before/after repro, and the self-contained test needs neither the `@barkpark/*` dist build nor the server-only loader.
-- **D9 — All wave-1 slices are round 1 (distinct files, no cross-slice code dependency); builder model opus@medium throughout.** Why: Fable is capped until Aug 21 and none of these slices is visually designed (correctness, not CSS); the fixes are well-specified and file-disjoint, so they build in parallel this run.
-- **D10 — The `BARKPARK_SERVER_TOKEN` dev-token default and the blog pagination-windowing UX gap are FILED, not built blind.** Why: the token default is a documented design tradeoff (a prod-guard that throws on `NODE_ENV==='production' && unset` is HIGH-FLIP and needs its own decision); the "fudged totalPages" (wire `countDocs` → true total) is a UX item outside the correctness fence.
+- **D1. Verdict-first ledger, not a bug bounty.** The surface is unusually well-hardened
+  (dir-emptiness check, name normalisation via `path.basename`, `literal()` C0 escaping,
+  `propName()` quoting, zero-option select degradation are all present AND tested). Manufacturing
+  fixes on guarded paths is forbidden; a SAFE verdict must cite the guard.
+- **D2. The crown is codegen's missing fetch timeout.** `grep -rnE 'AbortSignal|timeout|setTimeout|AbortController' js/packages/codegen/src` returns zero on origin/main; `doFetch(url,{headers})` carries no `signal`. Proven RED against a real local server: headers-stall and body-stall both PENDING at 2500ms.
+- **D3. One `AbortSignal.timeout` covers headers AND body — no per-phase deadline.** Measured: ARM C (headers 200, `res.json()` never settles) rejected at 804ms. The sibling `jscc-backlog-stalled-body-timeout` finding does NOT transfer: core's gap is a `clearTimeout` at `transport.ts:439` firing before the body read, a mechanism `AbortSignal.timeout` does not have.
+- **D4. Add a `withDeadline` race anyway.** The signal is advisory to an injected `fetchImpl`; ARM A/E stayed PENDING with the signal alone and all five arms rejected with the race. `fetchImpl` is a public documented option, and the race also makes the fix engine-independent across the declared `node>=20` floor. The `!res.ok` best-effort `res.text()` read must be wrapped too — it was still PENDING otherwise.
+- **D5. Mirror `core/transport.ts:358` vocabulary: 30s read default, `0` disables.** Two packages should read as one system, and a slow-link user needs an escape hatch.
+- **D6. Do NOT claim "hangs indefinitely".** On the `node>=20` floor global fetch is undici with documented header/body defaults; the verifier's probes bounded at 2.5s and never measured a 300s ceiling. The honest claim is "a stalled server stalls `barkpark generate` for minutes with no diagnostic, and forever against any injected `fetchImpl`".
+- **D7. Codegen crash guards go in the MAPPER, not in zod.** A `.min(1)` on the schema name changes the error text of both CLI paths and risks the committed drift fixture; a mapper-side guard is local and matches the existing loud, locatable composite error.
+- **D8. Widen the existing nameless-composite guard, never add a second error path.** `typeof sub.name` at `generate.ts:174` dereferences before it decides, so `fields:[{name:'a'},null]` re-raises the exact opaque `TypeError: Cannot read properties of null (reading 'name')` that guard was written to eliminate — reachable end-to-end (`node dist/cli.mjs generate --from …` exit 1) because zod's `.passthrough()` never validates a composite's nested `fields`.
+- **D9. An empty schema name FAILS LOUD, it is not sanitised.** `pascalCase('')` is `''` and zod's `name: z.string()` has no `.min(1)`, so `schemas:[{name:''}]` emits `export interface  extends …` and dies in prettier at 48:1. Inventing an interface name would silently produce a type nobody asked for.
+- **D10. `--watch` is a false success, not a no-op — fix it with a monotonic counter.** The watcher fires and re-hits the network with the STALE dataset, printing `Re-wrote <old path>`. mtime is sub-ms on APFS but 1-second-granularity filesystems would silently miss same-tick saves; a counter is uniform.
+- **D11. Scaffold cleanup must record `existedBefore` and lstat the path.** The naive one-line `fs.rm(targetDir,{recursive:true,force:true})` was proven to unlink a user's SYMLINK and leave the 4 partial files inside the real directory, and to delete a pre-existing empty dir the user created. Empty the entries in those cases; remove the path only when this run created it.
+- **D12. `ensureTargetEmpty` and the cleanup move into an exported module.** `index.ts` runs `main(process.argv)` at import and exports nothing, so a test of a COPIED guard proves the replica, not the shipped code.
+- **D13. Reserved npm names are a REAL error; the 214-char cap is hardening.** `validate-npm-package-name@7.0.2` returns `validForOldPackages:false` for `node_modules` and `favicon.ico`, and `yarn install` exits 1 with `Name is blacklisted` (npm/pnpm/bun exit 0). A 300-char name is only a WARNING everywhere, including publish. Core-module names and `test` are valid — the blacklist is exactly two names.
+- **D14. No `validate-npm-package-name` dependency.** Pulling a package in to reject two literals is worse than the bug; the fix is a two-name guard plus a length clamp inside `toPackageName`.
+- **D15. Locale determinism FILES, it does not build.** The comparator regimes really do disagree on the committed fixture (2 of 81 name lists), but NO locale reproduces it — five env locales and seven explicit locales all produce the byte-identical committed artifact. The code-unit variant forces a 52-line regen of `web/lib/barkpark.types.ts`, which is OUTSIDE this epic's fence; the fence-safe pinned-`Intl.Collator('en-US')` variant costs zero regen and is the only implementation a future slice may build.
+- **D16. The exit-0 install swallow is judgment, not a bug.** The failure is printed twice in yellow with the exact manual command, `didInstall` is threaded into `printNextSteps`, and this matches the create-next-app norm. The git-init swallow is worse (bare `catch {}`, `skipGit` never read, half-initialised `.git` left behind) and is FILED.
+- **D17. The wish's "unsanitised path from a project name" premise is REFUTED.** `normalizeProjectName = path.basename(String(raw).trim())`, so `..` is rejected, `/` empties, `../../etc` becomes `etc`. Nothing reaches `path.resolve` carrying traversal.
+- **D18. The wish's "copy follows a symlink / crashes on EACCES" premise is SAFE by construction.** The copy source is the package-bundled template tree (`find templates -type l` empty), never user input; EACCES propagates uncaught to exit 1.
+- **D19. Builders build first.** A fresh worktree is RED for module-resolution reasons (`dist/cli.mjs` missing; `@barkpark/react` entry unresolved) until `pnpm install` + a build run — a red-first test read against an unbuilt tree is a misread.
+- **D20. Fence: `js/packages/create-barkpark-app/src` + `js/packages/codegen/src` + their test trees + one named changeset per slice.** No `templates/` (the sibling web-templates wave owns them), no `web/`, `api/`, `cloud/`, `js/packages/core`, `js/packages/react`. Disjoint from the media (`api/lib/barkpark/media`) and controller+plug (`api/lib/barkpark_web`) waves by tree.
 
 ## Roadmap
 
-Wave 1 (this wave) — four file-disjoint round-1 slices, all opus@medium:
+### Wave 1 (this wave) — the five proven REAL findings, all round 1, all Opus
 
-| Slice | Task | Surface | Size | Files (source; cloud mirror synced) |
+| # | Slice | Task | Surface | Size |
 |---|---|---|---|---|
-| S1 crown 404→500 | `wtc-w1-s1-byid-notfound-swallow` | template lib | medium | blog+website `lib/barkpark.ts` |
-| S2 webhook build-break | `wtc-w1-s2-webhook-lazy-init` | template route | medium | blog+website `app/api/barkpark/webhook/route.ts` |
-| S3 sitemap degrade | `wtc-w1-s3-sitemap-degrade-nan` | template route | small | blog+website `app/sitemap.ts` |
-| S4 render robustness | `wtc-w1-s4-render-date-page-hydrate` | template pages | medium | blog+website render pages + new `lib/format-date.ts`, blog page/draft-preview/portable-doc-surface |
+| 1 | Bound every codegen fetch: signal + `withDeadline`, 30s default, `0` disables | `cca-w1-codegen-fetch-timeout` | `codegen/src/fetch-schema.ts` | medium |
+| 2 | Fail loud on a null composite sub-field and on an empty schema name | `cca-w1-codegen-mapper-guards` | `codegen/src/generate.ts` | small |
+| 3 | `--watch` reloads the config (monotonic cache-bust) | `cca-w1-codegen-watch-reload` | `codegen/src/cli.ts` | small |
+| 4 | Partial scaffold no longer poisons the retry (HIGH-FLIP) | `cca-w1-scaffold-cleanup` | `create-barkpark-app/src/index.ts` + new `target-dir.ts` | medium |
+| 5 | `toPackageName` rejects the two npm-blacklisted names, clamps at 214 | `cca-w1-package-name-guard` | `create-barkpark-app/src/scaffold.ts` | small |
 
-Backlog (filed, future waves):
-- `wtc-backlog-server-token-prod-guard` — fail-loud when `BARKPARK_SERVER_TOKEN` unset in production (documented tradeoff; needs a decision).
-- `wtc-backlog-blog-pagination-true-total` — wire `countDocs` → true `totalPages` so the pagination window stops fudging (UX, out of correctness fence).
+### Filed for later waves (backlog, not this wave)
+
+`.ts` config advertised with no loader (broken on the Node 20 floor) · pinned-collator determinism
+(D15) · `prettier.resolveConfig(process.cwd())` making output cwd-dependent · git-init silent
+failure + half-initialised `.git` · `applyHostedDemo` stranding a complete tree · CLI/env plumbing
+for `timeoutMs` · install-failure exit code · duplicate schema names / `_type` / `_id` emitting
+invalid-but-loud TS · interactive validator checking the raw name instead of the normalised one.
 
 ## Wave log
 
-### Wave 2026-08-18 — wave 1 (grade A)
-
-**Landed (4 file-disjoint template-tier slices, all gates re-run green on the reviewer's final branches):**
-
-- **S1 crown — by-id 404→null** (`wtc-w1-s1-byid-notfound-swallow`, branch `loop-epic/s1-crown-swallow-barkparknotfounderror-n-0`). `getDocById` (blog) and `getDoc` (website) now swallow `BarkparkNotFoundError`→null so a by-id miss renders `not-found.tsx` (404) not `error.tsx` (500). Reviewer independently re-derived the crown: the thrower (`js/packages/nextjs/src/server/core.ts:211`) and the catcher both reference `BarkparkNotFoundError` from `@barkpark/core`, so `instanceof` matches in a deduped install — the SDK's own `client.doc` convention. HIGH-FLIP: an independent 2nd reviewer is owed before merge (manual lead step).
-- **S2 webhook lazy-init** (`wtc-w1-s2-webhook-lazy-init`, branch `loop-epic/s2-webhook-lazy-init-createwebhookhandle-1`). Webhook route no longer calls `createWebhookHandler` at module-eval; an unset `BARKPARK_WEBHOOK_SECRET` now serves a fail-CLOSED 503 instead of breaking `next build`. `validateConfig` throw + `{POST,GET}` handler shape verified in source. HIGH-FLIP: 2nd reviewer owed.
-- **S3 sitemap degrade + NaN guard** (`wtc-w1-s3-sitemap-degrade-nan`, final branch `loop-epic/s3-sitemap-degrade-to-static-on-upstream-2-r`). Both template sitemaps degrade-to-static on upstream failure and NaN-guard `_updatedAt`. **Reviewer fix:** the builder shipped without the required `create-barkpark-app` changeset (the changesets CI gate reds a public-package change without one); reviewer added it on the `-r` branch — integrate `-r`, not the original.
-- **S4 render robustness** (`wtc-w1-s4-render-date-page-hydrate`, branch `loop-epic/s4-render-robustness-formatdate-helper-f-3`). `formatDate` null-guard against "Invalid Date", floored fractional `?page`, `.catch()` on the portable-doc hydrate. Sound.
-
-**web/ demo:** honest ZERO across all four correctness classes, upheld — every candidate cited to a guard. The reach-weighting prediction (D2) held: all five real bugs were in the higher-reach scaffold tier where comment density drops.
-
-**Filed, not built:** `wtc-backlog-server-token-prod-guard` (BARKPARK_SERVER_TOKEN prod-guard — needs a decision) and `wtc-backlog-blog-pagination-true-total` (UX, out of correctness fence).
-
-**Ledger:** clean — every slice `in_progress` with all non-merge-gated criteria stamped with real evidence; the lead-owned "PR merged" row left open on each. The lead closes those on merge.
-
-**Grade A.** Honest cited-safe verdict delivered exactly as the wish demanded; one point off A+ for the self-contained tests pinning logic-shape rather than importing the shipped template modules (unavoidable; compensated by drift-diff + git-diff) and S3's missing changeset (reviewer-fixed).
-
-**Next wave:** merge wave 1 first (S1/S2/S4 originals + the S3 `-r` branch; give S1 + S2 an independent second reviewer before merge). Then the two backlog items become candidate slices once their decisions are made — the `BARKPARK_SERVER_TOKEN` prod-guard needs a flip-risk decision (throw on `NODE_ENV==='production' && unset`), and the blog pagination true-total wiring (`countDocs`→`totalPages`) is a UX slice.
+_(empty — the lead appends one line per merged wave)_
