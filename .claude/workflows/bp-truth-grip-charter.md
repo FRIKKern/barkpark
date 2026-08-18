@@ -1714,6 +1714,87 @@ bolted on afterward, which is worth nothing.
   `gh pr list --head` returns `[]` for every builder branch, because the PR is opened on the
   reviewer's `-r` branch.
 
+- **D130 — WAVE 12 IS RECONCILE-AND-VERIFY WITH EARNED BUILDS; the wish's stale-open premise is
+  REFUTED against live L1.** The wish predicted the 136 children were dominated by DONE-pending-merge
+  stale-open rows closeable by evidence. Measured against the live server (single 500-row page,
+  `count == docs == unique == 136`): **53 done / 40 considering (parked) / 34 open / 9 cancelled** —
+  NOT a stale-open batch. Exactly ONE row sits at N-1 (`tgw9-s3` at 11/12), and its residual is a
+  lead close-window stamp (owned by `tgw11-bl-root-criteria-stamp-needs-close-window`), NOT shippable
+  code: its lone unmet criterion (index 10) is a ledger-stamp act and is NOT merge-gated, so it FAILS
+  the batch-close hard filter and must NOT be batch-closed. Movement 1's product is therefore an
+  ACCURATE PARTITION plus a corrected premise, not a mass close-by-evidence. Two rows are genuinely
+  evidence-closeable by the lead (state proves it, not merged content): `tgw9-bl-close-superseded-pr-5754`
+  (PR #5754 is CLOSED, `mergedAt` null) and `tgw6-bl-primary-checkout-staged-grip-fork`
+  (`git diff --cached` = 0 staged grip files). Neither is a build.
+
+- **D131 — THE GRIP HOLDS; no recent merge silently defeated it, and every guard can still FAIL.**
+  Since wave 11 (2026-07-28) only ONE grip production module changed on `origin/main`: `provenance.mjs`
+  via foreign #11535 (dr-w34), which *tightens* the quotable-ancestry law (replaced a boolean
+  `differs_from_origin` with a five-rung ancestry grade; `ahead_of_main`/`diverged` are now refused)
+  and is mutation-fail-able (32/32, reds when the law is widened). `seal.mjs`, `screen.mjs`,
+  `level.mjs`, `record.mjs` carry NO post-07-28 commit. All six named guards RED under a reverting
+  mutation on current `origin/main` (level checkCeiling reds 3; screen screenSegment reds 24; record
+  admitFact reds 5 via level.test; seal classifyRun reds +2; adjudicate.stands and provenance.isQuotable
+  are THIN at 1 each). The seal is a runnable command that ships saying NO — but on live data it exits
+  **2 INFRA-FAULT**, not 1, because a stale ready-pool GHOST row (`akbr-feedback-2026-08-epic` listed
+  twice; the document store holds exactly ONE row) trips the global pool-integrity gate. That is a
+  server-side ready-pool dedup bug OUTSIDE this epic's fence; deduped, the predicate reads
+  `a=FAIL b=FAIL(blocking=35) b'=PASS c=PASS HOLDS=FALSE` — an honest NOT-YET, backlog remains.
+
+- **D132 — CROWN BUILD: the screen value-taking-global collision is a LIVE census-gate write-bypass,
+  and git is NOT the only vulnerable head.** `screenCommand` — the SOLE, non-injectable gate the live
+  census executes through (`census.mjs:22` "the safety bound is screenCommand and NOTHING ELSE") —
+  ADMITS a write whenever a value-consuming global's ARGUMENT is itself a read-verb name. Proven on
+  `origin/main`, executed into the census EXECUTED list: `git -C log push origin main`,
+  `go -C env run main.go` (arbitrary CODE EXECUTION), `npm --prefix ls install` (postinstall CODE
+  EXECUTION). Root cause: `firstNonFlag` (screen.mjs:345) skips flag TOKENS but not the VALUES that
+  value-consuming globals eat, so the value is misread as the sub-verb; `gitRule`/`goRule`/`npmRule`
+  all inherit it (`gh` survives incidentally via its two-level noun+verb scan). Fix target =
+  `screenCommand` (a per-head value-taking-globals normaliser feeding `firstNonFlag`) and it MUST
+  close git AND go AND npm — a git-only fix is incomplete. This is a danger-axis level-skip on the
+  grip's OWN executor: a command classified less dangerous than it is, and the executor acts on it.
+  HIGH-FLIP-RISK (security/correctness on the guard itself): independent mutation-proven review owed,
+  prove the guard can still FAIL, fail-closed. The gap is ORIGINAL to wave 3 (screen.mjs unchanged
+  since #5349), not a regression. `classifySafety`'s separate space-separated-long-global leak is
+  LATENT (census never calls it) and is NOT the target.
+
+- **D133 — ON-THESIS BUILD: `tgw3` bp-local subcommand overpromotion is a live provenance-axis
+  level-skip.** `deriveLevel` (level.mjs:506) routes every `bp` head to L2 unless `hasOnlyLoopbackTargets`,
+  so the four PURE-LOCAL `bp scaffy` verbs (validate, fmt, run, discover) — documented in
+  `scaffy_cmd.go` as "no network, no auth, no manifest — this file never touches the server", true
+  authority L3 — grade L2, and `checkCeiling("L2", derived)` returns `{ok:true}`. A non-admin author
+  citing `bp scaffy validate x.scaffy` as an L2 rerun stores a fact one authority level above its
+  ground, reachable through the ordinary rerun field. #6506 added mention-immunity for ssh/gh-api/git-show
+  only — NO scaffy carve-out. Fix = demote URL-free local `bp scaffy` local verbs to L3; remote verbs
+  (`pull`, `ls --remote`, defined in a SEPARATE file) stay L2 — do NOT blanket-demote the `bp` head or
+  you wrongly downgrade legitimate remote reads. HIGH-FLIP-RISK (reachability/correctness): the scope
+  boundary (local-only, not remote) is the whole judgment.
+
+- **D134 — READ-PATH BUILD: D66 is largely CLOSED, one injection-wiring gap survives.** `foldLedger`
+  composes `admitRecipe` on the read path (ledger.mjs:879-902 "the read path re-admits what the write
+  path admitted") — refuting a from-scratch D66 rebuild. Four of six forged-row defect classes reject
+  with zero injection; all six reject when `{now, screen}` are injected as the CLI write path does.
+  The residual: the actual read callers `census.mjs:990` (`loadLedgerRecipes`) and `backfill.mjs:247`
+  call `foldLedger(dir)` with NO bounds, so a future-dated (FUTURE-OBSERVED-AT) or outage-capable
+  (REFUSED-COMMAND) row still folds through the product read paths while the write path refuses both.
+  Fix = inject `now` (from `date -u`) + `screenCommand` into those two fold callers; mutation-provable
+  by reverting the injection and watching a future/outage row fold clean. Bounded, in-fence, on-thesis
+  (the read path admitting what the write path refuses).
+
+- **D135 — CONVERGENCE HARDENING: the grip suite's own two reds and the one untested rejection class.**
+  (a) `inloop-gate.test.mjs` tests 255/256 are RED on `origin/main` — stale prose-anchors from #6688
+  (NOT #11604): the heading reworded to "THE SAME PR CARRIES THIS RUN'S LEDGER ROWS" and the ban
+  backticked, so the literal greps return -1/0 while the guarded discipline is fully intact at
+  workflow line 757. The grip suite is NOT CI-gated, so this blocks no merge, but every builder
+  running the full suite sees 2 reds on a clean tree. A re-pin (tolerate the current wording by
+  pattern) is slice 0 so each builder's gate proof is unambiguous — test-file only, no guard
+  semantics. (b) `BAD-DEPS` is the single `admitFact` rejection class with NO fail-before-plant test
+  (proven by mutation: neutering the guard reds ZERO tests); a small direct `record.test.mjs` closes
+  it. Neither is a level-skip; both are honest hardening of an already-working guard. DEFERRED to
+  backlog, NOT built this wave: `tgw4-absence-veto-stops-at-the-rerun-seam` (a fail-CLOSED
+  consistency gap on the refused-command read contract — real and in-fence, but not the on-thesis
+  fail-open level-skip the wave prioritizes).
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -2862,3 +2943,30 @@ and `tgw4-absence-veto-stops-at-the-rerun-seam`, which `seal.mjs` now cites by f
 works around. **The epic still does not seal — but for the first time the reason is DERIVABLE BY
 COMMAND: `node tooling/grip/seal.mjs` exits 1 and prints `a=FAIL b=FAIL b'=PASS c=PASS blocking=34`.
 The predicate stopped being prose.**
+
+### Wave 2026-08-18 — wave 12, RECONCILE-AND-VERIFY + earned builds. Parent `truth-grip-epic`. Paper `truth-grip-wave-12-2026-08-18`. In flight.
+
+Three weeks after the last ledger touch, the survey RECONCILED current truth first. The wish's
+stale-open premise was refuted against live L1 (D130): 136 children partition 53 done / 40 considering
+/ 34 open / 9 cancelled — no batch to close. The grip HOLDS (D131): only `provenance.mjs` moved
+post-wave-11 (#11535, a tightening), and all six guards red under a reverting mutation on current
+`origin/main`. Seal exits 2 INFRA-FAULT on a server-side ready-pool ghost row, not a grip defect;
+deduped it reads `HOLDS=FALSE blocking=35`, an honest NOT-YET.
+
+The verify floor CLEARED genuine, in-fence, mutation-proven holes above the bar, so this is
+convergence AND earned builds, not a vacuous convergence:
+
+| Slice | Round | Model | Surface | What |
+|---|---|---|---|---|
+| `tgw12-s0-inloop-anchor-repin` | 1 | opus | tooling/grip/test | re-pin inloop-gate 255/256 to the #6688 wording by pattern; restore full-suite green (D135a) |
+| `tgw12-s1-screen-value-global-collision` | 1 | fable | tooling/grip | CROWN: `screenCommand` value-taking-globals normaliser — close git+go+npm on the LIVE census gate (D132). HIGH-FLIP-RISK: security guard |
+| `tgw12-s2-bp-local-overpromotion` | 1 | opus | tooling/grip | `tgw3`: demote URL-free local `bp scaffy` verbs L2→L3; remote verbs untouched (D133). HIGH-FLIP-RISK: reachability scope |
+| `tgw12-s3-foldledger-injection-gap` | 1 | opus | tooling/grip | inject `now`+`screenCommand` into census/backfill `foldLedger` callers so FUTURE-OBSERVED-AT / REFUSED-COMMAND fire on read (D134) |
+| `tgw12-s4-record-baddeps-test` | 1 | opus | tooling/grip/test | direct fail-before-plant `record.test.mjs` for the untested BAD-DEPS admitFact rejection class (D135b) |
+
+All five are round 1, file-disjoint (screen.mjs / level.mjs / {census,backfill}.mjs /
+test/inloop-gate.test.mjs / new test/record.test.mjs), inside the `tooling/grip/` fence — clear of the
+live Deploy-reliability (deploy/+scripts/) and Felix (api/) fences. Merge-gated live/prod proofs and
+the `tgw9-s3`/root close-window stamps are left for the lead. The two evidence-closeable reconcile
+rows (`tgw9-bl-close-superseded-pr-5754`, `tgw6-bl-primary-checkout-staged-grip-fork`) are the lead's
+close-by-evidence, not build slices.
