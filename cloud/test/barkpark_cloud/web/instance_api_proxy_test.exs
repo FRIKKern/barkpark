@@ -856,7 +856,9 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     end
 
     test "rotate across teams is the SAME 404, no upstream, no audit" do
-      assert_cross_team_404(:post, &"/v1/barkparks/#{&1}/api/webhooks/wh_9/rotate", mutating: true)
+      assert_cross_team_404(:post, &"/v1/barkparks/#{&1}/api/webhooks/wh_9/rotate",
+        mutating: true
+      )
     end
 
     test "deliveries (GET) across teams is the SAME 404, upstream never called" do
