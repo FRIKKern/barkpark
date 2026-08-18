@@ -382,6 +382,7 @@ defmodule Barkpark.Content.DedupWall do
       # real workspace_id scopes fail-closed to its own rows; a nil one
       # (flat/Default legacy-global publish) leaves the scan pooled, so
       # Default publishes keep comparing across the shared corpus.
+      # global-read: the dedup wall deliberately reads workspace-OR-global — global/nil-workspace docs are the shared Default back-compat corpus (proven benign-shared by the content-plane object-authz wave, governed by the pdf-bl-anon ruling), so a scoped publish dedups against its own rows PLUS the shared surface and a flat/Default publish dedups against that shared corpus; a fail-closed scope_to_workspace/3 would silently stop matching the shared global duplicates. This closes the cross-tenant leak (workspace-A no longer sees workspace-B's PRIVATE rows) while keeping the intended shared-corpus comparison.
       |> Scope.scope_to_workspace_or_global(
         Keyword.get(opts, :workspace_id),
         Keyword.get(opts, :project_id)
