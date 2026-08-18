@@ -291,7 +291,17 @@
     // ("--dataset …"), so the fence's CLI-voiced exclusion bars relaying it.
     // The sentence states permanence + the bind remedy; no transience verb, no
     // CLI incantation.
-    no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy."
+    no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.",
+    // cch-w75-s1 (charter D883) — the github connect 422 from connect_site_github
+    // (POST /v1/sites/:id/github/connect) when a repo was revoked from the GitHub
+    // App installation between the picker's list call and the connect submit. The
+    // old fallback "Please try again." was a measured TRANSIENCE LIE: the state is
+    // permanent until access is re-granted on GitHub, so retrying the connect can
+    // never succeed. The curated rung wins first in friendly(), so it covers the
+    // reader (submitSiteGithub -> friendly(r.data, "Please try again.")) without
+    // relaying any server reason. It names the state and the ONE remedy — regrant
+    // then reconnect — with no transience verb.
+    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect."
   };
   // cch-w35-s4 — THE ROLE SENTENCES, keyed by the server's own `required` label.
   // Auth.forbidden/2 (cloud/lib/barkpark_cloud/web/auth.ex) merges evidence AROUND

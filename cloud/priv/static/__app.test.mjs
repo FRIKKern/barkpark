@@ -21994,3 +21994,18 @@ test("cch-w72-bl: no_content_binding renders the permanent-until-bound truth —
   assert.equal(wired, copy, "the CLI-voiced wire detail must never displace the curated sentence");
   assert.equal(copy.indexOf("--dataset"), -1, "no CLI flag in console copy");
 });
+
+// (4) repo_not_in_installation — the D883 (cch-w75-s1) curated cure for a measured
+// transience lie. The connect 422 from connect_site_github fires when a repo was
+// revoked from the GitHub App installation between the picker's list call and the
+// connect submit — a permanent-until-regranted state that the bare fallback
+// "Please try again." painted as retryable. The curated rung wins first, so
+// submitSiteGithub's friendly(r.data, "Please try again.") renders the true copy.
+test("cch-w75-s1: repo_not_in_installation renders the permanent-until-regranted truth — no transience verb", () => {
+  const copy = hooks.friendly({ error: "repo_not_in_installation" }, "Please try again.");
+  assert.equal(copy,
+    "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.");
+  // The state is permanent until access is re-granted: a transience verb would be
+  // the exact lie this cure deletes.
+  assert.ok(!/try again|\bretry\b/i.test(copy), "no transience verb: " + copy);
+});
