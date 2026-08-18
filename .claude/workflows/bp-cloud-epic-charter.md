@@ -40,4 +40,21 @@ Backlog (filed, future waves):
 
 ## Wave log
 
-_(empty — Review appends the wave-1 debrief)_
+### Wave 2026-08-18 — wave 1 (grade A)
+
+**Landed (4 file-disjoint template-tier slices, all gates re-run green on the reviewer's final branches):**
+
+- **S1 crown — by-id 404→null** (`wtc-w1-s1-byid-notfound-swallow`, branch `loop-epic/s1-crown-swallow-barkparknotfounderror-n-0`). `getDocById` (blog) and `getDoc` (website) now swallow `BarkparkNotFoundError`→null so a by-id miss renders `not-found.tsx` (404) not `error.tsx` (500). Reviewer independently re-derived the crown: the thrower (`js/packages/nextjs/src/server/core.ts:211`) and the catcher both reference `BarkparkNotFoundError` from `@barkpark/core`, so `instanceof` matches in a deduped install — the SDK's own `client.doc` convention. HIGH-FLIP: an independent 2nd reviewer is owed before merge (manual lead step).
+- **S2 webhook lazy-init** (`wtc-w1-s2-webhook-lazy-init`, branch `loop-epic/s2-webhook-lazy-init-createwebhookhandle-1`). Webhook route no longer calls `createWebhookHandler` at module-eval; an unset `BARKPARK_WEBHOOK_SECRET` now serves a fail-CLOSED 503 instead of breaking `next build`. `validateConfig` throw + `{POST,GET}` handler shape verified in source. HIGH-FLIP: 2nd reviewer owed.
+- **S3 sitemap degrade + NaN guard** (`wtc-w1-s3-sitemap-degrade-nan`, final branch `loop-epic/s3-sitemap-degrade-to-static-on-upstream-2-r`). Both template sitemaps degrade-to-static on upstream failure and NaN-guard `_updatedAt`. **Reviewer fix:** the builder shipped without the required `create-barkpark-app` changeset (the changesets CI gate reds a public-package change without one); reviewer added it on the `-r` branch — integrate `-r`, not the original.
+- **S4 render robustness** (`wtc-w1-s4-render-date-page-hydrate`, branch `loop-epic/s4-render-robustness-formatdate-helper-f-3`). `formatDate` null-guard against "Invalid Date", floored fractional `?page`, `.catch()` on the portable-doc hydrate. Sound.
+
+**web/ demo:** honest ZERO across all four correctness classes, upheld — every candidate cited to a guard. The reach-weighting prediction (D2) held: all five real bugs were in the higher-reach scaffold tier where comment density drops.
+
+**Filed, not built:** `wtc-backlog-server-token-prod-guard` (BARKPARK_SERVER_TOKEN prod-guard — needs a decision) and `wtc-backlog-blog-pagination-true-total` (UX, out of correctness fence).
+
+**Ledger:** clean — every slice `in_progress` with all non-merge-gated criteria stamped with real evidence; the lead-owned "PR merged" row left open on each. The lead closes those on merge.
+
+**Grade A.** Honest cited-safe verdict delivered exactly as the wish demanded; one point off A+ for the self-contained tests pinning logic-shape rather than importing the shipped template modules (unavoidable; compensated by drift-diff + git-diff) and S3's missing changeset (reviewer-fixed).
+
+**Next wave:** merge wave 1 first (S1/S2/S4 originals + the S3 `-r` branch; give S1 + S2 an independent second reviewer before merge). Then the two backlog items become candidate slices once their decisions are made — the `BARKPARK_SERVER_TOKEN` prod-guard needs a flip-risk decision (throw on `NODE_ENV==='production' && unset`), and the blog pagination true-total wiring (`countDocs`→`totalPages`) is a UX slice.
