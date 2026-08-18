@@ -77,4 +77,18 @@ Sequenced, not parallel: both slices edit `share_controller.ex`. Slice 2 dispatc
 
 ## Wave log
 
-_(empty — the lead appends one line per wave on merge)_
+_(the lead appends one line per wave on merge)_
+
+### Wave 2026-08-18 — share-token admin confinement (resolve and rebuild)
+
+**Landed (round 1, PR #12519, branch `loop-epic/rebuild-the-share-edit-token-cross-tenan-0-r`, task `arpss-w8-share-token-membership-confinement`).** The three `/v1/shares/tokens` admin actions now authorize on `Tenancy.Auth.workspace_admin?/2` against the workspace the REQUEST names — mint against the SCOPE's workspace (403), list filtered to the caller's admin workspaces before `token_json/1` (200, foreign rows absent), revoke against the TARGET ROW's workspace (404, byte-identical to a missing row). Every id is `Repo.uuid_or_nil/1`-guarded and nil is a denial. `Barkpark.Auth.revoke_token/1` has zero diff. Built fresh on clean origin/main; **PR #12405 is superseded and its branch was never touched.**
+
+**The open question, settled by running not reading: branch (A).** The suite's admin actor is built by `Auth.create_token/4`, which falls back to the seeded Default Workspace and writes an admin-role membership there (asserted in the test: `membership_role == "admin"`), while the old tests minted/listed/revoked against a freshly created FOREIGN workspace. The old assertions encoded the insecure cross-tenant flow, so the confinement stands and exactly two assertions moved to fail-closed, each paired with a same-flow sibling inside the actor's own workspace that stays green. A behaviour change ships and is stated in both moduledocs, the commit body, the PR body and the wave Paper.
+
+**Both proofs mutation-verified, and re-derived independently by review (not re-read):** predicate → `authorize/3` reds the leak test (201 where 403 expected); role floor → `"owner"` reds the host-admin test (403 where 201 expected); authorizing before resolving reds the 422-ordering test. Recorded honest limit: the host-admin proof is permissive, cannot red under full reversion, and leaves an actor-vs-target confusion green — the two cross-tenant tests are what catch that (measured, 3 failures).
+
+**Gate on the final state, re-run in the reviewer's worktree:** the corrected seven-file set (D19) at **105 tests, 0 failures** (origin/main baseline 102); `pds_delete_receipt_differential_test` + `public_share_guard_test` 12/0; `mix format --check-formatted` clean; `scripts/docs-anchors-check.sh` PASS. Review added one no-behaviour commit recording the accepted 403-vs-422 existence signal on mint at the site (`ResolveWorkspace` already answers 404-unknown / 403-unreachable, so the signal is not new).
+
+**Stalled / deferred by design.** Round 2 (`arpss-w8-share-create-delete-confinement` — the forgeable mint precondition and the cross-tenant share DoS on `POST`/`DELETE /v1/shares`, D11/D12) was NOT built: both slices edit the same controller region, so it dispatches only after round 1 merges. Nothing failed.
+
+**Next wave takes, in order:** (1) merge PR #12519 after an independent second reviewer re-derives both proofs (HIGH-FLIP-RISK: tenancy predicate on a credential-revealing surface) and closes the lead-owned criterion 12; (2) dispatch round 2 immediately on the merged predicate; (3) then the filed residue — `arpss-w8-followup-untenanted-install-share-tokens` (an install with no Default Workspace now fails closed on all three actions; every migrated install is covered by `20260527111000_backfill_token_memberships`), the D15 superseding ruling on `arpss-share-controller-edit-token-authz` criteria 4 and 6, the reworked #12404, and `DELETE /v1/fleet/support-tokens/:token_id` (D18).
