@@ -2970,3 +2970,54 @@ live Deploy-reliability (deploy/+scripts/) and Felix (api/) fences. Merge-gated 
 the `tgw9-s3`/root close-window stamps are left for the lead. The two evidence-closeable reconcile
 rows (`tgw9-bl-close-superseded-pr-5754`, `tgw6-bl-primary-checkout-staged-grip-fork`) are the lead's
 close-by-evidence, not build slices.
+
+### Wave 2026-08-18 — wave 12 REVIEW: all five slices built, mutation-proven, gate-green. Grade A.
+
+All five round-1 slices came back clean; the reviewer changed NO code — the builders shipped
+correct, mutation-proven work first pass. Every slice's gate re-ran green on its own branch and every
+HIGH-FLIP judgment was independently re-derived:
+
+- **s0 (`tgw12-s0-inloop-anchor-repin`)** — the re-pin anchors to the live workflow wording
+  (`THE SAME PR CARRIES THIS RUN'S LEDGER ROWS` at line 757; the `never \`git add -A\`` ban at 746+757).
+  28/28. The loosened regex `/never \\?\`?git add -A/g` still pins count===2 and still requires
+  `git add -A`, so the guard's tripwire survives. No production touch.
+- **s1 (`tgw12-s1-screen-value-global-collision`, CROWN, HIGH-FLIP security)** — `dropValueGlobals`
+  is one shared normaliser (not five hand-copies), pre-verb-only so `git branch -C old new` still
+  reaches the write-flag guard. Independently mutation-proven: neutering all three call sites to
+  identity reds 5 screen.test cases; restore → 61/61. git+go+npm collisions all refuse; the four
+  falsely-refused `git -C path read` rows correctly widen to admit. RESIDUAL for the lead: npm's
+  config long-tail (`--registry`, `--tag`, `--otp` …) is NOT in `NPM_VALUE_GLOBALS`, so
+  `npm --registry ls install` still admits — a real but narrower same-shape hole, documented by the
+  builder and worth a follow-up; and the shared `verbRule` pnpm/docker variant carries the identical
+  gap (filed `task-8b3de757996336f9`). An independent second security reviewer is still owed before
+  merge.
+- **s2 (`tgw12-s2-bp-local-overpromotion`, HIGH-FLIP reachability)** — the local/remote boundary was
+  re-derived from source, not the builder's prose: `scaffy_cmd.go`'s own header lists FIVE pure-local
+  verbs (validate, fmt, run, remove, discover) — so the builder's inclusion of `remove` beyond the
+  brief's four is CORRECT, not scope creep; `pull`/`ls --remote` live in `scaffy_remote_cmd.go` and
+  hit `<server>/v1/data/query`, staying L2. Demotion requires local-verb AND no URL; a URL-bearing
+  local verb falls to L2 (the safe, non-demoting direction). Mutation reds 4 level.test cases;
+  restore → 80/80.
+- **s3 (`tgw12-s3-foldledger-injection-gap`)** — census `shellNow()` is byte-identical to
+  ledger.mjs's write-path `shellNow()`; backfill reuses its existing one (hoisted). `foldLedger`
+  accepts `{now, screen}`. Mutation (revert census injection) reds test 1; restore → 3/3. Note for
+  the lead: this shifts the SHIPPED real-corpus census output (73 legacy REFUSED-COMMAND rows leave
+  the denominator into `unreadable[]`) — intended, but confirm the slow `census.test.mjs` on merge.
+- **s4 (`tgw12-s4-record-baddeps-test`)** — direct fail-before-plant for the BAD-DEPS `admitFact`
+  class; matches the real return shape (`rejections[].reason`, `fact.deps` defaults `[]`). Mutation
+  (`if (false)`) reds the 3 negative cases; restore → 6/6. Test-only.
+
+Cross-slice: file-disjoint, no duplicated helpers, no conflicting vocabulary; s3's fold will consume
+s1's tightened `screenCommand` once both merge — coherent, not conflicting.
+
+Ledger audit: CLEAN. All five slice tasks `in_progress` with every non-merge-gated criterion stamped
+with real evidence and exactly one merge-gated criterion left open for the lead. No ledger fixes.
+
+**The grip HOLDS and is now TIGHTER on its own executor.** This wave closed a live census-gate
+write-bypass (s1), an on-thesis provenance-axis level-skip (s2), and a read-path injection residual
+(s3), plus restored full-suite green (s0) and closed the last untested admitFact rejection class (s4)
+— all mutation-proven, all in-fence. Next wave: the lead merges round 1 (all file-disjoint, any
+order); then the two evidence-closeable reconcile rows and the `tgw9-s3`/root close-window stamps are
+pure lead close-by-evidence, no build. The named backlog residue (`tgw12-s1` npm long-tail +
+`task-8b3de757996336f9` pnpm/docker `verbRule`, and `tgw4-absence-veto-stops-at-the-rerun-seam`) is
+the genuinely-unbuilt frontier for a future wave.
