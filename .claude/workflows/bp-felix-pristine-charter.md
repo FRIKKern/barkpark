@@ -2960,6 +2960,32 @@ their non-merge rows via `seal_one.py` post-merge; close `felix-w27-s6-12041-gol
 
 ## Wave log
 
+### Wave 2026-08-18 — Wave 30 BUILT + REVIEWED, grade A. "The Unswept Frontier Held; One Seam Hardened."
+
+The one round-1 build slice — `felix-w30-s1-redaction-global-schema-fallback` — landed exactly as
+decided and needed NO reviewer fix: the diff was already minimal, formatted, and pinned by a five-row
+test. `query_controller.fetch_schema/3` now mirrors `content/papers.ex value_schema/3` — on a scoped
+`get_schema` miss it retries with `:workspace_id`/`:project_id` stripped and accepts ONLY a
+`workspace_id: nil` global schema, so a globally-declared NON-encrypted private field is redacted at the
+render site instead of rendering PUBLIC to a non-admin reader token. Gate 20/20 green on the reviewer's
+final state; fail-before RE-PROVEN live: reverting to nil-on-miss reds EXACTLY Scenario B (ssn=LEAK-B
+leaks) and leaves the other four rows (admin-sees, anon-404, co-resident-redacts, schemaless-public)
+green. HIGH-FLIP tenant-safety INDEPENDENTLY re-derived from source: `get_schema` under a set workspace
+routes through `scope_to_workspace/3` (workspace-only, fail-closed), so a global schema genuinely
+misses; the stripped fallback calls `scope_to_workspace_global`, which adds NO filter and can surface a
+FOREIGN tenant's row — the `%{workspace_id: nil}` guard is therefore genuinely load-bearing (rejects the
+foreign row, a mis-sorted one yields nil + MORE redaction, never a leak). Confirmed correct; a genuinely
+independent SECOND human reviewer of that tenant-safety is still owed PRE-MERGE (manual lead step).
+Latent today (grep of lib/ found no shipped schema declaring a non-encrypted private field), framed
+honestly as scar-class hardening, not a live exploit. Ledger spotless: slice `in_progress`, criteria 0-4
+met + stamped as-worked, criterion 5 (merge-gated) left for the lead. Decide's two closes landed
+(`felix-w29-bl-asset-schema-nil-redaction` done/refuted, `felix-w27-s6-12041-golden-contingency` done).
+#12132 stays OPEN so `felix-w27-bl-media-dataset-swallow-mirror` was NOT closed (wish step 1 does not
+fire; the lead lands #12132 then closes it). Backlog filed: `felix-w30-bl-envelope-caller-class-audit`.
+Next wave: after the lead merges #12147 + the slice PR, take that backlog — the other Envelope.render
+callers each owe their OWN reachability + mutation proof (most scoped-to-own-doc, expected already-good).
+Wave Paper: `felix-pristine-wave-30-2026-08-18`. Grade: A.
+
 ### Wave 2026-08-18 — Wave 30 DECIDED (building). "The Unswept Frontier Holds; One Seam Diverges."
 
 Ratified D202–D207. The two genuinely-unswept surfaces — the field-visibility redaction scar-class
