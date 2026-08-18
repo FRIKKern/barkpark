@@ -147,7 +147,7 @@ defmodule Barkpark.Search.Intelligence do
     suggest_opts = [min_search_count: min_count]
 
     %{
-      recent: recent_queries(surface, scope, actor_key, prefix, limit),
+      recent: recent_queries(surface, scope, actor_key, prefix, limit, workspace_id),
       popular: popular_queries(surface, scope, prefix, limit, suggest_opts, workspace_id),
       nohits: nohits_queries(surface, scope, prefix, min(limit, 5), workspace_id)
     }
@@ -672,7 +672,13 @@ defmodule Barkpark.Search.Intelligence do
   defp scope_ws(queryable, workspace_id),
     do: from(x in queryable, where: x.workspace_id == ^workspace_id)
 
-  defp recent_queries(surface, scope, actor_key, prefix, limit) do
+  # Anonymous actors collapse to ONE globally-shared `actor_key == "anon"`, so an
+  # anon recent-queries read would union every anonymous session/tenant. Fail
+  # closed: anon actors get no recent history at all (popular/nohits still serve
+  # them). Non-anon callers (client:<x>, token:<id>, reader) keep their recents.
+  defp recent_queries(_surface, _scope, "anon", _prefix, _limit, _workspace_id), do: []
+
+  defp recent_queries(surface, scope, actor_key, prefix, limit, workspace_id) do
     base =
       from(e in Event,
         where: e.surface == ^surface and e.scope == ^scope and e.actor_key == ^actor_key,
@@ -682,6 +688,7 @@ defmodule Barkpark.Search.Intelligence do
       |> accepted_events()
 
     base
+    |> scope_ws(workspace_id)
     |> maybe_prefix(prefix)
     |> Repo.all()
     |> dedupe_recent(limit)
