@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 900tok -->
+<!-- doc-tier: cold | canonical-for: onb-w6-release-cache-criteria-vs-d38 | budget: 900tok -->
 # onb-w6: release-cache criteria vs D38 — re-derivation recipe
 
 RULING: the task's acceptance_criteria are ALREADY D38-aligned. No criterion
