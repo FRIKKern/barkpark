@@ -72,6 +72,20 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
   end
 
   setup %{conn: conn} do
+    # ── Wave-26 leaked-session pollution guard (felix-w27-s6) ─────────────────
+    # The StudioChat Recorder is an app-tree GenServer (RuntimeSupervisor) that
+    # can outlive a prior test's sandbox owner and COMMIT chat_sessions rows that
+    # escape rollback. Such a leaked row renders as an EXTRA sidebar session card,
+    # so the scoped SIDEBAR byte-lock below (D11) diverges from its pinned golden
+    # — NOT a render change (the golden bytes are unmoved), just suite pollution.
+    # At setup — before this test seeds its own sessions — every visible
+    # chat_sessions row is such a leak, so purge them (restrict-FK children first,
+    # then the sessions, which cascades messages / telemetry / leases). Rolls back
+    # with the test transaction; test-infra hygiene only, ZERO prod code touched.
+    Barkpark.Repo.query!("DELETE FROM chat_runtime_usage_receipts")
+    Barkpark.Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
+    Barkpark.Repo.delete_all(Barkpark.StudioChat.Session)
+
     {:ok, _} =
       Auth.create_token(@admin_token, "chat golden admin", "production", [
         "read",
