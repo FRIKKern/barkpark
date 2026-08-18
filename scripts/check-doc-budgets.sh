@@ -23,7 +23,13 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve THIS script's own absolute path BEFORE the cd below. --selftest
+# re-invokes the real gate ~14 times as `bash "$SELF"`, and a relative $0
+# (`cd scripts && bash check-doc-budgets.sh --selftest`) stops resolving the
+# moment we cd to REPO_ROOT — every arm then dies with "No such file or
+# directory", a FALSE RED on a legitimate invocation.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(dirname "$(dirname "$SELF")")"
 cd "$REPO_ROOT"
 
 # Overridable so --selftest can point the onramp arm at a temp tree and prove
@@ -229,10 +235,10 @@ if [ "$MODE" = selftest ]; then
   fail_selftest() { echo "check-doc-budgets --selftest: FAILED — $*"; exit 1; }
 
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
-  bash "$0" --regen-onramp-golden >/dev/null
+  bash "$SELF" --regen-onramp-golden >/dev/null
 
   # (0) pristine, pinned tree passes
-  bash "$0" --span-only >/dev/null 2>&1 || fail_selftest "a pristine pinned tree did not pass"
+  bash "$SELF" --span-only >/dev/null 2>&1 || fail_selftest "a pristine pinned tree did not pass"
 
   # (a) three plausible note lines INSIDE the span, no marker moved → must RED
   awk '{ print }
@@ -242,20 +248,20 @@ if [ "$MODE" = selftest ]; then
          print "> Codex note: see the internal runbook before editing this block.";
          planted = 1
        }' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
-  if bash "$0" --span-only >/dev/null 2>&1; then
+  if bash "$SELF" --span-only >/dev/null 2>&1; then
     fail_selftest "prose inserted INSIDE the onramp span did NOT red the gate"
   fi
 
   # (b) the SAME plant, legitimately re-pinned → must PASS (the reviewed path)
-  bash "$0" --regen-onramp-golden >/dev/null
-  bash "$0" --span-only >/dev/null 2>&1 || fail_selftest "a re-pinned (regenerated golden) span did NOT pass"
+  bash "$SELF" --regen-onramp-golden >/dev/null
+  bash "$SELF" --span-only >/dev/null 2>&1 || fail_selftest "a re-pinned (regenerated golden) span did NOT pass"
 
   # (c) the end marker relocated to EOF, swallowing the rest of the doc → RED
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
-  bash "$0" --regen-onramp-golden >/dev/null
+  bash "$SELF" --regen-onramp-golden >/dev/null
   grep -v -x -- '<!-- barkpark:onramp:end -->' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
   printf '%s\n' '<!-- barkpark:onramp:end -->' >> "$DOC_BUDGETS_ONRAMP_DOC"
-  if bash "$0" --span-only >/dev/null 2>&1; then
+  if bash "$SELF" --span-only >/dev/null 2>&1; then
     fail_selftest "relocating the end marker to EOF did NOT red the gate"
   fi
 
@@ -268,30 +274,30 @@ if [ "$MODE" = selftest ]; then
            print "filler filler filler filler filler filler filler filler";
          planted = 1
        }' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
-  bash "$0" --regen-onramp-golden >/dev/null
-  if bash "$0" --span-only >/dev/null 2>&1; then
+  bash "$SELF" --regen-onramp-golden >/dev/null
+  if bash "$SELF" --span-only >/dev/null 2>&1; then
     fail_selftest "a golden larger than the span cap did NOT red the gate"
   fi
 
   # (e) the golden deleted → RED (the pin cannot be disarmed by removing it)
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
-  bash "$0" --regen-onramp-golden >/dev/null
+  bash "$SELF" --regen-onramp-golden >/dev/null
   rm -f "$DOC_BUDGETS_ONRAMP_GOLDEN"
-  if bash "$0" --span-only >/dev/null 2>&1; then
+  if bash "$SELF" --span-only >/dev/null 2>&1; then
     fail_selftest "a MISSING golden did NOT red the gate"
   fi
-  bash "$0" --regen-onramp-golden >/dev/null
+  bash "$SELF" --regen-onramp-golden >/dev/null
 
   # (f) both markers removed → RED (pair check, unchanged behaviour)
   grep -v -x -e '<!-- barkpark:onramp:begin -->' -e '<!-- barkpark:onramp:end -->' \
     "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
-  if bash "$0" --span-only >/dev/null 2>&1; then
+  if bash "$SELF" --span-only >/dev/null 2>&1; then
     fail_selftest "a doc with ZERO onramp markers did NOT red the gate"
   fi
 
   # (g) an unknown argument exits 2, not 0
   rc=0
-  bash "$0" --zzz-nonsense >/dev/null 2>&1 || rc=$?
+  bash "$SELF" --zzz-nonsense >/dev/null 2>&1 || rc=$?
   [ "$rc" -eq 2 ] || fail_selftest "an unknown argument exited $rc, expected 2"
 
   # (h) THE OVERRIDE CANNOT BE LOOSENED. Re-run arm (d)'s over-cap span with the
@@ -304,14 +310,14 @@ if [ "$MODE" = selftest ]; then
            print "filler filler filler filler filler filler filler filler";
          planted = 1
        }' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
-  bash "$0" --regen-onramp-golden >/dev/null
-  if DOC_BUDGETS_ONRAMP_SPAN_CAP=99999999 bash "$0" --span-only >/dev/null 2>&1; then
+  bash "$SELF" --regen-onramp-golden >/dev/null
+  if DOC_BUDGETS_ONRAMP_SPAN_CAP=99999999 bash "$SELF" --span-only >/dev/null 2>&1; then
     fail_selftest "DOC_BUDGETS_ONRAMP_SPAN_CAP raised the span cap — the clamp is gone"
   fi
   # …and it can still TIGHTEN, so a harness can prove the cap bites.
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
-  bash "$0" --regen-onramp-golden >/dev/null
-  if DOC_BUDGETS_ONRAMP_SPAN_CAP=10 bash "$0" --span-only >/dev/null 2>&1; then
+  bash "$SELF" --regen-onramp-golden >/dev/null
+  if DOC_BUDGETS_ONRAMP_SPAN_CAP=10 bash "$SELF" --span-only >/dev/null 2>&1; then
     fail_selftest "a LOWERED span cap did not red a span above it"
   fi
 
@@ -322,7 +328,7 @@ if [ "$MODE" = selftest ]; then
   #     early and pipefail then reports the WRITER's SIGPIPE as a failure — the
   #     exit-code trap this wave audits for.)
   env_out=""
-  DOC_BUDGETS_SPAN_ONLY=1 bash "$0" >"$TMP/env-run.out" 2>&1 \
+  DOC_BUDGETS_SPAN_ONLY=1 bash "$SELF" >"$TMP/env-run.out" 2>&1 \
     || fail_selftest "the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set"
   env_out="$(cat "$TMP/env-run.out")"
   case "$env_out" in
