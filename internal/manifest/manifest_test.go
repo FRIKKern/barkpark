@@ -264,11 +264,11 @@ func TestParseRejectsUnsafeNounVerbNames(t *testing.T) {
 		`x";touch /tmp/pwn;#`,
 		`$(touch /tmp/pwn)`,
 		`a'b`,
-		`a b`,           // whitespace splits the shell word list
-		`a;rm -rf /`,    // command separator
-		`a$IFS`,         // shell variable
-		`Doc`,           // uppercase is outside the documented charset
-		`-lead`,         // a leading hyphen would read as a flag / option
+		`a b`,        // whitespace splits the shell word list
+		`a;rm -rf /`, // command separator
+		`a$IFS`,      // shell variable
+		`Doc`,        // uppercase is outside the documented charset
+		`-lead`,      // a leading hyphen would read as a flag / option
 	}
 
 	for _, name := range hostileNames {
