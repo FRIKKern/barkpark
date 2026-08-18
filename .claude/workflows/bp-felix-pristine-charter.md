@@ -2619,6 +2619,118 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
 6. **#12041 golden contingency** — `felix-w27-s6-12041-golden-contingency` (opus, small, round 2 —
    lead dispatches on the re-run verdict; AFTER workflow 32068069994's re-run reports).
 
+## Wave 30 Decisions (2026-08-18) — THE UNSWEPT FRONTIER HOLDS; ONE SEAM DIVERGES
+
+Wave 30 swept the two genuinely-unswept surfaces — the field-visibility redaction scar-class across
+all Envelope.render callers, and the api/lib files added since the audit baseline — expecting
+already-good, and got it everywhere but ONE seam. Six verifiers RAN (deps borrowed, CC=clang, worktree
+byte-identical to origin/main). All premises smoked CLEAN: papers.ex value_schema/3's global fallback
+and query_controller fetch_schema's nil-on-miss both live on origin/main; query_controller
+collision-free. Wave Paper: `felix-pristine-wave-30-2026-08-18`.
+
+- **D202 — THE ENVELOPE SCAR-CLASS COLLAPSES TO ONE SHARED INVARIANT; THE CENSUS IS ALREADY-GOOD WITH
+  EXECUTED EVIDENCE.** The 26 Envelope.render caller sites reduce to a single schema-resolution
+  invariant, not 26 independent risks. Verify V1 RAN it: the redaction chokepoint (envelope.ex:172-195)
+  runs two independent guards with DIFFERENT postures — a nil CALLER fails closed (anonymous,
+  public-only), but a nil SCHEMA is LENIENT (drops only encrypted ciphertext; an undeclared
+  non-encrypted field renders public by legacy parity). Schema is therefore the sole leak vector. For
+  anything a non-admin can author, schema and doc are CO-RESIDENT — `WriteScope.put_scope_attrs`
+  strips client scope keys and forces the server scope onto BOTH — so the private field is redacted
+  (Scenario A GREEN: `refute Map.has_key?(doc, "ssn")` passed). V2 refuted the encryption backstop:
+  `encrypted: true` is the ONLY predicate that triggers FieldCipher (encryption.ex:185), so a
+  `private: true` field WITHOUT encryption persists PLAINTEXT — the class is NOT closed by
+  construction, it rests wholly on this invariant. Census verdict: already-good with a mutation-recorded
+  RUN, not an inspection note.
+
+- **D203 — THE ONE BUILD SLICE: THE REDACTION PATH FALLS BACK TO THE GLOBAL SCHEMA (V1 SCENARIO B, A
+  LIVE RED).** The invariant is NOT structural — a nil-workspace GLOBAL schema breaks it, and V1 proved
+  it with a live leak. `query_controller.fetch_schema/3` resolves the redaction schema under the
+  request's workspace-only scope (`Content.get_schema(type, dataset, scope_opts(conn))`, which excludes
+  nil-workspace rows when a workspace is present). A global schema declaring a non-encrypted private
+  field therefore MISSES at the render site and the field renders PUBLIC to a non-admin READER TOKEN:
+  probe diagnostics `global get_schema([]) => {:ok, "vprobe_b", workspace: nil}`, `workspace get_schema
+  => {:error, :not_found}`, `reader-token query status => 200`, `ssn value => "LEAK-B"`, anonymous 404.
+  This is inconsistent with the rest of the codebase: `content/papers.ex value_schema/3` (:906-917)
+  DELIBERATELY retries `get_schema` with `:workspace_id`/`:project_id` stripped and accepts a
+  `%SchemaDefinition{workspace_id: nil}` global schema; the redaction path is the LONE schema-resolution
+  site missing this fallback. FIX (mirror value_schema/3): on the scoped miss, retry with scope stripped
+  and accept ONLY a `workspace_id: nil` schema — anything else → nil. Fail-closed (redacts MORE, never
+  less); does NOT touch `schema_public?`/anonymous gating; does NOT change schemaless=public parity.
+  LATENT today (grep of lib/ found zero shipped schema declaring a non-encrypted private field; per-field
+  visibility is user-authored and co-resident), so this is a scar-class hardening with a live fail-before
+  proof — NOT a live exploit; framed honestly on the record. Round 1, opus (Fable capped to Aug 21).
+  HIGH-FLIP-RISK: the fallback must accept the GLOBAL schema ONLY — the stripped-scope query reads
+  cross-tenant rows, so the `workspace_id: nil` guard is load-bearing against substituting a FOREIGN
+  tenant's schema; a genuinely independent second reviewer of that tenant-safety is owed PRE-MERGE
+  (manual lead dispatch).
+
+- **D204 — THE ASSIGNMENT'S asset_response MUTATION IS WRONG; `felix-w29-bl-asset-schema-nil-redaction`
+  CLOSED ALREADY-GOOD/REFUTED ON THE CORRECT EXEMPLAR (DONE THIS WAVE).** Verify V3 RAN it: reverting
+  `caller_context(_)` to nil STAYS GREEN (nil also fails closed at envelope.ex:154-155, the same
+  non-admin arm `anonymous()` produces); only the `:internal` sentinel reds (2 tests/1 failure — the
+  encrypted `secret` ciphertext leaks). The test's private field is FieldCipher-ENCRYPTED, dropped
+  schema-INDEPENDENTLY, so a nil mutation cannot redden it and a builder handed the literal instruction
+  would draw the wrong conclusion. The `asset_schema` nil-swallow arm is refuted separately by own-tenant
+  resolution (asset_response.ex:119 resolves `get_schema` scoped to the DOC's own workspace_id/project_id
+  — a miss means the own tenant declares no fields to leak) plus the encrypted-arm guard. Closed
+  already-good on THIS evidence.
+
+- **D205 — EVERY OTHER NAMED CORNER IS ALREADY-GOOD WITH EVIDENCE — RE-SWEEPING IS THE CHURN THE WISH
+  BANS.** V4: `scope_opts` can NEVER emit `workspace_id: nil` (`put_scope/3` drops nil and non-`%{id:}`
+  values); every one of the 4 request-reachable `related/2` mounts sets `current_workspace`, so
+  related.ex's nil-workspace global-read bridge (:172) is unreachable from any route — 8/8 green,
+  already-good. V6: `sites/prebuilt_artifact.ex`'s 8 typed resource caps are ENFORCED by error code
+  (E_COMPRESSION_RATIO / E_TOO_MANY_ENTRIES / E_ENTRY_TOO_LARGE + pax-block budget + caps/0 pinned) —
+  50 tests 0 failures on main, files byte-identical. Surveys confirmed `sites/serving_memory.ex`,
+  `tasks/{fleet,stage,transitions}.ex` (fail-closed legality table + CAS; no CastError — the
+  controller resolves by doc_id STRING then passes the loaded UUID), the peek/snapshot field-visibility
+  family (board_live peek + card_from_broadcast already sealed), and the BPML kernel (fail-closed
+  parser + rescued printer + token-gated parse seams + replay-proven diff) all already-good. BPML is
+  DOUBLE-FENCED anyway: PE-parked AND open PR #11770 on bpml.ex/parser/printer (only diff.ex clean).
+  Record, build nothing.
+
+- **D206 — THE LEDGER FLOOR, PAID.** #12132 (media mirror)'s owed INDEPENDENT SECOND REVIEW is
+  DISCHARGED — review2-12132 recorded APPROVE with live legit-nil probes (PROBE-A deletes all
+  Dataset+Project rows so `default_project_id()` genuinely returns nil, upload still succeeds with
+  `dataset_id: nil`) AND a mutation-killed defect arm (reverting the resolver error clauses to bare
+  `_ -> {:ok, nil}` reds the fail-before), plus the 503 else-trap ordering confirmed correct. #12132 is
+  OPEN/BLOCKED/MERGEABLE, one green Elixir gate from landing (the three FAILUREs — Green arm, Compose
+  smoke, Sobelow — are all non-required); it lands by the LEAD. The wish's step-1 close does NOT fire —
+  `felix-w27-bl-media-dataset-swallow-mirror` stays in_progress until the PR merges.
+  `felix-w27-s6-12041-golden-contingency` CLOSED this wave (D198's merge-gates satisfied: #12041 merged
+  71f06d6, felix-w19 done — wave 29 decided it closeable but left it open; wave 30 discharged the close
+  on epoch 9 with the lead `--merge-gated` override). The four wave-28 rows are sealed post-merge — no
+  action.
+
+- **D207 — THE ROSTER: ONE OPUS BUILD SLICE, THE REST VERIFY-RECORDED + LEDGER.** One round-1 build
+  slice — `felix-w30-s1-redaction-global-schema-fallback` (opus, HIGH-FLIP) — file-disjoint
+  (`query_controller.ex` + one new test `envelope_global_schema_redaction_test.exs`). No other builder:
+  the already-good census is recorded from the six verifier RUNs, the two ledger closes are done
+  (D204, D206), and the class-completeness follow-up is filed to backlog
+  (`felix-w30-bl-envelope-caller-class-audit` — the other Envelope callers each owe their OWN
+  reachability + mutation proof before a fallback is added; most resolve scoped-to-own-doc and are
+  expected already-good). Fences (per-file disjoint): console w76 (cloud/), Connectors w36
+  (cloud/ + connectors/), PE (api/ content publish-path, parked) — the slice touches none. Elixir gate
+  green from the builder's own worktree; the merge-gated criterion AND the owed independent second
+  review of the fallback's tenant-safety are left for the lead.
+
+### Wave 30 roadmap (1 build slice, round 1; the rest is census + ledger, already discharged)
+
+1. **redaction global-schema fallback** — `felix-w30-s1-redaction-global-schema-fallback` (**opus**,
+   medium, round 1). Gate: `CC=/usr/bin/clang MIX_ENV=test mix test
+   test/barkpark_web/controllers/envelope_global_schema_redaction_test.exs
+   test/barkpark_web/controllers/ws_b_visibility_test.exs
+   test/barkpark_web/integration/preview_scope_leak_test.exs`; reverting `fetch_schema` to nil-on-miss
+   reds the new test (Scenario B leaks). HIGH-FLIP-RISK: the `workspace_id: nil` fallback guard —
+   independent second review of tenant-safety owed PRE-MERGE.
+
+_No-builder work this wave (lead):_ land #12132 (Elixir gate green) then close
+`felix-w27-bl-media-dataset-swallow-mirror`; dispatch the owed independent second review of s1's
+fallback before merge; close s1's merge-gated criterion. Already discharged by Decide:
+`felix-w27-s6-12041-golden-contingency` closed (D206), `felix-w29-bl-asset-schema-nil-redaction` closed
+already-good (D204). Backlog: `felix-w30-bl-envelope-caller-class-audit`; still open — door-census-deflake
+(unbuilt), checkout-tighten-adjudication (human-gated), reparent-nonfelix-rows.
+
 ## Wave 29 Decisions (2026-08-18) — THE LOST MIRROR, REBUILT ON OPUS
 
 Wave 29's job is to restore TRUST after a Fable-degraded wave 28: rebuild the one genuinely-lost,
@@ -2847,6 +2959,34 @@ their non-merge rows via `seal_one.py` post-merge; close `felix-w27-s6-12041-gol
    medium). Gate: applier_test.exs green + classification-revert fail-before; no reaper.
 
 ## Wave log
+
+### Wave 2026-08-18 — Wave 30 DECIDED (building). "The Unswept Frontier Holds; One Seam Diverges."
+
+Ratified D202–D207. The two genuinely-unswept surfaces — the field-visibility redaction scar-class
+and the post-baseline api/lib file frontier — swept already-good EVERYWHERE but one seam. All premises
+smoked CLEAN on origin/main (papers.ex value_schema/3 global fallback at :906-917; query_controller
+fetch_schema nil-on-miss; query_controller collision-free). Six verifiers RAN, not read: **V1 the
+crux** — the 26 Envelope.render callers collapse to ONE shared invariant (schema is the sole leak
+vector; a nil caller fails closed, a nil schema is lenient), and for non-admin-authored content
+schema+doc are co-resident so the field is redacted (Scenario A green) — BUT a nil-workspace GLOBAL
+schema breaks it: Scenario B is a LIVE RED (`reader-token query status => 200`, `ssn value =>
+"LEAK-B"`, anon 404), because the redaction path is the LONE schema-resolution site that ignores the
+global fallback papers.ex value_schema/3 already does. V2 refuted the encryption backstop (private
+=/=> encrypted; the class rests wholly on V1). V3 confirmed the assignment's asset_response mutation is
+WRONG (nil stays green, only `:internal` reds — the field is encrypted). V4 proved `scope_opts` can
+never emit `workspace_id: nil` (related.ex already-good, 8/8). V6 proved prebuilt_artifact's 8 caps
+enforced by error code (50/0). **One Opus round-1 build slice: the redaction global-schema fallback**
+(`felix-w30-s1-redaction-global-schema-fallback`, HIGH-FLIP: the `workspace_id: nil` guard against
+foreign-tenant substitution, independent 2nd review owed pre-merge) — mirror value_schema/3 so a
+globally-declared non-encrypted private field is redacted; latent today (no shipped schema declares
+one), framed honestly as scar-class hardening with a live fail-before. No other builder: the
+already-good census is verifier-recorded, and TWO ledger closes were discharged by Decide —
+`felix-w27-s6-12041-golden-contingency` (D206, merge-gates satisfied) and
+`felix-w29-bl-asset-schema-nil-redaction` (D204, already-good/REFUTED on the correct `:internal`
+exemplar). #12132's owed independent second review is DISCHARGED (APPROVE); it lands by the lead, and
+the wish's step-1 mirror close does NOT fire until it merges. Backlog:
+`felix-w30-bl-envelope-caller-class-audit`. Wave Paper: `felix-pristine-wave-30-2026-08-18`. Grade:
+pending build+review.
 
 ### Wave 2026-08-18 — Wave 29 BUILT + REVIEWED, grade A. "The Lost Mirror, Rebuilt on Opus — and it held."
 
