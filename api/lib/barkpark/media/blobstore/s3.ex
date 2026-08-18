@@ -381,11 +381,12 @@ defmodule Barkpark.Media.Blobstore.S3 do
     # `receive_timeout: @receive_timeout` — CORRECTED FAILURE MODE: without an
     # explicit timeout every verb inherited Req's 15s default, and a bucket that
     # goes SILENT mid-transfer (an idle socket, not a slow one — receive_timeout
-    # is per-receive) would stall the request. The read path is BUFFERED: with
-    # download/2 matching the whole body on status 200, writing a `.part` tmp
-    # file, and an ATOMIC rename, a stall yields an error tuple that falls to the
-    # `other ->` clause -> {:error, :storage_unavailable} — a spurious 503 on a
-    # HEALTHY transfer, NEVER a truncated or torn cache write. The 60s ceiling is
+    # is per-receive) would stall the request. The read path streams through
+    # download_collector/0 (the @max_download_bytes cap) but still writes a
+    # `.part` tmp file and ATOMIC-renames, so a stall yields an error tuple that
+    # falls to the `other ->` clause -> {:error, :storage_unavailable} — a
+    # spurious 503 on a HEALTHY transfer, NEVER a truncated or torn cache
+    # write. The 60s ceiling is
     # the guard: a genuinely-hung bucket fails LOUD and bounded instead of
     # pinning the request on the silent default.
     opts =
