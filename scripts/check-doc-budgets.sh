@@ -12,7 +12,14 @@
 #   scripts/check-doc-budgets.sh --regen-onramp-golden # re-pin the onramp span
 #   scripts/check-doc-budgets.sh --selftest            # tripwire: prove the gate
 #                                                      # REDs on planted bloat
+#   scripts/check-doc-budgets.sh --span-only           # the onramp arm alone
+#                                                      # (harness use; skips the
+#                                                      # fixed caps + card count)
 # Exit codes: 0 pass · 1 a budget (or the onramp span pin) failed · 2 bad usage.
+#
+# NOTHING IN THE ENVIRONMENT CAN LOOSEN THIS GATE. --span-only is an argument,
+# not an env var, and DOC_BUDGETS_ONRAMP_SPAN_CAP may only LOWER the span cap.
+# Both are pinned by --selftest arms (h) and (i).
 
 set -euo pipefail
 
@@ -29,25 +36,44 @@ ONRAMP_GOLDEN="${DOC_BUDGETS_ONRAMP_GOLDEN:-scripts/onramp-span.golden}"
 # the residual, and the honest closer for it is a Go assertion that the golden
 # still contains agentsMDCanonicalBody (out of this script's fence; filed as
 # follow-up cgsi-s6-followup-golden-go-assertion).
-ONRAMP_SPAN_CAP="${DOC_BUDGETS_ONRAMP_SPAN_CAP:-4000}"
+#
+# THE OVERRIDE CAN ONLY TIGHTEN. DOC_BUDGETS_ONRAMP_SPAN_CAP exists so a harness
+# can prove the cap bites; letting it RAISE the cap would make one env var in a
+# workflow silently bless unbounded span growth — the exact class this gate was
+# hardened against. A value above the committed default is clamped back down.
+ONRAMP_SPAN_CAP_DEFAULT=4000
+ONRAMP_SPAN_CAP="${DOC_BUDGETS_ONRAMP_SPAN_CAP:-$ONRAMP_SPAN_CAP_DEFAULT}"
+case "$ONRAMP_SPAN_CAP" in
+  ''|*[!0-9]*) ONRAMP_SPAN_CAP="$ONRAMP_SPAN_CAP_DEFAULT" ;;
+esac
+if [ "$ONRAMP_SPAN_CAP" -gt "$ONRAMP_SPAN_CAP_DEFAULT" ]; then
+  ONRAMP_SPAN_CAP="$ONRAMP_SPAN_CAP_DEFAULT"
+fi
+
 # 1 = run ONLY the onramp arm (used by --selftest so each planted red is
-# attributable to the span pin and not to some unrelated cap).
-SPAN_ONLY="${DOC_BUDGETS_SPAN_ONLY:-0}"
+# attributable to the span pin and not to some unrelated cap). It is an ARGUMENT
+# (--span-only), never an environment variable: as `DOC_BUDGETS_SPAN_ONLY=1` it
+# skipped ~45 fixed caps AND the 7-card count and still printed a PASS at exit 0,
+# so a single job-level `env:` entry — far from the step it disarms — blanked
+# most of this gate. As an argument it must appear in the workflow step itself,
+# where a reviewer reads it next to the command.
+SPAN_ONLY=0
 
 MODE=check
 case "${1:-}" in
   "") ;;
   --selftest) MODE=selftest ;;
   --regen-onramp-golden) MODE=regen ;;
+  --span-only) SPAN_ONLY=1 ;;
   *)
     echo "check-doc-budgets: unknown argument '$1'" >&2
-    echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden]" >&2
+    echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden|--span-only]" >&2
     exit 2
     ;;
 esac
 if [ "$#" -gt 1 ]; then
   echo "check-doc-budgets: too many arguments" >&2
-  echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden]" >&2
+  echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden|--span-only]" >&2
   exit 2
 fi
 
@@ -190,7 +216,7 @@ fi
 # Mirrors scripts/tenant-scope-check.sh --selftest: stand up a COPY of the
 # onramp-bearing doc in a temp dir, pin it, then prove the span arm REDs on each
 # exploit shape. Plants nothing in the real checkout. Runs the onramp arm only
-# (DOC_BUDGETS_SPAN_ONLY=1) so every red below is attributable to the pin.
+# (--span-only) so every red below is attributable to the pin.
 if [ "$MODE" = selftest ]; then
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
@@ -199,7 +225,6 @@ if [ "$MODE" = selftest ]; then
 
   export DOC_BUDGETS_ONRAMP_DOC="$TMP/CODEX.md"
   export DOC_BUDGETS_ONRAMP_GOLDEN="$TMP/onramp-span.golden"
-  export DOC_BUDGETS_SPAN_ONLY=1
 
   fail_selftest() { echo "check-doc-budgets --selftest: FAILED — $*"; exit 1; }
 
@@ -207,7 +232,7 @@ if [ "$MODE" = selftest ]; then
   bash "$0" --regen-onramp-golden >/dev/null
 
   # (0) pristine, pinned tree passes
-  bash "$0" >/dev/null 2>&1 || fail_selftest "a pristine pinned tree did not pass"
+  bash "$0" --span-only >/dev/null 2>&1 || fail_selftest "a pristine pinned tree did not pass"
 
   # (a) three plausible note lines INSIDE the span, no marker moved → must RED
   awk '{ print }
@@ -217,20 +242,20 @@ if [ "$MODE" = selftest ]; then
          print "> Codex note: see the internal runbook before editing this block.";
          planted = 1
        }' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
-  if bash "$0" >/dev/null 2>&1; then
+  if bash "$0" --span-only >/dev/null 2>&1; then
     fail_selftest "prose inserted INSIDE the onramp span did NOT red the gate"
   fi
 
   # (b) the SAME plant, legitimately re-pinned → must PASS (the reviewed path)
   bash "$0" --regen-onramp-golden >/dev/null
-  bash "$0" >/dev/null 2>&1 || fail_selftest "a re-pinned (regenerated golden) span did NOT pass"
+  bash "$0" --span-only >/dev/null 2>&1 || fail_selftest "a re-pinned (regenerated golden) span did NOT pass"
 
   # (c) the end marker relocated to EOF, swallowing the rest of the doc → RED
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
   bash "$0" --regen-onramp-golden >/dev/null
   grep -v -x -- '<!-- barkpark:onramp:end -->' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
   printf '%s\n' '<!-- barkpark:onramp:end -->' >> "$DOC_BUDGETS_ONRAMP_DOC"
-  if bash "$0" >/dev/null 2>&1; then
+  if bash "$0" --span-only >/dev/null 2>&1; then
     fail_selftest "relocating the end marker to EOF did NOT red the gate"
   fi
 
@@ -244,7 +269,7 @@ if [ "$MODE" = selftest ]; then
          planted = 1
        }' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
   bash "$0" --regen-onramp-golden >/dev/null
-  if bash "$0" >/dev/null 2>&1; then
+  if bash "$0" --span-only >/dev/null 2>&1; then
     fail_selftest "a golden larger than the span cap did NOT red the gate"
   fi
 
@@ -252,7 +277,7 @@ if [ "$MODE" = selftest ]; then
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
   bash "$0" --regen-onramp-golden >/dev/null
   rm -f "$DOC_BUDGETS_ONRAMP_GOLDEN"
-  if bash "$0" >/dev/null 2>&1; then
+  if bash "$0" --span-only >/dev/null 2>&1; then
     fail_selftest "a MISSING golden did NOT red the gate"
   fi
   bash "$0" --regen-onramp-golden >/dev/null
@@ -260,7 +285,7 @@ if [ "$MODE" = selftest ]; then
   # (f) both markers removed → RED (pair check, unchanged behaviour)
   grep -v -x -e '<!-- barkpark:onramp:begin -->' -e '<!-- barkpark:onramp:end -->' \
     "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
-  if bash "$0" >/dev/null 2>&1; then
+  if bash "$0" --span-only >/dev/null 2>&1; then
     fail_selftest "a doc with ZERO onramp markers did NOT red the gate"
   fi
 
@@ -269,8 +294,45 @@ if [ "$MODE" = selftest ]; then
   bash "$0" --zzz-nonsense >/dev/null 2>&1 || rc=$?
   [ "$rc" -eq 2 ] || fail_selftest "an unknown argument exited $rc, expected 2"
 
-  echo "check-doc-budgets --selftest: PASS (8 arms: pristine, in-span plant," \
-       "re-pin, marker relocation, span cap, missing golden, no markers, bad arg)"
+  # (h) THE OVERRIDE CANNOT BE LOOSENED. Re-run arm (d)'s over-cap span with the
+  #     span cap raised through the environment: the clamp must pull it back to
+  #     the committed default and the gate must still RED. Without the clamp one
+  #     `env:` line blesses an onramp span of any size.
+  awk '{ print }
+       $0 == "<!-- barkpark:onramp:begin -->" && !planted {
+         for (i = 0; i < 40; i++)
+           print "filler filler filler filler filler filler filler filler";
+         planted = 1
+       }' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
+  bash "$0" --regen-onramp-golden >/dev/null
+  if DOC_BUDGETS_ONRAMP_SPAN_CAP=99999999 bash "$0" --span-only >/dev/null 2>&1; then
+    fail_selftest "DOC_BUDGETS_ONRAMP_SPAN_CAP raised the span cap — the clamp is gone"
+  fi
+  # …and it can still TIGHTEN, so a harness can prove the cap bites.
+  cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
+  bash "$0" --regen-onramp-golden >/dev/null
+  if DOC_BUDGETS_ONRAMP_SPAN_CAP=10 bash "$0" --span-only >/dev/null 2>&1; then
+    fail_selftest "a LOWERED span cap did not red a span above it"
+  fi
+
+  # (i) --span-only is an ARGUMENT, never an env var. The retired
+  #     DOC_BUDGETS_SPAN_ONLY=1 skipped ~45 fixed caps and the 7-card count while
+  #     printing PASS; a full run must now ignore it entirely.
+  #     (captured to a variable, never piped: `cmd | grep -q` closes the pipe
+  #     early and pipefail then reports the WRITER's SIGPIPE as a failure — the
+  #     exit-code trap this wave audits for.)
+  env_out=""
+  DOC_BUDGETS_SPAN_ONLY=1 bash "$0" >"$TMP/env-run.out" 2>&1 \
+    || fail_selftest "the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set"
+  env_out="$(cat "$TMP/env-run.out")"
+  case "$env_out" in
+    *"card count is exactly 7"*) ;;
+    *) fail_selftest "DOC_BUDGETS_SPAN_ONLY=1 still skipped the card-count section" ;;
+  esac
+
+  echo "check-doc-budgets --selftest: PASS (11 arms: pristine, in-span plant," \
+       "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
+       "span-cap clamp both directions, retired env var inert)"
   exit 0
 fi
 
