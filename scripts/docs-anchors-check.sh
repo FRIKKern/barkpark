@@ -230,7 +230,13 @@ DUPES=$(
     # `set -o pipefail` (GitHub Actions' default shell) — a non-match is not an error.
     printf '%s\n' "$h" | { grep -E "$HEADER_RE" || true; } |
       sed -E 's/.*canonical-for: ([A-Za-z0-9._-]+) \|.*/\1/'
-  done | sort | uniq -d || true
+    # `none` is the explicit "owns no fact-topic" value: cold/ledger evidence
+    # files (tooling/grip/ledger/*.md, wave verdicts) legitimately share it, so
+    # it is exempt from the one-owner-per-topic rule. Only REAL topic slugs must
+    # be unique. Without this, three wave ledger files each declaring `none`
+    # collide on main (each green alone — the stale-green accumulator), redding
+    # doc-gates for a non-violation. Real duplicate slugs are still caught below.
+  done | grep -vxE 'none' | sort | uniq -d || true
 )
 if [ -n "$DUPES" ]; then
   for d in $DUPES; do

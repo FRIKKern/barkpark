@@ -2846,7 +2846,67 @@ their non-merge rows via `seal_one.py` post-merge; close `felix-w27-s6-12041-gol
 5. **sync dead-letter classification** — `task-felix-w14-sync-deadletter-classification` (opus,
    medium). Gate: applier_test.exs green + classification-revert fail-before; no reaper.
 
+## Wave 31 Decisions (2026-08-18) — RECONCILIATION: THE LEDGER TELLS THE TRUTH
+
+Wave 31 is a reconcile-and-close wave, not an audit/build wave. Wave 30 proved the api/ core is
+swept clean; the real unmet work was the ledger. The finding is undramatic and that IS the honest
+outcome: the census refuted the wish's central premise three ways, and the one substantive ledger
+correction available today was a re-parent, not a batch of closes. Numbering starts at **D208** —
+D202-D207 are staged on the still-open wave-30 charter PR **#12147** (union-merge partner; resolve
+by union, keep D208 if #12147 lands first, else #12147 renumbers).
+
+- **D208 — THE 173-OPEN PREMISE IS FALSE.** Felix (`task-96a908af98698118`) child_count 173 was, at
+  wave start, 124 done / 31 open / 16 cancelled / 2 considering — not 173 open. The wave's product is
+  an honest partition + a convergence verdict, never a slice count.
+- **D209 — THE CLOSEABLE-BY-EVIDENCE STALE-OPEN BATCH IS EMPTY TODAY.** Every 0/N open row has zero
+  merged commits; the only two N-1/N rows (5/6) are `felix-w27-bl-media-dataset-swallow-mirror`
+  (gated on PR **#12132**, OPEN/BLOCKED, unmet crit is the merge-gated one) and
+  `felix-w30-s1-redaction-global-schema-fallback` (gated on PR **#12159**, OPEN/UNSTABLE, unmet crit
+  is the merge-gated one). Neither head is an ancestor of origin/main; both close automatically when
+  their PR lands. A naive progress-ratio close is REFUSED (the console-w76 batch-close-heuristic
+  lesson holds). No row was fabricated closed.
+- **D210 — THE TWO ROWS WAVE 30 CLOSED STAND; audit-back reconfirms from source. DO NOT REOPEN.**
+  `felix-w27-s6-12041-golden-contingency` (done 3/3): #12041 merge commit `71f06d6` is a proven
+  ancestor of origin/main; D198 authorizes; airtight. `felix-w29-bl-asset-schema-nil-redaction`
+  (done 2/2): refutation sound at source — `envelope.ex:145-162` shows a nil caller_context routes to
+  `%CallerContext{}` and FAILS CLOSED, so the correct reddening exemplar is the `:internal` sentinel
+  (returns `envelope` unredacted, not request-reachable), exactly as recorded — NOT `caller_context=nil`.
+  The `D204` citation on that close is a PROVENANCE GAP only (D202-D207 live on open #12147, absent
+  from origin/main); the underlying refutation is independently source-confirmed. Charter note, no reopen.
+- **D211 — 7 NON-FELIX RIDERS RE-PARENTED to `cloud-console-hardening-epic` (executes D194).** The
+  five `gr-*` guerrilla-backlog rows + `cch-w1-mirror-direct-write-unfenced` + `cch-w3-task-birth-attribution`
+  moved cleanly (each parent_id verified post-move); `felix-w28-bl-reparent-nonfelix-rows` CLOSED 2/2.
+  Felix open dropped 31→23. `gr-bl-task-move-noop-help-drift`'s live defect is the Go CLI help text
+  (a CLI wave under the new parent), not an api/ Felix concern.
+- **D212 — `felix-w27-bl-sobelow-baseline-lineshift` is GENUINE-UNBUILT, CI/human-gated — NOT
+  stale-open.** #11427 (`4ca033f502`) is a merged ancestor but re-anchored only 3 of 6 CSRF rows and
+  has ALREADY re-drifted on current main (skip anchors 622/539/563 vs live pipeline decls 553/577/646).
+  D194's "THE LINESHIFT ROW IS NOT SUBSUMED" holds; the row stays open, fenced by open PR **#6057** +
+  D167 (zero builders in the sobelow vein). Counts toward human-gated residue, not the closeable batch.
+- **D213 — CONVERGENCE: SEAL-AND-SPIN recommended (a recommendation for the human, never a wave action
+  that shreds backlog).** No open row is an unbuilt, buildable api/-core defect above the doctrine bar.
+  The ~23 residue is: 2 built-and-merge-gated (#12132/#12159), ~11 CI/sobelow/gate-tooling + human-gated
+  governance (`close-6057-superseded`, `stranded-sobelow-worktree`, `workflows-ownership-gap`,
+  `openapi-drift-chronic` — regen OOMs locally, CI-artifact only), ~7 api/-core watches/evals/seams/audits
+  deferred by design, 3 W13 watches. Recommendation: declare the api/ Phoenix-mastery audit complete;
+  keep the epic open ONLY as a thin holder for the two merge-gated PRs; spin the tooling/human rows to
+  owners. Do NOT keep it open pending the watches — they are a permanent standing backlog.
+
 ## Wave log
+
+### Wave 2026-08-18 — Wave 31 RECONCILE. "173 was 31, the stale-open batch was empty, and the ledger now tells it."
+
+The census refuted the 173-open premise (124 done / 31 open / 16 cancelled / 2 considering) and found
+the closeable-by-evidence stale-open batch EMPTY: every 0/N row has zero merged commits, and the two
+5/6 rows are gated on still-open PRs #12132 (BLOCKED) and #12159 (UNSTABLE) — neither head an ancestor
+of origin/main, so both close only when their PR lands. The two rows the wish named to close were
+already closed by wave 30, and the audit-back reconfirmed BOTH from source (the `:internal` sentinel is
+the reddening exemplar, not `caller_context=nil`) — no reopen. The one substantive ledger write was the
+re-parent: 7 non-Felix riders moved to `cloud-console-hardening-epic`, dropping Felix open 31→23 with
+ZERO false closes. `felix-w27-bl-sobelow-baseline-lineshift` was verified genuine-unbuilt CI/human-gated
+(NOT stale-open) — #11427's 3-row fix already re-drifted. Verdict: SEAL-AND-SPIN — api/ core clean; keep
+the epic as a thin holder for #12132/#12159; the rest is standing backlog + human decisions. An honest
+ledger and a true residue number, not a slice count. No new api/ build (as expected). No build slices.
 
 ### Wave 2026-08-18 — Wave 29 BUILT + REVIEWED, grade A. "The Lost Mirror, Rebuilt on Opus — and it held."
 
