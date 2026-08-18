@@ -6,7 +6,7 @@ defmodule BarkparkCloud.Web.RouterCloudflareRedactionTest do
   non-2xx); that body can carry account/zone internals (`cf_zone_id`, record ids,
   the connected account's metadata). Before the fix the deploy binding echoed it
   verbatim via `detail` interpolating `inspect(reason)`, so an authenticated OWNER
-  OWNER driving POST /v1/sites/:id/deploy with `via=cloudflare` received the raw
+  driving POST /v1/sites/:id/deploy with `via=cloudflare` received the raw
   Cloudflare internals in the 502 response. `cloudflare_reason/1` now redacts it
   to a generic, status-keyed message while the router logs the full detail
   server-side.
@@ -233,6 +233,7 @@ defmodule BarkparkCloud.Web.RouterCloudflareRedactionTest do
       body = json_body(conn)
       assert body["error"] == "cloudflare_bind_failed"
       refute conn.resp_body =~ @sentinel
+
       assert body["detail"] ==
                "Cloudflare rejected the DNS/proxy write — the box is still serving standalone"
 
