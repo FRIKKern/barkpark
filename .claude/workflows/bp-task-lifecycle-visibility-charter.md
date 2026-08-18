@@ -332,3 +332,79 @@ Test), #5706 (S2, waits CI Elixir Test), #5707 (S4, own gate) — all pairwise f
 Merge THIS charter PR (D25) and close `tlv-bl-true-blocking-primitive-decision` citing the merged
 D25 SHA + `claimable_statuses_test.exs`. (3) Then the crown `tlv-bl-writer-seam-transition-gate` and
 `tlv-bl-publish-door-lifecycle-guard` remain the top round-2 candidates, then tlv-s5/tlv-s8.
+
+### Wave 2026-08-18 — reconciliation (wave 6), Opus-only (Fable capped to Aug 21), grade A−
+
+A reconcile-and-close wave, not a fresh-build wave — the ledger's own subject applied to itself.
+The epic exists to make a task's state read TRUE on every surface; three weeks after the last
+touch, this wave re-derived the epic's own children to truth. **NO builders dispatched** — movement 4
+(finish an offline- AND mutation-provable backlog row) found nothing finishable this wave, so the
+code wave is empty by design, and for THIS epic that honest verdict IS the deliverable.
+
+**True split (re-derived from L1, four Opus verifiers PROVING by running):** 44 children =
+**24 done / 17 open / 1 considering / 2 cancelled**. child_count 44 is NOT the open count — the 17
+open rows are the whole job. origin/main was 41b16d78db at Decide (the digest's d7da14e8fc is an
+ancestor, no divergence); every ancestry proof re-run against 41b16d78db.
+
+**The one evidence-close (handed to the LEAD — its sole unmet criterion is merge-gated):**
+`ledger-merge-criterion-autostamp` (4/5). Built by **#5742 = `9e7132846f`**, which carries the exact
+`Task: ledger-merge-criterion-autostamp` trailer and `git merge-base --is-ancestor 9e7132846f
+origin/main` = YES. The sole unmet criterion is **0-based index 4** (`met=false, merge_gate=true`,
+"PR merged to main (LEAD closes this criterion on merge)."). **Pay `--criterion 4`, never 5** — the
+D87/search-template-w12 gotcha: `bp task close --criterion` is 0-based, briefs are 1-based. Claim is
+LAPSED (worker=null, epoch=8): re-claim first to mint a fresh epoch, read the CURRENT holder+epoch
+immediately before close, then close `done` stamping the merge SHA. Criterion text must be byte-exact
+including the trailing period or the close 409s `criteria_mismatch`.
+
+**The one clean re-parent (PERFORMED + verified this wave):**
+`pds-bl-merge-gated-criteria-carry-the-flag` → PDS epic `task-2ac1f95237c4a8e5` (open, top-level,
+accepting children). Its subject is the PDS merge-gated class; #9527's own body names it "parented to
+a different epic". Move confirmed by re-reading `parent_id` = `task-2ac1f95237c4a8e5`.
+
+**Mis-parent rows KEPT under this epic (verified, NOT moved):**
+- `cloud-console-data-query-id-prefix-bug` — its only plausible owner `cloud-console-hardening-epic`
+  is IN its terminal close TODAY (NO-SEAL ruling, forwarding ~427 orphans OUT, D93 "no re-homing this
+  wave"); the bug is **api-side** (`/v1/data/query`), not a console-GUI defect. Re-homing would strand
+  it. It is still genuinely UNBUILT on origin/main (query_controller reads no `id_prefix`, rejects no
+  unknown param) — do not close by evidence.
+- `task-eal-bl-lock-key-convergence`, `task-eal-bl-cmux-auto-pulse`, `spd-b44-slug-allocator-assigns-not-guesses`,
+  `graph-endpoint-latency`, `task-6e819f39fe3aa9e6`, `task-11390a3b900c8a09` — no foreign task-system
+  umbrella epic exists (bp search returned only this epic); this epic IS their umbrella.
+- `task-eal-bl-events-cold-index` (considering) — epic-NATIVE by content (ordered mutation-event
+  replay is the spine of lifecycle visibility). `considering` is correct — it dogfoods D1's new
+  first-class state. LEAVE.
+
+**The named seal-blockers — LEAVE (genuine offline-unbuildable-this-wave defects):** `tlv-s5`
+(Studio board, 0/6) and `tlv-s8` (epic-cycle walks its graph, 0/5) — both unbuilt, Fable-tier,
+live-surface; their deps (s1/s2/s6/s7) all DONE, so blocked SOLELY by the Fable cap (to Aug 21) +
+live surface. Zero commit hits on any ref.
+
+**Offline-buildable backlog — LEAVE (movement 4 found no clean finish):**
+- `tlv-bl-tui-close-drift-resync-guidance` (highest bar, 86) — reword+pin is offline-provable, but
+  crit[0]'s second clause needs model-layer surgery (the interactive board close wires plain
+  `DoClose`, not `DoCloseRev`; the only `DoCloseRev` caller is `cmux_hook.go:245`), and crit[2] is a
+  server-side CAS guarantee the `serve()` unit mock cannot enforce. A genuine Go slice, not a stamp.
+- `tlv-bl-task-board-columns-dead-code` — "dead" is only half true: no runtime importer, but
+  `component-golden-parity.test.ts:51` + `task-board-columns.test.ts:18` import it and the 31/0 suite
+  passes → a delete is a REHOME, not a free delete. crit[1] is merge-gated.
+- `tlv-bl-js-vocab-generator` — genuinely unbuilt (its only commit hit #5707 builds the DONE
+  drift-gate SIBLING and explicitly DEFERS the generator — a phantom-citation trap avoided); needs a
+  new build-time emitter + retiring the Part-5 gate; crit[2] merge-gated.
+
+**Live/prod-gated backlog — LEAVE (D13/D14 new-architecture residue):** `tlv-bl-web-task-cache-bust`,
+`tlv-bl-chat-live-transition-stream` (Studio subscribes for the Doing strip, but the transcript
+transition-stream is unbuilt — brief slightly overstates the gap), `tlv-bl-task-prime-chip-gap`.
+
+**Convergence verdict — recommend AGAINST seal-and-spin.** `tlv-s5` and `tlv-s8` are real above-bar
+defects blocking the epic's own D11/D12/D14 and D17 criteria and cannot be built this wave
+(Fable-capped, live-surface). The correct next move is a Fable wave after the Aug-21 cap lifts. Where
+the ledger already read true, the wave manufactured no findings — already-honest-with-evidence is the
+A-grade for a ledger-truth epic reconciling itself.
+
+**Next wave — dispatch order:** (1) LEAD closes `ledger-merge-criterion-autostamp` by evidence
+(re-claim → `--criterion 4` → merge SHA `9e7132846f`). (2) After Aug-21 Fable cap lifts: dispatch
+`tlv-s5` (fable, round 2, live Studio) then `tlv-s8` (fable, round 3, LAST merge — shared workflow
+file). (3) Offline-buildable backlog as dedicated slices when a build wave has room:
+`tlv-bl-tui-close-drift-resync-guidance` (Go, highest bar), `tlv-bl-js-vocab-generator` (build wave),
+`tlv-bl-task-board-columns-dead-code` (low-bar rehome). Wave paper:
+`task-lifecycle-visibility-wave-2026-08-18`.
