@@ -189,6 +189,7 @@ defmodule Barkpark.Media.StuckProcessingSweeper do
       # Write the terminal state ourselves; "failed" is excluded from the SELECT
       # by construction, so the row self-removes from every future sweep.
       put_content(doc, file, %{@status_key => "failed"})
+
       Logger.warning(
         "StuckProcessingSweeper gave up on mediaAsset #{inspect(doc.doc_id)} " <>
           "after #{attempts} re-drives — marked failed"
