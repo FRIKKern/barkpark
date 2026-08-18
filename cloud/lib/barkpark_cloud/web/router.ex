@@ -4321,6 +4321,21 @@ defmodule BarkparkCloud.Web.Router do
         team = conn.assigns.current_team
 
         case Registry.get_barkpark(conn.path_params["id"]) do
+          # cch-idor-s3 — a SUSPENDED box reveals nothing. Mirrors /credentials
+          # (cch-w54-s2): suspension is billing's "data retained, access
+          # revoked", and this route hands back the instance read_token, the
+          # build env, and the webhook HMAC — all secrets. Keyed on the same
+          # boolean the console paints, and placed ABOVE the reveal so
+          # Registry.reveal_bootstrap is never reached on a suspended box. Same
+          # 409 "suspended" shape as /credentials, /studio-link, /app-token.
+          %Barkpark{team_id: tid, suspended: true} when tid == team.id ->
+            json(conn, 409, %{
+              error: "suspended",
+              detail:
+                "This instance is suspended. The content bootstrap is not revealed " <>
+                  "until the suspension is cleared."
+            })
+
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             case Registry.reveal_bootstrap(bp) do
               {:ok, nil} ->
