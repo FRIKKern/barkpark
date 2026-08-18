@@ -320,3 +320,37 @@ func TestScaleLadderCapsSpan(t *testing.T) {
 		t.Fatalf("scaleLadder did not cap huge span: len=%d got=%q", len(got), got)
 	}
 }
+
+// TestPadOrTruncateZeroWidth locks the padOrTruncate `if w <= 0 { return s }`
+// guard (sheet.go). The golden suite renders sheets only at widths >= 40, and
+// col_widths flow from those, so a zero/negative target column is never
+// exercised there — yet PdSheet col_widths are attacker/manifest-supplied and
+// pdrender is a standalone CLI renderer, so w<=0 is reachable.
+//
+// RED-ON-REMOVAL PROOF (observably different, not just "safe either way"): with
+// the guard, w=0 returns the input UNCHANGED. Without the guard the switch falls
+// through — vis>w (any non-empty string has vis>0) enters the `if w <= 1` branch
+// and returns the ellipsis "…". So deleting the guard silently rewrites
+// padOrTruncate("x", 0) from "x" to "…". This test pins the guarded behavior so
+// that regression is caught.
+func TestPadOrTruncateZeroWidth(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		w    int
+		want string
+	}{
+		{"zero-width-single-rune", "x", 0, "x"},        // guarded: unchanged; unguarded → "…"
+		{"zero-width-multi-rune", "hello", 0, "hello"}, // guarded: unchanged; unguarded → "…"
+		{"zero-width-empty", "", 0, ""},                // unchanged
+		{"negative-width", "hello", -5, "hello"},       // w<0 also short-circuits, unchanged
+		{"negative-width-single", "x", -1, "x"},        // unchanged
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := padOrTruncate(tc.s, tc.w); got != tc.want {
+				t.Fatalf("padOrTruncate(%q, %d) = %q, want %q — the `if w <= 0` guard in sheet.go is missing or broken (unguarded, w<=0 falls through to the w<=1 ellipsis branch and returns %q)", tc.s, tc.w, got, tc.want, "…")
+			}
+		})
+	}
+}
