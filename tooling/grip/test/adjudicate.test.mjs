@@ -415,14 +415,28 @@ test("an INJECTED runner still bypasses the screen — proving this is a boundar
   assert.notEqual(ruling.verdict, VERDICTS.REJECTED, "the injected path is not screened");
 });
 
-test("git merge-base and `git -C` reads are refused at the boundary — the STATED coverage bound (D88)", () => {
-  // Not an RCE: these are safe reads the screen over-refuses today (its git -C
-  // parse defect + merge-base refusal), until tgw4-screen-git-global-option-audit
-  // and tgw4-rerun-silence-fixes land. The wire inherits the screen verbatim; it
-  // does NOT reach into screen.mjs's grammar to fix them. Documented, fails CLOSED.
-  for (const cmd of ["git merge-base --is-ancestor HEAD origin/main", "git -C tooling/grip show HEAD:README.md"]) {
-    assert.equal(screenCommand(cmd).ok, false, `the boundary is expected to refuse the safe read: ${cmd}`);
-    const ruling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: cmd });
-    assert.equal(ruling.verdict, VERDICTS.REJECTED, `over-refused (fails closed), not executed: ${cmd}`);
-  }
+test("the D88 caller-boundary: `git -C` read is now ADMITTED, merge-base write is still REFUSED", () => {
+  // Split from a single over-refusal loop after tgw4 (GIT_VALUE_GLOBALS /
+  // dropValueGlobals, screen.mjs) taught the screen to skip `git`'s value-taking
+  // `-C <dir>` global and reach the real sub-verb. The wire inherits the screen
+  // verbatim; it does NOT reach into screen.mjs's grammar itself.
+
+  // READ half: `git -C tooling/grip show HEAD:README.md` is a safe read the
+  // screen now correctly admits. Assert NOT-REJECTED (not a positive ADMITTED
+  // check) so the assertion does not couple to filesystem/git state — only the
+  // boundary decision is under test, not whether the read itself succeeds.
+  // Reverting dropValueGlobals to identity re-breaks the parse and REDS this.
+  const readCmd = "git -C tooling/grip show HEAD:README.md";
+  assert.equal(screenCommand(readCmd).ok, true, `the boundary must now admit the safe read: ${readCmd}`);
+  const readRuling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: readCmd });
+  assert.notEqual(readRuling.verdict, VERDICTS.REJECTED, `the admitted read must not be rejected at the boundary: ${readCmd}`);
+
+  // WRITE half: `git merge-base --is-ancestor` still trips the broad \bmerge\b
+  // write-verb regex — an intentional over-refusal not touched this wave, filed
+  // separately as pds-bl-grip-screen-refuses-honest-read-commands. Permanently
+  // pinned here as intended: dropping `merge` from the write-verb regex REDS this.
+  const writeCmd = "git merge-base --is-ancestor HEAD origin/main";
+  assert.equal(screenCommand(writeCmd).ok, false, `the boundary must still refuse the write shape: ${writeCmd}`);
+  const writeRuling = adjudicate({ subject: "p", claim: "a discrete claim about it", rerun: writeCmd });
+  assert.equal(writeRuling.verdict, VERDICTS.REJECTED, `over-refused (fails closed), not executed: ${writeCmd}`);
 });
