@@ -73,7 +73,14 @@ if [ "$#" -gt 1 ]; then
   exit 2
 fi
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Absolute path to THIS script. --selftest re-invokes the REAL gate 14 times as
+# a bare command word, and a bare invocation is a COMMAND, not a path: run as
+# `cd scripts && bash tenant-scope-check.sh --selftest`, the invoked name carries
+# no slash, so every re-invocation died with "command not found" (rc 127) — a
+# FALSE RED on a legitimate invocation, and one that reads like a broken gate
+# rather than a broken call. Resolve it once, absolutely, and use that.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+ROOT="$(dirname "$(dirname "$SELF")")"
 # LIB / BASELINE are overridable (the --selftest tripwire points them at a temp
 # tree so it can prove the scanner reds without planting in the real source).
 LIB="${TENANT_SCOPE_LIB:-$ROOT/api/lib}"
@@ -99,12 +106,12 @@ end
 EX
   export TENANT_SCOPE_LIB="$TMP/lib"
   export TENANT_SCOPE_BASELINE="$TMP/baseline.txt"
-  "$0" --baseline >/dev/null
+  bash "$SELF" --baseline >/dev/null
 
   fail_selftest() { echo "tenant-scope-check --selftest: FAILED — $*"; exit 1; }
 
   # (0) clean tree passes
-  "$0" >/dev/null 2>&1 || fail_selftest "clean baselined tree did not pass"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "clean baselined tree did not pass"
 
   # (a) plant a NEW unjustified fail-open read → must RED
   cat > "$TMP/lib/barkpark/content/leak.ex" <<'EX'
@@ -114,7 +121,7 @@ defmodule Demo.Leak do
   end
 end
 EX
-  if "$0" >/dev/null 2>&1; then
+  if bash "$SELF" >/dev/null 2>&1; then
     fail_selftest "a NEW unjustified fail-open read did NOT red the gate"
   fi
 
@@ -127,7 +134,7 @@ defmodule Demo.Leak do
   end
 end
 EX
-  "$0" >/dev/null 2>&1 || fail_selftest "a justified (# global-read:) read did NOT pass"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "a justified (# global-read:) read did NOT pass"
 
   # (c) plant a NEW by-PK Repo.get(Document,…) → must RED
   cat > "$TMP/lib/barkpark/content/leak.ex" <<'EX'
@@ -137,11 +144,11 @@ defmodule Demo.Leak do
   end
 end
 EX
-  if "$0" >/dev/null 2>&1; then
+  if bash "$SELF" >/dev/null 2>&1; then
     fail_selftest "a NEW by-PK Repo.get(Document, id) did NOT red the gate"
   fi
   rm -f "$TMP/lib/barkpark/content/leak.ex"
-  "$0" >/dev/null 2>&1 || fail_selftest "tree did not return to green after removing the planted leak"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "tree did not return to green after removing the planted leak"
 
   # --- the waiver is a COMMENT, not a substring -------------------------------
   # Each probe plants ONE file holding a live, unbaselined fail-open read plus a
@@ -152,7 +159,7 @@ EX
   probe() {  # probe <red|green> <label>   (file body on stdin)
     local want="$1" label="$2" got
     cat > "$PROBE"
-    if "$0" >/dev/null 2>&1; then got=green; else got=red; fi
+    if bash "$SELF" >/dev/null 2>&1; then got=green; else got=red; fi
     [ "$got" = "$want" ] || fail_selftest "$label: expected $want, got $got"
     rm -f "$PROBE"
   }
@@ -352,24 +359,24 @@ EX
 
   # --- a scan root that scans NOTHING is a broken gate, not a clean tree ------
   MISSING="$TMP/does-not-exist"
-  if TENANT_SCOPE_LIB="$MISSING" "$0" >/dev/null 2>&1; then
+  if TENANT_SCOPE_LIB="$MISSING" bash "$SELF" >/dev/null 2>&1; then
     fail_selftest "a MISSING scan root did NOT red the gate"
   fi
-  missing_out="$(TENANT_SCOPE_LIB="$MISSING" "$0" 2>&1 || true)"
+  missing_out="$(TENANT_SCOPE_LIB="$MISSING" bash "$SELF" 2>&1 || true)"
   case "$missing_out" in
     *"scan root missing"*) ;;
     *) fail_selftest "the missing-scan-root failure did not name the missing root" ;;
   esac
   mkdir -p "$TMP/empty-root"
-  if TENANT_SCOPE_LIB="$TMP/empty-root" "$0" >/dev/null 2>&1; then
+  if TENANT_SCOPE_LIB="$TMP/empty-root" bash "$SELF" >/dev/null 2>&1; then
     fail_selftest "an EMPTY scan root (no *.ex files) did NOT red the gate"
   fi
 
   # --- argument dispatch ------------------------------------------------------
-  "$0" --baseline >/dev/null 2>&1 || fail_selftest "--baseline stopped dispatching"
-  "$0" >/dev/null 2>&1 || fail_selftest "the bare check stopped dispatching"
+  bash "$SELF" --baseline >/dev/null 2>&1 || fail_selftest "--baseline stopped dispatching"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "the bare check stopped dispatching"
   set +e
-  "$0" --zzz-nonsense >/dev/null 2>&1
+  bash "$SELF" --zzz-nonsense >/dev/null 2>&1
   unknown_rc=$?
   set -e
   [ "$unknown_rc" = "2" ] || fail_selftest "an unknown argument exited $unknown_rc, expected 2"
