@@ -2848,6 +2848,30 @@ their non-merge rows via `seal_one.py` post-merge; close `felix-w27-s6-12041-gol
 
 ## Wave log
 
+### Wave 2026-08-18 — Wave 29 BUILT + REVIEWED, grade A. "The Lost Mirror, Rebuilt on Opus — and it held."
+
+The one round-1 build slice — `felix-w27-bl-media-dataset-swallow-mirror`, the wave-28 fable
+centerpiece LOST to the cap — was rebuilt on Opus and it landed clean. The reviewer changed NOTHING:
+the slice already mirrored #12071's `WriteScope` split faithfully in media's ATOM-key dialect —
+`invalid_dataset_details/1` byte-identical to the reference, `resolve_dataset_id_once/2` exhaustive
+over the three shapes `get_or_create_dataset` returns, both legit-nil arms preserved as `{:ok, nil}`,
+and the two new `upload/3` else clauses (`{:error,{:invalid_dataset,_}}`, `{:error,:conflict}`) placed
+BETWEEN `payload_too_large` and the `{:error,_reason}→503` catch-all so a refused dataset renders
+422/409 — never a silent `dataset_id=nil`, never a mislabelled 503. Gate re-run GREEN on the
+reviewer's clean checkout (`CC=/usr/bin/clang mix test` on the swallow test + media_test.exs = 44
+tests, 0 failures). Independent mutation-kill by the reviewer: reverting the resolver error arms to a
+bare success-nil reds the fail-before test (upload persists `dataset_id=nil`, row inserted) — restored
+→ green, so the swallow is proven closed, not merely that a happy upload works. HIGH-FLIP boundary
+(legit-nil vs defect-nil, nil at three sites, only the changeset/not-found error fails closed)
+independently re-derived and confirmed — a genuinely independent SECOND reviewer is still owed
+PRE-MERGE (manual lead dispatch; this workflow spawns one reviewer). Ledger clean: slice
+`in_progress`, criteria 0-4 met with honest evidence, criterion 5 merge-gated for the lead; zero
+ledger fixes. Final branch: `loop-epic/media-dataset-swallow-fail-closed-mirror-0` (no reviewer
+fixes). No-builder lead work stands unchanged (land #12109/#12111/#12113/#12114, seal their rows via
+`seal_one.py` post-merge, close `felix-w27-s6-12041-golden-contingency` per D198). Backlog cousin
+`felix-w29-bl-asset-schema-nil-redaction` filed. Wave Paper sealed:
+`felix-pristine-wave-29-2026-08-18`. Grade: **A**.
+
 ### Wave 2026-08-18 — Wave 29 DECIDED (building). "The Lost Mirror, Rebuilt on Opus."
 
 Ratified D196–D201. The survey CONFIRMED the direction with ZERO re-scope — all inherited premises
