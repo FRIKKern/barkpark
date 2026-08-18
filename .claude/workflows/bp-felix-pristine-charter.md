@@ -2756,6 +2756,36 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
 
 ## Wave log
 
+### Wave 2026-08-18 — Wave 28 BUILT + REVIEWED, grade A-. "Four Clean, One Unbuilt."
+
+Four of five round-1 slices shipped, all gate-green on the reviewer's -r branches, mutation-proven,
+FENCE-respected, ledgers honest (each in_progress with non-merge-gated criteria stamped and the
+merge-gated PR row left False for the lead): **s3 receive_timeout** structural pin
+(`loop-epic/s3-ex-receive-timeout-structural-pin-a-s-1-r`, 18/0 — 60_000 module attr + public
+accessor threaded onto req/1's opts; source-text pin, the honest limit the Req.Test seam forces);
+**checkout release honesty** (`loop-epic/checkout-release-honesty-make-the-docstr-2-r`, 3/0 — zero
+behavior change: false @doc corrected to the real any-writer force-release contract, intent comment
+at media_controller admin?/1, pin test, rendition-deletion side effect named); **pulse metrics
+deflake** (`loop-epic/pulse-metrics-vitals-test-samples-determ-3-r`, 6/0 — synchronous
+`sample_now/0` cancels the autonomous 2s tick so it can no longer drain the counter mid-test; prod
+cadence byte-preserved); **w14 sync dead-letter classification**
+(`loop-epic/sync-dead-letter-transient-permanent-cla-4-r`, 14/0 — `error_class/1` allowlist:
+terminal content-errors dead-letter+advance, everything else defaults transient → halt+replay,
+never advance past a possibly-recoverable mutation). Reviewer made ZERO code changes — all four were
+already correct, well-scoped, and improvement-only. **The fifth slice did NOT ship: the media
+dataset-swallow mirror (`felix-w27-bl-media-dataset-swallow-mirror`, the fable HIGH-FLIP-RISK
+centerpiece) is lifecycle=open, unclaimed, 0/5 — a live tenancy swallow (any non-admin WRITE token
+persists dataset_id=nil) proven reachable at Verify went unbuilt.** That is the wave's real gap and
+the top next-wave item; the wish's signed_url TTL clamp was correctly DECLINED (D190 re-refutation:
+facade has zero callers, no path reaches :ttl — improvement-only escape hatch, honestly taken), and
+the never-swept core (access/, telemetry/, pulse/, sync/, connectors interior) was swept
+already-good with evidence. Structural note for the lead on w14: classifying a `{:halted,_}`
+before_save gate as transient means a genuinely-poison content doc (permanently-bad sheet) now
+STALLS the cursor indefinitely rather than eventually dead-lettering — the brief's intended fail-safe
+(prefer replay over skipping a possibly-valid write), but a real availability trade-off worth an
+owner's eye. Grade A-: the four delivered slices are A/A+ quality and honesty, but a "perfection"
+wave that leaves its highest-value reachable-defect slice unbuilt is incomplete.
+
 ### Wave 2026-08-18 — Wave 28 DECIDED (building). "The Mirror and the Unswept Corners."
 
 Ratified D187–D195. Ground truth moved twice under the wave: the wish's train was a wave stale, and
