@@ -4432,10 +4432,13 @@ defmodule BarkparkCloud.Web.Router do
   # diagnostic. NOTE: deliberately NOT `vercel_reason/1` — its String.slice(0,
   # 300) would leave a `cus_…` id intact. The `error:` CODE is unchanged, so the
   # JS `friendly()` / Go cloudError key still resolves with zero UI regression.
-  defp billing_reason({:stripe_http_error, status, _body}) when is_integer(status),
-    do: "billing provider returned an error (HTTP #{status})"
+  defp billing_reason({:stripe_http_error, status, _body}) when is_integer(status) do
+    "billing provider returned an error (HTTP #{status})"
+  end
 
-  defp billing_reason(_reason), do: "billing request could not be completed"
+  defp billing_reason(_reason) do
+    "billing request could not be completed"
+  end
 
   ## Instance-API proxy (C4 — charter decisions D46 / D51) — the console's
   ## gateway into a live instance's OWN HTTP API. EXPLICIT routes only, no
