@@ -337,7 +337,9 @@ defmodule BarkparkCloud.Web.RouterTransportRedactionTest do
           # shows the hazard).
           |> Enum.reject(fn {line, _n} -> String.match?(line, ~r/^\s*#/) end)
           |> Enum.filter(fn {line, _n} -> Regex.match?(@echo_re, line) end)
-          |> Enum.map(fn {line, n} -> "#{Path.relative_to(path, @lib)}:#{n}: #{String.trim(line)}" end)
+          |> Enum.map(fn {line, n} ->
+            "#{Path.relative_to(path, @lib)}:#{n}: #{String.trim(line)}"
+          end)
         end)
 
       assert offenders == [],
