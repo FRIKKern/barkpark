@@ -86,9 +86,22 @@ defmodule Barkpark.Sharing.Links do
 
   def resolve(_), do: {:error, :not_found}
 
-  @doc "Revoke (stamp `revoked_at`) one link by id. Idempotent."
-  @spec revoke(binary()) :: {:ok, ShareLink.t()} | {:error, :not_found}
-  def revoke(id) when is_binary(id) do
+  @doc """
+  Revoke (stamp `revoked_at`) one link by id. Idempotent.
+
+  Object-authz: `opts[:workspace_id]` scopes the resolve to ONE tenant. A bound
+  (binary) workspace id resolves the link via `Repo.get_by(id, workspace_id)`, so
+  a foreign-workspace link id yields `{:error, :not_found}` and is never revoked
+  (fail-closed — closes the cross-tenant revoke IDOR). A `nil` workspace id (self-
+  hosted host-is-admin / Cloud platform-admin) keeps the unfiltered
+  `Repo.get(ShareLink, id)` reach across every workspace. Two-head resolver mirrors
+  `Barkpark.Search.SurfaceConfigs.load_or_default/3` — NOT `scope_to_workspace`,
+  whose nil arm fails closed (the opposite of global-admin-sees-all).
+  """
+  @spec revoke(binary(), keyword()) :: {:ok, ShareLink.t()} | {:error, :not_found}
+  def revoke(id, opts \\ [])
+
+  def revoke(id, opts) when is_binary(id) do
     # Guard the :binary_id cast — a non-UUID id (from `DELETE /v1/shares/links/
     # garbage`) would raise Ecto.CastError → 500; treat it as not_found instead.
     case Repo.uuid_or_nil(id) do
@@ -96,7 +109,7 @@ defmodule Barkpark.Sharing.Links do
         {:error, :not_found}
 
       uuid ->
-        case Repo.get(ShareLink, uuid) do
+        case fetch_scoped(uuid, Keyword.get(opts, :workspace_id)) do
           nil ->
             {:error, :not_found}
 
@@ -107,6 +120,13 @@ defmodule Barkpark.Sharing.Links do
         end
     end
   end
+
+  # Two-head object-authz resolve. A bound workspace id filters the lookup; a nil
+  # workspace id is the global-admin passthrough (unfiltered by id alone).
+  defp fetch_scoped(uuid, workspace_id) when is_binary(workspace_id),
+    do: Repo.get_by(ShareLink, id: uuid, workspace_id: workspace_id)
+
+  defp fetch_scoped(uuid, nil), do: Repo.get(ShareLink, uuid)
 
   @doc """
   List the links for ONE item (newest first). Callers MUST NOT expose

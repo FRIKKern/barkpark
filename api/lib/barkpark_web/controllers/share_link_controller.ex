@@ -168,6 +168,7 @@ defmodule BarkparkWeb.ShareLinkController do
   def mint(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
+         :ok <- ensure_token_scope(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params),
          access <- access_of(params),
@@ -194,6 +195,13 @@ defmodule BarkparkWeb.ShareLinkController do
           unprocessable(conn, "could not create link")
       end
     else
+      # Cross-tenant confinement: a workspace-bound admin token minting against
+      # ANOTHER workspace's scope is indistinguishable from a missing item — a
+      # foreign scope must never be re-shareable. (nil-workspace host/platform
+      # admin is unfiltered.)
+      {:error, :cross_tenant} ->
+        not_found_json(conn, "no such item in this scope")
+
       {:error, msg} when is_binary(msg) ->
         unprocessable(conn, msg)
 
@@ -206,18 +214,26 @@ defmodule BarkparkWeb.ShareLinkController do
   def list(conn, params) do
     with {:ok, {ws, proj, _dataset}} <- scope_triple(params["scope"]),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
+         :ok <- ensure_token_scope(conn, workspace.id),
          %Tenancy.Project{} <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params) do
       links = Links.list_for(workspace.id, kind, ref_type, ref_id) |> Enum.map(&link_json/1)
       json(conn, %{links: links})
     else
+      # A workspace-bound admin listing ANOTHER workspace's item would otherwise
+      # recover its live `/s/<raw token>` credentials (read + re-share). Foreign
+      # scope → not_found; nil-workspace host/platform admin stays unfiltered.
+      {:error, :cross_tenant} -> not_found_json(conn, "no such item in this scope")
       _ -> unprocessable(conn, "scope, kind, ref_id (+ ref_type for docs) are required")
     end
   end
 
   @doc "DELETE /v1/shares/links/:id — revoke one link."
   def revoke(conn, %{"id" => id}) do
-    case Links.revoke(id) do
+    # Object-authz: scope the revoke to the actor's own workspace. A workspace-
+    # bound token revoking a foreign link resolves not_found (fail-closed); a
+    # nil-workspace host/platform admin keeps unfiltered cross-ws reach.
+    case Links.revoke(id, workspace_id: token_workspace_id(conn)) do
       # RECEIPT LAW (pds w39): `Links.revoke/1` returns the UPDATED link
       # (sharing/links.ex:91-109). The old body was a literal `true` plus an echo
       # of the `:id` path param; both now descend from the returned row's own
@@ -240,6 +256,27 @@ defmodule BarkparkWeb.ShareLinkController do
   # ── helpers ────────────────────────────────────────────────────────────
 
   defp scope(link), do: [workspace_id: link.workspace_id, project_id: link.project_id]
+
+  # The actor's workspace id from the bearer token (`:api_token` assigned by
+  # OptionalToken). `nil` for a host/platform admin token — the global-admin
+  # passthrough that keeps cross-workspace reach.
+  defp token_workspace_id(conn) do
+    case conn.assigns[:api_token] do
+      %{workspace_id: ws} -> ws
+      _ -> nil
+    end
+  end
+
+  # mint/list object-authz gate: a workspace-bound token may only act within its
+  # OWN workspace; a foreign scope is treated as a missing item. `nil` (host/
+  # platform admin) passes through unfiltered.
+  defp ensure_token_scope(conn, resolved_workspace_id) do
+    case token_workspace_id(conn) do
+      nil -> :ok
+      ^resolved_workspace_id -> :ok
+      _ -> {:error, :cross_tenant}
+    end
+  end
 
   defp scope_triple(scope) when is_binary(scope), do: Sharing.scope_triple(scope)
   defp scope_triple(_), do: {:error, "scope is required (ws[/project[/dataset]])"}

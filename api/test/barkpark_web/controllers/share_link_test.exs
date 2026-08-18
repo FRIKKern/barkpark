@@ -3,6 +3,14 @@ defmodule BarkparkWeb.ShareLinkTest do
   P7 — ITEM (per-document) share links: mint → `/s/:token` resolves the ONE
   bound item (paper / doc / media), scoped to the LINK's own workspace and
   INDEPENDENT of any section share. Revocable; admin-only management.
+
+  OBJECT-AUTHZ (SA-S1): admin management is scoped to the ACTOR's workspace.
+  A workspace-bound admin token cannot revoke, list (recover the raw
+  `/s/<token>` credential), or mint against ANOTHER workspace's item — a foreign
+  id/scope resolves `not_found`, fail-closed. A nil-workspace host/platform admin
+  keeps cross-workspace reach. Reverting `Links.revoke/2`'s scoped resolve or the
+  controller's `ensure_token_scope` guard REDs the cross-tenant tests below
+  (red-without-fix — the IDOR was run-proven open on origin/main).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -13,9 +21,13 @@ defmodule BarkparkWeb.ShareLinkTest do
 
   import Barkpark.TenancyFixtures
 
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Sharing.Links
+
   @dataset "production"
   @admin "share-link-admin"
   @junior "share-link-junior"
+  @host "share-link-host"
 
   defmodule MissingRedirectTenancy do
     def get_workspace_by_id(_id), do: nil
@@ -27,12 +39,24 @@ defmodule BarkparkWeb.ShareLinkTest do
     # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
     Barkpark.LabelFixtures.register_tags!(@dataset)
 
-    {:ok, _} = Auth.create_token(@admin, "sl-admin", @dataset, ["read", "write", "admin"])
-    {:ok, _} = Auth.create_token(@junior, "sl-junior", @dataset, ["read", "write"])
-
     ws = create_workspace!("link-ws")
     proj = create_project!(ws, "link-proj")
     scope = [workspace_id: ws.id, project_id: proj.id]
+
+    # @admin is BOUND to this fixture workspace (5th arg) — object-authz now
+    # scopes mint/list/revoke to the actor's workspace, so a same-workspace admin
+    # is what the happy-path tests exercise. (create_token/4 would bind to the
+    # seeded DEFAULT workspace, a DIFFERENT tenant, and every mint here would 404.)
+    {:ok, _} = Auth.create_token(@admin, "sl-admin", @dataset, ["read", "write", "admin"], ws.id)
+    {:ok, _} = Auth.create_token(@junior, "sl-junior", @dataset, ["read", "write"], ws.id)
+
+    # Workspace B + its own bound admin token — the cross-tenant attacker/victim
+    # pair. And a nil-workspace HOST/platform admin token (direct insert; there is
+    # no create_token arg for nil once a default workspace is seeded) that must
+    # keep cross-workspace reach.
+    ws_b = create_workspace!("link-ws-b")
+    proj_b = create_project!(ws_b, "link-proj-b")
+    host_admin_token!(@host)
 
     {:ok, _} =
       Content.upsert_schema(
@@ -83,9 +107,44 @@ defmodule BarkparkWeb.ShareLinkTest do
       conn: conn,
       ws: ws,
       proj: proj,
+      ws_b: ws_b,
+      proj_b: proj_b,
       scope_str: "#{ws.slug}/#{proj.slug}/#{@dataset}",
+      scope_str_b: "#{ws_b.slug}/#{proj_b.slug}/#{@dataset}",
       media: media
     }
+  end
+
+  # A nil-workspace HOST/platform admin token (RequireAdmin admits [admin]).
+  # There is no create_token arg for a nil workspace once the default workspace is
+  # seeded, so insert the row directly.
+  defp host_admin_token!(raw) do
+    %ApiToken{}
+    |> ApiToken.changeset(%{
+      token_hash: ApiToken.hash_token(raw),
+      label: "sl-host",
+      dataset: @dataset,
+      permissions: ["read", "write", "admin"],
+      workspace_id: nil
+    })
+    |> Repo.insert!()
+  end
+
+  # Create a ShareLink row directly in a workspace's scope (the victim link the
+  # cross-tenant probes target), returning the persisted %ShareLink{}.
+  defp seed_link!(ws, proj, ref_id) do
+    {:ok, {_raw, link}} =
+      Links.create(%{
+        workspace_id: ws.id,
+        project_id: proj.id,
+        dataset: @dataset,
+        kind: "doc",
+        ref_type: "post",
+        ref_id: ref_id,
+        access: "read"
+      })
+
+    link
   end
 
   defp put_media!(ws, proj) do
@@ -146,8 +205,122 @@ defmodule BarkparkWeb.ShareLinkTest do
       |> put_req_header("authorization", "Bearer #{@junior}")
       |> put_req_header("content-type", "application/json")
 
+  defp host(conn),
+    do:
+      conn
+      |> put_req_header("authorization", "Bearer #{@host}")
+      |> put_req_header("content-type", "application/json")
+
   defp mint(conn, body),
     do: conn |> admin() |> post("/v1/shares/links", body) |> json_response(201)
+
+  # ── object-authz: cross-tenant confinement (SA-S1) ─────────────────────────
+  #
+  # RED-WITHOUT-FIX: on origin/main `Links.revoke/1` is a bare unscoped
+  # `Repo.get(ShareLink, id)` and the controller resolves the workspace from the
+  # CLIENT-supplied `scope` slug — so a workspace-A admin token could revoke,
+  # list (recovering the raw `/s/<token>` credential), and mint against a
+  # workspace-B item. Reverting the scoped resolve / `ensure_token_scope` guard
+  # REDs each `not_found` / `revoked_at stays nil` assertion below.
+
+  test "a ws-A admin CANNOT revoke a ws-B link (cross-tenant write IDOR closed)", %{
+    conn: conn,
+    ws_b: ws_b,
+    proj_b: proj_b
+  } do
+    victim = seed_link!(ws_b, proj_b, "victim-post")
+
+    resp = conn |> admin() |> delete("/v1/shares/links/#{victim.id}")
+    assert resp.status == 404
+
+    # The victim row is untouched — never revoked.
+    assert Repo.get!(Barkpark.Sharing.ShareLink, victim.id).revoked_at == nil
+  end
+
+  test "a same-workspace admin revoke succeeds and stamps revoked_at", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    link = seed_link!(ws, proj, "own-post")
+
+    body = conn |> admin() |> delete("/v1/shares/links/#{link.id}") |> json_response(200)
+    assert body["revoked"] == true
+
+    assert Repo.get!(Barkpark.Sharing.ShareLink, link.id).revoked_at != nil
+  end
+
+  test "a nil-workspace HOST admin still revokes ANY workspace's link", %{
+    conn: conn,
+    ws_b: ws_b,
+    proj_b: proj_b
+  } do
+    link = seed_link!(ws_b, proj_b, "host-target-post")
+
+    body = conn |> host() |> delete("/v1/shares/links/#{link.id}") |> json_response(200)
+    assert body["revoked"] == true
+
+    assert Repo.get!(Barkpark.Sharing.ShareLink, link.id).revoked_at != nil
+  end
+
+  test "a ws-A admin listing a ws-B item leaks NO link / raw token", %{
+    conn: conn,
+    ws_b: ws_b,
+    proj_b: proj_b,
+    scope_str_b: scope_b
+  } do
+    _victim = seed_link!(ws_b, proj_b, "list-victim")
+
+    resp =
+      conn
+      |> admin()
+      |> get("/v1/shares/links?scope=#{scope_b}&kind=doc&ref_type=post&ref_id=list-victim")
+
+    assert resp.status == 404
+    # Absolutely no live share credential recovered.
+    refute resp.resp_body =~ "/s/"
+  end
+
+  test "a same-workspace admin list DOES return the item's link", %{
+    conn: conn,
+    ws: ws,
+    proj: proj,
+    scope_str: scope
+  } do
+    link = seed_link!(ws, proj, "list-own")
+
+    body =
+      conn
+      |> admin()
+      |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=list-own")
+      |> json_response(200)
+
+    ids = Enum.map(body["links"], & &1["id"])
+    assert link.id in ids
+  end
+
+  test "a ws-A admin CANNOT mint against a ws-B scope (cross-tenant re-share closed)", %{
+    conn: conn,
+    scope_str_b: scope_b
+  } do
+    resp =
+      conn
+      |> admin()
+      |> post("/v1/shares/links", %{
+        scope: scope_b,
+        kind: "doc",
+        ref_type: "post",
+        ref_id: "post1"
+      })
+
+    assert resp.status == 404
+  end
+
+  test "a same-workspace admin mint still succeeds", %{conn: conn, scope_str: scope} do
+    body = mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
+    assert is_binary(body["token"])
+    assert String.contains?(body["url"], "/s/")
+  end
 
   # ── paper link ────────────────────────────────────────────────────────────
 

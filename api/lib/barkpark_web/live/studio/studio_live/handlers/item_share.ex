@@ -66,7 +66,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
 
   def item_share_revoke(%{"id" => id}, socket) do
     if Caps.admin?(socket) do
-      Barkpark.Sharing.Links.revoke(id)
+      # Object-authz: scope the revoke to the current workspace so an admin of one
+      # workspace cannot revoke another's link (Caps.admin? alone binds no tenant).
+      # nil-safe: a nil workspace is the host/platform-admin passthrough.
+      Barkpark.Sharing.Links.revoke(id,
+        workspace_id: socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
+      )
 
       {:noreply,
        assign(socket,
