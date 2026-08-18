@@ -4440,6 +4440,27 @@ defmodule BarkparkCloud.Web.Router do
     "billing request could not be completed"
   end
 
+  # The cf-in-front deploy binding (D57) THREADS the raw Cloudflare v4 response
+  # body into `{:cloudflare_http_error, status, body}` (Cloudflare.Real.request/1
+  # on a non-2xx), and that body can carry account/zone internals — `cf_zone_id`,
+  # record ids, the connected account's own metadata. So it is NEVER echoed to
+  # the client: the http-error shape collapses to a bounded message keyed ONLY on
+  # the integer status, and EVERY other shape reaching the else arm (a
+  # Jason.DecodeError struct whose `.data` is body-bearing, the `:not_configured`
+  # / `:http_client_not_configured` atoms, an Ecto.Changeset from set_cf_binding)
+  # collapses to one generic constant via the BARE `_` catch-all (fail-closed —
+  # an unexpected term never reaches the wire raw). The full detail is logged
+  # server-side at the router else arm, so operators keep the diagnostic. The
+  # `error:` CODE (`cloudflare_bind_failed`) is unchanged, so the Go CLI key still
+  # resolves with zero UI regression. Mirrors `billing_reason/1` above.
+  defp cloudflare_reason({:cloudflare_http_error, status, _body}) when is_integer(status) do
+    "Cloudflare rejected the DNS/proxy write (HTTP #{status})"
+  end
+
+  defp cloudflare_reason(_reason) do
+    "Cloudflare rejected the DNS/proxy write — the box is still serving standalone"
+  end
+
   ## Instance-API proxy (C4 — charter decisions D46 / D51) — the console's
   ## gateway into a live instance's OWN HTTP API. EXPLICIT routes only, no
   ## free-form passthrough: each match names ONE `Registry.InstanceApiCatalog`
@@ -12114,11 +12135,15 @@ defmodule BarkparkCloud.Web.Router do
           {:cont, bound_site}
         else
           {:error, reason} ->
+            # Belt: the FULL raw provider body stays server-side for operators;
+            # the client gets only the bounded, status-keyed `cloudflare_reason/1`
+            # (never `inspect(reason)`, which echoed the zone/account internals).
+            Logger.error("cloudflare_bind_failed: #{inspect(reason)}")
+
             {:halt,
              json(conn, 502, %{
                error: "cloudflare_bind_failed",
-               detail:
-                 "Cloudflare rejected the DNS/proxy write: #{inspect(reason)} — the box is still serving standalone"
+               detail: cloudflare_reason(reason)
              })}
         end
     end
