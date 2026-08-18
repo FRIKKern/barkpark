@@ -180,6 +180,32 @@ defmodule BarkparkCloud.ConsoleReaderCensus do
   def rotted(read, classified) do
     MapSet.intersection(read, classified) |> Enum.sort()
   end
+
+  @doc """
+  THE D881 SEAL — classified rows whose reason still literally reads "READER OWED"
+  (SPACE-only, case-insensitive), returned as sorted unique codes.
+
+  A SETTLED classification names its reachability class, its disposition, and a
+  flip condition; it never carries the unpaid-debt phrase "READER OWED". The
+  wave-74 seal claim is that after the deploy/github payments ZERO census rows
+  read it — so an empty return IS the seal, and any code returned is a proven
+  reachable-dishonest survivor that owes either a curated reader (paid + rows
+  deleted via the rot arm) or a reword to a settled ruling.
+
+  The match is SPACE-only and scans the passed `.reason` strings ONLY — never the
+  source file. That is load-bearing: the moduledoc's own lowercase "reader owed"
+  and the HYPHENATED "reader-owed" flip phrases (the debt a code WOULD accrue if a
+  callback consumer shipped, or if a rename admitted a slug) are legitimate and
+  must survive. A `[\\s-]` class or a `File.read!` scan would false-red on them.
+  """
+  @spec reader_owed([%{optional(any) => any}]) :: [binary()]
+  def reader_owed(classified) do
+    classified
+    |> Enum.filter(&(&1.reason =~ ~r/READER OWED/i))
+    |> Enum.map(& &1.code)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
 end
 
 defmodule BarkparkCloud.ConsoleReaderCensusTest do
@@ -372,33 +398,49 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     },
 
     # ------------------------------------------------------------------ github arm
-    # Round 3 (D875) ships curated readers for github_error and
-    # repo_not_in_installation and deletes ALL their rows; the two zero-caller /
-    # guard-shield classifications below stay until their flip conditions fire.
+    # Round 3 (D883, wave 75) PAID repo_not_in_installation — its fallback was a
+    # measured transience lie, so it gained the curated ERRORS reader and its row
+    # was deleted (rot arm ran red first). github_error stays CLASSIFICATION-STANDS:
+    # its three sites are all admin-gated at the console and its fallbacks overclaim
+    # nothing (the slug is genuinely ambiguous). The zero-caller / guard-shield
+    # classifications below stay until their flip conditions fire.
     %{
       code: "github_error",
       site: "router.ex GET /v1/github/repos",
       reason:
-        "Member-reachable READER OWED: the only require_user site of this code (the " <>
-          "console repo picker's own list call); the emit is a bare slug that cannot " <>
-          "distinguish token death from outage. Round 3 (D875) ships the curated " <>
-          "entry — it must not overclaim cause — and DELETES all github_error rows."
+        "Classification stands (D883): the route is require_user, but the ONLY " <>
+          "console affordance that calls it is the #site-github button, rendered " <>
+          "solely for authority===\"grant\" (admin) — a member never reaches this " <>
+          "emit from the console, and the admin reader (openSiteGithub) renders the " <>
+          "caller fallback \"Couldn't load your repositories.\" github_error is " <>
+          "genuinely ambiguous (outage, rate-limit, and token-death are " <>
+          "indistinguishable at the emit), so that fallback overclaims no cause and " <>
+          "paints nothing permanent. Flip: github_error gains an ERRORS key OR a " <>
+          "member console affordance to GET /v1/github/repos ships."
     },
     %{
       code: "github_error",
-      site: "router.ex POST /v1/github/repos (vercel_reason mapping)",
+      site: "router.ex POST /v1/github/repos (create_repo_from_template github_error 502)",
       reason:
-        "Admin-gated sibling site (require_team_admin), not the member-reachable one; " <>
-          "the round-3 curated ERRORS entry reads the slug wherever it is minted, so " <>
-          "the rot arm deletes this row in the same diff as the GET-site row."
+        "Classification stands (D883): admin-gated (require_team_admin) create-repo " <>
+          "path; the console newCreateRepo reader renders its caller fallback " <>
+          "\"Please try again.\" The slug is the same genuinely-ambiguous upstream " <>
+          "verdict (outage/rate-limit/token-death indistinguishable), so the fallback " <>
+          "overclaims nothing. NOT the vercel_reason 502 route — it is minted bare in " <>
+          "the create_repo_from_template case arm. Flip: github_error gains an ERRORS " <>
+          "key OR a member affordance to GET /v1/github/repos ships."
     },
     %{
       code: "github_error",
       site: "router.ex connect_site_github",
       reason:
-        "Admin-gated connect-flow site of the same slug (site github connect card); " <>
-          "read lands with the round-3 curated entry — the rot arm deletes this row " <>
-          "together with its two sibling rows."
+        "Classification stands (D883): admin-gated (require_team_admin) connect-flow " <>
+          "site of the same slug; the submitSiteGithub reader renders its caller " <>
+          "fallback \"Please try again.\" github_error is genuinely ambiguous " <>
+          "(outage/rate-limit/token-death indistinguishable at the emit), so the " <>
+          "fallback overclaims no cause and paints nothing permanent. Flip: " <>
+          "github_error gains an ERRORS key OR a member affordance to GET " <>
+          "/v1/github/repos ships."
     },
     %{
       code: "installation_id_required",
@@ -420,11 +462,13 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     },
     %{
       code: "invalid_name",
-      site: "router.ex POST /v1/github/repos (vercel_reason mapping)",
+      site: "router.ex POST /v1/github/repos (bare 422 pre-check, not valid_repo_name?)",
       reason:
-        "Admin-gated (require_team_admin) new-repo path; the console form feeds the " <>
-          "name through its own input and upstream GitHub judges it — the refusal " <>
-          "renders the caller's fallback copy. Flip: a wave rules per-slug copy owed."
+        "Classification stands (D883): admin-gated (require_team_admin) new-repo path; " <>
+          "the router's OWN valid_repo_name? pre-check mints this bare 422 (NOT the " <>
+          "vercel_reason 502 route), and newCreateRepo renders its caller fallback " <>
+          "\"Please try again.\" — an honest, non-permanent sentence for a name the " <>
+          "console form fed through its own input. Flip: a wave rules per-slug copy owed."
     },
     %{
       code: "repo_full_name_required",
@@ -434,15 +478,12 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "is nonzero and always submits a member of it; no CLI/SDK caller sends the " <>
           "connect body at all. Flip: a caller that can submit an empty full_name ships."
     },
-    %{
-      code: "repo_not_in_installation",
-      site: "router.ex connect_site_github",
-      reason:
-        "TOCTOU-reachable READER OWED: a repo revoked from the installation between " <>
-          "the picker's list call and the connect submit is a real, permanent-until-" <>
-          "regranted state that today renders as a transience lie. Round 3 (D875) " <>
-          "ships the curated entry and DELETES this row."
-    },
+    # repo_not_in_installation was PAID in Round 3 (D883, wave 75): its fallback
+    # ("Please try again.") was a transience lie on a permanent-until-regranted
+    # state, so it gained the curated ERRORS reader
+    # ("GitHub's app can no longer see that repository — grant it access on GitHub,
+    # then reconnect.") and this row was deleted in the same diff. The rot arm
+    # asserts the deletion — a stray row here would red the moment the reader shipped.
     %{
       code: "repo_required",
       site: "router.ex POST /v1/sites/:id/github",
@@ -453,12 +494,15 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     },
     %{
       code: "unknown_template",
-      site: "router.ex POST /v1/github/repos (vercel_reason mapping)",
+      site: "router.ex POST /v1/github/repos (bare 422 / create_repo_from_template)",
       reason:
-        "Guard-shielded TOCTOU: the template is chosen from the server's own list; " <>
-          "only a template removed between list and submit (or a raw request) mints " <>
-          "this. Renders the caller's fallback copy. Flip: templates become mutable " <>
-          "at a cadence where the race is measured in the wild."
+        "Classification stands (D883): guard-shielded TOCTOU on the admin create-repo " <>
+          "path; the template is chosen from the server's own list and this bare 422 " <>
+          "is minted by the router's own pre-check / the create_repo_from_template " <>
+          "case arm (NOT the vercel_reason 502 route). Only a template removed between " <>
+          "list and submit (or a raw request) mints it, and newCreateRepo renders its " <>
+          "caller fallback \"Please try again.\" Flip: templates become mutable at a " <>
+          "cadence where the race is measured in the wild."
     },
     %{
       code: "unknown_template",
@@ -1422,6 +1466,23 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     """
   end
 
+  test "THE SEAL (D881): no CLASSIFIED row still reads READER OWED" do
+    owed = Census.reader_owed(@classified)
+
+    assert owed == [], """
+    #{length(owed)} classified code(s) still carry the unpaid-debt phrase READER OWED
+    in their reason:
+
+    #{Enum.map_join(owed, "\n", &"      #{&1}")}
+
+    The seal: after the deploy/github payments, ZERO census rows read READER OWED —
+    every survivor a settled classification with a named flip condition. Either PAY
+    the code (ship a curated ERRORS reader and delete its rows via the rot arm) or
+    REWORD the reason to a settled classification-stands ruling. The phrase is the
+    debt marker; a green here is the seal.
+    """
+  end
+
   test "no CLASSIFIED row outlives its emitter" do
     gone = MapSet.difference(classified_codes(), emitted()) |> Enum.sort()
 
@@ -1475,6 +1536,15 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     assert "not_a_support" in rotted,
            "a classified code injected into Side B did NOT trip the rot arm — " <>
              "the allowlist could rot silently"
+
+    # And the D881 seal guard can lose too: a row carrying the debt phrase in a
+    # LOCAL list (never the module attribute) surfaces by code.
+    probe = %{code: "zz_owed_probe", site: "synthetic seal probe site", reason: "READER OWED: injected debt"}
+
+    assert "zz_owed_probe" in Census.reader_owed(@classified ++ [probe]),
+           "a synthetic READER OWED row injected into a LOCAL classified list did " <>
+             "NOT surface through reader_owed/1 — the seal guard has gone vacuous " <>
+             "and its green proves nothing"
   end
 
   test "FAIL-CLOSED: a missing source, an empty extraction, a lost ERRORS map all raise by name" do
