@@ -1539,7 +1539,11 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
 
     # And the D881 seal guard can lose too: a row carrying the debt phrase in a
     # LOCAL list (never the module attribute) surfaces by code.
-    probe = %{code: "zz_owed_probe", site: "synthetic seal probe site", reason: "READER OWED: injected debt"}
+    probe = %{
+      code: "zz_owed_probe",
+      site: "synthetic seal probe site",
+      reason: "READER OWED: injected debt"
+    }
 
     assert "zz_owed_probe" in Census.reader_owed(@classified ++ [probe]),
            "a synthetic READER OWED row injected into a LOCAL classified list did " <>
