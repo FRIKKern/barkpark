@@ -3071,3 +3071,74 @@ this wave):
 Backlog, named-not-built: `task-8b3de757996336f9` (pnpm/docker `verbRule` twin, broadened to the npm
 config long-tail — D137); `tgw4-absence-veto-stops-at-the-rerun-seam` (fail-closed refused-command
 read-contract gap). Both OPEN, pre-existing children.
+
+- **D142 — THE DONE SET IS TRUE: FALSE-DONE COUNT = 0 over the full 62-row done universe; zero
+  reopens warranted, none manufactured.** An independent GR112-style false-done audit re-derived the
+  live denominator (Postgres, not `child_count` 147), pinned against `origin/main` and ran two
+  100%-coverage mechanical sweeps plus a stratified judgment layer over every done row. **The true
+  done universe is 62, not 54:** the flat `parent_id == truth-grip-epic` filter drops 16 grandchildren
+  parented to `tgw1-workflow-gate-wiring` (itself done), of which **8 are done and are the
+  highest-stakes wave-2 grip-engine rows** (`tgw2-adjudicator`, `-grip-quote-safety`,
+  `-fold-reread-derived-level`, `-inloop-gate`, `-recipe-ledger`, `-l4-artifact-census`,
+  `-decide-survey-projection`, `-wild-bulk-fanout-floor`). Both sweeps had originally run against the
+  flat 54 and were re-run against the 8 to close the gap. `seal.mjs`'s own header (:50-52) already
+  documents this 16-row drop — the denominator correction is baked into the code under audit. SWEEP A
+  (SHA-ancestry via `git rev-list --count origin/main..<sha> | grep -qx 0`, never the `is-ancestor`
+  form the grip's own `screenCommand` refuses as a write shape): every cited PR merge commit resolves
+  to an ancestor of `origin/main`; non-ancestor branch-tip SHAs were squash-resolved before any verdict
+  (superseded-landed, TRUE — no manufactured reopen). SWEEP B (close-provenance from `doc.claim`, not
+  `bp task events` which carry no actor): provenance recovered for 61/62; the one null-claim row
+  (`tgw5-prescreen-verb`, carrying the `Historical completion reconciled` seal string) is EXCUSED —
+  its cited verb re-derives `ADMIT[0]/REFUSE[1]/exit 1/no-mutation` when RUN on `origin/main`. The seal
+  string appears in 7 rows, all with full N/N criteria and real file:line evidence — benign, not the
+  Felix fabrication shape. The content-close dependency graph is a clean DAG (no cycles). Reverse
+  direction measured: 0 shipped-but-open and 0 shipped-but-cancelled mislabels. *Why: a grip/guard fix
+  marked done but not landed would be the highest-stakes false-done — the correctness guard with a hole
+  nobody knows about. The audit proves that did not happen anywhere in the done set.*
+
+- **D143 — GUARD MUTATION IS THE TRUTH AUTHORITY, and the six highest-stakes guards are LIVE
+  (red-when-reverted), not dead lines present on main.** The vacuity defense holds: because the grip
+  suite is not CI-gated, guard-exists + test-reds-on-revert IS the L1 truth for a guard-fix row. Six
+  targeted mutation-reverts, each restored to green: `screen.mjs` `git --output` refusal (5 reds) and
+  the `go coverprofile` write-flag (5 reds); `rerun.mjs` `classifySafety` quote-blanking (2 reds);
+  `seal.mjs` `adjudicateCriterion` polarity/verdict veto (2 reds); `level.mjs` `deriveLevel`
+  compound-walk (2 reds) and the `GENERATED_ARTIFACT_PATTERNS` `_gen.go` L4 census entry (1 red). The
+  cited capabilities are present on `origin/main` (line-drifted from the closes, grep-verified — the
+  tree is ~187 commits past). *Why: Sweep A proves code LANDED, not that it DOES what the criterion
+  claims; mutation closes that gap for the rows where it matters most.*
+
+- **D144 — FINDING (NOT a false-done): the grip suite is 1-red on `origin/main` —
+  `adjudicate.test.mjs:418` (the D88 caller-boundary test) pins a since-corrected over-refusal.** The
+  test asserts `screenCommand("git -C tooling/grip show HEAD:README.md")` is REFUSED, but the tgw4
+  value-global fix (`GIT_VALUE_GLOBALS`/`dropValueGlobals`, `screen.mjs:437/444`) since taught the
+  parser that `-C <dir>` is a value-taking global, so that safe read is now correctly ADMITTED. The
+  guard got STRICTER-correct (still refuses `git merge-base --is-ancestor` and every write verb); it
+  merely stopped over-refusing one safe read, and the co-scoped test was never updated. This is a
+  test-hygiene defect, not a guard hole, so NO row was reopened. It is invisible because the suite is
+  not CI-gated, and it is a concrete PREREQUISITE for `tgw6-bl-grip-suite-has-no-ci` (D104/D128 forbid
+  advisory CI on a red main). Distinct from the D141 `inloop-gate` 22/23 reds. Filed as backlog
+  `tgw-bl-adjudicate-d88-stale-pin` (OPEN). *Why: the epic exists to make an undetected level-skip
+  impossible; an undetected red on main is exactly the shape it should surface.*
+
+### Wave 2026-08-18 — DONE-SET FALSE-DONE AUDIT (verify-heavy, READ-ONLY). Parent `truth-grip-epic`. Paper `truth-grip-done-set-audit-2026-08-18`. Referent `truth-grip-epic-doneset-audit-log`.
+
+No construction: the fence is a read-only ledger audit (`bp` + `git` reads on `origin/main`) plus
+reopen-stage writes and this charter note. NO code edits — the guard-mutation cohort was proven by
+revert-in-a-throwaway-worktree, never on main. Six verifiers ran both 100% sweeps over the full 62-row
+done universe, mutation-proved the six highest-stakes guards, recovered close provenance, and measured
+both directions.
+
+| Lane | Coverage | Verdict |
+|---|---|---|
+| Sweep A — SHA-ancestry | 62/62 done rows, all cited PRs resolved | 0 genuinely-absent; every landing an ancestor |
+| Sweep B — close provenance | 61/62 from `doc.claim`; 1 null-claim excused by re-derivation | 0 fabrication-shape matches |
+| Guard mutation | 6 highest-stakes guards reverted | all LIVE (red-when-reverted) |
+| Content-close DAG | 6 mass-close rows, transitive targets | clean DAG, no cycles, all targets done/present |
+| Reverse mirror | open + cancelled cohorts sampled | 0 shipped-but-open, 0 shipped-but-cancelled |
+
+**Whole-ledger trust verdict: the truth-grip done set is TRUE. False-done count = 0.**
+
+Reopens issued this wave: NONE (none warranted, none manufactured). Backlog, named-not-built:
+`tgw-bl-adjudicate-d88-stale-pin` (D144, the stale D88 test — blocks tgw6 grip-CI); the pre-existing
+`tgw6-bl-grip-suite-has-no-ci` (OPEN, D128 — its OPEN status is legitimate and now has a concrete
+prerequisite named). No build slices: the audit warrants zero reopens and the fence is read-only.
