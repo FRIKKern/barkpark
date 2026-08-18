@@ -4461,6 +4461,34 @@ defmodule BarkparkCloud.Web.Router do
     "Cloudflare rejected the DNS/proxy write — the box is still serving standalone"
   end
 
+  # The deploy/upload TRANSPORT boundary (transport-leak wave, D93). Three client
+  # echoes serialize `Sites.Deploy.start_reported/1`'s `{:error, term()}` (spec'd
+  # `term()`, unbounded) or `Plug.Conn.read_body`'s `{:error, reason, conn}` — the
+  # box-build 503, the artifact-upload 500, the prebuilt-upload 503. Prod is
+  # BOUNDED (`TaskStarter` spawns `run/1` fire-and-forget and DISCARDS its rich
+  # terms; only a supervisor refusal like `{:error, :max_children}` or a
+  # `read_body` `:timeout`/`:closed` atom travels), so this is hygiene, not a live
+  # token/PII escape — but a starter swap (`SyncStarter` forwards `run/1`'s rich
+  # terms) WOULD leak, so it is redacted fail-closed now for defense-in-depth. The
+  # busy-box refusal keeps a retry-actionable message (both the prod double-wrapped
+  # `{:error, {:error, :max_children}}` and the flat `{:error, :max_children}`
+  # shape); EVERY other shape collapses to one generic constant via the BARE `_`
+  # catch-all (fail-closed — an unexpected term never reaches the wire raw). The
+  # full detail is `Logger.error`'d at EACH router emit site, so operators keep the
+  # diagnostic (the log MUST live in router.ex, never the driver module — Golden
+  # Rule 4 / #11723 cp-deploy brick guard). The `error:` CODE
+  # (`deploy_not_started` / `upload_failed`) is unchanged, so the Go `cloudError`
+  # and JS `friendly()` keys still resolve with zero UI regression. Mirrors
+  # `cloudflare_reason/1` + `billing_reason/1` above.
+  defp transport_reason(reason)
+       when reason in [{:error, {:error, :max_children}}, {:error, :max_children}] do
+    "the deploy could not be started — the box is busy; retry shortly"
+  end
+
+  defp transport_reason(_reason) do
+    "the request could not be completed"
+  end
+
   ## Instance-API proxy (C4 — charter decisions D46 / D51) — the console's
   ## gateway into a live instance's OWN HTTP API. EXPLICIT routes only, no
   ## free-form passthrough: each match names ONE `Registry.InstanceApiCatalog`
@@ -12251,14 +12279,17 @@ defmodule BarkparkCloud.Web.Router do
               {:error, reason} ->
                 # The row is minted and audited, so the attempt is on the record
                 # and reapable — but no build is running, and saying otherwise is
-                # the failure this route exists to stop reporting.
+                # the failure this route exists to stop reporting. The raw term is
+                # kept server-side and the client sees a bounded message (D93).
+                Logger.error("site deploy_not_started (box build): #{inspect(reason)}")
+
                 json(conn, 503, %{
                   error: "deploy_not_started",
                   detail:
                     "the deployment row was created but the build driver could not be started" <>
                       " — nothing is building. Retry the deploy; if it keeps failing the control" <>
                       " plane is out of build capacity.",
-                  reason: inspect(reason),
+                  reason: transport_reason(reason),
                   deployment: site_deployment_json(deployment, site, bp)
                 })
             end
@@ -13920,7 +13951,8 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 413, %{error: "artifact_too_large", max_bytes: max_artifact_bytes()})
 
       {:error, reason, conn} ->
-        json(conn, 500, %{error: "upload_failed", reason: inspect(reason)})
+        Logger.error("site upload_failed (artifact read_body): #{inspect(reason)}")
+        json(conn, 500, %{error: "upload_failed", reason: transport_reason(reason)})
     end
   end
 
@@ -13996,6 +14028,8 @@ defmodule BarkparkCloud.Web.Router do
             # upload would send them into a 200 that builds nothing, which is the
             # same lie in a new costume. THIS row is now a dead end: `queued`,
             # `claim_epoch` 0, covered by no reaper pass.
+            Logger.error("site deploy_not_started (prebuilt upload): #{inspect(reason)}")
+
             json(conn, 503, %{
               error: "deploy_not_started",
               detail:
@@ -14003,7 +14037,7 @@ defmodule BarkparkCloud.Web.Router do
                   " — nothing is building, and re-uploading these bytes will answer" <>
                   " `already_uploaded` without starting one. Mint a NEW prebuilt deployment" <>
                   " and upload again.",
-              reason: inspect(reason),
+              reason: transport_reason(reason),
               artifact_sha256: sha,
               deployment: site_deployment_json(stamped, site, bp)
             })

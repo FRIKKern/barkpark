@@ -3158,8 +3158,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     @moduledoc false
     @behaviour BarkparkCloud.Sites.Deploy.Starter
 
+    # Mirrors the PRODUCTION refusal shape: `TaskStarter` wraps the
+    # `Task.Supervisor.start_child` result, so a `max_children` refusal reaches
+    # `start_reported/1` as `{:error, {:error, :max_children}}`. The site unwraps
+    # once, so `transport_reason/1` sees `{:error, :max_children}` and answers the
+    # bounded busy-box message (transport-leak wave D93).
     @impl true
-    def start(_deployment_id), do: {:error, :max_children}
+    def start(_deployment_id), do: {:error, {:error, :max_children}}
   end
 
   describe "deploy-reliability W17 S5: a refused driver spawn answers 503, not 201" do
@@ -3179,7 +3184,10 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       body = json_body(conn)
       assert body["error"] == "deploy_not_started"
       assert body["detail"] =~ "nothing is building"
-      assert body["reason"] =~ "max_children"
+      # Redacted (D93): the client sees the bounded busy-box message, never the
+      # raw refusal term. The full term is Logger.error'd server-side.
+      assert body["reason"] == "the deploy could not be started — the box is busy; retry shortly"
+      refute body["reason"] =~ "max_children"
 
       # The row IS minted and audited — the attempt is on the record, reapable,
       # and named in the body so the operator can go look at it.
@@ -3213,7 +3221,9 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       body = json_body(conn)
       assert body["error"] == "deploy_not_started"
       assert body["artifact_sha256"] == sha
-      assert body["reason"] =~ "max_children"
+      # Redacted (D93): bounded busy-box message client-side, full term logged.
+      assert body["reason"] == "the deploy could not be started — the box is busy; retry shortly"
+      refute body["reason"] =~ "max_children"
 
       # THE INSTRUCTION MUST NOT BE "RE-POST". The bytes are stored, so the
       # retry the caller would reach for is answered `already_uploaded` WITHOUT
