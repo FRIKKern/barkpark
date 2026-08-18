@@ -43,6 +43,8 @@ export async function ensureTargetEmpty(targetDir: string): Promise<TargetDirSta
  * directory. A path the user made (or a symlink to one) keeps existing — only
  * its entries go — because the guard above already proved it was empty, so
  * everything inside it was written by this run and nothing else can be reached.
+ * And if a symlink now stands where the guard saw NOTHING, this touches
+ * nothing at all: that link is not something this run created.
  */
 export async function cleanupPartialScaffold(state: TargetDirState): Promise<void> {
   const { targetDir, createdByRun } = state
@@ -55,7 +57,12 @@ export async function cleanupPartialScaffold(state: TargetDirState): Promise<voi
     throw err
   }
 
-  if (createdByRun && !isSymlink) {
+  if (createdByRun) {
+    // This run only ever `mkdir`s the target, so a SYMLINK standing where the
+    // guard saw nothing was put there by something else between the guard and
+    // now. Whatever it points at is not ours to empty — back off entirely and
+    // let the retry's not-empty guard speak instead.
+    if (isSymlink) return
     await fs.rm(targetDir, { recursive: true, force: true })
     return
   }

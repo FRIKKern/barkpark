@@ -112,6 +112,25 @@ describe('cleanupPartialScaffold', () => {
     expect(await fs.readdir(target)).toEqual([])
   })
 
+  it('touches nothing when a symlink appeared where the guard saw an absent path', async () => {
+    // The guard recorded createdByRun for an absent path; by cleanup time a
+    // symlink stands there instead. This run only ever mkdirs, so that link —
+    // and everything it points at — belongs to somebody else.
+    const precious = path.join(tmp, 'precious')
+    const target = path.join(tmp, 'my-site')
+    await fs.mkdir(precious)
+    await fs.writeFile(path.join(precious, 'PRECIOUS.txt'), 'user data')
+
+    const state = await ensureTargetEmpty(target)
+    expect(state.createdByRun).toBe(true)
+    await fs.symlink(precious, target)
+
+    await cleanupPartialScaffold(state)
+
+    expect((await fs.lstat(target)).isSymbolicLink()).toBe(true)
+    expect(await fs.readFile(path.join(precious, 'PRECIOUS.txt'), 'utf8')).toBe('user data')
+  })
+
   it('is a no-op when the scaffold threw before creating anything', async () => {
     const target = path.join(tmp, 'my-site')
     const state = await ensureTargetEmpty(target)
