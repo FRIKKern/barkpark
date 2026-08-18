@@ -2971,53 +2971,103 @@ the `tgw9-s3`/root close-window stamps are left for the lead. The two evidence-c
 rows (`tgw9-bl-close-superseded-pr-5754`, `tgw6-bl-primary-checkout-staged-grip-fork`) are the lead's
 close-by-evidence, not build slices.
 
-### Wave 2026-08-18 — wave 12 REVIEW: all five slices built, mutation-proven, gate-green. Grade A.
+- **D136 — WAVE 13 IS INDEPENDENT VERIFY-AND-LAND: the four wave-12 builds were re-derived from
+  source, not inherited, and #12180 (the crown) is APPROVED and MERGED.** Five verifiers flew — one
+  per PR plus a merged-interaction proof — each running a NEW adversarial matrix rather than echoing
+  wave-12's self-review. #12180's `dropValueGlobals` closes the value-taking-global collision
+  FAIL-CLOSED: the full collision matrix on PR head refused every exploit shape (`git -C`/`-c`/
+  `--git-dir`/`--git-dir=value`/double-global `log push`, `go -C env run main.go`,
+  `npm --prefix ls install`) and admitted every safe recipe (`git -C /path log`,
+  `git -c core.pager=cat log`, `git status`, `go test ./...`, `npm ls`), with post-verb writes still
+  caught (`git branch -C/-m old new` REFUSED) and no new unsafe recipe introduced. Mutation-proven:
+  neutering `dropValueGlobals` to identity re-admits all three exploits and reds `screen.test.mjs`
+  (61→56); restore → 61/0. On current `origin/main` after the merge (870fcbb7bb):
+  `adjudicate.test.mjs` 37/37 and `screen.test.mjs` 58/58 GREEN — V5's stale-base prediction of an
+  adjudicate red was an artifact of a 5888-commit-behind branch base, NOT a real defect; GitHub's
+  3-way merge landed clean. *Why: distrust a check most when it confirms — wave 12's own Review
+  graded all five A and wrote "an independent second security review is still owed on #12180 before
+  merge." That review IS wave 13, and it holds.*
 
-All five round-1 slices came back clean; the reviewer changed NO code — the builders shipped
-correct, mutation-proven work first pass. Every slice's gate re-ran green on its own branch and every
-HIGH-FLIP judgment was independently re-derived:
+- **D137 — #12180's NAMED RESIDUAL is the npm config value-global long-tail, PRE-EXISTING and
+  NON-REGRESSING; APPROVE stands.** `NPM_VALUE_GLOBALS` enumerates 7 of ~150 npm config keys, so
+  `npm --registry/--tag/--otp/--node-options ls install` still admit as masked writes — byte-identical
+  `ok:true` on `origin/main` pre-fix and post-fix, so #12180 strictly improves and loosens nothing.
+  The `NPM_VALUE_GLOBALS` comment scopes itself to "the config paths/names that also eat a value" and
+  never claims npm-completeness, so the over-claim trap that would flip APPROVE→REQUEST-CHANGES is
+  absent. Owner: `task-8b3de757996336f9` (pnpm/docker `verbRule` twin, OPEN), whose scope broadens to
+  cover the npm long-tail. NOT built this wave. *Why: fail-closed means "no NEW hole opened"; a
+  partial-but-honest closure of a class the PR never claimed to finish clears the bar.*
 
-- **s0 (`tgw12-s0-inloop-anchor-repin`)** — the re-pin anchors to the live workflow wording
-  (`THE SAME PR CARRIES THIS RUN'S LEDGER ROWS` at line 757; the `never \`git add -A\`` ban at 746+757).
-  28/28. The loosened regex `/never \\?\`?git add -A/g` still pins count===2 and still requires
-  `git add -A`, so the guard's tripwire survives. No production touch.
-- **s1 (`tgw12-s1-screen-value-global-collision`, CROWN, HIGH-FLIP security)** — `dropValueGlobals`
-  is one shared normaliser (not five hand-copies), pre-verb-only so `git branch -C old new` still
-  reaches the write-flag guard. Independently mutation-proven: neutering all three call sites to
-  identity reds 5 screen.test cases; restore → 61/61. git+go+npm collisions all refuse; the four
-  falsely-refused `git -C path read` rows correctly widen to admit. RESIDUAL for the lead: npm's
-  config long-tail (`--registry`, `--tag`, `--otp` …) is NOT in `NPM_VALUE_GLOBALS`, so
-  `npm --registry ls install` still admits — a real but narrower same-shape hole, documented by the
-  builder and worth a follow-up; and the shared `verbRule` pnpm/docker variant carries the identical
-  gap (filed `task-8b3de757996336f9`). An independent second security reviewer is still owed before
-  merge.
-- **s2 (`tgw12-s2-bp-local-overpromotion`, HIGH-FLIP reachability)** — the local/remote boundary was
-  re-derived from source, not the builder's prose: `scaffy_cmd.go`'s own header lists FIVE pure-local
-  verbs (validate, fmt, run, remove, discover) — so the builder's inclusion of `remove` beyond the
-  brief's four is CORRECT, not scope creep; `pull`/`ls --remote` live in `scaffy_remote_cmd.go` and
-  hit `<server>/v1/data/query`, staying L2. Demotion requires local-verb AND no URL; a URL-bearing
-  local verb falls to L2 (the safe, non-demoting direction). Mutation reds 4 level.test cases;
-  restore → 80/80.
-- **s3 (`tgw12-s3-foldledger-injection-gap`)** — census `shellNow()` is byte-identical to
-  ledger.mjs's write-path `shellNow()`; backfill reuses its existing one (hoisted). `foldLedger`
-  accepts `{now, screen}`. Mutation (revert census injection) reds test 1; restore → 3/3. Note for
-  the lead: this shifts the SHIPPED real-corpus census output (73 legacy REFUSED-COMMAND rows leave
-  the denominator into `unreadable[]`) — intended, but confirm the slow `census.test.mjs` on merge.
-- **s4 (`tgw12-s4-record-baddeps-test`)** — direct fail-before-plant for the BAD-DEPS `admitFact`
-  class; matches the real return shape (`rejections[].reason`, `fact.deps` defaults `[]`). Mutation
-  (`if (false)`) reds the 3 negative cases; restore → 6/6. Test-only.
+- **D138 — #12182 (foldLedger read-path inject) is APPROVED and merges AFTER #12180.** The injection
+  is strictly ADDITIVE: `admitRecipe` checks VALUE-STORED input-free (fires with or without bounds)
+  and gates FUTURE-OBSERVED-AT on `hasNow` / REFUSED-COMMAND on `hasScreen`, so passing
+  `{now, screen}` can only ADD rejection classes, never disable one — no bypass, and a forged/
+  level-skipped row still rejects. `shellNow` in census.mjs and backfill.mjs is byte-identical to the
+  write-path `ledger.mjs:shellNow`. Mutation-proven: reverting BOTH injections to bare
+  `foldLedger(dir)` reds exactly the two product-path tests while the CONTROL (un-bounded fold folds
+  forgeries clean) stays green — 3/3 → pass 1/fail 2 → restore 3/3. Merge after #12180 so the census
+  read path inherits the tightened `screenCommand` and the census denominator shifts once (EXPECTED,
+  not a regression).
 
-Cross-slice: file-disjoint, no duplicated helpers, no conflicting vocabulary; s3's fold will consume
-s1's tightened `screenCommand` once both merge — coherent, not conflicting.
+- **D139 — #12183 (BAD-DEPS fail-before test) is APPROVED.** A single new `record.test.mjs`; the
+  guard already lives on `origin/main` (record.mjs:54), so the PR is purely additive coverage and
+  cannot loosen the grip. Mutation-proven: neutering the guard to `if(false)` reds exactly the 3
+  negative cases (string/numeric/object deps) and leaves the 3 positives green (array, empty-array,
+  undefined→stored `[]`) — the nil-stays-green trap is guarded in both directions — and the full-suite
+  fail-count delta is EXACTLY 3, all inside record.test.mjs, confirming BAD-DEPS was the one
+  admitFact class with zero prior coverage.
 
-Ledger audit: CLEAN. All five slice tasks `in_progress` with every non-merge-gated criterion stamped
-with real evidence and exactly one merge-gated criterion left open for the lead. No ledger fixes.
+- **D140 — #12181 (bp scaffy L2→L3 demotion) earns REQUEST-CHANGES on a fail-closed OVER-REFUSAL;
+  the CORE fix is airtight.** Independently re-derived: the tgw3 level-skip is real (5 pure-local
+  verbs derive L2 with `checkCeiling` ok:true on main), the fix closes it (→L3 LEVEL-SKIP), the
+  local/remote boundary holds (pull / `ls --remote` / URL-bearing stay L2, loopback L3), `remove` is
+  confirmed pure-local (the 5-verb superset over D133's 4 is correct), mutation reds tests 63/64/66 +
+  corpus snapshot 74, and the frozen 651-command corpus moves exactly ONE correct row. BUT
+  `isLocalScaffyInvocation` uses `tokens.indexOf("scaffy")` (level.mjs:343) — first occurrence
+  ANYWHERE — so a remote read carrying `scaffy` as an argument before a local-verb word over-demotes:
+  `bp task get scaffy validate x.scaffy` → L3 (should be L2). It fails CLOSED (stricter, zero corpus
+  occurrences), but test 65 titles the demotion "SUBCOMMAND-scoped" while the implementation is
+  indexOf-scoped — an unverified over-claim on the grip's own provenance grader. Per the wave's
+  fail-closed rule (over-refusal OR over-claiming test → REQUEST-CHANGES), this blocks. REMEDY (one
+  line, byte-disjoint): anchor `scaffy` to the subcommand position (require `bp` then adjacent
+  `scaffy` before the LOCAL_SCAFFY_VERBS check) and add
+  `assert.equal(deriveLevel("bp task get scaffy validate x.scaffy"), "L2")` to test 65. Filed as
+  `tgw13-s1`; the tgw12-s2 builder amends PR #12181. *Why: uncertainty on the grip's own executor/
+  grader is a block, and a test whose title asserts what its body does not verify is exactly the
+  vacuity this epic refuses.*
 
-**The grip HOLDS and is now TIGHTER on its own executor.** This wave closed a live census-gate
-write-bypass (s1), an on-thesis provenance-axis level-skip (s2), and a read-path injection residual
-(s3), plus restored full-suite green (s0) and closed the last untested admitFact rejection class (s4)
-— all mutation-proven, all in-fence. Next wave: the lead merges round 1 (all file-disjoint, any
-order); then the two evidence-closeable reconcile rows and the `tgw9-s3`/root close-window stamps are
-pure lead close-by-evidence, no build. The named backlog residue (`tgw12-s1` npm long-tail +
-`task-8b3de757996336f9` pnpm/docker `verbRule`, and `tgw4-absence-veto-stops-at-the-rerun-seam`) is
-the genuinely-unbuilt frontier for a future wave.
+- **D141 — CURRENT MAIN CARRIES 2 PRE-EXISTING GRIP REDS INDEPENDENT OF WAVE 13:
+  `inloop-gate.test.mjs` tests 22/23 red on `origin/main` from renewed workflow-wording drift.**
+  D135(a)'s #12179 re-pin held at merge time, but `bp-epic-cycle.workflow.js` reworded the Decide
+  ledger-commit prose again, so the literal-string anchors miss once more while the guarded discipline
+  is intact. #12180 (screen.mjs only) did not cause them; measured on 870fcbb7bb they were red before
+  it. The grip suite is not CI-gated so no merge is blocked, but every builder running the full suite
+  sees 2 reds on a clean tree. The durable fix is a WORDING-TOLERANT pattern (assert the discipline's
+  shape, not one PR's phrasing) so it stops drifting each month, filed as `tgw13-s2`. MERGE ORDER:
+  #12180 (DONE) → #12182 → #12183 (any order after #12182); #12181 HELD for its anchor remedy.
+
+### Wave 2026-08-18 — wave 13, INDEPENDENT VERIFY-AND-LAND. Parent `truth-grip-epic`. Paper `truth-grip-wave-13-2026-08-18`.
+
+No new construction: file edits under `tooling/grip/` were FORBIDDEN (they would conflict with the
+four PRs under review). Five verifiers re-derived the four wave-12 builds from source on current
+`origin/main` + `gh pr diff`, ran NEW adversarial matrices, mutation-proved each test in a throwaway
+worktree, and posted APPROVE/REQUEST-CHANGES as `gh pr` comments.
+
+| PR | Slice | Verdict | Merge |
+|---|---|---|---|
+| #12180 | tgw12-s1 screen value-global collision | APPROVE (+named npm residual) | MERGED 870fcbb7bb |
+| #12182 | tgw12-s3 foldLedger read-path inject | APPROVE | after #12180 |
+| #12183 | tgw12-s4 BAD-DEPS fail-before test | APPROVE | after #12182, any order |
+| #12181 | tgw12-s2 bp scaffy L2→L3 demotion | REQUEST-CHANGES (indexOf over-refusal) | HELD for tgw13-s1 |
+
+Two round-2 follow-up slices, dispatched by the lead after this wave (both `tooling/grip`, forbidden
+this wave):
+
+| # | Slice | Round | Model | Surface | What |
+|---|---|---|---|---|---|
+| 1 | `tgw13-s1-scaffy-subcommand-anchor` | 2 | opus | tooling/grip | anchor `scaffy` to the subcommand position + assert the L2 remote-read case; amends PR #12181 (D140). HIGH-FLIP-RISK: reachability scope |
+| 2 | `tgw13-s2-inloop-gate-wording-tolerant` | 2 | opus | tooling/grip/test | re-pin inloop-gate 22/23 by WORDING-TOLERANT pattern so it stops drifting (D141) |
+
+Backlog, named-not-built: `task-8b3de757996336f9` (pnpm/docker `verbRule` twin, broadened to the npm
+config long-tail — D137); `tgw4-absence-veto-stops-at-the-rerun-seam` (fail-closed refused-command
+read-contract gap). Both OPEN, pre-existing children.
