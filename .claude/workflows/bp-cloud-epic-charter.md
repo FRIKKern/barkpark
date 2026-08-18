@@ -1,45 +1,96 @@
-# Cloud Control-Plane Correctness & Quality — Epic Charter
+# JS SDK & Web-Consumer Correctness/Robustness Epic — Charter
 
-Epic task: `cloud-control-plane-correctness-audit` (open) · Wave 1 Paper: `cloud-control-plane-correctness-audit-wave-2026-08-18` · Fence: `cloud/lib/barkpark_cloud` + `cloud/test` ONLY. Distinct from the security campaign (IDOR + raw-body leaks) and disjoint from the js/ SDK and api/ Studio waves.
+Epic task: `js-client-correctness-audit` · Wave 1 Paper: `js-client-correctness-wave-2026-08-18`
 
 ## Vision
 
-The plane that provisions instances must not lie to itself. This epic is a Felix-style Phoenix/OTP/Ecto **correctness and robustness** audit of the cloud control plane — improvement-only, evidence-based, NON-security — across four classes: (1) Ecto efficiency/correctness (N+1, missing preloads, missing transactions, changeset gaps, unsafe binary_id `Repo.get`); (2) Oban job robustness (crash-loop bounds, idempotency, enqueue-before-commit races, silent drops); (3) provisioning state machine (dead-ends, missing failure/timeout edges, terminal re-entry); (4) error handling (unhandled `with`/`case` branches, swallowing rescues). The deliverable is a **pinned coverage map plus an honest per-class verdict**: every enqueue site, multi-write, state transition, changeset, and Repo-call-in-a-loop stamped REAL bug (with concrete inputs/state → wrong output/crash) or SAFE pattern (with a cited reason). In a plane this heavily hardened (cloud-console-hardening ~70 waves, deploy-reliability ~35, Felix W20 FK-abort, the security campaign) a manufactured bug is worse than an honest zero — the A-grade is the denominator + verdict, not a fix count. This is the Heggemsnes Act: humility enforced by instruments; safe cited is a finding, exactly as a fixed N+1 is.
+An honest, evidence-based per-class correctness and robustness verdict on the two
+JavaScript client packages — `@barkpark/core` (`js/packages/core/src`: transport, retry,
+pagination, tenancy, resource methods) and `@barkpark/nextjs` (`js/packages/nextjs/src`:
+caching, revalidation, server/client boundaries). Improvement-only, NON-security (distinct
+from the merged JS token-redaction security wave — the `config` `toJSON` hook is out of
+fence and must not be re-paved). The A-grade is NOT a manufactured finding count: the
+transport core is already scar-hardened, so certifying its guards guard-by-guard and
+hunting the quiet corners where comment density drops is the honest shape. Every confirmed
+small offline-provable defect ships with a red-first test; larger findings are filed with a
+failing scenario. State the count even when low.
 
 ## Decisions
 
-- **D1 — The A-grade is the honest per-class verdict, and all four named classes came back CLEAN.** Survey (13 lanes, zero coverage deficit) + verify (8 assignments with run-proofs) converged: zero read-side N+1 in registry.ex, zero changeset validation gaps across 29 schemas (FK class sealed by Felix W20's mutation-proven `fk_census` tripwire), zero unguarded param-fed binary_id `Repo.get` (repo.ex `uuid_or_nil`/`get_by_uuid` is the guard home), zero enqueue-before-commit races, zero provision-state dead-ends, zero live-but-slow reaps, zero unhandled `with`/`case` branches, zero false-success rescues. *Why: measurement-first survey then run-proof verify; every lane reported.*
-- **D2 — BUILD exactly one slice this wave: the Azure.Pricing unmonitored-spawn latch (V2).** `azure/pricing.ex` `handle_cast({:refresh, now_ms})` spawns an UNLINKED/UNMONITORED process that only clears `refreshing?: true` after `refresh/1` returns; a raise skips `send(:refresh_done)` and latches `refreshing?` forever — the price cache freezes at last-good and every `flush/0` waiter parks. Fix: `try/…after send(server, :refresh_done) end` so the completion signal always fires. *Why: the ONLY confirmed, small, offline-provable finding; V2's probe already reds without the fix and greens with it.*
-- **D3 — Severity of the pricing latch is LOW, not HIGH-FLIP.** The prod transport (`Billing.HttpClient.request/1`) normalizes ordinary transport failure to `{:error, {:http_client, reason}}` (does NOT raise), so the latch needs an EXCEPTIONAL raise (inets down, cacerts failure, an unforeseen `:httpc` shape); blast radius is bounded (prices freeze at last-good, nil-degrades, never 502), self-heals on restart. It touches OTP control flow but NOT provisioning/deploy, so it is not the HIGH-FLIP class. *Why: V2 read the wrapper + runtime wiring; the raise path is real but rare.*
-- **D4 — CITE SAFE, do not build: the email-change 3-write sequence (V1).** `accounts.ex` `deliver_user_update_email_instructions/2` runs 3 writes (stage `pending_email`, revoke old tokens, insert new code) with no `Repo.transaction`, but it is fail-closed: confirm binds the token to the current `pending_email` via `sent_to`, a retry is unthrottled + idempotent, and the `with` returns `{:error}` (no false success). A transaction wrap changes no observable outcome — that is tree-tidiness, out of scope. *Why: V1's three structural reasons; residue is a cosmetic UX retry, not a correctness/security defect.*
-- **D5 — CITE SAFE, do not build: the `dispatch_site_event` per-item `Repo.get` (V3).** `dispatch_reaped_deployment_alerts` does one UUID-guarded PK `Repo.get(Site)` per alert, hard-capped at `@reap_alert_cap = 25` by `Enum.split`; the dropped tail is already batched with a cited comment. A constant ≤25 PK lookups on a per-minute cron path is not a batchable N+1, and the fix would land cross-fence in notifications.ex. *Why: V3 pinned the cap = 25 and the deliberate design comment.*
-- **D6 — FILE, do not build: the usage.ex bare-rescue narrowing (V6).** Three gatherers (`seats/1`, `pending_invitations/1`, `instances_input/1`) use bare `rescue _` that would swallow a future programmer error as a silent "unmetered" meter. There is NO present failing input (callees are total over every valid team) and these are DISPLAY meters, not enforcement — so it is a robustness nit, not a correctness bug. Filed as a LOW backlog task with the mutation-proof template. *Why: V6's probe shows the bare clause hides KeyError, but the wave bars manufacturing style into correctness.*
-- **D7 — FILE, do not build: the chat-webhook idempotency/observability gap (V4).** Record ordering is post-send in every branch, an audit row is written per attempt, and the double-post is accepted at-least-once matching the api/ port — so it is SAFE for correctness. The residual: the outbound payload carries no stable delivery id (receivers cannot dedupe retries) and a response-lost-after-accept records `"failed"` for a delivered message. A DESIGN change touching all channel shapes (cross-fence). Filed with failing-scenario evidence. *Why: V4 refuted the "no audit trail" half; the residue is receipt-accuracy, not a crash.*
-- **D8 — FILE as backlog references (already documented, out of the offline-fixable envelope): two deploy.ex W27 latencies.** `settle_live/2` fence-loss can leave a serving build reported `failed` by the reaper (HIGH-FLIP, a two-phase box↔DB commit that cannot be made atomic offline); `defer/3` CAS-loss returns `{:ok, :deferred}` while leaving deferral counters NULL (a counting/observability defect, publish NOT lost). Both are the deploy path's own documented "the repair is speech." *Why: the deploy-control-flow verifier confirmed both are known W27 items, distinct from a partial-write transaction gap.*
-- **D9 — FILE as backlog note: `pending` provision jobs have no timeout-fail edge.** The stale reaper sweeps only `status == "claimed"`; a `pending` job whose kind has no running worker sits forever. This is design-expected (worker-down = infra), the one genuine "status with no timeout-fail edge," low consequence. *Why: provision-state verifier named it; not a state-machine dead-end because the row has a live claimable path.*
-- **D10 — Rounds are law, but this wave is single-round.** The one build slice (S1, pricing latch) is dependency-free → round 1, builds this run. No slice depends on another slice's code on main, so there is no round-2 deferral. *Why: a round-1 slice whose dep is unmerged burns a builder; here there are no inter-slice deps.*
-- **D11 — The pricing probe is promoted to the regression test.** V2's `pricing_latch_probe.exs` lived in a throwaway worktree and was never committed; the builder re-creates it as `cloud/test/barkpark_cloud/azure/pricing_latch_test.exs` (name ending `_test.exs` so the loader picks it up), mutation-proven: it reds against origin/main and greens with the `try/after` fix. *Why: the wave requires a mutation-proof for any built fix, and the probe is the template.*
+- **D1 · Direction: certify-core, hunt-corners.** Effort follows undiscovered-defect
+  density: the highest-traffic transport path is also the most-scarred, so its marginal
+  bug is lowest; the corners where the scars stop are where the real bugs sat. Verified
+  correct — every confirmed defect this wave came from the nextjs boundary or a body-read
+  edge, never from the certified core guards.
+- **D2 · Core transport/retry/pagination/numeric/async = SAFE, guard-by-guard.** Honest
+  zero across all five certified classes, each guard named to its prior-bug comment and
+  backed by a green baseline. Why: re-derivation + adversarial attack survived on every
+  cited guard (timeout `?? ?? default`, caller-abort re-throw never retried, 204/empty/
+  non-JSON ok-path split, write `maxAttempts:1`, `MAX_RATE_LIMIT_BACKOFF_MS` 60s cap,
+  leak-free abortable sleep, `Number.isFinite`/`Number.isInteger` numeric guards, 2
+  handled `.then`/`.catch` + 0 fire-and-forget). Baseline PROVEN green: core 419 passed /
+  1 skipped, nextjs 144 passed / 1 skipped, both build + typecheck clean on `e8603fb`.
+- **D3 · BUILD — nextjs `server/core.ts` ok-path JSON guard (V1).** `return (await
+  resp.json()) as T` at core.ts:375 has no 204 / empty-body / try-catch guard, drifting
+  from the core transport it claims to mirror (transport.ts:436-446). A 204 or empty-200
+  throws a raw `SyntaxError` that ESCAPES the Barkpark error taxonomy. Why build despite
+  low live reachability (both `/v1/data/query` + `/v1/data/doc` always emit a JSON
+  envelope today): it is a parity + taxonomy fix — the raw SyntaxError is uncatchable by a
+  caller filtering on `BarkparkError`, and any future 204 contract or proxy empty-200
+  crashes the client. Red-first proven: `Response('',{status:200})` and
+  `Response(null,{status:204})` both throw `SyntaxError: Unexpected end of JSON input`.
+- **D4 · BUILD — `useOptimisticDocument` monotonic-sequence guard (V3).** `setCommitted`
+  is unconditional and the re-sync guard keys on `inflightRef.current === 1` (sole-in-
+  flight), never on which response is NEWEST, so when two mutations are in flight and the
+  OLDER settles last it clobbers the newer committed doc and silently drops a persisted
+  patch. Why build: it is silent data loss (the worst class for an editor hook), the fix
+  is a ~4-line monotonic-seq guard proven red-first (out-of-order probe RED on main, GREEN
+  after, all 7 existing tests stay green), and it is zero-downside even under the
+  conservative reading that Next server-action serialization narrows reachability — the
+  public type `(doc:T)=>Promise<T>` permits any non-serialized mutator.
+- **D5 · BUILD — core `transport.ts` body-read try/catch (V7).** `await response.text()`
+  at transport.ts:100 (error path) and :439 (ok path) sit OUTSIDE the fetch try/catch, and
+  the per-attempt timeout timer is cleared before the body read. A mid-body connection
+  reset rejects with a raw `TypeError` (undici `terminated`) that (a) escapes the taxonomy
+  and (b) `defaultShouldRetry` never retries — even an idempotent GET. Why build: it is
+  the same transport-level network failure the fetch-catch already wraps as a retryable
+  `BarkparkNetworkError`, just a few ms later; classifying one retryable and the other a
+  raw escapee is arbitrary. Write `maxAttempts:1` means wrapping-as-retryable never
+  re-executes a plain POST, so the fix is safe.
+- **D6 · SAFE-by-contract, do NOT build.** media wrong-type casts (V2 — server
+  structurally cannot emit a truthy-wrong-type `hits`/`total`/`hasMore`), the `:_all` tag
+  asymmetry (V4 — every read is `:type`-tagged and the webhook backstops `:_all`), patchDoc
+  `result.document._type` (V5 — the mutate controller cannot 2xx-return a null/omitted
+  `document`, and a `?.` guard would silently mis-tag), and the listen frame-parser tail
+  (V8 — 1 MiB buffer cap + keepalive reset both correct). Why: building a guard against a
+  server output that provably cannot occur is manufacturing, which the charter forbids.
+- **D7 · FILE, do not build this wave.** The adjacent stalled-body-stream gap (a server
+  that sends headers then stalls hangs `response.text()` forever — the timeout timer is
+  already cleared; V7 flagged but did not derive) and the 304-not-modified error-path
+  handling (an empty-body 304 becomes a generic `BarkparkAPIError` rather than a
+  not-modified signal; V1 flagged, distinct from the ok-path fix). Both need their own
+  derivation before a fix.
+- **D8 · Builders are Opus@medium.** Fable is capped until Aug 21 and these are pure
+  logic/robustness fixes with no visual surface, so Opus is correct on both axes.
+- **D9 · All three fixes carry HIGH-FLIP-RISK: reachability.** Each fix's key judgment is
+  reachability (V1 low-today, V3 server-action serialization, V7 mid-body rarity) and each
+  touches a wide-blast transport/client boundary. The single wave reviewer performs a
+  distinct independent re-derivation per slice and flags that a genuinely independent
+  second reviewer is warranted before merge.
 
 ## Roadmap
 
-### Wave 1 (this wave) — the one confirmed fix + the honest verdict
+Wave 1 — three confirmed offline-provable fixes, all round 1, disjoint files, parallel:
 
-1. **S1 `ccpca-w1-pricing-spawn-latch`** — wrap the `azure/pricing.ex` `handle_cast` spawn body in `try/…after send(server, :refresh_done) end` so a raising `refresh/1` can no longer latch `refreshing?: true` forever; add `cloud/test/barkpark_cloud/azure/pricing_latch_test.exs` (promote V2's probe), mutation-proven reds-without/greens-with. (small, opus, round 1)
+| Slice | Package | File | Size | Model | Round |
+|---|---|---|---|---|---|
+| S1 nextjs ok-path JSON guard | @barkpark/nextjs | `server/core.ts` + new test | small | opus | 1 |
+| S2 optimistic out-of-order guard | @barkpark/nextjs | `actions/useOptimisticDocument.ts` + new test | small | opus | 1 |
+| S3 transport body-read try/catch | @barkpark/core | `transport.ts` + new test | small | opus | 1 |
 
-The three verify-round SAFE/CLEAN verdicts (email-change txn, dispatch_site_event N+1, all four named classes) are recorded in the wave Paper and cited here as findings — no slice, no task, by design.
-
-### Wave 2+ (filed backlog)
-
-- `ccpca-bl-usage-bare-rescue-narrow` — narrow the three bare `rescue _` clauses in usage.ex gatherers to the transient DB-fault classes (`DBConnection.ConnectionError`, `Postgrex.Error`) so a future programmer error surfaces loudly instead of hiding as "unmetered". LOW; mutation-provable (V6 probe is the template). No present failing scenario.
-- `ccpca-bl-chat-webhook-idempotency-key` — add a stable delivery/idempotency id to the outbound webhook payload so receivers can dedupe the documented at-least-once retries, and reconcile the `"failed"`-labeled-but-delivered receipt on accepted-but-response-lost. DESIGN change touching all `notifications/channels/*` shapes (cross-fence) — file, don't build under this fence.
-- `ccpca-bl-deploy-settle-live-fence-loss` — `settle_live/2` fence-loss after the box is serving leaves the row `building` + site pointer unflipped, later mis-settled `failed` by the reaper (deploy-reliability W27, "THE WORST LOSS ON THIS PATH"). HIGH-FLIP; a two-phase box↔DB commit, not offline-fixable — reference item.
-- `ccpca-bl-deploy-defer-cas-loss-counting` — `defer/3` returns `{:ok, :deferred}` when the fenced `deferred` write loses its CAS, leaving `deferral_depth/bound/cause` NULL and invisible to every deferral census (W27 counting defect; publish NOT lost).
-- `ccpca-bl-pending-provision-no-timeout` — `pending` provision jobs with no running worker for their kind never terminalize (reaper sweeps only `claimed`). Design-expected fleet-liveness gap; low consequence — note for a future liveness edge if desired.
+Backlog (filed, future waves): stalled-body-stream timeout (core transport); 304-not-modified
+error-path handling (nextjs server/core error path).
 
 ## Wave log
 
-### Wave 2026-08-18 — wave 1 (Correctness sweep + one fix), reviewed A
-
-The four correctness classes came back CLEAN across a 13-lane survey and 8 verify assignments with run-proofs; the honest per-class verdict IS the deliverable (charter D1). Exactly one slice built: **S1 `ccpca-w1-pricing-spawn-latch`** — wrapped `azure/pricing.ex`'s unlinked/unmonitored refresh spawn body in `try/…after send(server, :refresh_done) end` so a raising `refresh/1` can no longer latch `refreshing?: true` for the BEAM lifetime (cache frozen at last-good, every `flush/0` waiter parked). Review restored the fix, re-ran the gate (`14 tests, 0 failures`), then reverted the `try/after` in place and independently confirmed the mutation proof: the LATCH arm reds with `GenServer.call(…, :flush, 5000) ** (EXIT) time out` (10.0s, 1 failure). `mix format` clean; refresh/1 fail-closes only on `{:error,_}` tuples, so a raise genuinely escapes to kill the spawn — the finding is real. No review fixes needed; final branch is the builder's own `loop-epic/fix-azure-pricing-unmonitored-spawn-latc-0`. Ledger honest: task `in_progress`, 3/4 criteria met with quoted evidence, the LEAD-OWNED merge-gated "PR merged" row left `met:false` for the lead to close on merge. Nine other class/candidate verdicts recorded as cited-safe (email-change 3-write txn D4, `dispatch_site_event` per-item Repo.get D5) or filed backlog (D6–D9): 5 `ccpca-bl-*` children — usage bare-rescue narrowing, chat-webhook idempotency key, two deploy.ex W27 latencies, pending-provision timeout edge.
-
-Merge order: S1 is single-round, dependency-free — merge whenever Cloud + pr-task-gate are green; lead closes S1's criterion index 3 on merge. This is OTP control flow, NOT provisioning/deploy — charter D3 rules it LOW, not HIGH-FLIP, so no second independent reviewer is owed. Next wave: the highest-value vein is the two deploy.ex W27 latencies (`settle_live` fence-loss, HIGH-FLIP, and `defer` CAS-loss counting) — both need a two-phase box↔DB commit that is NOT offline-fixable, so a design wave, not a build slice. Wave Paper: `cloud-control-plane-correctness-audit-wave-2026-08-18` (debrief appended).
+(empty)
