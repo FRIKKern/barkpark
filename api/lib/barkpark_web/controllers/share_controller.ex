@@ -136,6 +136,14 @@ defmodule BarkparkWeb.ShareController do
   the tenancy check. A scope whose workspace does not exist has no tenant to
   confine to, so it falls through to `Auth.create_share_token/5` and keeps its
   422 "the scope is not edit-shared" contract instead of turning into a 403/404.
+
+  ACCEPTED SIGNAL (reviewed, arpss-w8): that ordering means a caller can tell an
+  EXISTING foreign workspace (403) from a nonexistent slug (422). Keeping the
+  422 first would be strictly worse — it would answer "is this foreign workspace
+  edit-shared, and for which surfaces", i.e. leak the foreign share CONFIG, not
+  just the slug's existence. And the signal is not new: `ResolveWorkspace`
+  already answers 404 for an unknown `/w/:workspace_slug/...` and 403 for a real
+  one the caller cannot reach (resolve_workspace.ex:71-76, 134).
   """
   def mint_token(conn, params) do
     scope = params["scope"]
