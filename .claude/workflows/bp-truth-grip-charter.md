@@ -3209,3 +3209,20 @@ Wave roster (both round 1, dependency-free, opus — Fable capped until Aug 21):
 Merge-gated closes LEFT FOR THE LEAD (D40 content-on-main; re-claim lapsed epochs first): `tgw12-s0`
 idx 3 (READY NOW — #12179 merged + inloop-gate 28/28 green); `tgw12-s2` idx 5 + `tgw13-s1` idx 4 (after
 FIX 1's fresh PR merges + #12181 closed); `tgw-bl-adjudicate-d88-stale-pin` idx 2 (after FIX 2 merges).
+
+### Wave 2026-08-18 — WAVE 15 REVIEW: both loose ends corrected, mutation-re-proven, grip suite green on the combined merge. Grade A.
+
+Both slices landed exactly as briefed; the reviewer independently re-derived the HIGH-FLIP reachability
+judgment and re-ran every mutation probe on this worktree rather than trusting the builder's numbers.
+
+- **FIX 2 — `tgw-bl-adjudicate-d88-stale-pin`, final branch `loop-epic/fix-2-d88-adjudicate-boundary-test-split-0-r`.** Only `adjudicate.test.mjs` changed; `screen.mjs` byte-identical to origin/main. The single over-refusal loop is split into a READ half (`git -C tooling/grip show …` now `screenCommand().ok===true` and verdict `!== REJECTED`) and a WRITE half (`git merge-base --is-ancestor` still `.ok===false`, verdict `=== REJECTED`). Reviewer-run mutation: reverting `dropValueGlobals`→`rawArgv` in the git rule reds ONLY the READ half; dropping `merge` from the write-verb regex reds ONLY the WRITE half — each half pins a distinct real behavior, not a tautology. `node --test tooling/grip/test/adjudicate.test.mjs` → 37/37.
+
+- **FIX 1 — `tgw13-s1-scaffy-subcommand-anchor`, final branch `loop-epic/fix-1-scaffy-subcommand-anchor-close-fre-1-r`.** Re-lands the whole tgw3 demotion on top of a clean origin/main (which carried NO scaffy carve-out), with `isLocalScaffyInvocation` anchored to the subcommand position: `bp` via `headToken`, walk the remainder skipping each value-taking global WITH its value (13-key mirror of `globals.go` `valueFlags`), treat `--json`/inline-long as self-contained, and require the first non-flag token `=== "scaffy"`. Reviewer re-ran the full deriveLevel+checkCeiling matrix and the arity traps: all five URL-free local verbs derive L3 and refuse an L2 claim; remote (`pull`, `ls --remote`, any `-s https://…`) stay L2; loopback stays L3; both incidental-scaffy remote reads (`bp task get scaffy validate x.scaffy`, `bp search query scaffy validate`) stay L2 with checkCeiling admitting the L2 claim — the over-refusal is GONE. Mutation: reverting the anchor to `rest.indexOf("scaffy")` reds exactly ONE test (79/80). `node --test tooling/grip/test/level.test.mjs` → 80/80. Corpus pin moved one row `{…L2:93,L3:380…}`→`{…L2:92,L3:381…}` as designed.
+
+- **Combined merge (both -r branches, disjoint files):** `node --test tooling/grip/test/*.test.mjs` from repo root → 712 tests / 711 pass / 0 fail / 1 skip. The D88 red that FIX 1 alone leaves standing is closed by FIX 2 — together they deliver the wish's "grip suite green on main," the prerequisite tgw6 grip-CI (D149) was waiting on.
+
+- **Ledger:** both slice tasks left honestly `in_progress` with non-merge-gated criteria stamped and evidence bearing; merge-gated rows (`tgw13-s1` idx 4, `tgw-bl-adjudicate-d88-stale-pin` idx 2) left open for the lead. No ledger lies found; no fixes needed. No tasks outside the wave were touched.
+
+- **HIGH-FLIP handoff:** FIX 1's level-classification is a reachability/security judgment. The single wave-reviewer independently re-derived it and it holds — but a genuinely independent second reviewer re-running the matrix before merge is still warranted, per the flip-risk protocol.
+
+- **Next wave:** merge FIX 2 first (greens the suite), then FIX 1's fresh PR (the lead closes #12181 and cuts it — the branch belongs to the tgw12-s2 builder). Then the lead closes the merge-gated criteria named above. With the suite green on main, tgw6 grip-CI (D128) is unblocked — its remaining dep `tgw9-s1` is done. The merge-base over-refusal and `git grep -ln` false-refusal remain filed as `pds-bl-grip-screen-refuses-honest-read-commands` for truth-grip to adopt.
