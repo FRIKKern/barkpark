@@ -2619,6 +2619,98 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
 6. **#12041 golden contingency** — `felix-w27-s6-12041-golden-contingency` (opus, small, round 2 —
    lead dispatches on the re-run verdict; AFTER workflow 32068069994's re-run reports).
 
+## Wave 29 Decisions (2026-08-18) — THE LOST MIRROR, REBUILT ON OPUS
+
+Wave 29's job is to restore TRUST after a Fable-degraded wave 28: rebuild the one genuinely-lost,
+genuinely-reachable defect (the media.ex swallow) with a live fail-before AND a fail-closed-after
+proof, land the four sound wave-28 slices WITHOUT rebuilding them, and record every sweep verdict
+with evidence. All premises smoked CLEAN on origin/main; six verifiers RAN, not read. Wave Paper:
+`felix-pristine-wave-29-2026-08-18`.
+
+- **D196 — THE LOST MIRROR REBUILDS ON OPUS, SAME DIALECT AS D188, PLUS THE 503 ELSE-TRAP CLOSED.**
+  Fable is capped until 2026-08-21, so the wave-28 fable HIGH-FLIP centerpiece
+  (`felix-w27-bl-media-dataset-swallow-mirror`) rebuilds on **opus at medium** with an INDEPENDENT
+  second reviewer owning the legit-nil/defect-nil boundary — the exact seam wave 28 could not staff
+  when it lost this slice (dispatched once on Fable, returned null, no retry). The build is D188
+  verbatim in media's own dialect: ONLY `put_scope_attrs/2` + the `upload/3` chain change; atom keys;
+  BOTH legit-nil arms preserved as `{:ok, nil}` (nil project incl. the Default-project fallback;
+  non-binary dataset, currently DEAD from the binary-guarded caller — preserve defensively, do NOT
+  prove it reachable); changeset error → `{:error, {:invalid_dataset, %{"dataset" => msgs}}}` (the
+  caller re-keys — verify V2 PROVED `to_envelope` passes `details` VERBATIM, so the string wire key
+  is the builder's job); `:dataset_not_found` retried once then `{:error, :conflict}` (errors.ex has
+  NO `:dataset_not_found` clause, so an unconverted one mislabels — the conversion is load-bearing).
+  **THE 503 ELSE-TRAP (verify V2/V3, the sole silent-regression path):** `put_scope_attrs` runs
+  inside the do-block today AFTER the blob is persisted at `Blobstore.put_file` (media.ex:100); to
+  thread the tuple it MOVES into the with-head, and TWO explicit else clauses —
+  `{:error,{:invalid_dataset,_}}` and `{:error,:conflict}` — MUST be inserted BETWEEN the
+  `payload_too_large` clause (:147) and the `{:error,_reason} → Blobstore.delete + :storage_unavailable`
+  503 catch-all (:149-154), each calling `Blobstore.delete(relative_path)` first (blob already on
+  disk). Miss the order and the 422/409 is relabeled 503 and lost silently. The 422 (errors.ex:564,
+  guarded `when is_map(details)`) and 409 (errors.ex:437) clauses are live on main — the envelope is
+  FREE; both media controllers' `{:error, changeset}` catch-all forwards ANY two-tuple to
+  FallbackController, no controller change. TEST TRAP (D188): the fail-before MUST seed a resolved
+  project or `resolve_dataset_id(_attrs, nil)` short-circuits and proves nothing. HIGH-FLIP-RISK:
+  the legit-nil/defect-nil boundary — nil arises at THREE sites, only the get_or_create_dataset error
+  (:663) fails closed; independent second review owed PRE-MERGE (manual lead dispatch, dual-mutant +
+  legit-nil-preservation harness). Round 1.
+
+- **D197 — THE FOUR WAVE-28 PRs ARE VERIFIED SOUND AND LAND UNCHANGED — NEVER REBUILT.** Survey
+  confirmed #12109 (s3 receive_timeout, D189), #12111 (checkout honesty, D191), #12113 (pulse
+  deflake, D192), #12114 (dead-letter, D193) are all MERGEABLE, scope-clean, and match their
+  charters; every non-merge criterion is already stamped met, only the MERGE-GATED row is open.
+  Rebuilding sound open PRs is the churn improvement-only bans (RIVAL B, rejected). Landing (Elixir
+  gate green) is the LEAD's; the non-merge ledger rows seal via `seal_one.py` POST-MERGE on the
+  current holder's RE-READ worker+epoch (the script refuses unless the PR is MERGED, so nothing
+  closes early). #12114 carries an author-flagged indefinite-cursor-stall availability trade-off
+  ({:halted,_} classified transient → a poison content doc stalls the cursor rather than
+  dead-lettering) — a real landing consideration for the lead, not a blocker.
+
+- **D198 — `felix-w27-s6-12041-golden-contingency` NOW CLOSES.** Its only unmet criterion was
+  MERGE-GATED on #12041 merged AND `felix-w19-bl-authority-lock-remaining-sites` closed. Both are
+  now true: #12041 merged 2026-08-18T00:10:32Z (mergeCommit 71f06d6), w19 closed 4s later. The row
+  is fully closeable — a lead ledger close, nothing blocks it. (`felix-w19` is already done;
+  `felix-w27-bl-sobelow-baseline-lineshift` stays fenced by open #6057; `task-openapi-drift-chronic`
+  stays open, out of scope.)
+
+- **D199 — share.ex ALREADY-GUARDED, UPGRADED FROM BY-INSPECTION TO A LIVE MUTATION PROOF.** Verify
+  V5 upgraded D194's by-inspection ruling to revert-red/fix-green evidence: reverting the three
+  scope threads commit 89e41d7bba added reds `share_scope_test.exs` 4/4 — a workspace-B `Share.revoke`
+  flipped the DEFAULT workspace collection's `shareLink.enabled=>false` (a different tenant,
+  workspace_id da076f64…) instead of returning `{:error, :not_found}`; restoring the threads greens
+  it 4/4. The mint/rotate/revoke WRITE leak was a real P0 fixed by 89e41d7bba; the anonymous-bearer
+  `resolve/2` is bearer-by-design on a 144-bit token (`:crypto.strong_rand_bytes(18)`). Record, do
+  NOT build. (Path drift to note: the file moved to `api/lib/barkpark/media/storage/share.ex`.)
+
+- **D200 — signed_url RE-REFUTED BY A ZERO-CALLER CENSUS (D184(i)/D190 STAND).** Verify V6: the
+  opts-forwarding `Barkpark.Media.Storage.sign/3` facade has ZERO callers in api/lib or api/test;
+  the sole prod caller is `urls.ex:147 SignedUrl.sign(path, file.id)` with NO opts, so `:ttl` always
+  resolves to `@default_ttl` (7 days) — no request data reaches `:ttl`. `signed_url_test.exs` 3/3
+  green. Leave the facade; record the census. Nothing is built on the refuted premise.
+
+- **D201 — THE ROSTER: ONE OPUS BUILD SLICE, THE REST VERIFY / ADJUDICATE / LAND.** RIVAL C won —
+  A's discipline (one build, zero rebuild) PLUS the wave's quality bar explicitly assigned to an
+  independent reviewer of the legit-nil boundary. The single round-1 build is the media mirror
+  (`felix-w27-bl-media-dataset-swallow-mirror`, opus, HIGH-FLIP). No other builder: the four PRs
+  land by the lead, the two adjudications (D199/D200) are recorded, `felix-w27-s6` closes (D198),
+  and the field-visibility cousin surfaced by the sweep — `asset_response.ex asset_schema/2` → nil
+  schema into `Envelope.render` — is filed to backlog (`felix-w29-bl-asset-schema-nil-redaction`),
+  NOT built (different vein, own reachability+leak proof owed). The `default_project_id/0` cousin is
+  the documented legit-nil arm the mirror must PRESERVE, not a defect — named, not filed. Fences
+  (per-file disjoint): Onboarding w7 (internal/cli + accounts/auth), console w75 (cloud/), Connectors
+  (cloud/) — the single slice touches only media.ex + a new media test, zero collision. Elixir gate
+  green from the builder's own worktree; merge-gated criteria left for the lead.
+
+### Wave 29 roadmap (1 build slice, round 1; the rest is landing + adjudication)
+
+1. **media dataset-swallow mirror** — `felix-w27-bl-media-dataset-swallow-mirror` (**opus**, medium,
+   round 1). Gate: `CC=/usr/bin/clang mix test` on the new fail-closed test + media_test.exs;
+   `_ -> nil` revert reds the fail-before. HIGH-FLIP-RISK: legit-nil boundary — independent second
+   review owed PRE-MERGE.
+
+_No-builder work this wave (lead):_ land #12109/#12111/#12113/#12114 (Elixir gate green) and seal
+their non-merge rows via `seal_one.py` post-merge; close `felix-w27-s6-12041-golden-contingency`
+(D198). Adjudications D199 (share.ex) and D200 (signed_url) are recorded, not built.
+
 ## Wave 28 Decisions (2026-08-18) — THE MIRROR AND THE UNSWEPT CORNERS
 
 - **D187 — THE TRAIN LANDED AND BOTH OWED REVIEWS WERE DISCHARGED POST-MERGE; NO REVERT.** The
@@ -2755,6 +2847,28 @@ belong to the LEAD at Review, batched, with each close naming its paying commit.
    medium). Gate: applier_test.exs green + classification-revert fail-before; no reaper.
 
 ## Wave log
+
+### Wave 2026-08-18 — Wave 29 DECIDED (building). "The Lost Mirror, Rebuilt on Opus."
+
+Ratified D196–D201. The survey CONFIRMED the direction with ZERO re-scope — all inherited premises
+smoked CLEAN on origin/main (#12071 on main at 24f683a11f; media.ex resolve_dataset_id at 656-668
+with the `_ -> nil` swallow at :663; #12071's 422/409 envelope clauses live at errors.ex:564/:437;
+#11853's slug-format gate on main). Six verifiers RAN: V2 proved the envelope is FREE by executed
+`to_envelope` output (422 validation_failed with details VERBATIM, 409 conflict, raw
+`:dataset_not_found` → 500 so it MUST be converted) and refuted the "would 500" surveyor
+(stale checkout); V3 mapped the upload/3 else-block and pinned the 503 else-trap as the sole
+silent-regression path; V5 UPGRADED share.ex from by-inspection to a live revert-red/fix-green
+mutation proof (workspace-B revoke flips the Default tenant's shareLink — 4/4 red, restore → 4/4
+green); V6 re-refuted signed_url with a zero-caller census on the `Storage.sign/3` facade. **One
+Opus round-1 build slice: the media mirror** (`felix-w27-bl-media-dataset-swallow-mirror`, HIGH-FLIP:
+legit-nil boundary, independent 2nd review owed pre-merge) — the wave-28 fable centerpiece that was
+LOST to the cap, now rebuilt on Opus (Fable capped to Aug 21) with the 503 else-trap folded into its
+criteria. No other builder: the four wave-28 PRs (#12109/#12111/#12113/#12114) are verified sound and
+LAND unchanged by the lead (seal non-merge rows via `seal_one.py` post-merge on re-read epochs);
+`felix-w27-s6-12041-golden-contingency` closes on the now-satisfied #12041-merge gate; share.ex and
+signed_url adjudications are recorded, not built; `felix-w29-bl-asset-schema-nil-redaction` filed to
+backlog (field-visibility read-path cousin). Wave Paper: `felix-pristine-wave-29-2026-08-18`. Grade:
+pending build+review.
 
 ### Wave 2026-08-18 — Wave 28 BUILT + REVIEWED, grade A-. "Four Clean, One Unbuilt."
 
