@@ -60,7 +60,13 @@
 
 set -euo pipefail
 
-REPO_ROOT="${STUDIO_LINK_LINT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+# Resolve THIS script's own absolute path BEFORE the cd below. The selftest
+# re-invokes the real gate as `bash "$SELF"`, and a relative $0 (`bash
+# studio-link-lint.sh` from inside scripts/) stops resolving the moment we cd to
+# REPO_ROOT — every case then reds with rc=127, a FALSE RED on a legitimate
+# invocation.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+REPO_ROOT="${STUDIO_LINK_LINT_ROOT:-$(dirname "$(dirname "$SELF")")}"
 cd "$REPO_ROOT"
 
 SCAN_ROOT="api/lib/barkpark_web"
@@ -131,7 +137,7 @@ EOF
   # One run of the REAL gate against the fixture tree.
   probe() {
     local code=0
-    STUDIO_LINK_LINT_ROOT="$tmp/tree" bash "$0" >"$tmp/out" 2>&1 || code=$?
+    STUDIO_LINK_LINT_ROOT="$tmp/tree" bash "$SELF" >"$tmp/out" 2>&1 || code=$?
     echo "$code"
   }
 
