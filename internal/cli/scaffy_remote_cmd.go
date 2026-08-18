@@ -337,6 +337,27 @@ func runScaffyPull(out *writer, g globals, args []string) int {
 
 	destRel := filepath.Join(filepath.FromSlash(scaffyCommandsDir), id+".scaffy")
 	sidecarRel := filepath.Join(filepath.FromSlash(scaffyCommandsDir), id+".provenance.json")
+
+	// Path containment (security): id is built from RAW remote metadata —
+	// meta.Domain/Concept/Variant are doc.Domain/… JSON fields with no charset
+	// gate, and the pre-write ValidateFile above gates only doc.Source, never the
+	// filename metadata. filepath.Join Cleans, so a domain like "../../../tmp/evil"
+	// collapses the destination OUT of scaffy/commands/ (dest becomes
+	// ../tmp/evil--…), and a '/'-bearing field plants a surprise subdirectory.
+	// Refuse BEFORE any MkdirAll/WriteFile: reject the WHOLE id if it carries a
+	// path separator or a ".." segment (all three fields flow into id, not just
+	// Domain), and confirm both computed paths stay under the commands base. The
+	// forward-slash "../" vector is the only one that escapes on non-Windows —
+	// rejecting only a leading '/' or backslash would be incomplete.
+	base := filepath.FromSlash(scaffyCommandsDir)
+	if strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") ||
+		!scaffyPathWithinBase(base, destRel) || !scaffyPathWithinBase(base, sidecarRel) {
+		return useError(out, "invalid",
+			fmt.Sprintf("scaffy pull: document %q metadata yields an out-of-tree path — id %q must not contain '/', '\\' or '..' (domain/concept/variant are untrusted server fields); refusing, nothing written",
+				doc.ID, id),
+			exitValidation)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(destRel), 0o755); err != nil {
 		return useError(out, "io", "scaffy pull: "+err.Error(), exitNotFound)
 	}
@@ -442,6 +463,20 @@ func scaffyPullMeta(doc scaffyCommandDoc, cmd *scaffy.Command) *scaffyProvenance
 		}
 	}
 	return meta
+}
+
+// scaffyPathWithinBase reports whether target stays inside base after cleaning —
+// false when target IS base's parent ("..") or reaches outside it ("../…"), and
+// false when filepath.Rel cannot even express target relative to base (a
+// leading-".." target base cannot reach lexically). This is the authoritative
+// path-containment gate for a pull destination whose id is derived from raw
+// remote metadata; it fails closed on any ambiguity.
+func scaffyPathWithinBase(base, target string) bool {
+	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(target))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // scaffyKnownConcepts lists the distinct concepts the server carries, sorted,
