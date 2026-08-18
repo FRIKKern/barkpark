@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -238,6 +239,77 @@ func TestParseRejectsUnknownChatKey(t *testing.T) {
 	if _, err := Parse(badInCaps); err == nil {
 		t.Fatal("Parse accepted an unknown key inside a provider's chat caps; want error")
 	}
+}
+
+// Parse is a CLIENT-SIDE TRUST BOUNDARY against a remote-to-eval RCE: the
+// completion emitters bake manifest noun/verb NAMES raw into a shell script the
+// user is told to eval (`eval "$(bp completion bash)"`), so a hostile server
+// could plant a name like `x";touch /tmp/pwn;#` that executes on eval. Parse
+// must REJECT a manifest whose noun name or command verb leaves the shell-safe
+// identifier charset — before any name reaches an emitter. MUTATION PROOF:
+// deleting the safeName loop in manifest.Parse reds every subtest here.
+func TestParseRejectsUnsafeNounVerbNames(t *testing.T) {
+	// A well-formed manifest scaffold with one legit noun+command; each case
+	// swaps in a hostile noun name or verb and asserts Parse errors.
+	manifest := func(nounName, verb string) []byte {
+		return []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[{"name":` +
+			jsonStr(nounName) + `,"summary":"s"}],"commands":[{"id":"c","noun":` + jsonStr(nounName) +
+			`,"verb":` + jsonStr(verb) + `,"summary":"s","http":{"method":"GET","path_template":"/x"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}]}`)
+	}
+
+	// The completion-eval RCE payload proven by verify (V3), plus a command-
+	// substitution variant and a single-quote break-out (breaks the fish emitter's
+	// single-quoted interpolation).
+	hostileNames := []string{
+		`x";touch /tmp/pwn;#`,
+		`$(touch /tmp/pwn)`,
+		`a'b`,
+		`a b`,           // whitespace splits the shell word list
+		`a;rm -rf /`,    // command separator
+		`a$IFS`,         // shell variable
+		`Doc`,           // uppercase is outside the documented charset
+		`-lead`,         // a leading hyphen would read as a flag / option
+	}
+
+	for _, name := range hostileNames {
+		// Hostile NOUN name (verb kept legit) must be rejected.
+		if _, err := Parse(manifest(name, "get")); err == nil {
+			t.Errorf("Parse accepted hostile noun name %q; want rejection", name)
+		}
+		// Hostile VERB (noun kept legit) must be rejected.
+		if _, err := Parse(manifest("doc", name)); err == nil {
+			t.Errorf("Parse accepted hostile verb %q; want rejection", name)
+		}
+	}
+
+	// The Command.Noun path is distinct from the declared Noun.Name: Tree()
+	// synthesizes a node from cmd.Noun for a command whose noun was never declared
+	// in nouns[], and that name flows into the same eval'd emitter. So a manifest
+	// with an EMPTY nouns[] but a command carrying a hostile noun must also be
+	// rejected — a Noun.Name-only check would miss it.
+	cmdNounOnly := func(hostileNoun string) []byte {
+		return []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[{"id":"c","noun":` +
+			jsonStr(hostileNoun) + `,"verb":"get","summary":"s","http":{"method":"GET","path_template":"/x"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}]}`)
+	}
+	for _, name := range hostileNames {
+		if _, err := Parse(cmdNounOnly(name)); err == nil {
+			t.Errorf("Parse accepted hostile undeclared command noun %q; want rejection", name)
+		}
+	}
+
+	// A legit hyphenated noun+verb (workspace project-create is a real command)
+	// must STILL parse — the validation rejects metacharacters, not the safe
+	// charset the CLI actually uses.
+	if _, err := Parse(manifest("workspace", "project-create")); err != nil {
+		t.Errorf("Parse rejected a legit hyphenated noun/verb: %v", err)
+	}
+}
+
+// jsonStr encodes a Go string as a JSON string literal so a test payload
+// carrying quotes/backslashes embeds cleanly into a manifest body.
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // (b) Tree() from core-manifest.json yields the eight canonical core nouns plus
