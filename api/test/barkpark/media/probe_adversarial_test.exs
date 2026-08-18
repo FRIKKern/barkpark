@@ -32,7 +32,8 @@ defmodule Barkpark.Media.ProbeAdversarialTest do
 
   # Minimal JPEG: SOI then a SOF0 marker carrying height::16 width::16.
   defp jpeg_with(w, h) do
-    <<0xFF, 0xD8>> <> <<0xFF, 0xC0, 17::16, 8, h::16, w::16, 3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1>>
+    <<0xFF, 0xD8>> <>
+      <<0xFF, 0xC0, 17::16, 8, h::16, w::16, 3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1>>
   end
 
   test "truncated JPEG cut mid-SOF -> {:error, :invalid_jpeg}, no raise" do

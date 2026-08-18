@@ -50,16 +50,13 @@ defmodule Barkpark.Search.HighlighterMultibyteTest do
     # snippet lead so the bounded paths must clamp (left ellipsis) — the
     # re-inflation guard is exercised, not bypassed.
     for {label, field, needle} <- [
-          {"CJK padding beyond the snippet lead",
-           @cjk_lead <> "検索キーワード" <> @cjk_tail, "検索キーワード"},
+          {"CJK padding beyond the snippet lead", @cjk_lead <> "検索キーワード" <> @cjk_tail, "検索キーワード"},
           {"emoji padding around an ascii match",
-           String.duplicate("🎉🚀✨🔥", 200) <> "needle" <> String.duplicate("🌟💫", 200),
-           "needle"},
+           String.duplicate("🎉🚀✨🔥", 200) <> "needle" <> String.duplicate("🌟💫", 200), "needle"},
           {"ZWJ family grapheme cluster padding",
-           String.duplicate("👨‍👩‍👧‍👦 ", 120) <> "match" <> String.duplicate(" 👩‍❤️‍👨", 120),
-           "match"},
-          {"a multibyte match string wrapping a whole CJK word",
-           @cjk_lead <> "全文検索" <> @cjk_tail, "全文検索"},
+           String.duplicate("👨‍👩‍👧‍👦 ", 120) <> "match" <> String.duplicate(" 👩‍❤️‍👨", 120), "match"},
+          {"a multibyte match string wrapping a whole CJK word", @cjk_lead <> "全文検索" <> @cjk_tail,
+           "全文検索"},
           {"adjacent repeated matches (abcabc)",
            String.duplicate("世界", 100) <> "abcabc" <> String.duplicate("世界", 100), "abc"},
           {"an entity-adjacent boundary with CJK",
@@ -74,7 +71,14 @@ defmodule Barkpark.Search.HighlighterMultibyteTest do
         parsed = %{terms: [needle], phrases: [], prefixes: []}
 
         # highlight_text (via highlight_documents): marks the ENTIRE field.
-        highlights = Highlighter.highlight_documents([doc], parsed, %{"highlight_fields" => ["title"]}, @admin)
+        highlights =
+          Highlighter.highlight_documents(
+            [doc],
+            parsed,
+            %{"highlight_fields" => ["title"]},
+            @admin
+          )
+
         marked = highlights["d1"]["title"]
         assert is_binary(marked)
         assert_safe(marked)
@@ -83,15 +87,22 @@ defmodule Barkpark.Search.HighlighterMultibyteTest do
         # valid + mark-balanced AND must NOT re-inflate to the full field length.
         clamped = Highlighter.clamp_brief_highlights(highlights["d1"])["title"]
         assert_safe(clamped)
+
         assert String.length(clamped) < field_len,
                "clamp re-inflated to full field length (#{String.length(clamped)} >= #{field_len})"
 
         # snippet_text (via snippet_documents): raw bounded window, no markup.
-        snippet = Highlighter.snippet_documents([doc], parsed, %{"snippet_fields" => ["title"]}, @admin)["d1"]
+        snippet =
+          Highlighter.snippet_documents([doc], parsed, %{"snippet_fields" => ["title"]}, @admin)[
+            "d1"
+          ]
+
         assert is_binary(snippet)
         assert_safe(snippet)
+
         assert String.length(snippet) < field_len,
                "snippet re-inflated to full field length (#{String.length(snippet)} >= #{field_len})"
+
         # The needle sits past the lead, so the left side was cut.
         assert String.starts_with?(snippet, "…")
       end
@@ -104,7 +115,11 @@ defmodule Barkpark.Search.HighlighterMultibyteTest do
       doc = %FakeDoc{doc_id: "d1", title: field, content: %{}, type: "post"}
       parsed = %{terms: ["abc", "bcd"], phrases: [], prefixes: []}
 
-      marked = Highlighter.highlight_documents([doc], parsed, %{"highlight_fields" => ["title"]}, @admin)["d1"]["title"]
+      marked =
+        Highlighter.highlight_documents([doc], parsed, %{"highlight_fields" => ["title"]}, @admin)[
+          "d1"
+        ]["title"]
+
       assert_safe(marked)
 
       clamped = Highlighter.clamp_brief_highlights(%{"title" => marked})["title"]
@@ -116,7 +131,9 @@ defmodule Barkpark.Search.HighlighterMultibyteTest do
   # <mark> depth that never goes negative and ends at zero.
   defp assert_safe(output) do
     assert String.valid?(output), "output is not valid UTF-8"
-    refute String.contains?(output, @replacement_char), "output contains a U+FFFD replacement char"
+
+    refute String.contains?(output, @replacement_char),
+           "output contains a U+FFFD replacement char"
 
     {min_depth, final_depth} = mark_depth(output)
     assert min_depth >= 0, "<mark> depth went negative (#{min_depth}) — a stray </mark>"
