@@ -13,11 +13,45 @@ defmodule BarkparkWeb.ShareController do
   which validate through the SAME parser as a `BARKPARK_SHARES` env entry and
   call `refresh/0`, so a new share is live immediately (no restart) and a
   malformed request can never widen access.
+
+  ## Tenancy confinement on `/v1/shares/tokens` (arpss-w8)
+
+  `:require_admin` is a GLOBAL-permission gate — it proves the caller holds
+  `"admin"` somewhere, not that it may act on THIS tenant. The three edit-token
+  actions therefore additionally require the caller to be an ADMIN MEMBER of
+  the workspace the REQUEST targets (`Tenancy.Auth.workspace_admin?/2`, the
+  grant-reading chokepoint): mint against the SCOPE's workspace (403), list
+  filtered to the caller's admin workspaces (200, foreign rows absent), revoke
+  against the TARGET ROW's workspace (404, byte-identical to a missing row).
+
+  BEHAVIOUR CHANGE THAT SHIPS: an admin bound to workspace A can no longer
+  mint/list/revoke edit tokens for workspace B, even when it holds a plain
+  `member` membership in B. That flow used to succeed and is the cross-tenant
+  hole this closes; two `share_token_controller_test.exs` assertions moved to
+  the fail-closed status to state the new contract.
+
+  SELF-HOSTED HOST-IS-ADMIN IS PRESERVED: `Auth.create_token/5` writes an
+  admin-role membership in the resolved (Default) workspace, so the
+  single-tenant admin remains a workspace admin of everything it created.
+  HONEST LIMIT of that proof (`share_token_controller_test.exs`, "self-hosted
+  host-is-admin …"): it is a PERMISSIVE assertion, so it can NEVER go red under
+  a full reversion of this confinement, and on its own it does NOT catch an
+  actor-vs-target confusion — authorizing against the ACTOR's own
+  `workspace_id` leaves that test green (measured; the file's two cross-tenant
+  tests are what red on that mutation, 3 failures). It is mutation-verified
+  against OVER-confinement instead: raising the role floor to `owner`, and
+  refusing to honour a Default-workspace membership, each turn it red (403
+  where 201 is expected).
   """
   use BarkparkWeb, :controller
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Errors
+  alias Barkpark.Repo
   alias Barkpark.Sharing
+  alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   `GET /v1/shares` — list every live share, env baseline + persisted, each
@@ -95,7 +129,13 @@ defmodule BarkparkWeb.ShareController do
   Body/params: `scope` (required), `surfaces` (required, comma list of
   `docs,media`), `ttl` (optional seconds; default 7d, cap 1y), `label`
   (optional). 201 with the RAW token shown ONCE; 422 if the scope is not
-  `:edit`-shared for the surfaces.
+  `:edit`-shared for the surfaces; 403 when the caller is not a workspace
+  admin of the SCOPE's workspace (see the tenancy-confinement note above).
+
+  ORDERING IS LOAD-BEARING: the scope slug is resolved to a workspace BEFORE
+  the tenancy check. A scope whose workspace does not exist has no tenant to
+  confine to, so it falls through to `Auth.create_share_token/5` and keeps its
+  422 "the scope is not edit-shared" contract instead of turning into a 403/404.
   """
   def mint_token(conn, params) do
     scope = params["scope"]
@@ -104,39 +144,85 @@ defmodule BarkparkWeb.ShareController do
     with true <- is_binary(scope) and scope != "",
          true <- is_binary(surfaces) and surfaces != "",
          {:ok, {ws, proj, dataset}} <- Sharing.scope_triple(scope) do
-      surface_list =
-        surfaces |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+      # Resolve FIRST (see the ordering note above), authorize SECOND.
+      case Tenancy.get_workspace_by_slug(ws) do
+        %Tenancy.Workspace{id: ws_id} ->
+          if workspace_admin?(conn, ws_id),
+            do: do_mint(conn, ws, proj, dataset, surfaces, params),
+            else: forbidden(conn)
 
-      opts = token_opts(params)
-
-      case Barkpark.Auth.create_share_token(ws, proj, dataset, surface_list, opts) do
-        {:ok, {raw, token}} ->
-          conn
-          |> put_status(:created)
-          |> json(%{token: raw, share_token: token_json(token)})
-
-        {:error, reason} ->
-          unprocessable(conn, "could not mint edit token: #{describe_token_error(reason)}")
+        nil ->
+          do_mint(conn, ws, proj, dataset, surfaces, params)
       end
     else
       _ -> unprocessable(conn, "scope and surfaces (comma list of docs,media) are required")
     end
   end
 
+  defp do_mint(conn, ws, proj, dataset, surfaces, params) do
+    surface_list =
+      surfaces |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+    opts = token_opts(params)
+
+    case Barkpark.Auth.create_share_token(ws, proj, dataset, surface_list, opts) do
+      {:ok, {raw, token}} ->
+        conn
+        |> put_status(:created)
+        |> json(%{token: raw, share_token: token_json(token)})
+
+      {:error, reason} ->
+        unprocessable(conn, "could not mint edit token: #{describe_token_error(reason)}")
+    end
+  end
+
   @doc """
   `GET /v1/shares/tokens` — list share-edit tokens (optional `?scope=` filter).
   Never returns the raw token or its hash.
+
+  CONFINED: without `?scope=` the underlying query returns EVERY workspace's
+  share tokens, so the rows are filtered to the workspaces the caller is an
+  admin member of BEFORE `token_json/1` runs. Status stays 200 — foreign rows
+  are simply absent, never a 403 that would confirm they exist.
   """
   def list_tokens(conn, params) do
     scope = if is_binary(params["scope"]) and params["scope"] != "", do: params["scope"]
-    tokens = Barkpark.Auth.list_share_tokens(scope) |> Enum.map(&token_json/1)
+    rows = Barkpark.Auth.list_share_tokens(scope)
+
+    # One membership lookup per DISTINCT workspace, not per row.
+    allowed =
+      rows
+      |> Enum.map(& &1.workspace_id)
+      |> Enum.uniq()
+      |> Enum.filter(&workspace_admin?(conn, &1))
+      |> MapSet.new()
+
+    tokens =
+      rows
+      |> Enum.filter(&MapSet.member?(allowed, &1.workspace_id))
+      |> Enum.map(&token_json/1)
+
     json(conn, %{tokens: tokens})
   end
 
   @doc """
   `DELETE /v1/shares/tokens/:token_id` — revoke one share-edit token.
+
+  CONFINED: the target ROW is read first and the caller must be a workspace
+  admin of the ROW's workspace. A denial is the SAME 404 "token not found" as a
+  missing row (byte-identical), so an opaque token id never becomes an
+  existence oracle. `Barkpark.Auth.revoke_token/1` itself stays UNSCOPED — 9 of
+  its 12 call sites have no HTTP actor.
   """
   def revoke_token(conn, %{"token_id" => token_id}) do
+    if revocable_by?(conn, token_id) do
+      do_revoke(conn, token_id)
+    else
+      not_found(conn, "token not found")
+    end
+  end
+
+  defp do_revoke(conn, token_id) do
     case Barkpark.Auth.revoke_token(token_id) do
       # RECEIPT LAW (pds w39): `Auth.revoke_token/1` returns the UPDATED row
       # (auth.ex:200-226). `revoked: true` was a literal and `token_id` echoed
@@ -155,6 +241,46 @@ defmodule BarkparkWeb.ShareController do
       {:error, _} ->
         unprocessable(conn, "could not revoke token")
     end
+  end
+
+  # ── tenancy confinement for the /tokens actions ────────────────────────
+
+  # The predicate is the MEMBERSHIP GRANT in the TARGET workspace
+  # (`Tenancy.Auth.workspace_admin?/2`), never `authorize/3`: authorize/3's
+  # api_token arm is `member? AND the token's GLOBAL permissions[]`, so a
+  # global-admin token holding a plain "member" row in workspace B passes
+  # `authorize(tok, B, :admin)` while `workspace_admin?(tok, B)` denies. The
+  # leak-closed test is written against exactly that shape (a real "member"
+  # membership in the foreign workspace), so swapping this call for authorize/3
+  # turns it RED.
+  #
+  # TOTALITY: `workspace_admin?/2` raises FunctionClauseError on a nil id and
+  # Ecto.Query.CastError on any non-UUID binary (including ""), so every id is
+  # routed through `Repo.uuid_or_nil/1` first and anything that does not cast is
+  # a DENIAL — a 500 here would trade a leak for a crash oracle.
+  defp workspace_admin?(conn, workspace_id) do
+    actor = conn.assigns[:api_token]
+
+    case {actor, Repo.uuid_or_nil(workspace_id)} do
+      {%ApiToken{}, ws_id} when is_binary(ws_id) -> TenancyAuth.workspace_admin?(actor, ws_id)
+      _ -> false
+    end
+  end
+
+  # A token id is revocable when its row exists AND the caller is a workspace
+  # admin of the ROW's workspace. A row with no workspace_id is not revocable
+  # through this surface (nil is a denial, never a pass).
+  defp revocable_by?(conn, token_id) do
+    with id when is_binary(id) <- Repo.uuid_or_nil(token_id),
+         %ApiToken{workspace_id: ws_id} <- Repo.get(ApiToken, id) do
+      workspace_admin?(conn, ws_id)
+    else
+      _ -> false
+    end
+  end
+
+  defp forbidden(conn) do
+    ErrorResponse.emit(conn, {:error, :forbidden}, "workspace access required")
   end
 
   # ── helpers ────────────────────────────────────────────────────────────
