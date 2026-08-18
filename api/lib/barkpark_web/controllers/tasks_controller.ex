@@ -929,13 +929,28 @@ defmodule BarkparkWeb.TasksController do
   # ─── GET /v1/tasks/:doc_id/edges ────────────────────────────────────────
 
   def edges(conn, %{"doc_id" => doc_id} = params) do
-    kind_opt =
-      case params["kind"] do
-        nil -> :blocks
-        "all" -> :all
-        other when is_binary(other) -> other
-      end
+    # `kind` is a FILTER, so a shape we cannot filter on is refused LOUDLY —
+    # `?kind[]=blocks` decodes to a list and used to fall off this case as a
+    # CaseClauseError-500 (before find_task_by_doc_id/2, so even a nonexistent
+    # doc_id 500'd instead of 404ing). Silently ignoring an unusable filter
+    # would return an unfiltered graph the caller believes is filtered — the
+    # same dishonesty query_controller's invalid_filter_op guard refuses.
+    # Contrast request_dataset/1, a SCOPE SELECTOR with a documented default,
+    # which fails SOFT.
+    with {:ok, kind_opt} <- parse_edge_kind(params["kind"]) do
+      edges_for_kind(conn, doc_id, kind_opt)
+    else
+      {:error, :invalid_kind} ->
+        bad_request(conn, "kind must be a string")
+    end
+  end
 
+  defp parse_edge_kind(nil), do: {:ok, :blocks}
+  defp parse_edge_kind("all"), do: {:ok, :all}
+  defp parse_edge_kind(other) when is_binary(other), do: {:ok, other}
+  defp parse_edge_kind(_), do: {:error, :invalid_kind}
+
+  defp edges_for_kind(conn, doc_id, kind_opt) do
     case find_task_by_doc_id(doc_id, conn) do
       {:ok, task} ->
         deps = Tasks.dependencies(task.id, kind: kind_opt)
@@ -1474,8 +1489,18 @@ defmodule BarkparkWeb.TasksController do
   # The dataset string a graph read scopes to. The graph endpoints have no
   # :doc_id segment to derive a dataset from, so we read the optional `dataset`
   # query param (defaulting to "production", the canonical content dataset).
+  # Fails SOFT on purpose: a non-binary `dataset` (e.g. `?dataset[]=production`,
+  # which Plug decodes to a list) used to flow straight into is_binary-guarded
+  # callees with no fallback clause — Tasks.Events.replay_since/3 and
+  # Tasks.Fleet.roster/2 among seven call sites — raising FunctionClauseError
+  # (500) before any Repo call. A scope selector with a documented default
+  # falls back to that default rather than 400ing six live routes; the `kind`
+  # FILTER in edges/2 is the deliberate opposite and returns 400.
   defp request_dataset(conn) do
-    conn.params["dataset"] || "production"
+    case conn.params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> "production"
+    end
   end
 
   # ─── field-visibility seal (fail-closed) ────────────────────────────────
