@@ -3142,3 +3142,70 @@ Reopens issued this wave: NONE (none warranted, none manufactured). Backlog, nam
 `tgw-bl-adjudicate-d88-stale-pin` (D144, the stale D88 test — blocks tgw6 grip-CI); the pre-existing
 `tgw6-bl-grip-suite-has-no-ci` (OPEN, D128 — its OPEN status is legitimate and now has a concrete
 prerequisite named). No build slices: the audit warrants zero reopens and the fence is read-only.
+
+### Wave 2026-08-18 — WAVE 15: TWO HONEST LOOSE ENDS (verify-heavy FIX wave). Parent `truth-grip-epic`. Paper `truth-grip-wave-15-2026-08-18`. Referent `truth-grip-epic-wave-15-log`.
+
+The done-set audit (D142, 62/62 true) left two offline-buildable, mutation-provable loose ends. Wave 15
+fixes BOTH in one worktree-isolated fence (`tooling/grip/`), two separate PRs, no publish-floor trip.
+Both fixes were IMPLEMENTED-AND-CERTIFIED in throwaway worktrees during verify; builders re-land them on
+fresh branches from clean origin/main. Re-smoked live on `origin/main` f3c4b6b04: D88 red, inloop-gate
+28/28 green, level.test 76/76 green, corpus {L1:32,L2:93,L3:380,L6:146}, no scaffy demotion on main.
+
+- **D145 — WAVE 15 IS A TWO-TARGET FIX WAVE, byte-disjoint, two PRs, worktree-isolated.** FIX 2 (D88
+  test split) lands first — trivial, greens the whole grip suite. FIX 1 (scaffy anchor) rides its own PR
+  behind the hand-run matrix. Files disjoint (`adjudicate.test.mjs` vs `level.mjs` + `level.test.mjs`),
+  no ordering dependency. All work in a worktree cut from CLEAN origin/main — the primary carries another
+  session's uncommitted cloud-build wave-2b work and is never touched. *Why: separation frees the
+  green-main/CI-prep unblock from FIX 1's risk review at zero cost.*
+
+- **D146 — #12181 SHIPS BY CLOSE+FRESH, superseding D140's amend routing; the ratified verdict + remedy
+  are preserved byte-for-byte.** D140's "the tgw12-s2 builder amends PR #12181" is a tactical filing
+  sentence (PR-routing), NOT a fact-authority invariant — the ratified content is the REQUEST-CHANGES
+  verdict + the anchor-and-assert remedy, satisfied by ANY PR that lands them. #12181's base is 28
+  commits stale and its branch belongs to the tgw12-s2 builder (Heggemsnes: no uninvited push). Close
+  #12181, cut fresh from clean origin/main, re-land the demotion + corrected anchor + ported tests.
+  `tgw13-s1` criterion 4 re-worded from "amend #12181" to "the fresh corrected PR" so the row stays
+  closeable. *Why: overriding a tactical routing clause preserves the invariant D140 protects; a
+  criterion pinned to a superseded mechanism is the false-done shape this epic refuses.*
+
+- **D147 — THE REMEDY IS NOT ONE LINE: the anchor must skip bp's value-taking globals per the arity
+  authority `internal/cli/globals.go` `valueFlags`.** D140 wrote "one line, byte-disjoint" — it lacked
+  the fact that a naive skip-set reintroduces the OPPOSITE over-refusal (fails to demote a genuine local
+  verb, reopening tgw3). Correct anchor: the first non-flag / non-value token after `bp` must
+  `=== "scaffy"`, consuming each value-global's value (13 keys: `-s/--server`, `--token`,
+  `-w/--workspace`, `-p/--project`, `-d/--dataset`, `-o/--output`, `--limit`, `--offset`, `--manifest`),
+  treating `--json` as BOOLEAN and inline `=` as self-contained only for long `--flag=value` (not short
+  `-o=json`). Verify proved 16/16 both directions and both traps avoided. *Why: the arity partition is
+  load-bearing in BOTH directions — only the exact valueFlags/boolFlags split is correct.*
+
+- **D148 — THE CORPUS IS BLIND to the over-refusal class; the hand-run bidirectional matrix is the SOLE
+  merge instrument (grip has no CI).** The class has ZERO corpus occurrences, so naive-indexOf and the
+  correct anchor give a bit-identical corpus distribution — the frozen snapshot cannot tell the fix from
+  the bug. The builder ports the two incidental-scaffy rows as durable guard tests in `level.test.mjs`
+  and co-edits the corpus pin from `{L1:32,L2:93,L3:380,L6:146}` to `{L1:32,L2:92,L3:381,L6:146}` (one
+  row moves: `bp scaffy run classify-block-type.scaffy …`). HIGH-FLIP-RISK: the level-classification
+  (reachability) judgment — a genuinely independent reviewer re-runs the full matrix before merge. *Why:
+  with no CI, the synthesized matrix is the only thing standing between the merge and a silent level-skip.*
+
+- **D149 — FIX 2 IS THE SOLE remaining suite-green prerequisite for tgw6 grip-CI; D141's inloop-gate red
+  has CLEARED.** D141 recorded `inloop-gate` 22/23 red at wave-13; #12179's literal re-pin (merged
+  04:28Z) took it to 28/28 GREEN on current main (re-run f3c4b6b04). `adjudicate.test.mjs` D88 (FIX 2)
+  is now the ONLY grip-suite red. FIX 2 splits the D88 loop — admit the `git -C … show` read (tgw4
+  correctly admits it), keep refusing `git merge-base` (broad `\bmerge\b` write regex, pinned as
+  intended-for-now; the merge-base over-refusal + `git grep -ln` false-refusal are filed for a later wave
+  as `pds-bl-grip-screen-refuses-honest-read-commands`, which truth-grip should ADOPT via `bp task stage`
+  since the epic owns `screen.mjs`) — greening the whole suite (708/707/1-skip). `tgw9-s1` (tgw6's other
+  dep) is done, so once FIX 2 merges tgw6 can proceed. `tgw13-s2` (wording-tolerant inloop-gate) remains
+  worthwhile anti-drift but is NOT a live red and NOT blocking. *Why: an undetected red on main is
+  exactly the shape this epic surfaces; naming the SINGLE blocker keeps the tgw6 unblock claim honest.*
+
+Wave roster (both round 1, dependency-free, opus — Fable capped until Aug 21):
+
+| PR | Slice | Task | Files | Gate |
+|---|---|---|---|---|
+| FIX 2 (first) | D88 adjudicate split | `tgw-bl-adjudicate-d88-stale-pin` | `tooling/grip/test/adjudicate.test.mjs` | `node --test tooling/grip/test/*.test.mjs` from repo root — expect 708/707/1-skip |
+| FIX 1 | scaffy subcommand anchor (close+fresh #12181) | `tgw13-s1-scaffy-subcommand-anchor` | `tooling/grip/level.mjs`, `tooling/grip/test/level.test.mjs` | `node --test tooling/grip/test/level.test.mjs` + hand-run 16-row bidirectional matrix |
+
+Merge-gated closes LEFT FOR THE LEAD (D40 content-on-main; re-claim lapsed epochs first): `tgw12-s0`
+idx 3 (READY NOW — #12179 merged + inloop-gate 28/28 green); `tgw12-s2` idx 5 + `tgw13-s1` idx 4 (after
+FIX 1's fresh PR merges + #12181 closed); `tgw-bl-adjudicate-d88-stale-pin` idx 2 (after FIX 2 merges).
