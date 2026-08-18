@@ -250,14 +250,16 @@ func TestRunOnce_HappyPath_FirstDeploy_BluelessSiteGoesLive(t *testing.T) {
 		t.Fatalf("expected had=true")
 	}
 
-	// 1. docker load was the first runner call.
-	if len(runner.calls) == 0 || runner.calls[0].name != "sh" {
-		t.Fatalf("expected docker load via sh, got %+v", runner.calls)
+	// 1. docker load was the first runner call — a fixed argv straight to docker
+	// (NO `sh -c`), so the image tag can never be shell-expanded.
+	if len(runner.calls) == 0 || runner.calls[0].name != "docker" {
+		t.Fatalf("expected docker load direct, got %+v", runner.calls)
 	}
-	if !strings.Contains(strings.Join(runner.calls[0].args, " "), "docker load -i") {
-		t.Errorf("first call args missing docker load: %v", runner.calls[0].args)
+	loadArgs := strings.Join(runner.calls[0].args, " ")
+	if !strings.Contains(loadArgs, "load") || !strings.Contains(loadArgs, "-i") {
+		t.Errorf("first call missing load/-i: %v", runner.calls[0].args)
 	}
-	if !strings.Contains(strings.Join(runner.calls[0].args, " "), "site-shop-d-12345678.tar") {
+	if !strings.Contains(loadArgs, "site-shop-d-12345678.tar") {
 		t.Errorf("docker load did not reference image tag in args: %v", runner.calls[0].args)
 	}
 
@@ -424,7 +426,9 @@ func TestRunOnce_DockerLoadFails_TransitionsFailed(t *testing.T) {
 	srv := httptest.NewServer(cp.handler())
 	defer srv.Close()
 
-	runner := &fakeRunner{failOn: map[string]error{"sh": errors.New("exit status 1: no such file")}}
+	// docker load is now a direct `docker` exec (no `sh -c`); it is the first
+	// docker invocation, so failing "docker" fails the load before anything else.
+	runner := &fakeRunner{failOn: map[string]error{"docker": errors.New("exit status 1: no such file")}}
 	e := &Executor{
 		ControlURL:    srv.URL,
 		AgentToken:    "test-token",
@@ -1136,5 +1140,81 @@ func TestRunOnceTimesOutAgainstHangingServer(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("RunOnce took %s to return an error, want it to return promptly on client timeout", elapsed)
+	}
+}
+
+// TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv is the RCE
+// regression: ImageTag is decoded RAW from the control-plane claim JSON, and
+// the old `docker load` path ran `sh -c "docker load -i %q"` — Go's %q does NOT
+// neutralize `$(...)`/backticks inside a shell, so a hostile tag executed
+// arbitrary code (a probe wrote /tmp/pwned). The fix runs a fixed argv straight
+// to docker (ExecRunner.Run == exec.CommandContext, raw execve, no shell), so
+// the whole payload must arrive as a SINGLE literal filename argument — never
+// split, never expanded.
+func TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv(t *testing.T) {
+	const evilTag = "site-shop-$(touch /tmp/pwned)-`id`"
+
+	cp := newCP(t)
+	cp.pending = []claimReply{{
+		deployment: Deployment{
+			ID:       "d-evil0001abcdef",
+			SiteID:   "s-evil0001",
+			Status:   "pushing",
+			ImageTag: evilTag,
+			Site:     InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}},
+		},
+		epoch: 1,
+	}}
+
+	containerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer containerSrv.Close()
+	containerPort := mustPort(t, containerSrv.URL)
+
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	runner := &fakeRunner{}
+	e := &Executor{
+		ControlURL:    srv.URL,
+		AgentToken:    "test-token",
+		WorkerID:      "agent-1",
+		CacheDir:      "/var/lib/barkpark-builder/images",
+		CaddyfilePath: "/etc/caddy/Caddyfile",
+		AskGateURL:    "https://cloud.barkpark.cloud/v1/tls/ask",
+		HTTPClient:    srv.Client(),
+		Runner:        runner,
+		FS:            newMapFS(),
+		Ports:         &fixedPorts{next: containerPort},
+		HealthTimeout: 2 * time.Second,
+	}
+
+	if _, err := e.RunOnce(context.Background(), State{}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	if len(runner.calls) == 0 {
+		t.Fatalf("no runner calls recorded")
+	}
+	load := runner.calls[0]
+	if load.name != "docker" {
+		t.Fatalf("docker load ran via %q, want a direct \"docker\" exec (no shell): %+v", load.name, load)
+	}
+	// Fixed argv: exactly ["load", "-i", "<cacheDir>/<tag>.tar"] — the payload is
+	// the trailing filename and NOTHING else, one element.
+	want := []string{"load", "-i", "/var/lib/barkpark-builder/images/" + evilTag + ".tar"}
+	if len(load.args) != len(want) {
+		t.Fatalf("docker load argv = %#v, want %#v", load.args, want)
+	}
+	for i := range want {
+		if load.args[i] != want[i] {
+			t.Fatalf("docker load argv[%d] = %q, want %q (full: %#v)", i, load.args[i], want[i], load.args)
+		}
+	}
+	// Belt-and-braces: the injection metacharacters survive verbatim inside the
+	// single filename argument — proof they were passed as data, not a command.
+	if !strings.Contains(load.args[2], "$(touch /tmp/pwned)") || !strings.Contains(load.args[2], "`id`") {
+		t.Fatalf("payload was altered in transit, expected it intact as a literal: %q", load.args[2])
 	}
 }
