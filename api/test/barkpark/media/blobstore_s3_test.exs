@@ -373,6 +373,34 @@ defmodule Barkpark.Media.Blobstore.S3Test do
     assert_received {:request, "HEAD", ^path}
   end
 
+  describe "req/1 carries an explicit receive_timeout on every blob verb" do
+    # STRUCTURAL PIN, not behavioral: the Req.Test in-process plug seam consumes
+    # the request without ever honouring receive_timeout (it is a per-receive
+    # socket bound, and there is no socket), so a hung-bucket stall cannot be
+    # exercised here. The mutation-proof is therefore that the assembled opts
+    # carry the accessor value — remove or alter the literal and one of these
+    # two assertions reds.
+    #
+    # Corrected failure mode (see the note at s3.ex req/1): the read path is
+    # BUFFERED with an atomic rename, so a stall collapses a HEALTHY transfer to
+    # a spurious {:error, :storage_unavailable} 503 — never a truncated cache
+    # write. The 60s ceiling replaces Req's silent 15s default.
+    test "the accessor is the single source of truth, pinned at 60_000ms" do
+      assert S3.receive_timeout_ms() == 60_000
+    end
+
+    test "req/1's assembled opts thread receive_timeout: @receive_timeout" do
+      source = File.read!("lib/barkpark/media/blobstore/s3.ex")
+
+      # Anchored to the assembled-opts list itself (`retry: false, ` prefix), not
+      # the bare token — the failure note above req/1 also mentions the key in
+      # prose, so a looser match would be satisfied by the comment alone.
+      assert source =~ "retry: false, receive_timeout: @receive_timeout",
+             "req/1 must thread the module attribute onto every request's opts; " <>
+               "a per-verb literal or a dropped key would evade this pin"
+    end
+  end
+
   test "selecting :s3 without its required keys fails loudly, not silently local" do
     previous = Application.get_env(:barkpark, :media_storage)
     Application.put_env(:barkpark, :media_storage, backend: :s3, s3: [bucket: @bucket])
