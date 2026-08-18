@@ -4403,8 +4403,14 @@ defmodule BarkparkCloud.Web.Router do
 
               {:error, reason} ->
                 # The client seam failed (Vercel API error / not configured
-                # mid-flight). Surface a SAFE, bounded summary — the error
-                # tuples never carry the token or a request body we built.
+                # mid-flight). The RAW Vercel v13 response body rides
+                # `{:vercel_http_error, status, body}` (Vercel.Real.request/1 on a
+                # non-2xx) and can carry account/project internals — so it is
+                # NEVER echoed: the full detail stays server-side for operators
+                # (origin/main did NOT log here — redaction alone would blind
+                # them), the client gets only the bounded, status-keyed
+                # `vercel_reason/1`.
+                Logger.error("vercel_error: #{inspect(reason)}")
                 json(conn, 502, %{error: "vercel_error", detail: vercel_reason(reason)})
             end
 
@@ -4414,11 +4420,26 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # A bounded `inspect` of a Vercel client error for the 502 payload — the
-  # operator-facing summary, truncated so a verbose API body can't balloon the
-  # response. Client error tuples carry no credentials by construction.
-  defp vercel_reason(reason) do
-    reason |> inspect() |> String.slice(0, 300)
+  # A SAFE, generic Vercel-error summary for the CLIENT. `Vercel.Real.request/1`
+  # binds the RAW Vercel v13 response body into `{:vercel_http_error, status,
+  # body}` on a non-2xx (deploy_for/1's with-chain short-circuits it verbatim to
+  # the 502 detail), and that body can carry account/project internals. So it is
+  # NEVER echoed to the client: the http-error shape collapses to a bounded
+  # message keyed ONLY on the integer status, and EVERY other error shape
+  # (`:not_configured`, `:http_client_not_configured`, a `Jason.DecodeError`
+  # whose `.data` is body-bearing, a raw transport tuple) collapses to one
+  # generic constant via the BARE `_` catch-all (fail-closed — an unexpected term
+  # never reaches the wire raw). The full detail is `Logger.error`'d at the router
+  # else arm, so operators keep the diagnostic. The `error:` CODE
+  # (`vercel_error`) is unchanged, so the JS `friendly()` / Go `cloudError` key
+  # still resolves with zero UI regression. Mirrors `cloudflare_reason/1` +
+  # `billing_reason/1` above.
+  defp vercel_reason({:vercel_http_error, status, _body}) when is_integer(status) do
+    "Vercel rejected the deploy (HTTP #{status})"
+  end
+
+  defp vercel_reason(_reason) do
+    "the Vercel deploy could not be completed"
   end
 
   # A SAFE, generic billing-error summary for the CLIENT. The Stripe gateway
@@ -4429,8 +4450,9 @@ defmodule BarkparkCloud.Web.Router do
   # the integer status, and EVERY other error shape collapses to one generic
   # constant (fail-closed — an unexpected term never reaches the wire raw). The
   # full detail is logged server-side at the gateway bind, so operators keep the
-  # diagnostic. NOTE: deliberately NOT `vercel_reason/1` — its String.slice(0,
-  # 300) would leave a `cus_…` id intact. The `error:` CODE is unchanged, so the
+  # diagnostic. NOTE: deliberately NOT `vercel_reason/1` — a shared summariser
+  # would couple two providers' redaction; each keeps its own status-keyed +
+  # bare-`_` fail-closed pair. The `error:` CODE is unchanged, so the
   # JS `friendly()` / Go cloudError key still resolves with zero UI regression.
   defp billing_reason({:stripe_http_error, status, _body}) when is_integer(status) do
     "billing provider returned an error (HTTP #{status})"
