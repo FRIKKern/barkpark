@@ -183,9 +183,19 @@ const apiEndpoint: Emit = (b) => {
   const path = str(b.path)
   if (method === '' && path === '') return ''
 
+  // The method-class modifier is a FAIL-CLOSED lowercase [a-z0-9-] slug of the
+  // user-controlled method (hyphen kept) — mirrors compose.ex's slug so a value
+  // like `"><img src=x onerror=alert(1)>` cannot break out of the class
+  // attribute into live markup. An empty slug drops the modifier class entirely.
+  const methodSlug = method.toLowerCase().replace(/[^a-z0-9-]/g, '')
+  const methodClass =
+    methodSlug === ''
+      ? 'bp-api-endpoint__method'
+      : `bp-api-endpoint__method bp-api-endpoint__method--${methodSlug}`
+
   const head =
     `<div class="bp-api-endpoint__head">` +
-    `<span class="bp-api-endpoint__method bp-api-endpoint__method--${method.toLowerCase()}">${escapeHtml(method)}</span>` +
+    `<span class="${methodClass}">${escapeHtml(method)}</span>` +
     `<code class="bp-api-endpoint__path">${escapeHtml(path)}</code>` +
     `</div>`
 
