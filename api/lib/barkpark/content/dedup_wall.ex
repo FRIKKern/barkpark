@@ -69,7 +69,7 @@ defmodule Barkpark.Content.DedupWall do
 
   require Logger
 
-  alias Barkpark.Content.{Document, DraftId}
+  alias Barkpark.Content.{Document, DraftId, Scope}
   alias Barkpark.Repo
 
   # ── Tunable thresholds (copied from Tasks.Similarity — one calibrated scale) ─
@@ -371,6 +371,21 @@ defmodule Barkpark.Content.DedupWall do
         limit: @candidate_limit
       )
       |> maybe_filter_dataset(dataset)
+      # TENANCY: scope the near-dup scan to the actor's workspace/project. The
+      # `dataset` STRING is NOT globally unique — documents uniqueness is
+      # [:doc_id, :type, :dataset_id] (migration 20260527134000), so two
+      # workspaces can share one dataset string. Filtering by the raw string
+      # alone let workspace-A's publish 409 against workspace-B's near-dup
+      # title, leaking B's title + published_id in the {:duplicate_of, _}
+      # payload. Byte-mirrors the already-scoped sibling reads
+      # (plugins/github/relations.ex, query_controller.ex, tasks/query.ex): a
+      # real workspace_id scopes fail-closed to its own rows; a nil one
+      # (flat/Default legacy-global publish) leaves the scan pooled, so
+      # Default publishes keep comparing across the shared corpus.
+      |> Scope.scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
 
     # CLIFF A: `SET LOCAL` only takes effect INSIDE a transaction — outside one it
     # is a silent no-op, leaving pg_trgm.similarity_threshold at its 0.3 default,
