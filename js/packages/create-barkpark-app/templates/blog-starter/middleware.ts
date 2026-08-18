@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { buildCspPolicy, generateNonce } from '@/lib/csp';
+import { buildCspPolicy, generateNonce } from './lib/csp';
 
 // Per-request nonce CSP for the blog-starter scaffold.
 //
