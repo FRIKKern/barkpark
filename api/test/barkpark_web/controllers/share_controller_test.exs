@@ -15,7 +15,10 @@ defmodule BarkparkWeb.ShareControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Sharing}
+  import Barkpark.TenancyFixtures
+
+  alias Barkpark.{Auth, Repo, Sharing}
+  alias Barkpark.Auth.ApiToken
 
   @admin_token "barkpark-test-admin-share"
   @junior_token "barkpark-test-junior-share"
@@ -194,6 +197,160 @@ defmodule BarkparkWeb.ShareControllerTest do
     test "empty when nothing is shared (default-off)", %{conn: conn} do
       body = conn |> admin_conn() |> get("/v1/shares") |> json_response(200)
       assert body == %{"shares" => [], "active" => false}
+    end
+  end
+
+  # ── share-edit token object-authz confinement (SA-S2) ────────────────────
+  #
+  # `/v1/shares/tokens*` run `[:api, :require_admin]`, which gates ONLY on the
+  # `admin` permission with ZERO workspace binding. A workspace-bound admin
+  # token therefore reaches revoke_token / mint_token / list_tokens with a
+  # client-supplied id or scope. The controller confines each action to the
+  # actor's `api_token.workspace_id`; a nil-workspace host/platform admin is
+  # unconfined. `Auth.revoke_token/1` (a shared primitive) is UNCHANGED.
+  describe "share-edit token object-authz confinement" do
+    setup %{conn: conn} do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      scope_a = "#{ws_a.slug}/#{proj_a.slug}/production"
+      scope_b = "#{ws_b.slug}/#{proj_b.slug}/production"
+
+      {:ok, _} = Sharing.add_share("#{scope_a}:docs:edit")
+      {:ok, _} = Sharing.add_share("#{scope_b}:docs:edit")
+
+      # Workspace-BOUND admin tokens (create_token's 5th arg binds + memberships).
+      {:ok, _} = Auth.create_token("sa-admin-a", "admin-a", "test", ["read", "admin"], ws_a.id)
+      {:ok, _} = Auth.create_token("sa-admin-b", "admin-b", "test", ["read", "admin"], ws_b.id)
+
+      # nil-workspace HOST admin — direct insert (create_token would fall back to
+      # the Default Workspace); this is the unconfined platform-admin arm.
+      {:ok, _host} =
+        %ApiToken{}
+        |> ApiToken.changeset(%{
+          token_hash: ApiToken.hash_token("sa-host-admin"),
+          label: "host-admin",
+          dataset: "test",
+          permissions: ["admin"],
+          workspace_id: nil
+        })
+        |> Repo.insert()
+
+      # A live share-edit token in EACH workspace (carries id + workspace_id).
+      {:ok, {raw_a, token_a}} =
+        Auth.create_share_token(ws_a.slug, proj_a.slug, "production", ["docs"])
+
+      {:ok, {raw_b, token_b}} =
+        Auth.create_share_token(ws_b.slug, proj_b.slug, "production", ["docs"])
+
+      %{
+        conn: conn,
+        ws_a: ws_a,
+        ws_b: ws_b,
+        scope_a: scope_a,
+        scope_b: scope_b,
+        token_a: token_a,
+        token_b: token_b,
+        raw_a: raw_a,
+        raw_b: raw_b
+      }
+    end
+
+    defp bearer(conn, raw) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> raw)
+      |> put_req_header("content-type", "application/json")
+    end
+
+    test "revoke_token: a ws-A admin canNOT revoke a ws-B share token (404, stays live)", %{
+      conn: conn,
+      token_b: token_b,
+      raw_b: raw_b
+    } do
+      resp = conn |> bearer("sa-admin-a") |> delete("/v1/shares/tokens/#{token_b.id}")
+
+      assert json_response(resp, 404)["error"]["code"] == "not_found"
+      # The foreign token is untouched — still resolves, revoked_at still nil.
+      assert Repo.get(ApiToken, token_b.id).revoked_at == nil
+      assert {:ok, _} = Auth.verify_token(raw_b)
+    end
+
+    test "revoke_token: a same-workspace admin revoke still succeeds", %{
+      conn: conn,
+      token_b: token_b,
+      raw_b: raw_b
+    } do
+      resp = conn |> bearer("sa-admin-b") |> delete("/v1/shares/tokens/#{token_b.id}")
+
+      assert %{"revoked" => true, "token_id" => id} = json_response(resp, 200)
+      assert id == token_b.id
+      assert Repo.get(ApiToken, token_b.id).revoked_at != nil
+      assert {:error, :unauthorized} = Auth.verify_token(raw_b)
+    end
+
+    test "list_tokens: a ws-A admin sees only its own workspace share tokens", %{
+      conn: conn,
+      token_a: token_a,
+      token_b: token_b
+    } do
+      body = conn |> bearer("sa-admin-a") |> get("/v1/shares/tokens") |> json_response(200)
+      ids = Enum.map(body["tokens"], & &1["id"])
+
+      assert token_a.id in ids
+      refute token_b.id in ids
+    end
+
+    test "mint_token: a ws-A admin canNOT mint against a ws-B scope (404)", %{
+      conn: conn,
+      scope_b: scope_b
+    } do
+      resp =
+        conn
+        |> bearer("sa-admin-a")
+        |> post("/v1/shares/tokens", %{scope: scope_b, surfaces: "docs"})
+
+      assert json_response(resp, 404)["error"]["code"] == "not_found"
+    end
+
+    test "mint_token: a same-workspace mint still succeeds", %{conn: conn, scope_a: scope_a} do
+      resp =
+        conn
+        |> bearer("sa-admin-a")
+        |> post("/v1/shares/tokens", %{scope: scope_a, surfaces: "docs"})
+
+      assert %{"token" => raw, "share_token" => st} = json_response(resp, 201)
+      assert String.starts_with?(raw, "bpshare_")
+      assert st["scope"] == scope_a
+    end
+
+    test "host admin (nil workspace) still reaches revoke/list/mint across any workspace", %{
+      conn: conn,
+      token_a: token_a,
+      token_b: token_b,
+      scope_a: scope_a,
+      scope_b: scope_b
+    } do
+      # list — sees BOTH workspaces' tokens
+      body = conn |> bearer("sa-host-admin") |> get("/v1/shares/tokens") |> json_response(200)
+      ids = Enum.map(body["tokens"], & &1["id"])
+      assert token_a.id in ids
+      assert token_b.id in ids
+
+      # mint — against either workspace's scope
+      assert (conn
+              |> bearer("sa-host-admin")
+              |> post("/v1/shares/tokens", %{scope: scope_a, surfaces: "docs"})).status == 201
+
+      assert (conn
+              |> bearer("sa-host-admin")
+              |> post("/v1/shares/tokens", %{scope: scope_b, surfaces: "docs"})).status == 201
+
+      # revoke — a foreign (ws-B) token, allowed for the host admin
+      resp = conn |> bearer("sa-host-admin") |> delete("/v1/shares/tokens/#{token_b.id}")
+      assert %{"revoked" => true} = json_response(resp, 200)
+      assert Repo.get(ApiToken, token_b.id).revoked_at != nil
     end
   end
 end

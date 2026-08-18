@@ -18,6 +18,7 @@ defmodule BarkparkWeb.ShareController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Sharing
+  alias Barkpark.Tenancy
 
   @doc """
   `GET /v1/shares` — list every live share, env baseline + persisted, each
@@ -103,7 +104,8 @@ defmodule BarkparkWeb.ShareController do
 
     with true <- is_binary(scope) and scope != "",
          true <- is_binary(surfaces) and surfaces != "",
-         {:ok, {ws, proj, dataset}} <- Sharing.scope_triple(scope) do
+         {:ok, {ws, proj, dataset}} <- Sharing.scope_triple(scope),
+         :ok <- confine_scope(conn, ws) do
       surface_list =
         surfaces |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
 
@@ -119,6 +121,10 @@ defmodule BarkparkWeb.ShareController do
           unprocessable(conn, "could not mint edit token: #{describe_token_error(reason)}")
       end
     else
+      # OBJECT-AUTHZ CONFINEMENT (arpss SA-S2): a workspace-bound admin token
+      # minting against a scope in ANOTHER workspace is a cross-tenant re-share
+      # — 404 not_found, indistinguishable from a nonexistent scope.
+      {:error, :cross_tenant} -> not_found(conn, "scope not found")
       _ -> unprocessable(conn, "scope and surfaces (comma list of docs,media) are required")
     end
   end
@@ -129,7 +135,15 @@ defmodule BarkparkWeb.ShareController do
   """
   def list_tokens(conn, params) do
     scope = if is_binary(params["scope"]) and params["scope"] != "", do: params["scope"]
-    tokens = Barkpark.Auth.list_share_tokens(scope) |> Enum.map(&token_json/1)
+
+    tokens =
+      Barkpark.Auth.list_share_tokens(scope)
+      # OBJECT-AUTHZ CONFINEMENT (arpss SA-S2): a workspace-bound admin token
+      # sees only its own workspace's share tokens; a nil-workspace host/platform
+      # admin sees all. Filters BEFORE token_json so no cross-tenant row leaks.
+      |> confine_rows(actor_workspace_id(conn))
+      |> Enum.map(&token_json/1)
+
     json(conn, %{tokens: tokens})
   end
 
@@ -137,27 +151,81 @@ defmodule BarkparkWeb.ShareController do
   `DELETE /v1/shares/tokens/:token_id` — revoke one share-edit token.
   """
   def revoke_token(conn, %{"token_id" => token_id}) do
-    case Barkpark.Auth.revoke_token(token_id) do
-      # RECEIPT LAW (pds w39): `Auth.revoke_token/1` returns the UPDATED row
-      # (auth.ex:200-226). `revoked: true` was a literal and `token_id` echoed
-      # the path param — neither could change if the update wrote nothing. Both
-      # now descend from the returned row's own `revoked_at` stamp.
-      {:ok, revoked} ->
-        json(conn, %{
-          revoked: not is_nil(revoked.revoked_at),
-          token_id: revoked.id,
-          revoked_at: revoked.revoked_at
-        })
-
-      {:error, :not_found} ->
-        not_found(conn, "token not found")
-
-      {:error, _} ->
-        unprocessable(conn, "could not revoke token")
+    # OBJECT-AUTHZ CONFINEMENT (arpss SA-S2, discharges
+    # dr-bl-shares-token-revoke-is-unscoped): `Auth.revoke_token/1` is a bare
+    # unscoped `Repo.get(ApiToken, id)` + revoke — a SHARED primitive with 7+
+    # non-share callers, so it must NOT be scoped. Instead we confine HERE:
+    # resolve the target through the existing `list_share_tokens/0` export (full
+    # rows carrying `workspace_id`) and, when the actor is workspace-bound,
+    # require the row to live in that workspace — else a foreign-workspace admin
+    # could kill another tenant's share token (cross-tenant denial). A
+    # nil-workspace host/platform admin is unconfined. A miss (not a share token,
+    # or a foreign one) is 404, same as an absent id.
+    with :ok <- confine_share_token(conn, token_id),
+         {:ok, revoked} <- Barkpark.Auth.revoke_token(token_id) do
+      json(conn, %{
+        revoked: not is_nil(revoked.revoked_at),
+        token_id: revoked.id,
+        revoked_at: revoked.revoked_at
+      })
+    else
+      {:error, :not_found} -> not_found(conn, "token not found")
+      {:error, _} -> unprocessable(conn, "could not revoke token")
     end
   end
 
   # ── helpers ────────────────────────────────────────────────────────────
+
+  # The actor's workspace binding (RequireToken assigned the full ApiToken row).
+  # A binary workspace_id CONFINES the admin to that tenant; nil is a host /
+  # platform admin with no binding — unconfined by design.
+  defp actor_workspace_id(conn) do
+    case conn.assigns[:api_token] do
+      %{workspace_id: ws_id} -> ws_id
+      _ -> nil
+    end
+  end
+
+  # revoke_token confinement: resolve the target via the existing
+  # list_share_tokens/0 export (full rows carrying workspace_id) and require it
+  # to live in the actor's workspace when the actor is bound. Not a share token,
+  # or a foreign one → :not_found (404, indistinguishable from an absent id).
+  defp confine_share_token(conn, token_id) do
+    case actor_workspace_id(conn) do
+      nil ->
+        :ok
+
+      ws_id when is_binary(ws_id) ->
+        case Enum.find(Barkpark.Auth.list_share_tokens(), &(&1.id == token_id)) do
+          %{workspace_id: ^ws_id} -> :ok
+          _ -> {:error, :not_found}
+        end
+    end
+  end
+
+  # mint_token confinement: the scope's workspace slug must resolve to the
+  # actor's workspace when the actor is bound. Foreign or unknown → :cross_tenant
+  # (surfaced as 404). nil actor (host admin) mints anywhere.
+  defp confine_scope(conn, ws_slug) do
+    case actor_workspace_id(conn) do
+      nil ->
+        :ok
+
+      ws_id when is_binary(ws_id) ->
+        case Tenancy.get_workspace_by_slug(ws_slug) do
+          %{id: ^ws_id} -> :ok
+          _ -> {:error, :cross_tenant}
+        end
+    end
+  end
+
+  # list_tokens confinement: keep only rows in the actor's workspace when bound;
+  # a nil-workspace host admin sees everything.
+  defp confine_rows(rows, nil), do: rows
+
+  defp confine_rows(rows, ws_id) when is_binary(ws_id) do
+    Enum.filter(rows, &(&1.workspace_id == ws_id))
+  end
 
   defp token_opts(params) do
     ttl =
