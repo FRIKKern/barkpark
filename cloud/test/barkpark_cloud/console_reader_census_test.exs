@@ -1030,17 +1030,6 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "the handler starts keying on the body."
     },
     %{
-      code: "invalid_current_password",
-      site: "router.ex PUT /v1/account/password",
-      reason:
-        "Console-reachable STATUS-READ: submitPasswordChange keys on `r.status === 401` " <>
-          "and renders 'Current password is wrong.' (noBounce:true), never the slug. " <>
-          "Known conflation (the flip): an expired-session 401 (Auth.require_user -> " <>
-          "unauthorized, no slug) paints that SAME false accusation — the fix + this " <>
-          "row's deletion is round-4 slice cch-w74-password-change-401-conflation; today " <>
-          "this row states only the status-read truth."
-    },
-    %{
       code: "invalid_or_expired",
       site: "router.ex GET /v1/invitations/:token",
       reason:

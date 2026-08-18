@@ -1754,7 +1754,21 @@
           var n = $("#pw-new"); if (n) n.value = "";
           loadSessions();
         } else if (errEl) {
-          errEl.textContent = r.status === 401 ? "Current password is wrong." : friendly(r.data, "Couldn't update password.");
+          // cch-w74 — THE 401 ARM KEYS ON THE SLUG, NOT THE STATUS. Two distinct
+          // 401s reach here: invalid_current_password (the router's password
+          // check) and a slug-less `unauthorized` when Auth.require_user rejects
+          // an expired session — noBounce:true suppresses api()'s login bounce,
+          // so BOTH land in this else. A bare `r.status === 401` accusation told a
+          // user whose password is fine that it was wrong (sharpest on this
+          // feature's own "signed out everywhere" success path, whose new token
+          // can 401 the very next submit). Accuse only on the proven slug; any
+          // other 401 states only what is proven — the session is gone.
+          errEl.textContent =
+            r.status === 401 && r.data && r.data.error === "invalid_current_password"
+              ? "Current password is wrong."
+              : r.status === 401
+                ? "Your session has expired — sign in again."
+                : friendly(r.data, "Couldn't update password.");
           errEl.hidden = false;
         }
       });

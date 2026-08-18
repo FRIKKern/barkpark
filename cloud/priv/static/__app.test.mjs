@@ -22009,3 +22009,39 @@ test("cch-w75-s1: repo_not_in_installation renders the permanent-until-regranted
   // the exact lie this cure deletes.
   assert.ok(!/try again|\bretry\b/i.test(copy), "no transience verb: " + copy);
 });
+
+// ── cch-w74: an expired session stops accusing the user of a wrong password ──
+// SOURCE-TEXT, per the cch-w37-s6 loadOperator precedent: submitPasswordChange
+// is impure (it reads #pw-current/#pw-new, calls api(), and paints #pw-error),
+// and this sandbox's getElementById returns null, so a node "drive" would be
+// vacuous. What is pinned is the SHAPE of the 401 arm: the accusation is gated
+// on the proven slug, and every OTHER 401 renders non-accusatory session copy.
+//
+// THE DEFECT this replaces: the arm was `r.status === 401 ? "Current password
+// is wrong." : friendly(...)`. Because api() is called with noBounce:true (so
+// its login bounce is suppressed for THIS 401) and Auth.require_user ships a
+// slug-less `unauthorized` when the session token has died, an expired-session
+// 401 painted "Current password is wrong." at a user whose password was fine —
+// reachable by any authenticated non-admin whose token dies between page-load
+// and submit (sharpest: this feature's own "signed out everywhere" success
+// path). The pre-fix red below is the bare status-only conflation.
+test("cch-w74: the password 401 accusation keys on the invalid_current_password slug, not the bare status", () => {
+  const body = APP_SRC.match(/function submitPasswordChange\(e\) \{[\s\S]*?\n  \}\n/)[0];
+  // THE RED on pre-fix bytes: the bare status-only conflation is GONE. A
+  // status-keyed accusation accuses an expired session of a wrong password.
+  assert.ok(!/r\.status === 401 \? "Current password is wrong\."/.test(body),
+    "the bare `r.status === 401 ? \"Current password is wrong.\"` conflation must be gone");
+  // A slug-carrying 401 renders the accusation: the accusing copy exists ONLY
+  // behind the proven slug guard.
+  assert.match(body,
+    /r\.status === 401 && r\.data && r\.data\.error === "invalid_current_password"\s*\n\s*\? "Current password is wrong\."/,
+    "the accusation must be gated on r.data.error === \"invalid_current_password\"");
+  // A slug-less 401 renders non-accusatory session copy — it states only what is
+  // proven (the session is gone), never the password accusation.
+  assert.match(body, /: r\.status === 401\s*\n\s*\? "Your session has expired — sign in again\."/,
+    "a slug-less 401 must render honest session copy, never the password accusation");
+  // The accusation string appears EXACTLY once — no un-gated second copy leaks
+  // back the conflation this slice deletes.
+  assert.equal((body.match(/Current password is wrong\./g) || []).length, 1,
+    "the accusation copy exists once, only behind the slug guard");
+});
