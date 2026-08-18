@@ -411,10 +411,15 @@ func (e *Executor) executeDeploy(
 	slug, domains, livePort := e.resolveSite(d, state)
 	site := d.SiteID
 
-	// 1. Load the image from the builder's cache.
+	// 1. Load the image from the builder's cache. Fixed argv straight through
+	// execve (ExecRunner.Run is exec.CommandContext — NO shell): imageTar embeds
+	// d.ImageTag, decoded raw from the control-plane claim JSON, so a malicious
+	// tag like `$(...)`/backticks must land as one literal filename argument, not
+	// a command the shell expands. A prior `sh -c "docker load -i %q"` was a real
+	// RCE — Go's %q does NOT neutralize `$(...)`/backticks inside a shell.
 	imageTar := fmt.Sprintf("%s/%s.tar", strings.TrimRight(e.CacheDir, "/"), d.ImageTag)
 	if err := e.runner().Run(ctx, devNull{},
-		"sh", "-c", fmt.Sprintf("docker load -i %q", imageTar)); err != nil {
+		"docker", "load", "-i", imageTar); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker load %s: %w", imageTar, err)
 	}
 
