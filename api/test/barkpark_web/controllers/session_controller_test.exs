@@ -7,9 +7,25 @@ defmodule BarkparkWeb.SessionControllerTest do
     * POST /login success (default redirect, custom redirect, open-redirect defense, whitespace trim)
     * POST /login failure (invalid token, missing token) — flash + no session leak + token not echoed
     * POST /logout — drops session and redirects
+    * POST /login/mfa — the step-up RECENCY window, incl. its clock-step floor
+
+  clk-w4-mfa-recency-floor (clock-semantics wave): `studio_mfa_at` is a
+  server-written instant round-tripped through the SIGNED session cookie —
+  correctly wall-clock (class A). The defect was SIDEDNESS: with only an upper
+  bound, an anchor LATER than now (what a backward wall-clock step on this node
+  produces) held the 5-minute pending window open indefinitely. The
+  future-anchor test below reds on the unfixed predicate — it mints a session
+  and redirects to /studio there — and the stale/in-window controls prove the
+  floor did not over-tighten. This is a HARDENING, not an exploitable bug: no
+  attacker-supplied value is involved and `mfa_factor_ok?/2` still demands a
+  live TOTP or a burned recovery code.
   """
 
   use BarkparkWeb.ConnCase, async: false
+
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it.
+  import Barkpark.TotpTestHelper
 
   import Ecto.Query
 
@@ -162,6 +178,78 @@ defmodule BarkparkWeb.SessionControllerTest do
 
       assert Repo.one(from s in UserSession, where: s.user_id == ^user.id).revoked_at ==
                revoked_at
+    end
+  end
+
+  describe "POST /login/mfa (step-up recency window)" do
+    # A TOTP-armed user plus one live recovery code. The recovery code is the
+    # deterministic second factor here: `verify_totp` consumes a period, so a
+    # code reused within the enrolment period would read as replay and make the
+    # positive control flaky. Recovery codes burn individually.
+    defp arm_mfa!(email) do
+      {:ok, user} = Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+      secret = NimbleTOTP.secret()
+
+      {:ok, user, [recovery | _]} =
+        Accounts.enable_totp(user, secret, totp_code_stable!(secret))
+
+      {user, recovery}
+    end
+
+    # Seed the pending marker the way `complete_sign_in/3` does, but with an
+    # explicit anchor — no sleeping, no barriers, no timing flake.
+    defp post_mfa(user, at, recovery) do
+      build_conn()
+      |> init_test_session(%{"studio_mfa_user" => user.id, "studio_mfa_at" => at})
+      |> post("/login/mfa", %{"recovery_code" => recovery})
+    end
+
+    defp session_rows(user), do: Repo.all(from s in UserSession, where: s.user_id == ^user.id)
+
+    test "an anchor in the FUTURE is rejected — no session is minted", %{conn: _conn} do
+      {user, recovery} = arm_mfa!("mfa-future-anchor@example.com")
+
+      # Arithmetically identical to a 100_000s BACKWARD wall-clock step on this
+      # node, and the only reachable route since the cookie is signed. On the
+      # UNFIXED predicate this redirects to /studio and mints a session.
+      conn = post_mfa(user, System.system_time(:second) + 100_000, recovery)
+
+      assert redirected_to(conn, 302) == "/login"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Sign-in expired"
+      refute get_session(conn, "user_session")
+      assert session_rows(user) == []
+    end
+
+    test "a STALE anchor is still rejected (the negative control)", %{conn: _conn} do
+      {user, recovery} = arm_mfa!("mfa-stale-anchor@example.com")
+
+      conn = post_mfa(user, System.system_time(:second) - 1000, recovery)
+
+      assert redirected_to(conn, 302) == "/login"
+      refute get_session(conn, "user_session")
+      assert session_rows(user) == []
+    end
+
+    test "an IN-WINDOW anchor still mints a session (the floor did not over-tighten)",
+         %{conn: _conn} do
+      {user, recovery} = arm_mfa!("mfa-in-window-anchor@example.com")
+
+      conn = post_mfa(user, System.system_time(:second) - 10, recovery)
+
+      assert redirected_to(conn, 302) == "/studio"
+      assert is_binary(get_session(conn, "user_session"))
+      assert [row] = session_rows(user)
+      refute is_nil(row.mfa_verified_at)
+    end
+
+    test "an anchor exactly at now still mints a session (the floor is inclusive)",
+         %{conn: _conn} do
+      {user, recovery} = arm_mfa!("mfa-now-anchor@example.com")
+
+      conn = post_mfa(user, System.system_time(:second), recovery)
+
+      assert redirected_to(conn, 302) == "/studio"
+      assert is_binary(get_session(conn, "user_session"))
     end
   end
 end
