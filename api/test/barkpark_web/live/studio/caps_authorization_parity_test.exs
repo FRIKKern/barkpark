@@ -547,11 +547,16 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     end
   end
 
-  test "the table drives BOTH forked caps answers on every cell, and they AGREE" do
-    # The forked-pair axis, stated once as an invariant of the whole table:
-    # derive/1's :admin key and admin?/1 are separate code paths and the
-    # shares/item-share handlers call the SECOND one. Every cell above declares
-    # a value for BOTH, and no cell declares them different.
+  test "every cell DECLARES both forked caps answers, and no cell declares them apart" do
+    # NOTE ON WHAT THIS TEST IS: it checks the DECLARED table, not the running
+    # code. The RUNTIME driving of both forks is in `check_cell/2`, which calls
+    # `Caps.derive/1` and `Caps.admin?/1` as two separate observations on every
+    # cell and asserts each against its own declared column — so "a test that
+    # calls one path twice" is not the shape here. This row exists to stop the
+    # TABLE from silently losing its `admin_fn` column: derive/1's :admin key
+    # and admin?/1 are separate code paths and the shares/item-share handlers
+    # call the SECOND one, so a table that declared only the first would leave
+    # the deepest path unpinned.
     disagreeing =
       Enum.filter(@table, fn spec -> spec.caps.admin != spec.admin_fn end)
 
@@ -724,7 +729,8 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
   test "PIN: LiveScope.authorize_read/4's %ApiToken{} branch returns `err` with no fallthrough" do
     source = File.read!("lib/barkpark_web/live_scope.ex")
 
-    assert source =~ ~r/case socket\.assigns\[:api_token\] do\s*\n\s*%Barkpark\.Auth\.ApiToken\{\}/,
+    assert source =~
+             ~r/case socket\.assigns\[:api_token\] do\s*\n\s*%Barkpark\.Auth\.ApiToken\{\}/,
            "authorize_read/4 no longer matches on %ApiToken{} — re-derive the CallerContext cell"
 
     # A CallerContext rides its OWN assign.
@@ -785,7 +791,9 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     # THE ROW THAT PROVES THE FIX WAS FREE. The seat is read off the row
     # `load_memberships/2` already holds; `Tenancy.Auth.member?/2` would have
     # cost a second Repo.one (measured 1.0 → 2.0 q/op) and is forbidden here.
-    queries = meter("derive/1 — ADMIN-permissioned TOKEN socket", @ops, fn -> Caps.derive(sock) end)
+    queries =
+      meter("derive/1 — ADMIN-permissioned TOKEN socket", @ops, fn -> Caps.derive(sock) end)
+
     assert queries == 1 * @ops
   end
 
@@ -798,7 +806,10 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     {:ok, _} = TAuth.create_membership(ws.id, ro.id, "admin", "api_token")
     ro_sock = socket(ws, nil, %{api_token: ro})
     refute Caps.admin?(ro_sock)
-    assert meter("admin?/1 — READ-ONLY token (short-circuits)", @ops, fn -> Caps.admin?(ro_sock) end) ==
+
+    assert meter("admin?/1 — READ-ONLY token (short-circuits)", @ops, fn ->
+             Caps.admin?(ro_sock)
+           end) ==
              0
 
     # (b) admin perms + BUILT-IN role: 0 → 1 (one membership_role/2 Repo.one;
@@ -808,7 +819,9 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     builtin_sock = socket(ws, nil, %{api_token: builtin})
     assert Caps.admin?(builtin_sock)
 
-    assert meter("admin?/1 — ADMIN token, BUILT-IN role", @ops, fn -> Caps.admin?(builtin_sock) end) ==
+    assert meter("admin?/1 — ADMIN token, BUILT-IN role", @ops, fn ->
+             Caps.admin?(builtin_sock)
+           end) ==
              1 * @ops
 
     # (c) admin perms + CUSTOM role: 0 → 2 (membership_role/2, then
@@ -1025,8 +1038,9 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     do: {caller_context(), ctx.default_ws, ctx.default_ws.id}
 
   defp build(:principal_token_nil_id, ctx),
-    do: {%Barkpark.Auth.ApiToken{id: nil, permissions: ["admin"]}, ctx.default_ws,
-         ctx.default_ws.id}
+    do:
+      {%Barkpark.Auth.ApiToken{id: nil, permissions: ["admin"]}, ctx.default_ws,
+       ctx.default_ws.id}
 
   defp build(:workspace_nil_token_admin, _ctx) do
     {:ok, token} = mint_token(["admin"])
@@ -1066,7 +1080,10 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
 
   defp workspace!(slug) do
     {:ok, ws} =
-      Tenancy.create_workspace(%{slug: "#{slug}-#{System.unique_integer([:positive])}", name: slug})
+      Tenancy.create_workspace(%{
+        slug: "#{slug}-#{System.unique_integer([:positive])}",
+        name: slug
+      })
 
     ws
   end
