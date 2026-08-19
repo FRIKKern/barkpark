@@ -39,6 +39,23 @@ describe('malformed nested descriptors — fail loud, never opaque', () => {
     await expect(generateTypes(envelope, { dataset: 'x' })).rejects.not.toThrow(/localeCompare/)
   })
 
+  it('a NULL composite sub-field takes that same single error path', async () => {
+    // The guard used to read `sub.name` inside its own test expression, so a
+    // null sub threw `TypeError: Cannot read properties of null (reading
+    // 'name')` before the guard could decide. Widened, not forked: same message.
+    // Full matrix (undefined, array-nested, arrayOf-nested) in mapper-guards.test.ts.
+    const envelope = envelopeWith([
+      {
+        name: 'price',
+        type: 'composite',
+        fields: [{ name: 'currency', type: 'string' }, null],
+      },
+    ])
+    await expect(generateTypes(envelope, { dataset: 'x' })).rejects.toThrow(
+      /composite field \("price"\) has a sub-field with no `name`/,
+    )
+  })
+
   it('localizedText.languages tolerates a non-string entry (no literal() crash)', async () => {
     const envelope = envelopeWith([
       { name: 'body', type: 'localizedText', languages: ['en', 123, 'nb'] },
