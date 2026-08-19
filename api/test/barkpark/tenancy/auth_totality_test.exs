@@ -23,7 +23,11 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   alias Barkpark.Accounts.User
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.CallerContext
+  alias Barkpark.Repo
+  alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth
+  alias Barkpark.Tenancy.Role
+  alias Barkpark.Tenancy.RolePermission
 
   # ---------------------------------------------------------------------------
   # The public surface, pinned as {name, arity} TUPLES.
@@ -205,7 +209,40 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     end
 
     test "a CUSTOM role with a valid workspace id still resolves from the DB (UNCHANGED)" do
-      refute Auth.role_permits?("custom-x", valid_uuid(), :admin)
+      # NOT a vacuous refute. `db_actions/2` is the one function the seam
+      # rewrote on the role path: it now binds the CAST id (`^ws_uuid`) into
+      # the query instead of the raw argument. A control that only asserts
+      # `false` for a random UUID stays green even if that rebind broke the
+      # match and the custom-role branch silently returned `[]` forever — a
+      # SILENT AUTHORIZATION TIGHTENING with no red anywhere in this file.
+      # So pin the POSITIVE direction: a real workspace-scoped role with real
+      # `role_permissions` rows must still resolve THROUGH the rebound query.
+      {:ok, ws} =
+        Tenancy.create_workspace(%{
+          slug: "auth-totality-#{System.unique_integer([:positive])}",
+          name: "WS"
+        })
+
+      {:ok, role} =
+        Repo.insert(Role.changeset(%Role{}, %{name: "totality-editor", workspace_id: ws.id}))
+
+      for action <- ["read", "write"] do
+        {:ok, _} =
+          Repo.insert(
+            RolePermission.changeset(%RolePermission{}, %{role_id: role.id, action: action})
+          )
+      end
+
+      assert Auth.role_permits?("totality-editor", ws.id, :read)
+      assert Auth.role_permits?("totality-editor", ws.id, :write)
+      refute Auth.role_permits?("totality-editor", ws.id, :admin)
+
+      # And the workspace scoping the rebind must not blur: the SAME custom
+      # role name grants nothing in a workspace that did not define it.
+      refute Auth.role_permits?("totality-editor", valid_uuid(), :read)
+
+      # An unknown custom name still resolves to no rows.
+      refute Auth.role_permits?("custom-x", ws.id, :admin)
     end
   end
 end
