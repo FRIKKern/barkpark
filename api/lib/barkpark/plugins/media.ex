@@ -103,6 +103,16 @@ defmodule Barkpark.Plugins.Media do
     end
   end
 
+  # Reachability: the only path read is the compile-time `@schemas_dir` joined
+  # with one of two literal filenames passed by `register_schemas/1` — no
+  # runtime input reaches `File.read!/1`. Same shape (and same waiver) as
+  # `Barkpark.Plugins.Bulldocs.register_schemas/1`. This replaces the
+  # line-numbered `.sobelow-skips` row for this call site: a fingerprint
+  # baseline entry is pinned to a LINE, so any edit above the call (here:
+  # adding `oban_crontab/0`) silently kills the waiver and the finding returns
+  # as new. The annotation binds by AST adjacency to the def below and survives
+  # line moves.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec load_schema!(String.t()) :: SchemaDefinition.t()
   defp load_schema!(filename) do
     path = Path.join(@schemas_dir, filename)
