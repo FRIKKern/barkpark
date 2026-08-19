@@ -132,6 +132,39 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     |> Enum.count(&(&1.action == action))
   end
 
+  # Drive `method`/`path_fun.(id)` as an actor from team A against a barkpark
+  # owned by team B, and assert the object-level-authorization fail-closed:
+  # a wrong-team id is the SAME 404 as a nonexistent id (no existence leak),
+  # the Fake upstream is never touched, and — for a `:mutate` — team B's audit
+  # log stays empty. The proof of load-bearingness is that reverting
+  # resolve_team_barkpark/2's `when tid == team.id` guard reds every call site.
+  defp assert_cross_team_404(method, path_fun, opts \\ []) do
+    body = Keyword.get(opts, :body)
+    mutating = Keyword.get(opts, :mutating, false)
+
+    {_owner_b, team_b} = user_with_team()
+    bp_b = live_barkpark(team_b)
+
+    {user_a, _team_a} = user_with_team()
+    token_a = session_token(user_a)
+    Fake.program([])
+
+    call_opts = if body, do: [token: token_a, body: body], else: [token: token_a]
+
+    wrong_team = call(method, path_fun.(bp_b.id), call_opts)
+    nonexistent = call(method, path_fun.(Ecto.UUID.generate()), call_opts)
+
+    assert wrong_team.status == 404
+    assert nonexistent.status == 404
+    # No existence leak: the barkpark the actor does NOT own is indistinguishable
+    # from one that never existed.
+    assert json_body(wrong_team) == json_body(nonexistent)
+    assert json_body(wrong_team) == %{"ok" => false, "error" => %{"code" => "not_found"}}
+    # The credential was never spent — the relay never happened.
+    assert Fake.requests() == []
+    if mutating, do: assert(Accounts.list_audit_events(team_b) == [])
+  end
+
   describe "route surface — explicit, no free-form passthrough" do
     test "a non-catalog path under /api is a 404 with ZERO upstream calls" do
       {user, team} = user_with_team()
@@ -792,6 +825,60 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert conn.status == 404
       assert Fake.requests() == []
       assert Accounts.list_audit_events(team_b) == []
+    end
+
+    # The 2 tests above cover GET base (list) and nested DELETE. The remaining 7
+    # webhook-proxy verbs funnel through the SAME proxy_instance_webhook/2 ->
+    # resolve_team_barkpark/2 gate, but each is a distinct route with its own
+    # method + path; a per-verb cross-team row proves the object-level check is
+    # not accidentally bypassed by any one of them (IDOR/BOLA capstone).
+
+    test "create (POST base) across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :post,
+        &"/v1/barkparks/#{&1}/api/webhooks",
+        body: %{"url" => "https://acme.test/hook", "events" => ["create"]},
+        mutating: true
+      )
+    end
+
+    test "show (GET :webhook_id) across teams is the SAME 404, upstream never called" do
+      assert_cross_team_404(:get, &"/v1/barkparks/#{&1}/api/webhooks/wh_9")
+    end
+
+    test "update (PUT :webhook_id) across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :put,
+        &"/v1/barkparks/#{&1}/api/webhooks/wh_9",
+        body: %{"active" => false},
+        mutating: true
+      )
+    end
+
+    test "rotate across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(:post, &"/v1/barkparks/#{&1}/api/webhooks/wh_9/rotate",
+        mutating: true
+      )
+    end
+
+    test "deliveries (GET) across teams is the SAME 404, upstream never called" do
+      assert_cross_team_404(:get, &"/v1/barkparks/#{&1}/api/webhooks/wh_9/deliveries")
+    end
+
+    test "replay across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :post,
+        &"/v1/barkparks/#{&1}/api/webhooks/wh_9/deliveries/evt_5/replay",
+        mutating: true
+      )
+    end
+
+    test "test-send across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :post,
+        &"/v1/barkparks/#{&1}/api/webhooks/wh_9/test-send",
+        mutating: true
+      )
     end
   end
 end

@@ -496,6 +496,46 @@ func sortedFlagKeys(flagMap map[string][]string) []string {
 	return keys
 }
 
+// Flag names are the ONE completion-token class the server can poison: they come
+// from the manifest cache (control-plane JSON) and manifest.Parse's safeName only
+// validates noun.Name / command.Noun / command.Verb — never Flag.Name. Without
+// escaping, a flag name like `--$(touch pwned)` reaches the emitted shell script
+// and executes on TAB. Go's `%q` verb is NOT sufficient: it quotes for a Go
+// double-quoted string literal and leaves `$`, backtick and `$(...)` LIVE in a
+// POSIX shell, so a %q-formatted token still command-substitutes. Only real shell
+// single-quoting neutralizes those metacharacters, so we single-quote flag tokens
+// at emit in every emitter below.
+
+// (shSingleQuote — the POSIX single-quote wrapper, with the classic `'\''` splice
+// for an embedded quote — lives in cloud_deploy_cmd.go and is reused here: inside
+// single quotes the shell performs no expansion, so `$`/backtick are inert. It
+// serves bash and zsh, whose single-quote semantics are identical here.)
+
+// shSingleQuoteEach single-quotes each token and space-joins them, for a context
+// (e.g. a zsh `arr=(...)` literal) that parses the quotes at assignment time and
+// performs quote removal — so the elements stay separate and land unquoted.
+func shSingleQuoteEach(toks []string) string {
+	q := make([]string, len(toks))
+	for i, t := range toks {
+		q[i] = shSingleQuote(t)
+	}
+	return strings.Join(q, " ")
+}
+
+// fishSingleQuoteEscape escapes toks for interpolation INSIDE a fish single-quoted
+// string. fish single quotes treat only `\` and `'` specially (`$` and `(...)` are
+// literal there), so those two are the whole escape set. Tokens are space-joined
+// as one `-a` candidate list.
+func fishSingleQuoteEscape(toks []string) string {
+	q := make([]string, len(toks))
+	for i, t := range toks {
+		e := strings.ReplaceAll(t, `\`, `\\`)
+		e = strings.ReplaceAll(e, `'`, `\'`)
+		q[i] = e
+	}
+	return strings.Join(q, " ")
+}
+
 func bashCompletionScript(nouns, globals string, verbMap, flagMap map[string][]string) string {
 	// bash 3.2 (macOS default) has no associative arrays, so per-noun verbs go
 	// through a `case` on the noun word. An empty verbMap yields an empty case,
@@ -505,9 +545,14 @@ func bashCompletionScript(nouns, globals string, verbMap, flagMap map[string][]s
 		fmt.Fprintf(&cases, "      %s) __bpverbs=%q;;\n", noun, strings.Join(verbMap[noun], " "))
 	}
 	// Position 3+ offers the command's own flags, keyed on the "noun verb" pair.
+	// The flag list is single-quoted as ONE value (not %q): the untrusted flag
+	// tokens must never be command-substituted when the case body assigns
+	// __bpflags. We deliberately store the raw space-joined names (no per-token
+	// quotes) because a shell variable's value is word-split but NOT quote-removed
+	// on re-expansion — interior quotes would survive as literal characters.
 	var flagCases strings.Builder
 	for _, key := range sortedFlagKeys(flagMap) {
-		fmt.Fprintf(&flagCases, "      %q) __bpflags=%q;;\n", key, strings.Join(flagMap[key], " "))
+		fmt.Fprintf(&flagCases, "      %q) __bpflags=%s;;\n", key, shSingleQuote(strings.Join(flagMap[key], " ")))
 	}
 	return `# bash completion for bp — eval "$(bp completion bash)" or source a saved copy.
 _bp_complete() {
@@ -532,7 +577,16 @@ _bp_complete() {
     case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in
 ` + flagCases.String() + `      *) ;;
     esac
-    COMPREPLY=( $(compgen -W "$__bpflags $globals" -- "$cur") )
+    # SECURITY: flag names are untrusted (manifest cache). compgen -W RE-EXPANDS
+    # its wordlist — command substitution included — so a poisoned flag reaching
+    # ` + "`compgen -W \"$__bpflags\"`" + ` would execute on TAB even though the
+    # assignment above is single-quoted. Match manually instead: expanding a
+    # variable word-splits but does not re-scan for $(...), so nothing runs.
+    local __bpword
+    COMPREPLY=()
+    for __bpword in $__bpflags $globals; do
+      case "$__bpword" in "$cur"*) COMPREPLY+=("$__bpword");; esac
+    done
   fi
 }
 complete -F _bp_complete bp
@@ -544,9 +598,13 @@ func zshCompletionScript(nouns, globals string, verbMap, flagMap map[string][]st
 	for _, noun := range sortedVerbNouns(verbMap) {
 		fmt.Fprintf(&cases, "      %s) verbs=(%s);;\n", noun, strings.Join(verbMap[noun], " "))
 	}
+	// Untrusted flag tokens go into a zsh `flags=(...)` array literal, which
+	// command-substitutes `$(...)` at assignment. Single-quote EACH element (not
+	// %q, which leaves $/backtick live): zsh performs quote removal when it parses
+	// the literal, so the elements land unquoted and inert.
 	var flagCases strings.Builder
 	for _, key := range sortedFlagKeys(flagMap) {
-		fmt.Fprintf(&flagCases, "      %q) flags=(%s);;\n", key, strings.Join(flagMap[key], " "))
+		fmt.Fprintf(&flagCases, "      %q) flags=(%s);;\n", key, shSingleQuoteEach(flagMap[key]))
 	}
 	return `#compdef bp
 # zsh completion for bp — eval "$(bp completion zsh)" or save to a file on $fpath.
@@ -596,9 +654,13 @@ func fishCompletionScript(nouns, globals string, verbMap, flagMap map[string][]s
 		if len(parts) != 2 {
 			continue
 		}
+		// Untrusted flag tokens sit inside a single-quoted fish `-a '...'` list.
+		// fish single quotes make `$`/`(...)` literal, so only `\` and `'` need
+		// escaping — but they DO need it, or a `'`-bearing name breaks out of the
+		// quote. (Go %q would leave $/backtick live in other shells; escape here.)
 		fmt.Fprintf(&flagLines,
 			"complete -c bp -n '__fish_seen_subcommand_from %s; and __fish_seen_subcommand_from %s' -a '%s'\n",
-			parts[0], parts[1], strings.Join(flagMap[key], " "))
+			parts[0], parts[1], fishSingleQuoteEscape(flagMap[key]))
 	}
 	return `# fish completion for bp — ` + "`bp completion fish | source`" + `, or save to
 # ~/.config/fish/completions/bp.fish (then it loads automatically).

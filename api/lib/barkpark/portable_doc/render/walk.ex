@@ -281,6 +281,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # Trap: PdText.children mixes raw strings (escaped) and child nodes (recursed).
     inner =
       Map.get(n, "children", [])
+      |> children_of()
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
         k -> walk(k, width, pal)
@@ -368,6 +369,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp paragraph_html(n, children, width, pal) do
     inner =
       children
+      |> children_of()
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
         k -> walk(k, width, pal)
@@ -422,6 +424,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp heading_inner(n, width, pal) do
     Map.get(n, "children", [])
+    |> children_of()
     |> Enum.map(fn
       k when is_binary(k) -> escape_html(k)
       k -> walk(k, width, pal)
@@ -542,6 +545,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # Trap: PdLink.children mixes raw strings (escaped) and child nodes (recursed).
     inner =
       Map.get(n, "children", [])
+      |> children_of()
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
         k -> walk(k, width, pal)
@@ -647,6 +651,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       _ ->
         inner =
           Map.get(n, "children", [])
+          |> children_of()
           |> Enum.map(fn
             k when is_binary(k) -> escape_html(k)
             k -> walk(k, width, pal)
@@ -1596,6 +1601,22 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   # ── shared helpers ──────────────────────────────────────────────────────────
 
+  # Fail-safe coercion for a node's `children`. Papers are schemaless — a raw
+  # API/SDK/CLI mutate can persist a PRESENT `children` key whose JSON value is
+  # `null` (→ `nil` here) or a bare scalar, and `Map.get(n, "children", [])`
+  # only substitutes the default on an ABSENT key. Any non-list would then hit
+  # `Enum.map/2` and RAISE, 500-ing every reader of the raw-tree entry
+  # (render_html/2 → render_body/3, reachable by the TUI, plugins, and tests
+  # ahead of compose coercion). Coercing any non-list to `[]` degrades to empty
+  # instead — it CANNOT alter a list-path render (a list passes through
+  # unchanged), so a passing render never regresses.
+  defp children_of(c) when is_list(c), do: c
+  defp children_of(_), do: []
+
+  # Non-list children degrade to "" here (mirrors the walk/3 non-node catch-all),
+  # covering every render_children caller transitively.
+  defp render_children(children, _width, _pal) when not is_list(children), do: ""
+
   defp render_children(children, width, pal) do
     children
     |> Enum.map(&walk(&1, width, pal))
@@ -1606,6 +1627,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # escaped verbatim, a Pd node (a mark span, link, code) is walked. Shared by
   # PdBlockquote so its inner is byte/shape-equal to a paragraph's — the parity
   # harness compares the article <blockquote> against the JS emitter.
+  defp paragraph_inner(children, _width, _pal) when not is_list(children), do: ""
+
   defp paragraph_inner(children, width, pal) do
     children
     |> Enum.map(fn

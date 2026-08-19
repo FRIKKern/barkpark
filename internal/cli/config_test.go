@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -988,5 +989,85 @@ func TestConfigCloudTokenReachesTheDoctorProbe(t *testing.T) {
 	}
 	if g := doctorGateOpts("", ""); g.CloudSitesToken != "from-the-file" {
 		t.Fatalf("the persisted tier regressed; got %q", g.CloudSitesToken)
+	}
+}
+
+// TestConfigMarshalRedactsAllFiveTokensButPersistRoundTrips proves BOTH
+// directions of the config-token marshal guard (bp-secgo-config-token-marshal-guard):
+//
+//	(a) SaveConfig -> LoadConfig round-trips all FIVE token-bearing fields,
+//	    including a DISTINCT nested KnownServers[].Token sentinel, so persistence
+//	    is unbroken; and
+//	(b) a PUBLIC json.Marshal(Config) contains NONE of the five sentinels — the
+//	    value-receiver Config.MarshalJSON redacts every credential.
+//
+// The FLAT-TOKEN-SENTINEL (Config.Token) and NESTED-ENTRY-TOKEN-SENTINEL
+// (ServerEntry.Token) are the mutation tripwires: neuter the redaction of
+// either field in config.go and assertion (b) reds on that sentinel.
+func TestConfigMarshalRedactsAllFiveTokensButPersistRoundTrips(t *testing.T) {
+	withTempConfigHome(t)
+
+	const (
+		flatSentinel   = "FLAT-TOKEN-SENTINEL"
+		adminSentinel  = "ADMIN-TOKEN-SENTINEL"
+		ingestSentinel = "INGEST-TOKEN-SENTINEL"
+		cloudSentinel  = "CLOUD-TOKEN-SENTINEL"
+		nestedSentinel = "NESTED-ENTRY-TOKEN-SENTINEL"
+	)
+	sentinels := []string{flatSentinel, adminSentinel, ingestSentinel, cloudSentinel, nestedSentinel}
+
+	want := &Config{
+		Server:      "https://api.barkpark.cloud",
+		Token:       flatSentinel,
+		AdminToken:  adminSentinel,
+		IngestToken: ingestSentinel,
+		CloudToken:  cloudSentinel,
+		KnownServers: []ServerEntry{
+			{Server: "https://api.barkpark.cloud", Token: nestedSentinel},
+		},
+	}
+
+	// (a) Persistence round-trips every token, incl the nested entry token.
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.Token != flatSentinel || got.AdminToken != adminSentinel ||
+		got.IngestToken != ingestSentinel || got.CloudToken != cloudSentinel {
+		t.Fatalf("flat tokens did not round-trip: got=%+v", *got)
+	}
+	if len(got.KnownServers) != 1 || got.KnownServers[0].Token != nestedSentinel {
+		t.Fatalf("nested ServerEntry.Token did not round-trip: got=%+v", got.KnownServers)
+	}
+
+	// (b) A public marshal of the Config leaks NONE of the five sentinels.
+	pub, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("json.Marshal(Config): %v", err)
+	}
+	for _, s := range sentinels {
+		if bytes.Contains(pub, []byte(s)) {
+			t.Fatalf("public marshal leaked token sentinel %q: %s", s, pub)
+		}
+	}
+	// A *Config nested in another struct redacts identically (value receiver
+	// covers both value and pointer).
+	pubPtr, err := json.Marshal(struct{ C *Config }{want})
+	if err != nil {
+		t.Fatalf("json.Marshal(*Config): %v", err)
+	}
+	for _, s := range sentinels {
+		if bytes.Contains(pubPtr, []byte(s)) {
+			t.Fatalf("public *Config marshal leaked token sentinel %q: %s", s, pubPtr)
+		}
+	}
+
+	// Redaction must not MUTATE the caller's live Config — the nested slice is
+	// deep-copied before blanking, so the in-memory token survives the marshal.
+	if want.Token != flatSentinel || want.KnownServers[0].Token != nestedSentinel {
+		t.Fatalf("public marshal mutated the caller's live tokens: %+v / %+v", *want, want.KnownServers)
 	}
 }

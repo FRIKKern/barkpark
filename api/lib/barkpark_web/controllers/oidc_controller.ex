@@ -32,7 +32,13 @@ defmodule BarkparkWeb.OidcController do
     end
   end
 
-  def callback(conn, %{"org_slug" => slug, "code" => code, "state" => state}) do
+  # `when is_binary(code)` belongs on the ACTION HEAD, not on the callee: a
+  # list-valued `?code[]=` slips past a callee guard and raises below the
+  # action frame, where Phoenix's ActionClauseError→400 conversion no longer
+  # applies (500). Guarded here, a wrong-typed `code` simply falls through to
+  # the fallback clause below and gets the same clean 400 as a missing one.
+  def callback(conn, %{"org_slug" => slug, "code" => code, "state" => state})
+      when is_binary(code) do
     c = Oidc.connection_for_org_slug(slug)
 
     cond do

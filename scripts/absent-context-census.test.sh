@@ -436,11 +436,19 @@ section "7. the workflow is schedule-only with a static job name"
 # trigger that can observe a queue on a branch that will never push again.
 shape_report() { # <yml file> -> lines of findings, empty when the shape is right
   local f="$1"
-  # Workflow-level trigger block only: everything from `^on:` to the next
-  # top-level key. A `pull_request` mentioned in a comment or in an `if:` is not
-  # a trigger and must not be matched.
+  # Workflow-level trigger block only: everything from the trigger key to the
+  # next top-level key. A `pull_request` mentioned in a comment or in an `if:`
+  # is not a trigger and must not be matched.
+  #
+  # THE KEY IS `on:`, `"on":` OR `'on':` — all three the same key to GitHub.
+  # YAML 1.1 resolves a bare `on` to the BOOLEAN true, so yamllint's `truthy`
+  # rule pushes authors to quote it, and a `/^on:/` byte anchor reads a quoted
+  # workflow as having NO trigger block at all: this shape check would then
+  # print ok over an empty string — a green earned over nothing, which is the
+  # exact defect this harness exists to catch. Same anchor, same three
+  # spellings, as scripts/required-checks-generate.sh build_workflow_index.
   local trig
-  trig="$(awk '/^on:/ {inon=1; next} /^[A-Za-z]/ {inon=0} inon {print}' "$f" | sed 's/#.*//')"
+  trig="$(awk '/^("on"|\047on\047|on)[ \t]*:/ {inon=1; next} /^[A-Za-z"\047]/ {inon=0} inon {print}' "$f" | sed 's/#.*//')"
   grep -qE '^[[:space:]]+schedule:' <<<"$trig" || echo "NO SCHEDULE TRIGGER"
   grep -qE '^[[:space:]]+pull_request(_target)?:' <<<"$trig" && echo "PULL_REQUEST TRIGGER"
   # Job names, comments stripped.
@@ -462,7 +470,7 @@ ok "7.2 the literal job name is: $JOBNAME"
 
 # The shape checker must be able to fail, in each direction independently.
 CANARY="$TMP/canary-pr.yml"
-awk '/^on:/ { print; print "  pull_request:"; next } { print }' "$WF" > "$CANARY"
+awk '/^("on"|\047on\047|on)[ \t]*:/ { print; print "  pull_request:"; next } { print }' "$WF" > "$CANARY"
 grep -q 'PULL_REQUEST TRIGGER' <<<"$(shape_report "$CANARY")" \
   && ok "7.3 …and a planted \`pull_request:\` trigger FIRES the check (mutation-proven able to fail)" \
   || bad "7.3 the shape checker did not fire on a planted pull_request trigger"
