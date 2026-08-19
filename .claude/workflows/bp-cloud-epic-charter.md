@@ -69,3 +69,23 @@ Filed, not built this wave: the doc-gates requirable-aggregator packet (human-ga
 ## Wave log
 
 (empty — the lead appends one line per wave on merge)
+
+### Wave 2026-08-19 — gate wiring + spec generator (`ci-gate-script-integrity-audit`)
+
+Round 1 built three slices; all three green on the reviewer's re-run and pushed with PRs open. Grade **A-**.
+
+| Slice | Task | Final branch | Verdict |
+|---|---|---|---|
+| Inverse blocking-authority clause + honest doc-gates step names (crown) | `cgsiw-s1-inverse-blocking-clause` | `loop-epic/inverse-blocking-authority-clause-honest-0-r` | `blocking_authority_check()` ships with a complement-derived subject set (93 of 112 jobs denied), three structural evidence classes, a reason-bearing escape hatch checked in both directions, and probes 19–23. Fail-before arm re-run by the reviewer against origin/main's four workflows reds exactly the predicted 4. |
+| Four legal YAML spellings make the spec generator emit a wrong spec at exit 0 | `cgsiw-s2-generator-parser-forms` | `loop-epic/four-legal-yaml-spellings-make-the-spec--1-r` | Quoted `"on":` trigger key, continue-on-error by VALUE, the both-lists refusal's missing mirror (`--expect-demoted`), and the `*.yaml` glob — fixed at all four byte-anchor sites plus the two sibling scripts. `.github/required-checks.json` untouched. |
+| Wire two orphan selftests + the push↔pull_request paths-parity tripwire | `cgsiw-s3-wire-orphans-and-paths-parity` | `loop-epic/wire-two-orphan-selftests-and-build-the--2-r` | `cloud-static-gz-guard.sh` and `pds-live-hetzner-placement-group.sh --selftest-offline` were written, green, mutation-proven and invoked by NO workflow; both are now wired selftest-first. New 419-line `doc-gates-paths-parity-check.sh` fails closed on `[] == []` and carries a self-retiring pin for the live 70-vs-69 drift. |
+
+Reviewer fixes, one commit per slice: both prose clauses in `required-checks-verify.sh` now scan `*.yaml` as well as `*.yml` (s1); a quoted or absent `continue-on-error` is read as the FALSE it is, so a blocking job is never dropped from the required set and a quoted-`false` step cannot manufacture a laundering red (s2); the parity lane installs PyYAML using this workflow file's own idiom instead of hard-failing on an image fact (s3).
+
+Cross-slice integration proof the reviewer ran and no builder could: s1's clause over a merged s1+s3 workflow tree reads 96 of 115 jobs denied with zero violations, and s2's generator builds its index over that same tree without tripping the catch-all or laundering refusals.
+
+THE HEADLINE, restated because it re-ranks everything in this fence: **doc-gates cannot block a merge at all.** Main's required set is exactly `Cloud gate`, `Console gate`, `Elixir gate`, `PR references an active task`. Every wiring gap inside doc-gates is post-merge DETECTION, never a merge hole — and the crown slice exists because 21 of its step names said `(blocking)` anyway.
+
+Stalled: nothing. Deferred BY DESIGN to round 2, dispatched as their dependencies merge — `cgsiw-s4-suite-mutation-clauses` (after s1 AND s2) mechanizes every disarm this wave proved by hand; `cgsiw-s5-doc-gates-paths-gaps` (after s1) closes the three proven paths-filter gaps and must delete the pin line in `scripts/doc-gates-paths-parity-check.sh` in the same PR or s3's guard reds STALE PIN.
+
+Next wave: merge round 1 in the order s1 → s2 → s3 (disjoint files, so any order works, but s5's brief is written against a merged s1), dispatch s4 and s5, then take the axis this wave deliberately did not: the `continue-on-error` postures themselves, and the gate-critical scripts outside this fence (`api/scripts/sobelow-fresh-finding-guard.sh`, `js/scripts/check-no-node-imports.sh`), both already filed with planted violations.
