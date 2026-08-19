@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.StuckProcessingSweeper do
+defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
   @moduledoc """
   Recovers `mediaAsset` documents left stranded at `bp_processing_status ==
   "processing"` by a crashed post-upload pipeline.
@@ -72,6 +72,23 @@ defmodule Barkpark.Media.StuckProcessingSweeper do
   back to `"processing"`. Within a single sweep, each candidate is re-read fresh
   immediately before the write and skipped if it is no longer `"processing"`
   (an external callback healed it in the meantime).
+
+  ## Placement — plugin code, not host code
+
+  This worker lives in the Media PLUGIN tree (`lib/barkpark/plugins/media/`,
+  namespace `Barkpark.Plugins.Media.*`) alongside `Assets`/`Codelists`, and NOT
+  under host `lib/barkpark/media/`. It reconciles `mediaAsset` DOCUMENTS — rows
+  the Media plugin owns and creates (`Assets.ensure_for_upload/1`) — and it
+  resolves them through `Assets.find_by_media_file_id/3` +
+  `Assets.file_scope_opts/1`. Sitting in host code it would be a NEW
+  core→removable-plugin coupling outside `@sanctioned_host_plugin_coupling`
+  (`test/barkpark/plugin_free_boot_test.exs` tier 5), i.e. host code whose only
+  reason to exist is a plugin's document type. Here the coupling disappears by
+  construction: the sweeper's lifecycle follows the plugin. With `:plugins []`
+  the Media plugin never registers, `Registry.collect_oban_crontab/0` never
+  collects `Media.oban_crontab/0`, and the cron entry is never installed — the
+  fresh-install invariant holds. Precedent: `Barkpark.Plugins.Indx.IndexerWorker`
+  and `Barkpark.Plugins.Github.MirrorJob` are plugin-owned Oban workers too.
 
   Configuration (all `Application.get_env(:barkpark, …)`, tests override):
   `:media_stuck_processing_after_seconds` (300..∞, default 900),

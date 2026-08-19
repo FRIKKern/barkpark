@@ -1,4 +1,4 @@
-defmodule Barkpark.Media.StuckProcessingSweeperTest do
+defmodule Barkpark.Plugins.Media.StuckProcessingSweeperTest do
   @moduledoc """
   Proves the media reconciliation sweeper terminates and heals.
 
@@ -22,9 +22,9 @@ defmodule Barkpark.Media.StuckProcessingSweeperTest do
 
   alias Barkpark.Content.Document
   alias Barkpark.Media
-  alias Barkpark.Media.StuckProcessingSweeper
   alias Barkpark.Plugins.Bootstrap
   alias Barkpark.Plugins.Media.Assets
+  alias Barkpark.Plugins.Media.StuckProcessingSweeper
   alias Barkpark.Repo
 
   @dataset "production"
@@ -173,8 +173,59 @@ defmodule Barkpark.Media.StuckProcessingSweeperTest do
 
     test "media plugin registers the per-minute cron on the :default queue" do
       assert Barkpark.Plugins.Media.oban_crontab() == [
-               {"* * * * *", Barkpark.Media.StuckProcessingSweeper}
+               {"* * * * *", Barkpark.Plugins.Media.StuckProcessingSweeper}
              ]
+    end
+
+    # FRESH-INSTALL INVARIANT (plugin_free_boot_test tier 5's runtime twin).
+    # The sweeper is PLUGIN code, reached only through the plugin's
+    # `oban_crontab/0` collector — never through the host's static
+    # `config.exs` :crontab. So with `:plugins []` the cron entry the host
+    # folds into Oban at boot must not name it AT ALL: no worker is
+    # registered, nothing sweeps, and `lib/barkpark/plugins/media/` can be
+    # deleted wholesale without stranding a cron pointing at a gone module.
+    # Moving this entry to config.exs (or the module back to host code) reds
+    # here.
+    test "a plugin-free boot registers NO sweeper cron entry" do
+      prev = Application.get_env(:barkpark, :plugins, :unset)
+
+      on_exit(fn ->
+        case prev do
+          :unset -> Application.delete_env(:barkpark, :plugins)
+          v -> Application.put_env(:barkpark, :plugins, v)
+        end
+      end)
+
+      # Sanity arm: with Media loaded the entry IS collected — so the
+      # plugins-off arm below is a real absence, not a vacuous one.
+      Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Media])
+
+      assert {"* * * * *", StuckProcessingSweeper} in Barkpark.Plugins.Registry.collect_oban_crontab()
+
+      Application.put_env(:barkpark, :plugins, [])
+
+      crontab = Barkpark.Plugins.Registry.collect_oban_crontab()
+
+      refute Enum.any?(crontab, fn
+               {_expr, worker} -> worker == StuckProcessingSweeper
+               {_expr, worker, _opts} -> worker == StuckProcessingSweeper
+               _ -> false
+             end)
+
+      # And the host's own static Oban config never names it either — the
+      # only path to this worker is the plugin collector.
+      static_crontab =
+        :barkpark
+        |> Application.fetch_env!(Oban)
+        |> Keyword.get(:plugins, [])
+        |> Enum.find_value([], fn
+          {Oban.Plugins.Cron, opts} -> Keyword.get(opts, :crontab, [])
+          _ -> nil
+        end)
+
+      refute Enum.any?(static_crontab, fn entry ->
+               elem(entry, 1) == StuckProcessingSweeper
+             end)
     end
   end
 

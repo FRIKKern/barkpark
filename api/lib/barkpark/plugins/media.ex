@@ -48,7 +48,7 @@ defmodule Barkpark.Plugins.Media do
   Oban Cron entries contributed by the media plugin (Path B).
 
   A single per-minute reconciliation sweep,
-  `Barkpark.Media.StuckProcessingSweeper`, that re-drives (or terminally fails)
+  `Barkpark.Plugins.Media.StuckProcessingSweeper`, that re-drives (or terminally fails)
   `mediaAsset` rows stranded at `bp_processing_status == "processing"` by a
   crashed post-upload pipeline. Folded into the host `Oban.Plugins.Cron`
   `:crontab` at boot by `Barkpark.Plugins.Registry.collect_oban_crontab/0`
@@ -57,7 +57,7 @@ defmodule Barkpark.Plugins.Media do
   """
   @impl Barkpark.Plugin
   def oban_crontab do
-    [{"* * * * *", Barkpark.Media.StuckProcessingSweeper}]
+    [{"* * * * *", Barkpark.Plugins.Media.StuckProcessingSweeper}]
   end
 
   @impl Barkpark.Plugin
