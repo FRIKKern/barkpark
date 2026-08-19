@@ -21,8 +21,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
   AGREE.
 
   The event is DOUBLE admin-gated (`Caps.@admin_events` deny-gate + the
-  handler's own `Caps.admin?/1` re-check), so the person misled here is a
-  workspace admin/operator, never a plain member.
+  handler's own `Caps.admin?/1` re-check) — but that is ONE opinion asked twice,
+  not two: both gates call the SAME forked `Caps` predicate, and there is no
+  second opinion anywhere on the admin path. So the person misled here is NOT
+  necessarily a workspace admin/operator: an api_token holding a plain `"member"`
+  membership row plus global `admin` permissions passes both gates and really
+  does mount this Studio. That shape is proven mountable — with a `"member"` row
+  read back from the store — in
+  `BarkparkWeb.Studio.CapsMountReachabilityTest` ("shape B").
   """
   use BarkparkWeb.ConnCase, async: false
 
