@@ -95,6 +95,60 @@ defmodule Barkpark.StudioChat.FleetHub do
     GenServer.call(server, {:handshake, cursor, scope})
   end
 
+  # ── CITED SAFE — class D, an INCARNATION FENCE: neither pure clock source is
+  # correct (clock-semantics wave, 2026-08-19). Read this before re-sourcing
+  # `epoch` in either direction.
+  #
+  # Provenance: swept alongside the class-C bucket-key defect closed by #12628
+  # (8598c4efe7) and the atomicity fix #12579 (e45f1377bb). This is neither
+  # class A (nothing compares `epoch` to a STORED instant — it is never
+  # persisted and never durably compared), nor class B (it measures no elapsed
+  # duration), nor class C (it keys no bound; the ring cap is a list length).
+  # It is a fourth thing, and naming the class is the point of this note: a
+  # future sweep that misfiles it as A or B will "fix" it into a defect.
+  #
+  # (a) STRUCTURAL — the required property is IDENTITY, not time: the value must
+  #     never repeat and must never go backwards ACROSS A RESTART, because it is
+  #     the epoch half of the opaque `"<epoch>:<seq>"` Last-Event-ID cursor, and
+  #     a restart is exactly when every prior cursor MUST stop validating (the
+  #     ring is an in-memory list, so post-restart the entries a cursor names no
+  #     longer exist). See the boot-epoch fence section in the moduledoc above.
+  #     Neither pure source satisfies that:
+  #       * `System.monotonic_time` RESETS at BEAM start — the very event this
+  #         token exists to distinguish. A monotonic epoch would collide across
+  #         restarts and hand a stale cursor a false match.
+  #       * `:erlang.unique_integer` restarts with the BEAM for the same reason,
+  #         and the moduledoc above already rejects it here on that ground.
+  #     Wall-clock microseconds is the least-wrong source: two incarnations of
+  #     the same hub cannot init in the same microsecond, and it survives a
+  #     restart by construction.
+  #
+  # (b) CONSUMER CENSUS — `epoch` is read only by the handshake, which compares
+  #     the CLIENT's cursor epoch against the CURRENT one and, on mismatch,
+  #     degrades to a fresh scoped snapshot. There is no authorization, expiry,
+  #     quota or lease keyed on it; scope enforcement is `StudioChat.scope_match?/2`
+  #     per entry (D43h), entirely independent of `epoch`.
+  #
+  # RESIDUAL, named in the safe direction: a BACKWARD host clock step spanning a
+  # restart could in principle mint an epoch a previous incarnation already
+  # used. The failure mode is a client accepting a cursor into a ring that no
+  # longer holds those entries — a stale-frame/liveness nuisance on an
+  # already-authorized socket, resolved by the next snapshot. Not an
+  # authorization bypass, and no caller influences the mint.
+  #
+  # SIBLINGS, so the class is legible across the repo: the identical shape with
+  # the identical recorded rationale lives at
+  # api/lib/barkpark/plugins/sheets/session.ex (the sheets session's incarnation
+  # stamp). The CAUTIONARY twin is `maybe_prebuilt_nonce/2` in
+  # cloud/lib/barkpark_cloud/sites/deploy.ex, which a sibling slice of this wave
+  # addresses — same "must differ across restarts" requirement, a source that
+  # does not meet it.
+  #
+  # WHAT THIS VERDICT DOES NOT REST ON: the D44h charter decision recorded in
+  # the moduledoc. That decision rejected `:erlang.unique_integer`; it never
+  # examined a clock step, and a prior recorded decision is not evidence about
+  # clock semantics. The grounds above are the identity requirement and a
+  # consumer census.
   @impl true
   def init(_opts) do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
