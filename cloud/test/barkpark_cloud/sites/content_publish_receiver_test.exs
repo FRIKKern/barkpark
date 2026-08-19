@@ -164,6 +164,28 @@ defmodule BarkparkCloud.Sites.ContentPublishReceiverTest do
       refute_enqueued(worker: AutoDeployWorker)
     end
 
+    # clk-w4 (TESTABILITY, not a defect — InboundSignature's `abs(now - t)` is
+    # CORRECT today). Every freshness arm in the corpus drove the PAST side only,
+    # so striking `abs(` from inbound_signature.ex left the whole cloud suite
+    # green while this UNAUTHENTICATED receiver (HMAC is the only auth here)
+    # silently accepted arbitrarily future-dated deliveries. This arm drives the
+    # future side through the real HTTP surface — the timestamp is caller-supplied
+    # in the header, so no clock injection is needed.
+    test "a FUTURE-dated (>300s ahead) signature 401s — the replay window is two-sided" do
+      site = team_fixture() |> live_barkpark() |> static_site()
+      {:ok, secret} = Registry.reveal_site_content_secret(site)
+
+      body = Jason.encode!(%{"event" => "publish"})
+      future_ts = System.system_time(:second) + 400
+
+      conn = deliver(site.id, body, sign(secret, future_ts, body))
+
+      assert conn.status == 401
+      # Pin the reason too, so a 401 raised for some unrelated cause can't pass this.
+      assert json_body(conn)["error"] == "bad_signature"
+      refute_enqueued(worker: AutoDeployWorker)
+    end
+
     test "a REPLAY (a valid signature for a different body) 401s" do
       site = team_fixture() |> live_barkpark() |> static_site()
       {:ok, secret} = Registry.reveal_site_content_secret(site)
