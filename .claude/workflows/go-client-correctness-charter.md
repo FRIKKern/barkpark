@@ -42,4 +42,16 @@ Future waves (only if a real vein appears): the corners no surveyor deeply read 
 
 ## Wave log
 
-_(empty — appended by each wave's Review)_
+### Wave 2026-08-18
+
+**Landed** — three round-1 slices, all Opus, file-disjoint, each proven red-without-fix (or red-on-removal), reviewed with no fixes needed:
+
+- **W1-S1 servers_cmd runewidth column fix** (`gocorrect-w1-servers-runewidth`, PR #12406) — `internal/cli/servers_cmd.go` now measures/pads NAME/KIND columns with `runewidth.StringWidth`/`FillRight` (display cells) instead of `utf8.RuneCountInString`/`%-*s` (rune-count), so wide-CJK/emoji DisplayNames no longer shear the SERVER column. `-o json/yaml` byte-identical. `TestServersTableWideRuneColumnAlignment` mutation-proven (reds on origin/main, delta 3).
+- **W1-S2 chat truncate wide-rune off-by-one** (`gocorrect-w1-chat-truncate`, PR #12407) — `internal/chat/render.go` `truncate()` now reserves one display cell for the ellipsis by actual per-rune width; a width-2 rune at the boundary no longer overshoots `w` by one cell. `TestTruncateWidthBound` (10 cases) mutation-proven by the reviewer (reverting the break condition reds emoji_overshoot 5>4 and mixed 5>4).
+- **W1-S3 pdrender narrow-terminal guard regressions** (`gocorrect-w1-pdrender-guard-tests`, PR #12408) — test-only; `blocks.go`/`sheet.go` byte-identical to origin. `TestDividerNarrowWidthGuard` (divider at Width:2 panics `strings: negative Repeat count` on guard removal) and `TestPadOrTruncateZeroWidth` (returns `…` not input on guard removal) lock two load-bearing guards uncovered by the golden suite (min width 40).
+
+**Grade A.** Honest per-class verdict delivered: 14 survey lanes swept near-total SAFE with cited guards; only two confirmed render findings (both LOW/cosmetic rune-vs-cell), both fixed with mutation-proven table tests; one genuinely load-bearing untested guard pair locked. No manufactured findings. Reviewer re-ran every gate green, independently mutation-checked the chat test, and found nothing to fix.
+
+**Filed, not built** — `gocorrect-cloudclient-decode-swallow` (REAL-low: `TeamMembers`/`TeamInvitations` swallow the inner-array decode, human path prints "(no members)" for an undecodable array while `-o json` stays correct — a render-contract choice) and `gocorrect-taskboard-floor-coverage-gap` (defense-in-depth `composeAt`/`Compose` floors untested, removal reds nothing). Both `open` under the epic.
+
+**Next wave** — dispatch is trivially parallel: all three PRs are file-disjoint, merge in any order. Then, only if a real vein appears, mine the unread corners the survey flagged: `internal/agent` df/size parse, `internal/hetzner`, `internal/backup` bodies, `internal/builder`; a live-terminal fuzz of taskboard/chat resize math; and consider the two filed backlog findings. No fresh build wave without fresh failing-input evidence.
