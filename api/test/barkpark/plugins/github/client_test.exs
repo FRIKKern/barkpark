@@ -755,4 +755,47 @@ defmodule Barkpark.Plugins.Github.ClientTest do
       refute log =~ @inst_token
     end
   end
+
+  # CLASS A (clock-semantics wave, clk-w4-github-backoff-clamp): X-RateLimit-Reset
+  # is a peer-transmitted ABSOLUTE epoch, so subtracting local wall clock is the
+  # only correct computation — monotonic would be meaningless against GitHub's
+  # epoch. The defect is time-as-INPUT: an unbounded peer value (or a backward
+  # clock step) fed an Oban {:snooze, n}, which never consumes an attempt, so the
+  # job parked effectively forever and leaked a scheduled row the Pruner never
+  # reclaims. Severity is availability / row accumulation, NOT authorization, and
+  # no caller can influence the timing (base_url resolves from app env only) —
+  # rank it below any auth finding. `now` is passed explicitly here, so these are
+  # deterministic: no sleeps, no barriers.
+  describe "retry_after_seconds/2 clamp" do
+    test "x-ratelimit-reset inside the window returns the true remaining seconds" do
+      reset = 1_800_000_000
+      assert Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset - 10) == 10
+    end
+
+    test "an absurdly distant x-ratelimit-reset clamps to the ceiling" do
+      # RED-BEFORE: unclamped this returns 10_000_000 (≈ 116 days of park).
+      reset = 1_800_000_000
+
+      assert Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset - 10_000_000) ==
+               300
+    end
+
+    test "a forward clock step past the reset floors to 0" do
+      reset = 1_800_000_000
+      assert Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset + 5_000) == 0
+    end
+
+    test "a hostile bare retry-after is clamped on that arm too" do
+      assert Client.retry_after_seconds([{"retry-after", "999999"}], 1_800_000_000) == 300
+    end
+
+    test "a sane bare retry-after is passed through unchanged" do
+      assert Client.retry_after_seconds([{"retry-after", "42"}], 1_800_000_000) == 42
+    end
+
+    test "no rate-limit headers → 0" do
+      assert Client.retry_after_seconds([{"content-type", "application/json"}], 1_800_000_000) ==
+               0
+    end
+  end
 end

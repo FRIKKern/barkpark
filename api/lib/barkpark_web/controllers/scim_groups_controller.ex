@@ -207,8 +207,13 @@ defmodule BarkparkWeb.ScimGroupsController do
 
   defp member_ids(nil), do: []
 
+  # `is_list` proves the CONTAINER, never the ELEMENTS: `&1["value"]` is
+  # `Access.get/3`, which has clauses only for map/keyword-list/nil, so a scalar
+  # element (`["u1"]`, `[123]`) raises FunctionClauseError BEFORE the is_binary
+  # filter below can drop it. Drop non-maps first — same outcome the is_binary
+  # filter already gives a `{"value": 123}` member, and a no-op on legal bodies.
   defp member_ids(members) when is_list(members),
-    do: Enum.map(members, & &1["value"]) |> Enum.filter(&is_binary/1)
+    do: members |> Enum.filter(&is_map/1) |> Enum.map(& &1["value"]) |> Enum.filter(&is_binary/1)
 
   defp member_ids(_), do: []
 
@@ -217,6 +222,8 @@ defmodule BarkparkWeb.ScimGroupsController do
 
   defp member_ops(ops) when is_list(ops) do
     ops
+    # A scalar Operation would raise in `Access.get/3` on `&1["path"]`; drop it.
+    |> Enum.filter(&is_map/1)
     |> Enum.filter(&(String.downcase(to_string(&1["path"] || "")) == "members"))
     |> Enum.flat_map(fn op ->
       action = if String.downcase(to_string(op["op"] || "")) == "remove", do: :remove, else: :add
