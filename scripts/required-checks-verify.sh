@@ -471,9 +471,15 @@ advisory_prose_check() {
   [ -d "$WORKFLOWS_DIR" ] \
     || fail "cannot read $WORKFLOWS_DIR — the advisory-prose clause has nothing to scan (a failure, never a skip)"
   local files
-  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 -name '*.yml' | sort)"
+  # BOTH legal spellings. GitHub runs a workflow written `*.yaml` exactly like a
+  # `*.yml` one (never-cancel-main-check.sh:96 already scans both, and cgsiw-s2
+  # widened required-checks-generate.sh's glob for the same reason). A guard
+  # that scans only one spelling is silent on the other — the vacuity class this
+  # whole file exists to refuse, so the scan covers both even though zero
+  # `*.yaml` workflows exist today.
+  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | sort)"
   [ -n "$files" ] \
-    || fail "no *.yml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
+    || fail "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
 
   local tmp ctxfile nctx nfiles out
   tmp="$(mktemp -d)"
@@ -654,9 +660,15 @@ blocking_authority_check() {
   [ -d "$WORKFLOWS_DIR" ] \
     || fail "cannot read $WORKFLOWS_DIR — the blocking-authority clause has nothing to scan (a failure, never a skip)"
   local files
-  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 -name '*.yml' | sort)"
+  # BOTH legal spellings. GitHub runs a workflow written `*.yaml` exactly like a
+  # `*.yml` one (never-cancel-main-check.sh:96 already scans both, and cgsiw-s2
+  # widened required-checks-generate.sh's glob for the same reason). A guard
+  # that scans only one spelling is silent on the other — the vacuity class this
+  # whole file exists to refuse, so the scan covers both even though zero
+  # `*.yaml` workflows exist today.
+  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | sort)"
   [ -n "$files" ] \
-    || fail "no *.yml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
+    || fail "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
 
   local tmp idx out
   tmp="$(mktemp -d)"
