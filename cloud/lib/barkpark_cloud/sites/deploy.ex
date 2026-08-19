@@ -334,9 +334,45 @@ defmodule BarkparkCloud.Sites.Deploy do
   # no-op was never correct in the first place. A future change that made `force`
   # idempotent again would silently take prebuilt with it.
   defp maybe_prebuilt_nonce(config, "prebuilt"),
-    do: Map.put(config, :prebuilt_nonce, System.unique_integer([:positive, :monotonic]))
+    do: Map.put(config, :prebuilt_nonce, prebuilt_nonce())
 
   defp maybe_prebuilt_nonce(config, _source), do: config
+
+  @doc """
+  The prebuilt nonce VALUE — a wall clock, deliberately (clock-semantics class D).
+
+  This is an identity token, not an elapsed duration: the only property it owes
+  is "never repeats, never goes backwards ACROSS A RESTART". The obvious reflex —
+  `System.unique_integer([:positive, :monotonic])` — is exactly wrong for that,
+  because it is a node-global counter that RESTARTS FROM 1 on every BEAM boot (a
+  separate sequence from bare `[:positive]`, so nothing else in the node consumes
+  it: the Nth prebuilt mint since boot deterministically gets nonce N). Since
+  `cloud/**` auto-deploys on merge, a control-plane restart is routine, so the
+  overlap is guaranteed rather than improbable — and a repeated nonce means a
+  repeated build_id, which the (site_id, build_id) partial unique index refuses,
+  which `recover_conflict/3` answers `{:duplicate, existing}`, which the router
+  answers HTTP 200 with the OLD row, while `record_audit` lives only in the
+  `{:ok, _}` arm: the freshly uploaded dist is discarded with ZERO trace.
+
+  `System.system_time()` is the idiom already used by `maybe_force_nonce/2` and
+  it survives a restart. Three in-repo moduledocs state this same rule and reject
+  `unique_integer` for this same fence (`Sheets.Session`, `StudioChat.FleetHub`,
+  `Studio.SheetGrid`).
+
+  SEVERITY, stated honestly: this is SILENT DATA LOSS on an AUTHENTICATED,
+  opt-in-gated tenant path — `POST /v1/sites/:id/deploy` with
+  `{"source":"prebuilt"}`, gated on `site.prebuilt_enabled` (422 otherwise) and
+  reached through `with_team_site(conn, {:ability, "write"})`. It is NOT
+  unauthenticated and NOT an authorization defect, no caller can influence the
+  nonce, and it ranks BELOW any auth finding in this wave.
+
+  Public only as a test seam: the nonce is otherwise invisible through
+  `build_id/5` (which returns a hash) and no restart can be staged in `mix test`,
+  so a difference assertion cannot fail on the unfixed code. The deciding proof
+  is on the VALUE DOMAIN — see `sites_deploy_test.exs`.
+  """
+  @spec prebuilt_nonce() :: integer()
+  def prebuilt_nonce, do: System.system_time()
 
   ## ---------------------------------------------------------------------------
   ## Prebuilt artifacts (charter D91)
