@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { getDocs } from '../lib/barkpark'
 import { POSTS_PER_PAGE } from '../lib/queries'
 import { Pagination } from './components/Pagination'
+import { formatDate } from '../lib/format-date'
 
 interface Post {
   _id: string
@@ -18,7 +19,7 @@ interface HomeProps {
 
 export default async function HomePage({ searchParams }: HomeProps) {
   const sp = await searchParams
-  const pageNum = Math.max(1, Number(sp.page ?? '1') || 1)
+  const pageNum = Math.max(1, Math.floor(Number(sp.page ?? '1') || 1))
   const offset = (pageNum - 1) * POSTS_PER_PAGE
 
   const posts = await getDocs<Post>('post', {
@@ -53,9 +54,9 @@ export default async function HomePage({ searchParams }: HomeProps) {
                   {post.excerpt ? (
                     <p className="text-sm text-slate-600 dark:text-slate-400">{post.excerpt}</p>
                   ) : null}
-                  {post.publishedAt ? (
+                  {formatDate(post.publishedAt) ? (
                     <p className="text-xs text-slate-500">
-                      {new Date(post.publishedAt).toLocaleDateString()}
+                      {formatDate(post.publishedAt)}
                     </p>
                   ) : null}
                 </Link>

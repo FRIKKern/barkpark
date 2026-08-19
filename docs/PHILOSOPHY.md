@@ -18,6 +18,15 @@ no forced hosted auth. The binding rule that keeps it that way is
 [decision 0004](decisions/0004-cloud-boundary.md): nothing may ever make Barkpark work worse
 self-hosted.
 
+## Conditioned for greatness
+
+We know the temptation from the inside: the moment greed enters a design, dark patterns
+follow, and every one is a worse product — friction wearing a business case. So we took the
+choice away from our future selves: open source dismantles the machinery that makes a "no"
+profitable. We are not locked behind greed. We are locked behind a purpose — greatness, and
+making software yours. We will not hold back on user experience, and we will not hold back
+on freedom.
+
 ## Barkpark Cloud — the official home
 
 We run **[Barkpark Cloud](https://barkpark.cloud)**, and we're not shy about it. It is the

@@ -144,7 +144,10 @@ defmodule BarkparkWeb.ScimUsersController do
 
   defp deactivating?(%{"Operations" => ops}) when is_list(ops) do
     Enum.any?(ops, fn op ->
-      String.downcase(to_string(op["op"] || "")) == "replace" and
+      # `is_list(ops)` proves the container, not the elements: `op["op"]` is
+      # `Access.get/3` and raises FunctionClauseError on a scalar Operation.
+      is_map(op) and
+        String.downcase(to_string(op["op"] || "")) == "replace" and
         String.downcase(to_string(op["path"] || "")) == "active" and
         op["value"] in [false, "false"]
     end)

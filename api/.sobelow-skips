@@ -15,7 +15,6 @@ XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/onixedit/web/export_contro
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/codelists/editeur.ex:298,227D73E
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:131,7FE4923
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/frt.ex:141,227F1B8
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/media.ex:96,340ACA6
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/studio_chat/runtime.ex:554,49C06AE
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:646,2895E31
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/onixedit/export.ex:261,7022E71

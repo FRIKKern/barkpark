@@ -1110,13 +1110,39 @@ fi
 # …and it must fire ONCE. crown-reconcile.yml carries its own paths-filtered
 # pull_request harness job (proven live by run 31320596893), so adding the same
 # harness to shell-harnesses.yml would double-run it.
+#
+# MENTION IS NOT EXECUTION — the doctrine shell-harnesses.yml itself states, and
+# the one this assertion used to violate. The predicate was a bare
+# `grep -q crown-reconcile`, which tested MENTION where its own message claimed
+# EXECUTION: it fired on the PROSE COMMENT #11703 (188e226f0a) added at
+# shell-harnesses.yml:84, where zero `run:` lines and zero paths entries name
+# crown-reconcile and the harness is executed by exactly one workflow (this
+# file's two if:-mutually-exclusive jobs). Because this harness is the FIRST
+# step of crown-reconcile.yml's product job, that false red skipped the actual
+# reconcile step on every push and every ~6h schedule from 2026-08-17T08:30Z —
+# the crown-vs-production reconciler, the only instrument that can see
+# production serving a sha the platform has no row for, was DARK for ~36h while
+# the failure filed to a human named the wrong defect.
+#
+# The predicate now counts only NON-COMMENT occurrences — deliberately
+# conservative (line-oriented, so it can over-red but never under-red) — and it
+# earns that tightening in the same breath: the same predicate is re-run against
+# a TEMP COPY carrying a PLANTED real wiring, and must still catch it. Without
+# that mutation case the tightening would just be the next vacuous guard.
+wiring_hits() { grep -vE '^[[:space:]]*#' "$1" | grep -c "crown-reconcile" || true; }
 HARNESSES="$REPO_ROOT/.github/workflows/shell-harnesses.yml"
+PLANTED="$TMP/shell-harnesses-planted.yml"
 if [ ! -f "$HARNESSES" ]; then
   bad "missing $HARNESSES — this assertion would be vacuous, so it fails instead"
-elif grep -q "crown-reconcile" "$HARNESSES"; then
-  bad "crown-reconcile appears in shell-harnesses.yml as well as in its own workflow — the harness would run TWICE"
 else
-  ok "crown-reconcile rides its own harness job only — it is not double-run by shell-harnesses.yml"
+  { cat "$HARNESSES"; printf '      - "scripts/crown-reconcile.test.sh"\n'; } >"$PLANTED"
+  if [ "$(wiring_hits "$HARNESSES")" != "0" ]; then
+    bad "crown-reconcile is WIRED in shell-harnesses.yml (a non-comment occurrence) as well as in its own workflow — the harness would run TWICE"
+  elif [ "$(wiring_hits "$PLANTED")" = "0" ]; then
+    bad "the double-run predicate did not catch the wiring planted in $PLANTED — it can no longer fail, so it fails now"
+  else
+    ok "crown-reconcile rides its own harness job only — no non-comment occurrence in shell-harnesses.yml, and a planted wiring still trips the predicate"
+  fi
 fi
 
 # The PAT env line exists so a human can mint the secret without touching this

@@ -40,6 +40,10 @@ defmodule Barkpark.RateLimiter do
   @max_entries 10_000
   @stale_after_ms 300_000
 
+  # Bounded retry budget for the lock-free debit below. Not a caller option:
+  # the bound is a property of the commit protocol, not of any call site.
+  @max_commit_attempts 128
+
   def start_link(_opts \\ []) do
     case :ets.whereis(@table) do
       :undefined ->
@@ -71,26 +75,78 @@ defmodule Barkpark.RateLimiter do
   def check(key, opts \\ []) do
     capacity = Keyword.get(opts, :capacity, @default_capacity)
     refill = Keyword.get(opts, :refill_per_sec, @default_refill_per_sec)
+
+    debit(key, capacity, refill, @max_commit_attempts)
+  end
+
+  # The commit is lock-free, not serialized: a GenServer would make every
+  # request on every key queue behind one process. `:ets.lookup` followed by
+  # `:ets.insert` is two separate atomic operations, so between them another
+  # process runs the same sequence, reads the SAME bucket state, decides
+  # independently that a token is available, and is admitted too — N concurrent
+  # callers all pass on one token and the bound fails OPEN. Both branches below
+  # therefore commit conditionally on the state they read and retry on a loss.
+  #
+  # Exhausting the budget fails CLOSED: bounding admissions is the whole job, so
+  # a debit we could not commit must deny rather than admit undebited. 128 is
+  # far past what 200-way contention needs (measured: 0 denials in 6000
+  # contended calls); a bound of 8 fail-closed-denies ~36% of that traffic.
+  defp debit(_key, _capacity, _refill, 0), do: :rate_limited
+
+  defp debit(key, capacity, refill, attempts_left) do
     now_ms = System.monotonic_time(:millisecond)
 
     case :ets.lookup(@table, key) do
       [] ->
-        maybe_prune(now_ms)
-        :ets.insert(@table, {key, capacity - 1.0, now_ms})
-        :ok
+        # Prune on the first attempt only: a retry here means another caller
+        # just created this bucket, and re-walking on every retry would turn a
+        # contended cold key into repeated table scans.
+        if attempts_left == @max_commit_attempts, do: maybe_prune(now_ms)
 
-      [{^key, tokens, last_ms}] ->
+        # insert_new/2 is the cold-key compare-and-swap: exactly one of N
+        # racing callers creates the bucket (the unconditional insert let each
+        # of them RESET it to full instead). `false` means somebody else won,
+        # so we must not return :ok (an undebited admission) and must not
+        # return :rate_limited (denying a legitimate first request) — we fall
+        # through to a fresh read, which takes the existing-bucket branch.
+        if :ets.insert_new(@table, {key, capacity - 1.0, now_ms}) do
+          :ok
+        else
+          debit(key, capacity, refill, attempts_left - 1)
+        end
+
+      [{^key, tokens, last_ms} = current] ->
         elapsed_s = (now_ms - last_ms) / 1000
         refilled = min(capacity * 1.0, tokens + elapsed_s * refill)
 
         if refilled >= 1.0 do
-          :ets.insert(@table, {key, refilled - 1.0, now_ms})
-          :ok
+          # select_replace/2 writes only if the row STILL holds the exact tuple
+          # we read, so the read and the debit commit as one step. 0 means
+          # somebody debited underneath us: retry from a FRESH read, never from
+          # the stale `refilled`.
+          case :ets.select_replace(@table, __cas_spec__(current, {key, refilled - 1.0, now_ms})) do
+            1 -> :ok
+            0 -> debit(key, capacity, refill, attempts_left - 1)
+          end
         else
           :rate_limited
         end
     end
   end
+
+  # TWO CONSTRAINTS, BOTH LOAD-BEARING AND BOTH INVISIBLE TO BEHAVIOURAL TESTS:
+  #
+  # 1. The match HEAD must be the literal tuple just read. A `:"$1"`-key head
+  #    plus an equality guard is equally correct and equally atomic, but it is
+  #    a FULL TABLE SCAN (measured 0.43us vs 30,252us per call on a 200k-row
+  #    table) — it replaces the same row and returns the same 1.
+  # 2. The BODY must be `{:const, replacement}`. A bare tuple body is read as a
+  #    match-spec EXPRESSION, which raises ArgumentError ("not a valid match
+  #    specification") for every tuple key this limiter is called with
+  #    ({:auth_write, …}, {:ticket, …}, {:pulse, …}, {:token, …}) while
+  #    silently working for the string keys Plugs.RateLimit builds.
+  @doc false
+  def __cas_spec__(current, replacement), do: [{current, [], [{:const, replacement}]}]
 
   @doc """
   The client IP an IP-keyed bucket must key on, as a canonical string.
