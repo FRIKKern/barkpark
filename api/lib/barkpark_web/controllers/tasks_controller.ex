@@ -1352,10 +1352,13 @@ defmodule BarkparkWeb.TasksController do
   # the deadline arm caused).
   #
   # WHY DEAD-ONLY LOSES NOTHING. `graph_corpus/2` wraps the derivation in a
-  # lexical `try/after`, and `after` runs on an ordinary return AND on a raise —
-  # so a 15s DBConnection timeout releases its own slot without any sweep. The
-  # one exit `after` does NOT cover is `Process.exit(pid, :kill)`, which is
-  # exactly what this arm reclaims: it is load-bearing and must survive.
+  # lexical `try/after`, and `after` runs on an ordinary return, on a raise, on
+  # a throw and on an in-process `exit/1` — so a 15s DBConnection timeout
+  # releases its own slot without any sweep. What `after` does NOT cover is an
+  # exit signal delivered from ANOTHER process to this untrapping one — `:kill`
+  # is the un-trappable case, but `Process.exit(pid, :shutdown)` skips `after`
+  # just the same. Every one of those leaves the owner DEAD, which is exactly
+  # what this arm reclaims: it is load-bearing and must survive.
   #
   # THE TRADE, stated rather than discovered under review: an alive-but-wedged
   # holder now keeps its slot until it finishes, so a permanently stuck
