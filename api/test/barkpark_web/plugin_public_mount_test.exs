@@ -116,6 +116,15 @@ defmodule BarkparkWeb.PluginPublicMountTest do
       # self-update banner still answers to an admin api_token. The split is the
       # fix, not a uniform tightening.
       assert mounted.assigns.instance_admin? == true
+
+      # …and Caps did NOT become ATTACHED to this route as a side effect of the
+      # chrome calling it. `Caps.admin?/1` is a pure predicate over assigns the
+      # chrome already holds; `Caps.attach/1` (the deny-gate) and `derive/1`'s
+      # `:caps` assign stay exclusive to `StudioLive.mount`. This is the premise
+      # `arpss-w10-caps-mount-reachability-ratchet` pins from the mount side —
+      # asserted here so the fix cannot quietly invalidate it.
+      assert mounted.assigns[:caps] == nil
+      assert mounted.assigns[:caps_gate?] == nil
     end
 
     test "an anonymous visitor still mounts — no redirect, chrome present but not admin" do
