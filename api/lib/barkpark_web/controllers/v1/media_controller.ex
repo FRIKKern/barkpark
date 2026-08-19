@@ -125,25 +125,43 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def create_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.create("media", dataset, params, workspace_id(conn)) do
-      {:ok, row} ->
-        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+    # D58/D71 fail-closed — mirrors update_search_settings. `workspace_id(conn)`
+    # reads `:current_workspace`, which `AssignDefaultScope` has ALREADY masked
+    # from nil to Default, so a genuinely nil-workspace admin token would silently
+    # write the Default/global media synonym row (an operator footgun). Read the
+    # RAW pre-mask token workspace_id and refuse when nil, BEFORE any insert. A
+    # workspace-bound admin token is unaffected — it writes its own row.
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+      _ws_id ->
+        case Synonyms.create("media", dataset, params, workspace_id(conn)) do
+          {:ok, row} ->
+            json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            validation_error(conn, changeset)
+        end
     end
   end
 
   def promote_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.promote("media", dataset, params, workspace_id(conn)) do
-      {:ok, row} ->
-        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, reason} when reason in [:invalid, :missing_fields] ->
-        error_json(conn, {:error, promote_fields_changeset()}, "from and to are required")
+      _ws_id ->
+        case Synonyms.promote("media", dataset, params, workspace_id(conn)) do
+          {:ok, row} ->
+            json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+          {:error, reason} when reason in [:invalid, :missing_fields] ->
+            error_json(conn, {:error, promote_fields_changeset()}, "from and to are required")
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            validation_error(conn, changeset)
+        end
     end
   end
 
@@ -183,12 +201,18 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def delete_search_synonym(conn, %{"dataset" => dataset, "id" => id}) do
-    case Synonyms.delete(id, "media", dataset, workspace_id(conn)) do
-      :ok ->
-        json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, :not_found} ->
-        error_json(conn, {:error, {:not_found, "synonym not found"}})
+      _ws_id ->
+        case Synonyms.delete(id, "media", dataset, workspace_id(conn)) do
+          :ok ->
+            json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+          {:error, :not_found} ->
+            error_json(conn, {:error, {:not_found, "synonym not found"}})
+        end
     end
   end
 
@@ -450,6 +474,14 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  # Force-release privilege for `undo_checkout`. NOTE: write==force-release is
+  # DELIBERATE here — any write token may release ANY actor's checkout lock,
+  # diverging from the pure-admin sibling `Access.admin?/1` (access.ex). The
+  # holder-only fallback in `Checkout.ensure_can_release/3` is therefore dead on
+  # the API path (`require_write` runs first, so admin? is always true). This is
+  # the current, intended posture; whether it SHOULD tighten to true-admin is
+  # tracked separately (felix-w28-bl-checkout-tighten-adjudication) — do not
+  # change behavior here.
   defp admin?(conn) do
     token = conn.assigns[:api_token]
 

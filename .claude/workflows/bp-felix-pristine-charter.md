@@ -2436,7 +2436,651 @@ All six are file-disjoint and dispatch in parallel. S2 and S3 both sit under the
 condition — if a tenancy file appears in any open PR before dispatch, BOTH stop. The ledger batch-closes (D164)
 belong to the LEAD at Review, batched, with each close naming its paying commit.
 
+## Wave 26 Decisions (2026-08-17) — THE SEAL IS EXECUTED, NOT DECLARED
+
+- **D173 — THE D164 CLOSES ARE EXECUTED AT DECIDE, NOT STAGED FOR THE LEAD.** Wave 25's "honest-ledger
+  reconciliation" was ratified but never landed: every D164 PAID row was still `lifecycle=open` because each carried
+  a LAPSED null-worker claim and `bp task close` CAS-requires the CURRENT claim. Root cause of the wave-25 miss:
+  the closes either never ran or 409'd silently (the bp-writes-silently-don't-land class). Wave 26 executed all of
+  them live via **re-claim → stamp (STORED verbatim criterion text) → close → read-back**, proven on the first row
+  (`felix-w23-s1-drift-migration`, epoch 7→8, life open→done, read back). Twenty rows closed: 17 PAID `done` (each
+  naming its paying commit from the D164 table), 1 no-op `cancelled` (`felix-w24-s7-continue-on-error-flip`, D143),
+  plus two stranded strays — `task-felix-w22-bl-recorder-bounds` `cancelled` superseded by #11858 (D169) and
+  `task-e98797b38ca3b51e` `cancelled` as a duplicate of the merged #5914 realtime seal. The merge-gated rows
+  closed with `--merge-gated` (Decide holding lead authority for the ledger reconciliation); the multi-unmet rows
+  closed with `criteria_override` citing the paying commit rather than fabricating criterion flips. The stranded W18
+  lock proof (`task-felix-w18-authority-lock-mutation-proof`, merged #5916) was also closed `done`. **Two D164
+  sub-rows are PHANTOM and were struck, not closed: `census-floor` and `transfer-needs-detector-map` were never
+  filed as tasks** (only `config-hash-line-consistency` and `multiclause-annotation-review` of the "four binding
+  sub-rows" exist).
+
+- **D174 — #11853 IS A FIXTURE DEFECT, NOT A BEHAVIOR CHANGE — LAND IT WITH AN UNDERSCORE-SAFE REGEX (S1).** The
+  open red straggler adds `validate_format(:slug, ~r/^[a-z0-9][a-z0-9-]*$/)`, whose char class excludes underscore;
+  all 16 reds are ONE mechanism (an underscore dataset slug on the CREATE path → `get_or_create_dataset` refuses →
+  `write_scope.ex:146` swallows to `dataset_id=nil` → partial-index collision / nil-authoritative assertions).
+  Two ground-truth proofs settle the fork: the **guerrilla prod census** (`barkpark_prod`: 21 datasets, 0 with
+  underscore, 0 violators — no real slug is refused), and the **probe** (both loosen-A and rename-B green all 16;
+  `dataset_test.exs` stays 37/0; underscore is not a SQL-injection vector, so loosening loses no security value).
+  Verdict: ship `@slug_format ~r/^[a-z0-9][a-z0-9_-]*$/` — the improvement-only-correct guard. Keeping strict would
+  gratuitously refuse the de-facto underscore-slug convention for zero security gain; that would be the behavior
+  change. S1 supersedes #11853 on a fresh branch; the lead closes #11853 on merge. The `write_scope.ex` swallow-to-nil
+  is a real, orthogonal isolation defect filed as backlog (`felix-w26-bl-write-scope-swallow-nil`), NOT this slice.
+
+- **D175 — THE pg_catalog BROADENING IS RELKIND-PRESERVING `pg_table_is_visible` (S2), SEQUENCED AFTER S1.** The
+  bundle-member guard (`assert_member_tables!/1`) is public-schema-only: `table_exists?/1` filters `nspname='public'`
+  while `copy_into/2` resolves the unqualified COPY via `search_path` (pg_catalog implicit-first), so a one-member
+  manifest naming `pg_authid` imports — proven end-to-end by review2-11855 (landed a LOGIN SUPERUSER row). The fix is
+  a 3-line SQL swap on `workspace_bundle.ex:510`: `SELECT 1 FROM pg_class cl WHERE cl.relname=$1 AND cl.relkind='r'
+  AND pg_catalog.pg_table_is_visible(cl.oid)` — **KEEPING `relkind='r'`** (the reviewer's bare one-liner dropped it
+  and would match views/indexes). Verify proved red-before/green-after: the probe manifest raises `InvalidBundleError`
+  after the swap, and `workspace_bundle_test.exs` 40/0 + three sibling suites 41/0 confirm zero legit-bundle change.
+  Draft `task-966de76b9dd92783` was AMENDED from its allow-set wording to this measured shape and published. **HIGH-FLIP-RISK:
+  tenancy privilege boundary.** SEQUENCING (D165(iv) auto-re-fence): #11853 holds tenancy files in an open PR, so S2
+  is **round 2** — it dispatches only after S1 merges AND #11853 is closed. The fix file (`workspace_bundle.ex`) is
+  itself collision-free (no open PR touches it); the fence is the dir-level tenancy-in-open-PR condition, cleared by S1.
+
+- **D176 — THE FRESH LANE FOUND A REAL SECURITY SLICE, NOT A PROVE-CLEAN (S3).** The least-swept unfenced stable-core
+  file (`net/safe_outbound.ex`, one commit ever) carries a genuine **DNS-rebinding TOCTOU**: `check_url/1` resolves
+  and classifies the target IP then DISCARDS it, and `post/2` hands the raw URL to Req, whose Finch pool re-resolves
+  at connect time — nothing pins the checked IP. The sole runtime caller is the fence-hot webhook dispatcher, so the
+  fix is confined ENTIRELY to `net/safe_outbound.ex` (pin the validated IP into the connection, preserve hostname for
+  SNI/Host/verification). This IS a behavior change (closing a hole) framed as a security slice with a rebinding
+  mutation fixture — not cleanup, not churn. The rival "prove-clean the whole core" outcome was refuted here; the rest
+  of the least-swept core (pulse, sync, media internals) is honestly already-good. **HIGH-FLIP-RISK: security.**
+
+- **D177 — THE ROSTER: 7 slices, all round 1 except S2 (round 2 after S1).** S1 straggler-rescue (opus),
+  S2 pg_catalog broadening (fable, r2), S3 SSRF rebind-pin (fable), S4 blobstore read-path guard (opus),
+  S5 chatlive two-seam honesty (opus — the codex dead-branch + buffer_overflow banner FOLDED into one slice because
+  both live in `chat_live.ex` handle_info; `task-felix-w22-bl-chatlive-overflow-banner` cancelled as folded),
+  S6 authority-lock remaining sites (fable — the FK-masked false-green trap is subtle per-site judgment; harness
+  de-risked by merged W18 #5916), S7 release_capture 124/125 branch coverage (opus, test-only, adopts the existing
+  `task-felix-w21-bl-releasecapture-bound-tests`). All file-disjoint. Fresh backlog filed: write-scope swallow,
+  codex protocol_error swallow, s3 blob receive_timeout.
+
+- **D178 — GUARDRAILS.** Builder models: **fable** for S2 (search_path semantics at the privilege boundary),
+  S3 (TOCTOU + rebinding harness), S6 (false-green trap); **opus** for S1/S4/S5/S7. Fences re-derived from the live
+  open-PR set at origin/main: content/ + portable_doc/ (#11934/#11770/#8465), capabilities (#11766), settings_live
+  (#11978), auth_controller + router (#9530), search_controller (#9600), `.sobelow-skips` (#6057), and everything D82
+  still covers outside the D165 lift; `application.ex` is soft-fenced by the conflicting zombie #2907 and the OTP lane
+  simply avoids it. **D167 HOLDS: zero builders in the Sobelow instrument vein** — `readiness-sobelow-inline` stays
+  backlog (its `.sobelow-skips:42` fingerprint currently matches the code, so it is not even a live line-drift). Note:
+  main itself carries pre-existing non-required reds (spec-gate, compose-smoke, Sobelow) inherited by every PR — the
+  four required contexts (Elixir/Cloud/Console gate + active-task) are what gate a merge.
+
+## Wave 27 Decisions (2026-08-17) — LAND THE FLEET, FAIL CLOSED
+
+- **D179 — THE MERGE TRAIN EXECUTED AT DECIDE; WHAT WAS GREEN IS ON MAIN.** The wish's premise
+  ("wave 26 landed its fixes") was corrected twice: first by premise smoke (all six build PRs open),
+  then by verify (#11853 MERGED at 21:18Z as b10593ab94, byte-identical in code to #12037 — the
+  second review proved zero behavior delta). Executed at Decide 2026-08-17T21:35Z: **#12025**
+  (charter D173–D178), **#12040** (chatlive two-seam), **#12042** (release_capture bounds) merged
+  with all four required contexts green; **#12037 CLOSED superseded-by-#11853** (CONFLICTING/DIRTY,
+  content already an ancestor of main; S1 second-review verdict recorded on the close comment).
+  #12038/#12039 each red on ONE unrelated single-test flake (InstanceSiteDeployControllerTest door
+  census; Pulse.MetricsTest vitals) — failed jobs re-run at 21:41Z; the lead merges each on green
+  and closes felix-w26-s3-ssrf-rebind-pin / felix-w24-bl-blobstore-runtime-guard by the D181 recipe.
+  #12041 is the one REAL red (ChatRenderGoldenTest sidebar byte-lock, chat_render_golden_test.exs:200)
+  — resolved by the felix-w27-s6 contingency below. The Sobelow reds on the train were PROVEN
+  stale-baseline line-shift by diff-independence (identical 6 router.ex CSRF findings on disjoint
+  diffs) and structurally cannot gate a merge (continue-on-error, excluded from every required
+  aggregator) — reconcile filed as backlog `felix-w27-bl-sobelow-baseline-lineshift`, fenced by #6057.
+
+- **D180 — LEDGER CLOSES EXECUTED WITH READ-BACK; SUPERSEDE-CLOSES USE criteria_override, NEVER
+  MET-FLIPS.** Five rows closed live at Decide, each read back `done`:
+  `task-felix-w22-bl-codex-completion-deadbranch` + `task-felix-w21-bl-releasecapture-bound-tests`
+  on #12040/#12042 merge evidence; `felix-w26-s1-11853-rescue` recording the SUPERSEDE INVERSION
+  (content landed via #11853, #12037 closed superseded — every substantive obligation met on main);
+  `felix-w23-bl-dataset-slug-format` (all four criteria substantively delivered by merged #11853)
+  and `felix-w23-bl-bundle-member-guard` (substance delivered by merged #11855; residuals NAMED in
+  the override: crit3's controller-test pass-count never captured, crit4's PR-6551 gate obsolete —
+  6551 closed unmerged). The server itself enforces the honesty rule: `bp task stamp` REFUSES a
+  MERGE-GATED criterion (`merge_gated_criterion`), so the sanctioned lead seal is
+  `bp task close … --set criteria_override="<why it is done anyway>"` — override on the record.
+
+- **D181 — THE CLOSE RECIPE IS CLAIM-STATE-DEPENDENT (supersedes D164's re-claim wording as the
+  universal recipe).** Proven live on scratch tasks AND on the real rows: a HELD claim closes by
+  presenting the CURRENT holder's worker+epoch (or your own worker + current epoch with
+  `--set holder_override="…"` — the not_holder refusal is an honesty gate whose documented normal
+  case is a lead sealing a merge-gated task); a LAPSED claim (worker null) closes by re-claim →
+  close. Wrong epoch answers `fenced_off` — the CAS is real; epochs moved twice within minutes
+  tonight (TTL sweeper), so ALWAYS re-read `claim.epoch` immediately before closing. Recipe row:
+  `tooling/grip/ledger/felix-w27-held-claim-close-recipe-2026-08-17.md` (rides this PR).
+
+- **D182 — write_scope FAILS CLOSED, WITH THE FRAME CORRECTED AND THE writer.ex FENCE LIFTED BY
+  NAME.** The defect is real and reachable non-admin TODAY (the #11853 slug gate makes the error
+  branch fire on any format-invalid dataset segment of POST /v1/data/mutate/:dataset), but
+  "isolation-weakening" overstated it: the honest harm is silent-accept-of-invalid-slug +
+  split-brain visibility between strict dataset_id readers (search/sheets/media) and NULL-tolerant
+  string readers — workspace/project scoping stays intact. The slice ships the verify-pinned
+  contract: legit-nil boundary byte-identical (cond arm, read arms, wykb NEVER-WORSE);
+  `{:error, :dataset_not_found}` retried once then `{:error, :conflict}` (409 — never a spurious
+  422, never nil); changeset errors become `{:error, {:invalid_dataset, details}}` re-keyed under
+  "dataset", riding Repo.rollback → 422 `validation_failed` with zero known_codes/OpenAPI change;
+  all 5 put_scope_attrs call sites restructured. FENCE LIFT (named, this slice only): writer.ex is
+  nominally held by #8465, whose required greens date to 2026-07-31 (merge-base 2,500 commits
+  behind) — it must re-gate before any merge anyway, so two call-site hoists cost it at most a
+  trivial rebase. The identical swallow in media.ex:641-644 is OUT of this slice's fence — filed as
+  `felix-w27-bl-media-dataset-swallow-mirror` so the "refused resolution is loud" claim is not
+  overstated. HIGH-FLIP-RISK: the legit-nil/defect-nil boundary — independent second review owed.
+
+- **D183 — THE WEBHOOK CAP IS ANCHORED AND THE 413 DISCIPLINE IS LAW.** GitHub documents a hard
+  25 MB webhook payload ceiling, so a 26 MB config-overridable cap at the existing CacheBodyReader
+  chokepoint rejects zero legitimate deliveries — provably behavior-preserving. Verified from
+  pinned deps: ONLY the 3-tuple `{:more, chunk, conn}` reaches the canonical 413 payload_too_large
+  envelope; a well-typed 2-tuple `{:error, :too_large}` raises non-enveloped Plug.BadRequestError
+  (400). The slice returns read_body's `{:more…}` verbatim under a reduced :length; the global
+  100MB endpoint length is untouched. The RateLimit half of the w22 brief is DESCOPED on the
+  record (webhook_secret_cached memoization already blunted per-probe cost). Recipe row:
+  `felix-w27-plug-bodyreader-413-propagation-2026-08-17.md`.
+
+- **D184 — TWO REFUTATIONS RECORDED, NOTHING BUILT ON THEM.** (i) signed_url's unclamped ttl:
+  the sole caller (delivery/urls.ex:147) passes no opts — ttl is never request-derived; no named
+  failure mode from request data; already-good. (ii) the Session-GenServer "sandbox escape": the
+  Ecto SQL sandbox exists only in test env — a Recorder committing on a pooled connection is
+  correct prod behavior; test-infra hygiene, not a Felix slice. Found instead and filed low:
+  undo_checkout's `admin?` = write-or-admin behind require_write, so ANY writer force-releases any
+  checkout — the docstring lies (`felix-w27-bl-checkout-docstring-honesty`; tightening to true
+  admin would be a behavior change, out of improvement-only scope). Recipe row:
+  `felix-w27-signed-url-callsites-2026-08-17.md`.
+
+- **D185 — MAIN'S ONLY FELIX-CAUSED RED GETS ITS TWO-LINE FIX AS A SLICE.** The spec-gate census
+  (section 18) reds on exactly two UNPINNED protection-claim rows in the TRACKED
+  felix-w25-sobelow-row-verdicts ledger file. Verify re-derived both hashes independently
+  (25db097ed62f / 451500fdf367) and proved by mutation that the two class-C pins flip the census
+  red→green and the suite exit 1→0 with the planted-claim canary still firing.
+
+- **D186 — THE ROSTER: 5 slices round 1 + 1 lead-dispatched contingency; fences swept live.**
+  Round 1 (all file-disjoint, zero open-PR collisions on a live sweep): write_scope fail-closed
+  (`felix-w26-bl-write-scope-swallow-nil`, **fable**, HIGH-FLIP-RISK), pg_catalog bundle-guard
+  broadening (`task-966de76b9dd92783`, **fable**, HIGH-FLIP-RISK: tenancy privilege boundary — its
+  #11853-terminal sequencing gate CLEARED by the merge, its "publish the draft" wish-step was
+  already stale), webhook 25MB cap (`task-felix-w22-bl-webhook-body-rightsize`, opus), spec-gate
+  pins (`felix-w27-s5-spec-gate-pins`, opus), codex protocol_error surfacing
+  (`felix-w26-bl-codex-protocol-error-swallow`, opus — ROUND 1 because #12040 merged at Decide,
+  freeing chat_live.ex; the slice targets the codex Runtime.Event path, distinct from #12040's
+  claude-pipeline overflow clause). Round 2, lead-dispatched on the re-run verdict:
+  `felix-w27-s6-12041-golden-contingency` (opus — flake-or-drift verdict first, GOLDEN_REGEN only
+  if real, then merge #12041 and close felix-w19-bl-authority-lock-remaining-sites per D181).
+  Wave Paper: `felix-pristine-wave-27-2026-08-17`.
+
+### Wave 27 roadmap (5 slices round 1 + 1 contingency round 2)
+
+1. **write_scope fail-closed** — `felix-w26-bl-write-scope-swallow-nil` (fable, large, round 1).
+   Gate: mix test on the touched files + fail-before revert run. HIGH-FLIP-RISK second review owed.
+2. **pg_catalog bundle-guard broadening** — `task-966de76b9dd92783` (fable, medium, round 1).
+   Gate: workspace_bundle_test.exs + 3 sibling suites green; pg_authid red-before probe.
+   HIGH-FLIP-RISK second review owed.
+3. **webhook 25MB body cap** — `task-felix-w22-bl-webhook-body-rightsize` (opus, medium, round 1).
+   Gate: 413 payload_too_large envelope test red-before/green-after.
+4. **spec-gate census pins** — `felix-w27-s5-spec-gate-pins` (opus, small, round 1).
+   Gate: bash scripts/required-checks.test.sh exit 1→0, section-18 ok lines quoted.
+5. **codex protocol_error surfacing** — `felix-w26-bl-codex-protocol-error-swallow` (opus, small,
+   round 1). Gate: chat_live_test.exs 0 failures + clause-removal fail-before.
+6. **#12041 golden contingency** — `felix-w27-s6-12041-golden-contingency` (opus, small, round 2 —
+   lead dispatches on the re-run verdict; AFTER workflow 32068069994's re-run reports).
+
+## Wave 29 Decisions (2026-08-18) — THE LOST MIRROR, REBUILT ON OPUS
+
+Wave 29's job is to restore TRUST after a Fable-degraded wave 28: rebuild the one genuinely-lost,
+genuinely-reachable defect (the media.ex swallow) with a live fail-before AND a fail-closed-after
+proof, land the four sound wave-28 slices WITHOUT rebuilding them, and record every sweep verdict
+with evidence. All premises smoked CLEAN on origin/main; six verifiers RAN, not read. Wave Paper:
+`felix-pristine-wave-29-2026-08-18`.
+
+- **D196 — THE LOST MIRROR REBUILDS ON OPUS, SAME DIALECT AS D188, PLUS THE 503 ELSE-TRAP CLOSED.**
+  Fable is capped until 2026-08-21, so the wave-28 fable HIGH-FLIP centerpiece
+  (`felix-w27-bl-media-dataset-swallow-mirror`) rebuilds on **opus at medium** with an INDEPENDENT
+  second reviewer owning the legit-nil/defect-nil boundary — the exact seam wave 28 could not staff
+  when it lost this slice (dispatched once on Fable, returned null, no retry). The build is D188
+  verbatim in media's own dialect: ONLY `put_scope_attrs/2` + the `upload/3` chain change; atom keys;
+  BOTH legit-nil arms preserved as `{:ok, nil}` (nil project incl. the Default-project fallback;
+  non-binary dataset, currently DEAD from the binary-guarded caller — preserve defensively, do NOT
+  prove it reachable); changeset error → `{:error, {:invalid_dataset, %{"dataset" => msgs}}}` (the
+  caller re-keys — verify V2 PROVED `to_envelope` passes `details` VERBATIM, so the string wire key
+  is the builder's job); `:dataset_not_found` retried once then `{:error, :conflict}` (errors.ex has
+  NO `:dataset_not_found` clause, so an unconverted one mislabels — the conversion is load-bearing).
+  **THE 503 ELSE-TRAP (verify V2/V3, the sole silent-regression path):** `put_scope_attrs` runs
+  inside the do-block today AFTER the blob is persisted at `Blobstore.put_file` (media.ex:100); to
+  thread the tuple it MOVES into the with-head, and TWO explicit else clauses —
+  `{:error,{:invalid_dataset,_}}` and `{:error,:conflict}` — MUST be inserted BETWEEN the
+  `payload_too_large` clause (:147) and the `{:error,_reason} → Blobstore.delete + :storage_unavailable`
+  503 catch-all (:149-154), each calling `Blobstore.delete(relative_path)` first (blob already on
+  disk). Miss the order and the 422/409 is relabeled 503 and lost silently. The 422 (errors.ex:564,
+  guarded `when is_map(details)`) and 409 (errors.ex:437) clauses are live on main — the envelope is
+  FREE; both media controllers' `{:error, changeset}` catch-all forwards ANY two-tuple to
+  FallbackController, no controller change. TEST TRAP (D188): the fail-before MUST seed a resolved
+  project or `resolve_dataset_id(_attrs, nil)` short-circuits and proves nothing. HIGH-FLIP-RISK:
+  the legit-nil/defect-nil boundary — nil arises at THREE sites, only the get_or_create_dataset error
+  (:663) fails closed; independent second review owed PRE-MERGE (manual lead dispatch, dual-mutant +
+  legit-nil-preservation harness). Round 1.
+
+- **D197 — THE FOUR WAVE-28 PRs ARE VERIFIED SOUND AND LAND UNCHANGED — NEVER REBUILT.** Survey
+  confirmed #12109 (s3 receive_timeout, D189), #12111 (checkout honesty, D191), #12113 (pulse
+  deflake, D192), #12114 (dead-letter, D193) are all MERGEABLE, scope-clean, and match their
+  charters; every non-merge criterion is already stamped met, only the MERGE-GATED row is open.
+  Rebuilding sound open PRs is the churn improvement-only bans (RIVAL B, rejected). Landing (Elixir
+  gate green) is the LEAD's; the non-merge ledger rows seal via `seal_one.py` POST-MERGE on the
+  current holder's RE-READ worker+epoch (the script refuses unless the PR is MERGED, so nothing
+  closes early). #12114 carries an author-flagged indefinite-cursor-stall availability trade-off
+  ({:halted,_} classified transient → a poison content doc stalls the cursor rather than
+  dead-lettering) — a real landing consideration for the lead, not a blocker.
+
+- **D198 — `felix-w27-s6-12041-golden-contingency` NOW CLOSES.** Its only unmet criterion was
+  MERGE-GATED on #12041 merged AND `felix-w19-bl-authority-lock-remaining-sites` closed. Both are
+  now true: #12041 merged 2026-08-18T00:10:32Z (mergeCommit 71f06d6), w19 closed 4s later. The row
+  is fully closeable — a lead ledger close, nothing blocks it. (`felix-w19` is already done;
+  `felix-w27-bl-sobelow-baseline-lineshift` stays fenced by open #6057; `task-openapi-drift-chronic`
+  stays open, out of scope.)
+
+- **D199 — share.ex ALREADY-GUARDED, UPGRADED FROM BY-INSPECTION TO A LIVE MUTATION PROOF.** Verify
+  V5 upgraded D194's by-inspection ruling to revert-red/fix-green evidence: reverting the three
+  scope threads commit 89e41d7bba added reds `share_scope_test.exs` 4/4 — a workspace-B `Share.revoke`
+  flipped the DEFAULT workspace collection's `shareLink.enabled=>false` (a different tenant,
+  workspace_id da076f64…) instead of returning `{:error, :not_found}`; restoring the threads greens
+  it 4/4. The mint/rotate/revoke WRITE leak was a real P0 fixed by 89e41d7bba; the anonymous-bearer
+  `resolve/2` is bearer-by-design on a 144-bit token (`:crypto.strong_rand_bytes(18)`). Record, do
+  NOT build. (Path drift to note: the file moved to `api/lib/barkpark/media/storage/share.ex`.)
+
+- **D200 — signed_url RE-REFUTED BY A ZERO-CALLER CENSUS (D184(i)/D190 STAND).** Verify V6: the
+  opts-forwarding `Barkpark.Media.Storage.sign/3` facade has ZERO callers in api/lib or api/test;
+  the sole prod caller is `urls.ex:147 SignedUrl.sign(path, file.id)` with NO opts, so `:ttl` always
+  resolves to `@default_ttl` (7 days) — no request data reaches `:ttl`. `signed_url_test.exs` 3/3
+  green. Leave the facade; record the census. Nothing is built on the refuted premise.
+
+- **D201 — THE ROSTER: ONE OPUS BUILD SLICE, THE REST VERIFY / ADJUDICATE / LAND.** RIVAL C won —
+  A's discipline (one build, zero rebuild) PLUS the wave's quality bar explicitly assigned to an
+  independent reviewer of the legit-nil boundary. The single round-1 build is the media mirror
+  (`felix-w27-bl-media-dataset-swallow-mirror`, opus, HIGH-FLIP). No other builder: the four PRs
+  land by the lead, the two adjudications (D199/D200) are recorded, `felix-w27-s6` closes (D198),
+  and the field-visibility cousin surfaced by the sweep — `asset_response.ex asset_schema/2` → nil
+  schema into `Envelope.render` — is filed to backlog (`felix-w29-bl-asset-schema-nil-redaction`),
+  NOT built (different vein, own reachability+leak proof owed). The `default_project_id/0` cousin is
+  the documented legit-nil arm the mirror must PRESERVE, not a defect — named, not filed. Fences
+  (per-file disjoint): Onboarding w7 (internal/cli + accounts/auth), console w75 (cloud/), Connectors
+  (cloud/) — the single slice touches only media.ex + a new media test, zero collision. Elixir gate
+  green from the builder's own worktree; merge-gated criteria left for the lead.
+
+### Wave 29 roadmap (1 build slice, round 1; the rest is landing + adjudication)
+
+1. **media dataset-swallow mirror** — `felix-w27-bl-media-dataset-swallow-mirror` (**opus**, medium,
+   round 1). Gate: `CC=/usr/bin/clang mix test` on the new fail-closed test + media_test.exs;
+   `_ -> nil` revert reds the fail-before. HIGH-FLIP-RISK: legit-nil boundary — independent second
+   review owed PRE-MERGE.
+
+_No-builder work this wave (lead):_ land #12109/#12111/#12113/#12114 (Elixir gate green) and seal
+their non-merge rows via `seal_one.py` post-merge; close `felix-w27-s6-12041-golden-contingency`
+(D198). Adjudications D199 (share.ex) and D200 (signed_url) are recorded, not built.
+
+## Wave 28 Decisions (2026-08-18) — THE MIRROR AND THE UNSWEPT CORNERS
+
+- **D187 — THE TRAIN LANDED AND BOTH OWED REVIEWS WERE DISCHARGED POST-MERGE; NO REVERT.** The
+  wish's merge-train framing was a full wave stale (its named PRs merged 2026-08-17 ~22:00Z), and
+  the Digest snapshot went stale mid-wave too: six of wave 27's seven PRs (#12071–#12076) merged
+  2026-08-17T23:09:49–23:10:07Z, each with the Elixir gate SUCCESS. Verify ran BOTH owed
+  HIGH-FLIP-RISK second reviews POST-MERGE with revert authority, as sanctioned by the direction:
+  **#12071 (write_scope) CONFIRMED-sound** — fail-closed suite 10/10; the faithful swallow mutant
+  AND the literal `_ -> nil` mutant each red exactly the same 4 guard tests including the literal
+  422→200 flip on POST /v1/data/mutate/Not-Valid; the moved upsert_blocks_doc_stamped/7 body is
+  byte-identical (old L185-296 == new L206-317); the cond nil-eligibility guard is byte-identical
+  to pre-PR main (legit-nil untouched); all 5 put_scope_attrs and all 4 upsert_schema callers
+  verified adapted; 71/71 across 9 sibling suites. **#12072 (pg_catalog) CONFIRMED-sound** — the
+  81/0 sibling-suite claim reproduced exactly (baseline 80 + the new pg_authid probe); reverting
+  table_exists? to nspname='public' reds the probe with "Expected exception … InvalidBundleError
+  but nothing was raised", restoring pg_table_is_visible greens it; pg_authid proven relkind='r' +
+  visible on live psql while the reverted query matches 0 rows — the exact hole; 0 of 94 app
+  tables collide with any pg_catalog name. The second-review debt is PAID on the record; no revert
+  warranted. Only **#12041** remains open (its re-fired Elixir Test + Prod compile gates in
+  flight); the lead already closed 5 of 7 ledger rows — the two still-held rows
+  (`felix-w27-s6-12041-golden-contingency`, holder epic-builder-12041-lands… epoch 6;
+  `felix-w19-bl-authority-lock-remaining-sites`, holder felix-review-w27 epoch 9) close on #12041's
+  merge by the D181 recipe with epochs RE-READ at close time.
+
+- **D188 — THE MEDIA MIRROR BUILDS ROUND 1, IN MEDIA'S OWN DIALECT.** Live fail-before PROVEN on
+  clean origin/main: `Media.upload/3` with dataset="Bad Slug" and a resolved project returned
+  `{:ok, %MediaFile{}}` persisting `dataset: "Bad Slug", dataset_id: nil` — the byte-level mirror
+  of the swallow #12071 fixed, reachable by any non-admin WRITE principal (POST /media/upload,
+  :media_mutate pipeline, caller-controlled dataset param). #12071 being on main satisfies the
+  sequencing precondition, so the slice is ROUND 1. The mirror must NOT copy #12071's dialect:
+  atom keys (not string), BOTH legit-nil arms preserved as {:ok, nil} (nil project incl. the
+  Default-project fallback; non-binary dataset), changeset error → {:error, {:invalid_dataset,
+  details}} re-keyed under "dataset", :dataset_not_found retried once then :conflict. The 422
+  envelope is FREE — MediaController's {:error, _}-matching clause → FallbackController →
+  Content.Errors.to_envelope carries #12071's build clause; the ONLY changed functions are
+  Media.put_scope_attrs/2 + threading through upload/3. TEST TRAP recorded: the fail-before test
+  must seed a resolved project or the nil-project arm short-circuits before the slug is tried.
+  HIGH-FLIP-RISK: the legit-nil/defect-nil boundary — independent second review owed pre-merge.
+
+- **D189 — s3 receive_timeout SHIPS AS A STRUCTURAL PIN, WITH THE FAILURE MODE CORRECTED ON THE
+  RECORD.** The row's "can truncate large blobs" title was refuted: the read path is buffered with
+  an atomic tmp-write + rename, so a Req 15s-default stall collapses a HEALTHY transfer to a
+  spurious `{:error, :storage_unavailable}` 503 — never truncation. Fix: 60_000 (sync/worker
+  precedent), lifted to a module attribute with a public accessor (house pattern
+  self_update/client/github.ex), passed in req/1's assembled opts. The Req.Test in-process plug
+  seam cannot exercise a behavioral timeout, so the sanctioned mutation-proof is the STRUCTURAL
+  pin (assert the assembled opts carry the accessor value; removing the literal reds it). Row
+  retitled and re-criteria'd to match.
+
+- **D190 — SIGNED_URL RE-REFUTATION: D184(i) EXTENDS TO THE FACADE.** The wish's premises were
+  refuted twice at verify: the module has THREE tests (not zero — round-trip ttl:3600, expired
+  ttl:-10, tampered path), and the opts-forwarding `Barkpark.Media.Storage.sign/3` facade has ZERO
+  callers anywhere in the repo (api/ census + grep across js/ web/ internal/ cloud/, empty). No
+  path lets request data reach :ttl. Already-good, recorded with this census as evidence; the
+  clamp survives only as scar-class defense-in-depth and is DECLINED under improvement-only.
+  Nothing is built on the refuted premise.
+
+- **D191 — CHECKOUT ADJUDICATION: THE TIGHTEN-BAN STANDS, AND THE DOCSTRING ROW HAS REAL
+  CONTENT.** Probe evidence (throwaway DataCase, 2/0): a write-only token classifies admin?=true
+  via media_controller.ex:456 and force-releases another actor's checkout {:ok}; the same
+  non-holder with admin?=false is refused {:error, :forbidden} — the holder check is live ONLY
+  when admin? is false, which the API path never produces (require_write runs first). The
+  write-or-admin fold in a helper NAMED admin? is unique against both sibling conventions
+  (access.ex:129 and studio/caps.ex:230 are pure admin) and dates unedited to the file's birth
+  commit (827a3e90f0) — copy-paste, not design. D184's ruling stands: tightening breaks every
+  write-token force-release — a behavior change, out of scope. The digest's "the row fixes
+  nothing" is REFUTED for checkout.ex, whose @doc "Admin or lock holder only." is false. Slice:
+  honest docs at both sites + rename/intent-note on the controller helper + a pin test of the
+  current any-writer-releases behavior (so a future tightening is a deliberate red) + name the
+  rendition-deletion side effect. ZERO behavior change.
+
+- **D192 — THE VITALS RED IS A FLAKE FAMILY; THE PULSE HALF GETS A DETERMINISTIC SEAM.** CI-log
+  proof: #12039's attempt-1 sole red was `assert snap.cursor_per_s > 0 … left: 0.0` at
+  pulse_metrics_test.exs:40; attempt 2 on the same SHA green — the globally-supervised sampler's
+  own 2s timer drained the counter between the test's bump loop and its explicit tick. PREMISE
+  CORRECTION: #12038's attempt-1 red was a DIFFERENT sibling flake (door-census
+  observed_in_flight 0→1→0, zero pulse lines in the job) — the classification generalizes to a
+  0→1→0 counter-drain timer-race FAMILY. Slice (test-infra improvement, prod cadence
+  byte-preserved): deterministic sampling for the pulse test; the door-census sibling is filed as
+  backlog `felix-w28-bl-door-census-deflake` with its mechanism still to classify.
+
+- **D193 — THE W14 DEAD-LETTER ROW FOLDS AS A SLICE, THREE WAVES OVERDUE.** Re-verified accurate:
+  applier.ex:107-128 counts every {:error, _} identically and cursor-advances past a possibly
+  recoverable mutation at attempts >= 5; HANDOFF.md:98 self-documents the gap. Scope exactly as
+  filed: an error-class branch at the record_failure boundary (retryable → halt+replay, cursor
+  retained; terminal → the bounded dead letter), one mutation-proof in applier_test.exs; the
+  reaper stays FORBIDDEN (dormant-infra churn). Fence note: push_cursor.ex is LIVE (the GitHub
+  outbound bridge consumes Barkpark.Sync.PushCursor) — out of this slice's files.
+
+- **D194 — SWEEP VERDICTS RECORDED; STRAYS CANCELLED; THE LINESHIFT ROW IS NOT SUBSUMED.**
+  Already-good with evidence, no slices: access/ (single grantee gate, no bypass; the claim TOCTOU
+  note fails the mutation bar — recorded, not built), telemetry/handlers.ex (bounded logging, no
+  raise surface), pulse prod code (every failure-prone tick call individually guarded), sync/ (12
+  of 13 files; careful write-then-advance quarantine, dedicated Finch pool, whitelisted reason
+  atoms), connectors interior (fence CLEAR — no open PR touches it; raw Req to a fixed
+  operator-config loopback is CORRECT, SafeOutbound inapplicable; ticket signing fail-closed,
+  fixed TTLs; catalog workspace-scoped with UUID cast), share.ex (144-bit token defeats the
+  SQL-equality timing frame; the moduledoc's cross-workspace seam is already remediated and
+  covered by share_scope_test.exs). Prior-art search surfaced no contradicting adjudication.
+  STRAYS: `task-a4ffb2ad447263b7` cancelled-subsumed (its work merged as #7554 — :error_test CSP
+  live at router.ex:2699-2703), `drafts.felix-w24-probe` deleted (throwaway),
+  `task-felix-w20-bl-cloud-testdb-drift` cancelled (host-local, unverifiable),
+  `felix-recorder-sandbox-escape-root-fix` closed REFUTED-as-prod (its own body records the
+  wave-26 refutation; the felix-w27-s6 purges remain the live flake mitigation). SOBELOW: the
+  subsumption hypothesis is REFUTED — #6057's CSRF skip rows (117/215/274/513/537/596) equal its
+  OWN tree's pipeline decls 6-for-6 (proving the anchor is the `pipeline :X do` line), but #6057
+  is 1272 commits stale/CONFLICTING; current main decls are 131/229/288/553/577/646, which NO open
+  artifact carries. `felix-w27-bl-sobelow-baseline-lineshift` stays open, fenced by #6057; D167
+  (zero builders in the sobelow vein) HOLDS. Mis-parented non-Felix rows (7 gr-*/cch-*) → backlog
+  `felix-w28-bl-reparent-nonfelix-rows`.
+
+- **D195 — THE ROSTER: 5 slices, ALL ROUND 1, file-disjoint; fences swept live (zero open-PR
+  collisions on any target file across all 34 open PRs).** media mirror
+  (`felix-w27-bl-media-dataset-swallow-mirror`, **fable**, medium, HIGH-FLIP-RISK: legit-nil
+  boundary), s3 timeout pin (`felix-w26-bl-s3-blob-receive-timeout`, opus, small), checkout
+  honesty (`felix-w27-bl-checkout-docstring-honesty`, opus, small), pulse deflake
+  (`felix-w28-s4-pulse-metrics-deflake`, opus, small), dead-letter classification
+  (`task-felix-w14-sync-deadletter-classification`, opus, medium). Act I needs NO builder: the
+  owed reviews are discharged (D187) and the two remaining row closes are lead work on #12041's
+  merge. Wave Paper: `felix-pristine-wave-28-2026-08-18`.
+
+### Wave 28 roadmap (5 slices, all round 1)
+
+1. **media dataset-swallow mirror** — `felix-w27-bl-media-dataset-swallow-mirror` (fable, medium).
+   Gate: mix test on the new fail-closed file + media_test.exs; `_ -> nil` revert fail-before.
+   HIGH-FLIP-RISK second review owed pre-merge.
+2. **s3 receive_timeout structural pin** — `felix-w26-bl-s3-blob-receive-timeout` (opus, small).
+   Gate: blobstore_s3_test.exs green + literal-removal mutation red.
+3. **checkout release honesty** — `felix-w27-bl-checkout-docstring-honesty` (opus, small).
+   Gate: new pin test green; zero behavior change in the diff.
+4. **pulse metrics deflake** — `felix-w28-s4-pulse-metrics-deflake` (opus, small).
+   Gate: pulse_metrics_test.exs deterministic green; race-reintroduction red.
+5. **sync dead-letter classification** — `task-felix-w14-sync-deadletter-classification` (opus,
+   medium). Gate: applier_test.exs green + classification-revert fail-before; no reaper.
+
+## Wave 31 Decisions (2026-08-18) — RECONCILIATION: THE LEDGER TELLS THE TRUTH
+
+Wave 31 is a reconcile-and-close wave, not an audit/build wave. Wave 30 proved the api/ core is
+swept clean; the real unmet work was the ledger. The finding is undramatic and that IS the honest
+outcome: the census refuted the wish's central premise three ways, and the one substantive ledger
+correction available today was a re-parent, not a batch of closes. Numbering starts at **D208** —
+D202-D207 are staged on the still-open wave-30 charter PR **#12147** (union-merge partner; resolve
+by union, keep D208 if #12147 lands first, else #12147 renumbers).
+
+- **D208 — THE 173-OPEN PREMISE IS FALSE.** Felix (`task-96a908af98698118`) child_count 173 was, at
+  wave start, 124 done / 31 open / 16 cancelled / 2 considering — not 173 open. The wave's product is
+  an honest partition + a convergence verdict, never a slice count.
+- **D209 — THE CLOSEABLE-BY-EVIDENCE STALE-OPEN BATCH IS EMPTY TODAY.** Every 0/N open row has zero
+  merged commits; the only two N-1/N rows (5/6) are `felix-w27-bl-media-dataset-swallow-mirror`
+  (gated on PR **#12132**, OPEN/BLOCKED, unmet crit is the merge-gated one) and
+  `felix-w30-s1-redaction-global-schema-fallback` (gated on PR **#12159**, OPEN/UNSTABLE, unmet crit
+  is the merge-gated one). Neither head is an ancestor of origin/main; both close automatically when
+  their PR lands. A naive progress-ratio close is REFUSED (the console-w76 batch-close-heuristic
+  lesson holds). No row was fabricated closed.
+- **D210 — THE TWO ROWS WAVE 30 CLOSED STAND; audit-back reconfirms from source. DO NOT REOPEN.**
+  `felix-w27-s6-12041-golden-contingency` (done 3/3): #12041 merge commit `71f06d6` is a proven
+  ancestor of origin/main; D198 authorizes; airtight. `felix-w29-bl-asset-schema-nil-redaction`
+  (done 2/2): refutation sound at source — `envelope.ex:145-162` shows a nil caller_context routes to
+  `%CallerContext{}` and FAILS CLOSED, so the correct reddening exemplar is the `:internal` sentinel
+  (returns `envelope` unredacted, not request-reachable), exactly as recorded — NOT `caller_context=nil`.
+  The `D204` citation on that close is a PROVENANCE GAP only (D202-D207 live on open #12147, absent
+  from origin/main); the underlying refutation is independently source-confirmed. Charter note, no reopen.
+- **D211 — 7 NON-FELIX RIDERS RE-PARENTED to `cloud-console-hardening-epic` (executes D194).** The
+  five `gr-*` guerrilla-backlog rows + `cch-w1-mirror-direct-write-unfenced` + `cch-w3-task-birth-attribution`
+  moved cleanly (each parent_id verified post-move); `felix-w28-bl-reparent-nonfelix-rows` CLOSED 2/2.
+  Felix open dropped 31→23. `gr-bl-task-move-noop-help-drift`'s live defect is the Go CLI help text
+  (a CLI wave under the new parent), not an api/ Felix concern.
+- **D212 — `felix-w27-bl-sobelow-baseline-lineshift` is GENUINE-UNBUILT, CI/human-gated — NOT
+  stale-open.** #11427 (`4ca033f502`) is a merged ancestor but re-anchored only 3 of 6 CSRF rows and
+  has ALREADY re-drifted on current main (skip anchors 622/539/563 vs live pipeline decls 553/577/646).
+  D194's "THE LINESHIFT ROW IS NOT SUBSUMED" holds; the row stays open, fenced by open PR **#6057** +
+  D167 (zero builders in the sobelow vein). Counts toward human-gated residue, not the closeable batch.
+- **D213 — CONVERGENCE: SEAL-AND-SPIN recommended (a recommendation for the human, never a wave action
+  that shreds backlog).** No open row is an unbuilt, buildable api/-core defect above the doctrine bar.
+  The ~23 residue is: 2 built-and-merge-gated (#12132/#12159), ~11 CI/sobelow/gate-tooling + human-gated
+  governance (`close-6057-superseded`, `stranded-sobelow-worktree`, `workflows-ownership-gap`,
+  `openapi-drift-chronic` — regen OOMs locally, CI-artifact only), ~7 api/-core watches/evals/seams/audits
+  deferred by design, 3 W13 watches. Recommendation: declare the api/ Phoenix-mastery audit complete;
+  keep the epic open ONLY as a thin holder for the two merge-gated PRs; spin the tooling/human rows to
+  owners. Do NOT keep it open pending the watches — they are a permanent standing backlog.
+
+## Wave 32 Decisions (2026-08-18) — THE DONE SET IS TRUE, EXCEPT ONE
+
+Wave 32 is a VERIFY-HEAVY FALSE-DONE AUDIT of the full Felix done set — the GR112-style independent re-audit the reconciliation waves (w30 api/ sweep, w31 ledger reconcile) never performed. Read-only ledger audit: bp reads + git reads, one reopen-stage write, this docs-only charter note. No code edits. Two mechanical sweeps at 100% coverage gave a hard trust floor + a true denominator; judgment depth was spent on the risk cohorts + a broad calibration sample. Wave Paper: `felix-pristine-wave-2026-08-18`.
+
+- **D214 — THE TRUE DENOMINATOR IS 127 DONE (live L1), not `child_count` 168** (which counts 23 open / 16 cancelled / 2 considering). Re-derived by five surveyors and re-confirmed at Decide. After the one reopen it is 126 done / 24 open.
+
+- **D215 — TWO MECHANICAL SWEEPS ARE CLEAN AT 100% COVERAGE.** SHA-ancestry: every decisive merge citation resolves to an ancestor of origin/main; the three absent PRs run to ground — #6551 (superseded, decisive #6616 `27352d8c13` ancestor), #12037 (superseded by #11853 `b10593ab94` ancestor), #12147 (the still-open wave-30 charter draft, cited only by the wave-30-log paperwork row). Engine-close provenance: exactly 10 rows bypassed the claim/close engine (4 no-claim A1, 6 worker-null holder-override A2), every one carrying a documented reconcile/override trail; ZERO bare hand-flips, and the 11-fake-done fabrication shape (null claim + boilerplate) does not appear. `closed_by` is engine-provenance, not authenticated identity — cohort A is "closed outside the engine", never "closed by the wrong person".
+
+- **D216 — THE ONE PROVEN FALSE-DONE, REOPENED: `felix-w24-bl-config-hash-line-consistency`.** The D164 PAID table mis-batched it into "the four binding sub-rows -> #7556", but #7556 (`2f9f25dd93`, "bind sobelow annotations to their defs") built the annotation-BINDING ratchet (`sobelow-inline-overlap-check.sh`, satisfying overlap-unbound + multiclause) — NOT the baseline-row FINGERPRINT-recompute-red-on-disagreement check crit0 demands. Capability ABSENT on origin/main (`3ddc00a0`), proven both directions: `sobelow-baseline-staleness-check.sh` EXPLICITLY prints `SKIP Config.CSRF` / `SKIP Config.HTTPS` (7 whole-file Config.* baseline rows structurally uncovered), and `sobelow-baseline-reconcile.sh` only uploads an artifact under a `continue-on-error: true` host job, so no fingerprint check can red. All 3 criteria `met=False`; crit0's user-visible claim is FALSE on main. Reopened via `bp task stage ... open` keeping the claim (the false-done recipe), correction note on `content.disposition_reason`. LOW severity (defense-in-depth over 7 narrow rows) — a real gap left unguarded, not a security hole. The row was re-read live before the reopen (`updated 2026-08-17T20:02Z`, no live engagement — no concurrent holder).
+
+- **D217 — EVERY OTHER JUDGMENT COHORT IS TRUE.** Cohort A 10/10 (`78bd9402` resolved as the squash predecessor of #3063's landed `3d0b1c28`; the ClaudeChat cap re-landed via #5975; the chatlive display-cap relocated live to `stream_tail.ex`). Decide-closed 0/N: 8/9 pass — dataset-slug, blobstore-migration, fenced-sixteen, bundle-member-guard, overlap-unbound, staleness-blocking-flip and multiclause all have their capability present on main. Paper-acceptance 12/12 reconcile against verdict tables; clean-cohort calibration 6/6; non-done set (41) clean.
+
+- **D218 — STAMPED-BUT-UNPROVEN IS REFUTED BY A LIVE MUTATE-CHECK.** Removing `materialized: true` from `queue.ex:179-180` makes `queue_test.exs:578` FAIL at `assert done_cte` (Expected truthy, got nil) — the CTE subplan node vanishes when PG inlines a single-reference CTE, so the test structurally proves the materialization capability and is not vacuous. `task-2c74954d53781113` stays done.
+
+- **D219 — CORRECTIONS TO INHERITED FRAMING (measured, not inherited).** The criteria-partial cohort is 21, not 23 (the extra 2 are None/None wave-log paperwork). D10's rubric-bug explanation is REFUTED for this cohort: the D10/D18 restamp targets are July 10-13 rows (none here), and the rubric-shape bug `task-6e819f39fe3aa9e6` is still OPEN under a different epic. The GR112 precedent was a 76/76 SWEEP, not "0/29" (29 was its deep sample) — audit ALL 127, never present a sample as a sweep.
+
+- **D220 — TRUST VERDICT: THE FELIX DONE SET IS HONEST.** 126/127 done rows independently re-derived TRUE; 1 low-severity false-done reopened. The three documented warts are cosmetic/paperwork with capability confirmed, NOT false-dones: `felix-w29-bl-asset-schema-nil-redaction` cites D204 (on open #12147) but its nil-fail-closed + schema-independent encrypted-drop capability is on main; `drafts.felix-pristine-wave-30-log` is done-against-open-#12147 but an engine-closed paperwork row with no criteria; squash-artifact secondary SHAs (e.g. w15's `ec097ceb0`) are non-ancestors whose primary merge IS an ancestor. The reconciliation program now rests on an independently-verified ledger.
+
+### Wave 32 roadmap (0 build slices — a read-only audit; 1 deferred remediation)
+
+1. **config-hash fingerprint-recompute check** — `felix-w24-bl-config-hash-line-consistency` (**opus**, round 2 — DEFERRED, the audit fence forbids code edits this wave; NOT dispatched). Reopened this wave; its 3 stored criteria are the build spec (recompute each baseline row's fingerprint, red on disagreement, cover the 7 whole-file Config.* rows the staleness ratchet SKIPS). Gate: `sobelow-baseline-*` scripts red on an injected Config.* fingerprint drift. A future felix wave / the lead dispatches it.
+
 ## Wave log
+
+### Wave 2026-08-18 — Wave 32 FALSE-DONE AUDIT. "126 true, one reopened — the ledger is honest."
+
+The GR112-style independent re-audit the reconciliation waves never ran. True denominator 127 done (live L1, not child_count 168). Two mechanical sweeps CLEAN at 100%: every decisive merge citation is an ancestor of origin/main (the 3 absent PRs run to ground), and exactly 10 engine-bypass rows all carry a documented reconcile/override trail — zero bare hand-flips, no 11-fake-done shape. The judgment cohorts where fabrication hides were re-derived from source: cohort A 10/10, paper-acceptance 12/12, calibration 6/6, non-done 41 clean, and the one strong stamped-but-unproven candidate REFUTED by a live mutate-check (removing `materialized:true` reds `queue_test:578` at `assert done_cte`). ONE genuine false-done: `felix-w24-bl-config-hash-line-consistency`, closed wave-26 as "PAID #7556 D164" but #7556 built annotation-BINDING, not the baseline fingerprint-recompute check crit0 demands — capability ABSENT on main (staleness ratchet SKIPs Config.CSRF/HTTPS; reconcile is continue-on-error advisory). Reopened via `bp task stage open` keeping the claim, correction note recorded; low severity, remediation deferred. Corrections to the inherited framing: criteria-partial cohort is 21 not 23; D10's rubric-bug story is REFUTED for this cohort; GR112 was 76/76 not 0/29. TRUST VERDICT: the Felix done set is HONEST — the reconciliation program rests on a now-independently-verified ledger. FENCE HELD: read-only audit + one reopen + this charter note; zero code edits. Wave Paper: `felix-pristine-wave-2026-08-18`.
+
+
+### Wave 2026-08-18 — Wave 31 RECONCILE. "173 was 31, the stale-open batch was empty, and the ledger now tells it."
+
+The census refuted the 173-open premise (124 done / 31 open / 16 cancelled / 2 considering) and found
+the closeable-by-evidence stale-open batch EMPTY: every 0/N row has zero merged commits, and the two
+5/6 rows are gated on still-open PRs #12132 (BLOCKED) and #12159 (UNSTABLE) — neither head an ancestor
+of origin/main, so both close only when their PR lands. The two rows the wish named to close were
+already closed by wave 30, and the audit-back reconfirmed BOTH from source (the `:internal` sentinel is
+the reddening exemplar, not `caller_context=nil`) — no reopen. The one substantive ledger write was the
+re-parent: 7 non-Felix riders moved to `cloud-console-hardening-epic`, dropping Felix open 31→23 with
+ZERO false closes. `felix-w27-bl-sobelow-baseline-lineshift` was verified genuine-unbuilt CI/human-gated
+(NOT stale-open) — #11427's 3-row fix already re-drifted. Verdict: SEAL-AND-SPIN — api/ core clean; keep
+the epic as a thin holder for #12132/#12159; the rest is standing backlog + human decisions. An honest
+ledger and a true residue number, not a slice count. No new api/ build (as expected). No build slices.
+
+### Wave 2026-08-18 — Wave 29 BUILT + REVIEWED, grade A. "The Lost Mirror, Rebuilt on Opus — and it held."
+
+The one round-1 build slice — `felix-w27-bl-media-dataset-swallow-mirror`, the wave-28 fable
+centerpiece LOST to the cap — was rebuilt on Opus and it landed clean. The reviewer changed NOTHING:
+the slice already mirrored #12071's `WriteScope` split faithfully in media's ATOM-key dialect —
+`invalid_dataset_details/1` byte-identical to the reference, `resolve_dataset_id_once/2` exhaustive
+over the three shapes `get_or_create_dataset` returns, both legit-nil arms preserved as `{:ok, nil}`,
+and the two new `upload/3` else clauses (`{:error,{:invalid_dataset,_}}`, `{:error,:conflict}`) placed
+BETWEEN `payload_too_large` and the `{:error,_reason}→503` catch-all so a refused dataset renders
+422/409 — never a silent `dataset_id=nil`, never a mislabelled 503. Gate re-run GREEN on the
+reviewer's clean checkout (`CC=/usr/bin/clang mix test` on the swallow test + media_test.exs = 44
+tests, 0 failures). Independent mutation-kill by the reviewer: reverting the resolver error arms to a
+bare success-nil reds the fail-before test (upload persists `dataset_id=nil`, row inserted) — restored
+→ green, so the swallow is proven closed, not merely that a happy upload works. HIGH-FLIP boundary
+(legit-nil vs defect-nil, nil at three sites, only the changeset/not-found error fails closed)
+independently re-derived and confirmed — a genuinely independent SECOND reviewer is still owed
+PRE-MERGE (manual lead dispatch; this workflow spawns one reviewer). Ledger clean: slice
+`in_progress`, criteria 0-4 met with honest evidence, criterion 5 merge-gated for the lead; zero
+ledger fixes. Final branch: `loop-epic/media-dataset-swallow-fail-closed-mirror-0` (no reviewer
+fixes). No-builder lead work stands unchanged (land #12109/#12111/#12113/#12114, seal their rows via
+`seal_one.py` post-merge, close `felix-w27-s6-12041-golden-contingency` per D198). Backlog cousin
+`felix-w29-bl-asset-schema-nil-redaction` filed. Wave Paper sealed:
+`felix-pristine-wave-29-2026-08-18`. Grade: **A**.
+
+### Wave 2026-08-18 — Wave 29 DECIDED (building). "The Lost Mirror, Rebuilt on Opus."
+
+Ratified D196–D201. The survey CONFIRMED the direction with ZERO re-scope — all inherited premises
+smoked CLEAN on origin/main (#12071 on main at 24f683a11f; media.ex resolve_dataset_id at 656-668
+with the `_ -> nil` swallow at :663; #12071's 422/409 envelope clauses live at errors.ex:564/:437;
+#11853's slug-format gate on main). Six verifiers RAN: V2 proved the envelope is FREE by executed
+`to_envelope` output (422 validation_failed with details VERBATIM, 409 conflict, raw
+`:dataset_not_found` → 500 so it MUST be converted) and refuted the "would 500" surveyor
+(stale checkout); V3 mapped the upload/3 else-block and pinned the 503 else-trap as the sole
+silent-regression path; V5 UPGRADED share.ex from by-inspection to a live revert-red/fix-green
+mutation proof (workspace-B revoke flips the Default tenant's shareLink — 4/4 red, restore → 4/4
+green); V6 re-refuted signed_url with a zero-caller census on the `Storage.sign/3` facade. **One
+Opus round-1 build slice: the media mirror** (`felix-w27-bl-media-dataset-swallow-mirror`, HIGH-FLIP:
+legit-nil boundary, independent 2nd review owed pre-merge) — the wave-28 fable centerpiece that was
+LOST to the cap, now rebuilt on Opus (Fable capped to Aug 21) with the 503 else-trap folded into its
+criteria. No other builder: the four wave-28 PRs (#12109/#12111/#12113/#12114) are verified sound and
+LAND unchanged by the lead (seal non-merge rows via `seal_one.py` post-merge on re-read epochs);
+`felix-w27-s6-12041-golden-contingency` closes on the now-satisfied #12041-merge gate; share.ex and
+signed_url adjudications are recorded, not built; `felix-w29-bl-asset-schema-nil-redaction` filed to
+backlog (field-visibility read-path cousin). Wave Paper: `felix-pristine-wave-29-2026-08-18`. Grade:
+pending build+review.
+
+### Wave 2026-08-18 — Wave 28 BUILT + REVIEWED, grade A-. "Four Clean, One Unbuilt."
+
+Four of five round-1 slices shipped, all gate-green on the reviewer's -r branches, mutation-proven,
+FENCE-respected, ledgers honest (each in_progress with non-merge-gated criteria stamped and the
+merge-gated PR row left False for the lead): **s3 receive_timeout** structural pin
+(`loop-epic/s3-ex-receive-timeout-structural-pin-a-s-1-r`, 18/0 — 60_000 module attr + public
+accessor threaded onto req/1's opts; source-text pin, the honest limit the Req.Test seam forces);
+**checkout release honesty** (`loop-epic/checkout-release-honesty-make-the-docstr-2-r`, 3/0 — zero
+behavior change: false @doc corrected to the real any-writer force-release contract, intent comment
+at media_controller admin?/1, pin test, rendition-deletion side effect named); **pulse metrics
+deflake** (`loop-epic/pulse-metrics-vitals-test-samples-determ-3-r`, 6/0 — synchronous
+`sample_now/0` cancels the autonomous 2s tick so it can no longer drain the counter mid-test; prod
+cadence byte-preserved); **w14 sync dead-letter classification**
+(`loop-epic/sync-dead-letter-transient-permanent-cla-4-r`, 14/0 — `error_class/1` allowlist:
+terminal content-errors dead-letter+advance, everything else defaults transient → halt+replay,
+never advance past a possibly-recoverable mutation). Reviewer made ZERO code changes — all four were
+already correct, well-scoped, and improvement-only. **The fifth slice did NOT ship: the media
+dataset-swallow mirror (`felix-w27-bl-media-dataset-swallow-mirror`, the fable HIGH-FLIP-RISK
+centerpiece) is lifecycle=open, unclaimed, 0/5 — a live tenancy swallow (any non-admin WRITE token
+persists dataset_id=nil) proven reachable at Verify went unbuilt.** That is the wave's real gap and
+the top next-wave item; the wish's signed_url TTL clamp was correctly DECLINED (D190 re-refutation:
+facade has zero callers, no path reaches :ttl — improvement-only escape hatch, honestly taken), and
+the never-swept core (access/, telemetry/, pulse/, sync/, connectors interior) was swept
+already-good with evidence. Structural note for the lead on w14: classifying a `{:halted,_}`
+before_save gate as transient means a genuinely-poison content doc (permanently-bad sheet) now
+STALLS the cursor indefinitely rather than eventually dead-lettering — the brief's intended fail-safe
+(prefer replay over skipping a possibly-valid write), but a real availability trade-off worth an
+owner's eye. Grade A-: the four delivered slices are A/A+ quality and honesty, but a "perfection"
+wave that leaves its highest-value reachable-defect slice unbuilt is incomplete.
+
+### Wave 2026-08-18 — Wave 28 DECIDED (building). "The Mirror and the Unswept Corners."
+
+Ratified D187–D195. Ground truth moved twice under the wave: the wish's train was a wave stale, and
+the Digest's "nothing merged" went stale mid-wave — six of seven wave-27 PRs merged 23:09–23:10Z
+with 5 of 7 rows lead-closed before Decide ran. Both owed HIGH-FLIP-RISK second reviews were
+discharged POST-MERGE with revert authority at verify, by run-proof not re-read (write_scope: dual
+mutants red exactly the 4 guard tests incl. the 422→200 flip, 71/71 siblings; pg_catalog: 81/0,
+revert-red/fix-green, pg_authid mechanism proven on live psql) — no revert warranted, so Act I
+collapsed to lead bookkeeping on #12041. Three premise refutations recorded instead of built on:
+signed_url (module has 3 tests; the facade has zero callers anywhere — D184 extends), sobelow
+lineshift NOT subsumed by #6057 (6-for-6 anchor proof; correct current anchors 131/229/288/553/577/
+646 exist in NO open artifact), and the s3 "truncation" framing (buffered read + atomic rename —
+the honest harm is a spurious 503). Sweep verdicts: access/, telemetry, pulse prod, sync (minus
+w14), connectors interior, share.ex all already-good with evidence. Four strays retired (one
+deleted draft, two cancelled, one closed refuted-as-prod). Roster: 5 slices, all round 1,
+file-disjoint — media mirror (fable, HIGH-FLIP-RISK), s3 structural pin, checkout honesty +
+pin test, pulse deflake, w14 dead-letter classification. Backlog seeded: door-census deflake
+sibling, non-Felix row re-parenting. Grade: pending build+review.
+
+### Wave 2026-08-17 — Wave 27 DECIDED (building). "Land the Fleet, Fail Closed."
+
+Ratified D179–D186. Verify corrected the direction mid-flight: #11853 merged at 21:18Z carrying the
+byte-identical slug package, so the planned "merge #12037 first" inverted into "close #12037
+superseded" and both owed slug second-reviews went moot. Act I largely EXECUTED at Decide: #12025 +
+#12040 + #12042 merged (all-4 green), #12037 closed superseded, #12038/#12039 single-flake reds
+re-run, five ledger rows closed live with read-back (two on fresh merge evidence, one recording the
+supersede inversion, two w23 dup-family rows by supersede via criteria_override with residuals
+named). The close recipe is now claim-state-dependent (D181): held → present current worker+epoch or
+holder_override; lapsed → re-claim → close; the epoch CAS is real (fenced_off measured twice). Two
+refutations recorded honestly (signed_url ttl not request-derived; sandbox-escape is test-infra) —
+no slice built on either. Five slices round 1 (write_scope fail-closed + pg_catalog broadening on
+fable with HIGH-FLIP-RISK flags; webhook 25MB cap, spec-gate pins, codex protocol_error on opus) +
+the #12041 golden contingency round 2. Backlog seeded: media dataset-swallow mirror, sobelow
+baseline reconcile (fenced by #6057), checkout docstring honesty. Grade: pending build+review.
+
+### Wave 2026-08-17 — Wave 26 BUILT + REVIEWED, grade A. "Six Green, One Caught."
+
+All six round-1 slices built, gates re-run green on the reviewer's final state, pushed with PRs: S1
+dataset-slug guard, underscore-safe, supersedes #11853 (#12037, 60/0); S3 SSRF DNS-rebinding TOCTOU pin
+with the Mint `:hostname` contract independently re-derived from deps (#12038, 19/0 + webhooks 111/0);
+blobstore read-seam traversal guard (#12039, 41/0, **reviewer fixed** the builder-flagged leading-dash
+regression on the `-r` branch — `unique_filename/1` genuinely emits `-<hex>.ext` for empty-slug
+basenames, so `@blob_segment`'s leading class is now `[A-Za-z0-9-]`; leading `.`/`_` stay refused);
+chatlive two-seam honesty (#12040, 295/0 — 3 local failures proved ENVIRONMENTAL: a stale committed
+chat_sessions row in the shared barkpark_test DB, clean partition green, row deleted); authority-lock
+lock-wait proofs for the two remaining sites (#12041, 77/0, test-only); release_capture 124/125 bounds
+(#12042, 3/0, test-only — pins branch EFFECT via wide wall-clock separation since the exit codes are
+private; the 126 rescue branch stays uncovered). Ledger spotless: every slice `in_progress` with
+evidence stamped mid-claim, merge-gated criteria left for the lead, S2 (task-966de76b9dd92783,
+pg_catalog broadening) honestly open for round 2 AFTER S1 merges and #11853 closes (D165(iv)
+auto-re-fence). HIGH-FLIP-RISK second reviews owed before merging S1 and S3 (named in both PR bodies).
+Next wave: lead merges the six (S1 first), closes #11853, dispatches S2, then considers the
+never-swept core (access/, telemetry/, connectors/ interior) and the Session-GenServer
+sandbox-escape leak the chatlive gate exposed. Grade: A.
+
+### Wave 2026-08-17 — Wave 26 DECIDED (building). "The Seal Is Executed, Not Declared."
+
+Ratified D173–D178. Premise smoke refuted the wish's core claim — wave 25 was NOT fully landed: #11853 was OPEN
+and red, and all 19 D164 PAID rows were still `open` (lapsed null-worker claims defeating the close CAS). Wave 26's
+first product is EXECUTION: 20 ledger rows closed live at Decide (re-claim → stamp verbatim → close → read-back),
+the pg_catalog draft amended to the proven `pg_table_is_visible` shape and published, two phantom D164 sub-rows
+struck. The second product is the build: 7 slices — land the straggler with the census-proven underscore-safe regex
+(S1), broaden the guard to refuse pg_catalog members (S2, round 2 after S1 clears the tenancy fence), pin the SSRF
+rebinding TOCTOU in the least-swept core (S3), plus blobstore read-guard, chatlive two-seam, authority-lock
+remaining sites, and release_capture branch coverage. Three direction/digest premises corrected by ground truth: no
+prod slug violates the regex (loosen, don't force), the guard file is collision-free (only the dir-level fence
+sequences it), and the fresh lane is a real security slice (not prove-clean). 6 slices dispatch round 1
+(S2 round 2); S3/S6 fable, S2 fable, rest opus. Grade: pending build+review.
+
+
 
 ### Wave 2026-08-17 — Wave 25 BUILT + REVIEWED, grade A. "Six for Six, Pushed."
 

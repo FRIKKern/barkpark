@@ -1961,8 +1961,9 @@ defmodule BarkparkWeb.Router do
   # search-surface-config settings — per-workspace attributed (charter D45/D49).
   # These two routes run the bespoke admin pipeline that derives the caller's
   # OWN workspace before the admin gate, so a shared dataset slug no longer means
-  # a shared config row. The sibling insights/synonyms routes stay on
-  # `[:api, :require_admin]` below (different tables, not part of this bleed).
+  # a shared config row. The sibling insights/synonyms routes below run the SAME
+  # bespoke pipeline (charter D85/D86 — repoint) so their reads and writes land
+  # on the caller's own workspace instead of collapsing to Default.
   scope "/v1/data", BarkparkWeb do
     pipe_through(:search_settings_admin)
 
@@ -1970,8 +1971,15 @@ defmodule BarkparkWeb.Router do
     put("/search/:dataset/settings", SearchController, :update_search_settings)
   end
 
+  # insights + synonyms — per-workspace attributed (charter D85/D86). Repointed
+  # off `[:api, :require_admin]` (which ran AssignDefaultScope with NO
+  # DeriveWorkspaceFromToken → collapsed every caller to Default) onto the
+  # bespoke `:search_settings_admin` pipeline: DeriveWorkspaceFromToken (fail-
+  # SOFT) runs before AssignDefaultScope, so a workspace-bound admin token
+  # resolves ITS workspace while a nil-workspace token still falls through to
+  # Default/global (READs stay global-legacy by D59 — never over-blocked).
   scope "/v1/data", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:search_settings_admin)
 
     get("/search/:dataset/insights", SearchController, :search_insights)
     get("/search/:dataset/synonyms", SearchController, :search_synonyms)
@@ -2170,8 +2178,12 @@ defmodule BarkparkWeb.Router do
     put("/:dataset/search/settings", V1.MediaController, :update_search_settings)
   end
 
+  # media insights + synonyms — per-workspace attributed (charter D85/D86),
+  # repointed onto the same bespoke `:search_settings_admin` pipeline as the
+  # documents block above so a workspace-bound admin token resolves ITS workspace
+  # instead of collapsing to Default; a nil-workspace token still falls through.
   scope "/v1/media", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:search_settings_admin)
 
     get("/:dataset/search/insights", V1.MediaController, :search_insights)
     get("/:dataset/search/synonyms", V1.MediaController, :search_synonyms)

@@ -143,21 +143,24 @@ defmodule Barkpark.Content.Schema do
   def upsert_schema(attrs, dataset, opts \\ []) do
     name = Map.get(attrs, "name") || Map.get(attrs, :name)
 
-    attrs =
-      attrs
-      |> Map.put("dataset", dataset)
-      |> Content.put_scope_attrs(opts)
+    # Fail-closed scope stamp (felix-w26): a refused dataset resolution errors
+    # out of the with (SchemaController's action_fallback funnels it through
+    # Errors.to_envelope) instead of silently stamping dataset_id=NULL.
+    with {:ok, attrs} <-
+           attrs
+           |> Map.put("dataset", dataset)
+           |> Content.put_scope_attrs(opts) do
+      case name && get_schema(name, dataset, opts) do
+        {:ok, existing} ->
+          existing
+          |> SchemaDefinition.changeset(attrs)
+          |> Repo.update()
 
-    case name && get_schema(name, dataset, opts) do
-      {:ok, existing} ->
-        existing
-        |> SchemaDefinition.changeset(attrs)
-        |> Repo.update()
-
-      _ ->
-        %SchemaDefinition{}
-        |> SchemaDefinition.changeset(attrs)
-        |> Repo.insert()
+        _ ->
+          %SchemaDefinition{}
+          |> SchemaDefinition.changeset(attrs)
+          |> Repo.insert()
+      end
     end
   end
 

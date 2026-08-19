@@ -458,6 +458,21 @@ defmodule BarkparkWeb.CycleFleetController do
   defp receipt_error("gate_receipt", :invalid), do: :invalid_gate_receipt
   defp receipt_error("gate_receipt", :required), do: :gate_receipt_required
   defp receipt_error("gate_receipt", :ambiguous), do: :ambiguous_gate_receipt
+  defp receipt_error("correction_of", :invalid), do: :invalid_correction_of
+  defp receipt_error("correction_of", :required), do: :correction_of_required
+  defp receipt_error("correction_of", :ambiguous), do: :ambiguous_correction_of
+  defp receipt_error("content", :invalid), do: :invalid_content
+  defp receipt_error("content", :required), do: :content_required
+  defp receipt_error("content", :ambiguous), do: :ambiguous_content
+
+  # Terminal clauses keep this helper total: a future required_json_object/3 key
+  # degrades to a 422 here instead of raising FunctionClauseError inside the error
+  # constructor (which with_scope/4 does not rescue, so it surfaces as a bare 500).
+  # Deliberately not a dynamic-atom mint (:"#{key}_required") — request-shaped keys
+  # would be an unbounded-atom hazard.
+  defp receipt_error(_key, :invalid), do: :invalid_request_object
+  defp receipt_error(_key, :required), do: :request_object_required
+  defp receipt_error(_key, :ambiguous), do: :ambiguous_request_object
 
   defp blank_to_nil(nil), do: nil
   defp blank_to_nil(""), do: nil

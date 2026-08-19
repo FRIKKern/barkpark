@@ -125,8 +125,14 @@ PY
 # "\tEXEMPT" column.
 extract_paths() {
   awk '
-    /^on:/                    { in_on = 1; next }
-    in_on && /^[a-z]/         { in_on = 0 }
+    # `on:` and its quoted spellings are the same key to GitHub (YAML 1.1
+    # resolves a bare `on` to the BOOLEAN true, which is why yamllint pushes
+    # authors to quote it). A `/^on:/` byte anchor reads a quoted workflow as
+    # having no `on.push.paths` at all and this gate then compares an EMPTY
+    # path set — a green earned over nothing. Same three spellings as
+    # scripts/required-checks-generate.sh build_workflow_index.
+    /^("on"|\047on\047|on)[ \t]*:/ { in_on = 1; next }
+    in_on && /^[A-Za-z"\047]/ { in_on = 0 }
     in_on && /^    paths:/    { in_paths = 1; exempt = 0; next }
     in_paths && /^    [a-z]/  { in_paths = 0 }
     in_paths && /^ *#/        { if ($0 ~ /deploy-filter-exempt:/) exempt = 1; next }
@@ -175,6 +181,50 @@ sample_for() {
     *\**)   printf '%s\n' "${1%\**}x" ;;
     *)      printf '%s\n' "$1" ;;
   esac
+}
+
+# ── required-path presence allowlist ─────────────────────────────────────────
+
+# THE HOLE THIS ARM CLOSES
+#
+# The drift scan (check_file below) only judges paths that are PRESENT: it proves
+# every LISTED on.push.paths entry targets some deploy job. It is blind to a path
+# that was DELETED — once both the `- "scripts/connectors/**"` push-path line AND
+# its instance-regex prefix are gone, nothing is left to drift, so the drift scan
+# reads GREEN. That is a false pass that silently re-opens exactly the gap W35
+# closed (charter D275): a runner-only merge under scripts/connectors/** lands on
+# main and never reaches guerrilla.
+#
+# So: pin the paths that MUST stay listed. A merge under one of these trees
+# deploys a real artifact (scripts/connectors/** installs the cloud-sandbox-runner
+# via instance-deploy.sh), so dropping its filter strands that artifact on main.
+# Deleting the line now reds THIS arm even though the drift arm sees nothing.
+REQUIRED_PATHS=(
+  "scripts/connectors/**"
+)
+
+# Assert every REQUIRED_PATHS entry appears in extract_paths() output (either
+# REQUIRED or EXEMPT column — presence is what matters here, drift is the other
+# arm's job). Fails closed if any is absent.
+check_required_paths() {
+  local yml="$1" label="$2"
+  local present missing=0 req
+  present="$(extract_paths "$yml" | cut -f1)"
+  for req in "${REQUIRED_PATHS[@]}"; do
+    if printf '%s\n' "$present" | grep -qxF "$req"; then
+      echo "  present  $req (required on.push.paths entry)"
+    else
+      echo "  MISSING  $req  ->  required on.push.paths entry absent (a merge here would deploy nothing)" >&2
+      missing=$((missing + 1))
+    fi
+  done
+  if [ "$missing" -gt 0 ]; then
+    echo "FAIL[$label]: $missing required path(s) absent from on.push.paths." >&2
+    echo "Fix: restore the '- \"<path>\"' entry under on.push.paths AND its matching prefix in the" >&2
+    echo "'changes' job instance regex — deleting both is the false-green this allowlist exists to catch." >&2
+    return 1
+  fi
+  return 0
 }
 
 # ── the check ────────────────────────────────────────────────────────────────
@@ -237,10 +287,19 @@ EOF
     return 1
   fi
 
+  # Required-path presence: the drift loop above only judges PRESENT paths; a
+  # DELETED required path leaves nothing to drift, so this arm asserts it too.
+  local presence_rc=0
+  check_required_paths "$yml" "$label" || presence_rc=$?
+
   if [ "$failures" -gt 0 ]; then
     echo "FAIL[$label]: $failures path(s) start the deploy workflow but target no deploy job." >&2
     echo "Fix: add the prefix to the matching job's grep -qE regex in the 'changes' job," >&2
     echo "or, if it is deliberately targetless, add a '# deploy-filter-exempt: <why>' comment above it." >&2
+    return 1
+  fi
+
+  if [ "$presence_rc" -ne 0 ]; then
     return 1
   fi
 
@@ -260,15 +319,15 @@ selftest() {
   local real="$REPO_ROOT/$DEPLOY_YML_DEFAULT"
   local rc=0
 
-  echo "selftest 1/5: the real workflow passes"
+  echo "selftest 1/6: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/5: dropping 'templates' from the instance regex must FAIL (the original bug)"
-  sed "s/|connectors|templates)\//|connectors)\//" "$real" > "$tmp/mutated.yml"
+  echo "selftest 2/6: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
     rc=1
@@ -280,7 +339,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/5: an unexplained targetless path must FAIL"
+  echo "selftest 3/6: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   if cmp -s "$real" "$tmp/orphan.yml"; then
@@ -294,11 +353,11 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/5: another job's own regex must NOT rescue a drifted dispatch filter"
+  echo "selftest 4/6: another job's own regex must NOT rescue a drifted dispatch filter"
   # The disarm shape, verbatim: strip `templates` from the instance filter AND
   # append a recorder job whose shell carries a copy of the same regex. Before
   # extract_regexes was scoped to `changes`, this read OK at rc=0.
-  sed "s/|connectors|templates)\//|connectors)\//" "$real" > "$tmp/disarm.yml"
+  sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/disarm.yml"
   cat >> "$tmp/disarm.yml" <<'YML'
 
   selftest-recorder:
@@ -318,7 +377,7 @@ YML
   fi
 
   echo
-  echo "selftest 5/5: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/6: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -347,6 +406,22 @@ YML
     rc=1
   else
     echo "  ok: a 2-space heredoc body inside 'run: |' reds the arm AND the whole gate"
+  fi
+
+  echo
+  echo "selftest 6/6: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
+  # Mirror of case 2, but for DELETION not drift: strip the required push-path
+  # line entirely. The drift arm now sees nothing to judge, so ONLY the presence
+  # allowlist can catch this — the false-green W35 exists to close (charter D275).
+  grep -v '^      - "scripts/connectors/\*\*"$' "$real" > "$tmp/nopath.yml"
+  if cmp -s "$real" "$tmp/nopath.yml"; then
+    echo "SELFTEST FAIL: the path-strip mutation changed nothing — scripts/connectors/** is not listed as expected" >&2
+    rc=1
+  elif check_file "$tmp/nopath.yml" "nopath" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: a copy missing scripts/connectors/** read GREEN — the presence allowlist cannot fail" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds when a required path is deleted from on.push.paths"
   fi
 
   rm -rf "$tmp"

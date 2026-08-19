@@ -2061,10 +2061,14 @@ func truncate(s string, w int) string {
 	if w <= 1 {
 		return "…"
 	}
-	// trim rune-wise to width-1, add ellipsis
+	// trim rune-wise to width-1, add ellipsis. Reserve one display cell for the
+	// ellipsis and measure the ACTUAL per-rune width (a hardcoded +1 assumes the
+	// next rune is a single cell, so a width-2 rune — emoji/CJK — at the boundary
+	// overshoots w by one cell).
 	out := ""
 	for _, r := range s {
-		if lipgloss.Width(out)+1 >= w {
+		rw := lipgloss.Width(string(r))
+		if lipgloss.Width(out)+rw > w-1 {
 			break
 		}
 		out += string(r)

@@ -1,4 +1,4 @@
-<!-- doc-tier: cold | canonical-for: none | budget: 1200tok -->
+<!-- doc-tier: cold | canonical-for: ttw19-fetch-concurrency-truncation-honesty | budget: 1200tok -->
 # ttw19 — fetch-concurrency + truncation-honesty re-derivation
 
 Verifier assignment [fetch-concurrency-and-truncation-honesty], Task-TUI wave 19.

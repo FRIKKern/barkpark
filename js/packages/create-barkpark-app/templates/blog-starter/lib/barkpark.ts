@@ -1,5 +1,5 @@
 import 'server-only'
-import { makeFilterExpression, type Perspective } from '@barkpark/core'
+import { BarkparkNotFoundError, makeFilterExpression, type Perspective } from '@barkpark/core'
 import { createBarkparkServer } from '@barkpark/nextjs/server'
 import { barkparkClient } from '../barkpark.config'
 
@@ -65,12 +65,24 @@ export async function countDocs(type: string): Promise<number> {
 }
 
 export async function getDocById<T>(type: string, id: string, draft = false): Promise<T | null> {
-  const env = await barkparkFetch<DocEnvelope<T>>({
-    type,
-    id,
-    ...(draft ? { perspective: 'drafts' as Perspective } : {}),
-  })
-  return env.result
+  try {
+    const env = await barkparkFetch<DocEnvelope<T>>({
+      type,
+      id,
+      ...(draft ? { perspective: 'drafts' as Perspective } : {}),
+    })
+    return env.result
+  } catch (err) {
+    // A by-id miss is a 404, not a 500. `barkparkFetch` throws
+    // BarkparkNotFoundError on a 404, but that error carries no NEXT_NOT_FOUND
+    // digest, so an uncaught throw makes App Router render error.tsx (500) —
+    // leaving every `if (!doc) notFound()` guard downstream dead code. Swallow
+    // to null so the caller's not-found path fires (404). Symmetric with
+    // getDocBySlug (a filtered miss returns null) and the SDK's client.doc
+    // 404→null convention (@barkpark/core doc.ts). Rethrow everything else.
+    if (err instanceof BarkparkNotFoundError) return null
+    throw err
+  }
 }
 
 export async function getDocBySlug<T>(type: string, slug: string, draft = false): Promise<T | null> {

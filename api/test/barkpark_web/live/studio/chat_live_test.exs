@@ -59,6 +59,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   end
 
   setup %{conn: conn} do
+    # Wave-26 leaked-session pollution guard (felix-w27, third victim — same
+    # class the felix-w27-s6 slice guarded in studio_chat_test.exs and
+    # chat_render_golden_test.exs): a Recorder that outlived a prior test's
+    # sandbox owner can COMMIT chat_sessions rows that escape rollback and ride
+    # list_sessions' recency-desc ordering ahead of seeded rows — reddening the
+    # sidebar/empty-state assertions here on a shifting set. At setup no test
+    # in this file has created a session yet, so every visible row is such a
+    # leak; purge for a clean baseline. Restrict-FK children first; deleting
+    # sessions cascades the delete_all children. Runs inside this test's
+    # sandbox transaction and rolls back with it — test-infra hygiene only.
+    Barkpark.Repo.query!("DELETE FROM chat_runtime_usage_receipts")
+    Barkpark.Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
+    Barkpark.Repo.delete_all(Barkpark.StudioChat.Session)
+
     {:ok, _} =
       Auth.create_token(@admin_token, "chat admin", "production", ["read", "write", "admin"])
 
@@ -771,6 +785,66 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_event, stream_delta("Hel")})
       send(view.pid, {:claude_chat_event, stream_delta("lo!")})
       assert render(view) =~ "Hello!"
+    end
+
+    # The codex turn_completed path (studio_chat_runtime_event) commits the
+    # streamed answer to a durable :assistant message so it survives turn
+    # completion (which always resets `streaming: nil`). The `streaming` assign
+    # is a StreamTail BARE MAP (%{text: ...}) — the old `text when is_binary(text)`
+    # clause never matched a map, so the just-streamed answer vanished from the
+    # open transcript at turn completion. MUTATION-PROOF: reverting the clause to
+    # `text when is_binary(text)` reds this — streaming resets to nil and the
+    # sentinel disappears because it was never appended.
+    test "turn_completed commits the streamed codex answer to a durable assistant message",
+         %{view: view} do
+      # populate the shared `streaming` StreamTail via the delta path
+      send(view.pid, {:claude_chat_event, stream_delta("ZZ_STREAMED_ANSWER_ZZ")})
+      assert render(view) =~ "ZZ_STREAMED_ANSWER_ZZ"
+
+      # codex end-of-turn — after this, streaming is nil no matter what
+      send(view.pid, {:studio_chat_runtime_event, codex_turn_completed()})
+
+      assert lv_assigns(view)[:streaming] == nil
+      # the streamed answer is still visible — now a durable :assistant message
+      assert render(view) =~ "ZZ_STREAMED_ANSWER_ZZ"
+    end
+
+    # A stdout buffer overflow (claude_chat.ex D126) sends a NAMED reason before
+    # the DOWN follows. Without a {:claude_chat_error, ...} clause it fell to the
+    # catch-all no-op and the user saw only the generic DOWN banner, losing the
+    # captured stderr tail. MUTATION-PROOF: removing the clause reds this — the
+    # render no longer carries the overflow copy or the captured reason.
+    test "a buffer_overflow error surfaces the captured reason, not the generic DOWN banner",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      send(
+        view.pid,
+        {:claude_chat_error, :buffer_overflow, "codex: runaway stdout ZZ_OVERFLOW_TAIL_ZZ"}
+      )
+
+      html = render(view)
+      assert html =~ "more data than this session can buffer"
+      assert html =~ "ZZ_OVERFLOW_TAIL_ZZ"
+      refute html =~ "ended unexpectedly"
+    end
+
+    # A codex runtime FAILURE event (protocol.ex :protocol_error / :error /
+    # :process_failed) carries an `error` map with the reason. Before this clause
+    # these kinds fell to the bare %Runtime.Event{} catch-all and rendered NOTHING
+    # — a framing buffer overflow left the transcript silent. MUTATION-PROOF:
+    # removing the codex-failure handle_info clause reds this — the render no
+    # longer carries the failure copy or the captured reason.
+    test "a codex :protocol_error surfaces its reason instead of rendering nothing",
+         %{view: view} do
+      send(
+        view.pid,
+        {:studio_chat_runtime_event, codex_protocol_error("ZZ_PROTOCOL_REASON_ZZ")}
+      )
+
+      html = render(view)
+      assert html =~ "protocol error"
+      assert html =~ "ZZ_PROTOCOL_REASON_ZZ"
     end
 
     # charter D41 — the wire carries no thinking text, so the pulse is a live
@@ -6256,6 +6330,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   defp turn_active_status?(view), do: lv_assigns(view)[:status] in [:thinking, :interrupting]
 
   defp count_substring(haystack, needle), do: length(String.split(haystack, needle)) - 1
+
+  # A codex end-of-turn runtime event (the studio_chat_runtime_event path). The
+  # terminal_state drives the closing line; `:completed` yields no extra line, so
+  # the durable-append assertion is the only thing under test.
+  defp codex_turn_completed do
+    %Barkpark.StudioChat.Runtime.Event{kind: :turn_completed, terminal_state: :completed}
+  end
+
+  defp codex_protocol_error(detail) do
+    %Barkpark.StudioChat.Runtime.Event{
+      kind: :protocol_error,
+      error: %{"code" => "buffer_overflow", "detail" => detail}
+    }
+  end
 
   defp stream_delta(text) do
     %{

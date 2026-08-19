@@ -4,7 +4,7 @@ package scaffy
 // unknown and newline-bearing values rejected; OPAQUE verbatim; SHAPE
 // ts14 re-validated against the supplied value; SUCCESSOR checked
 // (after == before + 1), never computed; transform vars resolve
-// through the four words.go joiners.
+// through the five words.go joiners.
 
 import (
 	"errors"

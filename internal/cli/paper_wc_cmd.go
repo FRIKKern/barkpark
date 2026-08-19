@@ -215,8 +215,15 @@ func runPaperStatus(out *writer, g globals, ctx manifest.Context, args []string)
 			}
 
 			// The remote check is best-effort: offline is a fact to report,
-			// never a failure that hides the local half.
-			if _, rev, apiErr, err := client.PaperPullBpml(slug); err != nil || apiErr != nil {
+			// never a failure that hides the local half. A 404 is NOT an
+			// outage — for a scaffolded paper (rev-0 anchor, never pushed)
+			// "the server has no such paper yet" is the expected truth, and
+			// push is what will create it.
+			if _, rev, apiErr, err := client.PaperPullBpml(slug); err != nil {
+				row["remote"] = "unreachable"
+			} else if apiErr != nil && apiErr.Status == 404 {
+				row["remote"] = "absent (push will create it)"
+			} else if apiErr != nil {
 				row["remote"] = "unreachable"
 			} else if rev == anchor.Rev {
 				row["remote"] = "current"
@@ -353,12 +360,22 @@ func paperWCDiffLines(a, b []string) []string {
 // ── push ────────────────────────────────────────────────────────────────────
 
 func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) int {
-	if len(args) != 1 {
+	check := false
+	var pos []string
+	for _, a := range args {
+		switch a {
+		case "--check":
+			check = true
+		default:
+			pos = append(pos, a)
+		}
+	}
+	if len(pos) != 1 {
 		out.userErr("paper push: exactly one <slug>")
 		usagePaper(out, false)
 		return exitUsage
 	}
-	slug := args[0]
+	slug := pos[0]
 
 	dir, err := paperWCDir()
 	if err != nil {
@@ -368,8 +385,15 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 
 	local, err := os.ReadFile(paperWCFile(dir, slug))
 	if err != nil {
-		out.userErr("paper push %s: no working copy — bp paper pull %s first", slug, slug)
+		out.userErr("paper push %s: no working copy — bp paper new %s (fresh) or bp paper pull %s (existing) first", slug, slug, slug)
 		return exitGeneric
+	}
+
+	// --check: the validate-all dry-run (POST /v1/plugins/bulldocs/papers/
+	// validate). Every violation in one reply, NOTHING written, no anchor
+	// touched — see the wall before the wall sees you.
+	if check {
+		return runPaperPushCheck(out, ctx, slug, string(local))
 	}
 
 	st, err := loadPaperWCState(dir)
@@ -416,6 +440,12 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 	}
 	anchor.Rev = result.Rev
 	anchor.PulledAt = time.Now().UTC().Format(time.RFC3339)
+	// A scaffolded paper (bp paper new) anchors with no server — it was born
+	// offline. Its first landed push binds the anchor to the server it created
+	// the paper on, so the cross-server drift guard above works from then on.
+	if anchor.Server == "" {
+		anchor.Server = ctx.Server
+	}
 	st.Papers[slug] = anchor
 	if err := savePaperWCState(dir, st); err != nil {
 		out.userErr("paper push %s: applied @ rev %s but the anchor save failed: %v — re-pull to converge",
@@ -429,6 +459,99 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 	}
 	out.outf("pushed %s: %d op(s) applied, now @ rev %s (file converged on canonical)", slug, result.OpCount, result.Rev)
 	return exitOK
+}
+
+// runPaperPushCheck POSTs the working copy to the validate-all dry-run
+// (`POST /v1/plugins/bulldocs/papers/validate` — the same endpoint the create
+// wall mirrors) and renders every violation. Read-only by contract: the server
+// persists nothing and the local anchor/pristine are never touched. Exit 0
+// when the wall would accept the document; exit 1 with the violation list when
+// it would refuse.
+func runPaperPushCheck(out *writer, ctx manifest.Context, slug, bpml string) int {
+	payload, err := json.Marshal(map[string]string{"bpml": bpml})
+	if err != nil {
+		out.userErr("paper push %s --check: %v", slug, err)
+		return exitGeneric
+	}
+
+	u := strings.TrimRight(ctx.Server, "/") + "/v1/plugins/bulldocs/papers/validate"
+	headers := map[string]string{"Content-Type": "application/json"}
+	if ctx.Token != "" {
+		headers["Authorization"] = "Bearer " + ctx.Token
+	}
+
+	status, body, err := doRequest("POST", u, headers, payload)
+	if err != nil {
+		out.userErr("paper push %s --check: %v", slug, err)
+		return exitGeneric
+	}
+	if status < 200 || status >= 300 {
+		renderPaperAPIErr(out, "push "+slug+" --check", decodePaperCheckErr(status, body))
+		return exitGeneric
+	}
+
+	var verdict struct {
+		Valid      bool `json:"valid"`
+		Violations []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Hint    string `json:"hint"`
+			Line    int    `json:"line"`
+		} `json:"violations"`
+	}
+	if jerr := json.Unmarshal(body, &verdict); jerr != nil {
+		out.userErr("paper push %s --check: unparsable validate reply: %v", slug, jerr)
+		return exitGeneric
+	}
+
+	if out.output == "json" || out.output == "yaml" {
+		out.renderRaw(body)
+		if verdict.Valid {
+			return exitOK
+		}
+		return exitGeneric
+	}
+
+	if verdict.Valid {
+		out.outf("%s: valid — the publish wall would accept this push (dry-run; nothing written)", slug)
+		return exitOK
+	}
+	out.userErr("%s: the publish wall would refuse this push — %d violation(s):", slug, len(verdict.Violations))
+	for _, v := range verdict.Violations {
+		line := ""
+		if v.Line > 0 {
+			line = fmt.Sprintf("line %d: ", v.Line)
+		}
+		out.errf("  %s[%s] %s", line, v.Code, v.Message)
+		if v.Hint != "" {
+			out.errf("    fix: %s", v.Hint)
+		}
+	}
+	return exitGeneric
+}
+
+// decodePaperCheckErr adapts a non-2xx validate reply into the shared
+// PaperAPIErr renderer — same envelope shape as pull/sync refusals.
+func decodePaperCheckErr(status int, body []byte) *apiclient.PaperAPIErr {
+	var env struct {
+		Error struct {
+			Code    string                    `json:"code"`
+			Message string                    `json:"message"`
+			Hint    string                    `json:"hint"`
+			Errors  []apiclient.PaperTeachErr `json:"errors"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &env) != nil || env.Error.Code == "" {
+		msg := strings.TrimSpace(string(body))
+		if len(msg) > 200 {
+			msg = msg[:200] + "…"
+		}
+		return &apiclient.PaperAPIErr{Status: status, Code: fmt.Sprintf("http_%d", status), Message: msg}
+	}
+	return &apiclient.PaperAPIErr{
+		Status: status, Code: env.Error.Code, Message: env.Error.Message,
+		Hint: env.Error.Hint, Errors: env.Error.Errors,
+	}
 }
 
 // renderPaperAPIErr prints the server's refusal the way the server teaches it:

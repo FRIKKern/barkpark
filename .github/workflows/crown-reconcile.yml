@@ -91,6 +91,13 @@ on:
       # required-check spec can break the harness while triggering nothing.
       # A file the harness reads has to be a file that fires it.
       - ".github/required-checks.json"
+      # Also an INPUT. crown-reconcile.test.sh reads shell-harnesses.yml and
+      # fails if this harness is WIRED there as well as here — so an edit to
+      # shell-harnesses.yml can break the harness while triggering nothing.
+      # #11703 was a shell-harnesses-only edit: it never fired this harness on
+      # its own PR, landed green, and surfaced 6h later as a dark reconciler.
+      # A file the harness reads has to be a file that fires it.
+      - ".github/workflows/shell-harnesses.yml"
 
 permissions:
   contents: read

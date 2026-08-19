@@ -2248,8 +2248,12 @@ a6fb32e3a3bc  C  tooling/grip/ledger/bpgraph-tripwire-selftest-2026-07-26.md:14 
 041309eecfc1  C  tooling/grip/ledger/cch-w35-protection-claim-census-2026-08-06.md:126  READ 2026-08-06: dated finding about a FOREIGN charter's :96 and why that alternation branch is enumerated; true of that file on that day
 e16a9d8d62d7  C  tooling/grip/ledger/felix-w23-gate-topology-d75-2026-07-28.md:8       dated recipe ledger
 e1288ba46a68  B  tooling/grip/ledger/felix-w24-wave23-criteria-closes-2026-07-29.md:23 "both are FALSE today"
+25db097ed62f  C  tooling/grip/ledger/felix-w25-sobelow-row-verdicts-2026-08-17.md:39      dated recipe ledger — quotes the DEAD premise to retire it (D75 amended away, felix-w23-s3/felix-w24-s5)
+451500fdf367  C  tooling/grip/ledger/felix-w25-sobelow-row-verdicts-2026-08-17.md:40      dated recipe ledger — git show #7557 re-grounds Sobelow topology on S4, NOT the dead premise
 af83a4d184e8  D  tooling/grip/ledger/jarl-gates-live-status-2026-07-31.md:45           OTHER REPO, still true of it
 e9afea44318b  C  tooling/grip/ledger/second-review-and-credential-2026-07-26.md:17     dated recipe ledger
+25db097ed62f  C  tooling/grip/ledger/felix-w25-sobelow-row-verdicts-2026-08-17.md:39  names the dead "no branch protection" premise, dated recipe ledger
+451500fdf367  C  tooling/grip/ledger/felix-w25-sobelow-row-verdicts-2026-08-17.md:40  git show recipe quoting #7557's dated subject, dated recipe ledger
 PINS
 
 protection_census_report() { # [extra path…] — emits UNPINNED/STALE lines, or nothing
@@ -3105,7 +3109,23 @@ fi
 # the workflow declared 19; the two the table omitted were
 # `Never-cancel-main concurrency ratchet` and `Nil-polarity fail-closed gate`.
 RC20_DG_YML="$REPO_ROOT/.github/workflows/doc-gates.yml"
-RC20_DG_REAL="$(grep -cE '^[[:space:]]*- name: .*\(blocking\)' "$RC20_DG_YML" | tr -d ' ')"
+# The label token is a UNION, and both arms are load-bearing. cgsiw-s1 renamed
+# all 21 of these step names from `(blocking)` to `(fails this job)`, because
+# doc-gates publishes ONE context and that context is not required — the steps
+# fail the job, and the job blocks nothing. The count is what this clause is
+# about, so it must survive the rename; keeping the old arm means a workflow
+# that reverts to the old label is still counted rather than silently read as
+# zero. RESIDUE, recorded here rather than left for a reader to trip over:
+# merge-gates.md:828 still spells the label `(blocking)` in its prose. The
+# arithmetic below is unaffected (it compares NUMBERS), and the one-line label
+# correction is filed as cgsiw-s1-followup-merge-gates-step-label — it lives in
+# docs/, outside this wave fence.
+#
+# The `|| true` is not a softening: `grep -c` exits 1 on a count of zero, and
+# under `set -e` that KILLED this suite mid-section-20 with no summary and no
+# message when the rename landed. A guard that dies is strictly worse than one
+# that reds — the `-gt 0` test below is the decision, and it still reds on zero.
+RC20_DG_REAL="$({ grep -cE '^[[:space:]]*- name: .*(\(blocking\)|\(fails this job\))' "$RC20_DG_YML" || true; } | tr -d ' ')"
 rc20_roster_claim() { grep -oE '\*\*[0-9]+ steps labelled' "$1" | head -1 | grep -oE '[0-9]+'; }
 rc20_roster_rows() {
   awk '/^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Step[[:space:]]*\|/ { t = 1; next }

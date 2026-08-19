@@ -4321,6 +4321,21 @@ defmodule BarkparkCloud.Web.Router do
         team = conn.assigns.current_team
 
         case Registry.get_barkpark(conn.path_params["id"]) do
+          # cch-idor-s3 — a SUSPENDED box reveals nothing. Mirrors /credentials
+          # (cch-w54-s2): suspension is billing's "data retained, access
+          # revoked", and this route hands back the instance read_token, the
+          # build env, and the webhook HMAC — all secrets. Keyed on the same
+          # boolean the console paints, and placed ABOVE the reveal so
+          # Registry.reveal_bootstrap is never reached on a suspended box. Same
+          # 409 "suspended" shape as /credentials, /studio-link, /app-token.
+          %Barkpark{team_id: tid, suspended: true} when tid == team.id ->
+            json(conn, 409, %{
+              error: "suspended",
+              detail:
+                "This instance is suspended. The content bootstrap is not revealed " <>
+                  "until the suspension is cleared."
+            })
+
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             case Registry.reveal_bootstrap(bp) do
               {:ok, nil} ->
@@ -4403,8 +4418,14 @@ defmodule BarkparkCloud.Web.Router do
 
               {:error, reason} ->
                 # The client seam failed (Vercel API error / not configured
-                # mid-flight). Surface a SAFE, bounded summary — the error
-                # tuples never carry the token or a request body we built.
+                # mid-flight). The RAW Vercel v13 response body rides
+                # `{:vercel_http_error, status, body}` (Vercel.Real.request/1 on a
+                # non-2xx) and can carry account/project internals — so it is
+                # NEVER echoed: the full detail stays server-side for operators
+                # (origin/main did NOT log here — redaction alone would blind
+                # them), the client gets only the bounded, status-keyed
+                # `vercel_reason/1`.
+                Logger.error("vercel_error: #{inspect(reason)}")
                 json(conn, 502, %{error: "vercel_error", detail: vercel_reason(reason)})
             end
 
@@ -4414,11 +4435,95 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # A bounded `inspect` of a Vercel client error for the 502 payload — the
-  # operator-facing summary, truncated so a verbose API body can't balloon the
-  # response. Client error tuples carry no credentials by construction.
-  defp vercel_reason(reason) do
-    reason |> inspect() |> String.slice(0, 300)
+  # A SAFE, generic Vercel-error summary for the CLIENT. `Vercel.Real.request/1`
+  # binds the RAW Vercel v13 response body into `{:vercel_http_error, status,
+  # body}` on a non-2xx (deploy_for/1's with-chain short-circuits it verbatim to
+  # the 502 detail), and that body can carry account/project internals. So it is
+  # NEVER echoed to the client: the http-error shape collapses to a bounded
+  # message keyed ONLY on the integer status, and EVERY other error shape
+  # (`:not_configured`, `:http_client_not_configured`, a `Jason.DecodeError`
+  # whose `.data` is body-bearing, a raw transport tuple) collapses to one
+  # generic constant via the BARE `_` catch-all (fail-closed — an unexpected term
+  # never reaches the wire raw). The full detail is `Logger.error`'d at the router
+  # else arm, so operators keep the diagnostic. The `error:` CODE
+  # (`vercel_error`) is unchanged, so the JS `friendly()` / Go `cloudError` key
+  # still resolves with zero UI regression. Mirrors `cloudflare_reason/1` +
+  # `billing_reason/1` above.
+  defp vercel_reason({:vercel_http_error, status, _body}) when is_integer(status) do
+    "Vercel rejected the deploy (HTTP #{status})"
+  end
+
+  defp vercel_reason(_reason) do
+    "the Vercel deploy could not be completed"
+  end
+
+  # A SAFE, generic billing-error summary for the CLIENT. The Stripe gateway
+  # binds the RAW Stripe HTTP response body into `{:stripe_http_error, status,
+  # body}` (StripeGateway.request/2), and that body can carry customer/PII
+  # internals — `cus_…` ids, request echoes. So it is NEVER echoed to the
+  # client: the http-error shape collapses to a bounded message keyed ONLY on
+  # the integer status, and EVERY other error shape collapses to one generic
+  # constant (fail-closed — an unexpected term never reaches the wire raw). The
+  # full detail is logged server-side at the gateway bind, so operators keep the
+  # diagnostic. NOTE: deliberately NOT `vercel_reason/1` — a shared summariser
+  # would couple two providers' redaction; each keeps its own status-keyed +
+  # bare-`_` fail-closed pair. The `error:` CODE is unchanged, so the
+  # JS `friendly()` / Go cloudError key still resolves with zero UI regression.
+  defp billing_reason({:stripe_http_error, status, _body}) when is_integer(status) do
+    "billing provider returned an error (HTTP #{status})"
+  end
+
+  defp billing_reason(_reason) do
+    "billing request could not be completed"
+  end
+
+  # The cf-in-front deploy binding (D57) THREADS the raw Cloudflare v4 response
+  # body into `{:cloudflare_http_error, status, body}` (Cloudflare.Real.request/1
+  # on a non-2xx), and that body can carry account/zone internals — `cf_zone_id`,
+  # record ids, the connected account's own metadata. So it is NEVER echoed to
+  # the client: the http-error shape collapses to a bounded message keyed ONLY on
+  # the integer status, and EVERY other shape reaching the else arm (a
+  # Jason.DecodeError struct whose `.data` is body-bearing, the `:not_configured`
+  # / `:http_client_not_configured` atoms, an Ecto.Changeset from set_cf_binding)
+  # collapses to one generic constant via the BARE `_` catch-all (fail-closed —
+  # an unexpected term never reaches the wire raw). The full detail is logged
+  # server-side at the router else arm, so operators keep the diagnostic. The
+  # `error:` CODE (`cloudflare_bind_failed`) is unchanged, so the Go CLI key still
+  # resolves with zero UI regression. Mirrors `billing_reason/1` above.
+  defp cloudflare_reason({:cloudflare_http_error, status, _body}) when is_integer(status) do
+    "Cloudflare rejected the DNS/proxy write (HTTP #{status})"
+  end
+
+  defp cloudflare_reason(_reason) do
+    "Cloudflare rejected the DNS/proxy write — the box is still serving standalone"
+  end
+
+  # The deploy/upload TRANSPORT boundary (transport-leak wave, D93). Three client
+  # echoes serialize `Sites.Deploy.start_reported/1`'s `{:error, term()}` (spec'd
+  # `term()`, unbounded) or `Plug.Conn.read_body`'s `{:error, reason, conn}` — the
+  # box-build 503, the artifact-upload 500, the prebuilt-upload 503. Prod is
+  # BOUNDED (`TaskStarter` spawns `run/1` fire-and-forget and DISCARDS its rich
+  # terms; only a supervisor refusal like `{:error, :max_children}` or a
+  # `read_body` `:timeout`/`:closed` atom travels), so this is hygiene, not a live
+  # token/PII escape — but a starter swap (`SyncStarter` forwards `run/1`'s rich
+  # terms) WOULD leak, so it is redacted fail-closed now for defense-in-depth. The
+  # busy-box refusal keeps a retry-actionable message (both the prod double-wrapped
+  # `{:error, {:error, :max_children}}` and the flat `{:error, :max_children}`
+  # shape); EVERY other shape collapses to one generic constant via the BARE `_`
+  # catch-all (fail-closed — an unexpected term never reaches the wire raw). The
+  # full detail is `Logger.error`'d at EACH router emit site, so operators keep the
+  # diagnostic (the log MUST live in router.ex, never the driver module — Golden
+  # Rule 4 / #11723 cp-deploy brick guard). The `error:` CODE
+  # (`deploy_not_started` / `upload_failed`) is unchanged, so the Go `cloudError`
+  # and JS `friendly()` keys still resolve with zero UI regression. Mirrors
+  # `cloudflare_reason/1` + `billing_reason/1` above.
+  defp transport_reason(reason)
+       when reason in [{:error, {:error, :max_children}}, {:error, :max_children}] do
+    "the deploy could not be started — the box is busy; retry shortly"
+  end
+
+  defp transport_reason(_reason) do
+    "the request could not be completed"
   end
 
   ## Instance-API proxy (C4 — charter decisions D46 / D51) — the console's
@@ -5839,7 +5944,7 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "billing_not_configured"})
 
           {:error, reason} ->
-            json(conn, 422, %{error: "checkout_failed", reason: inspect(reason)})
+            json(conn, 422, %{error: "checkout_failed", reason: billing_reason(reason)})
         end
     end
   end
@@ -5869,7 +5974,7 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "no_subscription"})
 
           {:error, reason} ->
-            json(conn, 422, %{error: "portal_failed", reason: inspect(reason)})
+            json(conn, 422, %{error: "portal_failed", reason: billing_reason(reason)})
         end
     end
   end
@@ -5929,7 +6034,7 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "no_subscription"})
 
           {:error, reason} ->
-            json(conn, 422, %{error: "cancel_failed", reason: inspect(reason)})
+            json(conn, 422, %{error: "cancel_failed", reason: billing_reason(reason)})
         end
     end
   end
@@ -6005,7 +6110,7 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 400, %{error: "invalid_signature"})
 
       {:error, reason} ->
-        json(conn, 400, %{error: "invalid_webhook", reason: inspect(reason)})
+        json(conn, 400, %{error: "invalid_webhook", reason: billing_reason(reason)})
     end
   end
 
@@ -12095,11 +12200,15 @@ defmodule BarkparkCloud.Web.Router do
           {:cont, bound_site}
         else
           {:error, reason} ->
+            # Belt: the FULL raw provider body stays server-side for operators;
+            # the client gets only the bounded, status-keyed `cloudflare_reason/1`
+            # (never `inspect(reason)`, which echoed the zone/account internals).
+            Logger.error("cloudflare_bind_failed: #{inspect(reason)}")
+
             {:halt,
              json(conn, 502, %{
                error: "cloudflare_bind_failed",
-               detail:
-                 "Cloudflare rejected the DNS/proxy write: #{inspect(reason)} — the box is still serving standalone"
+               detail: cloudflare_reason(reason)
              })}
         end
     end
@@ -12207,14 +12316,17 @@ defmodule BarkparkCloud.Web.Router do
               {:error, reason} ->
                 # The row is minted and audited, so the attempt is on the record
                 # and reapable — but no build is running, and saying otherwise is
-                # the failure this route exists to stop reporting.
+                # the failure this route exists to stop reporting. The raw term is
+                # kept server-side and the client sees a bounded message (D93).
+                Logger.error("site deploy_not_started (box build): #{inspect(reason)}")
+
                 json(conn, 503, %{
                   error: "deploy_not_started",
                   detail:
                     "the deployment row was created but the build driver could not be started" <>
                       " — nothing is building. Retry the deploy; if it keeps failing the control" <>
                       " plane is out of build capacity.",
-                  reason: inspect(reason),
+                  reason: transport_reason(reason),
                   deployment: site_deployment_json(deployment, site, bp)
                 })
             end
@@ -12540,7 +12652,7 @@ defmodule BarkparkCloud.Web.Router do
   # older than public-read), and naming WHICH box and WHAT it said is the
   # difference between a fixable error and a shrug.
   defp mint_failure_copy(bp, {:instance, status, body}) do
-    detail = body["error"] || body["detail"] || body["reason"]
+    detail = mint_failure_detail(body)
 
     base =
       "#{bp.slug} refused to mint the site's read token (HTTP #{status})"
@@ -12559,6 +12671,39 @@ defmodule BarkparkCloud.Web.Router do
 
   defp mint_failure_copy(bp, _reason),
     do: "#{bp.slug} is unreachable — could not mint the site's read token"
+
+  # The box's refusal arrives one of two ways: FLAT (`{"error": "forbidden"}`)
+  # or wrapped in a typed envelope (`{"error": {"code": ..., "message": ...}}` —
+  # TokenController's 422, and the 401/403 auth plugs nest the same way). A
+  # wrapped body used to reach the is_binary guard in mint_failure_copy/2 as a
+  # MAP, fail it, and the box's own words were discarded — the sibling of the
+  # rollback/teardown relay's nested-envelope drop (#11846). Reach INTO the
+  # envelope BEFORE the guard: compose the machine `code` and the human string
+  # as `code — message` so the 502 detail names WHY, not just WHICH box. The flat
+  # arm is untouched, so flat bodies resolve BYTE-IDENTICALLY to pre-fix output.
+  defp mint_failure_detail(%{"error" => %{} = err}) do
+    human = err["message"] || err["detail"] || err["reason"]
+    code = err["code"]
+
+    cond do
+      is_binary(code) and code != "" and is_binary(human) and human != "" ->
+        "#{code} — #{human}"
+
+      is_binary(human) and human != "" ->
+        human
+
+      is_binary(code) and code != "" ->
+        code
+
+      true ->
+        nil
+    end
+  end
+
+  defp mint_failure_detail(body) when is_map(body),
+    do: body["error"] || body["detail"] || body["reason"]
+
+  defp mint_failure_detail(_body), do: nil
 
   ## site-spawner W8 (charter D73/D74/D75) — CREATE VERIFIES THE BINDING BY
   ## READING IT.
@@ -13843,7 +13988,8 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 413, %{error: "artifact_too_large", max_bytes: max_artifact_bytes()})
 
       {:error, reason, conn} ->
-        json(conn, 500, %{error: "upload_failed", reason: inspect(reason)})
+        Logger.error("site upload_failed (artifact read_body): #{inspect(reason)}")
+        json(conn, 500, %{error: "upload_failed", reason: transport_reason(reason)})
     end
   end
 
@@ -13919,6 +14065,8 @@ defmodule BarkparkCloud.Web.Router do
             # upload would send them into a 200 that builds nothing, which is the
             # same lie in a new costume. THIS row is now a dead end: `queued`,
             # `claim_epoch` 0, covered by no reaper pass.
+            Logger.error("site deploy_not_started (prebuilt upload): #{inspect(reason)}")
+
             json(conn, 503, %{
               error: "deploy_not_started",
               detail:
@@ -13926,7 +14074,7 @@ defmodule BarkparkCloud.Web.Router do
                   " — nothing is building, and re-uploading these bytes will answer" <>
                   " `already_uploaded` without starting one. Mint a NEW prebuilt deployment" <>
                   " and upload again.",
-              reason: inspect(reason),
+              reason: transport_reason(reason),
               artifact_sha256: sha,
               deployment: site_deployment_json(stamped, site, bp)
             })

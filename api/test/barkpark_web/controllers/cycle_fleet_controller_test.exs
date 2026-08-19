@@ -1092,6 +1092,47 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert post_seal["error"]["details"]["reason"] =~ "experiment_phase_sealed"
   end
 
+  test "release-gate open with no correction_of returns 422, not 500", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    epic_id = "gate-open-missing-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    open_epic(base, token, ["gate-unit"])
+
+    body =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/release-gates/open", %{"idempotency_key" => "k1"})
+      |> json_response(422)
+
+    assert body["error"]["code"] == "validation_failed"
+    assert body["error"]["details"]["reason"] =~ "correction_of_required"
+  end
+
+  test "release-paper stage with a non-object content returns 422, not 500", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    epic_id = "gate-stage-scalar-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    open_epic(base, token, ["gate-unit"])
+
+    body =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/release-gates/#{Ecto.UUID.generate()}/papers/author/stage", %{
+        "content" => "not-an-object",
+        "title" => "t"
+      })
+      |> json_response(422)
+
+    assert body["error"]["code"] == "validation_failed"
+    assert body["error"]["details"]["reason"] =~ "ambiguous_content"
+  end
+
   defp open_epic(base, token, inventory) do
     build_conn()
     |> bearer(token)

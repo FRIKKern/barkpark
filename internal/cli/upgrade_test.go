@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,78 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestReleaseCacheRoundTrip: a written cache reads back FRESH with the same
+// version, via an atomic 0600 file in the config dir.
+func TestReleaseCacheRoundTrip(t *testing.T) {
+	withTempConfigHome(t)
+
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a never-written cache must read as cold")
+	}
+	if err := writeReleaseCache("1.15.0"); err != nil {
+		t.Fatalf("writeReleaseCache: %v", err)
+	}
+	rc, fresh := readReleaseCache()
+	if !fresh || rc.Latest != "1.15.0" {
+		t.Fatalf("cache = %+v fresh=%v, want fresh latest 1.15.0", rc, fresh)
+	}
+
+	// 0600 — it lives beside the token-bearing config.json.
+	path, err := releaseCachePath()
+	if err != nil {
+		t.Fatalf("releaseCachePath: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat cache: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("cache mode = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+// TestReleaseCacheStaleIsCold: a reading older than the TTL, a future reading
+// (clock skew), an empty version, and malformed bytes all read as cold — the
+// cache never hands whoami a verdict it cannot stand behind.
+func TestReleaseCacheStaleIsCold(t *testing.T) {
+	withTempConfigHome(t)
+	path, err := releaseCachePath()
+	if err != nil {
+		t.Fatalf("releaseCachePath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	writeRaw := func(rc releaseCache) {
+		b, _ := json.Marshal(rc)
+		if err := os.WriteFile(path, b, 0o600); err != nil {
+			t.Fatalf("write cache: %v", err)
+		}
+	}
+
+	writeRaw(releaseCache{Latest: "1.15.0", CheckedAt: time.Now().Add(-releaseCacheTTL - time.Minute)})
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a cache older than the TTL must read as cold")
+	}
+	writeRaw(releaseCache{Latest: "1.15.0", CheckedAt: time.Now().Add(time.Hour)})
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a future-dated cache (clock skew) must read as cold, never fresh")
+	}
+	writeRaw(releaseCache{Latest: "", CheckedAt: time.Now()})
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("an empty-version cache must read as cold")
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("write malformed: %v", err)
+	}
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a malformed cache must read as cold, not crash")
+	}
+}
 
 func TestCompareVersions(t *testing.T) {
 	cases := []struct {
@@ -490,6 +562,7 @@ func TestRunUpgradeCheckYAML(t *testing.T) {
 }
 
 func TestRunUpgradeCheckBehind(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.1")
 	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
@@ -500,6 +573,7 @@ func TestRunUpgradeCheckBehind(t *testing.T) {
 }
 
 func TestRunUpgradeCheckUpToDate(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.2")
 	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
@@ -509,7 +583,50 @@ func TestRunUpgradeCheckUpToDate(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeCheckWritesReleaseCache: `bp upgrade --check` runs a
+// network-bearing resolve, so it must warm the release cache a later
+// network-free whoami reads its freshness verdict from — landing the resolved
+// version with a fresh CheckedAt.
+func TestRunUpgradeCheckWritesReleaseCache(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "0.0.1")
+	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("release cache must start cold")
+	}
+	out, _, _ := newTestWriter()
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitGeneric {
+		t.Fatalf("--check behind = %d, want %d", code, exitGeneric)
+	}
+	rc, fresh := readReleaseCache()
+	if !fresh || rc.Latest != "0.0.2" {
+		t.Fatalf("release cache = %+v fresh=%v, want fresh latest 0.0.2 from the --check resolve", rc, fresh)
+	}
+}
+
+// TestRunUpgradeFailedResolveWritesNoReleaseCache: when the release resolve
+// fails, runUpgrade returns before the cache write, so nothing is cached — a
+// verdict is never fabricated from a resolve that never landed.
+func TestRunUpgradeFailedResolveWritesNoReleaseCache(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "0.0.1")
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close() // connection refused → latestReleaseVersion errors
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	out, _, _ := newTestWriter()
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitGeneric {
+		t.Fatalf("--check with a dead base = %d, want %d", code, exitGeneric)
+	}
+	if _, fresh := readReleaseCache(); fresh {
+		t.Errorf("a failed resolve must write no release cache")
+	}
+}
+
 func TestRunUpgradeEndToEnd(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.1")
 	exe, srv := upgradeFixture(t, "0.0.2", []byte("new-binary"), "")
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)

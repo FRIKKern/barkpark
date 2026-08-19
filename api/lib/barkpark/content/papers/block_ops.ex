@@ -170,18 +170,39 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # existing row's scope preserved) and hydration scopes by the existing row.
     scope_opts = paper_scope_opts(attrs)
 
-    scope_attrs =
+    # Fail-closed scope stamp (felix-w26): put_scope_attrs now returns
+    # {:ok, attrs} | {:error, reason} — a refused dataset resolution surfaces
+    # as the error (this fn is already error-shaped for every caller), never a
+    # silent dataset_id=NULL stamp. The UPDATE-without-explicit-scope arm
+    # stamps nothing, exactly as before.
+    scope_attrs_result =
       cond do
         scope_opts != [] ->
-          Map.delete(Content.put_scope_attrs(%{"dataset" => dataset}, scope_opts), "dataset")
+          stamped_scope_attrs(dataset, scope_opts)
 
         existing ->
-          %{}
+          {:ok, %{}}
 
         true ->
-          Map.delete(Content.put_scope_attrs(%{"dataset" => dataset}, []), "dataset")
+          stamped_scope_attrs(dataset, [])
       end
 
+    with {:ok, scope_attrs} <- scope_attrs_result do
+      upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs)
+    end
+  end
+
+  # Stamp a one-key attrs map to harvest ONLY the resolved scope ids — the
+  # "dataset" key is the resolver's input, not part of the stamp.
+  defp stamped_scope_attrs(dataset, scope_opts) do
+    with {:ok, stamped} <- Content.put_scope_attrs(%{"dataset" => dataset}, scope_opts) do
+      {:ok, Map.delete(stamped, "dataset")}
+    end
+  end
+
+  # The post-stamp tail of do_upsert_blocks_doc/3 — body unchanged, split out
+  # so the fail-closed scope stamp above can error before any content build.
+  defp upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs) do
     embed_scope =
       if scope_attrs == %{} and existing do
         %{

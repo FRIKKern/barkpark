@@ -32,7 +32,7 @@ func varErrorf(format string, args ...any) *VarError {
 
 // substituter resolves {{.Token}} occurrences to their replacement
 // text. The map is keyed by token spelling: for a transform variable
-// each of the four joiner spellings of the NAME maps to the same
+// each of the five joiner spellings of the NAME maps to the same
 // joiner's output over the VALUE's word list; for an OPAQUE variable
 // every legal spelling maps to the verbatim value (D22/D37).
 type substituter struct {
