@@ -1,9 +1,10 @@
 defmodule BarkparkWeb.Layouts.StudioUpdateBannerTest do
   @moduledoc """
   The Studio self-update banner (isu-4): renders in `studio.html.heex`
-  directly below the topbar ONLY when the session is admin (the
-  `shares_admin?` chrome flag) AND `Barkpark.SelfUpdate.status/0`
-  reports `state: :behind`. Any other state — including the `:disabled`
+  directly below the topbar ONLY when the session is an INSTANCE admin
+  (the HOST-level `instance_admin?` chrome flag — NOT the
+  workspace-scoped `shares_admin?`; see the oracle describe below) AND
+  `Barkpark.SelfUpdate.status/0` reports `state: :behind`. Any other state — including the `:disabled`
   default when the Checker is not supervised (test env) — must emit no
   banner markup.
   """
@@ -176,6 +177,93 @@ defmodule BarkparkWeb.Layouts.StudioUpdateBannerTest do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
+      refute html =~ ~s|id="bp-update-bar"|
+    end
+  end
+
+  # ── task-4cfc68a1e3bec452: the bar rides instance_admin?, not shares_admin? ──
+  #
+  # arpss-w10 split StudioChrome's single admin flag in two:
+  #
+  #   * `shares_admin?` — WORKSPACE-scoped seat authority on the MOUNTED
+  #     workspace (literally `BarkparkWeb.Studio.Caps.admin?/1`).
+  #   * `instance_admin?` — the HOST-level oracle (admin api_token OR an
+  #     account with admin authority on the DEFAULT workspace).
+  #
+  # The self-update bar is host-level: it offers to upgrade the BEAM that
+  # every workspace runs on. `layouts/studio.html.heex` was outside that
+  # PR's fence, so it kept passing the now-NARROWED `shares_admin?` and the
+  # bar vanished for a host operator browsing a workspace where they hold no
+  # admin seat. These two tests pin the split at the RENDERED layer — the
+  # defect is pure wiring, so asserting on assigns alone would pass on the
+  # broken layout and prove nothing.
+  #
+  # MediaLive is the surface on purpose: StudioLive re-derives `shares_admin?`
+  # from `Caps.admin?/1` in its own mount, so the chrome values are only
+  # cleanly observable on the other chrome surfaces.
+  describe "self-update bar oracle (instance vs. workspace admin)" do
+    setup do
+      {default_ws, _proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      foreign_ws = Barkpark.TenancyFixtures.create_workspace!("banner-foreign")
+
+      {:ok, foreign_proj} =
+        Barkpark.Tenancy.create_project_with_dataset(foreign_ws, %{name: "banner-foreign-p"})
+
+      %{default_ws: default_ws, foreign_ws: foreign_ws, foreign_proj: foreign_proj}
+    end
+
+    defp user_conn_for(memberships) do
+      email = "banner-oracle-#{System.unique_integer([:positive])}@example.com"
+
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+      for {ws, role} <- memberships do
+        {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, user.id, role, "user")
+      end
+
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      Plug.Test.init_test_session(Phoenix.ConnTest.build_conn(), %{"user_session" => raw})
+    end
+
+    defp media_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/d/production/studio/media"
+
+    test "an INSTANCE admin with no admin seat in the mounted workspace STILL sees the bar (and no Share chrome)",
+         %{default_ws: default_ws, foreign_ws: foreign_ws, foreign_proj: foreign_proj} do
+      prime_behind!()
+
+      conn = user_conn_for([{default_ws, "admin"}, {foreign_ws, "member"}])
+      {:ok, view, html} = live(conn, media_url(foreign_ws, foreign_proj))
+
+      # The socket under test really is the split case: host-level YES,
+      # workspace seat NO.
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.instance_admin? == true
+      assert assigns.shares_admin? == false
+
+      # THE PROOF. Reds on the pre-fix layout (`admin?={assigns[:shares_admin?]}`)
+      # — the host operator lost the bar the moment they browsed a workspace
+      # they merely belong to.
+      assert html =~ ~s|id="bp-update-bar"|
+      assert html =~ "New update available — Barkpark"
+
+      # ...while the WORKSPACE-scoped affordance stays correctly hidden. The
+      # split must not be re-merged in either direction.
+      refute html =~ ~s{phx-click="shares-open"}
+    end
+
+    test "a seated WORKSPACE admin who is not an instance admin gets Share chrome and NO bar",
+         %{foreign_ws: foreign_ws, foreign_proj: foreign_proj} do
+      prime_behind!()
+
+      conn = user_conn_for([{foreign_ws, "admin"}])
+      {:ok, view, html} = live(conn, media_url(foreign_ws, foreign_proj))
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.shares_admin? == true
+      assert assigns.instance_admin? == false
+
+      assert html =~ ~s{phx-click="shares-open"}
       refute html =~ ~s|id="bp-update-bar"|
     end
   end
