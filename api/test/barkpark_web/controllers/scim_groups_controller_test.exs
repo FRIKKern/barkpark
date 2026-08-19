@@ -943,4 +943,84 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
       assert resp["scimType"] == "uniqueness"
     end
   end
+
+  # A scalar element inside an is_list-guarded param reached `Access.get/3`
+  # (`&1["value"]` / `&1["path"]`) and raised FunctionClauseError → a generic 500,
+  # not even the SCIM Error shape an IdP can parse. The element shape is now
+  # filtered before the Access hop; a malformed entry is DROPPED, matching what
+  # the pre-existing is_binary filter already does to a `{"value": 123}` member.
+  describe "scalar members / Operations are dropped, never a 500 (element-shape class)" do
+    test "POST with string members returns 201 and no members" do
+      %{token: token} = org_with_ws("gscalarpost")
+
+      body =
+        scim(token)
+        |> post(
+          "/scim/v2/Groups",
+          Jason.encode!(%{
+            "displayName" => "Admins",
+            "role" => "admin",
+            "members" => ["u1", "u2"]
+          })
+        )
+        |> json_response(201)
+
+      assert member_values(body) == []
+    end
+
+    # THE PRECONDITION, PINNED: an empty displayName is rejected by
+    # Scim.create_group BEFORE member_ids/1 ever runs, so a probe with a bare bad
+    # body records a clean 400 and would falsely refute the crash above. A valid
+    # displayName AND role are load-bearing for reaching the element-shape path.
+    test "an empty displayName still returns 400 (validation precedes member_ids/1)" do
+      %{token: token} = org_with_ws("gscalarpre")
+
+      assert scim(token)
+             |> post(
+               "/scim/v2/Groups",
+               Jason.encode!(%{"displayName" => "", "role" => "admin", "members" => ["u1"]})
+             )
+             |> json_response(400)
+    end
+
+    test "PUT replace with a numeric member returns 200 and no members" do
+      %{token: token} = org_with_ws("gscalarput")
+      gid = create_group(token, "Admins", "admin") |> Map.fetch!("id")
+
+      body =
+        scim(token)
+        |> put(
+          "/scim/v2/Groups/#{gid}",
+          Jason.encode!(%{"displayName" => "Admins", "members" => [123]})
+        )
+        |> json_response(200)
+
+      assert member_values(body) == []
+    end
+
+    test "PATCH with a scalar Operation returns 200 (member_ops/1 &1[\"path\"])" do
+      %{token: token} = org_with_ws("gscalarop")
+      gid = create_group(token, "Admins", "admin") |> Map.fetch!("id")
+
+      body =
+        scim(token)
+        |> patch("/scim/v2/Groups/#{gid}", Jason.encode!(%{"Operations" => ["members"]}))
+        |> json_response(200)
+
+      assert member_values(body) == []
+    end
+
+    test "PATCH with a scalar inside the op value returns 200 (member_ids/1 &1[\"value\"])" do
+      %{token: token} = org_with_ws("gscalarval")
+      gid = create_group(token, "Admins", "admin") |> Map.fetch!("id")
+
+      op =
+        Jason.encode!(%{
+          "Operations" => [%{"op" => "add", "path" => "members", "value" => ["u1"]}]
+        })
+
+      body = scim(token) |> patch("/scim/v2/Groups/#{gid}", op) |> json_response(200)
+      assert member_values(body) == []
+    end
+  end
 end

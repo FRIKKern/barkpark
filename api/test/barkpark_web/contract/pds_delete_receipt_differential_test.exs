@@ -97,8 +97,11 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
   setup do
-    {:ok, _} = Auth.create_token(@admin, "pds-w39", "test", ["read", "write", "admin"])
-    :ok
+    {:ok, admin_token} = Auth.create_token(@admin, "pds-w39", "test", ["read", "write", "admin"])
+    # The struct is returned as context (rather than recovered later through
+    # `Auth.verify_token/1`) so the share-link receipt test can grant this admin
+    # a membership in the workspace it acts on — see that test's own note.
+    {:ok, admin_token: admin_token}
   end
 
   defp admin(conn) do
@@ -226,9 +229,16 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
 
   describe "DELETE /v1/shares/links/:id" do
     test "the receipt's `revoked` descends from the stamped row, not from a literal `true`",
-         %{conn: conn} do
+         %{conn: conn, admin_token: admin_token} do
       ws = create_workspace!(uniq("w39ws"))
       proj = create_project!(ws, uniq("w39proj"))
+
+      # FIXTURE REPAIR (arpss-w8): revoking a link now requires an ADMIN
+      # MEMBERSHIP in the LINK's own workspace. `create_token/4` homes @admin in
+      # the seeded `default` workspace and `create_workspace!/1` writes no
+      # membership, so this admin was a stranger to the workspace it revokes in.
+      # Zero production change — this is a receipt-shape pin, not a tenancy test.
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_token.id, "admin")
 
       {:ok, {_raw, link}} =
         Links.create(%{
