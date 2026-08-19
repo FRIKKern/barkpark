@@ -86,8 +86,8 @@ defmodule BarkparkWeb.StudioChrome do
   > NOTE: `layouts/studio.html.heex` still passes `shares_admin?` to
   > `studio_update_banner`. Re-pointing that one attribute at
   > `instance_admin?` is a layout change, outside this fence, filed as
-  > `arpss-w10-bl-update-banner-consumes-instance-admin`. Until it lands
-  > the banner rides the narrowed flag.
+  > `task-4cfc68a1e3bec452`. Until it lands the banner rides the narrowed
+  > flag.
 
   It also attaches a `handle_event` hook to EVERY chrome surface:
 
@@ -533,9 +533,10 @@ defmodule BarkparkWeb.StudioChrome do
   # to upgrade the instance, which is not a tenant-scoped act. Without the
   # account arm, a cloud/SSO session — which carries no api_token — would see
   # no host chrome even as the owner (this is why the tmux tab was invisible on
-  # cloud-login instances; the tmux TAB has since moved to `shares_admin?`,
-  # which is scoped, and a workspace admin now reaches it on their own
-  # workspace without needing a Default role at all).
+  # cloud-login instances). The tmux TAB itself is NOT on this flag — it is a
+  # workspace-scoped affordance and rides `shares_admin?`, so a workspace admin
+  # now reaches it on their own workspace with no Default role at all. What this
+  # arm still carries is the self-update banner.
   #
   # NOT used for any workspace-scoped affordance — that is `shares_admin?`,
   # which is `Caps.admin?/1`. Do not re-merge these two.
