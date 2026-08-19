@@ -219,4 +219,57 @@ buckets on two session-authenticated routes, and D13's wedged-live-holder residu
 
 ## Wave log
 
-_(empty — the lead appends one line per merged wave)_
+### Wave 2026-08-19 — sibling ETS-bound atomicity (wave 3)
+
+**Premise refuted, and that is the headline.** The wave was briefed to mirror
+#12579's `:ets.select_replace/2` CAS onto four sibling read-modify-write
+admission bounds. **Zero of the four had #12579's shape.** The cloud limiters
+already commit through `:ets.update_counter/4` (an atomic RMW with a default
+seed); the `/v1/graph` cap is ticket-then-count (the row is inserted *before*
+`:ets.info(:size)` is read, so the latest admitter counts itself and refuses);
+`RequestStats` writes a single `:ets.insert` on a VM-unique key with no
+preceding lookup. No CAS was ported anywhere, no retry loop was added anywhere,
+and therefore no retry distribution or exhaustion rate is quoted anywhere — the
+absence is the finding, not a gap in it.
+
+**Two of the four were still genuinely fail-open, by a different mechanism.**
+Both are sweep-predicate defects, not lost updates:
+
+| Bound | Disposition | Mechanism | Reachability |
+|---|---|---|---|
+| `Accounts.TwoFactorRateLimiter` + `DeviceAuth.RateLimiter` | **FIXED** (#12628) | the stale-window sweep guard `{:"/=", :"$1", window}` deleted every row for the key that was not the caller's own — *including a newer one*, refunding an exhausted budget | **unauthenticated** on `register:` / `start:` / `poll:` / `oauth_exchange:`; pre-session on the 2FA challenge — the crown |
+| `TasksController` `/v1/graph` slot cap | **FIXED** (#12629) | the TTL sweep's `deadline <= now or` arm reaped rows of **live** holders whose derivation outran the 60s TTL; every acquire sweeps first, so an arriving request performed that reap on the live holders' behalf and was admitted over the cap — self-amplifying | authenticated bearer (`:require_token`); severity is blast radius, not reach |
+| `BarkparkWeb.RequestStats` | **CITED SAFE** (#12630) | not an admission bound at all: unique-keyed single insert, and the only in-tree reader is a branchless `json(conn, RequestStats.stats())`; the off-box chain terminates in a `quota=nil` meter that tints and never enforces | n/a |
+
+Fix size: **one match-spec token per cloud limiter** and **one deleted `or`
+arm** on the graph cap. Every limit, burst capacity, window and `retry_after`
+derivation is byte-unchanged; all thirteen pre-existing test files ran
+byte-unchanged and green.
+
+**RED-FIRST was real and was re-derived independently by the reviewer, not
+inherited.** Reverting the cloud lib bodies to `origin/main` gives 3 tests / 3
+failures (`right: :ok` where a rate-limited tuple is asserted, on both
+limiters); restoring *only* the graph cap's `deadline <= now or` arm gives 5
+tests / 1 failure on the headline assertion, while the legacy twin and
+dead-owner controls stay green in both states — which is what makes the
+headline the discriminating test rather than a test that merely agrees with the
+fix.
+
+**Class residue is zero for the named class.** `git grep -nF ':"/="' -- api/lib
+cloud/lib` returns nothing after these merges, and every remaining `:ets.lookup`
+in `api/lib` + `cloud/lib` is a cache or a record read, not a bound.
+
+**Ledger:** three slice tasks, all claimed, all stamped criterion-by-criterion
+with real evidence as the work happened, all left `in_progress` with only the
+merge-gated row open. **No ledger fixes were needed** — the first wave in a
+while where the reviewer found nothing to correct.
+
+**Grade: A−.** What the next wave should take, in order: merge #12628 → #12629 →
+#12630 (disjoint files, any order works, but the unauthenticated crown first);
+then the four residue rows this wave filed rather than built —
+`acpc-bl-poll-key-unbounded-ets-growth` (attacker-chosen key space, the *fifth*
+failure mode and the one this wave deliberately did not touch),
+`acpc-bl-graph-slot-wedged-live-holder` (the fail-closed capacity loss #12629
+knowingly trades for), the untested `ReplayRing` single-writer invariant, and
+the two per-IP buckets on session-authenticated routes. Full story:
+Paper `sibling-ets-atomicity-wave-2026-08-19`.
