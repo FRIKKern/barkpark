@@ -1,0 +1,211 @@
+defmodule Barkpark.Tenancy.AuthTotalityTest do
+  @moduledoc """
+  TOTALITY of the tenant-authority chokepoint: `Barkpark.Tenancy.Auth`'s READ
+  predicates must DENY on malformed or absent input, never raise.
+
+  Before the `membership/2` normalisation seam, a `nil` or non-binary in either
+  id position raised `FunctionClauseError` (HTTP 500 via Plug's `Any` fallback)
+  and ANY non-castable binary — the empty string included — raised
+  `Ecto.Query.CastError` (HTTP 400 via `phoenix_ecto`). Never `Ecto.CastError`:
+  that module fires ZERO times on this path, so a test asserting it would be
+  vacuous. Every rescue below therefore names `Ecto.Query.CastError`.
+
+  Each malformed row is its OWN test so it reds INDIVIDUALLY under mutation
+  (restore `auth.ex` to origin/main, keep this file). The CONTROL rows are
+  green in BOTH runs — a matrix where every row reds is a blanket deny, not a
+  totality proof.
+
+  This file asserts NO new authorization semantics. Semantics-preserved lives
+  in `test/barkpark/tenancy_auth_test.exs`, which this wave leaves BYTE-UNTOUCHED.
+  """
+  use Barkpark.DataCase, async: true
+
+  alias Barkpark.Accounts.User
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Content.CallerContext
+  alias Barkpark.Tenancy.Auth
+
+  # ---------------------------------------------------------------------------
+  # The public surface, pinned as {name, arity} TUPLES.
+  #
+  # Names alone would collapse this to 9 entries and silently accept an arity
+  # change on `workspace_admin?` or a new `create_membership/5`:
+  # `create_membership` is one 4-arity head with inline `\\` defaults, so it
+  # exports arities 2, 3 AND 4. The module has no `use` macro (only
+  # `import Ecto.Query, warn: false`), declares no behaviours and defines no
+  # macros, so this literal is exactly the hand-written public set.
+  # ---------------------------------------------------------------------------
+  @public_surface [
+    authorize: 3,
+    create_membership: 2,
+    create_membership: 3,
+    create_membership: 4,
+    member?: 2,
+    membership: 2,
+    membership_role: 2,
+    permits?: 2,
+    role_for_permissions: 1,
+    role_permits?: 3,
+    workspace_admin?: 2
+  ]
+
+  # The DRIVEN subset — every entry point reachable from a request path with a
+  # client-supplied id. Everything else is excluded ON PURPOSE:
+  #
+  #   * create_membership/2,3,4 and role_for_permissions/1 — WRITE constructors,
+  #     deliberately LOUD. Three create_membership callers discard the return
+  #     value, so a silent denial would provision a principal with no seat and
+  #     report success; every caller derives its ids from a loaded row, so the
+  #     crash is unreachable from client input.
+  #   * permits?/2 — already total via its catch-all in auth.ex; it takes no id.
+  #     Pinned as a control below rather than driven through the matrix.
+  #   * role_permits?/3 — SPLIT expectation, own dedicated test at the bottom.
+  #     Its first argument is a ROLE NAME, not a principal id, and built-in
+  #     roles are workspace-id-INDEPENDENT by design, so a blanket
+  #     "malformed -> denial" row here would FORCE the exact authorization
+  #     tightening this wave forbids.
+
+  defp valid_uuid, do: Ecto.UUID.generate()
+
+  # Every driven entry point paired with the denial value its own @spec declares.
+  defp driven(principal, workspace_id) do
+    [
+      {"membership/2", fn -> Auth.membership(principal, workspace_id) end, nil},
+      {"membership_role/2", fn -> Auth.membership_role(principal, workspace_id) end, nil},
+      {"member?/2", fn -> Auth.member?(principal, workspace_id) end, false},
+      {"workspace_admin?/2", fn -> Auth.workspace_admin?(principal, workspace_id) end, false},
+      {"authorize/3 :read", fn -> Auth.authorize(principal, workspace_id, :read) end,
+       {:error, :forbidden}},
+      {"authorize/3 :admin", fn -> Auth.authorize(principal, workspace_id, :admin) end,
+       {:error, :forbidden}}
+    ]
+  end
+
+  # Drives every entry point and asserts the spec'd denial value with NO raise.
+  # A raise is converted into `{:raised, Module}` so the failure message NAMES
+  # the exception module the mutation run reported.
+  defp assert_denies(principal, workspace_id) do
+    for {label, fun, expected} <- driven(principal, workspace_id) do
+      actual =
+        try do
+          fun.()
+        rescue
+          e in FunctionClauseError -> {:raised, e.__struct__}
+          e in Ecto.Query.CastError -> {:raised, e.__struct__}
+        end
+
+      assert actual == expected,
+             "#{label} returned #{inspect(actual)} — expected the denial value #{inspect(expected)}"
+    end
+  end
+
+  describe "public surface pin" do
+    test "Auth exports exactly the 11 pinned {name, arity} tuples" do
+      assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
+    end
+  end
+
+  describe "malformed workspace id denies at every driven entry point" do
+    test "nil workspace id" do
+      assert_denies(valid_uuid(), nil)
+    end
+
+    test "non-binary workspace id" do
+      assert_denies(valid_uuid(), 123)
+    end
+
+    test "empty-string workspace id" do
+      assert_denies(valid_uuid(), "")
+    end
+
+    test "non-UUID workspace id" do
+      assert_denies(valid_uuid(), "zzz")
+    end
+
+    test "16-byte non-UUID workspace id is a synthetic UUID that matches no row" do
+      # Run-measured: on origin/main this RAISED Ecto.Query.CastError like any
+      # other non-UUID string. After the seam, Ecto.UUID.cast/1 accepts any
+      # 16-byte binary as raw UUID bytes, so it normalises to a well-formed
+      # synthetic UUID, DOES reach the query, and denies by matching no row.
+      # That is the one real WIDENING this seam admits — the raw 16 bytes of a
+      # LIVE workspace id now resolve instead of crashing. No privilege is
+      # gained (producing those bytes requires already holding the id); the
+      # auth.ex moduledoc records it explicitly rather than smuggling it.
+      assert_denies(valid_uuid(), "0123456789abcdef")
+    end
+  end
+
+  describe "malformed principal denies at every driven entry point" do
+    test "nil principal" do
+      assert_denies(nil, valid_uuid())
+    end
+
+    test "non-binary principal" do
+      assert_denies(:not_a_principal, valid_uuid())
+    end
+
+    test "non-UUID principal id" do
+      assert_denies("zzz", valid_uuid())
+    end
+
+    test "%ApiToken{id: nil}" do
+      assert_denies(%ApiToken{id: nil, permissions: ["admin"]}, valid_uuid())
+    end
+
+    test "%User{id: nil}" do
+      assert_denies(%User{id: nil}, valid_uuid())
+    end
+
+    test "unrecognised principal struct (%CallerContext{}) denies at membership/2" do
+      # The near-miss two prior share waves routed around. It must DENY at
+      # membership/2 — never be unwrapped there. (authorize/3 has its own
+      # CallerContext arm; that arm re-enters membership/2 with a reconstructed
+      # bare principal and is unaffected by this row.)
+      assert_denies(%CallerContext{}, valid_uuid())
+    end
+  end
+
+  describe "controls — green BEFORE and AFTER the seam" do
+    test "a valid UUID naming an unknown workspace denies without raising" do
+      assert_denies(valid_uuid(), valid_uuid())
+    end
+
+    test "permits?/2 was already total and stays so" do
+      refute Auth.permits?(nil, :admin)
+      refute Auth.permits?(%ApiToken{permissions: nil}, :read)
+      assert Auth.permits?(%ApiToken{permissions: ["admin"]}, :admin)
+    end
+  end
+
+  describe "role_permits?/3 — SPLIT expectation, the anti-tightening lock" do
+    test "a built-in role with an empty workspace id still permits (UNCHANGED)" do
+      # A NEW PIN on EXISTING behaviour: green on origin/main too, and that is
+      # correct. Built-in roles resolve from the compiled-in map BEFORE any DB
+      # read, so a tenant cannot redefine `admin` to escalate. A cast guard
+      # placed above that lookup would flip this true -> false — the silent
+      # authorization TIGHTENING this wave forbids.
+      assert Auth.role_permits?("admin", "", :admin)
+      assert Auth.role_permits?("admin", "not-a-uuid", :admin)
+      assert Auth.role_permits?("member", "", :read)
+      assert Auth.role_permits?("owner", "", :write)
+    end
+
+    test "a CUSTOM role with a malformed workspace id denies instead of raising" do
+      # The RED row: only a non-built-in name reaches db_actions/2, which is
+      # where the cast guard sits. Before the guard this raised
+      # Ecto.Query.CastError.
+      actual =
+        try do
+          Auth.role_permits?("custom-x", "zzz", :admin)
+        rescue
+          e in Ecto.Query.CastError -> {:raised, e.__struct__}
+        end
+
+      assert actual == false, "expected a denial, got #{inspect(actual)}"
+    end
+
+    test "a CUSTOM role with a valid workspace id still resolves from the DB (UNCHANGED)" do
+      refute Auth.role_permits?("custom-x", valid_uuid(), :admin)
+    end
+  end
+end
