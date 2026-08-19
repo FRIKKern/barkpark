@@ -19,10 +19,45 @@ defmodule BarkparkWeb.Studio.Caps do
       every `derive/1`, so a grant that expired mid-session drops its cap the
       next time the gate reads it — no stale mount-time assign.
 
-  `admin` is deliberately NEVER grant-conferred (a grant confers working
-  access, not tenant control — `Access` only ever mints read/write). Its arm is
-  exactly `StudioChrome.admin?/2`: an `admin`-permissioned api_token OR an
-  account with the `:admin` role on the workspace.
+  ## `admin` — WORKSPACE-SCOPED SEAT AUTHORITY (arpss-w10, charter D22)
+
+  `admin` is deliberately NEVER grant-conferred. NOT because `Access` cannot
+  mint it — it CAN: `Barkpark.Access.Grant`'s `@capabilities` is
+  `~w(read write admin)` and `POST /v1/access` passes client `capabilities`
+  straight through (`@mint_fields` in `AccessController`); only the Studio
+  airdrop PICKER restricts itself to read/write. The rule is a DELIBERATE
+  refusal at this gate: a grant confers working access, not tenant control, so
+  `derive/1` never unions a grant into the `admin` arm. (Corrected 2026-08-19:
+  the previous sentence, "`Access` only ever mints read/write", was FALSE.)
+
+  Both admin answers — `derive/1`'s `admin` key and `admin?/1` — spell the same
+  predicate: **`role_permits?(membership_role, ws_id, :admin)`**, i.e. the seat
+  the principal holds IN THIS WORKSPACE, for BOTH principal kinds. For a USER
+  that is what it always was. For an API TOKEN it is new: an `admin`-permissioned
+  token must ALSO hold an admin-conferring membership ROLE here. That closes the
+  barkpark-23yi/fsko shape at the Studio surface — a global-admin token added to
+  workspace B as a plain `member` is NOT a Studio admin of B — and it is the
+  reason a NIL / unresolved workspace now DENIES admin (the seat rule has no
+  workspace to read there). That last point OVERTURNS this module's former
+  claim that the token arm "still answers on a socket whose workspace is
+  unresolved"; it costs nothing reachable, because `:scoped_studio` always
+  mounts a resolved `%Workspace{}` and the flat `/studio/*` chrome routes never
+  derive caps at all. It does NOT close `task-46e7d44068e7185e`, which is about
+  a nil `workspace_id` COLUMN, not a nil argument.
+
+  The predicate is NEITHER canonical verbatim, and that is the ruling, not an
+  accident. `Tenancy.Auth.authorize/3`'s token arm is `member? AND permits?`,
+  which leaves the barkpark-23yi cell ADMITTING. `Tenancy.Auth.workspace_admin?/2`
+  is a literal `~w(owner admin)` NAME list, which DENIES a legitimate custom role
+  carrying `action: "admin"`. The declared, enforced divergences from each are
+  the parity table's job:
+  `test/barkpark_web/live/studio/caps_authorization_parity_test.exs`.
+
+  This arm is NOT "exactly `StudioChrome.admin?/2`" — that claim was FALSE
+  twice over (the function is `defp`, and its user arm authorizes against
+  `Tenancy.get_default_workspace()`, not the mounted workspace). The chrome
+  divergence is filed as
+  `arpss-w10-bl-studiochrome-admin-default-workspace-scoping`.
 
   ## The deny-gate (`attach/1`) — hidden ≠ denied
 
@@ -157,8 +192,22 @@ defmodule BarkparkWeb.Studio.Caps do
   UNCONDITIONAL and still per-`derive/1` — it is the load that buys mid-session
   expiry truth, and there is deliberately NO TTL memo across ops. The decision
   logic is `Tenancy.Auth`'s own (`permits?/2` for tokens, `role_permits?/3` for
-  users), read off the same row `authorize/3` would have loaded, so the answer
-  is byte-identical — only the round-trips are gone.
+  users), read off the same row `authorize/3` would have loaded.
+
+  ## WHAT PDS-D634 ACTUALLY AUTHORISED (corrected 2026-08-19, arpss-w10)
+
+  This docstring used to end "…so the answer is byte-identical — only the
+  round-trips are gone", citing pds-w43 / PDS-D634. D634 authorises the
+  PERFORMANCE claim ONLY: three byte-identical membership `Repo.one`s collapsed
+  to one. It never asserted DECISION equivalence with `authorize/3`, and until
+  arpss-w10 nothing verified it — a phantom warrant on an authorization path.
+
+  The `:read` and `:write` columns ARE equivalent to `authorize/3`, by shared
+  code (`permits?/2`, `role_permits?/3`) over the same row. The `:admin` column
+  is NOT, deliberately (see the module doc's seat-authority section). Both
+  statements are now ENFORCED cell-by-cell, with a DECLARED verdict per cell, by
+  `test/barkpark_web/live/studio/caps_authorization_parity_test.exs` — not
+  asserted in prose.
   """
   @spec derive(Phoenix.LiveView.Socket.t()) :: %{read: boolean, write: boolean, admin: boolean}
   def derive(socket) do
@@ -222,33 +271,81 @@ defmodule BarkparkWeb.Studio.Caps do
   defp membership_authorizes?(_principal, _membership, _ws_id, _action), do: false
 
   @doc """
-  Fresh admin predicate — an admin api_token OR an account with the `:admin`
-  role on the mounted workspace. Grants never confer admin. Mirrors
-  `StudioChrome.admin?/2`; the shares/item-share handlers re-check with this.
+  Fresh admin predicate — WORKSPACE-SCOPED SEAT AUTHORITY on the mounted
+  workspace, for both principal kinds (see the module doc, arpss-w10 / D22):
+  an `admin`-permissioned api_token whose MEMBERSHIP ROLE here confers `:admin`,
+  OR an account whose membership role confers `:admin`. Grants never confer
+  admin. The shares/item-share handlers re-check with this — note that is a
+  second call to THIS oracle, not an independent one, so this function and
+  `derive/1`'s `admin` key are a FORKED PAIR and must move together.
+
+  COST: the token arm holds no pre-loaded row, so it loads one — 0 → 1 query on
+  an `admin`-permissioned token socket with a BUILT-IN role, 0 → 2 with a CUSTOM
+  role (`role_permits?/3` reads `role_permissions` for a non-built-in name). A
+  read-only token stays at 0.0: `token_admin?/1` is the FIRST conjunct and
+  short-circuits before any load. `derive/1` is unaffected — it reads the seat
+  off rows it already holds and stays at 1.0 q/op (pds-w43 cost instrument).
   """
   @spec admin?(Phoenix.LiveView.Socket.t()) :: boolean
   def admin?(socket) do
-    token_admin?(socket.assigns[:api_token]) or
-      account_admin?(socket.assigns[:current_user], socket.assigns[:current_workspace])
+    ws = socket.assigns[:current_workspace]
+
+    token_admin_seat?(socket.assigns[:api_token], ws && Map.get(ws, :id)) or
+      account_admin?(socket.assigns[:current_user], ws)
   end
 
-  # `admin?/1`'s answer, read off the memberships `derive/1` already loaded.
-  # The token arm is deliberately membership-FREE (an `admin`-permissioned
-  # api_token is admin wherever it is), exactly as `admin?/1` has it — so it is
-  # asked of the raw assign, not of the loaded rows, and still answers on a
-  # socket whose workspace is unresolved.
-  defp admin_from(socket, memberships, ws_id) do
-    token_admin?(socket.assigns[:api_token]) or
-      Enum.any?(memberships, fn {principal, membership} ->
-        account_admin_from(principal, membership, ws_id)
-      end)
+  # The token arm of `admin?/1`. Unlike `admin_from/3` this one holds no loaded
+  # row, so it must ask for one — but only AFTER `token_admin?/1` has said the
+  # token could possibly be admin, so a read-only token costs nothing. A token
+  # with a non-binary id, or an unresolved workspace, denies WITHOUT touching
+  # the Repo (`Tenancy.Auth.membership/2` has no clause for either and would
+  # raise `FunctionClauseError`).
+  defp token_admin_seat?(%Barkpark.Auth.ApiToken{id: id} = token, ws_id)
+       when is_binary(id) and is_binary(ws_id) do
+    token_admin?(token) and
+      role_admits_admin?(Tenancy.Auth.membership_role(token, ws_id), ws_id)
   end
+
+  defp token_admin_seat?(_token, _ws_id), do: false
+
+  # `admin?/1`'s answer, read off the memberships `derive/1` already loaded.
+  #
+  # arpss-w10 / D22 OVERTURNS the former "the token arm is deliberately
+  # membership-FREE (an `admin`-permissioned api_token is admin wherever it
+  # is)". It is not admin wherever it is: that is the barkpark-23yi/fsko
+  # cross-tenant shape, and this gate is where the Studio inherited it. The
+  # token arm now reads the SEAT — the membership ROLE — exactly as the user arm
+  # always has. It reads it off the ALREADY-LOADED rows, never via
+  # `Tenancy.Auth.member?/2` or a second `membership/2`: that spelling was
+  # measured at +1 query (derive 1.0 → 2.0 q/op) and would trade PDS-D634's
+  # one-load property away. The loaded-row spelling is free (1.0 → 1.0).
+  defp admin_from(_socket, memberships, ws_id) do
+    Enum.any?(memberships, fn {principal, membership} ->
+      token_admin_from(principal, membership, ws_id) or
+        account_admin_from(principal, membership, ws_id)
+    end)
+  end
+
+  # Perms FIRST, deliberately: a non-admin token short-circuits before any role
+  # work happens.
+  defp token_admin_from(%Barkpark.Auth.ApiToken{} = token, %{role: role}, ws_id),
+    do: token_admin?(token) and role_admits_admin?(role, ws_id)
+
+  defp token_admin_from(_principal, _membership, _ws_id), do: false
 
   defp account_admin_from(%Barkpark.Accounts.User{}, %{role: role}, ws_id)
        when is_binary(role) and is_binary(ws_id),
        do: Tenancy.Auth.role_permits?(role, ws_id, :admin)
 
   defp account_admin_from(_principal, _membership, _ws_id), do: false
+
+  # THE SEAT RULE, one spelling, both admin answers. `Tenancy.Auth`'s own
+  # data-driven role resolver — a built-in name resolves from the compiled-in
+  # map, a custom name from `role_permissions`.
+  defp role_admits_admin?(role, ws_id) when is_binary(role) and is_binary(ws_id),
+    do: Tenancy.Auth.role_permits?(role, ws_id, :admin)
+
+  defp role_admits_admin?(_role, _ws_id), do: false
 
   defp token_admin?(%_{} = token), do: Barkpark.Auth.has_permission?(token, "admin")
   defp token_admin?(_), do: false

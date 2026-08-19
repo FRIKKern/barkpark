@@ -3109,7 +3109,23 @@ fi
 # the workflow declared 19; the two the table omitted were
 # `Never-cancel-main concurrency ratchet` and `Nil-polarity fail-closed gate`.
 RC20_DG_YML="$REPO_ROOT/.github/workflows/doc-gates.yml"
-RC20_DG_REAL="$(grep -cE '^[[:space:]]*- name: .*\(blocking\)' "$RC20_DG_YML" | tr -d ' ')"
+# The label token is a UNION, and both arms are load-bearing. cgsiw-s1 renamed
+# all 21 of these step names from `(blocking)` to `(fails this job)`, because
+# doc-gates publishes ONE context and that context is not required — the steps
+# fail the job, and the job blocks nothing. The count is what this clause is
+# about, so it must survive the rename; keeping the old arm means a workflow
+# that reverts to the old label is still counted rather than silently read as
+# zero. RESIDUE, recorded here rather than left for a reader to trip over:
+# merge-gates.md:828 still spells the label `(blocking)` in its prose. The
+# arithmetic below is unaffected (it compares NUMBERS), and the one-line label
+# correction is filed as cgsiw-s1-followup-merge-gates-step-label — it lives in
+# docs/, outside this wave fence.
+#
+# The `|| true` is not a softening: `grep -c` exits 1 on a count of zero, and
+# under `set -e` that KILLED this suite mid-section-20 with no summary and no
+# message when the rename landed. A guard that dies is strictly worse than one
+# that reds — the `-gt 0` test below is the decision, and it still reds on zero.
+RC20_DG_REAL="$({ grep -cE '^[[:space:]]*- name: .*(\(blocking\)|\(fails this job\))' "$RC20_DG_YML" || true; } | tr -d ' ')"
 rc20_roster_claim() { grep -oE '\*\*[0-9]+ steps labelled' "$1" | head -1 | grep -oE '[0-9]+'; }
 rc20_roster_rows() {
   awk '/^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Step[[:space:]]*\|/ { t = 1; next }

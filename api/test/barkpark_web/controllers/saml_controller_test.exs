@@ -253,6 +253,50 @@ defmodule BarkparkWeb.SamlControllerTest do
     assert conn |> get("/v1/auth/saml/no-such-org/start") |> json_response(404)
   end
 
+  # acpc-w1-sso-list-param-guard: the :sso_browser pipeline carries NO auth
+  # plug, so both of these are reachable by an unauthenticated caller who only
+  # knows an org slug with a configured SamlConnection. Before the
+  # `when is_binary(encoded)` head guards, a list-valued param slipped past the
+  # action head and raised FunctionClauseError inside Base.decode64/2 — below
+  # the action frame, so Phoenix's ActionClauseError→400 conversion never
+  # applied and the caller got a 500.
+  test "POST ACS with a LIST-valued SAMLResponse is 400, not a 500", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem)
+
+    assert conn
+           |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => ["abc"]})
+           |> json_response(400)
+  end
+
+  test "POST SLO with a LIST-valued SAMLRequest is 400, not a 500", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+
+    assert conn
+           |> post("/v1/auth/saml/#{@slug}/slo", %{"SAMLRequest" => ["abc"]})
+           |> json_response(400)
+  end
+
+  # The missing-param fallback clauses (saml_controller.ex acs/2 and slo/2
+  # second heads) are what the guarded heads fall through to — pin them so the
+  # guard can never be "fixed" by deleting the fallback.
+  test "POST ACS with no SAMLResponse at all is still 400", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem)
+
+    body = conn |> post("/v1/auth/saml/#{@slug}/acs", %{}) |> json_response(400)
+    assert body["error"] == "SAMLResponse is required"
+  end
+
+  test "POST SLO with no SAMLRequest at all is still 400", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+
+    body = conn |> post("/v1/auth/saml/#{@slug}/slo", %{}) |> json_response(400)
+    assert body["error"] == "SAMLRequest is required"
+  end
+
   describe "Single Logout" do
     test "IdP LogoutRequest revokes the named session, replies with a LogoutResponse form, and audits",
          %{conn: conn} do
