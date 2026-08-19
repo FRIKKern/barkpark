@@ -72,20 +72,45 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
   ## PR #12616 and the malformed/nil rows (charter D33)
 
   #12616 ("make Tenancy.Auth fail closed on malformed ids via one membership/2
-  seam") was re-checked at build time and was **OPEN — `state: OPEN`,
-  `mergedAt: null`** (`gh pr view 12616 --json state,mergedAt`). It flips the
-  canonical column on the malformed rows from RAISE to DENY. A test that reds
-  when a colleague merges their PR is a defect, not rigour, so:
+  seam") has **MERGED — `state: MERGED`, `mergedAt: 2026-08-19T16:30:50Z**
+  (`gh pr view 12616 --json state,mergedAt`). It was OPEN when this file was
+  written; the `:refuses` predicates below exist precisely so that its merge
+  would not red this table, and on the columns written that way it did not.
+
+  MERGE-ORDER NOTE, so the next reader does not re-derive it: this file landed
+  in #12695 at 15:17:48Z and #12616 merged at 16:30:50Z, but #12616's BRANCH was
+  cut before this file existed, so #12616's own CI never ran it. Both PRs were
+  green alone and `main` was red on the pair — a stale-base green. The cell
+  re-declarations recorded here are the reconciliation.
+
+  #12616 flips the canonical column from RAISE to DENY at the shared
+  `membership/2` seam, via a `Repo.uuid_or_nil/1` normalisation that answers
+  `nil` (no row, so nothing to admit) instead of raising. Consequently:
 
     * the MALFORMED-workspace rows assert a `:refuses` predicate (deny OR raise)
-      on every column, naming #12616 as the expected narrowing;
+      on every column, which absorbed the narrowing unchanged — they are the
+      only cells still declaring a `[:equivalent, :benign_divergent]` PAIR;
     * the NIL-workspace row asserts the caps `:admin` DENY **directly** — the
       arpss-w10 fix removed that column's #12616 sensitivity entirely, because
-      the seat rule has no workspace to read and denies before any Repo touch.
+      the seat rule has no workspace to read and denies before any Repo touch;
+    * the cells that named a verdict of `:benign_divergent` on the STRENGTH of
+      the canonical raising (`principal/unrecognised-map`,
+      `principal/callercontext-in-api-token-assign`, `principal/token-id-nil`,
+      `workspace/nil+token[admin]`) now observe DENY on both sides and are
+      re-declared `:equivalent`. Every one of those moves TIGHTENS the pin:
+      `:equivalent` demands the two oracles reach the SAME outcome, where
+      `:benign_divergent` accepted two DIFFERENT refusals. None of them relaxes
+      a refusal into an admit, and no cell moved off `:real_divergent`.
 
   Exception modules, where any are named: `Ecto.Query.CastError` for a
   non-castable BINARY id and `FunctionClauseError` for a nil / non-binary one.
   `Ecto.CastError` NEVER fires on this path and asserting it would be vacuous.
+
+  A `benign_guard` is RETAINED on cells that have moved to `:equivalent`. The
+  rule below is one-directional — a `:benign_divergent` label REQUIRES a guard;
+  a guard is not forbidden elsewhere — and those guards still pin the CAPS-SIDE
+  refusal, which is the load-bearing half and is not supplied by any canonical
+  narrowing.
 
   ## Fixture traps this file is built against (each a proven vacuous-green generator)
 
@@ -121,8 +146,8 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
   @repo_query_event [:barkpark, :repo, :query]
   @ops 200
 
-  # Re-checked at build time (2026-08-19). See the @moduledoc's #12616 section.
-  @pr_12616_state "OPEN (mergedAt: null)"
+  # Re-checked 2026-08-19 after the merge. See the @moduledoc's #12616 section.
+  @pr_12616_state "MERGED (mergedAt: 2026-08-19T16:30:50Z)"
 
   # ── THE TABLE ───────────────────────────────────────────────────────────────
   #
@@ -402,13 +427,18 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
         read: :equivalent,
         write: :equivalent,
         admin_vs_authorize: :equivalent,
-        admin_vs_ws_admin: :benign_divergent
+        admin_vs_ws_admin: :equivalent
       },
       benign_guard: "caps.ex loadable_principal?/1 denies an unrecognised principal shape",
       note:
         "caps denies via loadable_principal?/1's catch-all; authorize/3 denies via its own " <>
-          "catch-all clause. workspace_admin?/2 has no clause for a map and refuses by " <>
-          "raising — a refusal either way, never an admit."
+          "catch-all clause. workspace_admin?/2 USED TO refuse by raising (no clause for a " <>
+          "bare map), which made this column deny-vs-raise, i.e. :benign_divergent. #12616 " <>
+          "merged and routed it through the `membership/2` seam, which now answers `nil` " <>
+          "rather than raising, so workspace_admin?/2 DENIES and the column is :equivalent. " <>
+          "That is a TIGHTENING: same refusal on both sides instead of two different " <>
+          "refusals. The named guard is retained — it still pins the caps-side denial that " <>
+          "keeps this shape off the Repo, independently of how the canonical refuses."
     },
     %{
       id: "principal/callercontext-in-api-token-assign",
@@ -424,11 +454,15 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
         read: :equivalent,
         write: :equivalent,
         admin_vs_authorize: :equivalent,
-        admin_vs_ws_admin: :benign_divergent
+        admin_vs_ws_admin: :equivalent
       },
       benign_guard: "caps.ex loadable_principal?/1 denies an unrecognised principal shape",
       note:
-        "REACHABILITY: a CallerContext is assigned to :caller_context, never to :api_token " <>
+        "#12616 merged: workspace_admin?/2 no longer RAISES on this shape, it DENIES via the " <>
+          "`membership/2` seam, so admin_vs_ws_admin tightened from :benign_divergent " <>
+          "(deny-vs-raise) to :equivalent (both deny). The named guard is retained: it pins " <>
+          "the caps-side denial, which is what this cell is really about. " <>
+          "REACHABILITY: a CallerContext is assigned to :caller_context, never to :api_token " <>
           "(live_scope.ex), and every writer of :api_token routes through " <>
           "Auth.verify_token/1 (live_auth.ex) — both pinned SOURCE-LEVEL below. The RUNTIME " <>
           "mount proof is slice 2 (arpss-w10-caps-mount-reachability-ratchet), a second and " <>
@@ -439,24 +473,30 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     },
     %{
       id: "principal/token-id-nil",
-      summary: "an %ApiToken{id: nil} with admin perms: caps DENIES where authorize/3 RAISES",
+      summary: "an %ApiToken{id: nil} with admin perms: every oracle DENIES (#12616 merged)",
       build: :principal_token_nil_id,
       authorize: %{read: :refuses, write: :refuses, admin: :refuses},
       caps: %{read: :deny, write: :deny, admin: :deny},
       admin_fn: :deny,
       workspace_admin: :refuses,
       verdicts: %{
-        read: :benign_divergent,
-        write: :benign_divergent,
-        admin_vs_authorize: :benign_divergent,
-        admin_vs_ws_admin: :benign_divergent
+        read: :equivalent,
+        write: :equivalent,
+        admin_vs_authorize: :equivalent,
+        admin_vs_ws_admin: :equivalent
       },
       benign_guard: "caps.ex is_binary(id) guards keep a nil-id token off the Repo",
       note:
-        "authorize/3 raises FunctionClauseError (membership/2 has no clause for a nil " <>
-          "principal id); #12616 narrows that to a DENY, which is why the canonical columns " <>
-          "here are the :refuses predicate. caps denies WITHOUT touching the Repo, on both " <>
-          "answers — deny vs raise is a refusal either way, never an admit."
+        "authorize/3 USED TO raise FunctionClauseError here (membership/2 had no clause for " <>
+          "a nil principal id), so all four columns were deny-vs-raise, i.e. " <>
+          ":benign_divergent. #12616 MERGED and narrowed that raise to a DENY at the " <>
+          "`membership/2` seam, so all four are now :equivalent — a TIGHTENING, since both " <>
+          "sides now give the SAME refusal rather than two different ones. The canonical " <>
+          "columns stay on the :refuses predicate deliberately: it is satisfied by the deny " <>
+          "observed today AND by the historical raise, so it does not re-red if that seam " <>
+          "moves again. caps denies WITHOUT touching the Repo either way, never admits. " <>
+          "The named guard is retained — it pins that no-Repo-touch denial, which no " <>
+          "canonical narrowing can supply."
     },
 
     # ── WORKSPACE axis.
@@ -474,7 +514,7 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
         read: :equivalent,
         write: :equivalent,
         admin_vs_authorize: :equivalent,
-        admin_vs_ws_admin: :benign_divergent
+        admin_vs_ws_admin: :equivalent
       },
       benign_guard: "caps.ex denies a nil workspace without a Repo touch",
       note:
@@ -484,7 +524,11 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
           "reachable: :scoped_studio always mounts a resolved %Workspace{}, and the flat " <>
           "/studio/* chrome routes never derive caps. Does NOT close " <>
           "task-46e7d44068e7185e (that ruling is about a nil workspace_id COLUMN, not a nil " <>
-          "argument position)."
+          "argument position). #12616 MERGED: workspace_admin?/2 now DENIES on a nil " <>
+          "workspace instead of raising, so admin_vs_ws_admin tightened from " <>
+          ":benign_divergent (deny-vs-raise) to :equivalent (both deny). The caps :admin " <>
+          "column itself is unmoved — it was #12616-INSENSITIVE by construction, as the " <>
+          "summary says, and the named guard still pins that no-Repo-touch denial."
     },
     %{
       id: "workspace/malformed+token[admin]",
@@ -709,10 +753,20 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
 
   # A refusal is a DENY or a RAISE — never an admit. This is the #12616-stable
   # predicate the malformed rows are written against.
+  #
+  # `nil` IS a refusal, and its clause is LOAD-BEARING rather than defensive:
+  # this helper is pointed at `Tenancy.Auth.membership/2`, which answers with a
+  # ROW-OR-NIL rather than a decision atom. Before #12616 that call RAISED on a
+  # malformed id and the raise clause absorbed it; #12616's `uuid_or_nil/1` seam
+  # made it return `nil` instead — no row, so nothing can be admitted. Omitting
+  # this clause is what turned the very narrowing this predicate exists to
+  # tolerate into a `CaseClauseError`, i.e. the helper crashed on precisely the
+  # #12616 outcome it was written to be immune to.
   defp refuses?(fun) do
     case observe(fun) do
       :admit -> false
       :deny -> true
+      nil -> true
       {:raised, _} -> true
       %{read: r, write: w, admin: a} -> not (r or w or a)
     end
@@ -837,12 +891,12 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
              2 * @ops
   end
 
-  test "PR #12616's state was re-checked at build time and recorded in the @moduledoc" do
+  test "PR #12616's state is re-checked and recorded in the @moduledoc" do
     source = File.read!(__ENV__.file)
     [_head, moduledoc | _rest] = String.split(source, ~s("""))
 
-    assert collapse(moduledoc) =~ "OPEN — `state: OPEN`, `mergedAt: null`"
-    assert @pr_12616_state == "OPEN (mergedAt: null)"
+    assert collapse(moduledoc) =~ "MERGED — `state: MERGED`, `mergedAt: 2026-08-19T16:30:50Z"
+    assert @pr_12616_state == "MERGED (mergedAt: 2026-08-19T16:30:50Z)"
   end
 
   # ── the engine ──────────────────────────────────────────────────────────────

@@ -61,6 +61,15 @@ LIB="$ROOT/api/lib"
 # HTML numeric character reference must pass, and it must NOT mask a genuine
 # colour literal sharing its line (which is exactly what a whole-line lit-allow
 # would have done). CI wires this right after the main check (doc-gates.yml).
+#
+# Refuse an argument this gate does not understand first. A swallowed flag — a
+# `--selftest` typo, a future rename — would silently run the ordinary check
+# and report green, fabricating the tripwire's own proof.
+if [ -n "${1:-}" ] && [ "$1" != "--selftest" ]; then
+    echo "studio-literal-check: unknown argument '$1' (expected nothing or --selftest)" >&2
+    exit 2
+fi
+
 if [ "${1:-}" = "--selftest" ]; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
