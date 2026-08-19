@@ -37,6 +37,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # planting NOTHING in the real tree (a temp dir, cleaned on exit). It drives the
 # REAL scanner via NIL_POLARITY_SELFTEST so a future edit that weakens the
 # lexer/patterns is caught here, not just in prose.
+#
+# Refuse an argument this gate does not understand first. A swallowed flag — a
+# `--selftest` typo, a future rename — would silently run the ordinary check
+# and report green, fabricating the tripwire's own proof.
+if [ -n "${1:-}" ] && [ "$1" != "--selftest" ]; then
+    echo "nil-polarity-check: unknown argument '$1' (expected nothing or --selftest)" >&2
+    exit 2
+fi
+
 if [ "${1:-}" = "--selftest" ]; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
