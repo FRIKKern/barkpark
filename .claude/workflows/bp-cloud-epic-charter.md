@@ -1,60 +1,71 @@
-# Epic charter — Consumer web-demo & scaffold-template correctness audit
+# Epic charter — CI gate integrity, wave 2: the layer BENEATH the guards
 
-Epic task: `web-templates-correctness-audit`
-Wave Paper: `web-templates-correctness-wave-2026-08-18`
-Audited against origin/main `9fd1e383e7affd6281742566a07a979967737397`.
+Epic task: `ci-gate-script-integrity-audit`
+Wave Paper: `ci-gate-wiring-spec-generator-wave-2026-08-19`
+Wave referent: `ci-gate-script-integrity-audit-wave-2-log`
+Audited against origin/main `bf499f54b63135b8ae078305b83f2b5b2c078877`.
+(The strategy phase pinned `122fd0df81`; the tree moved during the wave and every number below was re-derived at `bf499f54b6`.)
 
 ## Vision
 
-An improvement-only, evidence-based correctness/robustness/UX sweep of the Next.js consumer surfaces users COPY — the `web/` demo (app, components, lib) and the two `create-barkpark-app` scaffolds (`blog-starter`, `website-starter`). A bug in a template ships to EVERY scaffolded project, so correctness in the higher-reach tier has multiplied blast radius. This is a DISTINCT lens from the merged consumer CSP/XSS security work (injection); do NOT re-pave the `proxy.ts` nonce, `lib/csp.ts`, or the template `middleware.ts`. NON-security. Four classes: (1) data-fetching & error states, (2) rendering correctness, (3) Next patterns, (4) async & state. The deliverable is an HONEST per-class verdict — the count stated even when zero — where every REAL finding carries a concrete input/state → broken-UI-or-crash reproduced against origin/main and is fixed with a test or before/after repro (or filed if larger), and every SAFE pattern is cited by the specific guard that makes it safe (error-boundaried, optional-chained, fallback-rendered, awaited). The honest cited-safe verdict IS the A-grade; a manufactured finding count is the failure mode.
+Wave 1 of this epic hardened guard SCRIPTS — ten unknown-arg refusals, a studio-link-lint selftest, docs-anchors, doc-budgets. Its own ranking put two things FIRST by blast radius and then covered neither: `.github/workflows/doc-gates.yml` (the WIRING that decides whether a guard runs at all) and `scripts/required-checks-generate.sh` (the GENERATOR that decides what may block a merge). A guard can be perfectly written and still vacuous as a gate if the wiring never invokes it on the PR that breaks it — and a generator that silently emits a wrong spec is worse, because every downstream verifier then agrees, correctly, against the wrong answer.
 
-Fence: `web/` (app, components, lib) + `js/packages/create-barkpark-app/templates` + any test tree (`web/__tests__`) ONLY. DISJOINT from the running JS-SDK wave (`js/packages/core`, `js/packages/nextjs`, `js/packages/react`) and the search+media wave (`api/lib/barkpark/search`, `api/lib/barkpark/media`). A template change touching a file vendored into `cloud/priv/templates` requires `make cloud-templates-sync` — the ONLY permitted `cloud/` touch. No `api/`, no `internal/`.
+Wave 2 audits that layer. Two of the wish's premises and two of the strategy's did not survive first contact, and each refutation improved the wave rather than shrinking it:
+
+- **doc-gates cannot block a merge at all.** Main's required set is exactly four contexts — Cloud gate, Console gate, Elixir gate, PR references an active task. `Doc budgets + anchors` is filed S4 PATHS-FILTERED among 25 exclusion rows, and 21 of its steps are named "(blocking)". Every wiring gap inside doc-gates is therefore a POST-MERGE DETECTION gap, not a merge hole. That re-pricing holds and it re-ranks the whole wave.
+- **The spec generator is NOT unharnessed.** `scripts/required-checks.test.sh` is 3,437 lines / 31 sections / ~28 generator drives / 7 disarm mutations, wired twice in `required-checks-drift.yml`. Bolting a second `--selftest` onto `generate.sh` beside it would manufacture the mirrored-truth defect this repo has already paid for four times. The work is to find what the existing suite does NOT mutate and extend THAT file.
+- **`required-checks-verify.sh` already carries an 18-probe mutation `--selftest`.** The crown appends probes, it does not build a harness.
+- **The advisory-posture census numbers were all wrong** — wish 24, strategy 18, truth 15 YAML keys in 11 workflows; console-harness scored third-highest on a substring scan while all five of its hits BAN the construct. Zero of the 15 are silently-demoted blocking guards. The defect is in the CLASSIFIER, not the postures.
+
+The crown is a class this repo's own doctrine names and nothing enforces. `required-checks-verify.sh`'s advisory-prose clause reds when a workflow calls a REQUIRED context advisory. The INVERSE — a workflow asserting blocking authority the spec DENIES — is enforced by nothing: the file contains ZERO references to `.exclusions` across all 872 lines. `docs/ops/merge-gates.md` already carries a bullet headed "A NAME THAT SAYS (blocking) AND HAS NO MERGE AUTHORITY AT ALL". The disease is named; the mechanism does not exist.
+
+Fence: `.github/workflows/**` + `scripts/**` + fixture dirs ONLY. Findings in gate-critical scripts outside it (`api/scripts/sobelow-*.sh`, `js/scripts/check-no-node-imports.sh`, `deploy/cp-deploy_test.sh`, `tooling/task-obsession/reland_check.py`) are FILED with the planted violation, never fixed here. `.github/required-checks.json` is a SPEC file and the branch-protection PUT is a human gate (`cch-w37-bl-register-spec-gate-human-gate`) — this wave does not take it, even though the active token would let it.
 
 ## Decisions
 
-- **D1 — The `web/` demo ships ZERO correctness fixes; the honest per-class zero IS the finding.** Why: 17 scouts plus a dedicated graph-view verifier re-derived every web/ candidate to a cited guard (bp-fetch throws only structured `BpUpstreamError`; `app/error.tsx`+`global-error.tsx`+`not-found.tsx` cover let-throw fetches; 3 date formatters NaN-guard; `fetchCorpusGraph` never-throws and always returns arrays; every effect has cleanup, every promise a catch). Manufacturing a fix on a guarded path is the exact failure the reach-weighted direction rejected.
-- **D2 — All five real findings are template-tier; fix the four offline-provable ones, file the fifth.** Why: the reach-weighting prediction held exactly — bugs are dense where comment density drops, which is the scaffold edges the demo has no analogue for (by-id 404, module-eval webhook throw, unguarded sitemaps, pre-seed empty data).
-- **D3 (CROWN) — Swallow `BarkparkNotFoundError` → `null` in `getDocById` (blog) AND `getDoc` (website).** Why: the by-id endpoint 404s a missing doc, and `barkparkFetch` throws `BarkparkNotFoundError` (a plain error with NO `NEXT_NOT_FOUND` digest) → renders `error.tsx` (500) not `not-found.tsx` (404), making `if(!x) notFound()` DEAD CODE. Swallowing is symmetric with `getDocBySlug` and the SDK's own `client.doc` 404→null convention, and every one of the six call sites already branches on null. Fixes authors/[id] 500, dangling-ref valid-post 500, AND the fresh-scaffold pre-seed home/about/pricing 500. HIGH-FLIP (ships to every scaffold).
-- **D4 — The webhook fix defers validation to request time (lazy handler → 503 when unset), NOT a `.env.example` default.** Why: `createWebhookHandler({secret: process.env.BARKPARK_WEBHOOK_SECRET!})` runs at MODULE-EVAL and throws `TypeError` on the unset secret, failing `next build` at "Collecting page data" for every fresh scaffold (build-probe confirmed exit 1 unset / exit 0 set). A guessable `changeme` default would ship a live webhook secret; deferring the throw un-breaks the build while keeping fail-CLOSED (an unconfigured webhook 503s, never fail-open verifies). HIGH-FLIP.
-- **D5 — Template sitemaps adopt the demo's degrade-to-static pattern + a NaN date guard.** Why: `web/app/sitemap.ts` already proves the pattern ("NEVER throws: any upstream failure degrades to the static routes"); the template sitemaps have NO try/catch (crash on API 500/network during build or crawl) and hand an Invalid Date to Next's `lastModified` → `.toISOString()` `RangeError`.
-- **D6 — Render-tier dates get a per-template `formatDate` helper; fractional `?page` floored; portable-doc `void` gets `.catch()`.** Why: LOW severity but cheap and offline-provable — four render sites currently emit the literal "Invalid Date" behind a truthiness-only guard; `?page=2.5` sends a fractional offset to the API; the `void hydratePortableDoc()` leaves an unhandled rejection.
-- **D7 — Every template fix runs `make cloud-templates-sync` and stages ONLY its own mirrored `cloud/priv/templates` paths — never `git add -A`, never the whole cloud dir.** Why: the drift test is bidirectional and armed (trees drift-clean today, Makefile:140); a full-tree sync followed by a broad add stages reverts of sibling slices' cloud copies at merge — the vendored-drift merge hazard.
-- **D8 — Proof standard: templates have no harness, so each slice adds a self-contained extract-and-compare test in `web/__tests__` (runs under plain `node --test`, no workspace linking) PLUS a before/after node repro of the real template behavior.** Why: uniform verify bar; the wish accepts a `web/__tests__` analogue or a before/after repro, and the self-contained test needs neither the `@barkpark/*` dist build nor the server-only loader.
-- **D9 — All wave-1 slices are round 1 (distinct files, no cross-slice code dependency); builder model opus@medium throughout.** Why: Fable is capped until Aug 21 and none of these slices is visually designed (correctness, not CSS); the fixes are well-specified and file-disjoint, so they build in parallel this run.
-- **D10 — The `BARKPARK_SERVER_TOKEN` dev-token default and the blog pagination-windowing UX gap are FILED, not built blind.** Why: the token default is a documented design tradeoff (a prod-guard that throws on `NODE_ENV==='production' && unset` is HIGH-FLIP and needs its own decision); the "fudged totalPages" (wire `countDocs` → true total) is a UX item outside the correctness fence.
+**D1 — The inverse blocking-authority clause derives its subject set as the COMPLEMENT (`.checks` + transitive `needs:`-closure), never as an `.exclusions` join.** *Why:* measured at structural evidence the join reds 3 and the complement reds 4 — the extra is `connectors.yml`'s `shim-confinement`, whose job-adjacent comment asserts "BLOCKING — no continue-on-error" and which has NO ledger row, so a join can never reach it; and all 13 S3 rows sit inside the needs-closure (13/13), so the complement excludes transitively-blocking names by construction with no hand list to rot.
+
+**D2 — The clause uses STRUCTURAL evidence only — job `name:` token, own step names, the contiguous comment block immediately above the job key — never a substring search for the context name.** *Why:* mirroring the existing forward clause's name-anchored 200-char window MISSES all three known specimens (doc-gates' claim sits 316 lines above its own job name) and collides on generic job keys, reddening `changes`, `build` and `control-plane` on ordinary prose.
+
+**D3 — File-header prose is reported UNRESOLVED against a committed baseline, never red.** *Why:* of its 11 hits at least five fire on prose that DENIES blocking authority ("but NEVER blocks the merge", "can never be a merge gate") — reddening a correction is the fastest way to get a guard disabled.
+
+**D4 — The clause and the doc-gates honest step-renaming CO-MERGE in one PR.** *Why:* proven by mutation, not by reading — planting one disclaimer into the real `.github/workflows/` took `required-checks.test.sh --hermetic` from `177 passed, 0 failed` to `173 passed, 4 failed`; the hermetic suite scans the REAL tree, and 23 live `name:` values carry `(blocking)`.
+
+**D5 — `go-format.yml` and `security.yml` get an ANNOTATION (`# spec-authority: advisory-ok — <reason>`), not a rename.** *Why:* their `(blocking)` token is inside the JOB name, which IS the rendered context name and IS a committed exclusion row — renaming would silently invalidate the ledger.
+
+**D6 — "Disarm the clause, watch its own `--selftest` red" is VACUOUS and is forbidden as a proof method.** *Why:* `required-checks-verify.sh:709` `probe()` re-execs the COMMITTED path, never `$0`; a copy with `PROSE_DISCLAIMERS` set to `ZZZNEVERMATCHZZZ` still printed `SELFTEST OK`. The working template is the §6(d) idiom — mutant copy inside `scripts/`, invoked DIRECTLY with `--spec/--readback/--runs/--sha/--workflows`, armed rc=1 / disarmed rc=0 on the identical fixture.
+
+**D7 — The generator's parser is widened at the JOB level only; step-level `continue-on-error` REFUSES LOUDLY instead of silently classifying.** *Why:* the naive fix ("any indentation, any non-false value") would mark `js-tests.yml`'s `test` job advisory — it mixes 3 advisory steps with genuinely blocking ones — and EXCLUDING a real gate loses protection rather than adding it.
+
+**D8 — The `^on:` byte anchor is fixed at ALL THREE sites in one PR.** *Why:* it also lives in `scripts/absent-context-census.test.sh` (443, 465) and `scripts/check-deployyml-filters.sh` (128); a one-file fix would leave two parsers disagreeing about the same workflow — the mirrored-truth defect again.
+
+**D9 — All new suite clauses land in `scripts/required-checks.test.sh` in ONE round-2 slice, decoupled from the fixes they guard.** *Why:* a guard co-merged with its fix cannot red on the fail-before state (Standing Law 0), and one owner for that 3,437-line file removes the wave's worst collision.
+
+**D10 — `cchi-w57-blocking-shaped-name-census-guard` stays FILED, not claimed.** *Why:* `.github/required-checks.json` itself routes the count to that task; Standing Law 0 sends free-standing gates to `cch-instruments-epic`; and this wave's own fixes move the census, so a guard merged beside them is born green. It inherits this wave's defended definition instead — 51 under a subtraction ledger of eight buckets, against 59 under the published w56 recipe, against 3 under a literal reading.
+
+**D11 — The registration trigger is EXECUTED up to, and stops at, the human gate.** *Why:* both halves fire today — `Required-check spec gate` is `completed/success` on main HEAD, and a fresh `--require-new-context` sweep reports `evaluated 21, skipped 39, casualties: 0` with all eight non-green heads already CONFLICTING. The active token carries repo admin and the PUT would succeed; `cch-w37` makes it an explicit owner sign-off and `cch-w36` was cancelled precisely for inviting a builder to mutate live protection.
+
+**D12 — The honesty chain is PUBLISHED, not footnoted.** *Why:* the crown lands in a file whose CI homes are `Required-check spec gate` (S7 EXCLUDED) and `Required-check spec drift (advisory)` (S2, continue-on-error), so its red does not yet stop a merge. A tripwire that names its own authority ceiling is strictly better than one that lets a reader assume it has teeth.
 
 ## Roadmap
 
-Wave 1 (this wave) — four file-disjoint round-1 slices, all opus@medium:
+Round 1 (dependency-free, builds this wave):
 
-| Slice | Task | Surface | Size | Files (source; cloud mirror synced) |
+| Slice | Task | Surface | Size | Model |
 |---|---|---|---|---|
-| S1 crown 404→500 | `wtc-w1-s1-byid-notfound-swallow` | template lib | medium | blog+website `lib/barkpark.ts` |
-| S2 webhook build-break | `wtc-w1-s2-webhook-lazy-init` | template route | medium | blog+website `app/api/barkpark/webhook/route.ts` |
-| S3 sitemap degrade | `wtc-w1-s3-sitemap-degrade-nan` | template route | small | blog+website `app/sitemap.ts` |
-| S4 render robustness | `wtc-w1-s4-render-date-page-hydrate` | template pages | medium | blog+website render pages + new `lib/format-date.ts`, blog page/draft-preview/portable-doc-surface |
+| Inverse blocking-authority clause + honest doc-gates step names (CROWN) | `cgsiw-s1-inverse-blocking-clause` | `scripts/required-checks-verify.sh`, `doc-gates.yml`, `go-format.yml`, `security.yml`, `connectors.yml` | large | fable |
+| Generator parser: quoted `"on":`, non-literal continue-on-error, `.yaml` glob, both-lists refusal | `cgsiw-s2-generator-parser-forms` | `scripts/required-checks-generate.sh`, `absent-context-census.test.sh`, `check-deployyml-filters.sh` | large | fable |
+| Wire two orphan selftests + a push↔pull_request paths-parity tripwire | `cgsiw-s3-wire-orphans-and-paths-parity` | `.github/workflows/shell-harnesses.yml`, `scripts/doc-gates-paths-parity-check.sh` (new) | medium | opus |
 
-Backlog (filed, future waves):
-- `wtc-backlog-server-token-prod-guard` — fail-loud when `BARKPARK_SERVER_TOKEN` unset in production (documented tradeoff; needs a decision).
-- `wtc-backlog-blog-pagination-true-total` — wire `countDocs` → true `totalPages` so the pagination window stops fudging (UX, out of correctness fence).
+Round 2 (dispatched by the lead after its dependencies MERGE):
+
+| Slice | Task | After | Surface | Size | Model |
+|---|---|---|---|---|---|
+| Mutation clauses for every fix this wave ships | `cgsiw-s4-suite-mutation-clauses` | s1, s2 | `scripts/required-checks.test.sh` | large | fable |
+| The three proven doc-gates paths-filter gaps | `cgsiw-s5-doc-gates-paths-gaps` | s1 | `.github/workflows/doc-gates.yml` | medium | opus |
+
+Filed, not built this wave: the doc-gates requirable-aggregator packet (human-gated), the branch-protection PUT (`cch-w37`, human gate), the blocking-shaped census guard (`cchi-w57`), the `Dispatch (compose-smoke paths)` exclusion row (spec file, out of fence), and the out-of-fence guard findings — `deploy/cp-deploy_test.sh` (green on a live re-pin to `localhost:4100`), `tooling/task-obsession/reland_check.py` (62 assertions bind none of its fetch-verdict branch), `api/scripts/sobelow-fresh-finding-guard.sh` (`--selftest` never invoked), `js/scripts/check-no-node-imports.sh` (five surviving plants).
 
 ## Wave log
 
-### Wave 2026-08-18 — wave 1 (grade A)
-
-**Landed (4 file-disjoint template-tier slices, all gates re-run green on the reviewer's final branches):**
-
-- **S1 crown — by-id 404→null** (`wtc-w1-s1-byid-notfound-swallow`, branch `loop-epic/s1-crown-swallow-barkparknotfounderror-n-0`). `getDocById` (blog) and `getDoc` (website) now swallow `BarkparkNotFoundError`→null so a by-id miss renders `not-found.tsx` (404) not `error.tsx` (500). Reviewer independently re-derived the crown: the thrower (`js/packages/nextjs/src/server/core.ts:211`) and the catcher both reference `BarkparkNotFoundError` from `@barkpark/core`, so `instanceof` matches in a deduped install — the SDK's own `client.doc` convention. HIGH-FLIP: an independent 2nd reviewer is owed before merge (manual lead step).
-- **S2 webhook lazy-init** (`wtc-w1-s2-webhook-lazy-init`, branch `loop-epic/s2-webhook-lazy-init-createwebhookhandle-1`). Webhook route no longer calls `createWebhookHandler` at module-eval; an unset `BARKPARK_WEBHOOK_SECRET` now serves a fail-CLOSED 503 instead of breaking `next build`. `validateConfig` throw + `{POST,GET}` handler shape verified in source. HIGH-FLIP: 2nd reviewer owed.
-- **S3 sitemap degrade + NaN guard** (`wtc-w1-s3-sitemap-degrade-nan`, final branch `loop-epic/s3-sitemap-degrade-to-static-on-upstream-2-r`). Both template sitemaps degrade-to-static on upstream failure and NaN-guard `_updatedAt`. **Reviewer fix:** the builder shipped without the required `create-barkpark-app` changeset (the changesets CI gate reds a public-package change without one); reviewer added it on the `-r` branch — integrate `-r`, not the original.
-- **S4 render robustness** (`wtc-w1-s4-render-date-page-hydrate`, branch `loop-epic/s4-render-robustness-formatdate-helper-f-3`). `formatDate` null-guard against "Invalid Date", floored fractional `?page`, `.catch()` on the portable-doc hydrate. Sound.
-
-**web/ demo:** honest ZERO across all four correctness classes, upheld — every candidate cited to a guard. The reach-weighting prediction (D2) held: all five real bugs were in the higher-reach scaffold tier where comment density drops.
-
-**Filed, not built:** `wtc-backlog-server-token-prod-guard` (BARKPARK_SERVER_TOKEN prod-guard — needs a decision) and `wtc-backlog-blog-pagination-true-total` (UX, out of correctness fence).
-
-**Ledger:** clean — every slice `in_progress` with all non-merge-gated criteria stamped with real evidence; the lead-owned "PR merged" row left open on each. The lead closes those on merge.
-
-**Grade A.** Honest cited-safe verdict delivered exactly as the wish demanded; one point off A+ for the self-contained tests pinning logic-shape rather than importing the shipped template modules (unavoidable; compensated by drift-diff + git-diff) and S3's missing changeset (reviewer-fixed).
-
-**Next wave:** merge wave 1 first (S1/S2/S4 originals + the S3 `-r` branch; give S1 + S2 an independent second reviewer before merge). Then the two backlog items become candidate slices once their decisions are made — the `BARKPARK_SERVER_TOKEN` prod-guard needs a flip-risk decision (throw on `NODE_ENV==='production' && unset`), and the blog pagination true-total wiring (`countDocs`→`totalPages`) is a UX slice.
+(empty — the lead appends one line per wave on merge)
