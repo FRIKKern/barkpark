@@ -25,7 +25,42 @@ defmodule Barkpark.Content.Envelope do
       `mutation_event` snapshot that is re-redacted per-subscriber downstream)
       pass the explicit `:internal` sentinel — never nil.
     * `caller_context == :internal` ⇒ NO redaction (the explicit full-content
-      sentinel; not reachable from any request path).
+      sentinel). Read it as UNFORGEABLE INPUT — never as "the bytes stay in the
+      process".
+
+      This bullet used to end "not reachable from any request path". That was
+      FALSE, and false in the direction a reader acts on. All three `:internal`
+      renders in `lib/` live in `Content.Broadcast` (broadcast.ex :69 immediate
+      broadcast, :133 deferred flush, :319 the stored `mutation_events`
+      snapshot), and `tap_broadcast/5` executes INSIDE the mutating request —
+      `POST /v1/data/mutate` → `Content.apply_mutations/2` → writer/lifecycle.
+      The unredacted map then leaves the node on EXACTLY TWO seams:
+
+        1. `BarkparkWeb.ListenController.live_result/4`, which forwards
+           `msg.document` verbatim to an `is_admin: true` SSE subscriber on
+           `GET /v1/data/listen/:dataset` — the ONE seam that reaches a
+           REQUESTER; and
+        2. `Barkpark.Webhooks.Dispatcher.build_payload/6`, which ships the same
+           map to the workspace-configured endpoint (also via the admin
+           `POST …/webhooks/:id/replay/:event_id`).
+
+      Both are SOUND, and for a structural reason rather than a promise: the
+      `%CallerContext{is_admin: true}` clause below returns the envelope
+      UNCHANGED — byte-identical to the `:internal` clause — so neither
+      recipient receives anything it could not already read through the normal
+      redaction path. The residual difference is freshness, documented at
+      `live_result/4`'s own comment block.
+
+      What IS true and load-bearing: nothing outside the writer can SUPPLY the
+      sentinel. `CallerContext.from_conn/1` (caller_context.ex) returns a
+      `%CallerContext{}` or `CallerContext.anonymous()` — never the bare atom —
+      so no header, token, param or share link can hand a caller the bypass.
+      That is now pinned by
+      `test/barkpark/content/envelope_internal_sentinel_test.exs`. The other
+      dangerous widening — relaxing `live_result/4`'s fast path from
+      `is_admin: true` to any `%CallerContext{}` — is already tripwired:
+      `test/barkpark_web/controllers/listen_controller_test.exs` reds with
+      `"ssn" => "111-22-3333"` visible in the forwarded map.
     * `caller_context.is_admin` ⇒ NO redaction (admins see all; note ciphertext
       is still NOT decrypted here — decryption stays the explicit
       `Content.reveal_fields/4` API).
@@ -156,7 +191,19 @@ defmodule Barkpark.Content.Envelope do
 
   # Explicit internal/full-content sentinel — the mutation-result echo, the
   # broadcast payload, and the stored mutation_event snapshot (re-redacted
-  # per-subscriber downstream) ride this. Not reachable from any request path.
+  # per-subscriber downstream) ride this.
+  #
+  # This comment used to end "Not reachable from any request path." That was
+  # FALSE: Content.Broadcast.tap_broadcast/5 runs inside POST /v1/data/mutate,
+  # and the unredacted map egresses on EXACTLY TWO seams — ListenController's
+  # `live_result/4` admin fast path (the only one reaching a REQUESTER) and
+  # Webhooks.Dispatcher.build_payload/6. Both are sound because the
+  # `%CallerContext{is_admin: true}` clause just below returns the envelope
+  # UNCHANGED, byte-identical to this clause. The true, load-bearing property is
+  # that `:internal` is UNFORGEABLE INPUT — CallerContext.from_conn/1 never
+  # yields the bare atom — pinned by
+  # test/barkpark/content/envelope_internal_sentinel_test.exs. See the moduledoc
+  # for the full derivation.
   defp redact_by_field_visibility(envelope, _schema, :internal, _owner_id), do: envelope
 
   # Admins see everything. Ciphertext is still NOT decrypted (that is the
@@ -224,7 +271,8 @@ defmodule Barkpark.Content.Envelope do
   # No caller context => FAIL CLOSED. A nil caller is the most restrictive
   # anonymous principal: a declared private / owner_only / readable_by field is
   # NEVER filterable/orderable by it. This mirrors `render/3`'s nil clause
-  # (see :149-153) — a nil caller is the anonymous PUBLIC-ONLY principal, never
+  # (the nil clause of `redact_by_field_visibility/4`) — a nil caller is the
+  # anonymous PUBLIC-ONLY principal, never
   # an "internal full-content" signal. Internal/writer paths that must reference
   # a private field in a WHERE/ORDER clause pass the explicit `:internal`
   # sentinel below — NEVER nil. (Every production caller already threads a
@@ -232,7 +280,15 @@ defmodule Barkpark.Content.Envelope do
   def field_readable?(_schema, _field_name, nil), do: false
 
   # Explicit internal/full-content sentinel — internal/system reads whose output
-  # still rides the `render/3` redaction boundary. Not reachable from a request path.
+  # still rides the `render/3` redaction boundary.
+  #
+  # Unlike the `render/3` sentinel clause above, this one is genuinely unused:
+  # NO in-tree caller passes `:internal` here at all. Every production call site
+  # threads an explicit context — `CallerContext.anonymous()` in tasks/board.ex,
+  # tasks/query.ex and the tasks board_live peek; the requester's own
+  # `%CallerContext{}` in query_controller.ex, legacy_controller.ex and
+  # search/highlighter.ex. Only envelope_test.exs exercises this clause. It
+  # exists for symmetry with `render/3`, not because a caller needs it.
   def field_readable?(_schema, _field_name, :internal), do: true
   def field_readable?(_schema, _field_name, %CallerContext{is_admin: true}), do: true
 
