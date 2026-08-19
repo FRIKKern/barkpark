@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { PortableText } from '@barkpark/react'
 import { barkparkMetadata } from '@barkpark/nextjs'
 import { getDocBySlug } from '../../../lib/barkpark'
+import { formatDate } from '../../../lib/format-date'
 
 interface Post {
   _id: string
@@ -33,9 +34,9 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   return (
     <article className="prose max-w-none dark:prose-invert">
       <h1 className="text-4xl font-bold">{post.title}</h1>
-      {post.publishedAt ? (
+      {formatDate(post.publishedAt) ? (
         <p className="text-sm text-slate-500">
-          {new Date(post.publishedAt).toLocaleDateString()}
+          {formatDate(post.publishedAt)}
         </p>
       ) : null}
       {post.excerpt ? <p className="text-lg">{post.excerpt}</p> : null}

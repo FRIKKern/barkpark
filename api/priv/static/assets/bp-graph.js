@@ -2041,8 +2041,8 @@
     }
 
     function esc(s) {
-      return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
-        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
       });
     }
 
@@ -2913,7 +2913,7 @@
           var swHex = TYPE_HEX[ty] || SLATE;
           if (theme === "light") swHex = shiftL(swHex, -0.22);
           var swStyle = "width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + swHex + ";";
-          row.innerHTML = "<span style='" + swStyle + "'></span>" + ty;
+          row.innerHTML = "<span style='" + swStyle + "'></span>" + esc(ty);
           legend.appendChild(row);
         });
       } else {

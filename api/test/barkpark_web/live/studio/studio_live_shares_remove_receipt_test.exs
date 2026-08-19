@@ -21,8 +21,27 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
   AGREE.
 
   The event is DOUBLE admin-gated (`Caps.@admin_events` deny-gate + the
-  handler's own `Caps.admin?/1` re-check), so the person misled here is a
-  workspace admin/operator, never a plain member.
+  handler's own `Caps.admin?/1` re-check) — but that is ONE opinion asked twice,
+  not two: both gates call the SAME forked `Caps` predicate, and there is no
+  second opinion anywhere on the admin path.
+
+  The original claim here — that the misled party is "a workspace admin/operator,
+  never a plain member" — was FALSE on the tree this correction was written
+  against. An api_token holding a plain `"member"` membership row plus global
+  `admin` permissions passed BOTH gates, because the token arm of both `Caps`
+  admin answers read only the token's global `permissions[]`. That shape is
+  proven MOUNTABLE — with a `"member"` row read back from the store — in
+  `BarkparkWeb.Studio.CapsMountReachabilityTest` ("shape B"), and it remains
+  mountable.
+
+  arpss-w10's sibling slice (`arpss-w10-caps-admin-parity-table`) then moved both
+  `Caps` admin answers onto workspace-scoped SEAT authority
+  (`role_permits?(membership_role, ws_id, :admin)`), which closes that specific
+  shape at the admin gate: the `member`-row global-admin token still mounts, but
+  no longer clears either admin gate. What survives is the STRUCTURAL point, and
+  it is the reason this paragraph stays: the two gates are one oracle asked
+  twice, so whoever the forked predicate admits is exactly whoever this receipt
+  can mislead — there is no independent check to catch a future drift in it.
   """
   use BarkparkWeb.ConnCase, async: false
 
