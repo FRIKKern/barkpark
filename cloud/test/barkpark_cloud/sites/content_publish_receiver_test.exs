@@ -176,7 +176,10 @@ defmodule BarkparkCloud.Sites.ContentPublishReceiverTest do
       {:ok, secret} = Registry.reveal_site_content_secret(site)
 
       body = Jason.encode!(%{"event" => "publish"})
-      future_ts = System.system_time(:second) + 400
+      # +3600 rather than the stale arm's mirror-image -400: the offset only has
+      # to clear the 300s tolerance, and a wide margin makes the arm immune to a
+      # test-host clock step between this line and the server's own read.
+      future_ts = System.system_time(:second) + 3600
 
       conn = deliver(site.id, body, sign(secret, future_ts, body))
 
