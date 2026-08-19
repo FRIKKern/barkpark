@@ -39,18 +39,29 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   # `import Ecto.Query, warn: false`), declares no behaviours and defines no
   # macros, so this literal is exactly the hand-written public set.
   # ---------------------------------------------------------------------------
+  #
+  # The four 3-arity entries are the EXPLICIT-KIND forms added by
+  # `arpss-w10-bl-workspace-admin-bare-user-id-silent-false`: a raw id binary
+  # cannot carry the `principal_type` discriminator, so the 2-arity raw-binary
+  # path has to guess (it reads "api_token"), and these let a caller SAY which
+  # kind it holds. This pin RED is what a new public arity is supposed to
+  # produce — it was red on 15-vs-11 before this list was updated.
   @public_surface [
     authorize: 3,
     create_membership: 2,
     create_membership: 3,
     create_membership: 4,
     member?: 2,
+    member?: 3,
     membership: 2,
+    membership: 3,
     membership_role: 2,
+    membership_role: 3,
     permits?: 2,
     role_for_permissions: 1,
     role_permits?: 3,
-    workspace_admin?: 2
+    workspace_admin?: 2,
+    workspace_admin?: 3
   ]
 
   # The DRIVEN subset — every entry point reachable from a request path with a
@@ -104,7 +115,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 11 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 15 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end
