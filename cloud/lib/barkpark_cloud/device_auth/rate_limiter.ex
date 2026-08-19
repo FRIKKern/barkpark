@@ -43,10 +43,12 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
   The key is `{key_string, window}` where `window = div(now_ms, @window_ms)`, so
   strictly-elapsed windows are lazily swept on the next `check/1` for that key.
   That sweep is PER-KEY: its match head pins the key being checked, so it bounds
-  how many rows ONE key accrues (to one) and nothing more — there is no periodic
-  prune, so rows for keys that never return stay until `reset/0`, and the key
-  space of the unauthenticated buckets is attacker-chosen. `check/1` is the only
-  mutation; `reset/0` clears the table for deterministic tests.
+  how many rows ONE key accrues — to one, or transiently two while a straddling
+  caller's older window sits beside a newer one, collapsing back to one on that
+  key's next forward call — and nothing more. There is no periodic prune, so
+  rows for keys that never return stay until `reset/0`, and the key space of the
+  unauthenticated buckets is attacker-chosen. `check/1` is the only mutation;
+  `reset/0` clears the table for deterministic tests.
   """
   use GenServer
 

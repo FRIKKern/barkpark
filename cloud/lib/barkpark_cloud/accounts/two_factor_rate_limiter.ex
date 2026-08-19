@@ -11,10 +11,12 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
   `window = div(now_ms, @window_ms)`, so counters for an elapsed window are
   simply never read again and are swept lazily on the next `check/1` for that
   user. That sweep is PER-KEY and only strictly-older: its match head pins the
-  user id being checked, so it bounds how many rows ONE user accrues (to one)
-  and nothing more — there is no periodic prune, so rows for users who never
-  return again stay until `reset/0`. A full token-bucket / `Hammer` dependency
-  would be overkill for one route.
+  user id being checked, so it bounds how many rows ONE user accrues — to one,
+  or transiently two while a straddling caller's older window sits beside a
+  newer one, collapsing back to one on that user's next forward call — and
+  nothing more. There is no periodic prune, so rows for users who never return
+  again stay until `reset/0`. A full token-bucket / `Hammer` dependency would be
+  overkill for one route.
 
   `check/1` is the only mutation: it bumps the current window's counter and
   returns `:ok` while at or under the limit, `{:error, {:rate_limited,

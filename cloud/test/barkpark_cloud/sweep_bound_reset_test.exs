@@ -22,11 +22,23 @@ defmodule BarkparkCloud.SweepBoundResetTest do
   admissions for that key in the newer window (30 on `"register:"`, 5 on 2FA) —
   a re-granted budget, not an erased bound.
 
-  VECTOR: PLAUSIBLE, NOT OBSERVED. The window-W view can be stale either by the
-  scheduling gap between the `div(now_ms, @window_ms)` derivation and the sweep,
-  or by a backwards wall-clock step (OTP 27 defaults to multi_time_warp and no
-  vm.args here overrides it). Nobody stepped a host clock to watch it happen;
-  the test drives `now_ms` explicitly instead of racing the real clock.
+  VECTOR. Two ways a caller's window view goes stale, and they are not equally
+  exotic:
+
+    * THE BOUNDARY STRADDLE, which needs no clock anomaly at all. Caller A reads
+      `now_ms` a few ms before a 60s boundary (window W) and caller B reads it a
+      few ms after (W+1). B sweeps and bumps W+1 first; A's sweep then runs with
+      the older `/=` guard and deletes B's W+1 row. Under the sustained flood
+      these buckets exist to brake, requests are in flight across EVERY window
+      boundary, so this interleaving is not a rare coincidence — it is the
+      normal case once per minute per hot key.
+    * A backwards wall-clock step (OTP 27 defaults to multi_time_warp and no
+      vm.args here overrides it), which widens the same hole arbitrarily.
+
+  NOT OBSERVED, though: nobody instrumented a production straddle or stepped a
+  host clock. The test drives `now_ms` explicitly rather than racing the real
+  clock, so what is proven here is that the code path admits the refund and that
+  the `<` guard closes it — not a measured production trigger rate.
   """
   use ExUnit.Case, async: false
 
