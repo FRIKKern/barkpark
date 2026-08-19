@@ -552,6 +552,25 @@ defmodule Barkpark.Webhooks.DispatcherTest do
              )
     end
 
+    # clk-w4 (TESTABILITY, not a defect — dispatcher.ex's `abs(now - t)` is
+    # CORRECT today). The stale arm above drives only the PAST side, so striking
+    # `abs(` from the freshness check left every webhook test in this repo green
+    # while the window silently lost its future half. This arm drives the other
+    # side: a signature dated 301s AHEAD of `now` must fail exactly like a stale
+    # one. Deterministic — `now` is the public 5th argument, no clock involved.
+    test "future-dated timestamp is rejected too — the freshness window is two-sided" do
+      header = "t=#{@parity_ts},v1=#{@parity_hex}"
+      early_now = @parity_ts - 301
+
+      refute Dispatcher.verify_signature(
+               @parity_body,
+               @parity_ts,
+               header,
+               [@parity_secret],
+               early_now
+             )
+    end
+
     test "tampered body is rejected (HMAC no longer matches the signed material)" do
       header = "t=#{@parity_ts},v1=#{@parity_hex}"
 
