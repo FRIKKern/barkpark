@@ -36,7 +36,10 @@ defmodule Barkpark.Tenancy.QuotaToctouDemonstrationTest do
     1. STAGED — the load-bearing one. The interleaving above, made explicit for
        8 callers. Deterministic; needs no scheduler luck.
     2. CONCURRENT — the same fan-out released from a barrier, showing the staged
-       ordering arises naturally under ordinary contention.
+       ordering arises naturally under ordinary contention. It asserts
+       OVER-ADMISSION (`admitted > 1`, against leg 3's pinned sequential 1)
+       rather than an exact count: it is the only leg whose number depends on
+       scheduling, and the exact count is leg 1's deterministic job.
     3. SEQUENTIAL CONTROL — the SAME code path driven one caller at a time
        admits exactly the headroom. Without this leg the demo could not
        distinguish "the race is real" from "the gate is simply broken".
@@ -165,16 +168,32 @@ defmodule Barkpark.Tenancy.QuotaToctouDemonstrationTest do
       admitted = Enum.count(outcomes, &(&1 == :admitted))
       final = usage(ws)
 
-      assert admitted == @fanout,
-             "DEMONSTRATION (current broken behaviour): every concurrent caller reads the " <>
-               "pre-write count and is admitted; expected #{@fanout} admitted, got " <>
-               "#{admitted} (#{inspect(outcomes)}). When the invariant moves into the " <>
-               "database this MUST be inverted to `admitted == 1` (the headroom)."
+      # The CLAIM of this leg is over-admission arising naturally, not a
+      # particular count: the exact `admitted == @fanout` figure is leg 1's,
+      # where it is staged and needs no scheduler luck. Asserting the exact
+      # count HERE would make the file's only scheduling-dependent number
+      # load-bearing, and a partial serialisation on a starved runner would red
+      # a file that asserts BROKEN behaviour — the most confusing red there is.
+      # Measured by the reviewer: 26 consecutive clean runs under
+      # `ELIXIR_ERL_OPTIONS="+S 1" --max-cases 1`, plus the builder's ~13 at 10
+      # schedulers, and `admitted` was the full fan-out every time. Bounded at
+      # `> 1` because leg 3 pins the sequential answer at EXACTLY 1, so any
+      # value above it is over-admission and nothing else.
+      assert admitted > 1,
+             "DEMONSTRATION (current broken behaviour): concurrent callers read the SAME " <>
+               "pre-write count and are all admitted, so more than the headroom (1, pinned " <>
+               "by leg 3) must get through; got #{admitted} of #{@fanout} " <>
+               "(#{inspect(outcomes)}). When the invariant moves into the database this " <>
+               "MUST be inverted to `admitted == 1`."
 
-      assert final == @cap - 1 + @fanout,
+      assert final > @cap,
              "DEMONSTRATION (current broken behaviour): concurrent callers overshoot the cap " <>
-               "of #{@cap} to #{@cap - 1 + @fanout}; invert to `final == #{@cap}` when fixed. " <>
-               "Got #{final}."
+               "of #{@cap}; got #{final}. Invert to `final == #{@cap}` when fixed."
+
+      assert final == @cap - 1 + admitted,
+             "every admitted caller must have written exactly once — final #{final} does not " <>
+               "equal the seeded #{@cap - 1} plus the #{admitted} admitted writes, so this " <>
+               "leg is measuring something other than the quota gate"
     end
   end
 
