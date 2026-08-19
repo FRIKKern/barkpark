@@ -760,12 +760,19 @@ jobs:
       - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
         # The guard turns a missing python3/PyYAML into exit 2
         # HARNESS-UNAVAILABLE — correctly refusing rather than skipping, but
-        # illegibly so. Fail by NAME here, matching the checks above.
+        # illegibly so. Resolve it by NAME here instead. PyYAML is INSTALLED
+        # rather than demanded, matching this file's own idiom at the
+        # reland-check step above: whether the runner image happens to ship it
+        # is an image fact, not a finding about this repo, and a red that says
+        # `ModuleNotFoundError: yaml` teaches a reader nothing about doc-gates'
+        # paths lists. A missing python3 is still a hard, named failure — pip3
+        # cannot repair that.
         run: |
           command -v python3 >/dev/null || {
             echo "python3 missing on the runner image" >&2
             exit 1
           }
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
           python3 -c "import yaml; print('PyYAML', yaml.__version__)"
       - name: doc-gates-paths-parity-check.sh syntax check
         run: bash -n scripts/doc-gates-paths-parity-check.sh
