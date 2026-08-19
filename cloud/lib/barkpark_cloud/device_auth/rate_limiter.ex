@@ -41,9 +41,12 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
       last hop.
 
   The key is `{key_string, window}` where `window = div(now_ms, @window_ms)`, so
-  elapsed windows are lazily swept on the next `check/1` for that key and the
-  table can't grow unbounded. `check/1` is the only mutation; `reset/0` clears
-  the table for deterministic tests.
+  strictly-elapsed windows are lazily swept on the next `check/1` for that key.
+  That sweep is PER-KEY: its match head pins the key being checked, so it bounds
+  how many rows ONE key accrues (to one) and nothing more — there is no periodic
+  prune, so rows for keys that never return stay until `reset/0`, and the key
+  space of the unauthenticated buckets is attacker-chosen. `check/1` is the only
+  mutation; `reset/0` clears the table for deterministic tests.
   """
   use GenServer
 
@@ -85,7 +88,7 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
 
     # Drop this key's rows from any earlier window so the table stays bounded.
     :ets.select_delete(@table, [
-      {{{key, :"$1"}, :_}, [{:"/=", :"$1", window}], [true]}
+      {{{key, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
     ])
 
     count = :ets.update_counter(@table, {key, window}, {2, 1}, {{key, window}, 0})

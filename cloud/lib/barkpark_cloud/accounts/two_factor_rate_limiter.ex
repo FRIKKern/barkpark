@@ -10,8 +10,11 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
   fixed-window counters. The key is `{user_id, window}` where
   `window = div(now_ms, @window_ms)`, so counters for an elapsed window are
   simply never read again and are swept lazily on the next `check/1` for that
-  user. A full token-bucket / `Hammer` dependency would be overkill for one
-  route.
+  user. That sweep is PER-KEY and only strictly-older: its match head pins the
+  user id being checked, so it bounds how many rows ONE user accrues (to one)
+  and nothing more — there is no periodic prune, so rows for users who never
+  return again stay until `reset/0`. A full token-bucket / `Hammer` dependency
+  would be overkill for one route.
 
   `check/1` is the only mutation: it bumps the current window's counter and
   returns `:ok` while at or under the limit, `{:error, {:rate_limited,
@@ -47,10 +50,13 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
   def check(user_id, now_ms) when is_binary(user_id) and is_integer(now_ms) do
     window = div(now_ms, @window_ms)
 
-    # Drop any stale rows for this user from an earlier window (a guard `:"$1"`
-    # not equal to the current window) so the table can't grow unbounded.
+    # Drop this user's rows from any STRICTLY EARLIER window (a guard `:"$1"`
+    # less than the current window) so this key's rows can't accrete. Strictly
+    # earlier, never merely different: a caller whose `window` view is stale —
+    # by the scheduling gap since it was derived, or by a backwards clock step —
+    # would otherwise delete a NEWER window's counter and hand it a fresh budget.
     :ets.select_delete(@table, [
-      {{{user_id, :"$1"}, :_}, [{:"/=", :"$1", window}], [true]}
+      {{{user_id, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
     ])
 
     # update_counter is atomic; the default {key, 0} seeds a fresh window.
