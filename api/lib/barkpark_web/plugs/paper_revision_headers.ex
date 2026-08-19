@@ -234,9 +234,9 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   # about clock semantics — the reviews that passed this code graded it on HTTP
   # conditional-request correctness (the weak-validator, 304 and If-None-Match
   # rows of the http-edge-truth charter named in the moduledoc above), never on
-  # what a clock step
-  # does to the bucket. The two grounds above are structural (no shared mutable
-  # state) and a consumer census; neither leans on that history.
+  # what a clock step does to the bucket. The two grounds above are structural
+  # (no shared mutable state) and a consumer census; neither leans on that
+  # history.
   defp weak_etag(content) do
     bucket = div(System.os_time(:second), @bucket_seconds)
     ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{bucket}")
