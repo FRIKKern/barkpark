@@ -121,6 +121,14 @@ EOF
   echo "selftest OK: agree→green, one-column drift→red"
 }
 
+# Refuse an argument this gate does not understand. A swallowed flag — a
+# `--selftest` typo, a future rename — would silently run the ordinary check
+# and report green, fabricating the tripwire's own proof.
+if [ -n "${1:-}" ] && [ "$1" != "--selftest" ]; then
+  echo "connectors-ddl-drift-check: unknown argument '$1' (expected nothing or --selftest)" >&2
+  exit 2
+fi
+
 if [ "${1:-}" = "--selftest" ]; then
   selftest
   exit $?

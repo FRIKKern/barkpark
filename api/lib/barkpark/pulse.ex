@@ -189,6 +189,50 @@ defmodule Barkpark.Pulse do
     end)
   end
 
+  # ── CITED SAFE — class A, and the most REACHABLE clock-derived bound in the
+  # repo (clock-semantics wave, 2026-08-19). Read this before re-sourcing the
+  # clock; it was previously UNCENSUSED.
+  #
+  # Why it hid: there is no `div(`, no `on_conflict`, no bucket key here, so
+  # every mechanical sweep for the #12628 shape (8598c4efe7 — a wall-clock
+  # window used as a bucket key; atomicity precedent #12579, e45f1377bb) walks
+  # straight past it. You only find it by following `count_today/1` to its
+  # SECOND caller.
+  #
+  # CONSUMER CENSUS — two callers, and they are not equally interesting:
+  #   * `stats/1` in this module — display only.
+  #   * `BarkparkWeb.PulseController.check_daily_cap/2` (pulse_controller.ex:127)
+  #     — this ENFORCES the per-channel `daily_cap` (default 5_000) on a route
+  #     whose own moduledoc reads "Auth posture: NONE, by design". An
+  #     unauthenticated caller reaches this bound.
+  # `grep -rn count_today api/lib` returns nothing else.
+  #
+  # (a) STRUCTURAL, before any consequence argument: this is a range COUNT over
+  #     the persisted `inserted_at` column, re-derived from scratch on every
+  #     request. Nothing stores a bucket key, nothing sweeps by one, and there
+  #     is nothing for a stale reader to delete — so #12628's mechanism is
+  #     absent and this is class A (an absolute instant compared against stored
+  #     instants), not class C.
+  #
+  # (b) CLOCK STEP, both directions, and the caller influences neither — no
+  #     request value feeds this read, `count_today/1` takes no `now` argument:
+  #     * FORWARD across UTC midnight: the window restarts early and the full
+  #       anonymous 5_000 budget is refreshed — FAIL-OPEN, bounded at one extra
+  #       cap per step.
+  #     * BACKWARD across UTC midnight: the window widens and rows from up to
+  #       two days are counted against one cap — FAIL-CLOSED.
+  #
+  # And the decisive point: a monotonic rewrite here is IMPOSSIBLE, not merely
+  # wrong. The column being compared (`inserted_at`) is wall clock and persists
+  # across restarts, and "per UTC day" IS the specification of the cap
+  # (`daily_cap`, documented in this module's moduledoc and in the pulse plugin
+  # card). `System.monotonic_time` cannot express a UTC-day boundary at all.
+  #
+  # WHAT THIS VERDICT DOES NOT REST ON: the fact that the pulse surface already
+  # carries per-IP token buckets and a green abuse-drill suite. Those bound a
+  # DIFFERENT thing (per-IP rate) and none of them exercises a clock step
+  # against this window. The grounds above are the structural shape and a
+  # caller census.
   @doc "How many events the channel ingested in the current UTC day (the daily-cap gauge)."
   def count_today(channel) do
     midnight = DateTime.utc_now() |> DateTime.to_date() |> DateTime.new!(~T[00:00:00], "Etc/UTC")
