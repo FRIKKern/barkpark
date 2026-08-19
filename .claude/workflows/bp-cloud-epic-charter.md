@@ -79,4 +79,25 @@ Deferred by construction (filed, not built — every fix locus is outside this f
 
 ## Wave log
 
-_(empty — the lead appends per-wave outcomes here as waves merge.)_
+### Wave 2026-08-19 — wave 2 (grade A-)
+
+**Landed (2 round-1 slices; both gates re-run green on the reviewer's `-r` branches, both rebased onto `bf499f54b6` and pushed):**
+
+- **S1 — the token bucket is atomic** (`acpc-w2-ratelimiter-cas-atomic-debit`, final branch `loop-epic/ratelimiter-commit-the-token-bucket-debi-0-r`, **PR #12579**). `check/2` delegates to `debit/4` with `@max_commit_attempts 128`; the existing branch commits via `:ets.select_replace/2` pinning the exact tuple read, the cold branch via `:ets.insert_new/2`, and exhaustion returns `:rate_limited` — fail CLOSED. D1's refutation of the inherited "update_counter is integer-only, so it needs a GenServer" premise held all the way to the merge. A **second race the filed finding never named** was closed with it: the cold branch let N callers each insert a FULL bucket (29–32 admitted at capacity 5). Semantics preserved by construction — `elapsed_s`, `refilled` and `refilled >= 1.0` are all context lines in the diff, and `rate_limiter_test.exs` is byte-unchanged and green.
+- **S3 — the quota is demonstrated, not patched** (`acpc-w2-quota-toctou-demonstration`, final branch `loop-epic/quota-demonstrate-the-count-then-compare-1-r`, **PR #12580**). `git diff origin/main -- api/lib/barkpark/tenancy/quota.ex` prints nothing, as D13 required. Four legs, the staged and batch ones deterministic; leg 4 refutes the filed task's own "up to the concurrency factor" bound (D18) and survives any fix to the race. `acpc-bl-quota-toctou` patched and re-published with all five corrections and the ranked costed menu.
+
+**D7 was the wave's best call, and the reviewer's own measurement is what proves it.** At `ELIXIR_ERL_OPTIONS="+S 1" --max-cases 1` the byte-verbatim twin over-admitted in **0 of 20 rounds** while the seam-widened twin asserted green in all 20. A verbatim per-round assertion would have been permanently red on a 1-vCPU CI runner; a fixed-limiter-only assertion would have been vacuous there. The two-twin split is the only shape that is both honest and CI-safe.
+
+**The guard is able to fail, re-proven independently.** The reviewer restored origin/main's `check/2` into the tree and re-ran: **6 of the 9** concurrency tests red, including `round 1: admitted 200 of 200 at capacity 50` and `round 1: cold-key race admitted 32`.
+
+**Reviewer fixes (both on the `-r` branches — integrate `-r`, never the originals):**
+- S1: the barrier's `assert_receive` liveness bound moved 5s → `@barrier_timeout_ms 60_000`. `race/2` hands the scheduler 200 busy-spinning processes and then drains 2N messages, so on a 1-vCPU runner a receive timeout was the likeliest red — and it would have read as "the limiter over-admitted".
+- S3: leg 2 asserted the exact `admitted == 8`, the file's only scheduling-dependent number, in a file that asserts BROKEN behaviour. It now asserts `admitted > 1` (non-vacuous because leg 3 pins the sequential answer at exactly 1) plus a conservation check. Measured 26 consecutive clean runs at `+S 1` before weakening — the change is about what a failure would *mean*, not about one being observed.
+
+**Stalled / deferred:** `acpc-w2-ratelimiter-prune-hourly-reset` (S2) was **not built, by design** — it is round 2 and edits the same file S1 must leave byte-unchanged (D10/D11). It dispatches once S1 merges, rebased onto it.
+
+**Ledger:** one real omission, fixed. S1's criterion 3 (the seam-widened twin's per-round assertion) was built, gated and green but left unstamped, while the builder's now-line claimed 11/12 against a ledger holding 10/12. The reviewer stamped it with first-hand re-run evidence and attributed the stamp. S3's ledger was clean (9/10, only the merge-gated row open). No task outside this wave was touched.
+
+**Grade A-.** Both fail-open races in fence closed or honestly refused; the concurrency proof genuinely reds on the unfixed body; the refusal is a category argument, not a shrug. Short of A because S1's stamped "arithmetic unchanged" grep is exact while the same claim in its commit prose is looser than the diff supports, and because the retry budget's fail-closed behaviour at pathological widths beyond 200 contenders is reasoned rather than measured.
+
+**Next wave:** merge #12579 first (it is S2's dependency), then #12580, then dispatch S2 rebased onto S1. **#12579 is owed an INDEPENDENT second reviewer before merge** — HIGH-FLIP on both the atomicity and preserved-semantics arguments, on a path every authenticated request crosses. The lead closes the merge-gated criteria: S1 criterion 11, S3 criterion 9.
