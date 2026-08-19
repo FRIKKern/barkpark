@@ -2328,6 +2328,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       nonce = Deploy.prebuilt_nonce()
 
       assert is_integer(nonce)
+
       assert nonce > 1_000_000_000_000,
              "prebuilt nonce #{nonce} is boot-relative, not wall-clock — it repeats after a restart"
 
