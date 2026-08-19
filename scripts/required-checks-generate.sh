@@ -93,6 +93,17 @@
 # CONTRADICTION rather than an absence and takes `--expect-promoted <name>`,
 # which DROPS the row instead of carrying it.
 #
+# AND THE SAME CONTRADICTION POINTS BOTH WAYS
+#
+# The mirror — a name the committed spec REQUIRES that this run derives as
+# EXCLUDED — had no clause at all: the check list's base-first union carried the
+# required row while the derived exclusion was appended beside it, so adding
+# `continue-on-error: true` to an already-required job emitted ONE CONTEXT ON
+# BOTH LISTS at exit 0, and `required-checks-verify.sh` reads no `.exclusions`,
+# so nothing downstream could notice. It is refused at the emit and acknowledged
+# with `--expect-demoted <name>`, which DROPS THE REQUIRED row — a protection
+# change, hence a name a human types.
+#
 # AND AN EXCLUDED AGGREGATOR DEMOTES ITS LEAVES, NEVER PROMOTES THEM (wave 11)
 #
 # S3 subsumption is computed against the SURVIVORS. So when a stage excludes an
@@ -108,6 +119,10 @@
 #   scripts/required-checks-generate.sh --sha <sha> --sha <sha> [--out FILE]
 #   scripts/required-checks-generate.sh --sha <sha> --explain      # the ledger
 #   scripts/required-checks-generate.sh --sha … --enforced true --out FILE
+#
+#   --expect-unrendered <name>  the sample could not render it; the MERGE carries it
+#   --expect-promoted   <name>  committed EXCLUSION this run requires; DROPS the exclusion row
+#   --expect-demoted    <name>  committed REQUIREMENT this run excludes; DROPS the required row
 #
 # The spec is regenerated immediately before any protection flip; it has a shelf
 # life of about one merged workflow change.
@@ -133,6 +148,7 @@ MERGE_BASE=""
 NO_MERGE=0
 EXPECT_UNRENDERED=()
 EXPECT_PROMOTED=()
+EXPECT_DEMOTED=()
 
 # Advisory BY INTENT: names that run green, are not paths-filtered, and are not
 # subsumed — but must still never gate a merge. Each needs one line of why.
@@ -278,26 +294,64 @@ fetch_status_contexts() {
 
 # ── the workflow-source index ────────────────────────────────────────────────
 # One row per job: file, job id, the `name:` TEMPLATE verbatim, whether the job
-# is matrixed, whether it is continue-on-error, whether its workflow is
-# paths-filtered on pull_request, and its `needs`. Everything the selection
-# stage decides is derived from THIS, not from the shape of a rendered string.
+# is matrixed, the job-level `continue-on-error` LITERAL (empty when the job is
+# blocking), whether its workflow is paths-filtered on pull_request, its
+# `needs`, and whether EVERY decision-bearing step in it is advisory (the
+# advisory literal is `-` when the job is blocking, never empty — see flush).
+# Everything the selection stage decides is derived from THIS, not from the
+# shape of a rendered string.
+#
+# THE TRIGGER KEY IS NOT ALWAYS THE BYTES `on:`. YAML 1.1 resolves a BARE `on`
+# to the BOOLEAN true, which is why yamllint's `truthy` rule pushes authors to
+# write `"on":` — and GitHub accepts it (the official workflow schema demands a
+# key literally named `on`, and public workflows carry the quoted form). A byte
+# anchor of `/^on:/` therefore reads a perfectly legal workflow as having NO
+# triggers at all: `pf` never gets set, `/^jobs:/` still matches, and a
+# paths-filtered job is emitted REQUIRED at exit 0 — the D18/D20 deadlock,
+# manufactured by the script written to prevent it. Match all three spellings.
+#
+# THE GLOB IS `*.yml` AND `*.yaml`. GitHub reads both; a `*.yml`-only index
+# leaves a `.yaml` job UNMAPPED and reports the factually false S0 reason "no
+# job in <dir> publishes this name". scripts/never-cancel-main-check.sh:96
+# already globs both — this is the repo's own standard, not a judgement call.
 build_workflow_index() {
   local f
-  for f in "$WORKFLOW_DIR"/*.yml; do
+  for f in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
     [ -f "$f" ] || continue
     awk -v file="$(basename "$f")" '
-      function flush() {
-        if (job != "") {
-          printf "%s\t%s\t%s\t%d\t%d\t%d\t%s\n", file, job,
-                 (jname == "" ? job : jname), matrixed, coe, pf, needs
-        }
-        job = ""; jname = ""; matrixed = 0; coe = 0; needs = ""
+      function indent_of(s) { match(s, /^ */); return RLENGTH }
+
+      # A step ends when the next one starts, when the `steps:` block ends, or
+      # when the job does. A step that carries neither `run:` nor `uses:` makes
+      # no decision (it is a `with:`-less `name:`-only stanza or a comment), so
+      # it neither counts toward the laundering shape nor rescues a job from it.
+      function stepflush() {
+        if (instep && sdecision) { ndec++; if (scoe) ndeccoe++ }
+        instep = 0; sdecision = 0; scoe = 0; inblock = 0
       }
-      BEGIN { inon = 0; inpr = 0; injobs = 0; pf = 0; instrategy = 0; inneeds = 0 }
+      function flush() {
+        stepflush()
+        if (job != "") {
+          # TAB IS IFS WHITESPACE. `IFS=$'\t' read` COLLAPSES a run of tabs,
+          # so an EMPTY field silently shifts every later one — which is why
+          # `needs`, the only field that is legitimately empty, stays LAST and
+          # why a blocking job writes the sentinel `-` rather than "".
+          printf "%s\t%s\t%s\t%d\t%s\t%d\t%d\t%s\n", file, job,
+                 (jname == "" ? job : jname), matrixed, (coe == "" ? "-" : coe),
+                 pf, (ndec > 0 && ndec == ndeccoe) ? 1 : 0, needs
+        }
+        job = ""; jname = ""; matrixed = 0; coe = ""; needs = ""
+        insteps = 0; ndec = 0; ndeccoe = 0
+      }
+      BEGIN { inon = 0; inpr = 0; injobs = 0; pf = 0; instrategy = 0; inneeds = 0
+              coe = ""; insteps = 0; ndec = 0; ndeccoe = 0 }
 
       # ---- workflow-level triggers: is pull_request paths-filtered? ----
-      /^on:/            { inon = 1; next }
-      inon && /^[a-z]/  { inon = 0; inpr = 0 }
+      # A quoted trigger key is the same key to GitHub. The anchor spells the
+      # single quote as awk escape \047 so it needs no shell quote gymnastics
+      # (the idiom is already in scripts/check-deployyml-filters.sh).
+      /^("on"|\047on\047|on)[ \t]*:/ { inon = 1; next }
+      inon && /^[A-Za-z"\047]/  { inon = 0; inpr = 0 }
       inon && /^  pull_request:/ { inpr = 1; next }
       inon && /^  [a-z_]+:/      { inpr = 0 }
       inon && inpr && /^    paths(-ignore)?:/ { pf = 1; next }
@@ -314,6 +368,9 @@ build_workflow_index() {
       }
 
       injobs && job != "" {
+        # A job key at depth 4 ends the `steps:` block, wherever it sits.
+        if (insteps && $0 ~ /^    [A-Za-z]/) { stepflush(); insteps = 0 }
+
         # strategy block: a `matrix:` inside it means GitHub may append a tuple
         if ($0 ~ /^    strategy:/) { instrategy = 1; next }
         if (instrategy && $0 ~ /^    [a-z]/) { instrategy = 0 }
@@ -325,7 +382,20 @@ build_workflow_index() {
           sub(/[ \t]+$/, "", v)
           jname = v; next
         }
-        if ($0 ~ /^    continue-on-error: *true/) { coe = 1; next }
+        # THE VALUE, NOT THE BYTES `true`. `'\''true'\''`, `"true"`, `yes` and a
+        # `${{ … }}` expression are all continue-on-error to GitHub and all
+        # escaped a `: *true` literal match. Anything that is not a literal
+        # `false` is advisory — a `${{ … }}` is statically unknowable, and
+        # classifying an unknowable job as advisory is the direction that
+        # cannot pin a check which may not be able to fail. The literal is
+        # carried through to the S2 reason so the operator reads what it saw.
+        if ($0 ~ /^    continue-on-error:/) {
+          v = $0; sub(/^    continue-on-error:[ \t]*/, "", v)
+          sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v); gsub(/\t/, " ", v)
+          if (v == "") v = "(empty)"
+          coe = (v == "false") ? "" : v
+          next
+        }
         if ($0 ~ /^    needs: *\[/) {
           v = $0; sub(/^    needs: *\[/, "", v); sub(/\].*$/, "", v)
           gsub(/ /, "", v); needs = v; inneeds = 0; next
@@ -336,10 +406,58 @@ build_workflow_index() {
           needs = (needs == "" ? v : needs "," v); next
         }
         if (inneeds && $0 !~ /^      /) { inneeds = 0 }
+
+        # ---- steps: the laundering shape ----
+        # A job with NO job-level key whose every decision-bearing step carries
+        # continue-on-error cannot fail either, and no single boolean can tell
+        # it from js-tests.yml'"'"'s `test` job, which mixes three advisory steps
+        # among genuinely blocking ones. So this counts rather than classifies,
+        # and the refusal that reads it is LOUD (see assert_no_laundered_jobs):
+        # silently demoting a mixed job would EXCLUDE a real gate, and losing
+        # protection is not a safe direction in either wave'"'"'s doctrine.
+        if ($0 ~ /^    steps:/) { stepflush(); insteps = 1; next }
+        if (insteps) {
+          # A block scalar (`run: |`) carries arbitrary text, including the
+          # literal `continue-on-error:` in a shell heredoc — skip its body.
+          if (inblock) { if ($0 ~ /^[ \t]*$/ || indent_of($0) > blockind) next; inblock = 0 }
+          if ($0 ~ /^      - /) { stepflush(); instep = 1 }
+          if (instep) {
+            line = $0; ind = indent_of($0)
+            sub(/^ +/, "", line)
+            if (sub(/^- +/, "", line)) ind = ind + 2
+            if (line ~ /^(run|uses):/) sdecision = 1
+            if (line ~ /^continue-on-error:/) {
+              v = line; sub(/^continue-on-error:[ \t]*/, "", v)
+              sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+              if (v != "false") scoe = 1
+            }
+            if (line ~ /^[A-Za-z_-]+:[ \t]*[|>][-+0-9]*[ \t]*$/) { inblock = 1; blockind = ind }
+          }
+          next
+        }
       }
       END { flush() }
     ' "$f"
   done
+}
+
+# A job that cannot fail, spelled one step at a time. Refused at INDEX-BUILD
+# time and BY NAME, never silently classified: `coe` is a single boolean and a
+# job whose every decision step is advisory looks identical to one whose steps
+# are merely mostly advisory, so a classifier would have to choose between
+# emitting a check that can never red and EXCLUDING a genuine gate. Both are
+# wrong; the operator gets the sentence instead. Fires on ZERO jobs in
+# .github/workflows today — js-tests.yml `test` carries three advisory steps
+# among blocking ones and is correctly untouched.
+assert_no_laundered_jobs() {
+  local idx="$1" file job tmpl launder
+  while IFS=$'\t' read -r file job tmpl _matrixed _coe _pf launder _needs; do
+    [ -n "$job" ] || continue
+    [ "$launder" = "1" ] || continue
+    die "EVERY DECISION-BEARING STEP IS ADVISORY: $file job '$job' declares no job-level \`continue-on-error\`, but every one of its \`run:\`/\`uses:\` steps carries one — the job publishes a check that CANNOT report a failure, while reading as blocking here. Either put \`continue-on-error: true\` on the JOB (which S2 excludes, honestly), or take the flag off the steps that are supposed to decide. This refusal names the job rather than classifying it because a job that MIXES advisory and blocking steps (js-tests.yml job 'test') is legitimate, and demoting one to catch the other would EXCLUDE a real gate."
+  done <<EOF
+$idx
+EOF
 }
 
 # A job `name:` template turned into an anchored ERE. Metacharacters are escaped
@@ -373,7 +491,7 @@ CATCHALL_PROBE='rc-catchall-probe-9f2c1dz'
 
 assert_no_catchall_job_names() {
   local idx="$1" file job tmpl re
-  while IFS=$'\t' read -r file job tmpl _matrixed _coe _pf _needs; do
+  while IFS=$'\t' read -r file job tmpl _matrixed _coe _pf _launder _needs; do
     [ -n "$job" ] || continue
     re="$(tmpl_to_regex "$tmpl")"
     if grep -qE "^${re}$" <<<"$CATCHALL_PROBE"; then
@@ -394,7 +512,7 @@ EOF
 job_for_name() {
   local target="$1" idx="$2"
   local file job tmpl matrixed coe pf needs re
-  while IFS=$'\t' read -r file job tmpl matrixed coe pf needs; do
+  while IFS=$'\t' read -r file job tmpl matrixed coe pf _launder needs; do
     [ -n "$job" ] || continue
     re="$(tmpl_to_regex "$tmpl")"
     if grep -qE "^${re}$" <<<"$target"; then
@@ -431,7 +549,7 @@ subsumed_jobs() {
     [ -n "$cur" ] || continue
     case ",$seen," in *",$cur,"*) continue ;; esac
     seen="$seen,$cur"
-    while IFS=$'\t' read -r jf jj _t _m _c _p jneeds; do
+    while IFS=$'\t' read -r jf jj _t _m _c _p _l jneeds; do
       [ "$jf" = "$file" ] && [ "$jj" = "$cur" ] || continue
       printf '%s\t%s\n' "$jf" "$jj"
       [ -n "$jneeds" ] && queue="${queue:+$queue,}$jneeds"
@@ -495,9 +613,14 @@ usage() {
 # will ever see its name, and widening the window in response is wasted motion.
 workflow_has_head_trigger() {
   [ -f "$1" ] || return 1
+  # SAME THREE SPELLINGS as build_workflow_index: with a byte anchor of
+  # `/^on:/` a `"on":` workflow that plainly carries `push:` draws the
+  # factually FALSE hint "PULL_REQUEST-ONLY: it can never render on a branch
+  # head", sending the operator to widen a sampling window that was never the
+  # problem.
   awk '
-    /^on:/ { inon = 1; next }
-    inon && /^[a-z]/ { exit }
+    /^("on"|\047on\047|on)[ \t]*:/ { inon = 1; next }
+    inon && /^[A-Za-z"\047]/ { exit }
     inon && /^  (push|schedule|workflow_dispatch|merge_group):/ { found = 1 }
     END { exit(found ? 0 : 1) }
   ' "$1"
@@ -542,6 +665,7 @@ main() {
       --no-merge) NO_MERGE=1; shift ;;
       --expect-unrendered) EXPECT_UNRENDERED+=("$2"); shift 2 ;;
       --expect-promoted) EXPECT_PROMOTED+=("$2"); shift 2 ;;
+      --expect-demoted) EXPECT_DEMOTED+=("$2"); shift 2 ;;
       --explain) EXPLAIN=1; shift ;;
       --status-source) SOURCE_FEED="status"; shift ;;
       --allow-single-sha) ALLOW_SINGLE_SHA=1; shift ;;
@@ -573,6 +697,7 @@ main() {
   idx="$(build_workflow_index)"
   [ -n "$idx" ] || die "the workflow index is empty — the parser is broken, not the repo"
   assert_no_catchall_job_names "$idx"
+  assert_no_laundered_jobs "$idx"
 
   # ── stage 1: the poison filter, per sha ──
   local sha rows accepted_all="" first=1 intersection=""
@@ -686,13 +811,18 @@ EOF
 $hit
 EOF
     else
-      file=""; job=""; coe=0; pf=0; needs=""
+      file=""; job=""; coe="-"; pf=0; needs=""
       reason="S0 UNMAPPED: no job in $WORKFLOW_DIR publishes this name — it cannot be traced to source"
     fi
 
     # S2 advisory by intent
-    if [ -z "$reason" ] && [ "$coe" = "1" ]; then
-      reason="S2 ADVISORY: $file job '$job' carries continue-on-error:true — needs.<job>.result reads success even when it failed"
+    # ANY value other than a literal `false` is advisory, and the literal it
+    # actually carries is printed: `'"'"'true'"'"'`, `"true"`, `yes` and `${{ … }}` are
+    # all continue-on-error to GitHub, and a reason that says "carries
+    # continue-on-error:true" for a job spelled `yes` reads as a transcription
+    # error rather than as the classification it is.
+    if [ -z "$reason" ] && [ "$coe" != "-" ]; then
+      reason="S2 ADVISORY: $file job '$job' carries continue-on-error: $coe — needs.<job>.result reads success even when it failed (anything but a literal \`false\` is advisory; a \`\${{ … }}\` expression is statically unknowable and is classified advisory rather than pinned)"
     fi
     if [ -z "$reason" ]; then
       local i=0
@@ -933,6 +1063,75 @@ EOF
     fi
   fi
 
+  # ── THE CONTRADICTION, THE OTHER WAY ROUND ──────────────────────────────────
+  #
+  # The STALE refusal above covers committed-EXCLUDED × derived-REQUIRED. Its
+  # MIRROR — a name the committed spec REQUIRES that this run derived as
+  # EXCLUDED — had no clause and no refusal: the check list is a base-first
+  # union, so the committed row rode through while the derived exclusion was
+  # appended beside it, and the emit put ONE CONTEXT ON BOTH LISTS at exit 0.
+  # Reproduced by adding `continue-on-error: true` to an already-required job:
+  # `{"both":["Cloud gate"]}`, nothing on stderr. Nothing downstream can notice
+  # it either — scripts/required-checks-verify.sh contains zero reads of
+  # `.exclusions`, so the spec would go on requiring a context this run just
+  # said must never gate a merge, with the sentence explaining why sitting in
+  # the same file.
+  #
+  # This is a CONTRADICTION, not an absence, so `--expect-unrendered` (which
+  # means "the sample could not see it") must not answer for it — and it points
+  # the opposite way from `--expect-promoted`. Its acknowledgement is
+  # `--expect-demoted '<name>'`, and like the other CONTRADICTION flag it DROPS
+  # a row rather than carrying both: here the REQUIRED row goes, because the
+  # operator is saying the derivation is right and the check must stop gating.
+  # DROPPING A REQUIRED ROW IS A PROTECTION CHANGE, which is exactly why it is
+  # a name an operator types and never a filter the derivation computes.
+  #
+  # It ships DORMANT: the committed spec's required × excluded intersection is
+  # `[]` today (4 required, 25 exclusions), so an unplanted regeneration is
+  # untouched by this block.
+  local demoted_drop='[]'
+  if [ -n "$committed_required" ]; then
+    local derived_ex_now contra="" rxname rxacked rxack
+    derived_ex_now="$(jq -r '.[].context' <<<"$exclusions_json")"
+    while IFS= read -r rxname; do
+      [ -n "$rxname" ] || continue
+      grep -qxF "$rxname" <<<"$derived_ex_now" || continue
+      rxacked=0
+      for rxack in ${EXPECT_DEMOTED[@]+"${EXPECT_DEMOTED[@]}"}; do
+        [ "$rxack" = "$rxname" ] && rxacked=1 && break
+      done
+      if [ "$rxacked" -eq 1 ]; then
+        note "  demoted (ACKNOWLEDGED) $rxname — this run EXCLUDES it, so its committed REQUIRED row is dropped"
+        demoted_drop="$(jq --arg c "$rxname" '. + [$c]' <<<"$demoted_drop")"
+        continue
+      fi
+      contra="$contra  CONTRADICTION  $rxname  [$(jq -r --arg c "$rxname" '.[] | select(.context == $c) | .reason' <<<"$exclusions_json" | head -1)]
+"
+    done <<EOF
+$committed_required
+EOF
+    if [ -n "$contra" ]; then
+      {
+        echo "REQUIRED × EXCLUDED — this run derived an EXCLUSION for context(s) the COMMITTED spec REQUIRES."
+        echo "Every line below is live branch protection today, and the reason in brackets is this run's"
+        echo "own statement that the name must not gate a merge. Emitting both is a spec that contradicts"
+        echo "itself, and no verifier reads .exclusions, so nothing downstream would ever say so:"
+        printf '%s' "$contra"
+        echo
+        echo "Sampled shas: ${SHAS[*]}"
+        echo "This is a CONTRADICTION, not an absence, so --expect-unrendered does not answer for it."
+        echo "Either the workflow change that produced the exclusion is the mistake — revert it and the"
+        echo "name goes back to being a real gate — or the derivation is right and the check must stop"
+        echo "gating, which is a PROTECTION CHANGE and is acknowledged ONE NAME AT A TIME with"
+        echo "  --expect-demoted '<name>'"
+        echo "which DROPS the committed required row instead of carrying it. Dropping a required row"
+        echo "narrows protection: run scripts/required-checks-apply.sh from the same sitting so the"
+        echo "branch and the file do not disagree."
+      } >&2
+      exit 1
+    fi
+  fi
+
   local checks_json
   checks_json="$(printf '%s' "$final" | grep . | jq -R --argjson a "$ACTIONS_APP_ID" '{context: ., app_id: $a}' | jq -s '.')"
 
@@ -961,6 +1160,7 @@ EOF
     --argjson checks "$checks_json" \
     --argjson exclusions "$exclusions_json" \
     --argjson promoted_drop "$promoted_drop" \
+    --argjson demoted_drop "$demoted_drop" \
     --argjson shas "$(printf '%s\n' "${SHAS[@]}" | jq -R . | jq -s '.')" \
     '
     ($enforced == "true") as $on
@@ -1004,7 +1204,13 @@ EOF
         protection: {
           required_status_checks: {
             strict: false,
-            checks: (((($b.protection.required_status_checks.checks) // []) + $checks)
+            # `$demoted_drop` holds exactly the names an operator typed
+            # after --expect-demoted, each of which this run EXCLUDED, so
+            # keeping the committed row would emit one context on both lists —
+            # the mirror of what `$promoted_drop` does to `exclusions` below.
+            checks: (((($b.protection.required_status_checks.checks) // [])
+                      | map(select(.context as $c | $demoted_drop | index($c) | not)))
+                     + $checks
                      | unique_by(.context) | sort_by(.context))
           },
           enforce_admins: true,
