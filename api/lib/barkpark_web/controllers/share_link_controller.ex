@@ -11,18 +11,145 @@ defmodule BarkparkWeb.ShareLinkController do
 
   Read links serve PUBLISHED data only (the ref is a published id; drafts.* is
   never resolved), mirroring section read shares.
+
+  ## Tenancy confinement on `/v1/shares/links` (arpss-w8)
+
+  `:require_admin` is a GLOBAL-permission gate — it proves the caller holds
+  `"admin"` somewhere, not that it may act on THIS tenant. The three admin
+  actions therefore additionally require the caller to be an ADMIN MEMBER of the
+  workspace the request TARGETS (`Tenancy.Auth.workspace_admin?/2`, the
+  grant-reading chokepoint), mirroring the sibling half in
+  `BarkparkWeb.ShareController` verbatim:
+
+    * `mint` — against the SCOPE's workspace (403). Ungated it minted a real
+      `access: "edit"` credential INTO a foreign workspace.
+    * `list` — against the SCOPE's workspace (403). Ungated it serialised
+      foreign rows through `link_json/1`, whose `url:` carries the PLAINTEXT
+      `/s/<token>` (see `Barkpark.Sharing.ShareLink` — the raw token IS stored),
+      i.e. it handed a stranger a LIVE credential, not merely metadata.
+    * `revoke` — against the TARGET ROW's own workspace (404, byte-identical to
+      a missing row).
+
+  `show` (`GET /s/:token`, browser pipe) is DELIBERATELY UNGATED: the token IS
+  the authorization there, and it is the whole point of the feature.
+
+  The predicate is `workspace_admin?/2`, never `Tenancy.Auth.authorize/3`:
+  authorize/3's api_token arm is `member? AND the token's GLOBAL permissions[]`,
+  so a global-admin token holding a plain `member` row in workspace B PASSES
+  `authorize(tok, B, :admin)` while `workspace_admin?(tok, B)` denies. The
+  leak-closed test is written against exactly that shape, so swapping the call
+  turns it RED.
+
+  In BOTH `mint` and `list` the gate sits immediately after
+  `Tenancy.get_workspace_by_slug/1` and BEFORE `Tenancy.get_project/2`. Placed
+  later it leaves an oracle: after `get_project/2` an existing project slug in B
+  answers 403 while a ghost answers 422 (project enumeration), and after
+  `ensure_item_exists` an existing item answers 403 while a missing one answers
+  422 (item enumeration, whose loudest positive form is the 201 leak itself).
+  Placing it before the query is also what makes the fix AUTHORIZE-BEFORE-
+  SERIALIZE structurally: `link_json/1` is unreachable for a row the caller
+  cannot administer, so a foreign token is never rendered into a string at all —
+  not hidden afterwards, not redacted afterwards.
+
+  ## Denial-shape law — THE SHAPE FOLLOWS THE INPUT, NOT THE VERB
+
+  The discriminant is WHERE the name arrives:
+
+    * PATH-ADDRESS slug, unknown → 404; exists but no authority → 403
+      (`RequireWorkspaceScope`, resolve_workspace.ex:76 / :134).
+    * PAYLOAD/QUERY value, unresolvable → 422, UNCHANGED (there is no tenant to
+      confine to). `mint`'s "no such item in this scope" and both actions'
+      malformed-scope 422 keep their contract.
+    * PAYLOAD/QUERY value that EXISTS but the caller cannot administer → 403
+      (`mint`, `list`). Emitted as
+      `ErrorResponse.emit(conn, {:error, :forbidden}, "workspace access required")`.
+    * OPAQUE ROW ID belonging to a foreign tenant → 404, BYTE-IDENTICAL to a
+      missing row (`revoke`): both arms reach the SAME
+      `not_found_json(conn, "link not found")` call site, which is an
+      instruction to reuse one call site rather than a property to assert about
+      the framework.
+    * An id that is nil or non-castable → a DENIAL, never a 500. Every id goes
+      through `Repo.uuid_or_nil/1` first.
+    * NO named target → 200 with foreign rows simply absent. Not reachable here
+      (`list` requires a `scope`), stated so the law is complete.
+
+  ACCEPTED SIGNAL, with its reason: even at the early placement a caller still
+  distinguishes an EXISTING foreign workspace (403) from a nonexistent slug
+  (422). That is the reviewed consequence of the resolve-first/authorize-second
+  ordering the sibling half established — checking edit-shared/scope config
+  first would leak the foreign share CONFIG, which is strictly worse. It is a
+  workspace-slug oracle only, never a contents oracle. TWO DISCRIMINANTS THIS
+  WAVE DOES NOT CLOSE: response HEADERS (the denial happens inside the same
+  action, after the same plugs, so headers match — but nothing pins that) and
+  TIMING (the foreign path runs one extra membership query). KNOWN EXCEPTION,
+  named so the law is not refuted by the first grep: `GET|DELETE
+  /v1/access/:id` answers 403 for a foreign grant id and 404 for a missing one
+  (access_controller.ex:100/106/118/119 over an unscoped `Access.get_grant/1`).
+  It is filed as `arpss-w8-bl-access-grant-id-existence-oracle` and is NOT fixed
+  here — access_controller.ex is outside this slice's fence.
+
+  ## BEHAVIOUR CHANGE THAT SHIPS
+
+  An admin token that is not an ADMIN MEMBER of the target workspace — including
+  a GLOBAL-admin token holding only a plain `member` membership there — can no
+  longer mint, list or revoke that workspace's item share links. That flow used
+  to succeed and returned live `/s/<token>` credentials; it is the cross-tenant
+  disclosure this closes. Host/self-hosted admins are unaffected:
+  `Auth.create_token/5` writes the caller's home membership in the resolved
+  workspace, so the real-install admin passes.
+
+  The Studio LiveView revoke arm REMAINS OPEN: `studio_live/handlers/
+  item_share.ex:69` reaches the same unscoped `Sharing.Links.revoke/1` with a
+  raw `phx-value-id` behind `Caps.admin?/1` — so a link id from ANOTHER
+  workspace is still accepted on its face. A controller-only fix does not close
+  the revoke CLASS; that is tracked by
+  `arpss-item-share-revoke-unscoped-revoke`, which this correction does NOT
+  discharge.
+
+  What DID change, and what this paragraph used to get wrong (corrected
+  2026-08-19, arpss-w10 / charter D22): this paragraph used to call the
+  `Caps.admin?/1` token arm membership-independent, citing caps.ex's own words.
+  That claim is OVERTURNED. Both Caps admin answers — `derive/1`'s `:admin` key
+  and `admin?/1` — now spell WORKSPACE-SCOPED SEAT AUTHORITY,
+  `role_permits?(membership_role, ws_id, :admin)` on the MOUNTED workspace, for
+  both principal kinds, and a nil/unresolved workspace DENIES. An
+  `admin`-permissioned token must therefore ALSO hold an admin-conferring
+  membership ROLE in the workspace whose desk it is standing on. So arpss-w10
+  narrows WHO reaches the revoke arm to exactly the principals this controller
+  admits — it does not narrow WHICH ids the arm will act on, which is the open
+  class.
+
+  ## Proof limits, stated rather than implied
+
+  The host-admin proof (`share_link_test.exs`, "a host admin ... end to end") is
+  a PERMISSIVE assertion and structurally CANNOT red under a full reversion of
+  the confinement — removing a gate cannot break a request the gate allowed. It
+  is therefore mutation-verified against OVER-confinement instead (role floor
+  raised to `"owner"`; a Default-workspace membership refused), each of which
+  reds it. Calling it mutation-verified without that pair would be a hollow
+  stamp.
+
+  `share_link_test.exs`'s older "list shows an item's links (no token/hash)"
+  refutes two absent MAP KEYS and passed on the LEAKING code, because the secret
+  rode in `url`. It is left in place as this wave's own resident failure mode and
+  is the reason the leak proof asserts on the SERIALIZED BODY (`resp_body =~`),
+  not on the shape of the map.
   """
   use BarkparkWeb, :controller
 
   alias Barkpark.{Content, Media, Tenancy}
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Errors
   alias Barkpark.Content.Labels
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.PortableDoc.{Projection, Render}
+  alias Barkpark.Repo
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.ErrorResponse
 
   # ── PUBLIC resolver ──────────────────────────────────────────────────────
 
@@ -168,6 +295,7 @@ defmodule BarkparkWeb.ShareLinkController do
   def mint(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
+         :ok <- ensure_workspace_admin(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params),
          access <- access_of(params),
@@ -194,6 +322,11 @@ defmodule BarkparkWeb.ShareLinkController do
           unprocessable(conn, "could not create link")
       end
     else
+      # MUST precede the is_binary arm and the catch-all: a denial that falls
+      # into either becomes a 422 and the whole confinement silently voids.
+      {:error, :forbidden} ->
+        forbidden(conn)
+
       {:error, msg} when is_binary(msg) ->
         unprocessable(conn, msg)
 
@@ -206,18 +339,25 @@ defmodule BarkparkWeb.ShareLinkController do
   def list(conn, params) do
     with {:ok, {ws, proj, _dataset}} <- scope_triple(params["scope"]),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
+         :ok <- ensure_workspace_admin(conn, workspace.id),
          %Tenancy.Project{} <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params) do
       links = Links.list_for(workspace.id, kind, ref_type, ref_id) |> Enum.map(&link_json/1)
       json(conn, %{links: links})
     else
-      _ -> unprocessable(conn, "scope, kind, ref_id (+ ref_type for docs) are required")
+      # Explicit, ahead of the catch-all — without it the denial is 422 and the
+      # foreign-token confinement reads as a validation error.
+      {:error, :forbidden} ->
+        forbidden(conn)
+
+      _ ->
+        unprocessable(conn, "scope, kind, ref_id (+ ref_type for docs) are required")
     end
   end
 
   @doc "DELETE /v1/shares/links/:id — revoke one link."
   def revoke(conn, %{"id" => id}) do
-    case Links.revoke(id) do
+    case revoke_scoped(conn, id) do
       # RECEIPT LAW (pds w39): `Links.revoke/1` returns the UPDATED link
       # (sharing/links.ex:91-109). The old body was a literal `true` plus an echo
       # of the `:id` path param; both now descend from the returned row's own
@@ -235,6 +375,62 @@ defmodule BarkparkWeb.ShareLinkController do
       _ ->
         unprocessable(conn, "could not revoke link")
     end
+  end
+
+  # ── tenancy confinement ───────────────────────────────────────────────────
+  #
+  # Mirrored VERBATIM from the sibling half (`share_controller.ex`), as a
+  # PRIVATE helper: the two halves of the share surface share ONE predicate, and
+  # a shared public helper is deliberately not extracted (that would widen this
+  # slice's fence into files another wave is editing).
+  #
+  # TOTALITY: bare `TenancyAuth.workspace_admin?/2` RAISES on most of the shapes
+  # that can reach here — FunctionClauseError on a nil actor, a
+  # `%CallerContext{}`, an `%ApiToken{id: nil}` or a nil workspace id, and
+  # Ecto.Query.CastError (NOT Ecto.CastError) on `""` and any non-UUID binary.
+  # So the actor is read as `conn.assigns[:api_token]` SPECIFICALLY (never a
+  # generic principal helper — `CallerContext.from_conn/1` prefers
+  # `:caller_context`, which raises), both ids are routed through
+  # `Repo.uuid_or_nil/1`, and anything that does not match is a DENIAL. A 500
+  # here would trade a leak for a crash oracle.
+  defp workspace_admin?(conn, workspace_id) do
+    actor = conn.assigns[:api_token]
+
+    case {actor, Repo.uuid_or_nil(workspace_id)} do
+      {%ApiToken{id: token_id}, ws_id} when is_binary(token_id) and is_binary(ws_id) ->
+        TenancyAuth.workspace_admin?(actor, ws_id)
+
+      _ ->
+        false
+    end
+  end
+
+  # The denial term is NON-BINARY on purpose: `mint`'s else carries
+  # `{:error, msg} when is_binary(msg) -> unprocessable/2`, so a string denial
+  # would answer 422 and the confinement would look like a validation quibble.
+  defp ensure_workspace_admin(conn, workspace_id) do
+    if workspace_admin?(conn, workspace_id), do: :ok, else: {:error, :forbidden}
+  end
+
+  # A link is revocable when its row exists AND the caller is a workspace admin
+  # of the ROW's own workspace. Every failure — non-castable id, missing row,
+  # foreign row, a row with no workspace_id — collapses to the SAME
+  # `{:error, :not_found}`, so `revoke/2`'s 404 arm is one call site and a
+  # foreign row is byte-identical to a missing one. `Links.revoke/1`'s signature
+  # is deliberately untouched: its Studio LiveView caller has a socket, not a
+  # conn, so an arity change would ripple outside this slice's fence.
+  defp revoke_scoped(conn, id) do
+    with row_id when is_binary(row_id) <- Repo.uuid_or_nil(id),
+         %ShareLink{workspace_id: ws_id} <- Repo.get(ShareLink, row_id),
+         true <- workspace_admin?(conn, ws_id) do
+      Links.revoke(row_id)
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp forbidden(conn) do
+    ErrorResponse.emit(conn, {:error, :forbidden}, "workspace access required")
   end
 
   # ── helpers ────────────────────────────────────────────────────────────

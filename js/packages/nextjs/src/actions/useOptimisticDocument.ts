@@ -81,8 +81,16 @@ export function useOptimisticDocument<T extends { _id: string; _type: string }>(
   const committedRef = useRef<T>(initialDoc)
   const latestRef = useRef<T>(initialDoc)
   const inflightRef = useRef(0)
+  // Monotonic sequence over mutate() calls. `seqRef` stamps each call at entry;
+  // `committedSeqRef` records the newest sequence whose response we've committed.
+  // Responses can settle out of order (a newer round-trip may resolve before an
+  // older one); committing only strictly-newer sequences stops an older, slower
+  // response from clobbering the newer committed doc and dropping its patch.
+  const seqRef = useRef(0)
+  const committedSeqRef = useRef(0)
 
   const mutate = (patch: Partial<T>): void => {
+    const mySeq = ++seqRef.current
     startTransition(async () => {
       const payload = { ...latestRef.current, ...patch } as T
       latestRef.current = payload
@@ -90,11 +98,18 @@ export function useOptimisticDocument<T extends { _id: string; _type: string }>(
       addOptimistic(patch)
       try {
         const next = await mutationAction(payload)
-        setCommitted(next)
-        committedRef.current = next
-        // Only re-sync server-derived fields (_rev/_updatedAt/…) when this was
-        // the sole in-flight call — a newer pending payload must not be clobbered.
-        if (inflightRef.current === 1) latestRef.current = next
+        // Commit only when this response is the newest we've seen. An older
+        // response settling after a newer one (mySeq <= committedSeqRef) must
+        // NOT overwrite the newer committed doc — that would silently drop a
+        // persisted patch.
+        if (mySeq > committedSeqRef.current) {
+          committedSeqRef.current = mySeq
+          setCommitted(next)
+          committedRef.current = next
+          // Only re-sync server-derived fields (_rev/_updatedAt/…) when this was
+          // the sole in-flight call — a newer pending payload must not be clobbered.
+          if (inflightRef.current === 1) latestRef.current = next
+        }
       } catch (e: unknown) {
         // A failed patch must not linger in the payload chain, but only roll back
         // when we're the sole in-flight call (mirrors useOptimistic reverting to
