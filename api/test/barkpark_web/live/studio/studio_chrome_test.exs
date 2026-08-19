@@ -355,4 +355,86 @@ defmodule BarkparkWeb.StudioChromeTest do
       assert :sys.get_state(view.pid).socket.assigns.current_path == root <> "/post"
     end
   end
+
+  # ── arpss-w10: admin chrome is scoped to the MOUNTED workspace ─────────────
+  #
+  # `shares_admin?` used to be `token_admin? or account_admin?`, and the account
+  # arm authorized against `Tenancy.get_default_workspace()` — never the
+  # workspace `hydrate_scope/1` had just resolved. It now delegates to
+  # `BarkparkWeb.Studio.Caps.admin?/1`, the SAME seat-authority oracle the
+  # StudioLive deny-gate enforces with: `role_permits?(membership_role, ws_id,
+  # :admin)` on the mounted workspace.
+  #
+  # MediaLive is the surface under test on purpose: StudioLive's own
+  # `mount.ex:122` overwrites `shares_admin?` from `Caps.admin?/1` after every
+  # on_mount, so the chrome value is only OBSERVABLE on the other chrome
+  # surfaces (Media / ApiTester / Settings / tmux / chat / plugin admin).
+  #
+  # BOTH proofs red on the pre-fix predicate, in opposite directions.
+  describe "shares_admin? is decided on the MOUNTED workspace, not the Default one" do
+    setup do
+      {default_ws, _default_proj} = ensure_default_scope!()
+      %{default_ws: default_ws}
+    end
+
+    defp user_conn_for(memberships) do
+      email = "chrome-scope-#{System.unique_integer([:positive])}@example.com"
+
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+      for {ws, role} <- memberships do
+        {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, role, "user")
+      end
+
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      Plug.Test.init_test_session(Phoenix.ConnTest.build_conn(), %{"user_session" => raw})
+    end
+
+    test "FALSE-SHOW: an admin of Default who is a plain member of the mounted workspace gets NO admin chrome",
+         %{default_ws: default_ws, ws_a: ws_a, proj_a: proj_a} do
+      conn = user_conn_for([{default_ws, "admin"}, {ws_a, "member"}])
+
+      {:ok, _view, html} = live(conn, media_url(ws_a, proj_a))
+
+      # Pre-fix this rendered: account_admin? said :ok against DEFAULT, so the
+      # Share button (and the admin tabs) appeared on a workspace where the
+      # scoped-admin gate would then refuse them.
+      refute html =~ ~s{phx-click="shares-open"}
+    end
+
+    test "FALSE-HIDE: an admin of the MOUNTED workspace holding no Default role DOES get admin chrome",
+         %{ws_a: ws_a, proj_a: proj_a} do
+      conn = user_conn_for([{ws_a, "admin"}])
+
+      {:ok, _view, html} = live(conn, media_url(ws_a, proj_a))
+
+      # Pre-fix this was ABSENT — the operationally worse direction: an admin or
+      # OWNER of A with no Default membership saw no admin chrome anywhere,
+      # including on the workspace they administer.
+      assert html =~ ~s{phx-click="shares-open"}
+    end
+
+    test "an OWNER of the mounted workspace is admin chrome too (the seat rule reads the role, not a name allowlist of one)",
+         %{ws_a: ws_a, proj_a: proj_a} do
+      conn = user_conn_for([{ws_a, "owner"}])
+
+      {:ok, _view, html} = live(conn, media_url(ws_a, proj_a))
+
+      assert html =~ ~s{phx-click="shares-open"}
+    end
+
+    test "instance_admin? keeps the HOST-level oracle: a Default admin browsing a foreign workspace still holds it",
+         %{default_ws: default_ws, ws_a: ws_a, proj_a: proj_a} do
+      conn = user_conn_for([{default_ws, "admin"}, {ws_a, "member"}])
+
+      {:ok, view, _html} = live(conn, media_url(ws_a, proj_a))
+
+      # The split is the point: the workspace-scoped flag is OFF here (the test
+      # above), while the self-update banner's host-level flag stays ON. Merging
+      # these two back into one assign re-creates one of the two defects.
+      assert :sys.get_state(view.pid).socket.assigns.instance_admin? == true
+      assert :sys.get_state(view.pid).socket.assigns.shares_admin? == false
+    end
+  end
 end
