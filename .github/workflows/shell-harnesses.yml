@@ -175,6 +175,36 @@ on:
       - "scripts/deploy-reliability-exit-2026-08-10.md"
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
+      # ── ORPHAN SWEEP II (CI gate-wiring wave, cgsiw-s3) ────────────────────
+      #
+      # cloud-static-gz-guard.sh. Its SUBJECT SET is the four things that make a
+      # committed .gz unrepresentable: the static dir itself (a tracked *.gz can
+      # only arrive by being added there), the ignore rule that stops the
+      # accident, the Dockerfile RUN that builds the sibling from the bytes
+      # `COPY priv priv` just laid down, and the router's `gzip: true` that
+      # serves it. The static dir is a GLOB and deliberately so — the file whose
+      # arrival this guard exists to catch (`app.js.gz`) does not exist yet, so
+      # pinning today's filenames would make the lane go dark on exactly the PR
+      # that matters. Same argument the .workflow.js glob makes above.
+      - "scripts/cloud-static-gz-guard.sh"
+      - "cloud/priv/static/**"
+      - "cloud/.gitignore"
+      - "cloud/Dockerfile"
+      - "cloud/lib/barkpark_cloud/web/router.ex"
+      # pds-live-hetzner-placement-group.sh --selftest-offline. Its subject set
+      # is the script and the committed 404/200 fixture corpus its harvest
+      # validators reproduce byte-for-byte. The corpus entry is a glob for the
+      # same reason: the PR that adds a TWELFTH fixture is the one that can
+      # break the emitter's byte-identity claim.
+      - "scripts/pds-live-hetzner-placement-group.sh"
+      - "internal/cli/testdata/pds_live_hetzner_*.json"
+      # doc-gates-paths-parity-check.sh. Its subject set is exactly one file —
+      # doc-gates.yml's two hand-maintained `paths:` lists — so that file must
+      # be able to trigger this lane. A guard whose trigger does not cover its
+      # subject set never runs on the PR that breaks it, which is the entire
+      # finding this wave is built on.
+      - "scripts/doc-gates-paths-parity-check.sh"
+      - ".github/workflows/doc-gates.yml"
   push:
     branches: [main]
     paths:
@@ -243,6 +273,19 @@ on:
       - "scripts/deploy-reliability-exit-2026-08-10.md"
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
+      # ── ORPHAN SWEEP II (cgsiw-s3) — mirrors the pull_request list above,
+      # globs included. A lane wired on PRs only goes dark the moment a merge
+      # lands, and these two lists staying set-equal is itself now guarded (by
+      # doc-gates-paths-parity-check.sh, for doc-gates.yml's twin lists).
+      - "scripts/cloud-static-gz-guard.sh"
+      - "cloud/priv/static/**"
+      - "cloud/.gitignore"
+      - "cloud/Dockerfile"
+      - "cloud/lib/barkpark_cloud/web/router.ex"
+      - "scripts/pds-live-hetzner-placement-group.sh"
+      - "internal/cli/testdata/pds_live_hetzner_*.json"
+      - "scripts/doc-gates-paths-parity-check.sh"
+      - ".github/workflows/doc-gates.yml"
 
 permissions:
   contents: read
@@ -631,3 +674,111 @@ jobs:
         # No `continue-on-error` here or anywhere in this file — it launders a red
         # into the green JOB conclusion the fleet reads.
         run: bash scripts/deploy-reliability-exit-run.test.sh
+
+  # ── ORPHAN SWEEP II (CI gate-wiring + spec-generator wave, cgsiw-s3) ────────
+  #
+  # Two guards that were already WRITTEN, already GREEN, and already carried a
+  # mutation-proven selftest — and that no workflow in .github/workflows/ ever
+  # invoked. `grep -rln cloud-static-gz-guard .github/` and `grep -rln
+  # pds-live-hetzner-placement-group .github/` both matched NOTHING. That is the
+  # wave's premise in its purest form: a guard can be perfectly written and
+  # still vacuous AS A GATE, because the wiring never runs it on the PR that
+  # breaks the thing it guards. Wiring is the whole fix.
+  #
+  # Each rides the house selftest-first idiom — two bare lines in one `run: |`
+  # block, no `&&` (a multi-line GitHub `run:` is `bash -e`, so line one failing
+  # already stops the step; `&&` would only make a two-line chain harder to
+  # read), exactly as doc-gates.yml does for never-cancel-main-check.sh. The
+  # selftest goes FIRST on purpose: if the guard has lost the ability to fail,
+  # that is reported before its verdict on the live tree is believed.
+
+  cloud-static-gz:
+    name: cloud-static-gz-guard.sh (uncommitted siblings, both halves wired)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # The DEFAULT depth is correct. Check 1 asks `git ls-files`, which reads
+        # the index, and the selftest builds its own `git init` repo in mktemp.
+        # No history of this repository is required.
+      - name: cloud-static-gz-guard.sh syntax check
+        run: bash -n scripts/cloud-static-gz-guard.sh
+      - name: the gz guard can still LOSE, then the live tree passes
+        # The selftest builds a throwaway repo from the REAL files and breaks
+        # each invariant in turn — the `*.gz` ignore rule deleted, the Dockerfile
+        # gzip step deleted, that step reordered ABOVE `COPY priv priv` (the
+        # ordering is what makes source and sibling born together), and the
+        # router losing `gzip: true` — asserting a red on each. Baseline on
+        # origin/main: `10 passed, 0 failed`. Hermetic: git + bash, no network,
+        # no `bp`, and it plants nothing in the tree.
+        run: |
+          bash scripts/cloud-static-gz-guard.sh --selftest
+          bash scripts/cloud-static-gz-guard.sh
+
+  pds-hetzner-offline:
+    name: pds-live-hetzner-placement-group.sh --selftest-offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the manifest emitter and its validators are python3)
+        # Matching the python3/jq/node name-checks above: an image change that
+        # drops python3 should fail BY NAME here rather than as a mysterious
+        # refusal from inside the offline arm.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — the manifest emitter is python3" >&2
+            exit 1
+          }
+          python3 --version
+      - name: pds-live-hetzner-placement-group.sh syntax check
+        run: bash -n scripts/pds-live-hetzner-placement-group.sh
+      - name: the credential-free arm (ONLY --selftest-offline is CI-able)
+        # ONE ARM, DELIBERATELY. Per the script's own usage block, `--selftest`
+        # HARD-REFUSES at exit 3 without a Hetzner credential — two of its four
+        # credential states are PROCEED states and would pass vacuously with
+        # none — and `--harvest-only` keeps the credential fence too. Wiring
+        # either here would manufacture a permanent red that says nothing.
+        # `--selftest-offline` is the arm the script itself names as "the
+        # CREDENTIAL-FREE arm and the CI-able gate": it scrubs every
+        # HCLOUD_*/HETZNER_* variable out of its own environment, re-execs,
+        # COUNTS what survived (must be zero), then runs four mutation blocks
+        # plus the harvest validators — including a proof that the committed
+        # fixture manifest is byte-identical to what this script's own emitter
+        # produces. There is no bare run to pair it with: the bare script is the
+        # LIVE arm and needs the credential.
+        run: bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline
+
+  doc-gates-paths-parity:
+    name: doc-gates.yml push.paths == pull_request.paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # DEFAULT depth. The guard reads one file out of the working tree and
+        # builds every fixture under mktemp.
+      - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
+        # The guard turns a missing python3/PyYAML into exit 2
+        # HARNESS-UNAVAILABLE — correctly refusing rather than skipping, but
+        # illegibly so. Fail by NAME here, matching the checks above.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image" >&2
+            exit 1
+          }
+          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
+      - name: doc-gates-paths-parity-check.sh syntax check
+        run: bash -n scripts/doc-gates-paths-parity-check.sh
+      - name: the parity guard can still LOSE, then the live doc-gates.yml passes
+        # doc-gates.yml hosts ~14 guards behind a hand-enumerated `paths:`
+        # filter, and behind it TWICE — push and pull_request each carry their
+        # own ~70-entry copy. They have ALREADY drifted (70 vs 69). The 15-case
+        # selftest proves BOTH directions (a matched pair passes, a one-sided
+        # pair reds), the fail-closed arm (a zero-entry or unparseable block is
+        # exit 2 HARNESS-UNAVAILABLE, never a pass — `[] == []` is the vacuous
+        # green this refuses), and the terminal unknown-argument refusal. The
+        # comparison itself was disarmed in a scratch copy and the selftest went
+        # 11 passed / 4 FAILED; that proof is recorded in the guard's header.
+        run: |
+          bash scripts/doc-gates-paths-parity-check.sh --selftest
+          bash scripts/doc-gates-paths-parity-check.sh
