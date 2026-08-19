@@ -164,14 +164,35 @@ defmodule Barkpark.Accounts.UserSession do
 
   @doc """
   True when the session presented an MFA factor within `window` seconds of
-  `now`. A `nil` `mfa_verified_at` (never stepped up) is never fresh.
+  `now`. A `nil` `mfa_verified_at` (never stepped up) is never fresh, and
+  neither is an `mfa_verified_at` in the FUTURE.
+
+  RECENCY, not DEADLINE — the distinction that separates this predicate from the
+  five above it (`expired?/2`, `idle_expired?/2`, `idle_expired_for_window?/3`,
+  `absolute_expired_for_window?/3`, `within_org_policy?/3`). All six read the
+  wall clock against a stored instant, and all six are correctly class A: an
+  absolute stored instant MUST be wall-clock, since it has to survive a restart
+  and be comparable across nodes. Those five are CITED SAFE and deliberately
+  keep their single-sided shape — a deadline's anchor is SUPPOSED to sit in the
+  future, so flooring one would reject every live session at once (a mass
+  logout) for zero security gain, and there is no second, clock-independent
+  anchor to floor it against. Their residual, named out loud: under a backward
+  wall-clock step every absolute-instant TTL in this module extends by the size
+  of the step. That is inherent to correct class-A wall-clock semantics, not a
+  defect.
+
+  `mfa_verified_at` is the opposite shape: a RECENCY anchor the issuer stamps in
+  the PAST, so an anchor later than `now` is nonsensical and is rejected
+  (fail-closed). Not `abs/1` — the repo's two-sided gates all guard a
+  remote-supplied signature timestamp; this value is server-written.
   """
   @spec mfa_fresh?(t(), pos_integer(), DateTime.t()) :: boolean()
   def mfa_fresh?(session, window \\ default_step_up_window(), now \\ DateTime.utc_now())
   def mfa_fresh?(%__MODULE__{mfa_verified_at: nil}, _window, _now), do: false
 
   def mfa_fresh?(%__MODULE__{mfa_verified_at: at}, window, now) do
-    DateTime.compare(now, DateTime.add(at, window, :second)) == :lt
+    DateTime.compare(at, now) != :gt and
+      DateTime.compare(now, DateTime.add(at, window, :second)) == :lt
   end
 
   @doc false
