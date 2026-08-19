@@ -393,7 +393,14 @@ build_workflow_index() {
           v = $0; sub(/^    continue-on-error:[ \t]*/, "", v)
           sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v); gsub(/\t/, " ", v)
           if (v == "") v = "(empty)"
-          coe = (v == "false") ? "" : v
+          # `false`, `"false"`, a single-quoted false and an absent value are
+          # all FALSE to GitHub, so all four leave the job BLOCKING. Normalising
+          # them is the protective direction: classifying a blocking job as
+          # advisory drops it out of the required set, which LOSES a gate, and
+          # losing protection is never a safe default here. Every other
+          # spelling — `true`, `"true"`, `yes`, `${{ … }}` — stays advisory.
+          vn = v; gsub(/^["\047]|["\047]$/, "", vn)
+          coe = (vn == "false" || v == "(empty)") ? "" : v
           next
         }
         if ($0 ~ /^    needs: *\[/) {
@@ -429,7 +436,12 @@ build_workflow_index() {
             if (line ~ /^continue-on-error:/) {
               v = line; sub(/^continue-on-error:[ \t]*/, "", v)
               sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
-              if (v != "false") scoe = 1
+              # Same normalisation as the job level, and for the same
+              # reason inverted: a quoted false step read as advisory could
+              # push a mixed job into the laundering refusal, which is a loud
+              # FALSE red rather than a lost gate — still worth not doing.
+              vn = v; gsub(/^["\047]|["\047]$/, "", vn)
+              if (vn != "false" && vn != "") scoe = 1
             }
             if (line ~ /^[A-Za-z_-]+:[ \t]*[|>][-+0-9]*[ \t]*$/) { inblock = 1; blockind = ind }
           }
