@@ -51,6 +51,14 @@ defmodule Barkpark.RateLimiterConcurrencyTest do
   @contenders 200
   @table_opts [:set, :public, read_concurrency: true, write_concurrency: true]
 
+  # LIVENESS ONLY, never the property under test: `race/2` hands the scheduler
+  # @contenders busy-spinning processes and then has to drain 2N messages, so on
+  # a 1-vCPU runner the parent competes with 200 spinners for one scheduler.
+  # Measured at `+S 1` the whole file finishes in 0.5s, but a starved runner
+  # must red on an ASSERTION, never on a receive timeout — a timeout here would
+  # read as "the limiter over-admitted" when nothing of the sort happened.
+  @barrier_timeout_ms 60_000
+
   defmodule LegacyTwinVerbatim do
     @moduledoc false
     # The origin/main `check/2` body, byte-verbatim apart from taking its table
@@ -361,13 +369,13 @@ defmodule Barkpark.RateLimiterConcurrencyTest do
       end)
     end
 
-    for _ <- 1..n, do: assert_receive({:ready, _}, 5_000)
+    for _ <- 1..n, do: assert_receive({:ready, _}, @barrier_timeout_ms)
 
     :atomics.put(gate, 1, 1)
 
     results =
       for _ <- 1..n do
-        assert_receive({:result, result}, 5_000)
+        assert_receive({:result, result}, @barrier_timeout_ms)
         result
       end
 
