@@ -136,6 +136,42 @@ describe('useOptimisticDocument', () => {
     expect(capture.current?.conflict).toBeUndefined()
   })
 
+  it('out-of-order settle: an older response resolving last does not clobber the newer committed doc', async () => {
+    // Two mutations in flight; resolve the NEWER (second) round-trip BEFORE the
+    // older (first). Pre-fix, mutate() commits every response unconditionally, so
+    // the older response's setCommitted overwrites the newer committed doc and
+    // silently drops body:'y' (data loss). The monotonic-sequence guard makes the
+    // stale, older response a no-op, so body:'y' survives.
+    const resolvers: Array<(doc: TestDoc) => void> = []
+    const action = vi.fn(
+      (_doc: TestDoc): Promise<TestDoc> =>
+        new Promise<TestDoc>((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+    const capture = renderHook(baseDoc, action)
+
+    await act(async () => {
+      capture.current?.mutate({ title: 'x' })
+    })
+    await act(async () => {
+      capture.current?.mutate({ body: 'y' })
+    })
+
+    expect(resolvers).toHaveLength(2)
+
+    // Newer (index 1) settles first, then the older (index 0) settles LAST.
+    await act(async () => {
+      resolvers[1]?.({ ...baseDoc, title: 'x', body: 'y' })
+      resolvers[0]?.({ ...baseDoc, title: 'x' })
+    })
+
+    // The newer patch must survive the older response's late arrival.
+    expect(capture.current?.data).toMatchObject({ title: 'x', body: 'y' })
+    expect(capture.current?.pending).toBe(false)
+    expect(capture.current?.conflict).toBeUndefined()
+  })
+
   it('conflict path: BarkparkConflictError populates conflict, rolls back data, clears pending', async () => {
     const action = vi.fn(async (_optimistic: TestDoc): Promise<TestDoc> => {
       throw new BarkparkConflictError('ifMatch mismatch', {

@@ -124,7 +124,32 @@ defmodule Barkpark.Media.Renditions do
         # libvips on macOS/Linux/Docker; ImageMagick CLI on Windows. See ImageBackend.
         case ImageBackend.impl().render(src, dest, spec, normalize_profile(profile)) do
           :ok ->
-            {:ok, rel}
+            # Post-generate parent recheck — closes the delete-vs-generate race.
+            # A lazy generate that loaded `file` before an admin DELETE, then
+            # ran mkdir_p!+render AFTER the delete's rm_rf, would re-create an
+            # orphan dir under a now-deleted media_files id (never served, but
+            # wasted disk). We re-read the row and reap our own write if the
+            # parent is gone.
+            #
+            # RACE-SOUND on a strict ordering dependency: `Media.delete_file`
+            # commits `Repo.delete` BEFORE the deferred `delete_for_file` rm_rf
+            # (see media.ex — Repo.delete, then defer_media_effect). So:
+            #   * any render landing AFTER that rm_rf sees the row gone here and
+            #     reaps its own dir (the reap branch below);
+            #   * any render the recheck KEEPS committed before the delete saw
+            #     the row present, meaning its write predates the deferred rm_rf,
+            #     which then sweeps it.
+            # No interleaving survives an orphan. A refactor moving
+            # `delete_for_file` BEFORE the Repo.delete commit would break this —
+            # a kept render could then outlive the rm_rf. Keep rm_rf last.
+            case Media.get_file(file.id) do
+              {:ok, _} ->
+                {:ok, rel}
+
+              {:error, :not_found} ->
+                File.rm_rf(Path.dirname(dest))
+                {:error, :parent_deleted}
+            end
 
           {:error, reason} ->
             log_generate_failure(preset, file, reason)

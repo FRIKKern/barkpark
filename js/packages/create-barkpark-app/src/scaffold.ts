@@ -103,8 +103,25 @@ function isTextFile(name: string): boolean {
 }
 
 /**
+ * Names npm refuses outright. `_` and `.` are legal inside a package name, so
+ * `node_modules` and `favicon.ico` survive slugification byte-for-byte — and
+ * both are hard-invalid (validate-npm-package-name v7:
+ * `validForOldPackages: false`). npm/pnpm/bun install them anyway, but yarn
+ * classic exits 1 with "error package.json: Name is blacklisted", and pm.ts
+ * can select yarn from the user agent. Pinned to npm 11 / v7 behaviour; the
+ * blacklist may move between npm majors.
+ */
+const BLACKLISTED_PACKAGE_NAMES = new Set(['node_modules', 'favicon.ico'])
+
+/** npm's name-length ceiling. Over it is a WARNING everywhere (install and
+ * publish both exit 0), so this clamp is hardening, not an error fix — unlike
+ * the blacklist above, which is a real npm error. */
+const MAX_PACKAGE_NAME_LENGTH = 214
+
+/**
  * Turn a project name into a valid npm package "name": lowercase, non-URL-safe
- * runs collapsed to '-', no leading '.'/'_', and never empty.
+ * runs collapsed to '-', no leading '.'/'_', never empty, never blacklisted,
+ * and never over npm's 214-character ceiling.
  */
 export function toPackageName(name: string): string {
   const slug = String(name)
@@ -113,7 +130,12 @@ export function toPackageName(name: string): string {
     .replace(/^[._]+/, '')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return slug || 'barkpark-site'
+  if (!slug) return 'barkpark-site'
+  const safe = BLACKLISTED_PACKAGE_NAMES.has(slug) ? `${slug}-app` : slug
+  return safe.length <= MAX_PACKAGE_NAME_LENGTH
+    ? safe
+    : // re-trim: the cut can land on a '-' or '.', which npm dislikes trailing
+      safe.slice(0, MAX_PACKAGE_NAME_LENGTH).replace(/[-.]+$/, '')
 }
 
 export function renderTemplate(input: string, vars: Record<string, string>): string {

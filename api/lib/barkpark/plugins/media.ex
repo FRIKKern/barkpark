@@ -44,6 +44,22 @@ defmodule Barkpark.Plugins.Media do
     [&Codelists.seed_all/0]
   end
 
+  @doc """
+  Oban Cron entries contributed by the media plugin (Path B).
+
+  A single per-minute reconciliation sweep,
+  `Barkpark.Plugins.Media.StuckProcessingSweeper`, that re-drives (or terminally fails)
+  `mediaAsset` rows stranded at `bp_processing_status == "processing"` by a
+  crashed post-upload pipeline. Folded into the host `Oban.Plugins.Cron`
+  `:crontab` at boot by `Barkpark.Plugins.Registry.collect_oban_crontab/0`
+  (C4-1). Binds the EXISTING `:default` queue — a plugin may contribute crontab
+  entries but not new queues — so there is no `config.exs` edit.
+  """
+  @impl Barkpark.Plugin
+  def oban_crontab do
+    [{"* * * * *", Barkpark.Plugins.Media.StuckProcessingSweeper}]
+  end
+
   @impl Barkpark.Plugin
   def api_tests do
     Barkpark.Plugins.Media.ApiTests.specs()
@@ -87,6 +103,16 @@ defmodule Barkpark.Plugins.Media do
     end
   end
 
+  # Reachability: the only path read is the compile-time `@schemas_dir` joined
+  # with one of two literal filenames passed by `register_schemas/1` — no
+  # runtime input reaches `File.read!/1`. Same shape (and same waiver) as
+  # `Barkpark.Plugins.Bulldocs.register_schemas/1`. This replaces the
+  # line-numbered `.sobelow-skips` row for this call site: a fingerprint
+  # baseline entry is pinned to a LINE, so any edit above the call (here:
+  # adding `oban_crontab/0`) silently kills the waiver and the finding returns
+  # as new. The annotation binds by AST adjacency to the def below and survives
+  # line moves.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec load_schema!(String.t()) :: SchemaDefinition.t()
   defp load_schema!(filename) do
     path = Path.join(@schemas_dir, filename)

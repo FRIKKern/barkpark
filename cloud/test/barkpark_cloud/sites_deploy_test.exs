@@ -2295,6 +2295,11 @@ defmodule BarkparkCloud.SitesDeployTest do
       {:ok, p2} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
       settle(p2)
 
+      # NOTE: this refute is NOT the proof of the restart-reset defect (clk-w4).
+      # It is same-VM, so the pre-fix `unique_integer([:positive, :monotonic])`
+      # counter never resets and this passes on the unfixed code too. It is kept
+      # only as a regression guard that prebuilt stays non-idempotent at all.
+      # The deciding assertion is the VALUE-DOMAIN one below.
       refute p1.build_id == p2.build_id
       assert p1.source == "prebuilt"
       assert p2.source == "prebuilt"
@@ -2305,6 +2310,32 @@ defmodule BarkparkCloud.SitesDeployTest do
       {:ok, b1} = Deploy.enqueue(site, bp)
       assert {:duplicate, dup} = Deploy.enqueue(site, bp)
       assert dup.id == b1.id
+    end
+
+    test "the prebuilt nonce is a WALL CLOCK, so a control-plane restart cannot repeat it" do
+      # The defect this pins: `System.unique_integer([:positive, :monotonic])` is
+      # a node-global counter that restarts from 1 on every BEAM boot, so after a
+      # restart the Nth prebuilt mint deterministically re-mints an earlier
+      # build_id — refused by the (site_id, build_id) partial unique index,
+      # answered `{:duplicate, _}` → HTTP 200 with the OLD row, and `record_audit`
+      # only runs in the `{:ok, _}` arm, so the uploaded dist is discarded with
+      # zero trace.
+      #
+      # A restart cannot be staged inside `mix test`, and a difference assertion
+      # passes on the unfixed code (same VM). So the assertion is on the VALUE
+      # DOMAIN instead: a boot-relative counter is a small integer (1, 2, 3…),
+      # while a wall clock is ~1.8e18. Unfixed this reads 1 and reds.
+      nonce = Deploy.prebuilt_nonce()
+
+      assert is_integer(nonce)
+
+      assert nonce > 1_000_000_000_000,
+             "prebuilt nonce #{nonce} is boot-relative, not wall-clock — it repeats after a restart"
+
+      # And it tracks the wall clock rather than merely being large.
+      assert_in_delta nonce,
+                      System.system_time(),
+                      System.convert_time_unit(60, :second, :native)
     end
   end
 

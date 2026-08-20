@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1143,14 +1144,14 @@ func TestRunOnceTimesOutAgainstHangingServer(t *testing.T) {
 	}
 }
 
-// TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv is the RCE
-// regression: ImageTag is decoded RAW from the control-plane claim JSON, and
-// the old `docker load` path ran `sh -c "docker load -i %q"` — Go's %q does NOT
-// neutralize `$(...)`/backticks inside a shell, so a hostile tag executed
-// arbitrary code (a probe wrote /tmp/pwned). The fix runs a fixed argv straight
-// to docker (ExecRunner.Run == exec.CommandContext, raw execve, no shell), so
-// the whole payload must arrive as a SINGLE literal filename argument — never
-// split, never expanded.
+// TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv was the #12308 RCE
+// regression (a metachar tag reaching `docker load` as one literal argv). It is
+// now CONVERTED to the defense-in-depth REFUSAL test: after the safeImageTag
+// guard at executeDeploy entry, a hostile tag never reaches the runner at all.
+// The metachar evilTag carries '/' (inside `/tmp/pwned`), so the charset refuses
+// it BEFORE docker load — the runner records ZERO calls and the deploy
+// transitions to `failed`. The execve-not-shell guarantee that the old body
+// proved is preserved separately in TestExecRunner_MetacharArgIsOneLiteralArgv.
 func TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv(t *testing.T) {
 	const evilTag = "site-shop-$(touch /tmp/pwned)-`id`"
 
@@ -1166,12 +1167,6 @@ func TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv(t *testing.T) {
 		epoch: 1,
 	}}
 
-	containerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer containerSrv.Close()
-	containerPort := mustPort(t, containerSrv.URL)
-
 	srv := httptest.NewServer(cp.handler())
 	defer srv.Close()
 
@@ -1186,7 +1181,7 @@ func TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv(t *testing.T) {
 		HTTPClient:    srv.Client(),
 		Runner:        runner,
 		FS:            newMapFS(),
-		Ports:         &fixedPorts{next: containerPort},
+		Ports:         &fixedPorts{next: 7123},
 		HealthTimeout: 2 * time.Second,
 	}
 
@@ -1194,27 +1189,100 @@ func TestExecuteDeploy_MaliciousImageTagLandsAsOneLiteralArgv(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	if len(runner.calls) == 0 {
-		t.Fatalf("no runner calls recorded")
+	// Fail-closed: NOT ONE docker command may run for a refused tag — the guard
+	// dominates both the load sink and the run sink.
+	if len(runner.calls) != 0 {
+		t.Fatalf("a refused image tag reached the runner (want zero calls): %+v", runner.calls)
 	}
-	load := runner.calls[0]
-	if load.name != "docker" {
-		t.Fatalf("docker load ran via %q, want a direct \"docker\" exec (no shell): %+v", load.name, load)
+	// And the deploy is driven to `failed` with a reason naming the refusal.
+	if len(cp.transitions) != 1 {
+		t.Fatalf("expected 1 transition, got %d: %+v", len(cp.transitions), cp.transitions)
 	}
-	// Fixed argv: exactly ["load", "-i", "<cacheDir>/<tag>.tar"] — the payload is
-	// the trailing filename and NOTHING else, one element.
-	want := []string{"load", "-i", "/var/lib/barkpark-builder/images/" + evilTag + ".tar"}
-	if len(load.args) != len(want) {
-		t.Fatalf("docker load argv = %#v, want %#v", load.args, want)
+	if cp.transitions[0]["status"] != "failed" {
+		t.Errorf("transition status = %v, want failed", cp.transitions[0]["status"])
 	}
-	for i := range want {
-		if load.args[i] != want[i] {
-			t.Fatalf("docker load argv[%d] = %q, want %q (full: %#v)", i, load.args[i], want[i], load.args)
-		}
+	if reason, _ := cp.transitions[0]["failure_reason"].(string); !strings.Contains(reason, "unsafe image tag") {
+		t.Errorf("failure_reason = %q, want it to name the unsafe image tag", reason)
 	}
-	// Belt-and-braces: the injection metacharacters survive verbatim inside the
-	// single filename argument — proof they were passed as data, not a command.
-	if !strings.Contains(load.args[2], "$(touch /tmp/pwned)") || !strings.Contains(load.args[2], "`id`") {
-		t.Fatalf("payload was altered in transit, expected it intact as a literal: %q", load.args[2])
+}
+
+// TestExecuteDeploy_PathEscapeImageTagRefused is the mutation-proof for the
+// path-escape / arbitrary-tar-load class (#12308's residual). A tag bearing '/'
+// or '..'-with-a-separator would make `docker load -i <CacheDir>/<tag>.tar`
+// read a tar OUTSIDE CacheDir. Each such tag must be refused at executeDeploy
+// entry — zero runner calls, deploy failed. If the safeImageTag guard is
+// deleted or its '/' rejection relaxed, these cases start reaching the runner
+// and the test goes red. (A BARE ".." is deliberately NOT here: it passes the
+// charset and is inert — `<CacheDir>/...tar` is one filename, no traversal —
+// which is exactly why '/' rejection, not a '..' rule, is the containment.)
+func TestExecuteDeploy_PathEscapeImageTagRefused(t *testing.T) {
+	for _, tag := range []string{
+		"../../../etc/evil", // classic parent-dir traversal (carries '/')
+		"site/evil",         // a bare separator escapes CacheDir
+		"/etc/shadow",       // absolute path
+		"a/../../b",         // separator-bearing traversal
+		"..%2fx",            // percent-encoded separator — '%' is off-charset too
+		"site-shop-$(id)",   // shell metachar, no '/', still refused off-charset
+	} {
+		t.Run(tag, func(t *testing.T) {
+			cp := newCP(t)
+			cp.pending = []claimReply{{
+				deployment: Deployment{
+					ID:       "d-esc0001abcdef",
+					SiteID:   "s-esc0001",
+					Status:   "pushing",
+					ImageTag: tag,
+					Site:     InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}},
+				},
+				epoch: 1,
+			}}
+			srv := httptest.NewServer(cp.handler())
+			defer srv.Close()
+
+			runner := &fakeRunner{}
+			e := &Executor{
+				ControlURL:    srv.URL,
+				AgentToken:    "test-token",
+				WorkerID:      "agent-1",
+				CacheDir:      "/var/lib/barkpark-builder/images",
+				CaddyfilePath: "/etc/caddy/Caddyfile",
+				AskGateURL:    "https://cloud.barkpark.cloud/v1/tls/ask",
+				HTTPClient:    srv.Client(),
+				Runner:        runner,
+				FS:            newMapFS(),
+				Ports:         &fixedPorts{next: 7123},
+				HealthTimeout: 2 * time.Second,
+			}
+
+			if _, err := e.RunOnce(context.Background(), State{}); err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if len(runner.calls) != 0 {
+				t.Fatalf("path-escape tag %q reached the runner (want zero calls): %+v", tag, runner.calls)
+			}
+			if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "failed" {
+				t.Fatalf("tag %q: expected one failed transition, got %+v", tag, cp.transitions)
+			}
+		})
+	}
+}
+
+// TestExecRunner_MetacharArgIsOneLiteralArgv preserves the #12308
+// execve-not-shell guarantee at the runner boundary now that executeDeploy
+// refuses metachar tags before they reach the runner. ExecRunner.Run is
+// exec.CommandContext — raw execve, NO shell — so a `$(...)`/backtick payload
+// handed to it must arrive at the child process as ONE literal argv element,
+// never split and never expanded. We prove it directly: /bin/echo reflects its
+// args verbatim; if any shell were interposed, `$(echo INJECTED)` would collapse
+// to `INJECTED`. Equality of output and input is the proof there is no shell.
+func TestExecRunner_MetacharArgIsOneLiteralArgv(t *testing.T) {
+	const payload = "site-shop-$(echo INJECTED)-`id`"
+	var buf bytes.Buffer
+	if err := (ExecRunner{}).Run(context.Background(), &buf, "/bin/echo", payload); err != nil {
+		t.Fatalf("echo: %v", err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if got != payload {
+		t.Fatalf("arg was altered in transit (shell expansion?): got %q, want the literal %q", got, payload)
 	}
 }

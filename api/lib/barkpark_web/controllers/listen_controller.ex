@@ -59,7 +59,26 @@ defmodule BarkparkWeb.ListenController do
       |> put_resp_header("connection", "keep-alive")
       |> send_chunked(200)
 
-    {:ok, conn} = chunk(conn, "event: welcome\ndata: {\"type\":\"welcome\"}\n\n")
+    # Guard the welcome frame the same way every other chunk/2 site here does.
+    # `Plug.Conn.chunk/2`'s own spec is `{:ok, t} | {:error, term} | no_return`,
+    # so a client that disconnects between send_chunked(200) above and this
+    # first frame turned a hard `{:ok, conn} = chunk(...)` bind into a MatchError
+    # — a 500-class error log on a route built for long-lived flaky connections.
+    # Census on the fence (`grep -rnE '(^|[^_[:alnum:]])chunk\(' \
+    # api/lib/barkpark_web/controllers api/lib/barkpark_web/plugs | grep -v write_chunk`):
+    # 11 chunk/2 call sites, 10 already case-guarded — including four in THIS
+    # file (L80, L201, L216, L301) using this exact idiom. This line was the
+    # only unguarded one, so the convention is the guard, not the bind.
+    # NO CONN TEST CAN RED THIS LINE: Plug.Adapters.Test.Conn.chunk/2 returns
+    # {:ok, ...} from every clause, so ConnTest cannot produce the {:error, _}
+    # branch. No mutation proof is shipped with this change and none exists;
+    # the census above is the evidence. The change is a strict widening — the
+    # {:ok, _} path is behaviourally identical.
+    conn =
+      case chunk(conn, "event: welcome\ndata: {\"type\":\"welcome\"}\n\n") do
+        {:ok, c} -> c
+        _ -> conn
+      end
 
     conn =
       if since do
