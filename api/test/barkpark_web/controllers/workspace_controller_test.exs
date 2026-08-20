@@ -721,6 +721,67 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert denied.status == 403
       refute denied.resp_body =~ sentinel
     end
+
+    # OPERATOR REMEDY (task-382829df2d7bf491). The binding above narrowed this
+    # route to `workspace_admin?/2`, and the three production consumers of it —
+    # `bp cloud workspace export` (internal/cli/cloud_workspace_cmd.go:165), the
+    # support pull (internal/cli/cloud_support_cmd.go:1736) and the provisioner
+    # (internal/provisioner/support.go:730) — all present an admin-permissioned
+    # operator token against a workspace they did NOT necessarily create. When
+    # that token holds no membership, the sanctioned remedy is an explicit
+    # `admin` GRANT, never weakening the predicate (that reopens the
+    # cross-tenant hole task-a5636ad31304b23a / task-f416f96ef0860f47 closed).
+    #
+    # THE GAP THIS FILLS: `@admin_roles` is ~w(owner admin), but every ALLOW arm
+    # on this route draws its authority from `create_workspace_with_owner` →
+    # role "owner", and every DENY arm uses "member" or no row at all. So the
+    # `admin` half of that constant is UNEXERCISED here. Narrow `@admin_roles`
+    # to ~w(owner) and the whole file still passes — while the documented
+    # operator remedy silently stops working in production. This arm is the
+    # tripwire for exactly that reversal.
+    #
+    # NOT VACUOUS BY CONSTRUCTION: the same token is asserted DENIED before the
+    # grant and ALLOWED after it, so the grant is provably what flipped the
+    # outcome — a 200 here cannot come from an accidental global bypass.
+    test "OPERATOR REMEDY: an explicitly granted `admin` membership — not ownership — restores export of a workspace the operator did not create",
+         %{conn: conn} do
+      raw_op = "ws-export-op-#{System.unique_integer([:positive])}"
+
+      {:ok, token_op} =
+        Auth.create_token(raw_op, "operator", "test", ["read", "write", "admin"])
+
+      # The target is created by a DIFFERENT principal — the production shape
+      # the provisioner/support chain actually faces (a workspace that arrived
+      # by seeds, a migration, an import, or another operator). The operator
+      # token is therefore NOT its owner.
+      raw_owner = "ws-export-op-owner-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_owner, "ws owner", "test", ["read", "write", "admin"])
+
+      sentinel = "Operator Grant Export WS #{System.unique_integer([:positive])}"
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_owner))
+
+      # BEFORE: admin PERMISSIONS but no membership row → denied. This is the
+      # negative control that makes the assertion after the grant meaningful.
+      refute TenancyAuth.member?(admin_token(raw_op), target.id)
+      before = conn |> authed(raw_op) |> get("/api/workspaces/#{target.slug}/export")
+      assert before.status == 403
+      refute before.resp_body =~ sentinel
+
+      # THE REMEDY: an explicit `admin` grant — the authority is a recorded
+      # grant, not a global bit. Deliberately NOT "owner": this is the half of
+      # @admin_roles nothing else on this route covers.
+      {:ok, membership} = TenancyAuth.create_membership(target.id, token_op.id, "admin")
+      assert membership.role == "admin"
+      assert TenancyAuth.workspace_admin?(admin_token(raw_op), target.id)
+
+      # AFTER: the identical token now exports, and the bundle really is this
+      # workspace's — asserted on the BYTES, not just the status code.
+      allowed = conn |> authed(raw_op) |> get("/api/workspaces/#{target.slug}/export")
+      assert allowed.status == 200
+      assert allowed.resp_body =~ sentinel
+    end
   end
 
   describe "POST /api/workspaces/:workspace_slug/import" do
