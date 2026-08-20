@@ -342,8 +342,24 @@ jobs:
       - name: Doc byte budgets (fails this job)
         run: bash scripts/check-doc-budgets.sh
 
+      # --selftest FIRST (distrust vacuous green). The harness landed in #12561
+      # with 18 cases — including §8's three: a duplicate capability slug, a
+      # marker over a private defp, and a dangling doc: backlink — and NO CI
+      # caller, so it had been rotting unexecuted. Every case plants ONE
+      # violation in a throwaway 4-file repo and re-invokes THIS script against
+      # it via DOCS_ANCHORS_ROOT, so the assertions drive the shipping gate
+      # rather than a copy. It plants nothing in this repo and takes ~4s.
+      #
+      # §8 is the section that most needs it: both its arms print `ok:` when the
+      # scan finds nothing to complain about, and a scan that returns NOTHING AT
+      # ALL prints exactly the same `ok:`. It must never grow a -z assertion —
+      # CLAUDE.md says @canonical markers are demand-driven and get REMOVED as
+      # dedup lands, so zero is a legitimate tree. The selftest is what makes a
+      # zero here mean "the repo has none" instead of "the scanner went blind".
       - name: Doc anchors + headers (fails this job)
-        run: bash scripts/docs-anchors-check.sh
+        run: |
+          bash scripts/docs-anchors-check.sh --selftest
+          bash scripts/docs-anchors-check.sh
 
       # Connectors chat_bridge DDL drift gate (connectors D54). The bridge OWNS
       # the chat_bridge.connector_installs DDL (charter D28: no Ecto migration),

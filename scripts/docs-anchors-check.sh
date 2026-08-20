@@ -184,6 +184,18 @@ if [ "$MODE" = selftest ]; then
     printf -- "# @canonical capability:fixture-dup\ndef one_fn, do: 1\n# @canonical capability:fixture-dup\ndef two_fn, do: 2\n" >> "$FIX/api/lib/x.ex"'
   st_case "dead doc: backlink reds" 1 "doc: points at a missing doc" '
     printf -- "# @canonical capability:fixture-doc doc:docs/nope.md\ndef three_fn, do: 3\n" >> "$FIX/api/lib/x.ex"'
+  # SILENT ARMS. The three above prove §8 BITES; these prove it bites only where
+  # it should — otherwise a scan that reds on everything would pass them all.
+  st_case "well-formed marker over a public def passes, and is COUNTED" 0 "§8 scanned 1 @canonical marker(s)" '
+    printf -- "# @canonical capability:fixture-ok\ndef four_fn, do: 4\n" >> "$FIX/api/lib/x.ex"'
+  # ZERO markers is a LEGITIMATE tree — CLAUDE.md says a marker is REMOVED once
+  # dedup kills its decoys. This arm is why §8 must never grow a -z assertion.
+  st_case "a corpus of ZERO markers is a legitimate pass, reported not asserted" 0 "§8 scanned 0 @canonical marker(s)" ':'
+  st_case "marker under node_modules/ is not scanned" 0 "docs-anchors-check: PASS" '
+    mkdir -p "$FIX/node_modules/vendor"
+    printf -- "# @canonical capability:fixture-vendored\n  defp v_fn, do: :ok\n" > "$FIX/node_modules/vendor/dep.ex"'
+  st_case "marker in an unscanned extension is not scanned" 0 "docs-anchors-check: PASS" '
+    printf -- "# @canonical capability:fixture-unscanned\n  defp u_fn, do: :ok\n" > "$FIX/api/lib/x.rb"'
 
   echo ""
   if [ "$ST_FAIL" -ne 0 ]; then
@@ -521,15 +533,18 @@ tripwire 'barkpark-dev-token' \
 # §8 did not. The corpus is non-empty today, so this was not vacuous yet, but
 # nothing here would have said when it became so.
 #
-# The fix is NOT "assert the marker count is non-zero". CLAUDE.md is explicit
-# that markers are demand-driven and "should be REMOVED once dedup eliminates
-# its decoys" — an empty corpus is a legitimate future state, and a non-empty
-# assertion would eventually red on a correct tree. Instead: plant a tree with
-# a KNOWN duplicate, a KNOWN private-helper marker and a KNOWN dangling doc:
-# backlink, run the SAME scan over it, and require all three to be caught. With
-# the scanner certified, a report of zero markers is a fact about the repo
-# rather than a fact about the scanner, and §8 states the count out loud.
-# Modelled on scripts/committed-symlink-check.sh --selftest.
+# The control is NOT "assert the marker count is non-zero". CLAUDE.md is
+# explicit that markers are demand-driven and "should be REMOVED once dedup
+# eliminates its decoys" — an empty corpus is a legitimate future state, and a
+# non-empty assertion would eventually red on a correct tree. The control is
+# `--selftest` at the top of this file: it plants a duplicate slug, a marker over
+# a private defp and a dangling doc: backlink in a throwaway repo, re-invokes
+# THIS script against it via DOCS_ANCHORS_ROOT, and requires each to red with a
+# named line; three further arms require it to stay silent on a well-formed
+# marker, on vendored code and on an unscanned extension, and to report a
+# corpus of zero as a legitimate PASS. With the scanner certified there, a
+# report of zero markers here is a fact about the repo rather than a fact about
+# the scanner — and §8 states the count out loud so the number is visible.
 
 CANON_INCLUDES=(--include='*.ex' --include='*.exs' --include='*.go'
   --include='*.ts' --include='*.tsx')
@@ -572,52 +587,6 @@ canon_scan() {
 
 echo "== @canonical capability markers =="
 
-# --- 8a. positive control: the scan must CATCH a planted defect --------------
-CANON_CTL="$(mktemp -d)"
-mkdir -p "$CANON_CTL/a" "$CANON_CTL/node_modules/vendor"
-printf '# @canonical capability:probe-dup\ndef probe_a do\nend\n'            > "$CANON_CTL/a/one.ex"
-printf '// @canonical capability:probe-dup\nfunc ProbeB() {}\n'              > "$CANON_CTL/a/two.go"
-printf '# @canonical capability:probe-private\ndefp probe_c do\nend\n'       > "$CANON_CTL/a/three.ex"
-printf '// @canonical capability:probe-doc doc:docs/no-such-card.md\nexport function d() {}\n' > "$CANON_CTL/a/four.ts"
-printf '# @canonical capability:probe-vendored\ndef v do\nend\n'             > "$CANON_CTL/node_modules/vendor/five.ex"
-printf '# @canonical capability:probe-unscanned\ndef u do\nend\n'            > "$CANON_CTL/a/six.rb"
-
-CANON_CTL_OUT="$(canon_scan "$CANON_CTL")"
-CANON_CTL_BAD=0
-canon_ctl_want() { # $1 = grep -E pattern, $2 = what it proves
-  if ! printf '%s\n' "$CANON_CTL_OUT" | grep -qE "$1"; then
-    CANON_CTL_BAD=$((CANON_CTL_BAD + 1))
-    fail "§8 SELFTEST — the @canonical scan did not $2 in its own planted fixture.
-      The scan is BROKEN, not the corpus clean: a wrong root, a dropped --include or a
-      changed marker syntax all look identical to 'no markers to complain about' from
-      here. Fix the scan before trusting any ok: from §8."
-  fi
-}
-canon_ctl_reject() { # $1 = pattern that must be ABSENT, $2 = what it proves
-  if printf '%s\n' "$CANON_CTL_OUT" | grep -qE "$1"; then
-    CANON_CTL_BAD=$((CANON_CTL_BAD + 1))
-    fail "§8 SELFTEST — the @canonical scan $2, so it is reading a wider tree than §8 documents."
-  fi
-}
-canon_ctl_want '^DUP probe-dup$'          'catch a slug claimed by two impls'
-canon_ctl_want '^PRIVATE .*probe-private$' 'catch a marker sitting on a private defp'
-canon_ctl_want '^DOCMISS probe-doc docs/no-such-card\.md$' 'catch a dangling doc: backlink'
-canon_ctl_want '^OK .*probe-doc$'          'accept a marker on a public export'
-# node_modules is excluded TWICE — by --exclude-dir in CANON_INCLUDES' sibling
-# GREP_PRUNE and by the trailing `grep -vE '/node_modules/'`. This arm bites only
-# when BOTH are gone, which is the condition that actually matters.
-canon_ctl_reject 'probe-vendored'          'reached into node_modules'
-canon_ctl_reject 'probe-unscanned'         'matched an unscanned extension (.rb)'
-rm -rf "$CANON_CTL"
-# The success line is GATED on the control. A selftest that announces "ok" beside
-# its own failures is the vacuous shape this section exists to kill.
-if [ "$CANON_CTL_BAD" -eq 0 ]; then
-  echo "ok:   §8 selftest — the scan catches a planted dup, a private-helper marker and a dangling doc: backlink"
-else
-  echo "FAIL: §8 selftest — $CANON_CTL_BAD control assertion(s) failed; every ok: below is UNTRUSTWORTHY"
-fi
-
-# --- 8b. the real corpus ----------------------------------------------------
 CANON_OUT="$(canon_scan .)"
 CANON_N=$(printf '%s\n' "$CANON_OUT" | grep -cE '^(OK|PRIVATE) ' || true)
 
