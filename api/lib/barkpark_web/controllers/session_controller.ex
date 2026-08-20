@@ -343,8 +343,19 @@ defmodule BarkparkWeb.SessionController do
     user_id = get_session(conn, "studio_mfa_user")
     at = get_session(conn, "studio_mfa_at")
 
+    # RECENCY predicate (class A — `at` is a server-written instant stamped by
+    # `complete_sign_in/3` on an earlier request and transmitted back through the
+    # SIGNED session cookie, so the wall clock is the CORRECT source and must
+    # stay). What was wrong is the SIDEDNESS: with only an upper bound, an
+    # anchor LATER than now — what a backward wall-clock step on this node
+    # produces — kept the 5-minute pending window open indefinitely. The floor
+    # (`at <= now`) rejects a nonsensical anchor. Deliberately NOT `abs/1`:
+    # every two-sided gate in this repo guards a REMOTE-supplied signature
+    # timestamp, where two-sidedness is mandatory; `at` is ours.
+    now = System.system_time(:second)
+
     fresh? =
-      is_integer(at) and System.system_time(:second) - at <= 300
+      is_integer(at) and at <= now and now - at <= 300
 
     with true <- is_binary(user_id) and fresh?,
          %Barkpark.Accounts.User{} = user <- Barkpark.Accounts.get_user(user_id),
