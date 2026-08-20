@@ -180,18 +180,47 @@ time.sleep(300)' "$port" >/dev/null 2>&1 &
 
 alive() { kill -0 "$1" 2>/dev/null; }
 
-# Run ONE launcher function against one of the two trees, in a subshell.
-# wait_server is replaced AFTER sourcing so "the boot path was entered" is
-# observable without booting anything; nothing else is overridden.
+# Run ONE launcher function against one of the two trees, in its OWN bash
+# PROCESS. wait_server is replaced AFTER sourcing so "the boot path was entered"
+# is observable without booting anything; nothing else is overridden.
+#
+# WHY A PROCESS AND NOT A `( ... )` SUBSHELL — this is load-bearing, and getting
+# it wrong silently voided a fixture on Linux for six CI runs.
+#
+# The launcher opens with `set -euo pipefail`, and some of its pre-fix behaviour
+# IS that setting: on a clean slate the pre-fix `stop_server` reaches
+# `pid="$(listener_pid)"`, whose `lsof | head -1` pipeline fails, and errexit
+# aborts the function before it can print anything. D6 exists to catch exactly
+# that silent death.
+#
+# But every fixture below is dispatched from `if probe ...`, and bash >= 4
+# propagates the "-e is being ignored" state through the ENTIRE dynamic extent
+# of a tested command — into sourced files and into `( ... )` subshells — and a
+# fresh `set -e` inside them does NOT re-arm it (bash manual: "If a compound
+# command or shell function executes in a context where -e is being ignored,
+# none of the commands executed within [it] will be affected by the -e setting").
+# bash 3.2, which is what macOS ships, does not propagate it that far. So the
+# same script on the same commit told two different stories: on macOS the
+# pre-fix reference died at exit 1 and D6 discriminated; on ubuntu-24.04
+# (bash 5.2) errexit was disarmed underneath, the pre-fix `stop_server` sailed
+# past the failing pipeline, printed "server not running" and exited 0 — passing
+# on BOTH trees. CI is the only place this gate runs, so it was vacuous exactly
+# where it mattered, and the harness said so.
+#
+# A fresh `bash` process cannot inherit that state: it starts with errexit
+# neither set nor ignored, so the launcher's own `set -euo pipefail` means what
+# it says. It is also the more faithful model — a user runs `bin/barkpark stop`
+# as a process, not as a subshell of something that is testing it. The canary
+# below asserts this isolation still holds.
 run_fn() { # <lib> <fn>   (BARKPARK_HOME/PORT/HARNESS_CURL_RC come from the env)
-  (
-    PATH="$TMP/bin:$PATH"
-    export PATH
+  # $0 is passed through so the launcher's BIN_DIR/REPO_ROOT/API_DIR resolve to
+  # the real repo exactly as they did under the old subshell.
+  PATH="$TMP/bin:$PATH" bash -c '
     # shellcheck disable=SC1090
     . "$1"
-    wait_server() { printf 'HARNESS: boot path entered\n'; exit 43; }
+    wait_server() { printf "HARNESS: boot path entered\n"; exit 43; }
     "$2"
-  ) 2>&1
+  ' "$0" "$1" "$2" 2>&1
 }
 
 new_home() {
@@ -353,10 +382,42 @@ probe() { # <fixture> <lib>
   [ "$delta" -eq 0 ]
 }
 
+# ── the errexit canary ───────────────────────────────────────────────────────
+#
+# The differential fixtures are only as honest as run_fn's isolation (see the
+# long note on run_fn). If that isolation is ever lost again, the pre-fix
+# launcher stops being able to die under `set -e` — and a launcher that cannot
+# fail makes every fixture that depends on it pass on both trees, i.e. green
+# vacuously. That regression is invisible from the fixture output: D6 only went
+# red because it happened to be the ONE fixture whose whole claim is a silent
+# errexit death. So assert the property directly, and assert it from inside the
+# same `if`-tested context the fixtures run in — which is what disarms errexit
+# in the first place, so a canary checked any other way would prove nothing.
+cat >"$TMP/canary.sh" <<'CANARY'
+set -euo pipefail
+canary_fn() {
+  local v
+  v="$(false | head -1)"
+  printf 'CANARY: errexit did NOT stop this function\n'
+}
+CANARY
+
+errexit_is_armed_inside_run_fn() {
+  local out rc
+  out="$(run_fn "$TMP/canary.sh" canary_fn)"; rc=$?
+  [ "$rc" -ne 0 ] && ! has "CANARY" "$out"
+}
+
+if ! errexit_is_armed_inside_run_fn; then
+  say "barkpark-boot-selftest: errexit is NOT armed inside run_fn — a launcher that dies on a failing command would look to this harness like a launcher that succeeded, so every differential fixture resting on that would report a pass it did not earn. Refusing."
+  exit 2
+fi
+
 say "barkpark boot selftest — bin/barkpark start/stop decisions"
 say "  tree under test : $LAUNCHER"
 say "  reference tree  : git show $REFERENCE_REV:bin/barkpark (pre-fix, pinned)"
 say "  listener helper : $LISTENER_KIND"
+say "  errexit canary  : armed (a set -e launcher can still die inside run_fn)"
 say ""
 
 for fx in $DIFFERENTIAL; do
