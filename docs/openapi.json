@@ -105,6 +105,7 @@
               "code": {
                 "enum": [
                   "batch_too_large",
+                  "blob_path_conflict",
                   "bpml",
                   "bpml_unavailable",
                   "bpml_unprintable",
