@@ -735,7 +735,16 @@ fi
 
 # Comments are stripped first: this file ARGUES about continue-on-error at
 # length, and a naive grep would red on its own prose.
-if sed 's/#.*//' "$WF" | grep -q "continue-on-error"; then
+#
+# The stripped text is materialised, never piped — honest-gates D37. `sed … "$WF"
+# | grep -q …` looks like a file match but is a PIPELINE: `grep -q` exits at its
+# first match, the `sed` takes SIGPIPE on its next write, and `set -o pipefail`
+# reports the sed's 141 instead of grep's 0. The `if` below then takes the ELSE
+# branch — printing "no continue-on-error in any directive" over a workflow that
+# carries one. That is the same false green #12754 fixed in the sibling harness
+# scripts/webhook-fanout-watch.test.sh, and this is the loudest place to lose it.
+wf_stripped="$(sed 's/#.*//' "$WF")"
+if grep -q "continue-on-error" <<<"$wf_stripped"; then
   bad "the workflow carries continue-on-error — it would launder the run conclusion to success"
 else
   ok "no continue-on-error in any directive: the run conclusion IS the scream"
@@ -743,10 +752,21 @@ fi
 # ...and prove that check can LOSE, rather than trusting a grep that may simply
 # never match anything.
 sed 's/^    runs-on: ubuntu-latest/    continue-on-error: true\n    runs-on: ubuntu-latest/' "$WF" > "$TMP/wf-laundered.yml"
-if sed 's/#.*//' "$TMP/wf-laundered.yml" | grep -q "continue-on-error"; then
+wf_laundered_stripped="$(sed 's/#.*//' "$TMP/wf-laundered.yml")"
+if grep -q "continue-on-error" <<<"$wf_laundered_stripped"; then
   ok "the continue-on-error check catches an injected specimen (it can lose)"
 else
   bad "the continue-on-error check did not catch an injected specimen — it is vacuous"
+fi
+# ...and prove it survives the pipe-buffer condition that made the old pipeline
+# form a coin flip: same planted specimen, padded past any pipe buffer.
+{ cat "$TMP/wf-laundered.yml"; yes "        key: padding past the pipe buffer" | head -n 3000; } \
+  > "$TMP/wf-laundered-padded.yml"
+wf_padded_stripped="$(sed 's/#.*//' "$TMP/wf-laundered-padded.yml")"
+if grep -q "continue-on-error" <<<"$wf_padded_stripped"; then
+  ok "the continue-on-error check still catches it when the stripped text overruns the pipe buffer"
+else
+  bad "the continue-on-error check lost the specimen to a SIGPIPE race (pipefail read the producer's 141 as 'no match')"
 fi
 
 if grep -qE 'cancel-in-progress: true' "$WF"; then
