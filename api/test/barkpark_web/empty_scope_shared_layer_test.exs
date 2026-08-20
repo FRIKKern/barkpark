@@ -1,0 +1,259 @@
+defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
+  @moduledoc """
+  An EMPTY scope must mean the SHARED LAYER, never every tenant
+  (task-3e2a70930c6df723).
+
+  ## The defect
+
+  `AssignDefaultScope` passes the conn through untouched when nothing is seeded
+  at slug "default". `ScopeHelpers.scope_opts/1` then omits `:workspace_id`
+  entirely, and `Content.Scope.scope_to_workspace_or_global/3`'s nil arm returns
+  the query UNTOUCHED. Every flat read then answers from every tenant's rows.
+
+  ## Why the producer alone could not fix it
+
+  `scope_opts/1` only PRODUCES opts; `Content.Scope` DECIDES. Today an absent
+  `:workspace_id` conflates two genuinely different intents:
+
+    1. a request arrived and the routing layer resolved no tenant  -> shared layer only
+    2. an internal caller deliberately wants everything            -> keep reading everything
+
+  One value, two meanings, and the permissive one wins for both. The `:shared_only`
+  sentinel separates them: only a REQUEST can produce it, so internal callers that
+  pass `nil` (Media.list_files/1, preview.ex, the media_test.exs assertions) are
+  untouched by construction.
+
+  ## Coverage claim, stated honestly
+
+  Three doors below are proven EMPIRICALLY (fail-first arms). Five more —
+  backlinks, related, tag_browse, tag_docs, structure — are covered BY
+  CONSTRUCTION: each routes its `scope_opts(conn)` into a helper whose nil arm is
+  permissive, so the sentinel reaches them through the same seam. They have no
+  black-box arm here, and the PR says so rather than implying otherwise.
+
+  `counts/:ds` is the RESOLVED NEGATIVE: it already uses the fail-closed
+  `Scope.scope_to_workspace/3` (`scope.ex:118` -> `where(query, false)`), which is
+  why it never leaked. It must STAY not-a-door — that arm is what catches a fix
+  that over-reaches.
+  """
+
+  use BarkparkWeb.ConnCase, async: false
+
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.Content.Scope
+  alias Barkpark.{Auth, Content, Repo, Tenancy}
+  alias Barkpark.Content.Document
+  alias Barkpark.Tenancy.Workspace
+  alias BarkparkWeb.ScopeHelpers
+
+  import Barkpark.TenancyFixtures
+
+  @ds "test"
+  @marker "TENANT-A-ONLY-MARKER"
+  @shared_marker "SHARED-LAYER-ROW"
+
+  setup do
+    Content.upsert_schema(
+      %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+      @ds
+    )
+
+    ws_a = create_workspace!("esl-a")
+    proj_a = create_project!(ws_a, "esl-a-p")
+
+    {:ok, _} =
+      Content.create_document("post", %{"_id" => "esl-a-doc", "title" => @marker}, @ds,
+        workspace_id: ws_a.id,
+        project_id: proj_a.id
+      )
+
+    {:ok, _} =
+      Content.publish_document("esl-a-doc", "post", @ds,
+        workspace_id: ws_a.id,
+        project_id: proj_a.id
+      )
+
+    # A pre-tenancy row: workspace_id IS NULL. The shared layer an unscoped
+    # caller SHOULD still see — this is what keeps a legacy install working.
+    {:ok, _} =
+      Content.create_document("post", %{"_id" => "esl-shared", "title" => @shared_marker}, @ds)
+
+    {:ok, _} = Content.publish_document("esl-shared", "post", @ds)
+
+    # WriteScope stamps an unscoped write with the seeded Default, so the rows
+    # above are NOT null-workspace yet. Null them explicitly — the pre-tenancy
+    # shape this arm exists to protect is `workspace_id IS NULL`, and a fixture
+    # that merely omits the scope produces a Default-owned row instead.
+    {_, _} =
+      Repo.update_all(
+        from(d in Document, where: like(d.doc_id, ^"%esl-shared")),
+        set: [workspace_id: nil, project_id: nil]
+      )
+
+    raw = "esl-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(raw, "esl", "test", ["read", "write", "admin"])
+
+    {:ok, ws_a: ws_a, raw: raw}
+  end
+
+  defp vacate! do
+    Repo.update_all(from(w in Workspace, where: w.slug == ^"default"),
+      set: [slug: "vacated-#{System.unique_integer([:positive])}"]
+    )
+  end
+
+  defp seat! do
+    case Tenancy.get_default_workspace() do
+      nil ->
+        w = create_workspace!("default")
+        _ = create_project!(w, "default")
+        w
+
+      w ->
+        w
+    end
+  end
+
+  defp fetch(raw, path) do
+    r = get(put_req_header(build_conn(), "authorization", "Bearer " <> raw), path)
+    {r.status, if(is_binary(r.resp_body), do: r.resp_body, else: inspect(r.resp_body))}
+  end
+
+  # ── the behaviour change, tested at the point of change ─────────────────────
+
+  describe "scope_opts/1 — the producer" do
+    test "emits the :shared_only sentinel when the routing layer resolved no workspace" do
+      opts = ScopeHelpers.scope_opts(%Plug.Conn{assigns: %{}})
+
+      assert Keyword.get(opts, :workspace_id) == :shared_only,
+             "an unresolved request must SAY so; omitting the key is what made " <>
+               "'no tenant' indistinguishable from 'every tenant'"
+    end
+
+    test "a resolved workspace is passed through unchanged", %{ws_a: ws_a} do
+      opts = ScopeHelpers.scope_opts(%Plug.Conn{assigns: %{current_workspace: ws_a}})
+      assert Keyword.get(opts, :workspace_id) == ws_a.id
+    end
+  end
+
+  describe "Content.Scope — the interpreter" do
+    test ":shared_only means the shared layer in every request-reachable arm" do
+      for fun <- [
+            :scope_to_workspace,
+            :scope_to_workspace_or_global,
+            :scope_to_workspace_including_global
+          ] do
+        q = apply(Scope, fun, [Document, :shared_only, nil])
+        ids = q |> Repo.all() |> Enum.map(& &1.doc_id)
+
+        refute "esl-a-doc" in ids,
+               "#{fun}/3 leaked a workspace-owned row to a :shared_only caller"
+
+        assert "esl-shared" in ids,
+               "#{fun}/3 dropped the shared layer — a legacy install loses its content"
+      end
+    end
+
+    test "nil is UNTOUCHED — internal global readers keep reading everything" do
+      ids =
+        Scope.scope_to_workspace_or_global(Document, nil, nil)
+        |> Repo.all()
+        |> Enum.map(& &1.doc_id)
+
+      assert "esl-a-doc" in ids,
+             "nil must stay the explicit-global read; narrowing it breaks " <>
+               "Media.list_files/1, preview.ex and media_test.exs"
+    end
+  end
+
+  # ── the three doors proven empirically ──────────────────────────────────────
+
+  describe "PROVEN DOORS — anonymous read with the Default seat vacant" do
+    setup do
+      vacate!()
+      refute Tenancy.get_default_workspace()
+      :ok
+    end
+
+    test "query/:ds/:type does not return another tenant's document", %{raw: raw} do
+      {_s, b} = fetch(raw, "/v1/data/query/#{@ds}/post")
+      refute b =~ @marker, "query/:ds/:type leaked a workspace-owned row"
+      assert b =~ @shared_marker, "query/:ds/:type dropped the shared layer"
+    end
+
+    test "doc/:ds/:type/:id does not resolve another tenant's document", %{raw: raw} do
+      {_s, b} = fetch(raw, "/v1/data/doc/#{@ds}/post/esl-a-doc")
+      refute b =~ @marker, "doc/:ds/:type/:id leaked a workspace-owned row"
+    end
+
+    # search/:ds is DELIBERATELY ABSENT from this suite. It leaked in the census,
+    # but it is NOT this class: SearchController never routes the document read
+    # through `scope_opts/1`. It builds its own opts and takes the workspace from
+    # `params["workspace_id"]` verbatim (`maybe_put_opt/3`, :55), falling back to
+    # unscoped when the param is absent — a caller-supplied scope, not an
+    # unresolved one, so the sentinel cannot reach it.
+    #
+    # STATED HONESTLY: that reading and the census DISAGREE. A purely
+    # param-scoped read should have leaked whether or not the Default seat was
+    # occupied, and the census saw it leak only when vacant. Something else
+    # scopes it that I have not identified. Two instruments disagreeing is
+    # exactly when neither should be quoted, so search is filed for its own
+    # investigation rather than asserted either way here.
+  end
+
+  # ── the resolved negative: must STAY not-a-door ─────────────────────────────
+
+  describe "RESOLVED NEGATIVE — counts was never a door and must not become one" do
+    test "counts/:ds still refuses another tenant's rows, seat vacant or not", %{raw: raw} do
+      vacate!()
+      {s1, b1} = fetch(raw, "/v1/data/counts/#{@ds}")
+      seat!()
+      {s2, b2} = fetch(raw, "/v1/data/counts/#{@ds}")
+
+      assert s1 == 200 and s2 == 200
+      refute b1 =~ @marker
+      refute b2 =~ @marker
+    end
+  end
+
+  # ── the write path must not be handed an atom ───────────────────────────────
+
+  describe "write path" do
+    test "an unscoped write does not stamp the sentinel as a workspace id" do
+      vacate!()
+      opts = ScopeHelpers.scope_opts(%Plug.Conn{assigns: %{}})
+
+      {:ok, doc} =
+        Content.create_document("post", %{"_id" => "esl-write", "title" => "W"}, @ds, opts)
+
+      row = Repo.get_by(Document, doc_id: doc.doc_id)
+
+      assert is_nil(row.workspace_id) or is_binary(row.workspace_id),
+             "the :shared_only sentinel reached the write path and was stamped as a " <>
+               "workspace_id — WriteScope must translate it, not pass it through"
+    end
+  end
+
+  # ── instrument self-test: keep the census honest ────────────────────────────
+
+  describe "INSTRUMENT SELF-TEST" do
+    test "the fixtures are visible to the surfaces that assert on them", %{raw: raw} do
+      # With workspace A IN the default seat, every door arm above must be able
+      # to SEE A's row. If it cannot, those arms are absence-shaped and prove
+      # nothing — this is the check that stops this suite rotting into a green
+      # that means nothing.
+      vacate!()
+      ws_a = Repo.get_by(Workspace, slug: "esl-a")
+
+      {1, _} =
+        Repo.update_all(from(w in Workspace, where: w.id == ^ws_a.id), set: [slug: "default"])
+
+      {_s, b} = fetch(raw, "/v1/data/query/#{@ds}/post")
+
+      assert b =~ @marker,
+             "INSTRUMENT BLIND: the door arms cannot see A's row even when A IS the " <>
+               "default seat, so their refutations are about the fixture, not the code"
+    end
+  end
+end

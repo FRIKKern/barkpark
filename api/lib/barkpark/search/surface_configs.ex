@@ -87,6 +87,17 @@ defmodule Barkpark.Search.SurfaceConfigs do
 
   @spec get(String.t(), String.t(), binary() | nil) :: map()
   def get(surface, scope, workspace_id \\ nil) when is_binary(surface) and is_binary(scope) do
+    # `:shared_only` is the request-side empty-scope sentinel
+    # (task-3e2a70930c6df723): a REQUEST that resolved no workspace. For a
+    # surface CONFIG that means exactly what `nil` already meant here — the
+    # workspace-agnostic global config — so it collapses to nil.
+    #
+    # This function is a RAW consumer: it puts the value straight into a
+    # `:binary_id` query, so an untranslated atom is an Ecto CastError (a 500),
+    # not a scope. Translating here is the finding, not a tax — a consumer
+    # reading `Keyword.get(opts, :workspace_id)` outside `Content.Scope` is the
+    # same "the interpreter decides, not the producer" defect one layer out.
+    workspace_id = if workspace_id == :shared_only, do: nil, else: workspace_id
     cache_key = {workspace_id, surface, scope}
     ensure_cache()
 

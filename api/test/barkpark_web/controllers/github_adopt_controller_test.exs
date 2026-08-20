@@ -40,10 +40,18 @@ defmodule BarkparkWeb.GithubAdoptControllerTest do
 
       assert %{"ok" => true, "task" => "gh-42", "state" => "adopted"} = json_response(conn, 200)
       # The controller threads ScopeHelpers.scope_opts(conn) (D15), not a
-      # hardcoded []. A flat/unscoped conn carries no workspace/project assigns,
-      # so the scope keys are absent (nil-safe → seeded-Default at the service).
+      # hardcoded []. A flat/unscoped conn carries no workspace assign, and as of
+      # task-3e2a70930c6df723 it SAYS so with `:shared_only` instead of omitting
+      # the key — omission was what made "no tenant resolved" indistinguishable
+      # from "every tenant", with the permissive reading winning for both.
+      #
+      # This assertion previously pinned the omission, and its own comment named
+      # the fail-open it produced ("nil-safe → seeded-Default at the service").
+      # It is updated deliberately: the contract it protected is the one being
+      # removed. `:project_id` is unchanged — only the workspace key carries the
+      # sentinel.
       assert_received {:adopt_called, "gh-42", "production", opts}
-      assert Keyword.get(opts, :workspace_id) == nil
+      assert Keyword.get(opts, :workspace_id) == :shared_only
       assert Keyword.get(opts, :project_id) == nil
     end
 

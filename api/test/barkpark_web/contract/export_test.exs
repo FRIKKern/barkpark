@@ -40,6 +40,14 @@ defmodule BarkparkWeb.Contract.ExportTest do
     :get
     |> Phoenix.ConnTest.build_conn("/v1/data/export/test", %{})
     |> Map.put(:adapter, {ClosedSocketAdapter, nil})
+    # BARE CONN — built directly, so no `:api` pipeline and no
+    # AssignDefaultScope. These tests assert the HANGUP path (halt instead of
+    # raise; an honest log line), not tenancy. The fixture rows are created
+    # unscoped and land in the seeded Default, so stand in for what the pipeline
+    # would have assigned — otherwise the sentinel
+    # (task-3e2a70930c6df723) fires, the export streams zero rows, never reaches
+    # the disconnect, and the log assertion measures nothing.
+    |> Plug.Conn.assign(:current_workspace, Barkpark.Tenancy.get_default_workspace())
   end
 
   test "exports all documents as NDJSON", %{conn: conn} do
