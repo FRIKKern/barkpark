@@ -218,13 +218,38 @@ defmodule PDS.Census do
   # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
   # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-17,
   # in the SAME commit as the create-on-push arm that moved the rows.
+  # RE-DERIVED AT THE CORRECTION-RECEIPT WAVE (4 rows, rides #9600) — the tree
+  # moved, same lens: SearchController.correction/2 stopped spelling the literal
+  # `ok: true` and now renders `ok: status != :error` beside a `status:`
+  # discriminator, because record_correction/3 answers FIVE causally different
+  # outcomes that all carried `promoted: false, distinct_sessions: 0`. The
+  # receipt got MORE honest and the site left this lens's population, which is
+  # the lens working: it keys on the literal, and there is no longer a literal.
+  #
+  #   textual   107 -> 106  the `ok: true` occurrence is gone; LENS-LOSES-NOTHING
+  #                         holds (106 == ast 97 + phantom 9).
+  #   ast        98 ->  97  the same one, as an AST-literal pair.
+  #   emitted    94 ->  93  the site no longer emits a literal on the wire.
+  #   write      57 ->  56  POST /v1/data/search/:dataset/correction leaves the
+  #                         literal write set. It does NOT leave the ROUTED-WRITE
+  #                         population — both of its route arrivals are disposed
+  #                         `status_only_receipt` in @routed_excluded below, which
+  #                         is the class for exactly this shape.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 14, unrouted 23 read `==`
+  # in the same run. Lens unchanged (build-free AST, :binary.matches/2, depth 6,
+  # @write_verbs without `transaction`, corpus api/lib/**/*.ex = 815 files);
+  # engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
+  # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-20,
+  # in the SAME commit as the correction receipt that moved the rows.
   @rederived %{
-    textual: 107,
-    ast: 98,
+    textual: 106,
+    ast: 97,
     phantom: 9,
     consumer: 4,
-    emitted: 94,
-    write: 57,
+    emitted: 93,
+    write: 56,
     read: 14,
     unrouted: 23
   }
@@ -507,6 +532,7 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
@@ -547,6 +573,7 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
@@ -1198,10 +1225,6 @@ defmodule PDS.Census do
     # barkpark_web/controllers/search_controller.ex:340
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.search_interaction/2", "79721084", "95315838"},
-      verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/search_controller.ex:363
-    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
-            "BarkparkWeb.SearchController.correction/2", "57827587", "73264487"},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/secret_controller.ex:67
     %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
