@@ -35,8 +35,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   @doc """
   Self-update bar for the Studio chrome — a slim strip pinned above the
-  topbar. Renders ONLY when the caller is an admin (`@admin?`, threaded
-  from the `shares_admin?` chrome flag) AND the running instance is behind
+  topbar. Renders ONLY when the caller is an INSTANCE admin (`@admin?`,
+  threaded from the HOST-level `instance_admin?` chrome flag, NOT the
+  workspace-scoped `shares_admin?`) AND the running instance is behind
   the latest published release (`Barkpark.SelfUpdate.status/0` reports
   `state: :behind`). Any other state — `:disabled` (Checker not running,
   e.g. test env), `:unknown`, `:current` — emits no update markup, so

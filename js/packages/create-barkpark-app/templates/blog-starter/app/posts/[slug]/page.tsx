@@ -8,6 +8,7 @@ import { barkparkMetadata } from '@barkpark/nextjs'
 // renderer emits (the same one Phoenix's `/papers` reader compiles in).
 import '@barkpark/react/paper-surface.css'
 import { getDocBySlug, getDocById } from '../../../lib/barkpark'
+import { formatDate } from '../../../lib/format-date'
 import { DraftModePreview } from './draft-preview'
 import { PortableDocSurface } from './portable-doc-surface'
 
@@ -78,9 +79,9 @@ export default async function PostPage({
   return (
     <article>
       <h1 className="text-4xl font-bold">{post.title}</h1>
-      {post.publishedAt ? (
+      {formatDate(post.publishedAt) ? (
         <p className="text-sm text-slate-500">
-          {new Date(post.publishedAt).toLocaleDateString()}
+          {formatDate(post.publishedAt)}
           {author ? (
             <>
               {' · '}

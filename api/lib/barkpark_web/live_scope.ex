@@ -59,6 +59,19 @@ defmodule BarkparkWeb.LiveScope do
   # handle_params hook — only re-resolves when the URL's scope slugs differ
   # from the socket's current scope (same-scope patches are the hot path:
   # pane navigation, desk chips — zero extra queries for them).
+  #
+  # The DATASET is part of the scope, not just the workspace+project: shares and
+  # access grants are dataset-SPECIFIC (`Sharing.shared?/4` matches `s.dataset`
+  # exactly; `Access.admits_desk?/3` compares `dataset`), and `switch-dataset`
+  # is an allowed `@readonly_event`, so a `:share_read` (or dataset-scoped grant)
+  # socket can push_patch to an unshared sibling dataset in the SAME ws+proj.
+  # Comparing only ws+proj here let that flip skip re-authorization and read the
+  # unshared dataset (arpss-lv-dataset-switch-reauth). Including the dataset forces
+  # `resolve_and_authorize/2` to re-derive the grade against the NEW dataset — the
+  # unshared sibling is not shared → `deny/1` → /login, fail-closed. The extra
+  # comparison is a map lookup, not a query, so the hot path (pane nav within one
+  # dataset) still short-circuits; re-authorization fires ONLY on a real dataset
+  # change.
   defp reauthorize(params, _uri, socket) do
     ws = socket.assigns[:current_workspace]
     proj = socket.assigns[:current_project]
@@ -66,7 +79,8 @@ defmodule BarkparkWeb.LiveScope do
     same_scope? =
       is_map(ws) and is_map(proj) and
         Map.get(ws, :slug) == params["workspace_slug"] and
-        Map.get(proj, :slug) == params["project_slug"]
+        Map.get(proj, :slug) == params["project_slug"] and
+        socket.assigns[:dataset] == params["dataset"]
 
     if same_scope? do
       {:cont, socket}

@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -397,6 +398,22 @@ func (e *Executor) transition(ctx context.Context, id string, body map[string]an
 	return statusError(resp)
 }
 
+// safeImageTag is the fail-closed allowlist for d.ImageTag before it is used to
+// build the docker-load tar path AND the docker-run image ref. The producer
+// mints tags as `site-<hex8>-<hex8>` (builder.go), so a strict charset is
+// lossless for every legitimate tag while refusing the whole path-escape /
+// arbitrary-tar-load class defense-in-depth on top of the #12308 shell-RCE fix.
+//
+// CRITICAL — the two rules must not drift: this charset rejects '/', and it is
+// the '/' rejection (not a '..' rule) that neutralizes a bare `..`. A tag of
+// exactly ".." passes the charset (dot and hyphen are allowed) but is inert:
+// `<CacheDir>/...tar` is a single filename under CacheDir, not a parent-dir
+// traversal. Traversal needs a separator — `../x` or `a/../..` — and every one
+// of those carries a '/', which this pattern refuses. Do NOT relax '/' on the
+// theory that '..' is separately handled; there is no separate '..' handling,
+// and there must not be, because '/' rejection IS the containment.
+var safeImageTag = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 // executeDeploy walks a claimed deployment from pushing → running container:
 // docker load → docker run on a fresh port → health-check. Returns:
 //
@@ -408,6 +425,17 @@ func (e *Executor) executeDeploy(
 	d *claimed,
 	state State,
 ) (string, string, []string, int, int, error) {
+	// 0. Fail closed on a hostile image tag BEFORE it reaches either docker sink.
+	// This one guard at function entry dominates BOTH uses of d.ImageTag below:
+	// the docker-load tar path (step 1) and the docker-run image ref (step 4).
+	// d.ImageTag is decoded RAW from the control-plane claim JSON; a tag bearing
+	// '/' or '..' would let `docker load -i <CacheDir>/<tag>.tar` read an
+	// attacker-chosen tar OUTSIDE CacheDir. See safeImageTag for why '/' rejection
+	// (not a '..' rule) is what provides containment — the two must not drift.
+	if !safeImageTag.MatchString(d.ImageTag) {
+		return "", "", nil, 0, 0, fmt.Errorf("refusing unsafe image tag %q: must match %s", d.ImageTag, safeImageTag.String())
+	}
+
 	slug, domains, livePort := e.resolveSite(d, state)
 	site := d.SiteID
 

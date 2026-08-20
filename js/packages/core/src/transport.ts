@@ -94,10 +94,39 @@ function strOrUndefined(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
 }
 
-async function decodeErrorAndThrow(response: Response, url: string): Promise<never> {
+// Read the response body text with the SAME error taxonomy as the fetch-level
+// catch. `response.text()` can reject mid-stream (a TCP reset while the body is
+// still arriving) with a raw TypeError; that rejection sits outside the fetch
+// try/catch and after the timeout timer is cleared, so without this it escapes
+// the taxonomy — defaultShouldRetry returns false for a non-Barkpark error and
+// never retries, even an idempotent GET. Mirror the fetch-level catch: a
+// caller-initiated abort (opts.signal) is a cancellation, re-throw its
+// AbortError untouched (caller detects it via `err.name === 'AbortError'`);
+// otherwise wrap as a retryable BarkparkNetworkError.
+async function readBodyText(
+  response: Response,
+  url: string,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  try {
+    return await response.text()
+  } catch (err) {
+    if (signal?.aborted) throw err
+    throw new BarkparkNetworkError(err instanceof Error ? err.message : 'network error', {
+      url,
+      cause: err,
+    })
+  }
+}
+
+async function decodeErrorAndThrow(
+  response: Response,
+  url: string,
+  signal: AbortSignal | undefined,
+): Promise<never> {
   const status = response.status
   const requestIdHeader = response.headers.get('x-request-id') ?? undefined
-  const raw = await response.text()
+  const raw = await readBodyText(response, url, signal)
 
   let parsed: unknown = undefined
   if (raw.length > 0) {
@@ -436,7 +465,7 @@ export async function request<T>(
       if (response.status === 204) {
         return { data: undefined as unknown as T, response }
       }
-      const text = await response.text()
+      const text = await readBodyText(response, reqCtx.url, opts.signal)
       if (text.length === 0) {
         return { data: undefined as unknown as T, response }
       }
@@ -452,7 +481,7 @@ export async function request<T>(
       }
     }
 
-    await decodeErrorAndThrow(response, reqCtx.url)
+    await decodeErrorAndThrow(response, reqCtx.url, opts.signal)
     // decodeErrorAndThrow returns Promise<never>; this line is unreachable.
     throw new BarkparkAPIError('unreachable', { status: response.status, url: reqCtx.url })
     // Pass the caller's signal so an abort during a between-attempt backoff sleep

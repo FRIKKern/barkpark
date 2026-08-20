@@ -180,6 +180,43 @@ defmodule Barkpark.AccountsTest do
       refute UserSession.active?(%UserSession{expires_at: future, revoked_at: now}, now)
       refute UserSession.active?(%UserSession{expires_at: past, revoked_at: nil}, now)
     end
+
+    # clk-w4-mfa-recency-floor. `mfa_verified_at` is a RECENCY anchor stamped in
+    # the past by the issuer, unlike the DEADLINE predicates above, whose anchor
+    # is SUPPOSED to be in the future. Under a backward wall-clock step the
+    # unfloored predicate reads a future anchor as fresh and keeps the step-up
+    # window open forever — `RequireRecentMfa` (plugs/require_recent_mfa.ex:35)
+    # is the only enforcement reader, so this predicate covers every path.
+    test "mfa_fresh?/3 rejects a mfa_verified_at in the FUTURE" do
+      now = DateTime.utc_now()
+      future = DateTime.add(now, 100_000, :second)
+
+      # On the unfloored predicate this returns TRUE (a future anchor is
+      # trivially inside `now < at + window`).
+      refute UserSession.mfa_fresh?(%UserSession{mfa_verified_at: future}, 600, now)
+    end
+
+    test "mfa_fresh?/3 still accepts an in-window anchor and rejects a stale one" do
+      now = DateTime.utc_now()
+
+      assert UserSession.mfa_fresh?(
+               %UserSession{mfa_verified_at: DateTime.add(now, -10, :second)},
+               600,
+               now
+             )
+
+      # The floor is inclusive at the anchor itself.
+      assert UserSession.mfa_fresh?(%UserSession{mfa_verified_at: now}, 600, now)
+
+      refute UserSession.mfa_fresh?(
+               %UserSession{mfa_verified_at: DateTime.add(now, -1000, :second)},
+               600,
+               now
+             )
+
+      # Never stepped up ⇒ never fresh.
+      refute UserSession.mfa_fresh?(%UserSession{mfa_verified_at: nil}, 600, now)
+    end
   end
 
   describe "email verification + password reset" do
