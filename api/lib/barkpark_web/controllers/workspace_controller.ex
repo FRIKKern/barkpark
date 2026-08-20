@@ -419,6 +419,9 @@ defmodule BarkparkWeb.WorkspaceController do
           })
         )
 
+      {:error, {:blob_path_conflict, info}} ->
+        blob_path_conflict(conn, info)
+
       {:error, other} ->
         import_failed(conn, :clean, other)
     end
@@ -460,6 +463,9 @@ defmodule BarkparkWeb.WorkspaceController do
             }
           }
         })
+
+      {:error, {:blob_path_conflict, info}} ->
+        blob_path_conflict(conn, info)
 
       {:error, other} ->
         import_failed(conn, :merge, other)
@@ -508,6 +514,27 @@ defmodule BarkparkWeb.WorkspaceController do
       :internal_server_error,
       "import_failed",
       "workspace bundle import failed: #{detail}"
+    )
+  end
+
+  # 409 for the cross-tenant blob-path refusal (task-918106d49c62563e). The
+  # engine rolled the whole import back at ROW-COPY time because the bundle's
+  # media paths are already owned by a resident workspace — and the flat blob
+  # keyspace means two owners at one path make the loser's own scoped read serve
+  # the winner's bytes. Named + actionable (the colliding paths ride in
+  # `details`) rather than the 500 `import_failed` an unmatched term would emit.
+  # Emitted from BOTH import arms — clean and merge — because this repo's error
+  # emitters are duplicated per arm and a one-arm fix is a half fix.
+  defp blob_path_conflict(conn, info) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :conflict,
+      "blob_path_conflict",
+      "refusing the import: #{info.count} media blob path(s) in this bundle are already " <>
+        "owned by another workspace on this instance. Importing them would make one " <>
+        "workspace serve the other's bytes on its own media route. Re-path the colliding " <>
+        "rows and retry.",
+      %{workspace_id: info.workspace_id, count: info.count, sample: info.sample}
     )
   end
 
